@@ -57,13 +57,13 @@ export const missingOf = (
         });
       }
     }
-    if (!record.volume) {
+    if (record.volume.people === 0) {
       missing.push({ kind: "number", which: "volume" });
     }
-    if (!record.takes) {
+    if (record.takes.people === 0) {
       missing.push({ kind: "number", which: "takes" });
     }
-    if (!record.wrong) {
+    if (record.wrong.people === 0) {
       missing.push({ kind: "number", which: "wrong" });
     }
     if (record.starts.people === 0) {

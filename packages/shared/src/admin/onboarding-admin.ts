@@ -1176,9 +1176,9 @@ const FIELDS: [RecordField, (telling: Telling) => boolean][] = [
   ["exceptions", (telling) => telling.differently.length > 0],
   ["decisions", (telling) => telling.decides],
   ["workarounds", (telling) => telling.own || telling.ai],
-  ["volume", (telling) => telling.volume],
-  ["time", (telling) => telling.takes],
-  ["rework", (telling) => telling.wrong],
+  ["volume", (telling) => (telling.numbers?.volume ?? null) !== null],
+  ["time", (telling) => (telling.numbers?.takes ?? null) !== null],
+  ["rework", (telling) => (telling.numbers?.wrong ?? null) !== null],
   ["result", (telling) => telling.right || telling.ask],
   ["cases", (telling) => telling.example],
   ["terms", (telling) => telling.term],
@@ -1187,9 +1187,9 @@ const FIELDS: [RecordField, (telling: Telling) => boolean][] = [
 
 /**
  * What one person said about their work: which parts of it (`ToldParts`). A real organization's
- * people carry no numbers of their own here: staff see those only as totals, the drawing's
- * (`Work.totals`). The made-up people of a sample organization carry theirs (`numbers`), from
- * which its totals are added up the same way.
+ * people carry no numbers of their own here, nor whether they gave one: staff see numbers only
+ * as totals over enough people, the drawing's (`Work.totals`). The made-up people of a sample
+ * organization carry theirs (`numbers`), from which its totals are added up the same way.
  */
 export interface Telling extends ToldParts {
   numbers?: Pick<Told, "volume" | "takes" | "wrong">;
@@ -1234,9 +1234,6 @@ export const NOTHING_TOLD: Telling = {
   decides: false,
   own: false,
   ai: false,
-  volume: false,
-  takes: false,
-  wrong: false,
   right: false,
   ask: false,
   next: false,
@@ -1269,9 +1266,9 @@ export const factsSaid = (
     ...(telling.decides ? ["decides"] : []),
     ...(telling.own ? ["own"] : []),
     ...(telling.ai ? ["ai"] : []),
-    ...(telling.volume ? ["volume"] : []),
-    ...(telling.takes ? ["takes"] : []),
-    ...(telling.wrong ? ["wrong"] : []),
+    ...((telling.numbers?.volume ?? null) === null ? [] : ["volume"]),
+    ...((telling.numbers?.takes ?? null) === null ? [] : ["takes"]),
+    ...((telling.numbers?.wrong ?? null) === null ? [] : ["wrong"]),
     ...(telling.right ? ["right"] : []),
     ...(telling.ask ? ["ask"] : []),
     ...(telling.example ? ["example"] : []),
@@ -1350,9 +1347,6 @@ export const tellingOf = (org: Org, person: Person, work: Work): Telling => {
     decides: work.decides !== undefined && says("decides", 0.6),
     own: work.own !== undefined && says("own", 0.55),
     ai: work.ai !== undefined && says("ai", 0.3),
-    volume: volume !== null,
-    takes: takes !== null,
-    wrong: wrong !== null,
     right: says("right", 0.86),
     ask: work.ask !== undefined && says("ask", 0.7),
     next: says("next", 0.9),
@@ -1555,9 +1549,9 @@ export const interviewsAt = (
     const unsaid = telling
       ? (
           [
-            ["volume", !telling.volume],
-            ["takes", !telling.takes],
-            ["wrong", !telling.wrong],
+            ["volume", (telling.numbers?.volume ?? null) === null],
+            ["takes", (telling.numbers?.takes ?? null) === null],
+            ["wrong", (telling.numbers?.wrong ?? null) === null],
             ["next", !telling.next],
           ] as const
         ).filter(([part, open]) => open && saidBefore(part, stoppedAt)).length

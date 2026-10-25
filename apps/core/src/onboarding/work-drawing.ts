@@ -482,54 +482,63 @@ export const drawnWorkSchema = z.object({
   open: z.array(z.string()),
 }) satisfies z.ZodType<DrawnWork>;
 
-const pair = z.tuple([z.number(), z.number()]);
+/** A number staff see (`DrawnNumber`): how many people, and its value only past the threshold. */
+const shownSchema = <Value extends z.ZodType>(value: Value) =>
+  z.object({ people: z.number(), value: value.nullable() });
 
 /**
  * A drawing as staff read it (`StaffDrawing`, GRA-1079): which parts each
- * person told, as positions and yes or no, and its numbers as totals over
- * everyone. Staff see totals only, never one person's numbers or example:
- * the schema names none, so a value that slipped into a drawing is
- * stripped on its way out rather than sent.
+ * person told, never their numbers nor whether they gave one, and its
+ * numbers as medians over at least 5 people. The schema names no field of
+ * one person's numbers, so a value that slipped into a drawing is stripped
+ * on its way out rather than sent.
  */
-const staffDrawingSchema = drawnWorkSchema.omit({ told: true }).extend({
-  told: z.record(
-    z.string(),
-    z.object({
-      start: z.boolean(),
-      steps: z.array(z.number()),
-      end: z.boolean(),
-      way: z.object({ step: z.number(), other: z.boolean() }).nullable(),
-      waits: z.array(z.number()),
-      differently: z.array(z.number()),
-      decides: z.boolean(),
-      own: z.boolean(),
-      ai: z.boolean(),
-      volume: z.boolean(),
-      takes: z.boolean(),
-      wrong: z.boolean(),
-      right: z.boolean(),
-      ask: z.boolean(),
-      next: z.boolean(),
-      example: z.boolean(),
-      term: z.boolean(),
-      out: z.array(z.string()),
-    })
-  ),
-  totals: z.object({
-    volume: z
-      .object({ quiet: pair, busy: pair, people: z.number() })
-      .nullable(),
-    takes: z
-      .object({
-        least: z.number(),
-        most: z.number(),
-        normal: pair,
-        people: z.number(),
+const staffDrawingSchema = drawnWorkSchema
+  .omit({ told: true, steps: true, differently: true })
+  .extend({
+    steps: z.array(
+      z.object({
+        text: z.string(),
+        who: z.string(),
+        tool: z.string(),
+        minutes: shownSchema(z.number()),
+        documented: z.boolean(),
       })
-      .nullable(),
-    wrong: z.object({ outOfTen: pair, people: z.number() }).nullable(),
-  }),
-}) satisfies z.ZodType<StaffDrawing>;
+    ),
+    differently: z.array(
+      z.object({
+        when: z.string(),
+        does: z.string(),
+        outOfTen: shownSchema(z.number()),
+        after: z.number(),
+      })
+    ),
+    told: z.record(
+      z.string(),
+      z.object({
+        start: z.boolean(),
+        steps: z.array(z.number()),
+        end: z.boolean(),
+        way: z.object({ step: z.number(), other: z.boolean() }).nullable(),
+        waits: z.array(z.number()),
+        differently: z.array(z.number()),
+        decides: z.boolean(),
+        own: z.boolean(),
+        ai: z.boolean(),
+        right: z.boolean(),
+        ask: z.boolean(),
+        next: z.boolean(),
+        example: z.boolean(),
+        term: z.boolean(),
+        out: z.array(z.string()),
+      })
+    ),
+    totals: z.object({
+      volume: shownSchema(z.object({ quiet: z.number(), busy: z.number() })),
+      takes: shownSchema(z.number()),
+      wrong: shownSchema(z.number()),
+    }),
+  }) satisfies z.ZodType<StaffDrawing>;
 
 /**
  * Every piece of work as staff read it (`StaffWorks`), checked on its way
@@ -569,7 +578,19 @@ const heardOf = (drawn: DrawnWork | null, talked: readonly string[]) => {
     if (telling === undefined) {
       continue;
     }
-    const facts = factsSaid(toldPartsOf(telling), null);
+    // Core's own count, of everything each said, numbers included.
+    const facts = factsSaid(
+      {
+        ...toldPartsOf(telling),
+        out: telling.out,
+        numbers: {
+          volume: telling.volume,
+          takes: telling.takes,
+          wrong: telling.wrong,
+        },
+      },
+      null
+    );
     added.push({
       fresh: facts.filter((fact) => !seen.has(fact)).length,
       all: facts.length,

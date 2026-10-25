@@ -394,52 +394,50 @@ const NumberRow = ({
   );
 };
 
+/** How many people a shown number rests on; none for one held back. */
+const restsOn = (number: { people: number; value: unknown }): number =>
+  number.value === null ? 0 : number.people;
+
 /**
- * The numbers: the range people gave, never an average and never one person's own; staff see
- * totals only (GRA-1079).
+ * The numbers as staff see them (GRA-1079): the median over everyone who gave one, once at least
+ * 5 people did; fewer, and only that shows. Never a lowest or a highest, never one person's own.
  */
 const Numbers = ({ record }: { record: RecordOfWork }) => {
   const { t } = useLingui();
-  // A range as people gave it: one number when the ends meet.
-  const span = (low: number, high: number) =>
-    low === high ? String(low) : t`${low} to ${high}`;
   const { volume, takes, wrong } = record;
   const { per, unit } = record.evidence.work;
-  let howMany: string | null = null;
-  if (volume !== null) {
-    const quiet = span(...volume.quiet);
-    const busy = span(...volume.busy);
-    howMany =
-      per === "month"
-        ? t`${quiet} in a quiet month, ${busy} in a busy one.`
-        : t`${quiet} in a quiet week, ${busy} in a busy one.`;
-  }
-  let howLong: string | null = null;
-  if (takes !== null) {
-    const normal = span(...takes.normal);
-    const { least, most } = takes;
-    howLong =
-      unit === "hours"
-        ? t`A normal one takes ${normal} hours. The quickest took ${least}, the longest ${most}.`
-        : t`A normal one takes ${normal} minutes. The quickest took ${least}, the longest ${most}.`;
-  }
-  const outOfTen = wrong === null ? "" : span(...wrong.outOfTen);
+  const fewer = t`Fewer than 5 people gave it.`;
+  // What a number reads as: nothing when nobody gave it, `fewer` below the threshold.
+  const shown = <Value,>(
+    number: { people: number; value: Value | null },
+    text: (value: Value) => string
+  ): string | null => {
+    if (number.people === 0) {
+      return null;
+    }
+    return number.value === null ? fewer : text(number.value);
+  };
   return (
     <SettingsSection
-      description={t`Always the range people gave and how many it rests on, never an average or one person's own.`}
+      description={t`The middle of what people gave once at least 5 did, never an average of a few or one person's own.`}
       title={t`The numbers`}
     >
-      <NumberRow label={t`How many`} people={volume?.people ?? 0}>
-        {howMany}
+      <NumberRow label={t`How many`} people={restsOn(volume)}>
+        {shown(volume, ({ quiet, busy }) =>
+          per === "month"
+            ? t`About ${quiet} in a quiet month, ${busy} in a busy one.`
+            : t`About ${quiet} in a quiet week, ${busy} in a busy one.`
+        )}
       </NumberRow>
-      <NumberRow label={t`How long`} people={takes?.people ?? 0}>
-        {howLong}
+      <NumberRow label={t`How long`} people={restsOn(takes)}>
+        {shown(takes, (normal) =>
+          unit === "hours"
+            ? t`A normal one takes about ${normal} hours.`
+            : t`A normal one takes about ${normal} minutes.`
+        )}
       </NumberRow>
-      <NumberRow
-        label={t`How often it comes in wrong`}
-        people={wrong?.people ?? 0}
-      >
-        {wrong === null ? null : t`${outOfTen} in 10.`}
+      <NumberRow label={t`How often it comes in wrong`} people={restsOn(wrong)}>
+        {shown(wrong, (outOfTen) => t`About ${outOfTen} in 10.`)}
       </NumberRow>
     </SettingsSection>
   );

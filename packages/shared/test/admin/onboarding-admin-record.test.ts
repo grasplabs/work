@@ -98,52 +98,34 @@ describe("the record of a piece of work", () => {
     ).toMatchObject({ explained: false });
   });
 
-  it("gives every number as the range people said, never one made up", () => {
+  it("gives every number as the median of what people said, only once at least 5 did, never one made up", () => {
     const records = [noordkade, hartog].flatMap((org) => {
       const view = at(org);
       return view.works.flatMap((work) => recordOf(view, work.id) ?? []);
     });
-    const volumes = records.flatMap((record) =>
-      record.volume
-        ? [{ ...record.volume, talked: record.interviews.length }]
-        : []
+    const numbers = records.flatMap((record) =>
+      [record.volume, record.takes, record.wrong].map((number) => ({
+        ...number,
+        talked: record.interviews.length,
+        team: record.evidence.doers,
+      }))
     );
-    const times = records.flatMap((record) =>
-      record.takes
-        ? [{ ...record.takes, talked: record.interviews.length }]
-        : []
-    );
-    const wrongs = records.flatMap((record) => record.wrong ?? []);
-    expect(volumes.length).toBeGreaterThan(10);
-    expect(times.length).toBeGreaterThan(10);
-    expect(wrongs.length).toBeGreaterThan(10);
-    for (const { quiet, busy, people, talked } of volumes) {
-      for (const value of [...quiet, ...busy]) {
-        expect(Number.isInteger(value)).toBeTruthy();
-      }
-      expect(quiet[0]).toBeLessThanOrEqual(quiet[1]);
-      expect(busy[0]).toBeLessThanOrEqual(busy[1]);
-      expect(people).toBeGreaterThan(0);
+    // Some shown, some held back: the samples have teams both sides of 5.
+    expect(numbers.some(({ value }) => value !== null)).toBeTruthy();
+    expect(
+      numbers.some(({ value, people }) => value === null && people > 0)
+    ).toBeTruthy();
+    for (const { people, value, talked, team } of numbers) {
       expect(people).toBeLessThanOrEqual(talked);
-    }
-    for (const { least, most, normal, people, talked } of times) {
-      expect(least).toBeLessThanOrEqual(normal[0]);
-      expect(normal[1]).toBeLessThanOrEqual(most);
-      expect(people).toBeLessThanOrEqual(talked);
-    }
-    for (const { outOfTen } of wrongs) {
-      expect(outOfTen[0]).toBeGreaterThanOrEqual(0);
-      expect(outOfTen[1]).toBeLessThanOrEqual(10);
+      expect(value !== null).toBe(people >= 5 || (team === 1 && people === 1));
     }
     // Nobody talked: nothing is known, and nothing is put in its place.
     const unheard = records.filter((record) => record.interviews.length === 0);
     expect(unheard.length).toBeGreaterThan(0);
     for (const record of unheard) {
-      expect([record.volume, record.takes, record.wrong]).toStrictEqual([
-        null,
-        null,
-        null,
-      ]);
+      expect(
+        [record.volume, record.takes, record.wrong].map(({ people }) => people)
+      ).toStrictEqual([0, 0, 0]);
     }
     for (const record of records) {
       for (const said of [

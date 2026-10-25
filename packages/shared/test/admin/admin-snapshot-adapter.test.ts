@@ -930,44 +930,47 @@ describe("an organization from core's admin snapshot", () => {
       share: 0.6,
       from: "lead",
       stale: false,
-      drawn: staffDrawingOf({
-        at: "2026-10-14T10:01:00.000Z",
-        from: ["lisa", "tom"],
-        starts: "A shop calls.",
-        steps: [
-          {
-            text: "Write the order down.",
-            who: "Sales",
-            tool: "Excel",
-            minutes: null,
-            documented: false,
+      drawn: staffDrawingOf(
+        {
+          at: "2026-10-14T10:01:00.000Z",
+          from: ["lisa", "tom"],
+          starts: "A shop calls.",
+          steps: [
+            {
+              text: "Write the order down.",
+              who: "Sales",
+              tool: "Excel",
+              minutes: null,
+              documented: false,
+            },
+            {
+              text: "Send it to the bakery.",
+              who: "Sales",
+              tool: "",
+              minutes: null,
+              documented: false,
+            },
+          ],
+          waits: [],
+          differently: [],
+          decides: "",
+          own: "",
+          ai: "",
+          right: "",
+          ask: "",
+          next: "",
+          term: null,
+          differs: null,
+          per: "week",
+          unit: "minutes",
+          told: {
+            lisa: told({ volume: [20, 40], takes: [2, 5, 10] }),
+            tom: told({ volume: [60, 80], wrong: 2 }),
           },
-          {
-            text: "Send it to the bakery.",
-            who: "Sales",
-            tool: "",
-            minutes: null,
-            documented: false,
-          },
-        ],
-        waits: [],
-        differently: [],
-        decides: "",
-        own: "",
-        ai: "",
-        right: "",
-        ask: "",
-        next: "",
-        term: null,
-        differs: null,
-        per: "week",
-        unit: "minutes",
-        told: {
-          lisa: told({ volume: [20, 40], takes: [2, 5, 10] }),
-          tom: told({ volume: [60, 80], wrong: 2 }),
+          open: ["Who takes an order when Sales is out?"],
         },
-        open: ["Who takes an order when Sales is out?"],
-      }),
+        3
+      ),
     };
     const rules = { ...STARTING_ORG_RULES, people: 2 };
     const { org, state } = adminOrgOf(both, client, {
@@ -999,9 +1002,9 @@ describe("an organization from core's admin snapshot", () => {
       rules,
       // Two of three talked: not known by the rules, but counted by hand.
       evidence: [["orders", 2, "complete", true]],
-      // The lowest and the highest anyone said, never an average.
-      volume: { quiet: [20, 60], busy: [40, 80], people: 2 },
-      wrong: { outOfTen: [2, 2], people: 1 },
+      // Fewer than 5 gave them: how many, and no value (GRA-1079).
+      volume: { people: 2, value: null },
+      wrong: { people: 1, value: null },
       heardFrom: ["lisa", "tom"],
       missing: ["people", "around", "around", "question"],
     });

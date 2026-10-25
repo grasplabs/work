@@ -22,7 +22,8 @@ import type {
   Work,
   WorkEvidence,
 } from "./onboarding-admin.ts";
-import { totalsOf } from "./org-record.ts";
+import { shownNumber, totalsOf } from "./org-record.ts";
+import type { DrawnTotals } from "./org-record.ts";
 import { present } from "./present.ts";
 
 /**
@@ -80,21 +81,10 @@ export interface WorkRecord {
   decides: Said | null;
   own: Said | null;
   ai: Said | null;
-  /** How many there are in a quiet and in a busy week or month: the lowest and the highest anyone said. */
-  volume: {
-    quiet: [number, number];
-    busy: [number, number];
-    people: number;
-  } | null;
-  /** How long one takes: the quickest and the longest anyone named, and what they call normal. */
-  takes: {
-    least: number;
-    most: number;
-    normal: [number, number];
-    people: number;
-  } | null;
-  /** How many out of ten come in wrong. */
-  wrong: { outOfTen: [number, number]; people: number } | null;
+  /** The numbers as totals over enough people, never one person's (`DrawnTotals`). */
+  volume: DrawnTotals["volume"];
+  takes: DrawnTotals["takes"];
+  wrong: DrawnTotals["wrong"];
   right: Said;
   ask: Said | null;
   next: Said;
@@ -149,7 +139,8 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
         takes: telling.numbers?.takes ?? null,
         wrong: telling.numbers?.wrong ?? null,
         out: telling.out,
-      }))
+      })),
+      evidence.doers
     );
   const needed = evidence.everyone
     ? 1
@@ -194,11 +185,18 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
       people: said(`wait:${index}`),
     })),
     differently: (work.differently ?? []).map(
-      ([when, then, outOfTen], index) => ({
-        text: `If ${when}, ${lower(bare(then))}.`,
-        outOfTen,
-        people: said(`differently:${index}`),
-      })
+      ([when, then, outOfTen], index) => {
+        const people = said(`differently:${index}`);
+        return {
+          text: `If ${when}, ${lower(bare(then))}.`,
+          // Shown only once enough people told it (`shownNumber`).
+          outOfTen:
+            outOfTen === null
+              ? null
+              : shownNumber(people, evidence.doers, () => outOfTen).value,
+          people,
+        };
+      }
     ),
     decides: one(work.decides, "decides"),
     own: one(work.own, "own"),

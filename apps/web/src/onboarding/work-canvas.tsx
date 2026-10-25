@@ -11,22 +11,23 @@ import { useLingui } from "@lingui/react/macro";
 // Nothing here can be changed: it is what was said. A step opens who told
 // it, beside the canvas.
 
-/** How long a step takes, as people said it: a normal one, and the quickest and longest when they differ. */
+/**
+ * How long a normal one of a step takes, once at least 5 people told the step: fewer, and staff
+ * read only that (GRA-1079). Never one person's minutes.
+ */
 const MinutesBadge = ({
   minutes,
 }: {
-  minutes: [number, number, number] | null;
+  minutes: StaffDrawing["steps"][number]["minutes"];
 }) => {
   const { t } = useLingui();
-  if (minutes === null) {
+  if (minutes.people === 0) {
     return null;
   }
-  const [quickest, usual, longest] = minutes;
+  const { value } = minutes;
   return (
     <Badge variant="outline">
-      {quickest === longest
-        ? t`${usual} min`
-        : t`${usual} min, ${quickest} to ${longest}`}
+      {value === null ? t`Fewer than 5 people` : t`${value} min`}
     </Badge>
   );
 };
@@ -34,15 +35,20 @@ const MinutesBadge = ({
 /** A case that goes off the usual way after a step. */
 const Case = ({ each }: { each: StaffDrawing["differently"][number] }) => {
   const { t } = useLingui();
-  const share = each.outOfTen;
+  const share = each.outOfTen.value;
   const { when } = each;
+  // Held back below 5 people (GRA-1079): only that shows.
+  let shareText = t`How often is not known`;
+  if (share !== null) {
+    shareText = t`About ${share} in 10`;
+  } else if (each.outOfTen.people > 0) {
+    shareText = t`Fewer than 5 people`;
+  }
   return (
     <li className="bg-card flex flex-col gap-1 rounded-lg border border-dashed p-3">
       <span className="flex flex-wrap items-center gap-2">
         <span className="text-muted-foreground">{t`When ${when}`}</span>
-        <Badge variant="outline">
-          {share === null ? t`How often is not known` : t`About ${share} in 10`}
-        </Badge>
+        <Badge variant="outline">{shareText}</Badge>
       </span>
       {each.does === "" ? null : <span>{each.does}</span>}
     </li>

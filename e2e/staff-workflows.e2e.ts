@@ -124,51 +124,54 @@ const works: StaffWorks = {
       share: 0.6,
       from: "lead",
       stale: false,
-      drawn: staffDrawingOf({
-        at: isoAt("2026-10-07", "10:00:00.000Z"),
-        from: ["lisa", "tom"],
-        starts: "A shop calls with an order.",
-        steps: [
-          {
-            text: "Write the order down in the order sheet.",
-            who: "Sales",
-            tool: "Excel",
-            minutes: [2, 5, 10],
-            documented: false,
+      drawn: staffDrawingOf(
+        {
+          at: isoAt("2026-10-07", "10:00:00.000Z"),
+          from: ["lisa", "tom"],
+          starts: "A shop calls with an order.",
+          steps: [
+            {
+              text: "Write the order down in the order sheet.",
+              who: "Sales",
+              tool: "Excel",
+              minutes: [2, 5, 10],
+              documented: false,
+            },
+            {
+              text: "Send the order to the bakery.",
+              who: "Sales",
+              tool: "Email",
+              minutes: null,
+              documented: false,
+            },
+          ],
+          waits: [],
+          differently: [
+            {
+              when: "the shop is new",
+              does: "Ask Finance for a customer number.",
+              outOfTen: 1,
+              after: 0,
+            },
+          ],
+          decides: "",
+          own: "",
+          ai: "",
+          right: "",
+          ask: "",
+          next: "",
+          term: null,
+          differs: null,
+          per: "week",
+          unit: "minutes",
+          told: {
+            lisa: told({ volume: [20, 40], volumeOf: "me", takes: [2, 5, 10] }),
+            tom: told({ volume: [60, 80], volumeOf: "team", wrong: 2 }),
           },
-          {
-            text: "Send the order to the bakery.",
-            who: "Sales",
-            tool: "Email",
-            minutes: null,
-            documented: false,
-          },
-        ],
-        waits: [],
-        differently: [
-          {
-            when: "the shop is new",
-            does: "Ask Finance for a customer number.",
-            outOfTen: 1,
-            after: 0,
-          },
-        ],
-        decides: "",
-        own: "",
-        ai: "",
-        right: "",
-        ask: "",
-        next: "",
-        term: null,
-        differs: null,
-        per: "week",
-        unit: "minutes",
-        told: {
-          lisa: told({ volume: [20, 40], volumeOf: "me", takes: [2, 5, 10] }),
-          tom: told({ volume: [60, 80], volumeOf: "team", wrong: 2 }),
+          open: ["Who takes an order when Sales is out?"],
         },
-        open: ["Who takes an order when Sales is out?"],
-      }),
+        3
+      ),
     },
   ],
   rules: STARTING_ORG_RULES,
@@ -218,7 +221,7 @@ test("staff see a drawn piece of work, its numbers as totals only, and its open 
     page.getByRole("table", { name: "Each person's numbers" })
   ).toHaveCount(0);
   await expect(
-    page.getByText("20 to 60 in a quiet week, 40 to 80 in a busy one.")
+    page.getByText("Fewer than 5 people gave it.").first()
   ).toBeVisible();
 
   // A step opens who told it.

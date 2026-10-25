@@ -222,11 +222,12 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     });
     const works = reads[0]?.works ?? [];
     const work = works.find(({ id }) => id === booking);
-    // Which parts each person told: yes or no, never their numbers.
-    const parts = (person: string) => {
-      const told = work?.drawn?.told[person];
-      return [told?.volume, told?.takes, told?.wrong];
-    };
+    // The names each person's entry carries: never one of a number of theirs,
+    // nor whether they gave one.
+    const names = (person: string) =>
+      Object.keys(work?.drawn?.told[person] ?? {}).filter((name) =>
+        ["volume", "volumeOf", "takes", "wrong", "example"].includes(name)
+      );
     // Every value a person's entry carries, whatever its name: a number of
     // theirs would show here as a number outside `steps`, `waits`,
     // `differently` and `way.step`, which are positions in the drawing.
@@ -253,8 +254,9 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
           doers,
           drawing === null,
         ]),
-      max: parts(ids.max),
-      mia: parts(ids.mia),
+      max: names(ids.max),
+      mia: names(ids.mia),
+      minutes: work?.drawn?.steps.map(({ minutes }) => minutes),
       ownValues,
       totals: work?.drawn?.totals,
       open: work?.drawn?.open,
@@ -270,15 +272,20 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
         [booking, ["invoice", "invoices"], [ids.max, ids.mia, ids.noor], false],
         [filing, ["receipt", "receipts"], [ids.noor], true],
       ],
-      max: [true, true, false],
-      mia: [true, false, true],
+      // Only that they shared an example, if they did.
+      max: ["example"],
+      mia: ["example"],
+      // Nobody gave a step's minutes here.
+      minutes: [
+        { people: 0, value: null },
+        { people: 0, value: null },
+      ],
       ownValues: [],
-      // The lowest and the highest anyone said, and how many it rests on:
-      // a number one person alone gave shows with one person.
+      // Fewer than 5 gave each number: how many, never a value (GRA-1079).
       totals: {
-        volume: { quiet: [20, 60], busy: [40, 90], people: 2 },
-        takes: { least: 2, most: 9, normal: [4, 4], people: 1 },
-        wrong: { outOfTen: [1, 1], people: 1 },
+        volume: { people: 2, value: null },
+        takes: { people: 1, value: null },
+        wrong: { people: 1, value: null },
       },
       open: ["Who approves an invoice over 5,000 euros?"],
       rules: STARTING_ORG_RULES,

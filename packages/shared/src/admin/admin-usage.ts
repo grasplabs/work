@@ -620,14 +620,10 @@ const hoursOf = (
   return (items * normal * (work.unit === "hours" ? 60 : 1)) / 60;
 };
 
-/** The middle of a range people gave. */
-const middleOf = ([low, high]: readonly [number, number]): number =>
-  (low + high) / 2;
-
 /**
  * The hours a week one person spends on `work`, and how many people that rests on. At a real
- * organization from its drawing's totals, never one person's numbers: the middle of the ranges
- * everyone gave. In a sample, averaged over its made-up people who gave both.
+ * organization from its drawing's totals, never one person's numbers: the medians, once enough
+ * people gave them. In a sample, averaged over its made-up people who gave both.
  */
 const personHours = (
   view: OrgView,
@@ -637,14 +633,15 @@ const personHours = (
   if (org.real) {
     const volume = work.totals?.volume;
     const takes = work.totals?.takes;
-    if (!volume || !takes) {
+    // Shown only once enough people gave both (`DrawnNumber`): none otherwise.
+    if (!volume || !takes || volume.value === null || takes.value === null) {
       return { hours: null, said: 0 };
     }
     return {
       hours: hoursOf(
         work,
-        [middleOf(volume.quiet), middleOf(volume.busy)],
-        middleOf(takes.normal)
+        [volume.value.quiet, volume.value.busy],
+        takes.value
       ),
       said: Math.min(volume.people, takes.people),
     };

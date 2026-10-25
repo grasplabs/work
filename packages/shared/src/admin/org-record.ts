@@ -4,7 +4,7 @@ import type { DocumentReading } from "./document-reading.ts";
 import type { InterviewFact, InterviewLine } from "./interview-turn.ts";
 import { isInterviewer } from "./interviewer.ts";
 import type { Interviewer } from "./interviewer.ts";
-import { PHASES, TAGS } from "./interviews.ts";
+import { MIN_GROUP, PHASES, TAGS } from "./interviews.ts";
 import type { PersonState, Phase } from "./interviews.ts";
 import type { Member, Unknown } from "./onboarding-admin.ts";
 import { present } from "./present.ts";
@@ -550,10 +550,18 @@ export interface Told {
   out: string[];
 }
 
+// Staff see a drawing's numbers as totals only, never one person's (GRA-1079). From the threat
+// model and its security review: a total over a few people, beside who told what, gives one
+// person's number away (one person's flag and a total over one; a step only one person told; the
+// ends of a range, each one person's). So a number shows only once at least `MIN_GROUP` (5)
+// people gave it, as a median, never a lowest or highest; who gave which number is never shown,
+// only how many. A team that is one person shows its number with one person: nothing else hides
+// it, and the Brain does the same.
+
 /**
- * Which parts of a piece of work one person told, as staff see it: positions and yes or no,
- * never a number of theirs or their example. Their numbers count only in the drawing's
- * `DrawnTotals`.
+ * Which parts of a piece of work one person told, as staff see it: which steps, and yes or no for
+ * the parts with no number. Never a number of theirs, nor whether they gave one: how many gave
+ * each number is in the drawing's `DrawnTotals`.
  */
 export interface ToldParts {
   start: boolean;
@@ -565,50 +573,56 @@ export interface ToldParts {
   decides: boolean;
   own: boolean;
   ai: boolean;
-  /** They said how many there are, how long one takes, how many come in wrong. */
-  volume: boolean;
-  takes: boolean;
-  wrong: boolean;
   right: boolean;
   ask: boolean;
   next: boolean;
   /** They shared an example. */
   example: boolean;
   term: boolean;
+  /** What they took out again at read-back, by fact; numbers' facts never among them. */
   out: string[];
 }
 
 /**
- * A drawing's numbers over everyone who gave them and left them in when it was read back: the
- * lowest and the highest anyone said, and how many people that rests on. Never an average, never
- * one person's; a team of one shows its number with one person.
+ * A number staff see: how many people it rests on, and its value only when that is at least
+ * `MIN_GROUP`, or the whole team is one person; otherwise none, and staff read "fewer than 5".
  */
-export interface DrawnTotals {
-  /** How many there are in a quiet and in a busy week or month. */
-  volume: {
-    quiet: [low: number, high: number];
-    busy: [low: number, high: number];
-    people: number;
-  } | null;
-  /** How long one takes: the quickest and the longest anyone named, and what they call normal. */
-  takes: {
-    least: number;
-    most: number;
-    normal: [low: number, high: number];
-    people: number;
-  } | null;
-  /** How many out of ten come in wrong. */
-  wrong: { outOfTen: [low: number, high: number]; people: number } | null;
+export interface DrawnNumber<Value> {
+  people: number;
+  value: Value | null;
 }
 
+/** A drawing's numbers over everyone who gave them and left them in, as medians (`DrawnNumber`). */
+export interface DrawnTotals {
+  /** How many there are in a quiet and in a busy week or month. */
+  volume: DrawnNumber<{ quiet: number; busy: number }>;
+  /** How long a normal one takes. */
+  takes: DrawnNumber<number>;
+  /** How many out of ten come in wrong. */
+  wrong: DrawnNumber<number>;
+}
+
+/** A step as staff see it: its minutes for a normal one only when the step rests on enough people. */
+export type StaffStep = Omit<DrawnStep, "minutes"> & {
+  minutes: DrawnNumber<number>;
+};
+
 /** A drawing as staff get it: who told which parts, and its numbers as totals only. */
-export type StaffDrawing = Omit<DrawnWork, "told"> & {
+export type StaffDrawing = Omit<DrawnWork, "told" | "steps" | "differently"> & {
+  steps: StaffStep[];
+  /** A case off the normal path, with how many out of ten as `DrawnNumber`. */
+  differently: (Omit<DrawnWork["differently"][number], "outOfTen"> & {
+    outOfTen: DrawnNumber<number>;
+  })[];
   /** Which parts each person told, by person. */
   told: Record<string, ToldParts>;
   totals: DrawnTotals;
 };
 
-/** Which parts `told` covers, without a number of theirs or their example (`ToldParts`). */
+/** The facts of numbers, which a person's `ToldParts` never names. */
+const numberFacts = new Set(["volume", "takes", "wrong"]);
+
+/** Which parts `told` covers, without a number of theirs or whether they gave one (`ToldParts`). */
 export const toldPartsOf = (told: Told): ToldParts => ({
   start: told.start,
   steps: [...told.steps],
@@ -619,31 +633,45 @@ export const toldPartsOf = (told: Told): ToldParts => ({
   decides: told.decides,
   own: told.own,
   ai: told.ai,
-  volume: told.volume !== null,
-  takes: told.takes !== null,
-  wrong: told.wrong !== null,
   right: told.right,
   ask: told.ask,
   next: told.next,
   example: told.example !== null && told.example !== "",
   term: told.term,
-  out: [...told.out],
+  out: told.out.filter((fact) => !numberFacts.has(fact)),
 });
 
-/** The lowest and the highest of some numbers. */
-const rangeOf = (values: readonly number[]): [low: number, high: number] => [
-  Math.min(...values),
-  Math.max(...values),
-];
+/** The median of some numbers: the middle one, or halfway between the two middle ones. */
+const medianOf = (values: readonly number[]): number => {
+  const sorted = values.toSorted((a, b) => a - b);
+  const half = Math.floor(sorted.length / 2);
+  const upper = sorted[half] ?? 0;
+  return sorted.length % 2 === 1
+    ? upper
+    : ((sorted[half - 1] ?? 0) + upper) / 2;
+};
+
+/** `value` of `people` as staff may see it (`DrawnNumber`), in a team of `team` people. */
+export const shownNumber = <Value>(
+  people: number,
+  team: number,
+  value: () => Value
+): DrawnNumber<Value> => ({
+  people,
+  value: people >= MIN_GROUP || (team === 1 && people === 1) ? value() : null,
+});
 
 /** The numbers someone gave, as far as `totalsOf` reads them. */
 export type GivenNumbers = Pick<Told, "volume" | "takes" | "wrong" | "out">;
 
 /**
- * The totals of what everyone in `given` said and left in when it was read back (`DrawnTotals`):
- * a number someone took out again counts for nothing.
+ * The totals of what everyone in `given` said and left in when it was read back (`DrawnTotals`),
+ * in a team of `team` people: a number someone took out again counts for nothing.
  */
-export const totalsOf = (given: readonly GivenNumbers[]): DrawnTotals => {
+export const totalsOf = (
+  given: readonly GivenNumbers[],
+  team: number
+): DrawnTotals => {
   const kept = <Value>(
     fact: string,
     of: (each: GivenNumbers) => Value | null
@@ -656,44 +684,55 @@ export const totalsOf = (given: readonly GivenNumbers[]): DrawnTotals => {
   const takes = kept("takes", (each) => each.takes);
   const wrongs = kept("wrong", (each) => each.wrong);
   return {
-    volume:
-      volumes.length === 0
-        ? null
-        : {
-            quiet: rangeOf(volumes.map(([quiet]) => quiet)),
-            busy: rangeOf(volumes.map(([, busy]) => busy)),
-            people: volumes.length,
-          },
-    takes:
-      takes.length === 0
-        ? null
-        : {
-            least: Math.min(...takes.map(([least]) => least)),
-            most: Math.max(...takes.map((each) => each[2])),
-            normal: rangeOf(takes.map(([, normal]) => normal)),
-            people: takes.length,
-          },
-    wrong:
-      wrongs.length === 0
-        ? null
-        : { outOfTen: rangeOf(wrongs), people: wrongs.length },
+    volume: shownNumber(volumes.length, team, () => ({
+      quiet: medianOf(volumes.map(([quiet]) => quiet)),
+      busy: medianOf(volumes.map(([, busy]) => busy)),
+    })),
+    takes: shownNumber(takes.length, team, () =>
+      medianOf(takes.map(([, normal]) => normal))
+    ),
+    wrong: shownNumber(wrongs.length, team, () => medianOf(wrongs)),
   };
 };
 
 /**
- * A drawing as staff get it (`StaffDrawing`): which parts each person told, and its numbers as
- * totals over everyone, never one person's.
+ * A drawing as staff get it (`StaffDrawing`), of a piece of work `team` people do: which parts
+ * each person told, and its numbers as totals over enough people, never one person's.
  */
-export const staffDrawingOf = ({
-  told,
-  ...drawn
-}: DrawnWork): StaffDrawing => ({
-  ...drawn,
-  told: Object.fromEntries(
-    Object.entries(told).map(([person, each]) => [person, toldPartsOf(each)])
-  ),
-  totals: totalsOf(Object.values(told)),
-});
+export const staffDrawingOf = (
+  { told, steps, differently, ...drawn }: DrawnWork,
+  team: number
+): StaffDrawing => {
+  const tellers = Object.values(told);
+  const tellingStep = (index: number) =>
+    tellers.filter((each) => each.steps.includes(index)).length;
+  const tellingCase = (index: number) =>
+    tellers.filter((each) => each.differently.includes(index)).length;
+  return {
+    ...drawn,
+    steps: steps.map(({ minutes, ...step }, index) => {
+      const normal = minutes?.[1];
+      return {
+        ...step,
+        minutes:
+          normal === undefined
+            ? { people: 0, value: null }
+            : shownNumber(tellingStep(index), team, () => normal),
+      };
+    }),
+    differently: differently.map(({ outOfTen, ...each }, index) => ({
+      ...each,
+      outOfTen:
+        outOfTen === null
+          ? { people: 0, value: null }
+          : shownNumber(tellingCase(index), team, () => outOfTen),
+    })),
+    told: Object.fromEntries(
+      Object.entries(told).map(([person, each]) => [person, toldPartsOf(each)])
+    ),
+    totals: totalsOf(tellers, team),
+  };
+};
 
 /** A step as drawn: one instruction, who does it, where, and how long people said one takes. */
 export interface DrawnStep {

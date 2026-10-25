@@ -208,7 +208,7 @@ const snapshot: StaffSnapshot = {
       doers: ["lisa", "tim"],
       share: 0.8,
       from: "lead",
-      drawn: staffDrawingOf(drawn),
+      drawn: staffDrawingOf(drawn, 2),
       stale: false,
     },
   ],
@@ -448,7 +448,7 @@ describe("a real organization as the admin reads it", () => {
     }).toStrictEqual({ facts: 5, out: 1, approved: 0.8 });
   });
 
-  it("counts the hours of a piece of work from everyone who told about it, whatever they were asked about", () => {
+  it("counts no hours of a piece of work from fewer than 5 people's numbers, whoever told about it", () => {
     const people = snapshot.roster?.people ?? [];
     // Lisa was asked about no work of her own, and told about handling tickets.
     const elsewhere = orgOfSnapshot({
@@ -464,10 +464,11 @@ describe("a real organization as the admin reads it", () => {
     const tickets = valueOf(seen, "2026-10-06").works.find(
       (each) => each.evidence.work.id === "w-tickets"
     );
+    // Lisa alone gave numbers: her hours would be hers (GRA-1079).
     expect({
       said: tickets?.said,
       known: tickets?.hours !== null,
-    }).toStrictEqual({ said: 1, known: true });
+    }).toStrictEqual({ said: 0, known: false });
   });
 
   it("keeps the links of a six-week plan open past two weeks, and counts who finishes later", () => {
