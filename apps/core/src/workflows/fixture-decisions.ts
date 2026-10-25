@@ -2,6 +2,7 @@ import { decisionErrors } from "@grasp-os/shared/decisions";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, desc, eq, gt } from "drizzle-orm";
@@ -287,6 +288,13 @@ const answerSchema = z.strictObject({
   at: z.array(z.int().min(0).max(9999)).max(maxLoopDepth).optional(),
 });
 
+/**
+ * How often a test's run looks at the decision it waits for, besides its
+ * wake, in ms (resource-host.ts, `#awaitDecision`): an answer whose wake
+ * was lost is taken within this long.
+ */
+export const fixtureDecisionLookMs = 1000;
+
 /** How often an answer looks again for the decision it answers, in ms. */
 const pollMs = 100;
 
@@ -418,10 +426,20 @@ export const answerFixtureDecision = async (
   if (answered === undefined) {
     throw decisionErrors.create("decision.closed");
   }
-  // The wake carries nothing: the run reads the answer from the decision.
-  await runEngine(env).sendEvent(
-    runId,
-    decisionEventType(open.id),
-    `decision:${open.id}`
-  );
+  // The wake carries nothing: the run reads the answer from the decision,
+  // and looks again on its own every `fixtureDecisionLookMs`, so an answer
+  // kept stands even when its wake is lost.
+  try {
+    await runEngine(env).sendEvent(
+      runId,
+      decisionEventType(open.id),
+      `decision:${open.id}`
+    );
+  } catch (error) {
+    log.warn("app_tests.decision_wake_failed", {
+      runId,
+      decision: open.id,
+      ...errorFields(error),
+    });
+  }
 };

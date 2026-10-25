@@ -55,6 +55,7 @@ import {
 import { takesExactly } from "./exact-values.ts";
 import type { FixtureDecisionRun } from "./fixture-decisions.ts";
 import {
+  fixtureDecisionLookMs,
   fixtureDecisionOutcome,
   openFixtureDecision,
   takeFixtureDecision,
@@ -2592,17 +2593,25 @@ export class ResourceRunHost
       );
     let seen = await look(`${stepName}:decision:reached`);
     for (let round = 0; !seen.answered && seen.at < deadline; round += 1) {
+      // A test's run looks again every so often as well: its answer keeps
+      // no wake owed (fixture-decisions.ts), so one lost on the way is
+      // read from the decision at the next look, within its test.
+      const timeout = fixture
+        ? Math.min(deadline - seen.at, fixtureDecisionLookMs)
+        : deadline - seen.at;
       try {
         // oxlint-disable-next-line no-await-in-loop -- one wait at a time
         await this.#step.waitForEvent(`${stepName}:decision:wait:${round}`, {
           type: decisionEventType(decision),
-          timeout: deadline - seen.at,
+          timeout,
         });
       } catch (error) {
         if (!isTimeout(error)) {
           throw error;
         }
-        break;
+        if (!fixture) {
+          break;
+        }
       }
       // oxlint-disable-next-line no-await-in-loop -- one look per wake
       seen = await look(`${stepName}:decision:woken:${round}`);

@@ -21,7 +21,7 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { resumed, stopped } from "./runs.ts";
+import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
@@ -575,6 +575,34 @@ describe(
       }).toStrictEqual({
         first: "ok",
         second: "decision.closed",
+        end: { status: "completed", output: { status: "approved" } },
+        decisions: [
+          {
+            recipients: '["approver"]',
+            status: "approved",
+            decidedBy: "approver",
+          },
+        ],
+      });
+      await session.close();
+    });
+
+    it("goes on with an answer whose wake was lost, reading it from the decision", async () => {
+      const app = await invoicesApp();
+      const { session, run, runId } = await runningIn(app);
+      await asked(runId);
+      // The engine can't be reached as the answer comes in: the answer is
+      // kept, and the wake it sends is lost.
+      const answered = await whileEngineRefuses(
+        (method) => method === "sendEvent",
+        async () => await respond(session, "approver", run, { approved: true })
+      );
+      expect({
+        answered,
+        end: await endOf(session, run),
+        decisions: await decisionsOf(runId),
+      }).toStrictEqual({
+        answered: "ok",
         end: { status: "completed", output: { status: "approved" } },
         decisions: [
           {
