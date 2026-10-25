@@ -64,9 +64,16 @@ const connectShared = async (admin: Admin, granted?: string) => {
   return { id: connection.id, mailbox };
 };
 
-/** A grant that holds Read company's rights. */
+/**
+ * A grant that holds Read company's rights, and a shared mailbox's, to read
+ * and send from it, as pointing Stephen at one asks for.
+ */
 const readCompanyGrant =
-  "openid profile email offline_access User.Read Mail.ReadWrite Files.Read.All Sites.Read.All Calendars.Read.Shared Tasks.Read";
+  "openid profile email offline_access User.Read Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send.Shared Files.Read.All Sites.Read.All Calendars.Read.Shared Tasks.Read";
+
+/** A grant that holds every class's rights, and a shared mailbox's. */
+const everyRightGrant =
+  "openid profile email offline_access User.Read MailboxSettings.Read Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send Mail.Send.Shared Calendars.ReadWrite Calendars.Read.Shared Files.ReadWrite.All Sites.ReadWrite.All Tasks.ReadWrite Notes.ReadWrite";
 
 const sentSchema = z.array(z.object({ subject: z.string() }).loose());
 
@@ -196,9 +203,9 @@ describe("the classes a company turned on", setUpTime, () => {
   it("let a class through once an admin turns it on for everyone", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
-    // Granted Read company's rights already, so turning it on asks no one
-    // to connect again.
-    const { id, mailbox } = await connectShared(admin, readCompanyGrant);
+    // Granted every right already, so turning it on asks no one to connect
+    // again.
+    const { id, mailbox } = await connectShared(admin, everyRightGrant);
     await pointedAt(admin, mailbox);
     const chat = await chatCalling(admin, person.userId, mailbox, id);
 
@@ -240,7 +247,8 @@ describe("the classes a company turned on", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const inTeam = await signedInApi(idp, "user");
     const outside = await signedInApi(idp, "user");
-    const { id, mailbox } = await connectShared(admin);
+    // Granted Read company's rights already: the class is turned on below.
+    const { id, mailbox } = await connectShared(admin, readCompanyGrant);
     await pointedAt(admin, mailbox);
     const team = await teamOf(inTeam.userId);
     await admin.api.connections.setToolClass("read-company", {
