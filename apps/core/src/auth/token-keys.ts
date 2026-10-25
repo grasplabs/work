@@ -1,5 +1,7 @@
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { appTokenMs } from "@grasp-os/shared/portable";
+import { sharedRun } from "@grasp-os/shared/shared-runs";
+import type { SharedRun } from "@grasp-os/shared/shared-runs";
 
 /** A key row of the JWT plugin's, as far as its expiry goes. */
 interface KeyRow {
@@ -49,6 +51,13 @@ const unknownKeyRereadMs = 5000;
  */
 const staleChecksMax = 1024;
 
+/**
+ * The longest a read of the key rows from D1 may take before the requests
+ * waiting on it take it for abandoned and read again (`sharedRun`): a
+ * read whose request was cancelled never settles.
+ */
+const keysReadMs = 10_000;
+
 /** A key row, by the ID a token's header names it with (`kid`). */
 interface IdentifiedKeyRow extends KeyRow {
   id: string;
@@ -70,16 +79,23 @@ export type KeyUse =
  * not once a request, so a token costs no D1 read before anyone is known;
  * again sooner for a key it doesn't hold (`unknownKeyRereadMs`). To sign
  * one, always read afresh: it signs with the key D1 holds now, and what it
- * read is held for the checks after. Requests meanwhile share one read.
- * Each answer is `liveKeys` of them, at the time asked.
+ * read is held for the checks after. Requests meanwhile share one read
+ * (`sharedRun`), each going on in its own context once it settles. Each
+ * answer is `liveKeys` of them, at the time asked.
  */
 export const keyRing = <Key extends IdentifiedKeyRow>() => {
   let held: { readonly keys: Key[]; readonly readAt: number } | undefined;
-  /** The read under way, which every request meanwhile joins. */
-  let reading: Promise<Key[]> | undefined;
+  /**
+   * The read under way, by the `version` it began at, which every request
+   * meanwhile joins: one begun before a `forget` is joined by none after.
+   */
+  const reads = new Map<string, SharedRun<Key[]>>();
   /** Moves on with `forget`: a read begun before it is never held. */
   let version = 0;
-  /** How many reads began: the one under way is the latest. */
+  /**
+   * How many reads began: only the latest is held, so one that ran past
+   * its time and settles after its replacement doesn't put back older rows.
+   */
   let begunReads = 0;
   /**
    * Tokens checked with the held copy, unread, though it lacked their key
@@ -101,25 +117,16 @@ export const keyRing = <Key extends IdentifiedKeyRow>() => {
     read: () => Promise<Key[]>,
     now: number
   ): Promise<Key[]> => {
-    if (reading === undefined) {
-      const begun = version;
+    const begun = version;
+    return await sharedRun(reads, String(begun), keysReadMs, async () => {
       begunReads += 1;
       const number = begunReads;
-      reading = (async () => {
-        try {
-          const keys = await read();
-          if (begun === version) {
-            held = { keys, readAt: now };
-          }
-          return keys;
-        } finally {
-          if (number === begunReads) {
-            reading = undefined;
-          }
-        }
-      })();
-    }
-    return await reading;
+      const keys = await read();
+      if (begun === version && number === begunReads) {
+        held = { keys, readAt: now };
+      }
+      return keys;
+    });
   };
   return {
     /** The live keys for `use`, read with `read` unless held fresh enough. */
@@ -164,7 +171,6 @@ export const keyRing = <Key extends IdentifiedKeyRow>() => {
     /** Drops the held copy: a key was made, or removed. */
     forget: (): void => {
       held = undefined;
-      reading = undefined;
       version += 1;
     },
   };

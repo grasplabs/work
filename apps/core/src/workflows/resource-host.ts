@@ -1076,8 +1076,14 @@ interface StepRun {
   decided: DecisionOutcome | undefined;
 }
 
-/** Expressions compiled once per build, by build hash and slot. */
-const compiled = new Map<string, Promise<CompiledExpression>>();
+/**
+ * Expressions compiled once per build, by build hash and slot. The
+ * compiled expressions themselves, never a compile still under way: run
+ * objects of one build share this isolate, and one that awaited another's
+ * compile could go on in that object's context (shared-runs.ts). Two that
+ * compile one expression at once each compile it, which costs no I/O.
+ */
+const compiled = new Map<string, CompiledExpression>();
 // Past the 128 slots of the largest step, so one step doesn't thrash it.
 const compiledMax = 512;
 
@@ -2499,32 +2505,25 @@ export class ResourceRunHost
   /** `expression`, compiled once per build. */
   async #compiled(expression: SealedExpression): Promise<CompiledExpression> {
     const key = `${this.#run.build.hash}:${expression.slot}`;
-    const compiling =
-      compiled.get(key) ??
-      remember(
-        compiled,
-        compiledMax,
-        key,
-        // Sealed: jq compiled it at publication, so it isn't run to
-        // compile it again, and every attempt spends only what evaluating
-        // it does, whether or not this isolate compiled it before.
-        compileExpression(
-          expression.source,
-          {
-            stage: expression.stage,
-            scope: expression.taskId === null ? [] : [expression.taskId],
-            pointer: expression.pointer,
-            loopVariables: expression.loopVariables,
-          },
-          true
-        )
-      );
-    try {
-      return await compiling;
-    } catch (error) {
-      compiled.delete(key);
-      throw error;
+    const kept = compiled.get(key);
+    if (kept !== undefined) {
+      return kept;
     }
+    // Sealed: jq compiled it at publication, so it isn't run to compile it
+    // again, and every attempt spends only what evaluating it does,
+    // whether or not this isolate compiled it before. A compile that fails
+    // keeps nothing.
+    const made = await compileExpression(
+      expression.source,
+      {
+        stage: expression.stage,
+        scope: expression.taskId === null ? [] : [expression.taskId],
+        pointer: expression.pointer,
+        loopVariables: expression.loopVariables,
+      },
+      true
+    );
+    return remember(compiled, compiledMax, key, made);
   }
 
   /**
