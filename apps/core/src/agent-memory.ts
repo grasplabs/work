@@ -72,6 +72,7 @@ memory: {
 /** `env.memory`. */
 export const memoryApi: AgentApi = {
   name: "memory",
+  summary: "What you keep about the person, in their USER.md.",
   declaration: memoryDeclaration,
   stub: (scope) => exports.MemoryApi({ props: scope }),
 };

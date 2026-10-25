@@ -400,6 +400,8 @@ apps: {
 /** `env.apps`. */
 export const appsApi: AgentApi = {
   name: "apps",
+  summary:
+    "The company's Apps the person has a role in, and the code of those they build.",
   declaration: appsDeclaration,
   stub: (scope) => exports.AppsApi({ props: scope }),
 };

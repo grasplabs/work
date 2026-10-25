@@ -29,6 +29,20 @@ export const codeStep = (code: string, times = 1): Answer => ({
   outputTokens: 40,
 });
 
+/** The model reads the full declaration of the APIs `names` (`readApi`). */
+export const readApiStep = (...names: string[]): Answer => ({
+  text: "",
+  toolCalls: [
+    {
+      id: `call_${crypto.randomUUID()}`,
+      name: "readApi",
+      arguments: { names },
+    },
+  ],
+  inputTokens: 200,
+  outputTokens: 10,
+});
+
 /** The model answers. */
 export const says = (text: string): Answer => ({
   text,
@@ -133,7 +147,7 @@ export const transcript = async (
 export const codeResults = async (stub: WorkspaceStub, chatId: string) => {
   const messages = await transcript(stub, chatId);
   return messages.flatMap((message) =>
-    message.role === "toolResult"
+    message.role === "toolResult" && message.toolName === "executeCode"
       ? [
           {
             isError: message.isError,

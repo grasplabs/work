@@ -283,6 +283,7 @@ workflows: {
 /** `env.workflows`. */
 export const workflowsApi: AgentApi = {
   name: "workflows",
+  summary: "The workflows this chat may follow, and their runs.",
   types: workflowsTypes,
   declaration: workflowsDeclaration,
   stub: (scope) => exports.WorkflowsApi({ props: scope }),
