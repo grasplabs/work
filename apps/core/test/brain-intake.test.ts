@@ -13,6 +13,7 @@ import { z } from "zod";
 import { intakeIds } from "../src/onboarding/brain-intake.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { claimChecksMax } from "../src/onboarding/team-claims.ts";
+import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, answeringWith, onLink } from "./interview-link.ts";
 import {
@@ -24,6 +25,7 @@ import {
   mapped,
   openLink,
   team,
+  fiveToldReply,
   ticketsReply,
   told,
   zendeskClaim,
@@ -152,7 +154,7 @@ describe(
       const ids = await team();
       await mapped(ids);
       await told(ids);
-      await answering([ticketsReply(ids)], async () => await store.drawNext());
+      await answering([fiveToldReply(ids)], async () => await store.drawNext());
       const { gave } = await intake(ids);
       const member = await signedInApi(idp, "user");
       const brain = await member.api.brain.read();
@@ -185,11 +187,8 @@ describe(
           name: "handling new tickets",
           local: "nieuwe tickets afhandelen",
           status: "drawn",
-          steps: [
-            "Open the ticket.",
-            "Ask someone when the customer number is missing.",
-            "Send the answer.",
-          ],
+          // What five told; the step only Max told stays out.
+          steps: ["Open the ticket.", "Send the answer."],
           minutes: { quickest: 1, normal: 2, longest: 5, basis: "estimated" },
           people: 6,
           volumes: [
@@ -197,8 +196,8 @@ describe(
               of: "me",
               per: "week",
               low: 30,
-              high: 50,
-              people: 2,
+              high: 54,
+              people: 5,
               basis: "estimated",
             },
           ],
@@ -206,10 +205,11 @@ describe(
             unit: "minutes",
             quickest: 3,
             longest: 45,
-            people: 2,
+            people: 5,
             basis: "estimated",
           },
-          open: ["Why do some ask someone?"],
+          // Written for the next interviews from what few said: never the brain's.
+          open: [],
         },
         rota: false,
         named: { ids: [], names: [], words: false, lead: false },
@@ -221,7 +221,7 @@ describe(
       const ids = await team();
       await mapped(ids);
       await told(ids);
-      await answering([ticketsReply(ids)], async () => await store.drawNext());
+      await answering([fiveToldReply(ids)], async () => await store.drawNext());
       await intake(ids);
       const before = await kept(ids);
       // Mia adds something and agrees again: tickets are drawn once more.
@@ -239,7 +239,7 @@ describe(
         1
       );
       await answering(
-        [ticketsReply(ids, "Close the ticket.")],
+        [fiveToldReply(ids, "Close the ticket.")],
         async () => await store.drawNext()
       );
       // Given again with nothing new, nothing is kept twice.
@@ -1122,5 +1122,122 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       gave,
       records: records.map(({ type }) => type),
     }).toStrictEqual({ gave: `brain:${ids.team}`, records: [] });
+  });
+});
+
+/** The tickets' newest drawing as `api` reads it in the brain, and its baseline's steps. */
+const ticketsDrawingFor = async (
+  api: { brain: { read: () => Promise<Workspace> } },
+  ids: Ids
+) => {
+  const brain = await api.brain.read();
+  const workflow = brain.workflows.find(
+    ({ teamId, name }) =>
+      teamId === `team-${ids.team}` && name === "handling new tickets"
+  );
+  const drawing = workflow?.drawings?.at(-1);
+  return {
+    baseline: workflow?.baseline.steps.map(({ text }) => text),
+    starts: drawing?.starts,
+    steps: drawing?.steps.map(({ text }) => text),
+    waits: drawing?.waits,
+    decides: drawing?.decides,
+    own: drawing?.own,
+    open: drawing?.open,
+    people: drawing?.people,
+    volumes: drawing?.volumes.map(({ people }) => people),
+    takes: drawing?.takes?.people ?? null,
+    wrong: drawing?.wrong?.people ?? null,
+  };
+};
+
+/** A team whose tickets are drawn as `reply` says, given to the brain. */
+const givenWith = async (reply: (ids: Ids) => GatewayReply) => {
+  const ids = await team();
+  await mapped(ids);
+  await told(ids);
+  await answering(
+    [reply(ids)],
+    async () => await onboardingStore(env).drawNext()
+  );
+  await intake(ids);
+  return ids;
+};
+
+// A drawing reaches the brain only as far as five or more of the people it
+// was drawn from told it, each part apart (GRA-1084, brain-intake.ts
+// `versionOf`), and Grasp's staff read only its numbers. The lead is never
+// one of a drawing's tellers while others do the work (store.ts
+// `#briefOf`), and `versionOf` leaves them out of every count besides. The
+// ways it can fail, tried here:
+//
+// - A step, a wait, how one starts or a one-line answer only some told,
+//   or a step that names someone only one person told about.
+// - A range of numbers resting on fewer than five, which shows theirs.
+// - A question for the next interviews, written from what few said.
+// - Staff reading what the company's people told.
+describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
+  it("is only what five or more told, each part apart: no step, wait, answer or question fewer told", async () => {
+    const ids = await givenWith(fiveToldReply);
+    const member = await signedInApi(idp, "user");
+    await expect(ticketsDrawingFor(member.api, ids)).resolves.toStrictEqual({
+      baseline: ["Open the ticket.", "Send the answer."],
+      starts: "A customer email arrives as a ticket in Zendesk.",
+      steps: ["Open the ticket.", "Send the answer."],
+      // Only Mo said it waits, and only Max keeps a sheet of his own.
+      waits: [],
+      decides: "The ticket's priority.",
+      own: "",
+      open: [],
+      people: 6,
+      volumes: [5],
+      takes: 5,
+      wrong: 5,
+    });
+  });
+
+  it("keeps no part and no number fewer than five told", async () => {
+    const ids = await givenWith((each) => ticketsReply(each));
+    const member = await signedInApi(idp, "user");
+    await expect(ticketsDrawingFor(member.api, ids)).resolves.toStrictEqual({
+      baseline: [],
+      starts: "",
+      steps: [],
+      waits: [],
+      decides: "",
+      own: "",
+      open: [],
+      // How many it was drawn from, never who: that stays.
+      people: 6,
+      volumes: [],
+      takes: null,
+      wrong: null,
+    });
+  });
+
+  it("gives Grasp's staff only its numbers, and members its words", async () => {
+    const ids = await givenWith(fiveToldReply);
+    const member = await signedInApi(idp, "user");
+    const staff = await asStaff();
+    const read = await ticketsDrawingFor(member.api, ids);
+    expect({
+      member: read.steps,
+      staff: await ticketsDrawingFor(staff, ids),
+    }).toStrictEqual({
+      member: ["Open the ticket.", "Send the answer."],
+      staff: {
+        baseline: [],
+        starts: "",
+        steps: [],
+        waits: [],
+        decides: "",
+        own: "",
+        open: [],
+        people: 6,
+        volumes: [5],
+        takes: 5,
+        wrong: 5,
+      },
+    });
   });
 });

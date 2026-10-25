@@ -239,6 +239,60 @@ export const ticketsReply = (
   outputTokens: 900,
 });
 
+/**
+ * Tickets as drawn, with what five who tell their own work told alike, as
+ * the brain may take it (GRA-1084): how one starts, opening the ticket,
+ * the last step, what they decide by and their numbers; besides, what
+ * fewer told, which stays out of it: a step only Max told, naming Noor, a
+ * wait only Mo told, Max's own list, and a question for the next
+ * interviews.
+ */
+export const fiveToldReply = (
+  ids: Ids,
+  last = "Send the answer."
+): GatewayReply => {
+  const five = [ids.max, ids.mia, ids.mo, ids.noor, ids.pim];
+  return {
+    text: JSON.stringify({
+      starts: "A customer email arrives as a ticket in Zendesk.",
+      starts_by: five,
+      steps: [
+        {
+          text: "Open the ticket.",
+          who: "Agent",
+          tool: "Zendesk",
+          by: five,
+          minutes: [1, 2, 5],
+        },
+        {
+          text: "Ask Noor when the customer number is missing.",
+          who: "Agent",
+          tool: "",
+          by: [ids.max],
+        },
+        { text: last, who: "Agent", tool: "Zendesk", by: five },
+      ],
+      notes: [
+        { kind: "wait", text: "Waits for the customer's reply.", by: [ids.mo] },
+        { kind: "decides", text: "The ticket's priority.", by: five },
+        { kind: "own", text: "A sheet of open tickets.", by: [ids.max] },
+      ],
+      numbers: five.map((person, index) => ({
+        person,
+        quiet: 30 + index,
+        busy: 50 + index,
+        of: "me",
+        per: "week",
+        minutes: [3, 10 + index, 45],
+        wrong: 2,
+      })),
+      open: ["Why do some ask Noor?"],
+    }),
+    inputTokens: 4000,
+    outputTokens: 900,
+  };
+};
+
 /** Lea's map drawn, from `more` she said too, and everyone's links out. */
 export const mapped = async (
   ids: Ids,

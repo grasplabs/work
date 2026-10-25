@@ -253,7 +253,8 @@ const ticketsReply = (ids: Ids, tool: string): Answer => ({
         text: "Open the ticket.",
         who: "Agent",
         tool,
-        by: [ids.max, ids.mia, ids.mo],
+        // All five told it, so it reaches the brain (GRA-1084).
+        by: [ids.max, ids.mia, ids.mo, ids.noor, ids.pim],
         minutes: [1, 2, 5],
       },
       { text: "Send the answer.", who: "Agent", tool, by: [ids.mia] },
