@@ -922,6 +922,10 @@ msgstr "{name}, por {key}"
 msgid "{name}: {count}"
 msgstr "{name}: {count}"
 
+#: src/onboarding/work-record.tsx
+msgid "{name}: {outOfTen} in 10"
+msgstr "{name}: {outOfTen} de 10"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "{name}: {shown} of the limit"
 msgstr "{name}: {shown} del límite"
@@ -5018,6 +5022,10 @@ msgstr "Cada persona"
 #: src/onboarding/work-record.tsx
 msgid "Each person's numbers"
 msgstr "Las cifras de cada persona"
+
+#: src/onboarding/work-record.tsx
+msgid "Each person's share"
+msgstr "La proporción de cada persona"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Each workflow"
@@ -13080,6 +13088,10 @@ msgstr "Su propio límite"
 #: src/settings/stephen-settings.tsx
 msgid "Their own mail, calendar and files. Runs at once."
 msgstr "Su propio correo, calendario y archivos. Se ejecuta al momento."
+
+#: src/onboarding/work-record.tsx
+msgid "Their own: {minutes}"
+msgstr "Lo suyo: {minutes}"
 
 #: src/onboarding/interview-people.tsx
 msgid "Their rating"

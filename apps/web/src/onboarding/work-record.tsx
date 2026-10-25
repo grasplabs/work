@@ -245,7 +245,7 @@ const MissingList = ({
 };
 
 /** One step, as the interviews have it: who told it and how, the other way it is told, and who does it and where. */
-const StepEvidence = ({
+export const StepEvidence = ({
   record,
   index,
   drawn,
@@ -267,6 +267,19 @@ const StepEvidence = ({
   };
   const { people } = step;
   const { needed } = record;
+  /** The minutes `person` gave for this step, as they gave them; none when they gave none. */
+  const ownMinutes = (person: string): string | null => {
+    const given = drawn?.told[person]?.stepMinutes?.find(
+      (each) => each.step === index
+    );
+    if (given === undefined || drawn === null) {
+      return null;
+    }
+    const [quickest, normal, longest] = given.minutes;
+    return drawn.unit === "hours"
+      ? t`${normal} hours, ${quickest} to ${longest}`
+      : t`${normal} minutes, ${quickest} to ${longest}`;
+  };
   return (
     <>
       <div className="flex flex-col gap-2">
@@ -322,6 +335,7 @@ const StepEvidence = ({
           <ul className="flex flex-col">
             {record.interviews.map((interview, at) => {
               const way = step.ways[at] ?? "none";
+              const minutes = ownMinutes(interview.person.id);
               return (
                 <li
                   className="flex items-center gap-2.5 border-b py-1.5 last:border-b-0"
@@ -333,6 +347,9 @@ const StepEvidence = ({
                     <span className="text-muted-foreground text-xs">
                       {toldAs[way]}
                     </span>
+                    {minutes === null ? null : (
+                      <span className="text-xs">{t`Their own: ${minutes}`}</span>
+                    )}
                   </span>
                 </li>
               );
@@ -470,7 +487,7 @@ const OwnNumbers = ({
 };
 
 /** The numbers: the range people gave, never an average, and each person's own beside it. */
-const Numbers = ({
+export const Numbers = ({
   record,
   drawn,
 }: {
@@ -504,8 +521,14 @@ const Numbers = ({
   const outOfTen = wrong === null ? "" : span(...wrong.outOfTen);
   const own = record.interviews.flatMap((interview) => {
     const told = drawn?.told[interview.person.id];
+    // Anyone who gave a number of their own, of the whole or of a step or
+    // a case: theirs show beside them in the step's and the case's details.
     return told === undefined ||
-      (told.volume === null && told.takes === null && told.wrong === null)
+      (told.volume === null &&
+        told.takes === null &&
+        told.wrong === null &&
+        (told.stepMinutes ?? []).length === 0 &&
+        (told.caseShares ?? []).length === 0)
       ? []
       : [{ id: interview.person.id, name: interview.person.name, told }];
   });
@@ -567,27 +590,45 @@ const Numbers = ({
 };
 
 /** What goes around the steps: what starts it, where it waits, when it goes differently, and what right looks like. */
-const Around = ({ record }: { record: RecordOfWork }) => {
+export const Around = ({
+  record,
+  drawn,
+}: {
+  record: RecordOfWork;
+  drawn: DrawnWork | null;
+}) => {
   const { t, i18n } = useLingui();
   const talked = record.interviews.length;
+  /** Each person's own share of case `index`, as they gave it. */
+  const sharesOf = (index: number) =>
+    record.interviews.flatMap((interview) => {
+      const given = drawn?.told[interview.person.id]?.caseShares?.find(
+        (each) => each.case === index
+      );
+      return given === undefined
+        ? []
+        : [{ name: interview.person.name, outOfTen: given.outOfTen }];
+    });
   const lines: {
     label: string;
     text: string;
     people: number;
     more?: string;
+    own?: { name: string; outOfTen: number }[];
   }[] = [
     { label: t`What starts it`, ...record.starts },
     ...record.waits.map((wait) => ({
       label: i18n._(tagTitles.wait),
       ...wait,
     })),
-    ...record.differently.map((each) => {
+    ...record.differently.map((each, index) => {
       const share = each.outOfTen;
       return {
         label: i18n._(tagTitles.exception),
         text: each.text,
         people: each.people,
         ...(share === null ? {} : { more: t`About ${share} in 10.` }),
+        own: sharesOf(index),
       };
     }),
     ...(record.decides === null
@@ -642,6 +683,16 @@ const Around = ({ record }: { record: RecordOfWork }) => {
                     <span className="text-muted-foreground">{each.more}</span>
                   )}
                 </span>
+                {each.own === undefined || each.own.length === 0 ? null : (
+                  <ul
+                    aria-label={t`Each person's share`}
+                    className="text-muted-foreground flex flex-col text-xs"
+                  >
+                    {each.own.map(({ name, outOfTen }) => (
+                      <li key={name}>{t`${name}: ${outOfTen} in 10`}</li>
+                    ))}
+                  </ul>
+                )}
               </li>
             );
           })}
@@ -1069,7 +1120,7 @@ export const WorkRecord = ({
         <>
           <StepsTold record={record} />
           <div className="grid items-start gap-6 xl:grid-cols-2">
-            <Around record={record} />
+            <Around drawn={drawn} record={record} />
             <Numbers drawn={drawn} record={record} />
           </div>
         </>
