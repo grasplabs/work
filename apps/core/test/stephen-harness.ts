@@ -51,10 +51,14 @@ import type {
 } from "./fixtures/stephen-cases.ts";
 import {
   budgetRows,
+  crmNote,
+  crmTools,
   graphTable,
   grantedCollections,
   leaveRows,
+  lisaDrive,
   lisaEvents,
+  lisaFiles,
   lisaMessages,
   registerRows,
   stephenBudget,
@@ -73,6 +77,7 @@ import type {
 } from "./fixtures/stephen-world.ts";
 import type { Idp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
+import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { callAuth, routed, signedInApi } from "./sign-in.ts";
 import { brokenRules, stephenRuleNames } from "./stephen-rules.ts";
@@ -83,7 +88,7 @@ import type {
   StephenProvider,
   StephenTurn,
 } from "./stephen-stub.ts";
-import { testBinding } from "./test-env.ts";
+import { connectDb, testBinding } from "./test-env.ts";
 
 /** Bumped with any change to how the harness runs or measures a case. */
 export const stephenHarnessVersion = "1";
@@ -102,6 +107,9 @@ export const outlookActions = [
   "mail.createDraft",
   "mail.createReplyDraft",
 ];
+
+/** What her agent may do in her own OneDrive: read it. */
+export const oneDriveActions = ["files.list", "files.search", "files.read"];
 
 /** What her agent may do in the register, through the company's account. */
 export const registerActions = [
@@ -169,6 +177,58 @@ const graphSeen = async () => {
  */
 const everyRight =
   "openid profile email offline_access User.Read MailboxSettings.Read Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send Mail.Send.Shared Calendars.ReadWrite Calendars.Read.Shared Files.ReadWrite.All Sites.ReadWrite.All Tasks.ReadWrite Notes.ReadWrite";
+
+/**
+ * The company's CRM, a HubSpot connection through Composio whose admin
+ * allowed reading its notes and changing a deal, served by core's fake
+ * toolkit server (mail-server.ts): its latest note plants an instruction
+ * (fixtures/stephen-world.ts). Its ID.
+ */
+const crmConnection = async (): Promise<string> => {
+  const name = `crm-${crypto.randomUUID()}`;
+  const id = `connection-${name}`;
+  const now = Date.now();
+  await connectDb()
+    .prepare(
+      "INSERT INTO connections (id, provider, scope, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'hubspot', 'shared', 'active', 'composio', ?, ?, ?, ?)"
+    )
+    .bind(
+      id,
+      mailServerUrl(name),
+      JSON.stringify([{ name: crmTools.read, read: true }, crmTools.change]),
+      now,
+      now
+    )
+    .run();
+  await providers().fetch(mailControlUrl(name), {
+    method: "POST",
+    body: JSON.stringify({
+      list: [
+        {
+          name: crmTools.read,
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+          annotations: { readOnlyHint: true },
+        },
+        {
+          name: crmTools.change,
+          inputSchema: {
+            type: "object",
+            properties: { deal: { type: "string" }, stage: { type: "string" } },
+          },
+          annotations: { readOnlyHint: false },
+        },
+      ],
+      answers: {
+        [crmTools.read]: { content: [{ type: "text", text: crmNote }] },
+      },
+    }),
+  });
+  return id;
+};
 
 /** A Microsoft 365 account `person` connects at `scope`, as `subject`. */
 const connectMicrosoft = async (
@@ -290,6 +350,8 @@ export const setUpStephenCompany = async (
     events: lisaEvents(clock, mailbox),
     messages: lisaMessages(clock, mailbox),
   });
+  await setGraph({ drive: lisaDrive, files: lisaFiles });
+  const crm = await crmConnection();
   const { drive, workbook, table, leaveTable, columns } = stephenRegister;
   await setGraph(
     graphTable(`${drive}/${workbook}/${table}`, columns, registerRows(clock))
@@ -355,6 +417,25 @@ export const setUpStephenCompany = async (
     object: { type: "connection", connectionId: company, resource: workbook },
     actions: registerActions,
     binding: "REGISTER",
+  });
+  await granted(admin, {
+    subject: { type: "agent", agentId: lisa },
+    object: { type: "connection", connectionId: outlook, resource: lisaDrive },
+    actions: oneDriveActions,
+    binding: "ONEDRIVE",
+  });
+  await granted(admin, {
+    subject: { type: "agent", agentId: lisa },
+    object: { type: "connection", connectionId: crm },
+    actions: [crmTools.read, crmTools.change],
+    binding: "CRM",
+  });
+  // A company app is read only where an admin points Stephen at it: the
+  // whole CRM, for Lisa's team (app-pointers.ts).
+  await admin.api.connections.pointApp({
+    connectionId: crm,
+    resources: [],
+    audience: { who: "teams", teams: customerService },
   });
   return {
     admin,
