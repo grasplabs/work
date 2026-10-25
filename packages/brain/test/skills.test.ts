@@ -646,14 +646,150 @@ describe("who can make a skill selectable", () => {
       message: null,
       restoredFrom: null,
     });
+    // A skill naming its own name, in its own collection by ID, where
+    // another has that name too: ambiguous, never the other one.
+    await writeVersion(brain, writerOf("writer"), {
+      collection: skills,
+      path: "settle/SKILL.md",
+      text: skillText(
+        "settle",
+        `tasks: [settle]\nprerequisites: [{ collection: "${skills.id}", name: settle }]`
+      ),
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
+    await writeVersion(brain, writerOf("writer"), {
+      collection: skills,
+      path: "settle-copy/SKILL.md",
+      text: skillText("settle", "tasks: [other]"),
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
     const caller: Caller = { userId: "ann", reads: [skills.id] };
 
     const selection = await selectSkill(brain, caller, {
       task: { type: "close" },
     });
+    const settle = await selectSkill(brain, caller, {
+      task: { type: "settle" },
+    });
 
-    expect(summary(selection).considered).toStrictEqual({
-      "close-month": "prerequisite_missing",
+    expect([summary(selection).considered, summary(settle)]).toStrictEqual([
+      { "close-month": "prerequisite_missing" },
+      { result: "no_match", considered: { settle: "prerequisite_missing" } },
+    ]);
+  });
+
+  it("replaces nothing through a name that is ambiguous, and a replacement never settles an ambiguity", async () => {
+    const shipped = await newCollection(brain, "Shipped skills", "shipped");
+    const company = await newCollection(brain, "Company skills");
+    /** Saves a skill named `name` at its own `path` in `collection`. */
+    const at = async (
+      collection: CollectionRow,
+      path: string,
+      name: string,
+      manifest: string
+    ) =>
+      await writeVersion(brain, writerOf("writer"), {
+        collection,
+        path: `${path}/SKILL.md`,
+        text: skillText(name, manifest),
+        ifVersion: 0,
+        message: null,
+        restoredFrom: null,
+      });
+    // `review` twice in one collection, and one replacing it.
+    await at(company, "review-a", "review", "tasks: [audit]");
+    await at(company, "review-b", "review", "tasks: [audit]");
+    await at(
+      company,
+      "review-fast",
+      "review-fast",
+      "tasks: [audit]\nreplaces: [review]"
+    );
+    // `base` in the company's collection and in a shipped one: replacing
+    // `base` from the company's could mean either.
+    await at(shipped, "base", "base", "tasks: [base]");
+    await at(company, "base", "base", "tasks: [base]");
+    await at(
+      company,
+      "base-ours",
+      "base-ours",
+      "tasks: [base]\nreplaces: [base]"
+    );
+    // `close` replaced by two skills of one name: the target goes, the two
+    // left are ambiguous.
+    await at(company, "close", "close", "tasks: [close]");
+    await at(
+      company,
+      "close-a",
+      "close-fast",
+      "tasks: [close]\nreplaces: [close]"
+    );
+    await at(
+      company,
+      "close-b",
+      "close-fast",
+      "tasks: [close]\nreplaces: [close]"
+    );
+    // A replacement that can't be used itself replaces nothing.
+    await at(company, "pay", "pay", "tasks: [pay]");
+    await at(
+      company,
+      "pay-new",
+      "pay-new",
+      "tasks: [pay]\nprerequisites: [missing]\nreplaces: [pay]"
+    );
+    const caller: Caller = { userId: "ann", reads: [shipped.id, company.id] };
+    const select = async (type: string) => {
+      const selection = await selectSkill(brain, caller, { task: { type } });
+      return {
+        result:
+          selection.result.kind === "skill"
+            ? selection.result.skill.name
+            : selection.result.reason,
+        considered: selection.considered
+          .map((each) => `${each.skill.name}: ${each.outcome}`)
+          .toSorted(),
+      };
+    };
+
+    expect({
+      audit: await select("audit"),
+      base: await select("base"),
+      close: await select("close"),
+      pay: await select("pay"),
+    }).toStrictEqual({
+      audit: {
+        result: "ambiguous",
+        considered: [
+          "review-fast: ambiguous",
+          "review: ambiguous",
+          "review: ambiguous",
+        ],
+      },
+      base: {
+        result: "ambiguous",
+        considered: [
+          "base-ours: ambiguous",
+          "base: ambiguous",
+          "base: ambiguous",
+        ],
+      },
+      close: {
+        result: "ambiguous",
+        considered: [
+          "close-fast: ambiguous",
+          "close-fast: ambiguous",
+          "close: replaced",
+        ],
+      },
+      pay: {
+        result: "pay",
+        considered: ["pay-new: prerequisite_missing", "pay: selected"],
+      },
     });
   });
 });

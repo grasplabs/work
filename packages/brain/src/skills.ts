@@ -249,7 +249,8 @@ const allIn = (needed: readonly string[], held: ReadonlySet<string>) =>
 /**
  * The one selectable skill `reference` names, from `from`: by name in its
  * own collection, or in the collection named. Undefined when there is
- * none, or more than one of that name there.
+ * none, more than one of that name there (`from` counted too: a name it
+ * shares with another is ambiguous), or only `from` itself.
  */
 const resolved = (
   from: Candidate,
@@ -258,12 +259,10 @@ const resolved = (
 ): Candidate | undefined => {
   const collection = reference.collection ?? from.ref.collectionId;
   const named = all.filter(
-    ({ ref }) =>
-      ref.collectionId === collection &&
-      ref.name === reference.name &&
-      ref.documentId !== from.ref.documentId
+    ({ ref }) => ref.collectionId === collection && ref.name === reference.name
   );
-  return named.length === 1 ? named[0] : undefined;
+  const [only] = named;
+  return named.length === 1 && only !== from ? only : undefined;
 };
 
 /** A reference as `resolved` takes it. */
@@ -442,6 +441,21 @@ const mayReplace = (by: Candidate, target: Candidate): boolean =>
   (by.authority === "admins" && target.authority === "shipped");
 
 /**
+ * The skills `by` takes the place of: for each name in its `replaces`, the
+ * one selectable skill of that name it may replace (`mayReplace`). A name
+ * that is no skill, or more than one, replaces nothing: which one is meant
+ * is ambiguous, and a replacement never settles an ambiguity.
+ */
+const replacedBy = (by: Candidate, all: readonly Candidate[]): Candidate[] =>
+  by.manifest.replaces.flatMap((name) => {
+    const named = all.filter(
+      (target) =>
+        target !== by && target.ref.name === name && mayReplace(by, target)
+    );
+    return named.length === 1 ? named : [];
+  });
+
+/**
  * Each of the skills `relevant` to the task, with why it was or wasn't
  * selected, and the one left applicable, with its dependencies' pins, once
  * `replaces` is applied: one is selected, more are each ambiguous.
@@ -469,15 +483,12 @@ const outcomesOf = async <C>(
       applicable.push({ candidate, pins: checked.pins });
     }
   }
-  // Where both apply, one that another may replace, and names, gives way.
+  // Where both apply, the one another replaces gives way.
+  const replaced = new Set(
+    applicable.flatMap(({ candidate: by }) => replacedBy(by, all))
+  );
   for (const { candidate: target } of applicable) {
-    const replacedBy = applicable.some(
-      ({ candidate: by }) =>
-        by !== target &&
-        by.manifest.replaces.includes(target.ref.name) &&
-        mayReplace(by, target)
-    );
-    if (replacedBy) {
+    if (replaced.has(target)) {
       outcomes.set(target, "replaced");
     }
   }
