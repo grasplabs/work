@@ -221,13 +221,31 @@ export const modelRoles = ["quick", "careful"] as const;
 export type ModelRole = (typeof modelRoles)[number];
 
 /**
+ * The model a role gets on a deployment that names none for it, where its
+ * allowlist has that model and the rules let the call use it; otherwise
+ * the role takes the first allowed model the rules let it use. `quick`
+ * defaults to GLM 5.3 Flash, which thinks at low effort, as quick lines
+ * ask: DeepSeek V4.1 Flash, chat's default and the first allowed, thinks
+ * at high at least, too slow for a line someone is waiting to hear.
+ */
+export const defaultRoleModels: Readonly<Partial<Record<ModelRole, string>>> = {
+  quick: "workers-ai/@cf/zai-org/glm-5.3-flash",
+};
+
+/**
  * The models a new deployment allows until staff change its
  * `MODEL_GATEWAY`, and core allows while none is set: Workers AI's, which
  * AI Gateway runs on the client's own account with no provider key, so a
- * client can call a model on day one.
+ * client can call a model on day one. The first is chat's default.
+ *
+ * Chosen on the Brain baseline's real-model runs: DeepSeek V4.1 Flash
+ * answered best and followed the answer protocol, well within the cost
+ * target; GLM 5.3 Flash is the cheapest to complete a task with. Both
+ * search Knowledge with tools, which Llama 3.3, the earlier default, never
+ * did.
  */
 export const defaultGatewayModels = [
-  "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
   "workers-ai/@cf/zai-org/glm-5.3-flash",
 ] as const;
 
