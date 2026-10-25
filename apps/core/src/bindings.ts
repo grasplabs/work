@@ -514,6 +514,8 @@ export const bindingsFor = async (
  * for it (workflows/host.ts), so each call is checked against the step
  * running then and its key. The workflow dispatcher builds them on every
  * start and resume, so a revoked permission is gone from the next one.
+ * Its `brain` permission gives it the Brain's binding by its name
+ * (`brains`, GRA-1067): a recall the host makes for it as the run.
  */
 export const runBindingsFor = async (
   env: Env,
@@ -522,10 +524,18 @@ export const runBindingsFor = async (
 ): Promise<{
   bindings: Record<string, Fetcher<CollectionBinding>>;
   connections: Record<string, ConnectionGrant>;
+  brains: string[];
 }> => {
   const permissions = await grantedPermissions(env, authority, context);
   return {
     bindings: stubsOf(permissions, collectionStubOf(authority, context)),
     connections: stubsOf(permissions, connectionGrantOf(context)),
+    brains: Object.keys(
+      stubsOf(permissions, ({ object, actions }) =>
+        object.type === "platform" && actions.includes("brain")
+          ? true
+          : undefined
+      )
+    ),
   };
 };

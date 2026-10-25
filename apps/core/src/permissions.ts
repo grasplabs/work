@@ -1745,29 +1745,56 @@ export const activePermissions = async (
   await permissionsIn(env, subject, ["active"], where);
 
 /** A binding name's kind: the run's stub of it (bindings.ts, `runBindingsFor`). */
-export type WorkflowBindingKind = "connection" | "collection";
+export type WorkflowBindingKind = "connection" | "collection" | "brain";
+
+/** Whether a permission row's actions (JSON, as stored) include `brain`. */
+const holdsBrain = (actions: string | undefined): boolean => {
+  if (actions === undefined) {
+    return false;
+  }
+  const parsed = z.array(z.string()).safeParse(JSON.parse(actions));
+  return parsed.success && parsed.data.includes("brain");
+};
+
+/**
+ * The kind of binding a permission row gives a run: a connection's, a
+ * collection's, or the Brain's (a platform permission holding `brain`,
+ * GRA-1067), or none.
+ */
+const kindOf = (
+  objectType: string,
+  actions: string | undefined
+): WorkflowBindingKind | undefined => {
+  if (objectType === "connection" || objectType === "collection") {
+    return objectType;
+  }
+  return objectType === "platform" && holdsBrain(actions) ? "brain" : undefined;
+};
 
 /**
  * The binding names `held` gives, each with the kind of binding a run
- * gets from it: a connection's or a collection's. Another App's
- * permission gives a run none: a run reaches no App's code but its own.
- * A name is the kind of the permission that holds it unrevoked, unique
- * among those (`permissions_live_binding_idx`), as that is the one a run
- * gets; a name only revoked permissions held is the kind the run's stub of
- * it would be, a connection's over a collection's (`bindings`,
- * workflows/code.ts).
+ * gets from it: a connection's, a collection's or the Brain's. Another
+ * App's permission gives a run none: a run reaches no App's code but its
+ * own. A name is the kind of the permission that holds it unrevoked,
+ * unique among those (`permissions_live_binding_idx`), as that is the one
+ * a run gets; a name only revoked permissions held is the kind the run's
+ * stub of it would be, a connection's over the Brain's over a
+ * collection's (`bindings`, workflows/code.ts).
  */
 export const bindingKindsOf = (
-  held: readonly { binding: string; objectType: string; status?: string }[]
+  held: readonly {
+    binding: string;
+    objectType: string;
+    actions?: string;
+    status?: string;
+  }[]
 ): Record<string, WorkflowBindingKind> => {
-  const rank = { collection: 0, connection: 1 } as const;
+  const rank = { collection: 0, brain: 1, connection: 2 } as const;
   const kinds: Record<string, { kind: WorkflowBindingKind; live: boolean }> =
     {};
-  for (const { binding, objectType: kind, status } of held) {
-    if (
-      (kind === "connection" || kind === "collection") &&
-      bindingNameSchema.safeParse(binding).success
-    ) {
+  for (const { binding, objectType, actions, status } of held) {
+    const kind = kindOf(objectType, actions);
+    if (kind !== undefined && bindingNameSchema.safeParse(binding).success) {
       const live = status !== "revoked";
       const before = kinds[binding];
       const wins =
@@ -1799,6 +1826,7 @@ export const appBindingKinds = async (
       .select({
         binding: permissions.binding,
         objectType: permissions.objectType,
+        actions: permissions.actions,
         status: permissions.status,
       })
       .from(permissions)

@@ -3,6 +3,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { isolateArgumentDepth } from "@grasp-os/shared/stores";
 import { passedBound } from "@grasp-os/shared/value-bounds";
+import { knowledgeUseOperations } from "@grasp-os/shared/workflow-modules";
 import type { SealedUse } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { RpcTarget } from "cloudflare:workers";
@@ -113,7 +114,7 @@ const modelRequestSchema = z.strictObject({
  * collection, and its request (GRA-700). The collection is the binding's.
  */
 const knowledgeRequestSchema = z.strictObject({
-  operation: z.enum(["search", "read"]),
+  operation: z.enum(knowledgeUseOperations),
   arguments: jsonSchema,
 });
 

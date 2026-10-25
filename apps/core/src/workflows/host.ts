@@ -1,3 +1,4 @@
+import { recall } from "@grasp-os/brain/recall";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { connectErrors } from "@grasp-os/shared/connect";
@@ -65,7 +66,9 @@ import type {
   DecisionOutcome,
   DecisionRecipient,
 } from "../decisions/decisions.ts";
+import { readAsDelegate } from "../knowledge/binding.ts";
 import type { CollectionBinding } from "../knowledge/binding.ts";
+import { brainOf } from "../knowledge/ports.ts";
 import { models } from "../models.ts";
 import { requireActivePerson } from "../permissions.ts";
 import type { StepModel } from "../resource-bindings.ts";
@@ -149,6 +152,8 @@ export interface HostedRun {
   collections: Record<string, Fetcher<CollectionBinding>>;
   /** Its connection permissions, by binding name (`runBindingsFor`). */
   connections: Record<string, ConnectionGrant>;
+  /** The names its `brain` permission binds the Brain by (`runBindingsFor`). */
+  brains: readonly string[];
   /**
    * The bindings its workflow calls, by step, as the review of its version
    * shows them (`app_versions.workflow_calls`).
@@ -2368,6 +2373,8 @@ export class RunHost extends RpcTarget {
           await this.#callCollection(attempt, binding, method, args),
         callConnection: async (binding, call) =>
           await this.#callConnection(attempt, binding, call),
+        callBrain: async (binding, request) =>
+          await this.#callBrain(attempt, binding, request),
         callFunction: async (reference, input) =>
           await this.#callFunction(attempt, reference, input),
         openDecision: async (request) =>
@@ -2666,6 +2673,42 @@ export class RunHost extends RpcTarget {
           throw workflowErrors.create("workflow.invalid");
         }
       }
+    });
+  }
+
+  /**
+   * Recalls from the Brain through the run's Brain binding (`binding`,
+   * `brain(env.BRAIN).recall(request)`), only inside a step whose code its
+   * review shows calling it (`#requireReviewed`), as the run: its App on
+   * behalf of its person, under the App's collection grants and `brain`
+   * permission as they are now (GRA-1067; the threat model is on the
+   * issue). The same service and checks as every caller's recall: the
+   * Brain refuses without the `brain` grant (`brain.denied`), and a filter
+   * naming a collection the run may not read (`brain.not_found`); what it
+   * read is recorded with the run (knowledge/access.ts, `noteProvenance`).
+   */
+  async #callBrain(
+    attempt: StepAttempt,
+    binding: unknown,
+    request: unknown
+  ): Promise<Settled<unknown>> {
+    return await settle(async () => {
+      this.#requireUntampered();
+      await this.#requireCurrent(attempt, "brain");
+      const { brains, authority } = this.#run;
+      const name = checked(z.string(), binding);
+      if (!brains.includes(name)) {
+        throw workflowErrors.create("workflow.invalid");
+      }
+      await this.#requireReviewed(attempt, name);
+      await this.#requireCurrent(attempt, name);
+      return await readAsDelegate(
+        this.#env,
+        authority,
+        { type: "run", appId: this.#run.app, runId: this.#run.runId },
+        undefined,
+        async (reader) => await recall(brainOf(this.#env), reader, request)
+      );
     });
   }
 
