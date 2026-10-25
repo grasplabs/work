@@ -47,6 +47,7 @@ import { readableCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import { findByPath, writeVersion } from "./documents.ts";
 import { ExtractorUnavailableError, extractorFor } from "./extract.ts";
+import { brainOf } from "./ports.ts";
 import type { ErasedFiles, OnErase } from "./purge.ts";
 
 // Files uploaded into Knowledge (see @grasp-os/shared/uploads). An upload
@@ -566,7 +567,7 @@ export const extractUpload = async (
   // A conflict (someone saved the document meanwhile) throws, and the
   // step's retry saves on top of their version.
   const saved = await writeVersion(
-    env,
+    brainOf(env),
     { actor, userId: row.uploadedBy },
     {
       collection,

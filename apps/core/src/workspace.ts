@@ -151,6 +151,7 @@ import {
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
+import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { catalog, cited, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
@@ -1442,10 +1443,14 @@ export class Workspace extends DurableObject<Env> {
       work,
       undefined,
       async (reader) => {
-        const found = await catalog(this.env, reader);
+        const found = await catalog(brainOf(this.env), reader);
         return {
           ...found,
-          listed: await noteListedSkills(this.env, reader, found.skills),
+          listed: await noteListedSkills(
+            brainOf(this.env),
+            reader,
+            found.skills
+          ),
         };
       }
     );
@@ -2328,7 +2333,7 @@ export class Workspace extends DurableObject<Env> {
       chatAuthority(scope),
       chatContext(scope),
       undefined,
-      async (reader) => await cited(this.env, reader, documentIds)
+      async (reader) => await cited(brainOf(this.env), reader, documentIds)
     );
   }
 

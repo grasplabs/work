@@ -16,6 +16,7 @@ import type { CollectionRow } from "./collections.ts";
 import { writeVersion } from "./documents.ts";
 import type { Writer } from "./documents.ts";
 import { appMemoryPath } from "./memory-files.ts";
+import { brainOf } from "./ports.ts";
 import type { ErasedDocument, OnErase } from "./purge.ts";
 
 // The Apps collection: one entry per App, its AGENTS.md at its current
@@ -251,12 +252,12 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
     return;
   }
   const collection = await ensureCollection(
-    env,
+    brainOf(env),
     appsCollectionRow(),
     appsActor
   );
   const write = async (entry: string) =>
-    await writeVersion(env, appsWriter, {
+    await writeVersion(brainOf(env), appsWriter, {
       collection,
       path,
       text: entry,

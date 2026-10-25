@@ -16,15 +16,13 @@ import type {
 } from "@grasp-os/shared/knowledge";
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import type { Reader } from "./access.ts";
 import type { ReadRecord, Allowed } from "./authorize.ts";
 import { allowedFor } from "./authorize.ts";
+import type { Brain } from "./brain.ts";
 import { readableCollection } from "./collections.ts";
-import { portsOf } from "./ports.ts";
 import { nearestCollectionsMax, nearestDetail } from "./search-detail.ts";
 
 // Full-text search over sections, in two FTS5 indexes kept by triggers on
@@ -307,8 +305,11 @@ const toHit = (row: z.infer<typeof hitRowSchema>): SearchHit => ({
  * secret. A plain hash of a short query can be reversed by guessing it
  * ("ziekmelding jan de vries"), and the audit log can't be purged.
  */
-const queryKey = async (env: Env, terms: string[]): Promise<string> => {
-  const key = await portsOf(env).keys.hmac(
+const queryKey = async <C>(
+  brain: Brain<C>,
+  terms: string[]
+): Promise<string> => {
+  const key = await brain.ports.keys.hmac(
     "grasp-os knowledge search query key",
     ["sign"]
   );
@@ -393,8 +394,8 @@ const nearestCollections = async (
  * came close to: people search for people, and the audit log keeps
  * everything for good.
  */
-const searchRecord = async (
-  env: Env,
+const searchRecord = async <C>(
+  brain: Brain<C>,
   terms: string[],
   collectionId: string | undefined,
   hits: { documentId: string }[],
@@ -422,7 +423,7 @@ const searchRecord = async (
       target,
       detail: {
         terms: terms.length,
-        queryKey: await queryKey(env, terms),
+        queryKey: await queryKey(brain, terms),
         ...(nearest.length === 0 ? {} : { nearest: nearestDetail(nearest) }),
       },
     };
@@ -472,9 +473,9 @@ const coverageOf = async (
  * `search`, with each section's version, last change and whole text: what
  * a recall (recall.ts) cites and quotes. The same reads, checks and audit.
  */
-export const searchSections = async (
-  env: Env,
-  reader: Reader,
+export const searchSections = async <C>(
+  brain: Brain<C>,
+  reader: C,
   query: unknown,
   options?: unknown,
   only?: string,
@@ -507,8 +508,8 @@ export const searchSections = async (
         ),
         collectionId: only,
       };
-  const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(portsOf(env), reader);
+  const { db } = brain;
+  const allowed = await allowedFor(brain.ports, reader);
   // Refused like any read of a collection the reader can't read. A search
   // in one collection reads from it whatever it finds: that nothing
   // matches says something of what it holds too. So the collection is
@@ -531,14 +532,14 @@ export const searchSections = async (
     return {
       sections: [],
       coverage,
-      provenance: await portsOf(env).onRead(
+      provenance: await brain.ports.onRead(
         reader,
-        await searchRecord(env, terms, scope, [], [], recall !== undefined),
+        await searchRecord(brain, terms, scope, [], [], recall !== undefined),
         ...scoped
       ),
     };
   }
-  const now = portsOf(env).clock().getTime();
+  const now = brain.ports.clock().getTime();
   const today = new Date(now).toISOString().slice(0, 10);
   // Freshness scales a score by 0.5 to 1: a quarter off for a year without
   // changes, and a quarter off past the review date. It orders sections that
@@ -624,9 +625,16 @@ export const searchSections = async (
     found.length === 0
       ? await nearestCollections(db, allowed, terms)
       : [];
-  const provenance = await portsOf(env).onRead(
+  const provenance = await brain.ports.onRead(
     reader,
-    await searchRecord(env, terms, scope, found, nearest, recall !== undefined),
+    await searchRecord(
+      brain,
+      terms,
+      scope,
+      found,
+      nearest,
+      recall !== undefined
+    ),
     ...scoped,
     ...found.map((row) => ({
       id: row.collectionId,
@@ -651,15 +659,15 @@ export const searchSections = async (
  * names, if any. A collection's stub passes its
  * own as `only`, and its options can't name another.
  */
-export const search = async (
-  env: Env,
-  reader: Reader,
+export const search = async <C>(
+  brain: Brain<C>,
+  reader: C,
   query: unknown,
   options?: unknown,
   only?: string
 ): Promise<SearchResults> => {
   const { sections, coverage, provenance } = await searchSections(
-    env,
+    brain,
     reader,
     query,
     options,

@@ -1,7 +1,7 @@
 import type { BatchItem, BatchResponse } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import type { KnowledgePorts } from "./ports.ts";
+import type { BrainPorts } from "./brain.ts";
 
 // Knowledge's audit events: each is stored in Knowledge's own outbox in
 // the batch of the change it records (`outboxed`, `outboxedWhere`), so
@@ -17,7 +17,7 @@ export const auditedBatch = async <
   U extends BatchItem<"sqlite">,
   T extends Readonly<[U, ...U[]]>,
 >(
-  { audit }: Pick<KnowledgePorts, "audit">,
+  { audit }: Pick<BrainPorts<never>, "audit">,
   db: DrizzleD1Database,
   statements: T
 ): Promise<BatchResponse<T>> => {
