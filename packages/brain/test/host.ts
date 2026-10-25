@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 
 import type { ReadRecord } from "../src/authorize.ts";
 import { createBrain } from "../src/brain.ts";
-import type { Brain, BrainPorts } from "../src/brain.ts";
+import type { Brain, BrainPorts, IndexJob, LinkJob } from "../src/brain.ts";
 import { ensureCollection } from "../src/collections.ts";
 import type { CollectionRow } from "../src/collections.ts";
 import type { Writer } from "../src/documents.ts";
@@ -24,14 +24,31 @@ export interface Caller {
   only?: Readonly<Record<string, readonly string[]>>;
 }
 
-/** The Brain over the test database, and what its ports were told. */
-export const testHost = (): {
+/** A job the Brain asked its host to start. */
+export interface StartedJob {
+  id: string;
+  job: IndexJob | LinkJob;
+}
+
+/**
+ * The Brain over the test database, and what its ports were told. The
+ * host's model gateway is `extract`: the only outside provider, which a
+ * test stands in for (none by default: a call fails).
+ */
+export const testHost = (
+  extract: (text: string) => Promise<unknown> = async () => {
+    await Promise.resolve();
+    throw new Error("No model in this test");
+  }
+): {
   brain: Brain<Caller>;
   reads: { caller: string; record: ReadRecord }[];
   events: BrainEvent[];
+  started: StartedJob[];
 } => {
   const reads: { caller: string; record: ReadRecord }[] = [];
   const events: BrainEvent[] = [];
+  const started: StartedJob[] = [];
   const ports: BrainPorts<Caller> = {
     authorize: async (caller) =>
       await Promise.resolve({
@@ -109,17 +126,23 @@ export const testHost = (): {
           usages
         ),
     },
+    extractEntities: extract,
     jobs: {
-      start: async () => {
+      start: async (id, job) => {
         await Promise.resolve();
+        if (!started.some((known) => known.id === id)) {
+          started.push({ id, job });
+        }
       },
-      status: async () => {
+      // A job this host started has ended: the test ran it, or never will.
+      status: async (id) => {
         await Promise.resolve();
+        return started.some((known) => known.id === id) ? "ended" : undefined;
       },
     },
     clock: () => new Date(),
   };
-  return { brain: createBrain(env.BRAIN, ports), reads, events };
+  return { brain: createBrain(env.BRAIN, ports), reads, events, started };
 };
 
 /** A person writing as themselves. */

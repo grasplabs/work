@@ -433,6 +433,22 @@ const knowledgeDb: D1State = {
       `${brain}memories.ts`,
       "Memory search projection."
     ),
+    brain_link_jobs: exported(
+      `${brain}entities.ts`,
+      `Where linking each Brain source stands: without it, nothing links a source until it changes. ${brainPending}`
+    ),
+    brain_entities: exported(
+      `${brain}entities.ts`,
+      `Stable entity IDs: an ID and a kind, never a name. ${brainPending}`
+    ),
+    brain_entity_keys: exported(
+      `${brain}entities.ts`,
+      `The exact evidence each entity is known by, as deployment-keyed HMACs. ${brainPending}`
+    ),
+    brain_mentions: exported(
+      `${brain}entities.ts`,
+      `Entity mentions of each source's linked version: derived, but only by model calls again. ${brainPending}`
+    ),
     brain_receipts: transient(
       `${brain}memories.ts`,
       "Command receipts for retries, swept a day after the command."

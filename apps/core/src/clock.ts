@@ -1,3 +1,4 @@
+import { sweepLinking } from "@grasp-os/brain/entities";
 import { sweepIndexing } from "@grasp-os/brain/indexing";
 import { sweepBrainReceipts } from "@grasp-os/brain/memories";
 import { sweepPayloads } from "@grasp-os/brain/payloads";
@@ -90,6 +91,16 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: async (env, at) => {
       await sweepIndexing(brainOf(env), at);
+    },
+  },
+  // Brain sources settled since their change, linking runs that ended
+  // unfinished, and failed ones due another run (packages/brain's
+  // entities.ts).
+  {
+    name: "knowledge.linking",
+    period: "minute",
+    run: async (env, at) => {
+      await sweepLinking(brainOf(env), at);
     },
   },
   // Deploys apply migrations first (CI's db:migrate, and the admin's

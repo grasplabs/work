@@ -36,10 +36,17 @@ import {
   versions,
 } from "./db/schema.ts";
 import { sectionCountOf, versionText } from "./documents.ts";
-import { fromBase64Url, toBase64Url, toHex } from "./encoding.ts";
+import { fromBase64Url, toBase64Url } from "./encoding.ts";
+import {
+  forgetPersonEntities,
+  memoryLinkIntentWhere,
+  relinkWhere,
+  unlinkMemoryWhere,
+} from "./entities.ts";
 import { brainReceiptIdSchema, memoryIdSchema } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
 import type { Json } from "./json.ts";
+import { keyed } from "./keyed.ts";
 import { forgetPersonOutcomes } from "./outcomes.ts";
 import { asWord, termsOf } from "./search.ts";
 
@@ -101,21 +108,6 @@ const sweepBudgetMs = 5000;
 /** Who may read a receipt back, and whose keys are whose. */
 const callerKey = (userId: string): string => canonicalJson(["person", userId]);
 
-/** `parts` keyed to this deployment: never computable from them alone. */
-const keyed = async <C>(
-  brain: Brain<C>,
-  purpose: string,
-  parts: Json
-): Promise<string> => {
-  const key = await brain.ports.keys.hmac(purpose, ["sign"]);
-  const mac = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(canonicalJson(parts))
-  );
-  return toHex(new Uint8Array(mac));
-};
-
 const refsSchema = z.array(brainSourceRefSchema);
 
 /**
@@ -129,6 +121,8 @@ export const forgetPerson = (
   now: Date
 ) =>
   [
+    // The entities only their records name go first, with their keys.
+    forgetPersonEntities(db, userId),
     db.delete(brainMemories).where(eq(brainMemories.ownerId, userId)),
     db.delete(brainReceipts).where(eq(brainReceipts.caller, callerKey(userId))),
     ...forgetPersonOutcomes(db, userId, now),
@@ -270,20 +264,39 @@ export const eraseStatements = async <C>(
       },
       sql`EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${asRead})`
     );
+    if (now === null) {
+      // Its link job, its mentions and the entities only it named go
+      // with it.
+      return [
+        event,
+        ...unlinkMemoryWhere(
+          db,
+          id,
+          sql`EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${asRead})`
+        ),
+        db.delete(brainMemories).where(asRead),
+      ] as const;
+    }
     return [
       // Before the write, on the same condition: recorded only if made.
       event,
-      now === null
-        ? db.delete(brainMemories).where(asRead)
-        : db
-            .update(brainMemories)
-            .set({
-              statement: now,
-              revision: revision + 1,
-              indexingState: "pending",
-              updatedAt,
-            })
-            .where(asRead),
+      db
+        .update(brainMemories)
+        .set({
+          statement: now,
+          revision: revision + 1,
+          indexingState: "pending",
+          updatedAt,
+        })
+        .where(asRead),
+      // Only after the redaction was made: the mentions of the old text go.
+      ...relinkWhere(
+        db,
+        { kind: "memory", id },
+        revision + 1,
+        updatedAt,
+        sql`EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${brainMemories.id} = ${id} AND ${brainMemories.revision} = ${revision + 1})`
+      ),
     ] as const;
   };
   for (let at = 0; at < changes.length; at += recordsPerEraseBatch) {
@@ -583,6 +596,8 @@ export const remember = async <C>(
         .select(
           sql`SELECT ${memoryId}, 1, 'person', ${ownerId}, ${request.kind}, ${request.text}, ${JSON.stringify(sourceRefs)}, 'proposed', 'pending', ${now.getTime()}, ${now.getTime()}, ${ownerId} WHERE ${receiptStored(receiptId)}`
         ),
+      // Its linking intent (entities.ts), with it or not at all.
+      memoryLinkIntentWhere(db, memoryId, 1, now, receiptStored(receiptId)),
       outboxedWhere(
         brain,
         {
@@ -1245,6 +1260,7 @@ export const memoriesPublish = async <C>(
         .select(
           sql`SELECT ${memoryId}, 1, ${request.scope}, ${ownerId}, ${request.kind}, ${request.text}, ${JSON.stringify(sourceRefs)}, 'accepted', 'pending', ${now.getTime()}, ${now.getTime()}, ${scopeId} WHERE ${stored}`
         ),
+      memoryLinkIntentWhere(db, memoryId, 1, now, stored),
       outboxedWhere(
         brain,
         {
@@ -1368,6 +1384,13 @@ export const memoriesProposeChange = async <C>(
         .select(
           sql`SELECT ${memoryId}, 1, 'person', ${ownerId}, ${current.kind}, ${request.statement}, ${JSON.stringify(sourceRefs)}, 'accepted', 'pending', ${now.getTime()}, ${now.getTime()}, ${ownerId} WHERE ${stored}`
         ),
+      memoryLinkIntentWhere(db, memoryId, 1, now, stored),
+      // The corrected record's mentions go before it is retired.
+      ...unlinkMemoryWhere(
+        db,
+        request.memoryId,
+        sql`EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${live}) AND ${stored}`
+      ),
       db
         .update(brainMemories)
         .set({ state: "retired", updatedAt: now })
@@ -1478,6 +1501,12 @@ export const memoriesRetire = async <C>(
     ],
     condition: sql`EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${live})`,
     writes: (stored, receiptId) => [
+      // Its mentions go before it is retired.
+      ...unlinkMemoryWhere(
+        db,
+        memoryId,
+        sql`EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${live}) AND ${stored}`
+      ),
       db
         .update(brainMemories)
         .set({ state: "retired", updatedAt: now })

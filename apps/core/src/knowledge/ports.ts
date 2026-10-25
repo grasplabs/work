@@ -9,6 +9,7 @@ import { runEngine } from "../workflows/engine.ts";
 import { audiencesOf, noteProvenance, readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { authorize } from "./app-entries.ts";
+import { extractEntities } from "./entities.ts";
 import {
   keepRecalledMemories,
   recallMemoryAudience,
@@ -70,13 +71,22 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
   keys: {
     hmac: async (purpose, usages) => await derivedHmacKey(env, purpose, usages),
   },
+  extractEntities: async (text) => await extractEntities(env, text),
   jobs: {
-    start: async (id, { documentId, version }) => {
-      await runEngine(env).createInternal({
-        id,
-        workflow: "indexing",
-        input: { documentId, version },
-      });
+    start: async (id, job) => {
+      await runEngine(env).createInternal(
+        "source" in job
+          ? {
+              id,
+              workflow: "linking",
+              input: { source: job.source, version: job.version },
+            }
+          : {
+              id,
+              workflow: "indexing",
+              input: { documentId: job.documentId, version: job.version },
+            }
+      );
     },
     status: async (id) => {
       const found = await runEngine(env).status(id);

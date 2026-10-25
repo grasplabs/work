@@ -1,3 +1,4 @@
+import { runLinking } from "@grasp-os/brain/entities";
 import { runIndexing } from "@grasp-os/brain/indexing";
 import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId } from "@grasp-os/shared/ids";
@@ -410,6 +411,9 @@ const internalRuns: Record<
   backfill: runBackfill,
   indexing: async (env, input, step) => {
     await runIndexing(brainOf(env), input, step);
+  },
+  linking: async (env, input, step) => {
+    await runLinking(brainOf(env), input, step);
   },
 };
 
