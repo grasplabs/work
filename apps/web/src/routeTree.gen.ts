@@ -20,6 +20,7 @@ import { Route as ShellIndexRouteImport } from './routes/_shell.index'
 import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellActivityRouteImport } from './routes/_shell.activity'
 import { Route as ShellBrainRouteImport } from './routes/_shell.brain'
+import { Route as ShellConnectMicrosoftRouteImport } from './routes/_shell.connect-microsoft'
 import { Route as ShellConnectionsRouteImport } from './routes/_shell.connections'
 import { Route as ShellDashboardRouteImport } from './routes/_shell.dashboard'
 import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
@@ -64,6 +65,7 @@ import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settin
 import { Route as ShellSettingsPulseRouteImport } from './routes/_shell.settings.pulse'
 import { Route as ShellSettingsSecurityRouteImport } from './routes/_shell.settings.security'
 import { Route as ShellSettingsSpendRouteImport } from './routes/_shell.settings.spend'
+import { Route as ShellSettingsStephenRouteImport } from './routes/_shell.settings.stephen'
 import { Route as ShellSettingsWorkspaceRouteImport } from './routes/_shell.settings.workspace'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
 import { Route as ShellWorkflowsWorkflowRouteImport } from './routes/_shell.workflows.$workflow'
@@ -150,6 +152,11 @@ const ShellActivityRoute = ShellActivityRouteImport.update({
 const ShellBrainRoute = ShellBrainRouteImport.update({
   id: '/brain',
   path: '/brain',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellConnectMicrosoftRoute = ShellConnectMicrosoftRouteImport.update({
+  id: '/connect-microsoft',
+  path: '/connect-microsoft',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellConnectionsRoute = ShellConnectionsRouteImport.update({
@@ -377,6 +384,11 @@ const ShellSettingsSpendRoute = ShellSettingsSpendRouteImport.update({
   path: '/spend',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
+const ShellSettingsStephenRoute = ShellSettingsStephenRouteImport.update({
+  id: '/stephen',
+  path: '/stephen',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
 const ShellSettingsWorkspaceRoute = ShellSettingsWorkspaceRouteImport.update({
   id: '/workspace',
   path: '/workspace',
@@ -577,6 +589,7 @@ export interface FileRoutesByFullPath {
   '/$': typeof ShellSplatRoute
   '/activity': typeof ShellActivityRoute
   '/brain': typeof ShellBrainRouteWithChildren
+  '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/connections': typeof ShellConnectionsRoute
   '/dashboard': typeof ShellDashboardRoute
   '/inbox': typeof ShellInboxRoute
@@ -611,6 +624,7 @@ export interface FileRoutesByFullPath {
   '/settings/pulse': typeof ShellSettingsPulseRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
+  '/settings/stephen': typeof ShellSettingsStephenRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
@@ -664,6 +678,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/$': typeof ShellSplatRoute
   '/activity': typeof ShellActivityRoute
+  '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/connections': typeof ShellConnectionsRoute
   '/dashboard': typeof ShellDashboardRoute
   '/inbox': typeof ShellInboxRoute
@@ -696,6 +711,7 @@ export interface FileRoutesByTo {
   '/settings/pulse': typeof ShellSettingsPulseRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
+  '/settings/stephen': typeof ShellSettingsStephenRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
@@ -752,6 +768,7 @@ export interface FileRoutesById {
   '/_shell/$': typeof ShellSplatRoute
   '/_shell/activity': typeof ShellActivityRoute
   '/_shell/brain': typeof ShellBrainRouteWithChildren
+  '/_shell/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/_shell/connections': typeof ShellConnectionsRoute
   '/_shell/dashboard': typeof ShellDashboardRoute
   '/_shell/inbox': typeof ShellInboxRoute
@@ -787,6 +804,7 @@ export interface FileRoutesById {
   '/_shell/settings/pulse': typeof ShellSettingsPulseRoute
   '/_shell/settings/security': typeof ShellSettingsSecurityRoute
   '/_shell/settings/spend': typeof ShellSettingsSpendRoute
+  '/_shell/settings/stephen': typeof ShellSettingsStephenRoute
   '/_shell/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/_shell/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/kit_/components/$name': typeof KitComponentsNameRoute
@@ -844,6 +862,7 @@ export interface FileRouteTypes {
     | '/$'
     | '/activity'
     | '/brain'
+    | '/connect-microsoft'
     | '/connections'
     | '/dashboard'
     | '/inbox'
@@ -878,6 +897,7 @@ export interface FileRouteTypes {
     | '/settings/pulse'
     | '/settings/security'
     | '/settings/spend'
+    | '/settings/stephen'
     | '/settings/workspace'
     | '/workflows/$workflow'
     | '/kit/components/$name'
@@ -931,6 +951,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/$'
     | '/activity'
+    | '/connect-microsoft'
     | '/connections'
     | '/dashboard'
     | '/inbox'
@@ -963,6 +984,7 @@ export interface FileRouteTypes {
     | '/settings/pulse'
     | '/settings/security'
     | '/settings/spend'
+    | '/settings/stephen'
     | '/settings/workspace'
     | '/workflows/$workflow'
     | '/kit/components/$name'
@@ -1018,6 +1040,7 @@ export interface FileRouteTypes {
     | '/_shell/$'
     | '/_shell/activity'
     | '/_shell/brain'
+    | '/_shell/connect-microsoft'
     | '/_shell/connections'
     | '/_shell/dashboard'
     | '/_shell/inbox'
@@ -1053,6 +1076,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/pulse'
     | '/_shell/settings/security'
     | '/_shell/settings/spend'
+    | '/_shell/settings/stephen'
     | '/_shell/settings/workspace'
     | '/_shell/workflows/$workflow'
     | '/kit_/components/$name'
@@ -1191,6 +1215,13 @@ declare module '@tanstack/react-router' {
       path: '/brain'
       fullPath: '/brain'
       preLoaderRoute: typeof ShellBrainRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/connect-microsoft': {
+      id: '/_shell/connect-microsoft'
+      path: '/connect-microsoft'
+      fullPath: '/connect-microsoft'
+      preLoaderRoute: typeof ShellConnectMicrosoftRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/connections': {
@@ -1501,6 +1532,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsSpendRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
+    '/_shell/settings/stephen': {
+      id: '/_shell/settings/stephen'
+      path: '/stephen'
+      fullPath: '/settings/stephen'
+      preLoaderRoute: typeof ShellSettingsStephenRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
     '/_shell/settings/workspace': {
       id: '/_shell/settings/workspace'
       path: '/workspace'
@@ -1804,6 +1842,7 @@ interface ShellSettingsRouteChildren {
   ShellSettingsPulseRoute: typeof ShellSettingsPulseRoute
   ShellSettingsSecurityRoute: typeof ShellSettingsSecurityRoute
   ShellSettingsSpendRoute: typeof ShellSettingsSpendRoute
+  ShellSettingsStephenRoute: typeof ShellSettingsStephenRoute
   ShellSettingsWorkspaceRoute: typeof ShellSettingsWorkspaceRoute
   ShellSettingsIndexRoute: typeof ShellSettingsIndexRoute
   ShellSettingsPackagesIndexRoute: typeof ShellSettingsPackagesIndexRoute
@@ -1823,6 +1862,7 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsPulseRoute: ShellSettingsPulseRoute,
   ShellSettingsSecurityRoute: ShellSettingsSecurityRoute,
   ShellSettingsSpendRoute: ShellSettingsSpendRoute,
+  ShellSettingsStephenRoute: ShellSettingsStephenRoute,
   ShellSettingsWorkspaceRoute: ShellSettingsWorkspaceRoute,
   ShellSettingsIndexRoute: ShellSettingsIndexRoute,
   ShellSettingsPackagesIndexRoute: ShellSettingsPackagesIndexRoute,
@@ -1861,6 +1901,7 @@ interface ShellRouteChildren {
   ShellSplatRoute: typeof ShellSplatRoute
   ShellActivityRoute: typeof ShellActivityRoute
   ShellBrainRoute: typeof ShellBrainRouteWithChildren
+  ShellConnectMicrosoftRoute: typeof ShellConnectMicrosoftRoute
   ShellConnectionsRoute: typeof ShellConnectionsRoute
   ShellDashboardRoute: typeof ShellDashboardRoute
   ShellInboxRoute: typeof ShellInboxRoute
@@ -1898,6 +1939,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellSplatRoute: ShellSplatRoute,
   ShellActivityRoute: ShellActivityRoute,
   ShellBrainRoute: ShellBrainRouteWithChildren,
+  ShellConnectMicrosoftRoute: ShellConnectMicrosoftRoute,
   ShellConnectionsRoute: ShellConnectionsRoute,
   ShellDashboardRoute: ShellDashboardRoute,
   ShellInboxRoute: ShellInboxRoute,

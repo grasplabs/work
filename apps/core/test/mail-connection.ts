@@ -3,6 +3,7 @@
  * toolkit's, to a mail server of its own (test/mail-server.ts). Its admin
  * allowed `mail.send`, a side effect, and may allow `mail.search` too.
  */
+import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
@@ -44,9 +45,30 @@ export const mailForApps = [
 ];
 
 /**
+ * A company that lets the chat's agent work in the mail app `connectionId`
+ * (GRA-725): an admin pointed it at the app for everyone, and turned on
+ * changing the company's things and reaching others. The classes' defaults
+ * are tested in tool-classes.test.ts and app-pointers.test.ts.
+ */
+const agentMayUse = async (connectionId: string): Promise<void> => {
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT OR REPLACE INTO app_pointers (connection_id, resources, who, teams, changed_by, changed_at) VALUES (?, '[]', 'everyone', '[]', 'test-admin', ?)"
+    ).bind(connectionId, now),
+    ...["change-company", "reach-others"].map((toolClass) =>
+      env.DB.prepare(
+        "INSERT OR REPLACE INTO tool_class_settings (tool_class, who, teams, changed_by, changed_at) VALUES (?, 'everyone', '[]', 'test-admin', ?)"
+      ).bind(toolClass, now)
+    ),
+  ]);
+};
+
+/**
  * A shared mail connection in connect's registry, as a Composio toolkit's,
  * allowing `tools`, to a mail server of its own that answers its next
- * calls as `plan` says (then sends mail), and tells what it did.
+ * calls as `plan` says (then sends mail), and tells what it did. The
+ * chat's agent may use it (`agentMayUse`).
  */
 export const mailConnection = async (
   plan: MailAnswer[] = [],
@@ -61,6 +83,7 @@ export const mailConnection = async (
     )
     .bind(id, mailServerUrl(name), JSON.stringify(tools), now, now)
     .run();
+  await agentMayUse(id);
   await providers().fetch(mailControlUrl(name), {
     method: "POST",
     body: JSON.stringify({ plan }),
