@@ -19,6 +19,8 @@ export const appLimits = {
   nameLength: 100,
   descriptionLength: 1000,
   messageLength: 1000,
+  /** Integrations a builder adds to an App by hand. */
+  addedIntegrations: 50,
 } as const;
 
 /**

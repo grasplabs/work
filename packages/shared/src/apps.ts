@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
+import type { CatalogEntryRef } from "./connect.ts";
 import type { DefinitionPackage } from "./definition-packages.ts";
 import type { DiagnosticCategory } from "./diagnostics.ts";
 import { defineErrorFamily } from "./errors.ts";
@@ -93,8 +94,24 @@ export interface App {
   id: AppId;
   name: string;
   description: string;
-  /** The user who created it. */
+  /**
+   * The user who created it: always one of its builders, and whom its
+   * triggered runs act for. It never changes; who answers for the App is
+   * `responsible`.
+   */
   owner: string;
+  /**
+   * The member who answers for the App: who is asked about it and decides
+   * what changes (the prototype's "Owner"). Its owner until a builder names
+   * someone else (`AppsApi.update`). It grants nothing: they are someone who
+   * could open the App when named.
+   */
+  responsible: string;
+  /**
+   * The team or person the App is made for, if a builder said: shown with
+   * it, granting nothing. Whom it is open to is its members.
+   */
+  audience: AppMemberRef | null;
   /**
    * What the App was made from: the blueprint's ID for an App made from
    * one, otherwise the label its creator gave, if any.
@@ -107,6 +124,37 @@ export interface App {
   /** Where it is in its life (`appStatusSchema`). */
   status: AppStatus;
   createdAt: string;
+}
+
+/**
+ * Why an integration is one of an App's: it holds a permission on a
+ * connection to it, or a builder added it by hand.
+ */
+export type AppIntegrationReason = "permission" | "added";
+
+/**
+ * A catalog entry an App works with (`AppIntegrationsApi.list`): never
+ * which connection, nor whose.
+ */
+export type AppIntegration = CatalogEntryRef & {
+  /** Both, when it is added and held. */
+  why: AppIntegrationReason[];
+};
+
+/**
+ * The integrations an App works with: those it holds a permission on a
+ * connection to, which its code asked for, and those its builders added
+ * by hand for what it needs besides (`added`). Adding one grants nothing
+ * and connects nothing: it is what the App is shown with until its code
+ * asks for it.
+ */
+export interface AppIntegrationsApi {
+  /** For anyone with a role in the App: catalog order is the page's. */
+  list: (app: string) => Promise<AppIntegration[]>;
+  /** Adds one by hand, for its builders; adding it again changes nothing. */
+  add: (app: string, entry: CatalogEntryRef) => Promise<void>;
+  /** Takes one added by hand off, for its builders; its permissions stay. */
+  remove: (app: string, entry: CatalogEntryRef) => Promise<void>;
 }
 
 /** One committed version of an App. */
@@ -461,6 +509,23 @@ export const newAppMemberSchema = z.strictObject({
 });
 export type NewAppMember = z.input<typeof newAppMemberSchema>;
 
+/**
+ * What a builder changes of an App's settings (`AppsApi.update`): any of
+ * its name, description, who answers for it, and whom it is made for (null
+ * for nobody in particular). At least one.
+ */
+export const appChangesSchema = z
+  .strictObject({
+    name: newAppSchema.shape.name.optional(),
+    description: z.string().max(appLimits.descriptionLength).optional(),
+    responsible: identifierSchema.optional(),
+    audience: appMemberRefSchema.nullable().optional(),
+  })
+  .refine((changes) => Object.keys(changes).length > 0, {
+    message: "At least one setting",
+  });
+export type AppChanges = z.input<typeof appChangesSchema>;
+
 /** Someone an App is shared with. Times are ISO 8601. */
 export interface AppMember extends AppMemberRef {
   /** The person's or team's name; null once they are gone. */
@@ -639,10 +704,19 @@ export interface AppsApi {
    * `app.stops_pending` while runs it started are still being stopped.
    */
   restore: (app: string) => Promise<App>;
+  /**
+   * Changes the App's settings (`AppChanges`), for its builders; audited
+   * as `app.updated`. Naming who answers for it or whom it is made for is
+   * not for Grasp staff: that is the client's decision. Refused with
+   * `app.conflict` when someone changed the same settings since they were
+   * read.
+   */
+  update: (app: string, changes: AppChanges) => Promise<App>;
   readonly files: AppFilesApi;
   readonly versions: AppVersionsApi;
   readonly members: AppMembersApi;
   readonly blueprints: AppBlueprintsApi;
+  readonly integrations: AppIntegrationsApi;
 }
 
 /**
@@ -683,6 +757,11 @@ export const appErrors = defineErrorFamily({
   "app.invalid": "That isn't a valid request for an App.",
   "app.not_found": "There's no such App.",
   "app.member_invalid": "The App can't be shared with them like that.",
+  "app.responsible_invalid":
+    "Only a member of the organization who can open the App can answer for it.",
+  "app.audience_invalid":
+    "The App can only be made for a member or a team of the organization.",
+  "app.integrations_full": "The App has as many integrations added as it may.",
   "app.share_unreadable":
     "This App has read data they can't read where it comes from, such as someone else's mailbox or a collection they can't read, so it can't be shared with them.",
   "app.unreadable":

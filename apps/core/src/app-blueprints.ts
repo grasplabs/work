@@ -574,6 +574,9 @@ export const createFromBlueprint = async (
     name,
     description,
     ownerId: by.userId,
+    responsibleId: null,
+    audienceType: null,
+    audienceId: null,
     blueprint: blueprint.id,
     currentVersion: null,
     pendingVersion: null,
@@ -633,6 +636,9 @@ export const createFromBlueprint = async (
       name: sql<string>`${appRow.name}`.as("name"),
       description: sql<string>`${appRow.description}`.as("description"),
       ownerId: sql<string>`${appRow.ownerId}`.as("owner_id"),
+      responsibleId: sql<string | null>`NULL`.as("responsible_id"),
+      audienceType: sql<"person" | "team" | null>`NULL`.as("audience_type"),
+      audienceId: sql<string | null>`NULL`.as("audience_id"),
       blueprint: sql<string | null>`${appRow.blueprint}`.as("blueprint"),
       currentVersion: sql<number | null>`${appRow.currentVersion}`.as(
         "current_version"

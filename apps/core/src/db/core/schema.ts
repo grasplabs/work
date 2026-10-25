@@ -611,8 +611,19 @@ export const apps = sqliteTable("apps", {
   id: text().primaryKey(),
   name: text().notNull(),
   description: text().notNull(),
-  /** The user who created it. */
+  /** The user who created it, whom its triggered runs act for. */
   ownerId: text("owner_id").notNull(),
+  /**
+   * Who answers for it (apps.ts `updateApp`), when a builder named someone
+   * other than its owner; null for its owner. Grants nothing.
+   */
+  responsibleId: text("responsible_id"),
+  /**
+   * Whom it is made for, a person or a team, when a builder said; both
+   * null otherwise. Grants nothing.
+   */
+  audienceType: text("audience_type", { enum: ["person", "team"] }),
+  audienceId: text("audience_id"),
   blueprint: text(),
   currentVersion: integer("current_version"),
   pendingVersion: integer("pending_version"),
@@ -631,6 +642,28 @@ export const apps = sqliteTable("apps", {
   }>(),
   createdAt: timestamp("created_at").notNull(),
 });
+
+/**
+ * The integrations a builder added to an App by hand (app-integrations.ts):
+ * catalog entries by source and ID, for what it needs besides those it
+ * holds permissions on. One row each; taking one off deletes it, and who
+ * did which is in the audit log. Grants and connects nothing.
+ */
+export const appIntegrations = sqliteTable(
+  "app_integrations",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    source: text({ enum: ["native", "composio"] }).notNull(),
+    connectorId: text("connector_id").notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.source, table.connectorId] }),
+  ]
+);
 
 /**
  * Revocations an App's host couldn't be told of (src/access-revocations.ts):

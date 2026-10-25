@@ -288,6 +288,34 @@ describe("indexing", setUpTime, () => {
     });
   });
 
+  it("indexes an App renamed or described anew at once, and catches up on the cron trigger when that failed", async () => {
+    const owner = await personOf("builder");
+    const app = await releasedApp(owner, agentsMd(term()));
+    const path = entryPath(app.id);
+    const old = app.name.split(" ")[1] ?? "";
+    const [renamed, described] = [term(), term()];
+
+    await owner.api.apps.update(app.id, {
+      name: `Leave ${renamed}`,
+      description: `Leave, ${described} included.`,
+    });
+    const atOnce = await foundFor(owner.knowledge, old, renamed, described);
+
+    const later = term();
+    await withIndexingFailing(owner, async (api) => {
+      await api.apps.update(app.id, { name: `Leave ${later}` });
+    });
+    const failed = await foundFor(owner.knowledge, renamed, later);
+    await runQuarterHourCron();
+    const caughtUp = await foundFor(owner.knowledge, renamed, later);
+
+    expect({ atOnce, failed, caughtUp }).toStrictEqual({
+      atOnce: { [old]: [], [renamed]: [path], [described]: [path] },
+      failed: { [renamed]: [path], [later]: [] },
+      caughtUp: { [renamed]: [], [later]: [path] },
+    });
+  });
+
   it("lets only one of two indexings at once write, and nothing of the other", async () => {
     const owner = await personOf("builder");
     const [first, second, third] = [term(), term(), term()];
@@ -736,10 +764,7 @@ describe("read-only", setUpTime, () => {
       `documentIds: document ${id} is an App's entry in the Apps collection, made from the App itself: a term is in the App's name or description, which a purge can't reach: the App's builders or Grasp support must change it first; then purge`,
     ]);
 
-    // No API renames an App yet: the name changes where the App keeps it.
-    await env.DB.prepare("UPDATE apps SET name = ? WHERE id = ?")
-      .bind("Leave requests", appId)
-      .run();
+    await owner.api.apps.update(appId, { name: "Leave requests" });
     const plan = await admin.knowledge.preparePurge(input);
     await admin.knowledge.purge(input, plan.token);
     await expect(versionsHolding(id, word)).resolves.toBe(0);

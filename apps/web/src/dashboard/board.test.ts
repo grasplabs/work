@@ -42,6 +42,8 @@ const engine = (id: string): App => ({
   name: id,
   description: "",
   owner: "owner",
+  responsible: "owner",
+  audience: null,
   blueprint: null,
   currentVersion: 1,
   pendingVersion: null,

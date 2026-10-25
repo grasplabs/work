@@ -162,6 +162,11 @@ export const toApp = (row: AppRow): App => ({
   name: row.name,
   description: row.description,
   owner: row.ownerId,
+  responsible: row.responsibleId ?? row.ownerId,
+  audience:
+    row.audienceType === null || row.audienceId === null
+      ? null
+      : { type: row.audienceType, id: row.audienceId },
   blueprint: row.blueprint,
   currentVersion: row.currentVersion,
   pendingVersion: row.pendingVersion,
@@ -569,6 +574,9 @@ export const createApp = async (
     name,
     description,
     ownerId: by.userId,
+    responsibleId: null,
+    audienceType: null,
+    audienceId: null,
     blueprint: blueprint ?? null,
     currentVersion: null,
     pendingVersion: null,
