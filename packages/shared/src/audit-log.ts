@@ -111,6 +111,8 @@ const typeRules: readonly {
   { action: "brain.gap.answerer_erased", type: "action" },
   { action: "brain.gap", type: "decision" },
   { action: "knowledge.search", type: "read" },
+  // A skill selected for a task, or none (GRA-310): which, never its text.
+  { action: "knowledge.skill", type: "read" },
   { action: "knowledge.read", type: "read" },
   // Knowledge usage signals: the daily computation, an owner reading those
   // of their collections, and dismissing one.
