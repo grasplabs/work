@@ -35,12 +35,20 @@ import { nearestCollectionsMax, nearestDetail } from "./search-detail.ts";
 // One statement asks up to three passes, and a section counts in the first
 // that finds it: whole words first, then trigrams; and only when neither
 // finds anything, trigrams with room for one typo. Within a pass sections
-// rank by BM25 with field weights (title, then description, headings and
-// text) and by freshness. Every word of a search must match (AND): a
-// search narrows as it gets longer. A recall asks a question in its
-// person's words, which no section holds all of, so any of its words
-// matches (OR), and BM25 ranks the sections that hold more of them, and
-// the rarer ones, first: how search engines read a question.
+// rank by which of the query's words each holds, weighed by where (title,
+// then description, headings and text), shorter sections first for the
+// same words, then by freshness (`matchesSql`). Every word of a search
+// must match (AND): a search narrows as it gets longer. A recall asks a
+// question in its person's words, which no section holds all of, so any
+// of its words matches (OR), and the sections that hold more of them come
+// first.
+//
+// Never BM25 (GRA-1083): its weights count a word over every row of the
+// index, sections of collections the reader can't read too, so the order
+// of a reader's own results would tell them how often a word is in those.
+// A section's rank rests on its own words and length alone, and constants:
+// measured on the Brain baseline, it keeps BM25's evidence recall at
+// scale, and within a point of it on the dev split.
 //
 // Access is part of the same statement (R11): a section of a collection
 // the reader can't read, or of an App's entry they may not find
@@ -68,12 +76,6 @@ const typoLength = typoPieces * trigramLength;
 
 /** Most sections of one document in one search's results. */
 const maxHitsPerDocument = 3;
-
-/** BM25 weights per column: title, description, headings, text. */
-const fieldWeights = sql.raw("10.0, 5.0, 3.0, 1.0");
-
-/** The same, for what belongs to the section alone: headings and text. */
-const sectionWeights = sql.raw("0.0, 0.0, 3.0, 1.0");
 
 /** Tokens of text around a whole-word match; trigrams are characters. */
 const snippetWords = 24;
@@ -151,6 +153,8 @@ interface Pass {
   table: string;
   pass: number;
   match: string;
+  /** Each of the query's words, as this pass asks for it: what a row is scored by. */
+  terms: string[];
   /**
    * Words the trigrams don't ask for (too short, or only digits), which the
    * section must then have as words, so that every word of the query still
@@ -176,13 +180,14 @@ const passesOf = (terms: string[], joiner: Joiner): Pass[] => {
   const short = letters
     .filter(({ term, chars }) => !trigramReady(term, chars))
     .map(({ term }) => term);
-  const trigrams = (query: string): Pass | undefined =>
+  const trigrams = (asked: string[]): Pass | undefined =>
     long.length === 0
       ? undefined
       : {
           table: "search_trigrams",
           pass: 0,
-          match: query,
+          match: asked.join(joiner),
+          terms: asked,
           // Each word counts only when every one must match.
           ...(short.length === 0 || joiner === " OR "
             ? {}
@@ -192,30 +197,82 @@ const passesOf = (terms: string[], joiner: Joiner): Pass[] => {
     chars.length < typoLength ? quoted(term) : `(${allowingTypo(chars)})`
   );
   return [
-    { table: "search_words", pass: 0, match: words(terms) },
-    trigrams(long.map(({ term }) => quoted(term)).join(joiner)),
+    {
+      table: "search_words",
+      pass: 0,
+      match: words(terms),
+      terms: terms.map(asWord),
+    },
+    trigrams(long.map(({ term }) => quoted(term))),
     long.some(({ chars }) => chars.length >= typoLength)
-      ? trigrams(typo.join(joiner))
+      ? trigrams(typo)
       : undefined,
   ].flatMap((pass, index) =>
     pass === undefined ? [] : [{ ...pass, pass: index }]
   );
 };
 
+/** Each FTS table's columns: title, description, headings, text. */
+const columnsOf: Readonly<Record<string, readonly string[]>> = {
+  search_words: ["title", "description", "headings", "text"],
+  search_trigrams: ["c0", "c1", "c2", "c3"],
+};
+
+/** How much a section's length weighs against its words, as BM25's `b`. */
+const lengthWeight = 0.75;
+
+/** The length, in characters, a section's words count for as they are. */
+const referenceLength = 600;
+
+/** How much a word in each column counts: title, description, headings, text. */
+const columnWeights = [10, 5, 3, 1] as const;
+
 /**
- * One pass's matches, with their BM25 score and the score of the section's
- * own headings and text alone.
+ * What a row is scored by, as one JSON array bound once: for each of the
+ * query's words in each column, the FTS5 query that finds it there, what
+ * it counts towards the score, and towards the section's own score
+ * (headings and text alone).
  */
-const matchesSql = ({ table, pass, match, short }: Pass): SQL => {
+const askedOf = (table: string, terms: readonly string[]): string =>
+  JSON.stringify(
+    terms.flatMap((term) =>
+      (columnsOf[table] ?? []).map((column, index) => [
+        `${column} : (${term})`,
+        columnWeights[index] ?? 0,
+        index >= 2 ? (columnWeights[index] ?? 0) : 0,
+      ])
+    )
+  );
+
+/**
+ * One pass's matches, each with its score and the score of the section's
+ * own headings and text alone, lower first: minus the weight of every
+ * column each of the query's words is in. Never BM25: its weights count a
+ * word over every row of the index, sections of collections the reader
+ * can't read too, so the order of a reader's own results would tell them
+ * how often a word is in those (GRA-1083). A row's score is its own words
+ * alone: each lookup finds the rows holding a word, and no count over
+ * other rows reaches it.
+ */
+const matchesSql = ({ table, pass, match, terms, short }: Pass): SQL => {
   const name = sql.identifier(table);
-  return sql`SELECT rowid AS row_id, ${pass} AS pass,
-      bm25(${name}, ${fieldWeights}) AS score,
-      bm25(${name}, ${sectionWeights}) AS own
-    FROM ${name} WHERE ${name} MATCH ${match}
+  return sql`SELECT matched.rowid AS row_id, ${pass} AS pass,
+      -coalesce(scored.score, 0) AS score,
+      -coalesce(scored.own, 0) AS own
+    FROM ${name} AS matched
+    LEFT JOIN (
+      SELECT ${name}.rowid AS id,
+        sum(json_extract(asked.value, '$[1]')) AS score,
+        sum(json_extract(asked.value, '$[2]')) AS own
+      FROM json_each(${askedOf(table, terms)}) AS asked, ${name}
+      WHERE ${name} MATCH json_extract(asked.value, '$[0]')
+      GROUP BY ${name}.rowid
+    ) AS scored ON scored.id = matched.rowid
+    WHERE matched.${name} MATCH ${match}
     ${
       short === undefined
         ? sql``
-        : sql`AND rowid IN (
+        : sql`AND matched.rowid IN (
             SELECT rowid FROM search_words WHERE search_words MATCH ${short}
           )`
     }`;
@@ -355,15 +412,23 @@ const nearestCollections = async (
       table: "search_words",
       pass: 0,
       match: terms.map(asWord).join(" OR "),
+      terms: terms.map(asWord),
     },
     ...(long.length === 0
       ? []
-      : [{ table: "search_trigrams", pass: 1, match: long.join(" OR ") }]),
+      : [
+          {
+            table: "search_trigrams",
+            pass: 1,
+            match: long.join(" OR "),
+            terms: long,
+          },
+        ]),
   ];
   // MATERIALIZED: with one pass the CTE is a lone SELECT, which SQLite
-  // would flatten into the query below, putting bm25() inside min(), where
-  // FTS5 can't evaluate it ("unable to use function bm25 in the requested
-  // context"). A query of only short or digit words has one pass.
+  // would flatten into the query below, putting FTS5's own lookups inside
+  // min(), where it can't evaluate them. A query of only short or digit
+  // words has one pass.
   const rows = await db.all(sql`
     WITH matches AS MATERIALIZED (
       ${sql.join(passes.map(matchesSql), sql` UNION ALL `)}
@@ -482,7 +547,7 @@ export const searchSections = async <C>(
   /**
    * For a recall: only these collections, each refused as not found
    * unless the reader may read it, read in one search; matching any of
-   * the query's words, ranked by BM25 (`passesOf`); and recorded as a
+   * the query's words, ranked by the words each holds (`matchesSql`); and recorded as a
    * recall (`searchRecord`).
    */
   recall?: { among?: readonly string[] }
@@ -547,6 +612,15 @@ export const searchSections = async <C>(
   const freshness = sql`(1.0
     - 0.25 * min(1.0, max(0.0, (${now} - documents.updated_at) / (${yearMs} * 1.0)))
     - (CASE WHEN documents.review_date < ${today} THEN 0.25 ELSE 0.0 END))`;
+  // A section's words count for less the longer it is past a fixed length,
+  // as BM25 normalizes for length, but by a constant (`referenceLength`),
+  // never the index's average: that would count the length of sections
+  // the reader can't read.
+  const lengthNorm = sql`(${sql.raw(String(1 - lengthWeight))} + ${sql.raw(String(lengthWeight))} * (
+    SELECT length(sections.text) FROM sections
+    WHERE sections.document_id = search_rows.document_id
+      AND sections.position = search_rows.position
+  ) / ${sql.raw(referenceLength.toFixed(1))})`;
   // Every section of a document repeats its title and description, so a
   // document ranks by its best section, and its sections follow one another
   // in the order their own headings and text match.
@@ -555,7 +629,7 @@ export const searchSections = async <C>(
     WITH matches AS (${sql.join(passes.map(matchesSql), sql` UNION ALL `)}),
     readable AS (
       SELECT matches.row_id, matches.pass, matches.own,
-        matches.score * ${freshness} AS rank,
+        matches.score * ${freshness} / ${lengthNorm} AS rank,
         search_rows.document_id, search_rows.position,
         collections.id AS collection_id, collections.sensitive,
         row_number() OVER (PARTITION BY matches.row_id ORDER BY matches.pass) AS nth
