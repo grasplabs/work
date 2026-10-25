@@ -4,7 +4,11 @@ import type {
   InterviewSaved,
   InterviewSession,
 } from "@grasp-os/shared/interview-links";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
+import {
+  factRevision,
+  interviewApiPath,
+  participationNotice,
+} from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -45,6 +49,17 @@ import {
 // - D3: a copy left open can't save a deleted interview back.
 // - W7, and the company not learning who talked: the audit log gets
 //   nothing of what anyone did on their link.
+//
+// And the link's side of read-back approval (GRA-329):
+//
+// - T1: taking part is kept with the notice it was for, its purpose and
+//   audience; an older notice is refused.
+// - T4: anyone else with the link, the admin too, can't take part, approve
+//   or withdraw for them.
+// - T5: withdrawing works whenever deleting does, and nobody takes part
+//   again after it.
+// - T6: after the last day nothing is approved any more.
+// - T7: taking part and withdrawing asked again answer as the first time.
 
 const idp = mockIdp();
 
@@ -170,6 +185,34 @@ const save = async (
 
 const remove = async (secret: string, key: string) =>
   await post({ action: "delete", secret, key });
+
+const takePart = async (
+  secret: string,
+  key: string,
+  notice: number = participationNotice.version
+) => await post({ action: "participate", secret, key, notice });
+
+const withdraw = async (secret: string, key: string) =>
+  await post({ action: "withdraw", secret, key });
+
+/** An approval of the fact `progress()` writes down, as it stands. */
+const approveFact = async (secret: string, key: string) =>
+  await post({
+    action: "approve",
+    secret,
+    key,
+    facts: [
+      {
+        id: "f1",
+        revision: await factRevision({
+          id: "f1",
+          tag: "step",
+          text: sentinel,
+          record: sentinel,
+        }),
+      },
+    ],
+  });
 
 /** Every value in the store's tables, as text. */
 const storeText = async (): Promise<string> =>
@@ -513,12 +556,153 @@ describe("deleting and starting again", () => {
   });
 });
 
+describe("taking part, approving and withdrawing", () => {
+  it("keeps who took part, to which notice, for what and whom, and answers the same when asked again (T1, T7)", async () => {
+    const { ids, secrets } = await running();
+    const { key } = await opened(secrets.oli);
+    const old = await takePart(
+      secrets.oli,
+      key,
+      participationNotice.version + 1
+    );
+    const before = await sessionOf(await session(secrets.oli, key));
+    await save(secrets.oli, key, 0);
+    const first = await takePart(secrets.oli, key);
+    const again = await takePart(secrets.oli, key);
+    const after = await sessionOf(await session(secrets.oli, key));
+    const kept = await runInDurableObject(
+      onboardingStore(env),
+      (_instance, state) =>
+        state.storage.sql
+          .exec(
+            "SELECT notice, purpose, audience, withdrawn_at FROM participations WHERE person = ?",
+            ids.oli
+          )
+          .toArray()
+    );
+    expect({
+      old: await codeOf(old),
+      before: before.progress,
+      first: first.status,
+      same: (await first.text()) === (await again.text()),
+      told: after.progress?.told,
+      kept,
+    }).toStrictEqual({
+      old: "interview.notice_changed",
+      before: null,
+      first: 200,
+      same: true,
+      told: true,
+      kept: [
+        {
+          notice: participationNotice.version,
+          purpose: participationNotice.purpose,
+          audience: participationNotice.audience,
+          withdrawn_at: null,
+        },
+      ],
+    });
+  });
+
+  it("lets nobody else with the link, the admin too, take part, approve or withdraw for them (T4)", async () => {
+    const { secrets } = await running();
+    const { key } = await opened(secrets.oli);
+    await save(secrets.oli, key, 0);
+    const other = randomSecret();
+    expect([
+      await codeOf(await takePart(secrets.oli, other)),
+      await codeOf(await approveFact(secrets.oli, other)),
+      await codeOf(await withdraw(secrets.oli, other)),
+    ]).toStrictEqual([
+      "interview.elsewhere",
+      "interview.elsewhere",
+      "interview.elsewhere",
+    ]);
+    const mine = await sessionOf(await session(secrets.oli, key));
+    expect({
+      told: mine.progress?.told,
+      withdrawn: mine.withdrawn,
+    }).toStrictEqual({ told: false, withdrawn: false });
+  });
+
+  it("withdraws once, whenever deleting works, keeps what was said theirs to read, and takes no one back after (T5, T7)", async () => {
+    const { store, secrets } = await running();
+    const { key } = await opened(secrets.oli);
+    const unagreed = await withdraw(secrets.oli, key);
+    await takePart(secrets.oli, key);
+    await save(secrets.oli, key, 0);
+    await store.setPaused(true, { type: "system" });
+    const first = await withdraw(secrets.oli, key);
+    const again = await withdraw(secrets.oli, key);
+    await store.setPaused(false, { type: "system" });
+    const read = await sessionOf(await session(secrets.oli, key));
+    const back = await takePart(secrets.oli, key);
+    const deleted = await remove(secrets.oli, key);
+    expect({
+      unagreed: await codeOf(unagreed),
+      first: first.status,
+      same: (await first.text()) === (await again.text()),
+      withdrawn: read.withdrawn,
+      said: read.progress?.lines[1]?.text,
+      told: read.progress?.told,
+      back: await codeOf(back),
+      deleted: deleted.status,
+    }).toStrictEqual({
+      unagreed: "interview.not_participating",
+      first: 200,
+      same: true,
+      withdrawn: true,
+      said: sentinel,
+      told: false,
+      back: "interview.withdrawn",
+      deleted: 200,
+    });
+  });
+
+  it("approves nothing after the last day: what wasn't approved stays theirs alone (T6)", async () => {
+    const { ids, store, secrets } = await running();
+    const { key } = await opened(secrets.oli);
+    await takePart(secrets.oli, key);
+    await save(secrets.oli, key, 0);
+    await store.savePlan(
+      { start: isoDay(Date.now() - 20 * dayMs), days: 14 },
+      { type: "system" }
+    );
+    expect({
+      late: await codeOf(await approveFact(secrets.oli, key)),
+      drawn: await store.drawInput(ids.oli),
+    }).toStrictEqual({ late: "interview.closed", drawn: null });
+  });
+
+  it("asks again before anything new once the interview is deleted: taking part goes with it", async () => {
+    const { secrets } = await running();
+    const { key } = await opened(secrets.oli);
+    await takePart(secrets.oli, key);
+    await save(secrets.oli, key, 0);
+    await remove(secrets.oli, key);
+    const { key: fresh } = await opened(secrets.oli);
+    const read = await sessionOf(await session(secrets.oli, fresh));
+    expect({
+      key: fresh === "" ? "same device" : "new",
+      told: read.progress?.told ?? false,
+      approve: await codeOf(await approveFact(secrets.oli, key)),
+    }).toStrictEqual({
+      key: "same device",
+      told: false,
+      approve: "interview.not_participating",
+    });
+  });
+});
+
 describe("what the company learns", () => {
   it("finds nothing of what anyone did on their link in the audit log; only staff's log has it (W7)", async () => {
     const { ids, secrets } = await running();
     const events = await auditedDuring(async () => {
       const { key } = await opened(secrets.oli);
+      await takePart(secrets.oli, key);
       await save(secrets.oli, key, 0, { ...progress(), person: "completed" });
+      await approveFact(secrets.oli, key);
+      await withdraw(secrets.oli, key);
       await remove(secrets.oli, key);
     });
     const text = JSON.stringify(events);
@@ -529,8 +713,11 @@ describe("what the company learns", () => {
     ]).toStrictEqual([false, false, false]);
     await expect(staffLog(ids.oli)).resolves.toStrictEqual([
       "interview.opened",
+      "interview.participated",
       "interview.started",
       "interview.completed",
+      "interview.approved",
+      "interview.withdrawn",
       "interview.deleted",
     ]);
   });
