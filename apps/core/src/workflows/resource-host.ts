@@ -1554,6 +1554,16 @@ export class ResourceRunHost
    * expressions of its `do`.
    */
   readonly #caughtErrors = new Map<string, CaughtError>();
+  /** The scope of the step whose failure is pending (`#failure`). */
+  #failureScope: readonly { id: string; index: number }[] = [];
+  /**
+   * The branches of each race (a competing fork, by its place) that
+   * failed, as this activation reached them, fresh or replayed: a failure
+   * of theirs no catch took, which the race went past (`#passRace`).
+   */
+  readonly #raceFailures = new Map<string, Set<number>>();
+  /** The branch each race recorded as its winner, by its place. */
+  readonly #raceWinners = new Map<string, number>();
 
   constructor(
     env: Env,
@@ -1611,6 +1621,7 @@ export class ResourceRunHost
     if (typeof name !== "string" || this.#asked.has(name)) {
       return this.#refuse(`Step ${shown} runs once.`);
     }
+    this.#passRace(step.scope);
     const loop = this.#loopOf(step.scope);
     if (loop === undefined) {
       return this.#refuse(`Step ${shown} runs in an item no loop recorded.`);
@@ -1632,13 +1643,18 @@ export class ResourceRunHost
     for (const [depth, { id, index }] of scope.entries()) {
       const task = this.#run.build.tasks.find((one) => one.id === id);
       // A fork's branch: one of the branches it was sealed with, and no
-      // variables of its own.
+      // variables of its own; a race's, only as its race goes.
       if (task?.kind === "fork") {
-        if (index >= task.fork.branches) {
+        if (
+          index >= task.fork.branches ||
+          (task.fork.compete &&
+            !this.#raceAdmits(placeOf(id, scope.slice(0, depth)), index))
+        ) {
           return undefined;
         }
         continue;
       }
+
       const items = this.#items.get(placeOf(id, scope.slice(0, depth)));
       if (
         items === undefined ||
@@ -1651,6 +1667,106 @@ export class ResourceRunHost
       loop[task.loop.at] = index;
     }
     return loop;
+  }
+
+  /**
+   * Whether the race at `place` lets a step of its branch `branch` run:
+   * only once every branch before it failed, while it hasn't failed
+   * itself, and, once the race recorded its winner, only the winner's.
+   * Its branches run one after another, the next only past a failure
+   * (open-workflow.ts, `fork`): the host holds a module to that order, so
+   * a branch after one that succeeded, or a failed one, never runs on,
+   * and a race is never a way past a failure.
+   */
+  #raceAdmits(place: string, branch: number): boolean {
+    const winner = this.#raceWinners.get(place);
+    if (winner !== undefined) {
+      return winner === branch;
+    }
+    return this.#raceGoesTo(place, branch);
+  }
+
+  /** Whether every branch of the race at `place` before `branch` failed, and it didn't. */
+  #raceGoesTo(place: string, branch: number): boolean {
+    return (
+      this.#raceFailures.get(place)?.has(branch) !== true &&
+      this.#failedBefore(place, branch)
+    );
+  }
+
+  /**
+   * Whether every branch of the race at `place` before `branch` failed.
+   */
+  #failedBefore(place: string, branch: number): boolean {
+    const failed = this.#raceFailures.get(place);
+    for (let earlier = 0; earlier < branch; earlier += 1) {
+      if (failed?.has(earlier) !== true) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Notes branch `branch` of the race at `place` as failed. */
+  #raceFailed(place: string, branch: number): void {
+    const failed = this.#raceFailures.get(place) ?? new Set<number>();
+    failed.add(branch);
+    this.#raceFailures.set(place, failed);
+  }
+
+  /**
+   * Lets the race the pending failure (`#failure`) came from go past it,
+   * for a step in `scope`, by the host's own rule and no other: a failure
+   * a catch may take, that none in its branch took, is that branch's, and
+   * the race goes on to its next branch (open-workflow.ts, `fork`), so a
+   * step of exactly that branch takes it; past the race's last branch,
+   * the race fails as that branch did, a failure of the scope around it,
+   * for the races and catches out there. Nothing else gets past a
+   * failure: a step anywhere else still meets it (`#requireNoFailure`),
+   * and one the race may not take (an unknown outcome, a refusal) goes on
+   * to fail the run, whatever a module calls a race.
+   */
+  #passRace(scope: readonly { id: string; index: number }[]): void {
+    if (this.#failure?.catchable !== true) {
+      return;
+    }
+    const failed = this.#failureScope;
+    for (let depth = failed.length - 1; depth >= 0; depth -= 1) {
+      const segment = failed[depth];
+      const task = this.#run.build.tasks.find((one) => one.id === segment?.id);
+      if (
+        segment === undefined ||
+        task?.kind !== "fork" ||
+        !task.fork.compete
+      ) {
+        continue;
+      }
+      const outer = failed.slice(0, depth);
+      const place = placeOf(segment.id, outer);
+      const next = scope[depth];
+      const inRace =
+        next?.id === segment.id &&
+        outer.every(
+          ({ id, index }, at) =>
+            scope[at]?.id === id && scope[at]?.index === index
+        );
+      if (inRace) {
+        // Its next branch takes the failure as this branch's; its own
+        // branch leaves it to its catches, and any other to its refusal.
+        if (next.index === segment.index + 1) {
+          this.#raceFailed(place, segment.index);
+          this.#failure = undefined;
+        }
+        return;
+      }
+      if (
+        segment.index !== task.fork.branches - 1 ||
+        !this.#failedBefore(place, segment.index)
+      ) {
+        return;
+      }
+      this.#raceFailed(place, segment.index);
+    }
   }
 
   /**
@@ -1788,6 +1904,8 @@ export class ResourceRunHost
                   reached?.task,
                   this.#tampered !== undefined
                 );
+          // Where it failed: what a race goes past it by (`#passRace`).
+          this.#failureScope = reached?.scope ?? [];
           throw error;
         }
       });
@@ -2452,6 +2570,13 @@ export class ResourceRunHost
     }
     if (
       step.kind === "task" &&
+      task.kind === "fork" &&
+      record.data.branch !== undefined
+    ) {
+      this.#raceWinners.set(step.place, record.data.branch);
+    }
+    if (
+      step.kind === "task" &&
       task.kind === "call" &&
       task.call.name === "grasp.model" &&
       // Made in this activation: counted as it was asked for.
@@ -2649,6 +2774,7 @@ export class ResourceRunHost
         reached?.task,
         this.#tampered !== undefined
       );
+      this.#failureScope = reached?.scope ?? [];
       throw error;
     }
   }
@@ -4556,11 +4682,14 @@ export class ResourceRunHost
     }
     // A race records its winning branch, one it has, and nothing of its
     // own: what each branch did its own steps recorded.
+    // Only a branch the race reached past the failures before it, which
+    // didn't fail itself (`#raceGoesTo`).
     if (task.kind === "fork" && step.kind === "task") {
       const { branch } = record;
       if (
         branch === undefined ||
         branch >= task.fork.branches ||
+        !this.#raceGoesTo(step.place, branch) ||
         Object.keys(record).length !== 2
       ) {
         this.#refuse(`Task "${task.id}"'s race records its winning branch.`);
