@@ -2096,8 +2096,41 @@ export class ResourceRunHost
         !this.#fencedOff(pending.scope) &&
         (within
           ? isWithin(pending.scope, scope)
-          : isWithin(pending.scope, scope) || isWithin(scope, pending.scope))
+          : this.#holdsBack(pending.scope, scope))
     );
+  }
+
+  /**
+   * Whether a failure pending in scope `failed` holds back a step in
+   * `scope`: one in the same scope, nested in it or around it; and any
+   * other but a sibling item or branch of a task that runs them at once
+   * (`concurrency` above 1), which runs beside it, or of a race one branch
+   * at a time, which goes on only by its own rule (`#passRace`,
+   * `#raceAdmits`). One at a time, a later item or branch never starts
+   * past a failure no catch took, as nothing does.
+   */
+  #holdsBack(
+    failed: readonly { id: string; index: number }[],
+    scope: readonly { id: string; index: number }[]
+  ): boolean {
+    if (isWithin(failed, scope) || isWithin(scope, failed)) {
+      return true;
+    }
+    const depth = failed.findIndex(
+      ({ id, index }, at) => scope[at]?.id !== id || scope[at]?.index !== index
+    );
+    const sibling = scope[depth];
+    if (sibling === undefined || sibling.id !== failed[depth]?.id) {
+      return true;
+    }
+    const task = this.#run.build.tasks.find((one) => one.id === sibling.id);
+    if (task?.kind === "for") {
+      return task.loop.concurrency === 1;
+    }
+    if (task?.kind === "fork") {
+      return task.fork.concurrency === 1 && !task.fork.compete;
+    }
+    return true;
   }
 
   /**

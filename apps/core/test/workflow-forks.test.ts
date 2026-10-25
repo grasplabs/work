@@ -419,4 +419,29 @@ describe("a run's host, against a forged module's fork", () => {
       nextBranch: "workflow.invalid",
     });
   });
+
+  it("runs no later branch of a fork one at a time past a failure no catch took", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      {
+        both: {
+          fork: {
+            branches: [
+              branch("left", "${ {status: (.who | tonumber)} }"),
+              branch("right", '${ {status: "right"} }'),
+            ],
+          },
+        },
+      },
+      { after: { set: '${ {status: "after"} }' } },
+    ]);
+    const host = await hostOf(by, workflow.id);
+    const first = await failed(host, "task:left@both.0");
+    const later = codeOf(await ran(host, "task:right@both.1", right));
+
+    expect({ left: codeOf(first), later }).toStrictEqual({
+      left: "expression.failed",
+      later: "workflow.invalid",
+    });
+  });
 });
