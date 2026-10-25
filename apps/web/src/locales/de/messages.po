@@ -10110,6 +10110,10 @@ msgstr "Lesen lassen"
 msgid "Read it again"
 msgstr "Erneut lesen lassen"
 
+#: src/settings/stephen-settings.tsx
+msgid "Read others' words"
+msgstr "Worte anderer lesen"
+
 #: src/activity/audit-words.ts
 msgid "Read restricted sources, and is held to them"
 msgstr "Eingeschränkte Quellen gelesen und ist jetzt an sie gebunden"
@@ -14417,6 +14421,10 @@ msgstr "Was auf Sie wartet"
 #: src/chat/builds.tsx
 msgid "What other domains may call"
 msgstr "Was andere Domänen aufrufen dürfen"
+
+#: src/settings/stephen-settings.tsx
+msgid "What others wrote and said in their own Teams chats and meetings, summarised for them alone."
+msgstr "Was andere in ihren eigenen Teams-Chats und Besprechungen geschrieben und gesagt haben, nur für sie selbst zusammengefasst."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "What people thought of {name}"

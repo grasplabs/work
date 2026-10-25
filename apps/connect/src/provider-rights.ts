@@ -11,7 +11,8 @@ import type { CompanyToolClass } from "@grasp-os/shared/connect";
 // and turning a class on asks the connections that lack its rights to
 // connect again, in place (`requireClassRights`). The ways it can fail, which the tests
 // start from: a consent asks a right no class that is on needs (sending
-// mail while Reach others is off); a class turned on runs on a grant that
+// mail while Reach others is off, reading Teams chats while Read others'
+// words is off); a class turned on runs on a grant that
 // lacks its rights, and fails at Microsoft instead of asking the person;
 // a right read with another's case or prefix counts as missing, or one
 // that isn't granted counts as held.
@@ -34,7 +35,9 @@ const microsoftSignIn = [
  * writing them (drafts, flags, events, their own documents, their To Do,
  * their notes). The company's is SharePoint, others' calendars and the
  * Planner plans of the person's groups, and reaching others is sending
- * mail. Shared mailboxes' rights come with pointing Stephen at one
+ * mail. Reading others' words is the person's own Teams chats and the
+ * transcripts of the meetings they were in (GRA-747), found through their
+ * calendar. Shared mailboxes' rights come with pointing Stephen at one
  * (`sharedMailboxRights`).
  */
 const microsoftClassRights: Readonly<
@@ -66,6 +69,12 @@ const microsoftClassRights: Readonly<
     "Tasks.ReadWrite",
   ],
   "reach-others": ["Mail.Send"],
+  "read-others": [
+    "Calendars.Read",
+    "Chat.Read",
+    "OnlineMeetings.Read",
+    "OnlineMeetingTranscript.Read.All",
+  ],
 };
 
 /**

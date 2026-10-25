@@ -60,9 +60,12 @@ const smtpPrefix = /^smtp:/iu;
  * Refuses `mailbox` unless it names the person the token is for: their
  * user ID, address, sign-in name or one of their email aliases, in any
  * case. The refusal is `invalid`, not `access_denied`: Graph didn't deny
- * anything, the call named someone else's mailbox.
+ * anything, the call named someone else's mailbox. Gives back every name
+ * the person goes by, in lower case.
  */
-export const requireOwnMailbox = async (mailbox: string): Promise<void> => {
+export const requireOwnMailbox = async (
+  mailbox: string
+): Promise<ReadonlySet<string>> => {
   const me = await graphJson(
     graphUrl("/me", { $select: "id,mail,userPrincipalName,proxyAddresses" }),
     graphMe
@@ -84,6 +87,7 @@ export const requireOwnMailbox = async (mailbox: string): Promise<void> => {
       code: invalidCode,
     });
   }
+  return own;
 };
 
 const graphShown = z.object({
