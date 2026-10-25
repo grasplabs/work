@@ -10,6 +10,24 @@ import type {
   RecallInput,
   RememberInput,
 } from "@grasp-os/brain/contract";
+import {
+  backlinks,
+  getDocument,
+  history,
+  listDocuments,
+} from "@grasp-os/brain/documents";
+import type { Writer } from "@grasp-os/brain/documents";
+import {
+  memoriesGet,
+  memoriesList,
+  receiptsGet,
+  remember,
+} from "@grasp-os/brain/memories";
+import { preparePurge, purge } from "@grasp-os/brain/purge";
+import type { OnErase } from "@grasp-os/brain/purge";
+import { recall } from "@grasp-os/brain/recall";
+import { search } from "@grasp-os/brain/search";
+import { follow, read } from "@grasp-os/brain/tools";
 import type {
   BacklinkPage,
   Collection,
@@ -48,23 +66,10 @@ import type { Reader } from "./access.ts";
 import { appsErasure } from "./apps-collection.ts";
 import { catalog } from "./catalog.ts";
 import { createCollection, listCollections } from "./collection-rules.ts";
-import { backlinks, getDocument, history, listDocuments } from "./documents.ts";
-import type { Writer } from "./documents.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
-import {
-  memoriesGet,
-  memoriesList,
-  receiptsGet,
-  remember,
-} from "./memories.ts";
 import { personalCollectionId } from "./memory-files.ts";
 import { personWriter, restoreVersion, saveDocument } from "./person-writes.ts";
 import { brainOf } from "./ports.ts";
-import { preparePurge, purge } from "./purge.ts";
-import type { OnErase } from "./purge.ts";
-import { recall } from "./recall.ts";
-import { search } from "./search.ts";
-import { follow, read } from "./tools.ts";
 import { uploadErasure } from "./uploads.ts";
 
 /** The copies of people's words in core's own tables, as `OnErase` reaches them. */

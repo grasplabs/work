@@ -1,6 +1,7 @@
+import { createBrain } from "@grasp-os/brain/brain";
+import type { Brain, BrainPorts } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { drizzle } from "drizzle-orm/d1";
 
 import { brainEventOf, drainKnowledgeOutboxSoon } from "../audit-outbox.ts";
 import { derivedHmacKey } from "../derived-keys.ts";
@@ -8,7 +9,6 @@ import { runEngine } from "../workflows/engine.ts";
 import { noteProvenance, readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { authorize } from "./app-entries.ts";
-import type { Brain, BrainPorts } from "./brain.ts";
 import { recallKey, requireRecall } from "./recall-grants.ts";
 import { checkWrite } from "./write-rules.ts";
 
@@ -70,7 +70,5 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
 });
 
 /** The Brain for a request of core's, over `env`. */
-export const brainOf = (env: Env): Brain<Reader> => ({
-  db: drizzle(env.KNOWLEDGE),
-  ports: portsOf(env),
-});
+export const brainOf = (env: Env): Brain<Reader> =>
+  createBrain(env.KNOWLEDGE, portsOf(env));

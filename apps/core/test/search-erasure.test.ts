@@ -1,7 +1,3 @@
-import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
-
 import {
   addCollectionKeys,
   holdsAny,
@@ -10,8 +6,11 @@ import {
   owedWritesDone,
   rebuildOwed,
   rebuildSearchIndex,
-} from "../src/knowledge/search-erasure.ts";
-import type { IndexKey } from "../src/knowledge/search-erasure.ts";
+} from "@grasp-os/brain/search-erasure";
+import type { IndexKey } from "@grasp-os/brain/search-erasure";
+import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
+import { describe, expect, it } from "vite-plus/test";
 
 // What a purge leaves of a term in the search index's page directory
 // (search-erasure.ts, threat model in GRA-693): the rule that decides

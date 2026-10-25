@@ -1,3 +1,8 @@
+import {
+  ensureCollection,
+  readableCollections,
+} from "@grasp-os/brain/collections";
+import type { CollectionRow } from "@grasp-os/brain/collections";
 import { actorOf } from "@grasp-os/shared/audit";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import {
@@ -15,8 +20,6 @@ import { collectionTeams, teams } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { canCreate, canWrite } from "./access.ts";
 import type { Reader } from "./access.ts";
-import { ensureCollection, readableCollections } from "./collections.ts";
-import type { CollectionRow } from "./collections.ts";
 import { portsOf, brainOf } from "./ports.ts";
 
 // Core's rules for Knowledge's collections: who may create and change

@@ -1,3 +1,6 @@
+import { allowedFor } from "@grasp-os/brain/authorize";
+import type { Brain } from "@grasp-os/brain/brain";
+import { collections, documents, links } from "@grasp-os/brain/schema";
 import {
   brainErrors,
   brainNoteMaxLinks,
@@ -10,10 +13,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
-import { collections, documents, links } from "./db/knowledge/schema.ts";
 import type { Reader } from "./knowledge/access.ts";
-import { allowedFor } from "./knowledge/authorize.ts";
-import type { Brain } from "./knowledge/brain.ts";
 
 // Every note in the brain with its links (`brain.notes`), a page at a
 // time, as the person may read them: what core records today, Knowledge

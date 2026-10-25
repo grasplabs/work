@@ -1,3 +1,4 @@
+import { collections } from "@grasp-os/brain/schema";
 import { workflowIdOf } from "@grasp-os/compiler";
 import type { AnyResource } from "@grasp-os/sdk";
 import { aiStepCalls } from "@grasp-os/sdk/describe";
@@ -47,7 +48,6 @@ import { appResourceBindings, apps, permissions } from "./db/core/schema.ts";
 // Each list bound as one parameter: a review may name more permissions or
 // collections than D1's 100 bound parameters.
 import { inList } from "./db/d1.ts";
-import { collections } from "./db/knowledge/schema.ts";
 import { bindingScopes } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { LedgerScope, ScopeSpend } from "./model-ledger.ts";

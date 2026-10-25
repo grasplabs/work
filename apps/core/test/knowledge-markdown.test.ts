@@ -1,10 +1,9 @@
-import { describe, expect, it } from "vite-plus/test";
-
 import {
   FrontmatterError,
   parseFrontmatter,
-} from "../src/knowledge/frontmatter.ts";
-import { extractLinks, splitSections } from "../src/knowledge/markdown.ts";
+} from "@grasp-os/brain/frontmatter";
+import { extractLinks, splitSections } from "@grasp-os/brain/markdown";
+import { describe, expect, it } from "vite-plus/test";
 
 // The parsers a save runs: frontmatter, sections and links. Pure logic, so
 // tested on its own, in workerd like the rest (the YAML parser runs there).

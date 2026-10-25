@@ -1,3 +1,4 @@
+import { collections } from "@grasp-os/brain/schema";
 import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -8,7 +9,6 @@ import { z } from "zod";
 import { connectionOwnersOf } from "./connections.ts";
 import { collectionTeams, permissions } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { collections } from "./db/knowledge/schema.ts";
 import { mayRead } from "./knowledge/access.ts";
 import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 

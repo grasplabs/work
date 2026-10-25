@@ -177,15 +177,19 @@ const dropRank = ({ type, sql }: { type: string; sql: string | null }) => {
   return sql?.startsWith("CREATE VIRTUAL TABLE") === true ? 1 : 2;
 };
 
-/** Drops everything in `database`: triggers, views, virtual and plain tables. */
+/**
+ * Drops everything in `database`: triggers, views, virtual and plain
+ * tables, each kind newest first, so a table goes before the tables its
+ * foreign keys name (SQLite refuses to drop a table whose parent is gone).
+ */
 const emptied = async (database: D1Database): Promise<void> => {
   const { results } = await database
     .prepare(
-      "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table', 'view', 'trigger')"
+      "SELECT rowid, type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table', 'view', 'trigger')"
     )
-    .all<{ type: string; name: string; sql: string | null }>();
+    .all<{ rowid: number; type: string; name: string; sql: string | null }>();
   const drops = results
-    .toSorted((a, b) => dropRank(a) - dropRank(b))
+    .toSorted((a, b) => dropRank(a) - dropRank(b) || b.rowid - a.rowid)
     .map(({ type, name }) =>
       database.prepare(
         `DROP ${type.toUpperCase()} IF EXISTS "${name.replaceAll('"', '""')}"`

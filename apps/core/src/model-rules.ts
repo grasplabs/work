@@ -1,3 +1,4 @@
+import { collections, documents } from "@grasp-os/brain/schema";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { ModelRules } from "@grasp-os/shared/deployment-config";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -6,7 +7,6 @@ import { and, eq, inArray, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { inList } from "./db/d1.ts";
-import { collections, documents } from "./db/knowledge/schema.ts";
 import type { ModelShare } from "./model-admission.ts";
 import { isRestricted } from "./restricted.ts";
 import type { RestrictedEnv, WorkContext } from "./restricted.ts";
