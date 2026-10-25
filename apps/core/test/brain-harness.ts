@@ -394,16 +394,22 @@ interface OwnTrial {
 const ownCapture = (
   asked: readonly OwnTrial[]
 ): Record<string, { where: string; bindings: string[] }> => {
-  const chats = asked.map(({ chatId }) => chatId);
   const sources = asked.map(({ workspaceId }) => turnSource(workspaceId));
+  // Exactly the trial's own turns: a chat turn's episode, from the trial
+  // Workspace object's turns, about the trial's chat. Anything else about
+  // that chat (a run's episode, another source's) still counts.
+  const own = `task_type = 'chat.turn' AND (${asked
+    .map(() => "(source = ? AND evidence_id = ?)")
+    .join(" OR ")})`;
+  const pairs = asked.flatMap(({ chatId, workspaceId }) => [
+    turnSource(workspaceId),
+    chatId,
+  ]);
   return {
-    brain_episodes: {
-      where: `evidence_id NOT IN (${placeholders(chats)})`,
-      bindings: chats,
-    },
+    brain_episodes: { where: `NOT (${own})`, bindings: pairs },
     brain_episode_members: {
-      where: `episode_id NOT IN (SELECT id FROM brain_episodes WHERE evidence_id IN (${placeholders(chats)}))`,
-      bindings: chats,
+      where: `episode_id NOT IN (SELECT id FROM brain_episodes WHERE ${own})`,
+      bindings: pairs,
     },
     brain_capture_cursors: {
       where: `source NOT IN (${placeholders(sources)})`,
