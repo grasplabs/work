@@ -40,6 +40,7 @@ import { toHex } from "./encoding.ts";
 import { brainReceiptIdSchema, memoryIdSchema } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
 import type { Json } from "./json.ts";
+import { asWord, termsOf } from "./search.ts";
 
 // The Brain's memory commands (GRA-297; the Brain design's "Brain SDK and
 // API" and "Memory model"): `remember`, `receipts.get`, `memories.get`
@@ -797,16 +798,12 @@ export interface MemoryAudience {
 export const turnMemoryLimits = { records: 20, chars: 4000 } as const;
 
 /**
- * The records `audience` may read, newest first, within `limits`: the
- * accepted ones of its scopes, and an owner's own proposed records, which
- * they wrote themselves. Retired records never. Each with whose it is, for
- * the host to say who wrote one that isn't the reader's.
+ * What `audience` may read of `brain_memories`, as a condition: the
+ * accepted records of its scopes, and an owner's own proposed records,
+ * which they wrote themselves. Retired records never. Undefined for an
+ * audience that reads none.
  */
-export const memoriesFor = async <C>(
-  { db }: Brain<C>,
-  audience: MemoryAudience,
-  limits: { records: number; chars: number } = turnMemoryLimits
-): Promise<(MemoryRecord & { ownerId: string })[]> => {
+const audienceScope = (audience: MemoryAudience): SQL | undefined => {
   const scopes = [
     audience.owners.length === 0
       ? undefined
@@ -835,13 +832,30 @@ export const memoriesFor = async <C>(
           eq(brainMemories.state, "accepted")
         ),
   ].filter((scope) => scope !== undefined);
-  if (scopes.length === 0) {
+  return scopes.length === 0
+    ? undefined
+    : and(or(...scopes), ne(brainMemories.state, "retired"));
+};
+
+/**
+ * The records `audience` may read, newest first, within `limits`: the
+ * accepted ones of its scopes, and an owner's own proposed records, which
+ * they wrote themselves. Retired records never. Each with whose it is, for
+ * the host to say who wrote one that isn't the reader's.
+ */
+export const memoriesFor = async <C>(
+  { db }: Brain<C>,
+  audience: MemoryAudience,
+  limits: { records: number; chars: number } = turnMemoryLimits
+): Promise<(MemoryRecord & { ownerId: string })[]> => {
+  const scope = audienceScope(audience);
+  if (scope === undefined) {
     return [];
   }
   const rows = await db
     .select()
     .from(brainMemories)
-    .where(and(or(...scopes), ne(brainMemories.state, "retired")))
+    .where(scope)
     .orderBy(desc(brainMemories.recordedAt), desc(brainMemories.id))
     .limit(limits.records);
   const kept: (MemoryRecord & { ownerId: string })[] = [];
@@ -854,6 +868,70 @@ export const memoriesFor = async <C>(
     }
   }
   return kept;
+};
+
+/**
+ * The records `audience` may read whose words match `query`'s, best
+ * first, at most `limit` (GRA-298): any of its words, as a recall reads a
+ * question (search.ts), in the statements' full-text index (migration
+ * `0002_memory_search.sql`), ranked by how many of its words each holds,
+ * newer first between equals.
+ * The audience is part of the match, so a record outside it is never
+ * ranked, counted or returned. Each with whose it is.
+ */
+export const searchMemories = async <C>(
+  { db }: Brain<C>,
+  audience: MemoryAudience,
+  query: string,
+  limit: number
+): Promise<(MemoryRecord & { ownerId: string })[]> => {
+  const scope = audienceScope(audience);
+  const terms = termsOf(query);
+  if (scope === undefined || terms.length === 0 || limit <= 0) {
+    return [];
+  }
+  // Ranked by how many of the question's words a record holds, then
+  // newest first: never by BM25, whose weights count the words of every
+  // record in the index, other people's private ones too, so the order of
+  // a reader's own records would tell them which words others' hold
+  // (the GRA-298 security review). The index only matches.
+  const hits = sql.join(
+    terms.map(
+      (term) => sql`(CASE WHEN brain_memory_words.rowid IN (
+        SELECT rowid FROM brain_memory_words
+        WHERE brain_memory_words MATCH ${asWord(term)}
+      ) THEN 1 ELSE 0 END)`
+    ),
+    sql` + `
+  );
+  const matched = await db.all<{ id: string }>(sql`
+    SELECT brain_memories.id AS id
+    FROM brain_memory_words
+    JOIN brain_memory_rows ON brain_memory_rows.id = brain_memory_words.rowid
+    JOIN brain_memories ON brain_memories.id = brain_memory_rows.memory_id
+    WHERE brain_memory_words MATCH ${terms.map(asWord).join(" OR ")}
+      AND ${scope}
+    ORDER BY ${hits} DESC, brain_memories.recorded_at DESC,
+      brain_memories.id DESC
+    LIMIT ${limit}
+  `);
+  const ids = matched.map(({ id }) => id);
+  if (ids.length === 0) {
+    return [];
+  }
+  // The records as they are now, under the same scope: one retired or
+  // corrected since the match is left out.
+  const rows = await db
+    .select()
+    .from(brainMemories)
+    .where(and(inList(brainMemories.id, ids), scope));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return ids.flatMap((id) => {
+    const row = byId.get(id);
+    return row === undefined
+      ? []
+      : [{ ...recordOf(row), ownerId: row.ownerId }];
+  });
 };
 
 /** The documents and memories `refs` name, as an event's provenance. */

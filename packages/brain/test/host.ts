@@ -59,6 +59,27 @@ export const testHost = (): {
     mayRetire: async () => {
       await Promise.resolve();
     },
+    memories: {
+      // A caller's own records, read by them alone.
+      audienceOf: async (caller) =>
+        await Promise.resolve({
+          audience: {
+            owners: [caller.userId],
+            teams: [],
+            company: false,
+            sessions: [],
+          },
+          people: [caller.userId],
+        }),
+      keep: async (caller, _people, records) =>
+        await Promise.resolve(
+          records.map((record) => ({
+            ...record,
+            by: record.ownerId === caller.userId ? null : record.ownerId,
+            cites: [],
+          }))
+        ),
+    },
     blobs: env.BLOBS,
     audit: {
       eventOf: (entry) => {
