@@ -539,6 +539,19 @@ describe("a native connector", () => {
       "todo.complete": "change-own",
       "files.versions": "read-company",
       "files.createDraft": "change-own",
+      // A Word document is in a drive: a OneDrive or a SharePoint library.
+      "word.read": "read-company",
+      "lists.addItem": "change-company",
+      "lists.updateItem": "change-company",
+      // A plan is a group's. A task is made unassigned: assigning one
+      // would tell someone, and reach others.
+      "planner.tasks": "read-company",
+      "planner.create": "change-company",
+      // Only the person's own notebooks, shared with no one.
+      "onenote.sections": "read-own",
+      "onenote.pages": "read-own",
+      "onenote.read": "read-own",
+      "onenote.create": "change-own",
     });
     expect(classesOf("google-workspace")).toStrictEqual({
       "mail.list": "read-own",
