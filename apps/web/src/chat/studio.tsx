@@ -81,7 +81,8 @@ const DraftPreview = ({
  * (`DraftVersionBar`), then the way to the App, where its people meet it
  * (and an admin approves its screens' code). Its padding and the button's
  * height are the page sidebar's top row's (`PageSidebarTop`), so its line
- * continues that one.
+ * continues that one. On a narrow screen the version controls wrap under
+ * the name rather than run over the way to the App.
  */
 const StudioBar = ({
   chatId,
@@ -99,7 +100,7 @@ const StudioBar = ({
   onVersion: (version?: number) => void;
 }) => (
   <div className="flex flex-none items-center gap-3 border-b p-3">
-    <div className="flex min-w-0 flex-1 items-center gap-2">
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
       <h2 className="truncate font-medium" id={headingId}>
         {name}
       </h2>

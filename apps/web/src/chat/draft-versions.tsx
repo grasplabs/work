@@ -113,7 +113,7 @@ export const DraftVersionBar = ({
     // Unread (or not read yet), an earlier version still open keeps the
     // way back to the latest.
     return shown === undefined ? null : (
-      <div className="flex flex-none items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         <ReadOnlyBack onShow={onShow} />
       </div>
     );
@@ -124,7 +124,7 @@ export const DraftVersionBar = ({
   const toShow = (to: number): number | undefined =>
     to >= latest ? undefined : to;
   return (
-    <div className="flex flex-none items-center gap-1">
+    <div className="flex flex-wrap items-center gap-1">
       <Button
         aria-label={t`Earlier version`}
         disabled={number <= 1}
