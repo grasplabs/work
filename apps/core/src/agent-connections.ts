@@ -43,6 +43,7 @@ import { connectionOwnersOf } from "./connections.ts";
 import { workspace } from "./durable-objects.ts";
 import { endOfCompanyDay } from "./organization.ts";
 import { grantedPermissions } from "./permissions.ts";
+import { mailboxesFor } from "./shared-mailboxes.ts";
 
 // Connections for a chat's code: `await env.connections.call("OUTLOOK",
 // "mail.search", { query })`. The agent's connection permissions, each
@@ -188,6 +189,27 @@ const fromChatApp = (scope: AgentScope): boolean =>
   scope.via !== undefined && scope.via !== "web";
 
 /**
+ * The addresses the chat's person sends from through `connectionId`: its
+ * account's, when it is their own personal connection, and the shared
+ * mailboxes pointed at them (shared-mailboxes.ts), in lower case.
+ */
+const sendersOf = async (
+  env: Env,
+  scope: AgentScope,
+  connectionId: string
+): Promise<string[]> => {
+  const [owner] = await env.CONNECT.connectionOwners([connectionId]);
+  const own =
+    owner?.ownerUserId === scope.personId
+      ? [owner.accountEmail, owner.accountName, ...owner.accountAddresses]
+      : [];
+  const pointed = await mailboxesFor(env, scope.personId);
+  return [...own, ...pointed]
+    .filter((address) => address !== null)
+    .map((address) => address.toLowerCase());
+};
+
+/**
  * In a chat that came through a chat platform: what connect goes by for
  * `action` (`ActionShape`), after refusing a write the chat's person
  * didn't give the values of (channels/stephen-rules.ts) before connect
@@ -214,7 +236,8 @@ const checkedForChatApp = async (
   const refusal = await workspace(env, scope.workspaceId).heldWriteRefusal(
     scope.chatId,
     input,
-    shape.inputs
+    shape.inputs,
+    await sendersOf(env, scope, grant.connection.connectionId)
   );
   if (refusal !== undefined) {
     throw agentErrors.create(refusal);
