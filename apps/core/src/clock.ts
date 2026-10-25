@@ -16,6 +16,7 @@ import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
+import { renewGmailWatch } from "./channels/gmail.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
@@ -186,6 +187,8 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepChannelSignals,
   },
+  // Gmail's watch on Stephen's mailbox, renewed daily (channels/gmail.ts).
+  { name: "channels.gmail_watch", period: "quarterHour", run: renewGmailWatch },
   {
     name: "workflows.run_details",
     period: "quarterHour",

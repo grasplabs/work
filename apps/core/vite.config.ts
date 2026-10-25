@@ -17,6 +17,8 @@ import {
   connectProvidersScript,
   directoryClient,
   documentsClient,
+  gmailAccount,
+  gmailPush,
   landscapeClient,
   slackApp,
   teamsBot,
@@ -227,6 +229,12 @@ export const coreProject = (
             WHATSAPP_VERIFY_TOKEN: whatsAppNumber.verifyToken,
             // The client's Telegram bot (src/channels/telegram.ts).
             TELEGRAM_WEBHOOK_SECRET: telegramBot.webhookSecret,
+            // Stephen's Gmail mailbox and its push, so its door is open too.
+            GMAIL_MAILBOX: gmailAccount.mailbox,
+            GMAIL_PUBSUB_AUDIENCE: gmailPush.audience,
+            GMAIL_PUBSUB_SERVICE_ACCOUNT: gmailPush.serviceAccount,
+            GMAIL_PUBSUB_SUBSCRIPTION: gmailPush.subscription,
+            GMAIL_PUBSUB_TOPIC: gmailPush.topic,
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_POINT_LIMITS: "10/25",
             STATISTICS_READ_LIMITS: "20/60",
@@ -338,6 +346,11 @@ export const coreProject = (
                 WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
                 WHATSAPP_ACCESS_TOKEN: whatsAppNumber.accessToken,
                 TELEGRAM_BOT_TOKEN: telegramBot.token,
+                // Stephen's Gmail mailbox, which the fake Google there knows.
+                GMAIL_MAILBOX: gmailAccount.mailbox,
+                GMAIL_CLIENT_ID: gmailAccount.clientId,
+                GMAIL_CLIENT_SECRET: gmailAccount.clientSecret,
+                GMAIL_REFRESH_TOKEN: gmailAccount.refreshToken,
               },
               d1Databases: { DB: "grasp-os-connect" },
               // Its clock (connect's src/clock.ts).

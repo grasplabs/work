@@ -1556,6 +1556,7 @@ export const channelPlatformSchema = z.enum([
   "slack",
   "whatsapp",
   "telegram",
+  "gmail",
 ]);
 export type ChannelPlatform = z.infer<typeof channelPlatformSchema>;
 

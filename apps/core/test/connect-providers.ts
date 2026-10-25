@@ -11,6 +11,7 @@
  * (workerd), so it only holds data.
  */
 import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake.ts";
+import { googleGmailFake } from "../../connect/test/google-gmail-fake.ts";
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
@@ -262,6 +263,41 @@ export const telegramSentUrl = "https://telegram-control.test/sent";
  */
 export const whatsAppSentUrl = "https://whatsapp-control.test/sent";
 
+/**
+ * Stephen's own Gmail mailbox, as connect holds it (`GMAIL_*`) in the
+ * tests, and the fake Gmail behind it knows it.
+ */
+export const gmailAccount = {
+  mailbox: "stephen@acme.test",
+  clientId: "acme-gmail-client-for-tests",
+  clientSecret: "acme-gmail-client-secret-for-tests",
+  refreshToken: "acme-gmail-refresh-token-for-tests",
+  accessToken: "acme-gmail-access-token-for-tests",
+} as const;
+
+/** The Pub/Sub push that tells Gmail's door of new mail, as core has it. */
+export const gmailPush = {
+  audience: "https://acme.grasp.test/api/channels/gmail",
+  serviceAccount: "gmail-push@acme-grasp.iam.gserviceaccount.com",
+  subscription: "projects/acme-grasp/subscriptions/stephen-gmail",
+  topic: "projects/acme-grasp/topics/stephen-gmail",
+} as const;
+
+/**
+ * Where tests publish Google's signing keys: POST `{ keys }`, public JWKs,
+ * added to those other test files published.
+ */
+export const googleKeysUrl = "https://google-control.test/keys";
+
+/**
+ * Where tests put mail in Stephen's inbox: POST `{ from, replyTo?, subject?,
+ * text }`, answered with the mail's `{ id, threadId }`.
+ */
+export const gmailDeliverUrl = "https://google-control.test/deliver";
+
+/** Where tests read the mail Gmail sent from Stephen's mailbox, in order. */
+export const gmailSentUrl = "https://google-control.test/sent";
+
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
 
@@ -333,6 +369,8 @@ const whatsAppAnswer = async (request, url) => {
     messages: [{ id: "wamid." + crypto.randomUUID() }],
   });
 };
+const google = (${googleGmailFake.toString()})(${JSON.stringify(gmailAccount)});
+let googleKeys = [];
 const slackCalls = [];
 /** Slack's Web API, as far as the door's adapter calls it. */
 const slackAnswer = async (request, url) => {
@@ -623,6 +661,23 @@ export default {
     }
     if (url.hostname === "login.botframework.com") {
       return botFramework.answer(request);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(googleKeysUrl)}) {
+      const { keys } = await request.json();
+      const kids = new Set(keys.map(({ kid }) => kid));
+      googleKeys = [...googleKeys.filter(({ kid }) => !kids.has(kid)), ...keys];
+      google.setKeys(googleKeys);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(gmailDeliverUrl)}) {
+      return Response.json(google.deliver(await request.json()));
+    }
+    if (url.href === ${JSON.stringify(gmailSentUrl)}) {
+      return Response.json(google.sent);
+    }
+    const fromGoogle = await google.answer(request);
+    if (fromGoogle !== undefined) {
+      return fromGoogle;
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
       // Added to the keys other test files published: files run at once,
