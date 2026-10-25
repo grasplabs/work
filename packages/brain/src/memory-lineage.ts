@@ -11,6 +11,7 @@ import type {
   MemoryRecord,
   ShownMemory,
 } from "./contract.ts";
+import { inList } from "./db/d1.ts";
 import {
   brainMemories,
   collections,
@@ -33,6 +34,12 @@ const lineageMaxDepth = 8;
 
 /** Most nodes one lineage shows: a crafted chain can't fan out past it. */
 const lineageMaxNodes = 100;
+
+/**
+ * Most references one lineage looks at, shown or not: the work a read
+ * does is bounded by what it reads, not only by what it shows.
+ */
+const lineageMaxReferences = 200;
 
 /** A record row as a lineage reads it, with whose it is. */
 type Owned = MemoryRecord & { ownerId: string };
@@ -109,7 +116,7 @@ const recordsOf = async <C>(
   const rows = await db
     .select()
     .from(brainMemories)
-    .where(and(where, or(...ids.map((id) => eq(brainMemories.id, id)))));
+    .where(and(where, inList(brainMemories.id, ids)));
   return rows.map((row) => ({ ...recordOf(row), ownerId: row.ownerId }));
 };
 
@@ -127,46 +134,53 @@ const documentsOf = async <C>(
     return [];
   }
   const allowed = await allowedFor(brain.ports, reader);
-  const found = await Promise.all(
-    refs.map(async (ref) => {
-      const row = await brain.db
-        .select({
-          title: documents.title,
-          path: documents.path,
-          currentVersion: documents.currentVersion,
-          sensitive: collections.sensitive,
-        })
-        .from(versions)
-        .innerJoin(documents, eq(documents.id, versions.documentId))
-        .innerJoin(collections, eq(collections.id, documents.collectionId))
-        .where(
-          and(
-            eq(versions.documentId, ref.documentId),
-            eq(versions.number, ref.version),
-            eq(documents.collectionId, ref.collectionId),
-            allowed.documents()
-          )
-        )
-        .get();
-      return row === undefined
-        ? []
-        : [
-            {
-              kind: "document" as const,
-              citedBy: memoryIdSchema.parse(ref.citedBy),
-              documentId: ref.documentId,
-              collectionId: ref.collectionId,
-              version: ref.version,
-              ...(ref.section === undefined ? {} : { section: ref.section }),
-              title: row.title,
-              path: row.path,
-              currentVersion: row.currentVersion,
-              sensitive: row.sensitive,
-            },
-          ];
+  // One read for the level: every version cited that the reader may read.
+  const rows = await brain.db
+    .select({
+      documentId: versions.documentId,
+      version: versions.number,
+      collectionId: documents.collectionId,
+      title: documents.title,
+      path: documents.path,
+      currentVersion: documents.currentVersion,
+      sensitive: collections.sensitive,
     })
+    .from(versions)
+    .innerJoin(documents, eq(documents.id, versions.documentId))
+    .innerJoin(collections, eq(collections.id, documents.collectionId))
+    .where(
+      and(
+        inList(versions.documentId, [
+          ...new Set(refs.map(({ documentId }) => documentId)),
+        ]),
+        sql`${versions.number} IN (SELECT value FROM json_each(${JSON.stringify(
+          [...new Set(refs.map(({ version }) => version))]
+        )}))`,
+        allowed.documents()
+      )
+    );
+  const readable = new Map(
+    rows.map((row) => [`${row.documentId}@${row.version}`, row])
   );
-  return found.flat();
+  return refs.flatMap((ref) => {
+    const row = readable.get(`${ref.documentId}@${ref.version}`);
+    return row === undefined || row.collectionId !== ref.collectionId
+      ? []
+      : [
+          {
+            kind: "document" as const,
+            citedBy: memoryIdSchema.parse(ref.citedBy),
+            documentId: ref.documentId,
+            collectionId: ref.collectionId,
+            version: ref.version,
+            ...(ref.section === undefined ? {} : { section: ref.section }),
+            title: row.title,
+            path: row.path,
+            currentVersion: row.currentVersion,
+            sensitive: row.sensitive,
+          },
+        ];
+  });
 };
 
 /**
@@ -221,16 +235,21 @@ const restsOn = async <C>(
   const nodes: (LineageNode & { sensitive?: boolean })[] = [];
   const visited = new Set([root.id]);
   let level: ShownMemory[] = [root];
+  let references = 0;
   for (
     let depth = 0;
     depth < lineageMaxDepth &&
     level.length > 0 &&
-    nodes.length < lineageMaxNodes;
+    nodes.length < lineageMaxNodes &&
+    references < lineageMaxReferences;
     depth += 1
   ) {
-    const cited = level.flatMap(({ id, sourceRefs }) =>
-      sourceRefs.map((ref) => ({ ...ref, citedBy: id }))
-    );
+    const cited = level
+      .flatMap(({ id, sourceRefs }) =>
+        sourceRefs.map((ref) => ({ ...ref, citedBy: id }))
+      )
+      .slice(0, lineageMaxReferences - references);
+    references += cited.length;
     const memoryRefs = cited.filter(
       (ref): ref is typeof ref & { kind: "memory" } =>
         ref.kind === "memory" && !visited.has(ref.memoryId)

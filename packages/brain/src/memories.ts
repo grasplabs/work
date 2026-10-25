@@ -795,9 +795,85 @@ const readCursor = async <C>(
   return { recordedAt: new Date(recordedAt), id };
 };
 
+/** Most rows one shared listing reads to fill its page; past it, it ends. */
+const sharedScanMax = 500;
+
+type MemoryRow = typeof brainMemories.$inferSelect;
+
+/** Up to `most` rows `where` admits after `after`, newest first. */
+const rowsAfter = async <C>(
+  { db }: Brain<C>,
+  where: SQL | undefined,
+  after: { recordedAt: Date; id: string } | undefined,
+  most: number
+): Promise<MemoryRow[]> =>
+  await db
+    .select()
+    .from(brainMemories)
+    .where(
+      and(
+        where,
+        after === undefined
+          ? undefined
+          : or(
+              lt(brainMemories.recordedAt, after.recordedAt),
+              and(
+                eq(brainMemories.recordedAt, after.recordedAt),
+                lt(brainMemories.id, after.id)
+              )
+            )
+      )
+    )
+    .orderBy(desc(brainMemories.recordedAt), desc(brainMemories.id))
+    .limit(most);
+
 /**
- * The person's own records, newest first, a bounded page at a time, of
- * one kind if asked: the next page starts after `cursor`.
+ * Up to `size` + 1 of the shared rows `where` admits after `after` that
+ * the host keeps for `people`, newest first: read a batch at a time until
+ * that many are kept, the rows run out, or {@link sharedScanMax} were read.
+ * A row the host drops is never the page's, nor where its cursor points.
+ */
+const keptRowsAfter = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  people: readonly string[],
+  where: SQL | undefined,
+  after: { recordedAt: Date; id: string } | undefined,
+  size: number
+): Promise<MemoryRow[]> => {
+  const kept: MemoryRow[] = [];
+  let position = after;
+  let scanned = 0;
+  while (kept.length <= size && scanned < sharedScanMax) {
+    const wanted = Math.min(size + 1, sharedScanMax - scanned);
+    // oxlint-disable-next-line no-await-in-loop -- each batch starts where the last ended
+    const batch = await rowsAfter(brain, where, position, wanted);
+    scanned += batch.length;
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    const checked = await brain.ports.memories.keep(
+      reader,
+      people,
+      batch.map((row) => ({ ...recordOf(row), ownerId: row.ownerId }))
+    );
+    const ids = new Set<string>(checked.map(({ id }) => id));
+    kept.push(...batch.filter((row) => ids.has(row.id)));
+    const last = batch.at(-1);
+    if (last === undefined || batch.length < wanted) {
+      break;
+    }
+    position = { recordedAt: last.recordedAt, id: last.id };
+  }
+  return kept.slice(0, size + 1);
+};
+
+/**
+ * The caller's own records, or (`among: "shared"`) others' shared records
+ * their memory audience reads now, newest first, a page at a time. A
+ * shared page holds only records the host keeps, and its cursor points at
+ * the last of them, a record the caller was just shown: never at one the
+ * host dropped. A page has a cursor only when more kept records follow,
+ * so a short page never says hidden ones exist; a listing that reads
+ * {@link sharedScanMax} rows without filling its page ends there.
  */
 export const memoriesList = async <C>(
   brain: Brain<C>,
@@ -813,62 +889,42 @@ export const memoriesList = async <C>(
   );
   const size = limit ?? defaultPage;
   const scope = { caller, kind, among: among ?? "mine" };
-  // Others' shared records: those the caller's memory audience reads now,
-  // as the host compiles it, re-checked by the host before they're shown.
-  const readers =
-    among === "shared"
-      ? await brain.ports.memories.audienceOf(reader)
-      : undefined;
-  const whose =
-    readers === undefined
-      ? eq(brainMemories.ownerId, ownerId)
-      : and(
-          audienceScope(readers.audience) ?? sql`0`,
-          ne(brainMemories.ownerId, ownerId)
-        );
   const after =
     cursor === undefined ? undefined : await readCursor(brain, scope, cursor);
-  const rows = await brain.db
-    .select()
-    .from(brainMemories)
-    .where(
-      and(
-        whose,
-        kind === undefined ? undefined : eq(brainMemories.kind, kind),
-        after === undefined
-          ? undefined
-          : or(
-              lt(brainMemories.recordedAt, after.recordedAt),
-              and(
-                eq(brainMemories.recordedAt, after.recordedAt),
-                lt(brainMemories.id, after.id)
-              )
-            )
-      )
-    )
-    .orderBy(desc(brainMemories.recordedAt), desc(brainMemories.id))
-    .limit(size + 1);
+  const ofKind = kind === undefined ? undefined : eq(brainMemories.kind, kind);
+  let rows: MemoryRow[];
+  if (among === "shared") {
+    // Others' shared records: those the caller's memory audience reads
+    // now, as the host compiles it, re-checked by the host before shown.
+    const { audience, people } = await brain.ports.memories.audienceOf(reader);
+    const shared = audienceScope(audience);
+    rows =
+      shared === undefined
+        ? []
+        : await keptRowsAfter(
+            brain,
+            reader,
+            people,
+            and(shared, ne(brainMemories.ownerId, ownerId), ofKind),
+            after,
+            size
+          );
+  } else {
+    rows = await rowsAfter(
+      brain,
+      and(eq(brainMemories.ownerId, ownerId), ofKind),
+      after,
+      size + 1
+    );
+  }
   const page = rows.slice(0, size);
   const last = page.at(-1);
-  const checked =
-    readers === undefined
-      ? undefined
-      : await brain.ports.memories.keep(
-          reader,
-          readers.people,
-          page.map((row) => ({ ...recordOf(row), ownerId: row.ownerId }))
-        );
-  // What another's record rests on is shown in its lineage, as far as the
-  // reader may see it (memory-lineage.ts), never listed here.
-  const kept =
-    checked === undefined
-      ? page.map(recordOf)
-      : checked.map(({ by: _by, cites: _cites, ...record }) => ({
-          ...record,
-          sourceRefs: [],
-        }));
   return {
-    records: kept,
+    // What another's record rests on is shown in its lineage, as far as
+    // the reader may see it (memory-lineage.ts), never listed here.
+    records: page.map((row) =>
+      among === "shared" ? { ...recordOf(row), sourceRefs: [] } : recordOf(row)
+    ),
     cursor:
       rows.length > size && last !== undefined
         ? await writeCursor(brain, scope, last)

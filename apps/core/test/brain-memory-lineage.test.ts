@@ -45,10 +45,11 @@ const seed = async (
     id?: string;
     state?: "proposed" | "accepted" | "retired";
     sourceRefs?: unknown[];
+    recordedAt?: Date;
   }
 ): Promise<string> => {
   const id = record.id ?? crypto.randomUUID();
-  const now = new Date();
+  const now = record.recordedAt ?? new Date();
   await drizzle(env.KNOWLEDGE)
     .insert(brainMemories)
     .values({
@@ -98,6 +99,13 @@ const nodesOf = (lineage: MemoryLineage) =>
         : `document:${node.documentId}`
     )
     .toSorted();
+
+/** The time `minutesAgo` minutes ago. */
+const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+
+/** The IDs of a page's records, in its order. */
+const idsOf = (page: { records: readonly { id: string }[] }): string[] =>
+  page.records.map(({ id }) => id);
 
 /** The receipt's record. */
 const idOf = (receipt: {
@@ -377,5 +385,108 @@ describe("a memory record's lineage", setUpTime, () => {
       refs: [],
       crossed: "brain.invalid",
     });
+  });
+
+  it("pages the shared listing by what it shows: a cursor never points at, or tells of, a record kept from the reader", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ada = await signedInApi(idp, "user");
+    const ben = await signedInApi(idp, "user");
+    const both = await newTeam(admin, [ada, ben]);
+    const adaOnly = await newTeam(admin, [ada]);
+    const hidden = await documentIn(admin, {
+      name: `Ada's team ${unique()}`,
+      access: "teams",
+      teams: [adaOnly],
+    });
+    const teamRecord = async (
+      statement: string,
+      minutesAgo: number,
+      restsOnHidden = false
+    ) =>
+      await seed(statement, {
+        scope: "team",
+        scopeId: both,
+        ownerId: ada.userId,
+        recordedAt: at(minutesAgo),
+        ...(restsOnHidden ? { sourceRefs: [hidden] } : {}),
+      });
+    // Newest first: one Ben may see, two resting on what he can't read,
+    // one he may see, and another he can't.
+    const first = await teamRecord("First.", 1);
+    const keptFrom = [
+      await teamRecord("Hidden one.", 2, true),
+      await teamRecord("Hidden two.", 3, true),
+    ];
+    const last = await teamRecord("Last.", 4);
+    keptFrom.push(await teamRecord("Hidden three.", 5, true));
+    const list = async (limit: number, cursor?: string) =>
+      await ben.api.knowledge.memoriesList({
+        among: "shared",
+        limit,
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+
+    const one = await list(1);
+    const next = await list(1, one.cursor ?? undefined);
+    const two = await list(2);
+    const decoded = atob(one.cursor ?? "");
+
+    expect({
+      one: idsOf(one),
+      cursorNamesHidden: keptFrom.some((id) => decoded.includes(id)),
+      next: idsOf(next),
+      // Nothing kept follows: no cursor, so nothing says more exists.
+      nextCursor: next.cursor,
+      two: idsOf(two),
+      twoCursor: two.cursor,
+    }).toStrictEqual({
+      one: [first],
+      cursorNamesHidden: false,
+      next: [last],
+      nextCursor: null,
+      two: [first, last],
+      twoCursor: null,
+    });
+  });
+
+  it("reads a wide lineage within its bounds", async () => {
+    const ada = await signedInApi(idp, "user");
+    const fanOut = 20;
+    const leaves = await Promise.all(
+      Array.from(
+        { length: fanOut },
+        async (_, n) =>
+          await seed(`Leaf ${n}.`, {
+            scope: "person",
+            scopeId: ada.userId,
+            ownerId: ada.userId,
+            // Each cites twenty document versions nobody can read.
+            sourceRefs: Array.from({ length: fanOut }, () => ({
+              kind: "document",
+              documentId: crypto.randomUUID(),
+              collectionId: crypto.randomUUID(),
+              version: 1,
+            })),
+          })
+      )
+    );
+    const root = await seed("Rests on twenty records.", {
+      scope: "person",
+      scopeId: ada.userId,
+      ownerId: ada.userId,
+      sourceRefs: leaves.map((memoryId) => ({
+        kind: "memory",
+        memoryId,
+        revision: 1,
+      })),
+    });
+
+    const lineage = await ada.api.knowledge.memoriesLineage({
+      memoryId: root,
+    });
+
+    expect(nodesOf(lineage)).toStrictEqual(
+      leaves.map((id) => `memory:${id}`).toSorted()
+    );
   });
 });
