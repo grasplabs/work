@@ -15,7 +15,10 @@ import {
   codeOf,
   countedFor,
   modelOf,
+  onLink,
   opened,
+  openedFor,
+  participate,
   quick,
 } from "./interview-link.ts";
 import { routed } from "./sign-in.ts";
@@ -374,6 +377,29 @@ describe("an interview turn", { timeout: 60_000 }, () => {
       unknown: [404, "interview.link_invalid"],
       elsewhere: [403, "interview.elsewhere"],
       named: [400, "interview.invalid"],
+      sent: 0,
+    });
+  });
+
+  it("gives no turn to someone who didn't agree to take part, or withdrew (GRA-329, T1, T5)", async () => {
+    const { link } = await openedFor({ participating: false });
+    const turn: Turn = {
+      event: "start",
+      locale: "en",
+      lines: [],
+      facts: [],
+      phase: "open",
+      minutes: 0,
+    };
+    const { requests, result } = await answering([], async () => {
+      const unagreed = await codeOf(await ask(link, turn));
+      await participate(link);
+      await onLink({ action: "withdraw", ...link });
+      return { unagreed, withdrawn: await codeOf(await ask(link, turn)) };
+    });
+    expect({ ...result, sent: requests.length }).toStrictEqual({
+      unagreed: [403, "interview.not_participating"],
+      withdrawn: [410, "interview.withdrawn"],
       sent: 0,
     });
   });
