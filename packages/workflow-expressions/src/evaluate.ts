@@ -23,6 +23,7 @@ const taskStages = new Set<Stage>([
   "taskDefinition",
   "taskOutputAs",
   "taskExportAs",
+  "loopKeys",
 ]);
 
 /** The pinned descriptor every expression sees as `$runtime`. */

@@ -9,8 +9,14 @@ export interface AttemptCalls {
   check: (which: unknown, value: unknown) => Settled<null>;
   call: (frame: unknown) => Promise<Settled<Json>>;
   until: (frame: unknown) => Promise<Settled<number>>;
-  items: (frame: unknown) => Promise<Settled<Json[]>>;
+  items: (frame: unknown) => Promise<Settled<LoopItems>>;
   catches: () => Promise<Settled<boolean>>;
+}
+
+/** A `for` task's items, and their keys where its loop has them. */
+export interface LoopItems {
+  items: Json[];
+  keys?: (string | number)[];
 }
 
 /**
@@ -50,8 +56,11 @@ export class ResourceAttemptHost extends RpcTarget {
     return await this.#calls.until(frame);
   }
 
-  /** Resolves a `for` task's items, as the build sealed them, on its input. */
-  async items(frame: unknown): Promise<Settled<Json[]>> {
+  /**
+   * Resolves a `for` task's items, as the build sealed them, on its input,
+   * with their keys where its loop has them.
+   */
+  async items(frame: unknown): Promise<Settled<LoopItems>> {
     return await this.#calls.items(frame);
   }
 

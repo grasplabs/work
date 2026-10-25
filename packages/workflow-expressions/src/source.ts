@@ -38,6 +38,12 @@ export const stageVariables = {
     "params",
   ],
   workflowOutputAs: ["context", "workflow", "runtime", "params"],
+  /**
+   * Grasp's own: a `for` task's item keys (`metadata.grasp.key`), all at
+   * once, on the items its enter step recorded as `.`, with the variables
+   * of its other expressions (`taskDefinition`'s).
+   */
+  loopKeys: ["context", "input", "task", "workflow", "runtime", "params"],
 } as const satisfies Record<string, readonly string[]>;
 
 /**
