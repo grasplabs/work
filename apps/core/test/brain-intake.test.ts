@@ -11,6 +11,7 @@ import {
   fact,
   kept,
   mapped,
+  othersTold,
   team,
   ticketsReply,
   told,
@@ -34,6 +35,8 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // - A drawing written over when the work is drawn again.
 // - What a record rests on lost, so deleting an interview can't find it.
 // - Someone else adding, or squatting on, the onboarding's own records.
+// - What someone said, or a fact they didn't approve, in the transcript of
+//   their team's interviews: its turns are the approved statements alone.
 
 const idp = mockIdp();
 
@@ -323,6 +326,91 @@ describe(
         waiting: 0,
         late: `brain:${ids.team}`,
         types: ["statement", "team", "workflow", "workflowVersion"],
+      });
+    });
+
+    it("carries as its interviews' transcript only the statements their people approved, never what they said, read or left unapproved", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      await mapped(ids);
+      await agree(ids.max, [
+        fact("m1", "step", "Opens the ticket in Zendesk."),
+        fact("m2", "system", "Tickets arrive in Zendesk."),
+        fact("m3", "handoff", "Max hands billing questions to Noor."),
+      ]);
+      await agree(ids.mia, [
+        fact("i1", "system", "Tickets arrive in Zendesk."),
+        fact(
+          "i2",
+          "wish",
+          "Would like the customer number filled in for them."
+        ),
+      ]);
+      // Mo says more than he approves: a raw line, and a fact he left out
+      // of what he agreed to.
+      await agree(
+        ids.mo,
+        [
+          fact("o1", "wait", "A ticket waits days for the customer's reply."),
+          {
+            id: "o2",
+            tag: "rule",
+            text: "You said: Mo skips the queue for his friends.",
+            record: "Mo skips the queue for his friends.",
+          },
+        ],
+        0,
+        [
+          { from: "stephen", text: "What starts one?" },
+          { from: "person", text: "Honestly Lea never answers her mail." },
+        ]
+      );
+      await othersTold(ids);
+      await answering([ticketsReply(ids)], async () => await store.drawNext());
+      await store.intakeNext();
+      const member = await signedInApi(idp, "user");
+      const brain = await member.api.brain.read();
+      const teamId = `team-${ids.team}`;
+      const source = brain.sources.find(
+        ({ teamIds }) => teamIds?.includes(teamId) === true
+      );
+      const statements = brain.statements
+        .filter(({ sourceId }) => sourceId === source?.id)
+        .map(({ text }) => text);
+      const shown = JSON.stringify(source?.transcript);
+      expect({
+        transcript: source?.transcript,
+        sameAsStatements: source?.transcript?.turns
+          .map(({ text }) => text)
+          .toSorted(),
+        unsaid: ["Lea never answers", "skips the queue", "You said"].filter(
+          (words) => shown.includes(words)
+        ),
+      }).toStrictEqual({
+        transcript: {
+          unit: "passage",
+          turns: [
+            {
+              at: "1",
+              speaker: "Ops",
+              text: "A ticket waits days for the customer's reply.",
+            },
+            {
+              at: "2",
+              speaker: "Ops",
+              text: "Someone hands billing questions to someone.",
+            },
+            { at: "3", speaker: "Ops", text: "Tickets arrive in Zendesk." },
+            {
+              at: "4",
+              speaker: "Ops",
+              text: "Would like the customer number filled in for them.",
+            },
+          ],
+          chapters: [],
+        },
+        sameAsStatements: statements.toSorted(),
+        unsaid: [],
       });
     });
 

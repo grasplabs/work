@@ -57,6 +57,7 @@ import {
 } from "./payloads.ts";
 import type { StagedPayload } from "./payloads.ts";
 import {
+  hasTranscript,
   transcriptDetail,
   transcriptSchema,
   transcriptWrites,
@@ -489,6 +490,10 @@ export const writeVersion = async <C>(
   if ((existing?.currentVersion ?? 0) !== ifVersion) {
     throw conflict(existing);
   }
+  const had =
+    existing !== undefined && transcript === undefined
+      ? await hasTranscript(db, existing.id)
+      : false;
   const now = brain.ports.clock();
   const number = ifVersion + 1;
   const documentId = existing?.id ?? crypto.randomUUID();
@@ -542,7 +547,13 @@ export const writeVersion = async <C>(
       restoredFrom,
       createdAt: now,
     }),
-    ...transcriptWrites(brain, by.actor, documentId, number, transcript, now),
+    ...transcriptWrites(
+      brain,
+      by.actor,
+      { documentId, version: number, had },
+      transcript,
+      now
+    ),
     db.delete(links).where(eq(links.fromDocumentId, documentId)),
     ...inChunks(
       prepared.links.map((link) => ({

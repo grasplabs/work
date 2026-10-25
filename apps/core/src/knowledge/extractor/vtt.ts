@@ -1,5 +1,6 @@
 import { WebVTTParser } from "webvtt-parser";
 import type { WebVTTCue, WebVTTNode } from "webvtt-parser";
+import entities from "webvtt-parser/html-entities.json";
 
 import { TooLargeError } from "./too-large.ts";
 
@@ -104,7 +105,9 @@ export const vttExtraction = (bytes: Uint8Array): VttExtraction => {
     fatal: false,
     ignoreBOM: true,
   }).decode(bytes);
-  const { cues, errors } = new WebVTTParser().parse(input);
+  // Every character reference HTML names, as the spec reads them: without
+  // the table, the parser knows a few and leaves `&amp;` as `&;`.
+  const { cues, errors } = new WebVTTParser(entities).parse(input);
   if (errors.some(({ line }) => line === 1)) {
     throw new Error("Not a WebVTT file: no signature");
   }

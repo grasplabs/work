@@ -3,7 +3,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { outboxedIfChanged } from "./audit.ts";
+import { outboxed } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { collections, documents, transcripts } from "./db/schema.ts";
@@ -122,23 +122,58 @@ export const transcriptDetail = (
   transcriptChapters: transcript.chapters.length,
 });
 
-/** The stored row's turns and chapters as a transcript. */
-const fromRow = (row: { turns: string; chapters: string }): Transcript => ({
-  turns: z.array(transcriptTurnSchema).parse(JSON.parse(row.turns)),
-  chapters: z.array(transcriptChapterSchema).parse(JSON.parse(row.chapters)),
+/**
+ * A stored transcript's shape, without the limits a producer's is held
+ * to: a purge's rewrite may have made a turn longer than a producer may
+ * save, and it must still be read.
+ */
+const storedSchema = z.object({
+  turns: z.array(
+    z.object({
+      speaker: z.string(),
+      text: z.string(),
+      startMs: z.number().optional(),
+      endMs: z.number().optional(),
+    })
+  ),
+  chapters: z.array(
+    z.object({ title: z.string(), firstTurn: z.int(), lastTurn: z.int() })
+  ),
 });
+
+/** The stored row's turns and chapters as a transcript. */
+const fromRow = (row: { turns: string; chapters: string }): Transcript => {
+  const turns: unknown = JSON.parse(row.turns);
+  const chapters: unknown = JSON.parse(row.chapters);
+  return storedSchema.parse({ turns, chapters });
+};
+
+/** Whether a document has a transcript stored now. */
+export const hasTranscript = async (
+  db: DrizzleD1Database,
+  documentId: string
+): Promise<boolean> =>
+  (await db
+    .select({ documentId: transcripts.documentId })
+    .from(transcripts)
+    .where(eq(transcripts.documentId, documentId))
+    .get()) !== undefined;
 
 /**
  * The statements that make version `version` of a document's transcript
  * `transcript`, in its save's batch: the one it had goes, and this one, if
- * any, takes its place. A save without one that took one away records
- * `knowledge.transcript.removed`.
+ * any, takes its place. A save without one, of a document that `had` one
+ * (`hasTranscript`, read before: the save's version check keeps any other
+ * save from coming between), records `knowledge.transcript.removed`.
  */
 export const transcriptWrites = <C>(
   brain: Brain<C>,
   actor: Json,
-  documentId: string,
-  version: number,
+  {
+    documentId,
+    version,
+    had,
+  }: { documentId: string; version: number; had: boolean },
   transcript: Transcript | undefined,
   now: Date
 ): BatchItem<"sqlite">[] => {
@@ -147,15 +182,17 @@ export const transcriptWrites = <C>(
     .delete(transcripts)
     .where(eq(transcripts.documentId, documentId));
   if (transcript === undefined) {
-    return [
-      removed,
-      outboxedIfChanged(brain, {
-        actor,
-        action: "knowledge.transcript.removed",
-        target: { type: "document", id: documentId },
-        detail: { version },
-      }),
-    ];
+    return had
+      ? [
+          removed,
+          outboxed(brain, {
+            actor,
+            action: "knowledge.transcript.removed",
+            target: { type: "document", id: documentId },
+            detail: { version },
+          }),
+        ]
+      : [removed];
   }
   return [
     removed,
