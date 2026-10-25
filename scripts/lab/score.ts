@@ -12,7 +12,7 @@
 import path from "node:path";
 
 import type { InterviewFact } from "@grasp-os/shared/interview-links";
-import type { StaffTranscript } from "@grasp-os/shared/onboarding-staff";
+import type { LabInterview } from "@grasp-os/shared/lab";
 
 import {
   cardColumns,
@@ -23,7 +23,7 @@ import {
 } from "./card.ts";
 import type { Judged, RealCard, ScoreCard } from "./card.ts";
 import type { Transcript } from "./cases.ts";
-import { contextOf, inTurns, spentLine } from "./core.ts";
+import { contextOf, interviewOf, inTurns, spentLine } from "./core.ts";
 import type { Core } from "./core.ts";
 import { hardTurns, judge, judgeTruth } from "./judge.ts";
 import { folderOf, keepJson } from "./kept.ts";
@@ -44,7 +44,7 @@ const judgedAtOnce = 3;
 /** Someone's interview as the local core keeps it, read as Grasp's staff. */
 interface Held {
   person: PracticePerson;
-  transcript: StaffTranscript;
+  transcript: NonNullable<LabInterview["interview"]>;
   lines: Said[];
   facts: InterviewFact[];
 }
@@ -53,12 +53,11 @@ interface Held {
 const heldOf = async (core: Core, practice: Practice): Promise<Held[]> => {
   const all = await Promise.all(
     practice.people.map(async (person) => {
-      const transcript = await core.session.api.onboardingStaff.transcript(
-        person.id
-      );
-      const { progress } = transcript;
+      const transcript = await interviewOf(core, person.id);
+      const progress = transcript?.progress ?? null;
       // Someone who went away agreed to nothing, and is scored all the same: that is what it cost.
       const counts =
+        transcript !== null &&
         progress !== null &&
         (transcript.completedAt !== null || person.played?.left === true);
       return counts

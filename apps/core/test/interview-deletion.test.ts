@@ -24,6 +24,7 @@ import {
   kept,
   mapReply,
   mapped,
+  othersTold,
   openLink,
   rosterOf,
   team,
@@ -55,7 +56,7 @@ import {
 // - D3: a copy left open saving it back (also interview-links.test.ts).
 // - D4: Stephen's lines from it, kept for their sound.
 // - L7: someone taken off the list leaving what they said behind.
-// - W5: a team falling under three people in the brain by a delete.
+// - W5: a team falling under five people in the brain by a delete.
 // - W7: the deletion in the audit log with who, or with their words, or
 //   a delete from the link there at all: its moment would tell the admin
 //   which lead it was.
@@ -98,7 +99,7 @@ const linesWith = (words: string): InterviewLine[] => [
   { from: "stephen", text: stephenSays(words) },
 ];
 
-/** Max, Mia and Mo agree to what they told about tickets: one fact each of their own, and one Max and Mia share. */
+/** Max, Mia and Mo agree to what they told about tickets: one fact each of their own, and one Max and Mia share; Noor and Pim agree to a step each. */
 const toldWith = async (ids: Ids, said: Said) => {
   await agree(
     ids.max,
@@ -124,6 +125,7 @@ const toldWith = async (ids: Ids, said: Said) => {
     0,
     linesWith(said.mo)
   );
+  await othersTold(ids);
 };
 
 /** Draws every piece of work due, each with the tickets' drawing, until none is. */
@@ -306,7 +308,7 @@ const ways: {
     way: "by taking them off the staff list (L7)",
     remove: async (ids) => {
       await onboardingStore(env).saveRoster(
-        rosterOf(ids, ["lea", "mia", "mo", "noor"]),
+        rosterOf(ids, ["lea", "mia", "mo", "noor", "pim"]),
         { type: "system" }
       );
     },
@@ -403,8 +405,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
             `Tickets wait in ${said.max}.`,
             `Would like ${said.mia} filled in for them.`,
           ],
-          sources: ["4 people"],
-          drawings: [3],
+          sources: ["6 people"],
+          drawings: [5],
         },
         after: {
           // What Mia agreed to as well stays: it rests on her.
@@ -413,13 +415,13 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
             "Tickets arrive in Zendesk.",
             `Would like ${said.mia} filled in for them.`,
           ],
-          sources: ["3 people"],
-          // The drawing from three is gone; the one from who is left is there.
-          drawings: [2],
+          sources: ["5 people"],
+          // The drawing from five is gone; the one from who is left is there.
+          drawings: [4],
         },
         left: { words: [], person: [] },
         others: true,
-        drawnFrom: [ids.mia, ids.mo].toSorted(),
+        drawnFrom: [ids.mia, ids.mo, ids.noor, ids.pim].toSorted(),
         redrawnWith: false,
         restsOn: [],
         audited,
@@ -495,7 +497,10 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       left: { words: [], person: [] },
       redrawnWith: false,
       works: [
-        ["handling new tickets", [ids.max, ids.mia, ids.mo].toSorted()],
+        [
+          "handling new tickets",
+          [ids.max, ids.mia, ids.mo, ids.noor, ids.pim].toSorted(),
+        ],
         ["planning the rota", null],
       ],
       after: {
@@ -505,23 +510,25 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
           `Tickets wait in ${said.max}.`,
           `Would like ${said.mia} filled in for them.`,
         ],
-        sources: ["3 people"],
-        // Drawn again from the same three, without the lead's facts.
-        drawings: [3],
+        sources: ["5 people"],
+        // Drawn again from the same five, without the lead's facts.
+        drawings: [5],
       },
       restsOn: [],
     });
   });
 
-  it("that leaves a team under three people takes all of the team's interviews out of the brain until three agree again (W5)", async () => {
+  it("that leaves a team under five people takes all of the team's interviews out of the brain until five agree again (W5)", async () => {
     const store = onboardingStore(env);
-    const ids = await team(["lea", "max", "mia", "mo"]);
+    const ids = await team(["lea", "max", "mia", "mo", "noor"]);
     const said = sentinels();
     await mapped(ids);
     await agree(ids.max, [fact("m9", "wait", `Tickets wait in ${said.max}.`)]);
     await agree(ids.mia, [
       fact("i9", "wish", `Would like ${said.mia} filled in for them.`),
     ]);
+    await agree(ids.mo, [fact("o9", "rule", `Every ticket gets ${said.mo}.`)]);
+    await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
     await drawAll(ids);
     await store.intakeNext();
     const before = await kept(ids);
@@ -578,7 +585,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       drew: true,
       deleted: 200,
       thrown: null,
-      drawnFrom: [ids.mia, ids.mo].toSorted(),
+      drawnFrom: [ids.mia, ids.mo, ids.noor, ids.pim].toSorted(),
       left: { words: [], person: [] },
       restsOn: [],
     });
@@ -672,8 +679,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
           "Tickets arrive in Zendesk.",
           `Would like ${said.mia} filled in for them.`,
         ],
-        sources: ["3 people"],
-        drawings: [2],
+        sources: ["5 people"],
+        drawings: [4],
       },
       restsOn: [],
     });
@@ -777,11 +784,11 @@ describe(
             "Tickets arrive in Zendesk.",
             `Would like ${said.mia} filled in for them.`,
           ],
-          sources: ["3 people"],
-          drawings: [2],
+          sources: ["5 people"],
+          drawings: [4],
         },
         words: ["interviews"],
-        drawnFrom: [ids.mia, ids.mo].toSorted(),
+        drawnFrom: [ids.mia, ids.mo, ids.noor, ids.pim].toSorted(),
         redrawnWith: false,
         restsOn: [],
         drawInput: null,

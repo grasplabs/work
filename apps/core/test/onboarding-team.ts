@@ -18,7 +18,7 @@ import { routed, unique } from "./sign-in.ts";
 // A team on its way through the onboarding into the brain, as the tests
 // of the brain's intake (brain-intake.test.ts) and of deleting an
 // interview (interview-deletion.test.ts) share it: Lea leads Ops, with
-// Max, Mia, Mo and Noor; her map, their agreements, and the drawing of
+// Max, Mia, Mo, Noor and Pim; her map, their agreements, and the drawing of
 // their tickets, with AI Gateway faked behind the AI binding.
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -26,7 +26,7 @@ const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const sessionKey = z.object({ key: z.string().optional() });
 
 /** The people of a team, by key. */
-export type Key = "lea" | "max" | "mia" | "mo" | "noor";
+export type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim";
 
 const names: Record<Key, [string, string]> = {
   lea: ["Lea Lind", "Team lead"],
@@ -34,6 +34,7 @@ const names: Record<Key, [string, string]> = {
   mia: ["Mia Moor", "Agent"],
   mo: ["Mo Mertens", "Agent"],
   noor: ["Noor Nijs", "Agent"],
+  pim: ["Pim Peeters", "Agent"],
 };
 
 /** Each person's and the team's id, by key. */
@@ -44,6 +45,7 @@ const idsOf = (id: string) => ({
   mia: `mia-${id}`,
   mo: `mo-${id}`,
   noor: `noor-${id}`,
+  pim: `pim-${id}`,
 });
 
 /** The staff list of Ops, led by Lea, with the people `keys`. */
@@ -67,7 +69,7 @@ export const rosterOf = (
  * a fresh onboarding that started yesterday.
  */
 export const team = async (
-  keys: readonly Key[] = ["lea", "max", "mia", "mo", "noor"]
+  keys: readonly Key[] = ["lea", "max", "mia", "mo", "noor", "pim"]
 ) => {
   const store = onboardingStore(env);
   const ids = idsOf(unique());
@@ -273,7 +275,17 @@ export const mapped = async (
   );
 };
 
-/** Max, Mia and Mo agree to what they told about tickets. */
+/**
+ * Noor and Pim agree to a step each: with Lea, Max, Mia and Mo they make
+ * six, one more than the five a team needs before any of it reaches the
+ * brain (`brainFloor`), so one interview going leaves the rest there.
+ */
+export const othersTold = async (ids: Ids) => {
+  await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
+  await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
+};
+
+/** Max, Mia, Mo, Noor and Pim agree to what they told about tickets. */
 export const told = async (ids: Ids) => {
   await agree(ids.max, [
     fact("m1", "step", "Opens the ticket in Zendesk."),
@@ -287,6 +299,7 @@ export const told = async (ids: Ids) => {
   await agree(ids.mo, [
     fact("o1", "wait", "A ticket waits days for the customer's reply."),
   ]);
+  await othersTold(ids);
 };
 
 /** Every record the brain keeps whose id is the onboarding's, for a team: as stored. */

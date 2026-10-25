@@ -144,8 +144,8 @@ export const personIn = async (
 ): Promise<string | undefined> => {
   const { core, api } = apiOf(staff);
   try {
-    const { progress } = await api.onboardingStaff.transcript(person);
-    return progress?.person;
+    const { state } = await api.onboardingStaff.interview(person);
+    return state ?? undefined;
   } finally {
     core[Symbol.dispose]();
   }

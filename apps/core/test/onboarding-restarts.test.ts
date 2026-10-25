@@ -215,7 +215,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       before.version,
       progressOf([asked, answer, said])
     );
-    const kept = await onboardingStore(env).transcriptOf(person);
+    const kept = await onboardingStore(env).practiceInterviewOf(person);
     expect({
       again,
       saved: [before.saved, after.saved, twice.saved],

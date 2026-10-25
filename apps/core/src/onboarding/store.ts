@@ -33,6 +33,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   agreementsSchema,
   firstInterviewer,
+  minTeamShown,
   planSchema,
   remindAfterWorkingDays,
   rosterSchema,
@@ -74,7 +75,7 @@ import type {
   StaffLog,
   StaffLogEntry,
   StaffNote,
-  StaffTranscript,
+  StaffInterview,
   StaffWorks,
   StephenSetup,
   StephenSetupView,
@@ -155,12 +156,7 @@ import {
 } from "../mail-outbox.ts";
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
 import { sendMail } from "../mail.ts";
-import {
-  brainFloor,
-  intakeIds,
-  intakeOf,
-  rosterSource,
-} from "./brain-intake.ts";
+import { intakeIds, intakeOf, rosterSource } from "./brain-intake.ts";
 import type { TeamIntake } from "./brain-intake.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import {
@@ -681,6 +677,32 @@ const countsOf = (progress: InterviewProgress): InterviewCounts => ({
   typed: progress.mode === "type",
   interviewer: progress.interviewer ?? null,
 });
+
+/** How someone's interview was held, as staff see it: never what was said. */
+const howHeld = (
+  progress: InterviewProgress | null
+): Pick<StaffInterview, "state" | "mode" | "rating" | "interviewer"> =>
+  progress === null
+    ? { state: null, mode: null, rating: null, interviewer: null }
+    : {
+        state: progress.person,
+        mode: progress.mode,
+        rating: progress.rating ?? null,
+        interviewer: progress.interviewer ?? firstInterviewer,
+      };
+
+/** How much someone said and how much was written down: numbers, never what. */
+const countsOfSaid = (
+  progress: InterviewProgress | null
+): { said: number; facts: number; out: number } => {
+  const facts = progress?.facts ?? [];
+  return {
+    said: (progress?.lines ?? []).filter(({ from }) => from === "person")
+      .length,
+    facts: facts.filter(({ out }) => out !== true).length,
+    out: facts.filter(({ out }) => out === true).length,
+  };
+};
 
 /** Why staff's change to the organization wasn't made. */
 export type OrganizationRefusal =
@@ -3594,12 +3616,14 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Someone's interview for Grasp's staff, with who held it and the texts
-   * it was held with, and the link's random id to audit its read by.
+   * Someone's interview for Grasp's staff (GRA-329): who held it, the
+   * texts it was held with, where it stands and its numbers, read here,
+   * inside the store, so not a word of it leaves; and the link's random id
+   * to audit the look by.
    */
-  transcriptOf(
+  interviewOf(
     person: string
-  ): (StaffTranscript & { interviewId: string }) | null {
+  ): (StaffInterview & { interviewId: string }) | null {
     const roster = this.#roster();
     const one = roster?.people.find(({ id }) => id === person);
     const [code] = this.#db
@@ -3611,12 +3635,20 @@ export class Onboarding extends DurableObject<Env> {
       return null;
     }
     const state = this.#interviews().get(person);
-    const progress = this.#forSpeaker(person, this.#held(person));
+    const progress = this.#held(person);
     const texts = this.#db
       .select({ mark: interviewTexts.mark })
       .from(interviewTexts)
       .where(eq(interviewTexts.person, person))
       .orderBy(asc(interviewTexts.at), asc(interviewTexts.mark))
+      .all();
+    const [taking] = this.#db
+      .select({
+        at: participations.at,
+        withdrawnAt: participations.withdrawnAt,
+      })
+      .from(participations)
+      .where(eq(participations.person, person))
       .all();
     return {
       person,
@@ -3624,11 +3656,37 @@ export class Onboarding extends DurableObject<Env> {
       team: roster?.teams.find(({ id }) => id === one.team)?.name ?? "",
       startedAt: state?.startedAt ?? null,
       completedAt: state?.completedAt ?? null,
-      progress,
-      interviewer:
-        progress === null ? null : (progress.interviewer ?? firstInterviewer),
+      ...howHeld(progress),
       texts: texts.map(({ mark }) => mark),
+      counts: {
+        ...countsOfSaid(progress),
+        approved: this.#admitted(person, progress).length,
+      },
+      participatedAt: taking?.at ?? null,
+      withdrawnAt: taking?.withdrawnAt ?? null,
       interviewId: code.linkId,
+    };
+  }
+
+  /**
+   * What a practice person said and approved, for the Stephen Lab alone
+   * (lab.ts, on a local stack): the lab played them, and scores what was
+   * written down. Never reached on a deployed core, where Grasp's staff
+   * see no word of an interview (GRA-329, `interviewOf`).
+   */
+  practiceInterviewOf(person: string): {
+    startedAt: string | null;
+    completedAt: string | null;
+    progress: InterviewProgress | null;
+  } | null {
+    if (!this.#onRoster(person)) {
+      return null;
+    }
+    const state = this.#interviews().get(person);
+    return {
+      startedAt: state?.startedAt ?? null,
+      completedAt: state?.completedAt ?? null,
+      progress: this.#forSpeaker(person, this.#held(person)),
     };
   }
 
@@ -4737,7 +4795,7 @@ export class Onboarding extends DurableObject<Env> {
    * names (for none to reach it), the facts each person who told their
    * own work agreed to, and its pieces of work as drawn. Never the lead's
    * facts, whose role alone says who they are, nor a piece of work drawn
-   * from the lead alone. None while fewer than `brainFloor` of its people
+   * from the lead alone. None while fewer than `minTeamShown` of its people
    * agreed: it waits.
    */
   #teamIntake(teamId: string): TeamIntake | null {
@@ -4748,7 +4806,7 @@ export class Onboarding extends DurableObject<Env> {
     }
     const members = roster.people.filter((person) => person.team === teamId);
     const agreed = members.filter(({ id }) => this.#agreedAt(id) !== null);
-    if (agreed.length < brainFloor) {
+    if (agreed.length < minTeamShown) {
       return null;
     }
     const { lead } = team;
@@ -4868,7 +4926,7 @@ export class Onboarding extends DurableObject<Env> {
    * - a drawing once anyone it rests on is gone: their numbers and words
    *   are in it, and what is left is drawn again without them;
    * - a workflow once nobody it rests on is left, or none of its drawings;
-   * - everything of a team fewer than `brainFloor` of whose people still
+   * - everything of a team fewer than `minTeamShown` of whose people still
    *   agreed, or that left the staff list: the brain has a team's work
    *   only from three of its people (GRA-359), and gets it again once it
    *   does.
@@ -4896,7 +4954,7 @@ export class Onboarding extends DurableObject<Env> {
           roster?.people.filter(
             (person) => person.team === team && agreed.has(person.id)
           ).length ?? 0;
-        return !onRoster || left < brainFloor;
+        return !onRoster || left < minTeamShown;
       })
     );
     const records = new Map<
