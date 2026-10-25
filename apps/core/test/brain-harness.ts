@@ -342,8 +342,11 @@ const rowText = (row: unknown): string =>
  * What changes on its own whatever a trial does: the audit outboxes as
  * calls and reads are recorded and drained, sign-in sessions as they are
  * checked and refreshed, signing keys as they are made when first needed,
- * SQLite's sequence counters, and usage signals as they are computed. Not
- * something a task could ask to change.
+ * SQLite's sequence counters, usage signals as they are computed, and how
+ * far the Brain's background consolidation read each scope's episodes (a
+ * watermark of IDs and times, moved by core's own job as a trial's turns
+ * are captured; the lessons it writes stay watched). Not something a task
+ * could ask to change.
  */
 const bookkeeping = new Set([
   "core.audit_outbox",
@@ -356,6 +359,7 @@ const bookkeeping = new Set([
   "knowledge.sqlite_sequence",
   "core.improvement_signal_computations",
   "core.knowledge_signal_computations",
+  "knowledge.brain_consolidation_marks",
 ]);
 
 /**
