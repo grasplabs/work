@@ -13,6 +13,7 @@ import type {
   Tool,
   Transcript,
   Vision,
+  Workflow as BrainWorkflow,
   Workspace,
 } from "@grasp-os/shared/brain";
 import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
@@ -89,7 +90,7 @@ import type { SessionCheck } from "./session-check.ts";
 // |                    | only; the onboarding's are the team's claims five or     |
 // |                    | more of its people made (GRA-1084)                       |
 // | workflows          | the brain's records, as the onboarding drew them, for    |
-// |                    | everyone signed in                                       |
+// |                    | everyone signed in; only their numbers for Grasp's staff |
 // | goals, landscape,  | nothing core can read holds them yet: empty              |
 // | policies           |                                                          |
 //
@@ -766,6 +767,36 @@ const onboardingHeld = async (env: Env): Promise<OnboardingHeld> => {
   };
 };
 
+/**
+ * A workflow as Grasp's staff read it (GRA-1084): its name and its
+ * drawings' numbers, never a word of what its people told.
+ */
+const numbersOnly = (workflow: BrainWorkflow): BrainWorkflow => ({
+  ...workflow,
+  baseline: { steps: [] },
+  ...(workflow.target === undefined ? {} : { target: { steps: [] } }),
+  ...(workflow.drawings === undefined
+    ? {}
+    : {
+        drawings: workflow.drawings.map((drawing) => ({
+          ...drawing,
+          starts: "",
+          steps: [],
+          waits: [],
+          differently: [],
+          decides: "",
+          own: "",
+          ai: "",
+          right: "",
+          ask: "",
+          next: "",
+          term: null,
+          differs: null,
+          open: [],
+        })),
+      }),
+});
+
 /** The brain's workspace, as `person` may read it. */
 export const readBrain = async (
   env: Env,
@@ -823,7 +854,9 @@ export const readBrain = async (
     statements: person.staff ? [] : records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),
-    workflows: records.workflows,
+    workflows: person.staff
+      ? records.workflows.map(numbersOnly)
+      : records.workflows,
     connections,
     landscape: [],
     policies: [],

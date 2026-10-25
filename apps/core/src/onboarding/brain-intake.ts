@@ -1,6 +1,10 @@
 import type { WorkflowState } from "@grasp-os/shared/admin/interviews";
 import { dayOf } from "@grasp-os/shared/admin/org-record";
-import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
+import type {
+  DrawnWork,
+  HeardAnswer,
+  Told,
+} from "@grasp-os/shared/admin/org-record";
 import type { StatementKind } from "@grasp-os/shared/brain";
 import {
   brainRecordSchema,
@@ -33,7 +37,9 @@ import type { TeamClaim } from "./team-claims.ts";
 //   never resting on the lead, whose role alone says who they are; and a
 //   name on the staff list in it is taken out.
 // - A drawing keeps no `from` and no `told`: its numbers are ranges over
-//   everyone who gave one, and how many did, never whose.
+//   everyone who gave one, and how many did, never whose; and only what
+//   five or more of its people told, each part apart (`versionOf`,
+//   GRA-1084).
 // - A team reaches the brain only once `minTeamShown` (five) of its people
 //   agreed, as many as the company's numbers need and the interview's
 //   notice promises (GRA-329); the store holds it back until then.
@@ -185,26 +191,56 @@ const volumesOf = (
   });
 
 /**
- * A drawing as the brain keeps it: no person in it, each person's numbers
- * as ranges over everyone, and every text without a name.
+ * A drawing as the brain keeps it (GRA-1084): only what five or more of
+ * the people it was drawn from told, the lead not counted, and every text
+ * without a name. Each step, wait, case off the normal path, what starts
+ * one, a term and a step told another way, by who told it (`told`); each
+ * one-line answer by who said it as it stands (`heard`: none on a drawing
+ * from before it was noted). Numbers are ranges over everyone who gave
+ * one, kept only when five or more did. What the next interviews should
+ * ask is never the brain's: it is written from what few said.
  */
 const versionOf = (
   work: TeamIntake["works"][number],
   clean: (text: string) => string
 ): Omit<WorkflowVersionRecord, "id" | "workflowId" | "sourceId"> => {
   const { drawn } = work;
-  const told = Object.values(drawn.told);
+  const lead = new Set(work.namedBy);
+  const tellers = Object.entries(drawn.told).filter(
+    ([person]) => !lead.has(person)
+  );
+  const told = tellers.map(([, each]) => each);
+  const enough = (people: Iterable<string>): boolean =>
+    [...new Set(people)].filter((person) => !lead.has(person)).length >=
+    minTeamShown;
+  const toldBy = (said: (each: Told) => boolean): boolean =>
+    enough(tellers.flatMap(([person, each]) => (said(each) ? [person] : [])));
+  const heard = (answer: HeardAnswer, text: string): string =>
+    enough(drawn.heard?.[answer] ?? []) ? clean(text) : "";
+  // The steps five or more told, and where each step of the drawing lands
+  // among them: a case off the path after a step left out follows the
+  // last step kept before it.
+  const kept = drawn.steps.flatMap((step, index) =>
+    toldBy((each) => each.steps.includes(index)) ? [{ step, index }] : []
+  );
+  const placeOf = (index: number): number =>
+    Math.max(kept.filter((each) => each.index <= index).length - 1, 0);
   const takes = told.flatMap(({ takes: own }) => (own === null ? [] : [own]));
   const wrong = rangeOf(
     told.flatMap(({ wrong: own }) => (own === null ? [] : [own]))
   );
+  const { differs } = drawn;
+  const differsKept =
+    differs !== null &&
+    kept.some(({ index }) => index === differs.step) &&
+    toldBy((each) => each.way?.other === true);
   return {
     type: "workflowVersion",
     date: dayOf(drawn.at),
     state: work.state,
     people: drawn.from.length,
-    starts: clean(drawn.starts),
-    steps: drawn.steps.map(({ text, who, tool, minutes, documented }) => ({
+    starts: toldBy((each) => each.start) ? clean(drawn.starts) : "",
+    steps: kept.map(({ step: { text, who, tool, minutes, documented } }) => ({
       text: clean(text),
       who: clean(who),
       tool: clean(tool),
@@ -219,34 +255,46 @@ const versionOf = (
             },
       documented,
     })),
-    waits: drawn.waits.map(clean),
-    differently: drawn.differently.map(({ when, does, outOfTen, after }) => ({
-      when: clean(when),
-      does: clean(does),
-      outOfTen,
-      after,
-    })),
-    decides: clean(drawn.decides),
-    own: clean(drawn.own),
-    ai: clean(drawn.ai),
-    right: clean(drawn.right),
-    ask: clean(drawn.ask),
-    next: clean(drawn.next),
+    waits: drawn.waits.flatMap((wait, index) =>
+      toldBy((each) => each.waits.includes(index)) ? [clean(wait)] : []
+    ),
+    differently: drawn.differently.flatMap(
+      ({ when, does, outOfTen, after }, index) =>
+        toldBy((each) => each.differently.includes(index))
+          ? [
+              {
+                when: clean(when),
+                does: clean(does),
+                outOfTen,
+                after: placeOf(after),
+              },
+            ]
+          : []
+    ),
+    decides: heard("decides", drawn.decides),
+    own: heard("own", drawn.own),
+    ai: heard("ai", drawn.ai),
+    right: heard("right", drawn.right),
+    ask: heard("ask", drawn.ask),
+    next: heard("next", drawn.next),
     term:
-      drawn.term === null
+      drawn.term === null || !toldBy((each) => each.term)
         ? null
         : { word: clean(drawn.term.word), meaning: clean(drawn.term.meaning) },
     differs:
-      drawn.differs === null
+      differs === null || !differsKept
         ? null
         : {
-            ...drawn.differs,
-            other: clean(drawn.differs.other),
-            because: clean(drawn.differs.because),
+            ...differs,
+            step: placeOf(differs.step),
+            other: clean(differs.other),
+            because: clean(differs.because),
           },
-    volumes: volumesOf(told, drawn.per),
+    volumes: volumesOf(told, drawn.per).filter(
+      ({ people }) => people >= minTeamShown
+    ),
     takes:
-      takes.length === 0
+      takes.length < minTeamShown
         ? null
         : {
             unit: drawn.unit,
@@ -255,8 +303,11 @@ const versionOf = (
             people: takes.length,
             basis: "estimated",
           },
-    wrong: wrong === null ? null : { ...wrong, basis: "estimated" },
-    open: drawn.open.map(clean),
+    wrong:
+      wrong === null || wrong.people < minTeamShown
+        ? null
+        : { ...wrong, basis: "estimated" },
+    open: [],
   };
 };
 
