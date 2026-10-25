@@ -3402,6 +3402,7 @@ msgstr "Can’t be read"
 
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
+#: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
@@ -4841,6 +4842,11 @@ msgstr "done"
 #: src/chat/thread.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
+msgid "Done"
+msgstr "Done"
+
+#: src/connections/connect-dialog.tsx
+msgctxt "a step that is finished"
 msgid "Done"
 msgstr "Done"
 
@@ -11925,6 +11931,10 @@ msgstr "Takes part in the interviews"
 msgid "Takes sensitive data"
 msgstr "Takes sensitive data"
 
+#: src/connections/connect-dialog.tsx
+msgid "Taking long? <0>Try again</0>"
+msgstr "Taking long? <0>Try again</0>"
+
 #: src/onboarding/organization-words.ts
 msgctxt "filter: teams that take part in the interviews"
 msgid "Taking part"
@@ -14067,6 +14077,10 @@ msgstr "Waiting"
 msgctxt "dashboard: what waits on you, settled on its own page"
 msgid "Waiting elsewhere"
 msgstr "Waiting elsewhere"
+
+#: src/connections/connect-dialog.tsx
+msgid "Waiting for {app}"
+msgstr "Waiting for {app}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Waiting for {signIn}"

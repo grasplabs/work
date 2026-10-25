@@ -3402,6 +3402,7 @@ msgstr "No se puede leer"
 
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
+#: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
@@ -4843,6 +4844,11 @@ msgstr "hecho"
 #: src/routes/_shell.workflows.index.tsx
 msgid "Done"
 msgstr "Listo"
+
+#: src/connections/connect-dialog.tsx
+msgctxt "a step that is finished"
+msgid "Done"
+msgstr "Hecho"
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox tab: what someone dealt with"
@@ -11925,6 +11931,10 @@ msgstr "Participa en las entrevistas"
 msgid "Takes sensitive data"
 msgstr "Admite datos sensibles"
 
+#: src/connections/connect-dialog.tsx
+msgid "Taking long? <0>Try again</0>"
+msgstr "¿Tarda mucho? <0>Inténtalo de nuevo</0>"
+
 #: src/onboarding/organization-words.ts
 msgctxt "filter: teams that take part in the interviews"
 msgid "Taking part"
@@ -14067,6 +14077,10 @@ msgstr "Espera"
 msgctxt "dashboard: what waits on you, settled on its own page"
 msgid "Waiting elsewhere"
 msgstr "Pendiente en otro lugar"
+
+#: src/connections/connect-dialog.tsx
+msgid "Waiting for {app}"
+msgstr "Esperando a {app}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Waiting for {signIn}"
