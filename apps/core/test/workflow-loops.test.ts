@@ -1,8 +1,4 @@
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
-import type { Role } from "@grasp-os/shared/roles";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -19,6 +15,7 @@ import {
   hostOf,
   published,
   ranFor,
+  recordedText,
 } from "./json-workflows.ts";
 
 // Sequential `for` loops of JSON workflows (GRA-276; @grasp-os/open-workflow's
@@ -563,7 +560,10 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
   });
 });
 
-const itemsSchema = z.object({ ok: z.literal(true), value: z.array(z.json()) });
+const itemsSchema = z.object({
+  ok: z.literal(true),
+  value: z.object({ items: z.array(z.json()) }),
+});
 
 /** The loop the forged modules below run: three names, a while, a task. */
 const named = [

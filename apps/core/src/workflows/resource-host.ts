@@ -4659,6 +4659,28 @@ export class ResourceRunHost
   }
 
   /**
+   * Refuses `record` of race `task`'s own step `step` unless it names its
+   * winning branch alone: one it has, which the race reached past the
+   * failures before it and which didn't fail itself (`#raceGoesTo`). What
+   * each branch did its own steps recorded.
+   */
+  #requireRaceRecord(
+    step: StepOf,
+    task: Extract<SealedTask, { kind: "fork" }>,
+    record: { branch?: number | undefined }
+  ): void {
+    const { branch } = record;
+    if (
+      branch === undefined ||
+      branch >= task.fork.branches ||
+      !this.#raceGoesTo(step.place, branch) ||
+      Object.keys(record).length !== 2
+    ) {
+      this.#refuse(`Task "${task.id}"'s race records its winning branch.`);
+    }
+  }
+
+  /**
    * Accepts what of `record` a loop's or a fork's steps record, whatever
    * the isolate resolved: a race (a competing fork's `task` step) only
    * its winning branch, one it has; an `item` step only what its `while`
@@ -4680,20 +4702,8 @@ export class ResourceRunHost
     if (task === undefined) {
       return false;
     }
-    // A race records its winning branch, one it has, and nothing of its
-    // own: what each branch did its own steps recorded.
-    // Only a branch the race reached past the failures before it, which
-    // didn't fail itself (`#raceGoesTo`).
     if (task.kind === "fork" && step.kind === "task") {
-      const { branch } = record;
-      if (
-        branch === undefined ||
-        branch >= task.fork.branches ||
-        !this.#raceGoesTo(step.place, branch) ||
-        Object.keys(record).length !== 2
-      ) {
-        this.#refuse(`Task "${task.id}"'s race records its winning branch.`);
-      }
+      this.#requireRaceRecord(step, task, record);
       return true;
     }
     if (step.kind === "item") {
