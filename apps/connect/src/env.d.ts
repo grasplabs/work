@@ -88,6 +88,12 @@ interface __BaseEnv_Env {
   WHATSAPP_PHONE_NUMBER_ID?: string;
   WHATSAPP_ACCESS_TOKEN?: string;
   /**
+   * The client's Telegram bot's token from BotFather (src/channels.ts), set
+   * by hand on staging until the console seals it per client. While it is
+   * unset, every Telegram request is refused as `unconfigured`.
+   */
+  TELEGRAM_BOT_TOKEN?: string;
+  /**
    * `none` on workerd and on-prem, which have no Cloudflare jurisdiction:
    * the clock's object is then taken from the plain namespace
    * (src/clock.ts). Unset or any other value means the EU. Never set in

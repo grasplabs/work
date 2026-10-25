@@ -57,6 +57,14 @@ import { recordEvents } from "./audit.ts";
 // (`WHATSAPP_ACCESS_TOKEN`). Media, templates, the number's settings and
 // every other Graph path are refused, and so is another number's id.
 //
+// Telegram: only the Bot API (`https://api.telegram.org/bot<token>/
+// <method>`), and of it only what an adapter needs to answer in a chat:
+// sending, changing and removing its own messages, showing it is typing,
+// and reading who it is (`telegramMethods`). The token stands in the path:
+// it must be the placeholder there, which connect swaps for the bot's
+// (`TELEGRAM_BOT_TOKEN`); files, webhooks, chat members and updates are
+// refused, and the real token never goes back to core.
+//
 // The token is cached in this isolate until shortly before it expires,
 // keyed by the bot's app, tenant and a hash of its secret, so rotating the
 // secret takes a new token at once. Only the token is cached, never a
@@ -166,6 +174,24 @@ const whatsAppHost = "graph.facebook.com";
 const whatsAppMessagesPath =
   /^\/v\d{1,3}\.\d{1,3}\/(?<number>\d{1,32})\/messages$/u;
 
+/** Telegram's Bot API. */
+const telegramHost = "api.telegram.org";
+
+/** A Bot API method's path, the bot's token in it. */
+const telegramMethodPath = /^\/bot(?<token>[^/]+)\/(?<method>[A-Za-z]+)$/u;
+
+/**
+ * The Bot API methods an adapter may call, and whether each changes
+ * something at Telegram, recorded as Teams' writes are.
+ */
+const telegramMethods: ReadonlyMap<string, { write: boolean }> = new Map([
+  ["sendMessage", { write: true }],
+  ["editMessageText", { write: true }],
+  ["deleteMessage", { write: true }],
+  ["sendChatAction", { write: false }],
+  ["getMe", { write: false }],
+]);
+
 /** Methods that change something at the platform, recorded. */
 const writeMethods: ReadonlySet<string> = new Set(["POST", "PUT", "DELETE"]);
 
@@ -263,6 +289,7 @@ const statedOf = (
     (url.hostname === loginHost ||
       url.hostname === slackHost ||
       url.hostname === whatsAppHost ||
+      url.hostname === telegramHost ||
       botConnectorHosts.has(url.hostname))
       ? url.hostname
       : "other",
@@ -1043,6 +1070,146 @@ const whatsAppFetch = async (
 };
 
 /**
+ * Why a Telegram request is refused, or where it goes with the bot's real
+ * token, whether its method changes something, and its body: only the Bot
+ * API over HTTPS, one of the methods an adapter may call
+ * (`telegramMethods`), posted, with the placeholder in the token's place,
+ * within the size limit, and only while the client's bot is set up.
+ */
+const checkedTelegramRequest = async (
+  env: Env,
+  request: Request,
+  url: URL
+): Promise<
+  { refused: RefusedReason } | { sendTo: URL; write: boolean; body: Uint8Array }
+> => {
+  if (
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.port !== "" ||
+    url.hostname !== telegramHost
+  ) {
+    return { refused: "host" };
+  }
+  const token = env.TELEGRAM_BOT_TOKEN;
+  if (token === undefined || token === "") {
+    return { refused: "unconfigured" };
+  }
+  const named = telegramMethodPath.exec(url.pathname)?.groups;
+  const allowed =
+    named?.method === undefined ? undefined : telegramMethods.get(named.method);
+  if (allowed === undefined || url.search !== "") {
+    return { refused: "path" };
+  }
+  if (request.method !== "POST") {
+    return { refused: "method" };
+  }
+  if (named?.token !== channelCredentialPlaceholder) {
+    return { refused: "credential" };
+  }
+  const body = await readCapped(request.body, maxChannelRequestBytes);
+  if (body === undefined) {
+    return { refused: "too_large" };
+  }
+  const sendTo = new URL(`https://${telegramHost}/bot${token}/${named.method}`);
+  return { sendTo, write: allowed.write, body };
+};
+
+/**
+ * Sends one request on to Telegram, its address carrying the bot's token,
+ * tried again while Telegram rate limits it and asks for a short wait.
+ */
+const sendToTelegram = async (
+  url: URL,
+  headers: Headers,
+  body: Uint8Array
+): Promise<
+  { response: Response; attempts: number } | { response: undefined }
+> => {
+  let attempts = 0;
+  for (;;) {
+    attempts += 1;
+    let response: Response;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      response = await fetch(url, {
+        method: "POST",
+        headers,
+        body,
+        redirect: "manual",
+        signal: AbortSignal.timeout(requestTimeoutMs),
+      });
+    } catch {
+      // Never the error itself: its message may hold the address, and the
+      // address the token.
+      return { response: undefined };
+    }
+    if (response.status !== 429 || attempts >= maxAttempts) {
+      return { response, attempts };
+    }
+    const waitMs = retryWaitMs(response.headers.get("retry-after"), attempts);
+    if (waitMs > maxRetryWaitMs) {
+      return { response, attempts };
+    }
+    // oxlint-disable-next-line no-await-in-loop -- once, then again
+    await response.body?.cancel();
+    // oxlint-disable-next-line no-await-in-loop -- the wait it asked for
+    await scheduler.wait(waitMs);
+  }
+};
+
+/**
+ * A Telegram request: one of the Bot API methods an adapter may call,
+ * sent on as the bot, or refused (`checkedTelegramRequest`).
+ */
+const telegramFetch = async (
+  env: Env,
+  request: Request,
+  url: URL
+): Promise<Response> => {
+  const platform = "telegram";
+  const stated = statedOf(request.method, url);
+  const checked = await checkedTelegramRequest(env, request, url);
+  if ("refused" in checked) {
+    return await refuse(env, platform, checked.refused, stated);
+  }
+  const { sendTo, write, body } = checked;
+  const headers = new Headers();
+  for (const name of forwardedHeaders) {
+    const value = request.headers.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  const sent = await sendToTelegram(sendTo, headers, body);
+  if (sent.response === undefined) {
+    log.warn("channel.failed", { platform, ...stated });
+    if (write) {
+      await record(env, { platform, outcome: "failed", ...stated });
+    }
+    return failed();
+  }
+  const { response, attempts } = sent;
+  const { status } = response;
+  log.info("channel.request", { platform, ...stated, status, attempts });
+  if (write) {
+    await record(env, {
+      platform,
+      outcome: response.ok ? "ok" : "failed",
+      ...stated,
+      status,
+      attempts: attempts > 1 ? attempts : undefined,
+    });
+  }
+  if (status >= 300 && status < 400 && status !== 304) {
+    await response.body?.cancel();
+    return failed();
+  }
+  return await passedBack(response);
+};
+
+/**
  * Sends a chat adapter's request on to its platform as the client's own
  * bot (`ChannelApi.channelFetch`), or refuses it.
  */
@@ -1071,6 +1238,9 @@ export const channelFetch = async (
     }
     case "whatsapp": {
       return await whatsAppFetch(env, request, url);
+    }
+    case "telegram": {
+      return await telegramFetch(env, request, url);
     }
     case "teams": {
       return await teamsFetch(env, request, url);

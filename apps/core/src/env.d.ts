@@ -29,6 +29,12 @@ interface __BaseEnv_Env {
   WHATSAPP_APP_SECRET?: string;
   WHATSAPP_PHONE_NUMBER_ID?: string;
   WHATSAPP_VERIFY_TOKEN?: string;
+  /**
+   * The secret the client's Telegram bot's webhook was registered with, a
+   * Worker secret: Telegram sends it with every update
+   * (src/channels/telegram.ts). Unset, Telegram's door answers 404.
+   */
+  TELEGRAM_WEBHOOK_SECRET?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /** The model gateway (src/models.ts): JSON. */
   MODEL_GATEWAY?: unknown;
