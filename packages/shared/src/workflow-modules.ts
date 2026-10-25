@@ -68,8 +68,11 @@ export const operationUseSchema = z.strictObject({
   kind: z.literal("operation"),
 });
 
-/** The operations of a Knowledge collection an action may use (GRA-700). */
-export const knowledgeUseOperations = ["search", "read"] as const;
+/**
+ * The operations of a Knowledge collection an action may use (GRA-700),
+ * the Brain's recall over it among them (GRA-1067).
+ */
+export const knowledgeUseOperations = ["search", "read", "recall"] as const;
 
 /**
  * A knowledge binding's use: the operations of its one collection the

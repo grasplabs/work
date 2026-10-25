@@ -23,7 +23,7 @@ describe("an action's declared uses", () => {
   test.each([
     ["no operations", []],
     ["the same operation twice", ["search", "search"]],
-    ["more operations than there are", ["search", "read", "search"]],
+    ["more operations than there are", ["search", "read", "recall", "search"]],
   ])(
     "a knowledge use with %s is refused as a knowledge use's",
     (_case, operations) => {
@@ -35,7 +35,7 @@ describe("an action's declared uses", () => {
 
   test("a knowledge use of an operation it has no such name for is refused", () => {
     expect(refusalOf("knowledge", { operations: ["delete"] })).toMatch(
-      /"search", "read" or both/u
+      /"search", "read" and "recall"/u
     );
   });
 

@@ -89,8 +89,8 @@ export type Settled<T> =
 
 /**
  * What the run's main module takes from core: the run, the parameter
- * values people set, its input, and the binding names of its collections
- * and connections, which it calls through the host (host.ts).
+ * values people set, its input, and the binding names of its collections,
+ * connections and the Brain, which it calls through the host (host.ts).
  */
 export interface RunStart {
   runId: RunId;
@@ -98,6 +98,7 @@ export interface RunStart {
   input: unknown;
   collections: string[];
   connections: string[];
+  brains: string[];
 }
 
 /** The run's main module, as core calls it. */
@@ -444,7 +445,7 @@ const guarded = (env) =>
 
 const collectionMethods = ${JSON.stringify(collectionMethods)};
 
-export const bindings = ({ connections, collections }) => {
+export const bindings = ({ connections, collections, brains = [] }) => {
   const all = {
     __proto__: null,
     APP: {
@@ -461,6 +462,13 @@ export const bindings = ({ connections, collections }) => {
         unwrapped(await currentAttempt().callCollection(name, method, args));
     }
     all[name] = methods;
+  }
+  for (let index = 0; index < brains.length; index += 1) {
+    const name = brains[index];
+    all[name] = {
+      recall: async (request) =>
+        unwrapped(await currentAttempt().callBrain(name, request)),
+    };
   }
   for (let index = 0; index < connections.length; index += 1) {
     const name = connections[index];
@@ -495,7 +503,7 @@ import definition from ${JSON.stringify(appModuleName(workflowPaths(id).workflow
 ${settling}
 
 export class Run extends WorkerEntrypoint {
-  async run(host, { runId, params, input, connections, collections }) {
+  async run(host, { runId, params, input, connections, collections, brains }) {
     return await settled(async () => {
       if (definition?.metadata?.id !== ${JSON.stringify(id)} || typeof definition.run !== "function") {
         throw new Error(${JSON.stringify(`workflows/${id}.ts must export the workflow "${id}" as its default export.`)});
@@ -503,7 +511,7 @@ export class Run extends WorkerEntrypoint {
       const engine = {
         runId,
         params,
-        env: bindings({ connections, collections }),
+        env: bindings({ connections, collections, brains }),
         do: async (name, options, fn) => unwrapped(await host.do(name, options, async (attempt) => await inAttempt(attempt, async () => await settled(fn)))),
         sleep: async (name, milliseconds) => unwrapped(await host.sleep(name, milliseconds)),
         callModel: async (request) => unwrapped(await currentAttempt().callModel(request)),

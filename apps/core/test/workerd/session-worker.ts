@@ -417,6 +417,7 @@ const runHostCase = async (env: StandInEnv, name: string) => {
     callModel: async () => await answer("callModel", 1),
     callCollection: async () => await answer("callCollection", 1),
     callConnection: async () => await answer("callConnection", 1),
+    callBrain: async () => await answer("callBrain", 1),
     callFunction: async () => await answer("callFunction", 1),
     openDecision: async () =>
       await answer("openDecision", { decision: "d", deadline: 1 }),
@@ -567,6 +568,7 @@ const attemptLiveness = async () => {
       },
       callCollection: async () => await Promise.resolve({ ok: true, value: 1 }),
       callConnection: async () => await Promise.resolve({ ok: true, value: 1 }),
+      callBrain: async () => await Promise.resolve({ ok: true, value: 1 }),
       callFunction: async () => await Promise.resolve({ ok: true, value: 1 }),
       openDecision: async () =>
         await Promise.resolve({

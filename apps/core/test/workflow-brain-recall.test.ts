@@ -1,0 +1,168 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
+import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import { describe, expect, it } from "vite-plus/test";
+
+import { release, requestGranted } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
+import { mockIdp } from "./idp.ts";
+import { readCollection } from "./knowledge.ts";
+import { finished } from "./runs.ts";
+import { signedInApi } from "./sign-in.ts";
+import { sampleApp, workflowFiles } from "./workflow-apps.ts";
+
+// An App's workflow recalling the Brain through its Brain binding,
+// `brain(env.BRAIN).recall(…)` (GRA-1067; the threat model is on the
+// issue): the same recall as every caller's, as the run, its App on behalf
+// of its person, from the collections the App was granted, only while it
+// holds the `brain` permission, and recorded with the run. What a run's
+// recall does once the run ends or its grant goes mid-run is tested on the
+// host, in attempt-fence.test.ts.
+
+const idp = mockIdp();
+
+type Admin = Awaited<ReturnType<typeof signedInApi>>;
+
+/** A word only one test's documents hold. */
+const rareWord = (): string =>
+  `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+
+/** A collection everyone reads, holding `word` in one document. */
+const collectionSaying = async (admin: Admin, name: string, word: string) => {
+  const { id } = await admin.api.knowledge.createCollection({
+    name: `${name} ${crypto.randomUUID()}`,
+    access: "everyone",
+  });
+  await admin.api.knowledge.saveDocument({
+    collectionId: id,
+    path: "plan.md",
+    text: `# Plan\n${word} is the plan.`,
+    ifVersion: 0,
+  });
+  return id;
+};
+
+/** `files`, their workflow importing the SDK's `brain` too. */
+const withBrain = (files: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(files).map(([path, text]) => [
+      path,
+      text.replace("import { type Json,", "import { brain, type Json,"),
+    ])
+  );
+
+/**
+ * A workflow that recalls `word` in one step: unfiltered, and filtered to
+ * `other`, each answering the collections its evidence cites, or the
+ * refusal's code.
+ */
+const recaller = (word: string, other: string): Record<string, string> =>
+  withBrain(
+    workflowFiles(
+      "recaller",
+      `  return await step.do("recall", { description: "Recall the plan" }, async () => {
+    const outcome = async (asked: Promise<{ items: { sourceRefs: ({ kind: "document"; collectionId: string } | { kind: "memory" })[] }[] }>) => {
+      try {
+        const pack = await asked;
+        return pack.items.flatMap(({ sourceRefs }) => sourceRefs.flatMap((ref) => (ref.kind === "document" ? [ref.collectionId] : [])));
+      } catch (error) {
+        return (error as { code?: string }).code ?? String(error);
+      }
+    };
+    return {
+      granted: await outcome(brain(env.BRAIN).recall({ query: ${JSON.stringify(word)} })),
+      widened: await outcome(brain(env.BRAIN).recall({ query: ${JSON.stringify(word)}, filters: { collectionIds: [${JSON.stringify(other)}] } })),
+    } as Json;
+  });`,
+      { recall: { granted: [], widened: [] } }
+    )
+  );
+
+/** The App's `brain` permission, under `BRAIN`. */
+const brainFor = (app: string): PermissionRequest => ({
+  subject: { type: "app", appId: appIdSchema.parse(app) },
+  object: { type: "platform" },
+  actions: ["brain"],
+  binding: "BRAIN",
+});
+
+/** A run of the App's `recaller`, once it ended: its status and output. */
+const ranOnce = async (admin: Admin, app: string) => {
+  const { id } = await admin.api.workflows.start(app, "recaller");
+  await finished(id);
+  const status = await admin.api.workflows.status(id);
+  return {
+    id,
+    status: status.status,
+    output: status.output,
+    error: status.error?.name,
+  };
+};
+
+describe("a workflow's recall through the Brain binding", () => {
+  it("recalls as the run from the collections its App was granted, refuses a wider filter, and is recorded with the run", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const word = rareWord();
+    const handbook = await collectionSaying(admin, "Handbook", word);
+    const other = await collectionSaying(admin, "Other", word);
+    const { id: app } = await admin.api.apps.create({ name: "Recall" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    await requestGranted(idp, admin, readCollection(app_, handbook));
+    await requestGranted(idp, admin, brainFor(app));
+    // Released once it holds its permissions: its `env.BRAIN` is typed.
+    await release(admin, app, { ...sampleApp(), ...recaller(word, other) });
+
+    const run = await ranOnce(admin, app);
+    const events = await allEvents();
+
+    expect({
+      status: run.status,
+      output: run.output,
+      recorded: events.some(
+        ({ action, detail }) =>
+          action === "knowledge.search" &&
+          detail.via === "recall" &&
+          detail.run === run.id
+      ),
+    }).toStrictEqual({
+      status: "completed",
+      // The collection it may read, never the one it wasn't granted.
+      output: { granted: [handbook], widened: "brain.not_found" },
+      recorded: true,
+    });
+  });
+
+  it("recalls nothing from a collection whose grant was revoked, and has no Brain binding once its brain permission was", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const word = rareWord();
+    const handbook = await collectionSaying(admin, "Handbook", word);
+    const { id: app } = await admin.api.apps.create({ name: "Recall" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    const collectionGrant = await requestGranted(
+      idp,
+      admin,
+      readCollection(app_, handbook)
+    );
+    const brainGrant = await requestGranted(idp, admin, brainFor(app));
+    await release(admin, app, {
+      ...sampleApp(),
+      ...recaller(word, handbook),
+    });
+
+    await admin.api.permissions.revoke(collectionGrant);
+    const withoutCollection = await ranOnce(admin, app);
+    await admin.api.permissions.revoke(brainGrant);
+    const withoutBrain = await ranOnce(admin, app);
+
+    expect({
+      withoutCollection: withoutCollection.output,
+      withoutBrain: { status: withoutBrain.status, error: withoutBrain.error },
+    }).toStrictEqual({
+      // Its collection is no longer one it may read: no evidence, and
+      // naming it is refused as one that isn't there.
+      withoutCollection: { granted: [], widened: "brain.not_found" },
+      // A run's env holds a binding only while its permission does: the
+      // run that names it fails.
+      withoutBrain: { status: "failed", error: "PermissionError" },
+    });
+  });
+});

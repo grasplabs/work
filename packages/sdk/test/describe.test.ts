@@ -44,6 +44,15 @@ export default workflow("sample", { params: {} }, async (step, { env }) => {
 });
 `;
 
+/** A workflow importing the SDK's `brain`, its one step running `code`. */
+const brainSource = (code: string) => `
+import { brain, workflow } from "@grasp-os/sdk/workflow";
+
+export default workflow("sample", { params: {} }, async (step, { env }) => {
+  await step.do("recall", { description: "Recall" }, async () => { ${code} });
+});
+`;
+
 /** A file of `imports`, then `body`: the SDK's names as it imports them. */
 const lookalike = (imports: string, body: string): string => `
 ${imports}
@@ -482,6 +491,32 @@ describe(describeWorkflow, () => {
         kinds: {},
         all: [],
       });
+    }
+  });
+
+  it("names the Brain binding a step recalls through, `brain(env.NAME).recall(…)`, and refuses the stub kept, given `env` or another call", () => {
+    expect({
+      steps: describeWorkflow(
+        brainSource(`return await brain(env.BRAIN).recall({ query: "leave" });`)
+      ).steps,
+      reviewed: reviewedCalls(
+        brainSource(`return await brain(env.BRAIN).recall({ query: "leave" });`)
+      ).steps,
+    }).toMatchObject({
+      steps: [{ name: "recall", env: ["BRAIN"] }],
+      reviewed: { recall: ["BRAIN"] },
+    });
+    for (const code of [
+      // Kept: its calls could be made anywhere.
+      `const memory = brain(env.BRAIN); return await memory.recall({ query: "leave" });`,
+      // The whole env, not the Brain's binding.
+      `return await brain(env).recall({ query: "leave" });`,
+      // Not a recall: no other call the stub has.
+      `return await brain(env.BRAIN).remember({ text: "x" }, { idempotencyKey: "k" });`,
+    ]) {
+      expect(() => describeWorkflow(brainSource(code))).toThrow(
+        "don't keep `env`"
+      );
     }
   });
 

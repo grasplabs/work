@@ -135,7 +135,7 @@ const runOf = async (
     mode: "workflow",
     appVersion: 1,
   });
-  const { bindings } = await runBindingsFor(env, authority, {
+  const { bindings, brains } = await runBindingsFor(env, authority, {
     type: "run",
     appId: appIdSchema.parse(app),
     runId,
@@ -153,6 +153,7 @@ const runOf = async (
         shareSubject: authority.onBehalfOf,
         collections,
         connections: {},
+        brains,
         calls,
       },
       {
@@ -562,6 +563,116 @@ describe(
         asItStarts: "execution.stale_attempt",
         asItAnswers: "execution.stale_attempt",
       });
+    });
+  }
+);
+
+/** A recall in a step, through the run's Brain binding, once armed. */
+const recallNote = async (attempt: AttemptHost, arm: () => void) => {
+  arm();
+  return await attempt.callBrain("BRAIN", { query: "note" });
+};
+
+describe(
+  "a run's recall through its Brain binding",
+  { timeout: 60_000 },
+  () => {
+    /** An App of `admin`'s granted the handbook and the Brain, and its calls. */
+    const recallingApp = async (
+      admin: Awaited<ReturnType<typeof personApi>>
+    ) => {
+      const app = await appWith(admin, {});
+      const subject = { type: "app", appId: appIdSchema.parse(app) } as const;
+      const { collectionId } = await collectionWithNote(admin.api, {
+        name: "Handbook",
+        access: "everyone",
+      });
+      await requestGranted(idp, admin, readCollection(subject, collectionId));
+      const brainGrant = await requestGranted(idp, admin, {
+        subject,
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+      const calls: WorkflowCalls = {
+        steps: { tidy: ["BRAIN"] },
+        kinds: { tidy: "exact" },
+        all: ["BRAIN"],
+      };
+      return { app, brainGrant, calls };
+    };
+
+    it("hands back no evidence for a run cancelled at any stage of its recall", async () => {
+      const admin = await personApi("admin");
+      const { app, calls } = await recallingApp(admin);
+      const uncancelled = await cancelledAt(
+        app,
+        admin.userId,
+        calls,
+        undefined,
+        recallNote
+      );
+      const outcomes = new Set<string>();
+      for (let stage = 1; stage <= uncancelled.stages; stage += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one stage at a time
+        const { answered } = await cancelledAt(
+          app,
+          admin.userId,
+          calls,
+          stage,
+          recallNote
+        );
+        outcomes.add(codeOf(answered));
+      }
+
+      expect({
+        uncancelled: codeOf(uncancelled.answered),
+        stages: uncancelled.stages > 0,
+        outcomes,
+      }).toStrictEqual({
+        uncancelled: "ok",
+        stages: true,
+        outcomes: new Set(["execution.stale_attempt"]),
+      });
+    });
+
+    it("refuses a recall once its binding's brain permission is revoked, though the run started with it and another holds", async () => {
+      const admin = await personApi("admin");
+      const { app, brainGrant, calls } = await recallingApp(admin);
+      // Another `brain` permission of the App's, under another name.
+      await requestGranted(idp, admin, {
+        subject: { type: "app", appId: appIdSchema.parse(app) },
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "MEMORY",
+      });
+      const { answered } = await cancelledAt(
+        app,
+        admin.userId,
+        calls,
+        undefined,
+        async (attempt) => {
+          // Its binding came with the run's start; the grant goes after.
+          await admin.api.permissions.revoke(brainGrant);
+          return await attempt.callBrain("BRAIN", { query: "note" });
+        }
+      );
+
+      expect(codeOf(answered)).toBe("brain.denied");
+    });
+
+    it("refuses a recall from a step whose review doesn't show it calling the Brain", async () => {
+      const admin = await personApi("admin");
+      const { app } = await recallingApp(admin);
+      const { answered } = await cancelledAt(
+        app,
+        admin.userId,
+        { steps: { tidy: [] }, kinds: { tidy: "exact" }, all: [] },
+        undefined,
+        recallNote
+      );
+
+      expect(codeOf(answered)).toBe("workflow.call_not_reviewed");
     });
   }
 );

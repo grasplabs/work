@@ -11,6 +11,7 @@ import {
 import type { InboundEmail } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
+import type { BrainBinding } from "./brain.ts";
 import type {
   Backoff,
   DecisionRecipient,
@@ -52,6 +53,7 @@ import { namePattern, nameRule, stepOptionSchemas } from "./steps.ts";
 
 // Workflow code imports only this module, so it gets Zod from here too.
 export { z } from "zod";
+export { brain } from "./brain.ts";
 export type { ParamKind, ParamValue } from "./params.ts";
 // What a step records and a binding is handed: a workflow's code names it
 // to narrow what a binding answers (`unknown`) into a step's result.
@@ -483,9 +485,17 @@ export interface ConnectionBinding {
 
 /**
  * A Knowledge collection the run's App may read, by its binding name:
- * `await env.HANDBOOK.search("refunds")`.
+ * `await env.HANDBOOK.search("refunds")`. A run recalls through the Brain
+ * binding (`WorkflowBrainBinding`), never a collection's.
  */
-export type CollectionBinding = Readonly<CollectionReader>;
+export type CollectionBinding = Readonly<Omit<CollectionReader, "recall">>;
+
+/**
+ * The Brain, when the run's App holds the `brain` permission, by its
+ * binding name: `await brain(env.BRAIN).recall({ query })`, the same
+ * contract every caller of the Brain uses (`@grasp-os/sdk/brain`).
+ */
+export type WorkflowBrainBinding = Required<Pick<BrainBinding, "recall">>;
 
 /**
  * Which of the App's functions `callFunction` calls: its generated

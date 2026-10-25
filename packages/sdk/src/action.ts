@@ -1,3 +1,4 @@
+import type { MemoryPack, RecallInput } from "./brain.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import { descriptorOf } from "./value-schema.ts";
@@ -66,7 +67,7 @@ export type UseKind =
 export type FilesOperation = "write" | "read" | "list" | "delete";
 
 /** The operations of a Knowledge collection an action may declare. */
-export type KnowledgeOperation = "search" | "read";
+export type KnowledgeOperation = "search" | "read" | "recall";
 
 /**
  * A binding an action declares it uses: its alias and kind, and of a
@@ -163,6 +164,18 @@ export type KnowledgeResource<Operation extends KnowledgeOperation> =
           readonly read: (request: {
             readonly id: string;
           }) => Promise<KnowledgeDocument>;
+        }
+      : unknown) &
+    ("recall" extends Operation
+      ? {
+          /**
+           * The Brain's recall over the collection (GRA-1067): evidence for
+           * `query`, cited at exact versions, within `budget`. Needs the
+           * workflow's `brain` permission.
+           */
+          readonly recall: (
+            request: Pick<RecallInput, "query" | "budget">
+          ) => Promise<MemoryPack>;
         }
       : unknown);
 
@@ -327,7 +340,11 @@ interface DeclaredUse {
 const declaredUses = new WeakMap<object, DeclaredUse>();
 
 /** The knowledge operations, as `resource.knowledge` takes them. */
-const knowledgeOperations: ReadonlySet<string> = new Set(["search", "read"]);
+const knowledgeOperations: ReadonlySet<string> = new Set([
+  "search",
+  "read",
+  "recall",
+]);
 
 /** The files operations, as `resource.files` takes them. */
 const filesOperations: ReadonlySet<string> = new Set([
@@ -521,7 +538,9 @@ export const resource = freeze({
     }
     const operations = operationsOf(property.value, "knowledge");
     if (operations.some((operation) => !knowledgeOperations.has(operation))) {
-      return refuse('A knowledge use calls "search", "read" or both.');
+      return refuse(
+        'A knowledge use calls one or more of "search", "read" and "recall".'
+      );
     }
     return declareUse<Alias, "knowledge", AnySchema, Operation>(
       "knowledge",
