@@ -23,7 +23,8 @@ allowBuilds:
   # Install scripts of the model SDKs under pi-ai, which core never needs.
   "@google/genai": false
   protobufjs: false
-  core-js-pure: set this to true or false
+  # Its install script, under the Gmail adapter, only prints a banner.
+  core-js-pure: false
 
 catalog:
   # Tooling
