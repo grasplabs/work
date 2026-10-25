@@ -2570,6 +2570,15 @@ const refusedFailureTask = (
 };
 
 /**
+ * Whether `key` of a task of `kind` is part of its kind: the kind's own
+ * key, a for's while and do, and a try's catch.
+ */
+const isKindKey = (kind: string, key: string): boolean =>
+  key === kind ||
+  (kind === "for" && (key === "while" || key === "do")) ||
+  (kind === "try" && key === "catch");
+
+/**
  * Refuses, by pointer, what of task `item` (of `kind`) isn't lowered: its
  * kind or named call, a property, a timeout where none bounds anything.
  * Whether anything was.
@@ -2590,11 +2599,7 @@ const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
     refused = true;
   }
   for (const key of Object.keys(task)) {
-    // A for's while and do, and a try's catch, are part of their kind.
-    const own =
-      (kind === "for" && (key === "while" || key === "do")) ||
-      (kind === "try" && key === "catch");
-    if (key !== kind && !own && !supportedTaskKeys.has(key)) {
+    if (!isKindKey(kind, key) && !supportedTaskKeys.has(key)) {
       emitter.refusals.add(pointerJoin(pointer, key), key, id);
       refused = true;
     }

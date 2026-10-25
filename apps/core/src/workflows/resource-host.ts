@@ -91,6 +91,7 @@ import {
   openRunDecision,
   takeDecision,
 } from "./resource-decisions.ts";
+import {
   failureOf,
   matchesFilter,
   notCaught,
@@ -1726,8 +1727,7 @@ export class ResourceRunHost
     // answer came, nor when a retry ran.
     const entering = step.kind === "enter" && step.task !== undefined;
     const taskStart =
-      (step.kind === "leave" || takesDecision(step)) &&
-      step.task !== undefined
+      (step.kind === "leave" || takesDecision(step)) && step.task !== undefined
         ? this.#taskStarts.get(step.place)
         : undefined;
     // Its wait for load since its last admission, read off the markers
@@ -2217,26 +2217,9 @@ export class ResourceRunHost
         attempt.call === "done" && this.#tampered === undefined;
       throw toStepError(afterEffect ? failedAfterEffect : forIsolate(error));
     }
-    const { task } = run.step;
-    const record = recordSchema.safeParse(value).data;
-    const skipped = record !== undefined && "skipped" in record;
-    if (run.step.kind === "task" && task?.kind === "raise" && !skipped) {
-      // Not skipped (`#acceptRecord` held a skip to its if): the step fails
-      // with the task's error, as the workflow's own, never tried again.
-      throw toStepError({
-        name: "Error",
-        message:
-          task.error.title ??
-          workflowResourceErrors.create("workflow.raised").message,
-        code: raisedCode,
-      });
-    }
-    if (run.step.kind === "catch") {
-      // What its catch took, as mapped now, journaled beside its record.
-      const { failure } = attempt;
-      return attempt.caught === true && failure?.catchable === true
-        ? { record: value, error: failure.error }
-        : { record: value };
+    const failing = ResourceRunHost.#raisedOrCaught(run, attempt, value);
+    if (failing !== undefined) {
+      return failing;
     }
     if (!run.entering) {
       return value;
@@ -2261,6 +2244,39 @@ export class ResourceRunHost
       });
     }
     return journaled;
+  }
+
+  /**
+   * What a raise's or a catch's step of `run` makes of `value`, its
+   * accepted record: a raise not skipped (`#acceptRecord` held a skip to
+   * its if) fails with the task's error, as the workflow's own, never
+   * tried again; a catch journals what it took, as mapped now, beside its
+   * record. Undefined for any other step.
+   */
+  static #raisedOrCaught(
+    run: StepRun,
+    attempt: StepAttempt,
+    value: Json
+  ): { record: Json; error?: CaughtError } | undefined {
+    const { task } = run.step;
+    const record = recordSchema.safeParse(value).data;
+    const skipped = record !== undefined && "skipped" in record;
+    if (run.step.kind === "task" && task?.kind === "raise" && !skipped) {
+      throw toStepError({
+        name: "Error",
+        message:
+          task.error.title ??
+          workflowResourceErrors.create("workflow.raised").message,
+        code: raisedCode,
+      });
+    }
+    if (run.step.kind !== "catch") {
+      return undefined;
+    }
+    const { failure } = attempt;
+    return attempt.caught === true && failure?.catchable === true
+      ? { record: value, error: failure.error }
+      : { record: value };
   }
 
   /**

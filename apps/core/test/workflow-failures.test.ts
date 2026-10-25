@@ -764,6 +764,7 @@ const hostOf = async (
       await Promise.resolve();
     },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
+    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
   };
   const runId = crypto.randomUUID();
   return new ResourceRunHost(
@@ -786,6 +787,7 @@ const hostOf = async (
         invoker: { type: "person", id: by.userId, appVersion: null },
         bindings: new Map(),
         restricted: false,
+        rootRunId: runId,
       },
       maxModelCalls: 1,
     },
