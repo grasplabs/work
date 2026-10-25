@@ -189,7 +189,11 @@ import type { InterviewState, TeamCount } from "./rules.ts";
 import { anyLanguage, spokenKeysOf } from "./spoken-lines.ts";
 import type { SaidIn } from "./spoken-lines.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
-import { teamClaims } from "./team-claims.ts";
+import {
+  claimChecksMax,
+  teamClaims,
+  TooManyClaimChecksError,
+} from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
 import { drawnWorkSchema, drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
@@ -2008,6 +2012,14 @@ export class Onboarding extends DurableObject<Env> {
         tries,
         error: error instanceof Error ? error.name : "unknown",
       });
+      // Too many checks to put its claims together: nothing was written,
+      // and the audit log says so (GRA-1084).
+      if (error instanceof TooManyClaimChecksError) {
+        this.#changed({ type: "system" }, "onboarding.claims.capped", {
+          checks: claimChecksMax,
+        });
+        this.#deliverAudit();
+      }
       const wait = drawRetryMs[tries - 1];
       this.ctx.storage.transactionSync(() => {
         if (wait === undefined) {

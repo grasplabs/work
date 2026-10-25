@@ -346,6 +346,8 @@ export interface FakeClaim {
   says?: readonly string[];
   /** Its words as the check is asked about them, once names are taken out: `text`, unless given. */
   checked?: string;
+  /** Every check of it fails at the gateway. */
+  fails?: true;
 }
 
 const shownSchema = z.array(
@@ -385,17 +387,19 @@ const shownIn = (request: GatewayRequest | undefined) =>
 const claimsOrCheck =
   (
     claims: (request: GatewayRequest | undefined) => unknown,
-    says: (claim: string, fact: string) => boolean
+    says: (claim: string, fact: string) => boolean | "fails"
   ) =>
   (requests: readonly GatewayRequest[]): GatewayReply => {
     const request = requests.at(-1);
     const check = checkSchema.safeParse(dataOf(request, "data"));
+    const answer = check.success
+      ? says(check.data.claim, check.data.fact)
+      : false;
+    if (answer === "fails") {
+      return { status: 400, errorType: "invalid_request_error" };
+    }
     return {
-      text: JSON.stringify(
-        check.success
-          ? { says: says(check.data.claim, check.data.fact) }
-          : claims(request)
-      ),
+      text: JSON.stringify(check.success ? { says: answer } : claims(request)),
       inputTokens: 1000,
       outputTokens: 200,
     };
@@ -423,11 +427,15 @@ export const claimsReply = (claims: readonly FakeClaim[]) =>
         })),
       };
     },
-    (claim, said) =>
-      claims.some(
-        ({ text, checked, cites, says }) =>
-          (checked ?? text) === claim && (says ?? cites).includes(said)
-      )
+    (claim, said) => {
+      const of = claims.filter(
+        ({ text, checked }) => (checked ?? text) === claim
+      );
+      if (of.some(({ fails }) => fails === true)) {
+        return "fails";
+      }
+      return of.some(({ cites, says }) => (says ?? cites).includes(said));
+    }
   );
 
 /**
