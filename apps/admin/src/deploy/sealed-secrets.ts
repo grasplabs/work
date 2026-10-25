@@ -2,9 +2,13 @@
  * A client's own secrets that can't be derived (src/deploy/secrets.ts
  * derives the rest): its Teams bot's client secret, minted in the
  * client's own Entra, which connect sends as the bot with (connect's
- * src/channels.ts, `TEAMS_BOT_SECRET`). Staff set it, and set it again to
- * replace it (src/clients/settings.ts); a deploy gives it to the client's
- * connect as a Worker secret. Nothing ever reads it back to anyone.
+ * src/channels.ts, `TEAMS_BOT_SECRET`); and its Slack app's bot token,
+ * which connect sends with too (`SLACK_BOT_TOKEN`), and signing secret,
+ * which core checks Slack's requests with (core's src/channels/slack.ts,
+ * `SLACK_SIGNING_SECRET`). Staff set each, and set it again to replace it
+ * (src/clients/settings.ts); a deploy gives it to the one Worker of the
+ * client's that uses it, as a Worker secret. Nothing ever reads it back
+ * to anyone.
  *
  * Each is sealed with AES-256-GCM under a key HKDF derives from
  * `CLIENT_KEY` for this purpose alone, so a copy of the admin's database
@@ -30,11 +34,15 @@ import { secretsFingerprint } from "./upload.ts";
 export type SealedSecretName =
   (typeof clientSealedSecrets.name.enumValues)[number];
 
-/** Which Worker gets which sealed secret: only connect sends as the bot. */
+/**
+ * Which Worker gets which sealed secret: only connect sends as a bot, and
+ * only core checks what Slack sends.
+ */
 const sealedSecretsByApp: Readonly<
   Record<string, readonly SealedSecretName[]>
 > = {
-  connect: ["TEAMS_BOT_SECRET"],
+  core: ["SLACK_SIGNING_SECRET"],
+  connect: ["TEAMS_BOT_SECRET", "SLACK_BOT_TOKEN"],
 };
 
 /** Every sealed secret's name, on any Worker: none can be given as a shared secret. */
