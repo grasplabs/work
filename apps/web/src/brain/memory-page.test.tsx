@@ -55,6 +55,7 @@ const shared = record("m-team", "Stand-ups are at nine.", "team", "Ben");
 const shown = async (admin: boolean, refusal?: string) => {
   const calls: string[] = [];
   const records = { mine: [own], shared: [shared] };
+  const retired = new Set<string>();
   const knowledge = {
     memoriesList: async ({ among }: { among: "mine" | "shared" }) => {
       await Promise.resolve();
@@ -64,9 +65,12 @@ const shown = async (admin: boolean, refusal?: string) => {
     memoriesLineage: async ({ memoryId }: { memoryId: string }) => {
       await Promise.resolve();
       calls.push(`lineage ${memoryId}`);
-      const found =
+      const known =
         [own, shared].find(({ id }) => id === memoryId) ??
         record(memoryId, "Floor 4 is quiet.");
+      const found = retired.has(memoryId)
+        ? { ...known, state: "retired" as const, revision: 2 }
+        : known;
       return {
         record: found,
         restsOn:
@@ -103,6 +107,7 @@ const shown = async (admin: boolean, refusal?: string) => {
     memoriesRetire: async (input: { memoryId: string }) => {
       await Promise.resolve();
       calls.push(`retire ${input.memoryId}`);
+      retired.add(input.memoryId);
       return { resourceRefs: [{ kind: "memory", memoryId: input.memoryId }] };
     },
   };
@@ -230,6 +235,7 @@ describe(MemoryPage, () => {
     await press("Shared with you");
     await press(shared.statement);
     await press("Retire it");
+    const afterRetire = buttons();
 
     expect({
       member: member.filter(
@@ -237,10 +243,15 @@ describe(MemoryPage, () => {
       ),
       textarea: document.querySelector("textarea") === null,
       calls: calls.filter((call) => call.startsWith("retire")),
+      // Read again after the retirement, as it is now.
+      lineageReads: calls.filter((call) => call === "lineage m-team").length,
+      retireStillOffered: afterRetire.includes("Retire it"),
     }).toStrictEqual({
       member: [],
       textarea: true,
       calls: ["retire m-team"],
+      lineageReads: 2,
+      retireStillOffered: false,
     });
   });
 

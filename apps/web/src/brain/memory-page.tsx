@@ -496,7 +496,7 @@ export const MemoryPage = ({ admin }: { admin: boolean }) => {
         {picked === undefined ? null : (
           <LineagePanel
             admin={admin}
-            key={picked}
+            key={`${picked}:${changes}`}
             memoryId={picked}
             onChanged={(memoryId) => {
               setChanges((count) => count + 1);

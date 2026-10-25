@@ -14675,7 +14675,7 @@ msgstr "Ce que vous avez validé est conservé. Vous avez oublié quelque chose 
 
 #: src/brain/memory-page.tsx
 msgid "What you and your agents remember, and what others share with you, shows here."
-msgstr "Ce dont vous et vos agents vous souvenez, et ce que d'autres partagent avec vous, apparaît ici."
+msgstr "Ce dont vous et vos agents vous souvenez, et ce que d'autres partagent avec vous, apparaissent ici."
 
 #: src/landscape/data-tab.tsx
 msgid "What your identity provider granted {appName}."
