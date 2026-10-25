@@ -425,6 +425,10 @@ const knowledgeDb: D1State = {
       "Empty between batches."
     ),
     brain_memories: exported(`${brain}memories.ts`, brainPending),
+    brain_memory_cites: cache(
+      `${brain}memories.ts`,
+      "The collections each memory record's lineage rests on, written with the record."
+    ),
     brain_memory_rows: cache(
       `${brain}memories.ts`,
       "Memory search projection."

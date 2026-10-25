@@ -12,6 +12,7 @@ import { authorize } from "./app-entries.ts";
 import { extractEntities } from "./entities.ts";
 import {
   keepRecalledMemories,
+  readableByEveryoneOf,
   recallMemoryAudience,
 } from "./memory-audience.ts";
 import { mayPublish, mayRetire } from "./memory-publish.ts";
@@ -48,6 +49,8 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
   },
   memories: {
     audienceOf: async (reader) => await recallMemoryAudience(env, reader),
+    readableBy: async (_reader, people) =>
+      await readableByEveryoneOf(env, people),
     keep: async (reader, people, records) =>
       await keepRecalledMemories(env, reader, people, records),
   },

@@ -415,6 +415,35 @@ export const brainMemories = sqliteTable(
 );
 
 /**
+ * The collections each memory record's lineage rests on (GRA-1085): the
+ * collections of the documents it cites, and of those its cited records
+ * cite in turn, to the depth publishing checks (`lineage:too-deep` past
+ * it, which no collection is). Written with the record and never after: a
+ * record's source references don't change, a redaction rewrites only its
+ * statement and a correction is a record of its own. Shared reads hold a
+ * record to readers who may read all of them, in the query itself
+ * (memories.ts, `citesReadable`).
+ */
+export const brainMemoryCites = sqliteTable(
+  "brain_memory_cites",
+  {
+    memoryId: text("memory_id")
+      .notNull()
+      .references(() => brainMemories.id, { onDelete: "cascade" }),
+    collectionId: text("collection_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.memoryId, table.collectionId] }),
+    // The records resting on a collection, covering `citesReadable`'s check
+    // from the collection's side.
+    index("brain_memory_cites_collection_idx").on(
+      table.collectionId,
+      table.memoryId
+    ),
+  ]
+);
+
+/**
  * The Brain's command receipts: one per command key, so a retry after a
  * lost reply answers the recorded result. `key_hash` is the key keyed to
  * the deployment and scoped to the caller and operation, never the key

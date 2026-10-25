@@ -118,6 +118,31 @@ export const stillReadable = async <Record extends MemoryRecord>(
   );
 };
 
+/**
+ * The collections every one of `people` may read now: the Brain's
+ * `memories.readableBy` port (GRA-1085), which holds a shared read of
+ * memory records to those resting on nothing else, in its queries. As
+ * `stillReadable` decides, over every collection of the deployment.
+ */
+export const readableByEveryoneOf = async (
+  env: Env,
+  people: readonly string[]
+): Promise<string[]> => {
+  if (people.length === 0) {
+    return [];
+  }
+  const all = await drizzle(env.KNOWLEDGE)
+    .select({ id: collections.id })
+    .from(collections);
+  return [
+    ...(await readableByAll(
+      env,
+      people,
+      all.map(({ id }) => id)
+    )),
+  ];
+};
+
 /** The names of the people `userIds`, by ID, as the model may see them. */
 export const namesOf = async (
   env: Env,

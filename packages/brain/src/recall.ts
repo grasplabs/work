@@ -297,6 +297,8 @@ const scopeOf = (
 interface MemoryReaders {
   audience: MemoryAudience;
   people: readonly string[];
+  /** The collections every one of `people` may read (`memories.readableBy`). */
+  readable: readonly string[];
 }
 
 /**
@@ -313,7 +315,13 @@ const memoriesFound = async <C>(
   if (readers === undefined) {
     return [];
   }
-  const found = await searchMemories(brain, readers.audience, query, limit);
+  const found = await searchMemories(
+    brain,
+    readers.audience,
+    query,
+    limit,
+    readers.readable
+  );
   return found.length === 0
     ? []
     : await brain.ports.memories.keep(reader, readers.people, found);
@@ -356,10 +364,20 @@ const memoryReadersOf = async <C>(
   brain: Brain<C>,
   reader: C,
   collectionIds: readonly CollectionId[] | undefined
-): Promise<MemoryReaders | undefined> =>
-  collectionIds === undefined
-    ? await brain.ports.memories.audienceOf(reader)
-    : undefined;
+): Promise<MemoryReaders | undefined> => {
+  if (collectionIds !== undefined) {
+    return undefined;
+  }
+  const { audience, people } = await brain.ports.memories.audienceOf(reader);
+  return {
+    audience,
+    people,
+    readable:
+      people.length === 0
+        ? []
+        : await brain.ports.memories.readableBy(reader, people),
+  };
+};
 
 /**
  * Whether a read stopped at a limit: the section search at its most, or
