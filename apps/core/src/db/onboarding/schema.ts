@@ -162,7 +162,9 @@ export const interviews = sqliteTable("interviews", {
  * Whether each person agreed to take part (GRA-329), before anything they
  * say is recorded or read by a model: the notice they read
  * (`participationNotice`), its purpose and audience, when, and when they
- * withdrew. Goes with the interview.
+ * withdrew. Goes with the interview, unless they withdrew: then it stays
+ * through a delete and a new start, so withdrawing is final, until they
+ * leave the roster, which takes it.
  */
 export const participations = sqliteTable("participations", {
   person: text().primaryKey(),

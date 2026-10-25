@@ -597,7 +597,7 @@ const onboarding: DurableObjectState = {
     interview_texts: exported(`${core}onboarding/store.ts`),
     participations: exported(
       `${core}onboarding/store.ts`,
-      "Who agreed to take part in their interview, to which notice, and when they withdrew."
+      "Who agreed to take part in their interview, to which notice, and when they withdrew; a withdrawal stays through a delete or new start, until they leave the roster."
     ),
     readbacks: exported(
       `${core}onboarding/store.ts`,

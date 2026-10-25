@@ -683,6 +683,36 @@ describe("taking part, approving and withdrawing", () => {
     }
   );
 
+  it("keeps no mark of someone who withdrew once they leave the roster", async () => {
+    const { ids, store, secrets } = await running();
+    const { key } = await opened(secrets.oli);
+    await takePart(secrets.oli, key);
+    await save(secrets.oli, key, 0);
+    await withdraw(secrets.oli, key);
+    const marks = async () =>
+      await runInDurableObject(onboardingStore(env), (_instance, state) =>
+        state.storage.sql
+          .exec(
+            "SELECT withdrawn_at FROM participations WHERE person = ?",
+            ids.oli
+          )
+          .toArray()
+      );
+    const before = await marks();
+    const { roster } = await store.view();
+    await store.saveRoster(
+      {
+        teams: roster?.teams ?? [],
+        people: (roster?.people ?? []).filter(({ id }) => id !== ids.oli),
+      },
+      { type: "system" }
+    );
+    expect({ before: before.length, after: await marks() }).toStrictEqual({
+      before: 1,
+      after: [],
+    });
+  });
+
   it("approves nothing after the last day: what wasn't approved stays theirs alone (T6)", async () => {
     const { ids, store, secrets } = await running();
     const { key } = await opened(secrets.oli);

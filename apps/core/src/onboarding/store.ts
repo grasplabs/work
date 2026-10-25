@@ -896,10 +896,12 @@ export class Onboarding extends DurableObject<Env> {
     { confirmed = true }: { confirmed?: boolean } = {}
   ): Promise<OnboardingView> {
     const fresh = await this.#freshCodes(roster);
+    const lines = await this.#lineKeysOf(this.#leaving(roster));
     const said = this.ctx.storage.transactionSync(() => {
       const before = this.#roster();
       const { removed, erased } = this.#writeRoster(roster, fresh, {
         late: false,
+        lines,
       });
       if (confirmed) {
         this.#confirmed(before, roster);
@@ -1022,10 +1024,21 @@ export class Onboarding extends DurableObject<Env> {
    * (`#askNewcomers`). Returns how many left, and what was said in the
    * interviews of whoever left (`#erase`), for `#afterForget`.
    */
+  /** Who has an interview here and isn't on `roster`: whose `#writeRoster` erases. */
+  #leaving(roster: Roster): string[] {
+    const kept = new Set(roster.people.map(({ id }) => id));
+    return this.#db
+      .select({ person: interviews.person })
+      .from(interviews)
+      .all()
+      .map(({ person }) => person)
+      .filter((person) => !kept.has(person));
+  }
+
   #writeRoster(
     roster: Roster,
     fresh: readonly { person: string; linkId: string; mark: string }[],
-    { late }: { late: boolean },
+    { late, lines }: { late: boolean; lines: ReadonlyMap<string, string[]> },
     now: string = new Date().toISOString()
   ): { removed: number; erased: (SaidIn | null)[] } {
     const kept = new Set(roster.people.map((person) => person.id));
@@ -1104,7 +1117,14 @@ export class Onboarding extends DurableObject<Env> {
     }
     const erased: (SaidIn | null)[] = [];
     for (const person of new Set([...gone, ...stale])) {
+      this.#queueLines(lines.get(person) ?? []);
       erased.push(this.#erase(person));
+      // Off the list, they take part in nothing: no mark of theirs stays,
+      // their withdrawal's neither.
+      this.#db
+        .delete(participations)
+        .where(eq(participations.person, person))
+        .run();
       this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
       this.#db.delete(links).where(eq(links.person, person)).run();
       dropMailAbout(this.ctx.storage.sql, person);
@@ -1667,7 +1687,9 @@ export class Onboarding extends DurableObject<Env> {
     if (held.withdrawnAt !== null) {
       return answered({ withdrawn: true, at: held.withdrawnAt });
     }
+    const lines = await this.#lineKeysOf([person.id]);
     const said = this.ctx.storage.transactionSync(() => {
+      this.#queueLines(lines.get(person.id) ?? []);
       this.#db
         .update(participations)
         .set({ withdrawnAt: now })
@@ -2339,6 +2361,7 @@ export class Onboarding extends DurableObject<Env> {
       return next;
     }
     const fresh = await this.#freshCodes(next);
+    const lines = await this.#lineKeysOf(this.#leaving(next));
     const written = this.ctx.storage.transactionSync(() => {
       // Made again on the list as it is now: what changed meanwhile stands.
       const before = this.#roster();
@@ -2346,7 +2369,10 @@ export class Onboarding extends DurableObject<Env> {
       if (typeof after === "string" || before === null) {
         return typeof after === "string" ? after : "onboarding.no_roster";
       }
-      const { erased } = this.#writeRoster(after, fresh, { late: true });
+      const { erased } = this.#writeRoster(after, fresh, {
+        late: true,
+        lines,
+      });
       const { action, detail, about } = listChangeOf(change, before, id);
       this.#changed(by, action, detail, about);
       return erased;
@@ -2635,12 +2661,14 @@ export class Onboarding extends DurableObject<Env> {
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
     }
+    const lines = await this.#lineKeysOf([person.id]);
     const said = this.ctx.storage.transactionSync(() => {
       const forgotten = this.#forget(
         person.id,
         now,
         "interview.deleted",
-        interviewee
+        interviewee,
+        lines
       );
       this.#db
         .update(links)
@@ -2668,12 +2696,14 @@ export class Onboarding extends DurableObject<Env> {
       return false;
     }
     const now = new Date().toISOString();
+    const lines = await this.#lineKeysOf([person]);
     const said = this.ctx.storage.transactionSync(() => {
       const forgotten = this.#forget(
         person,
         now,
         "interview.new_start",
-        whoIs(by)
+        whoIs(by),
+        lines
       );
       this.#db
         .update(links)
@@ -3816,12 +3846,14 @@ export class Onboarding extends DurableObject<Env> {
     if (link === undefined) {
       return false;
     }
+    const lines = await this.#lineKeysOf([person]);
     const said = this.ctx.storage.transactionSync(() => {
       const forgotten = this.#forget(
         person,
         now,
         "interview.deleted",
-        whoIs(by)
+        whoIs(by),
+        lines
       );
       this.#db
         .update(links)
@@ -5680,8 +5712,10 @@ export class Onboarding extends DurableObject<Env> {
     person: string,
     now: string,
     what: string,
-    by: string
+    by: string,
+    lines: ReadonlyMap<string, string[]>
   ): SaidIn | null {
+    this.#queueLines(lines.get(person) ?? []);
     const said = this.#erase(person);
     this.#noted(person, what, now, by);
     return said;
@@ -5712,7 +5746,8 @@ export class Onboarding extends DurableObject<Env> {
       .where(eq(interviewSettings.person, person))
       .run();
     // Withdrawing is final (GRA-329): its mark outlives a delete and a new
-    // start, so they never take part again. Nothing said is in it.
+    // start, so they never take part again while on the list. Nothing said
+    // is in it; leaving the list takes it too (`#writeRoster`).
     this.#db
       .delete(participations)
       .where(
@@ -5822,13 +5857,42 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The stored keys of the voice's lines of each of `persons`' interviews,
+   * as they stand: hashed before anything is erased, so the erasing
+   * transaction keeps them waiting itself (`#queueLines`, GRA-329).
+   */
+  async #lineKeysOf(persons: Iterable<string>): Promise<Map<string, string[]>> {
+    const keys = new Map<string, string[]>();
+    for (const person of persons) {
+      const said = this.#saidIn(person);
+      if (said !== null) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview's lines at a time
+        keys.set(person, await spokenKeysOf(this.env, said));
+      }
+    }
+    return keys;
+  }
+
+  /** Keeps the voice's lines `keys` waiting to go, in the transaction it is called in. */
+  #queueLines(keys: readonly string[]): void {
+    for (const key of keys) {
+      this.#db
+        .insert(linesToForget)
+        .values({ key })
+        .onConflictDoNothing()
+        .run();
+    }
+  }
+
+  /**
    * What follows someone's interview going, once it's gone here: what is
    * left of the work it was in is drawn again, the brain's records that
    * rested on it are taken out (`purgeBrain`), and so are the lines said
    * in it that were kept. Both are tried again by the alarm until done
    * (`#armDrawing`): the brain's records rest on someone gone until they
    * are out, and the lines wait by their stored keys, hashes, never what
-   * was said (`linesToForget`, GRA-329).
+   * was said (`linesToForget`, GRA-329), queued by the erasing transaction
+   * itself; any line said after they were hashed is queued here.
    */
   async #afterForget(said: readonly (SaidIn | null)[]): Promise<void> {
     const each = await Promise.all(
@@ -5838,13 +5902,7 @@ export class Onboarding extends DurableObject<Env> {
     );
     const keys = each.flat();
     this.ctx.storage.transactionSync(() => {
-      for (const key of keys) {
-        this.#db
-          .insert(linesToForget)
-          .values({ key })
-          .onConflictDoNothing()
-          .run();
-      }
+      this.#queueLines(keys);
     });
     await this.#armDrawing();
     try {
