@@ -371,6 +371,8 @@ describe("Grasp staff's views, audited", () => {
     const { api } = await staffOn();
     await api.whoami();
     const asked = [
+      // Shaped like an ID, but a query: its kind alone.
+      crypto.randomUUID(),
       "salary_review",
       "anna_de_vries",
       `sk_live_${"4eC39HqLyjWDarjtT1zdp7dc".repeat(2)}`,

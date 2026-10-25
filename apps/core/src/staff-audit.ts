@@ -21,11 +21,12 @@ import type { SessionCheck } from "./session-check.ts";
 //   (`auditStaffRoute`).
 //
 // An entry names what was viewed, never what it holds: the surface
-// (namespace and method, or route), how many arguments it took, the
-// platform IDs among them (UUIDs, bare or after one of our short prefixes,
-// as `ent_<uuid>`), and the kind of every other argument, by the name the
-// method gives it (`query`, `input`). So a search's terms, a name or
-// a secret never reach the log, whatever their shape. It is stored in
+// (namespace and method, or route), how many arguments it took, the kind
+// of each, by the name the method gives it (`query`, `input`), and the
+// platform IDs (UUIDs, bare or after one of our short prefixes, as
+// `ent_<uuid>`) held by parameters named as resource IDs (`documentId`,
+// `app`). So a search's terms, a name or a secret never reach the log,
+// whatever their shape: a query that looks like a UUID is still a query. It is stored in
 // core's outbox before the call goes on: one that can't be stored fails
 // the call, so no view goes unrecorded. The same view on one connection
 // (surface, the target it was asked of, and a hash of all its arguments)
@@ -95,11 +96,41 @@ export interface Named {
   kinds: string[];
 }
 
+/** A parameter or member named as a resource's ID: `documentId`, `ids`. */
+const idName = /^ids?$|I(?:d|ds)$/u;
+
+/**
+ * Parameters our methods name after the resource whose ID they take,
+ * without saying `Id` (`apps.get(app)`, `workflows.status(run)`).
+ */
+const resourceNames: ReadonlySet<string> = new Set([
+  "app",
+  "blueprint",
+  "chat",
+  "collection",
+  "connection",
+  "decision",
+  "document",
+  "run",
+  "store",
+  "team",
+  "trigger",
+  "upload",
+  "work",
+  "workflow",
+]);
+
+/** Whether a parameter or member called `name` holds a resource's ID. */
+const namesAnId = (name: string): boolean =>
+  idName.test(name) || resourceNames.has(name);
+
 /**
  * What `args`, named `names`, name: every argument by its kind, its
  * parameter's name (`query`, `input`), never an object's keys; and each
- * platform ID one is, or holds one level in (an object's members, a list's
- * items), by its value. Nothing else of what they hold.
+ * platform ID a parameter named as an ID holds (`documentId`, `app`), or an
+ * object's member named so holds. A query, a text, a path or anything else
+ * is its kind alone, whatever it looks like: a search for a UUID names no
+ * ID.
  */
 export const namedBy = (
   args: readonly unknown[],
@@ -107,12 +138,12 @@ export const namedBy = (
 ): Named => {
   const ids = new Set<string>();
   const kinds = new Set<string>();
-  const take = (value: unknown, kind: string): void => {
+  const take = (value: unknown, kind: string, isId: boolean): void => {
     if (value === undefined || value === null) {
       return;
     }
     kinds.add(kind);
-    if (typeof value === "string" && platformId.test(value)) {
+    if (isId && typeof value === "string" && platformId.test(value)) {
       ids.add(value);
     }
   };
@@ -120,16 +151,17 @@ export const namedBy = (
     const name = names[index] ?? `arg${index}`;
     if (Array.isArray(value)) {
       for (const item of value) {
-        take(item, name);
+        take(item, name, namesAnId(name));
       }
     } else if (typeof value === "object" && value !== null) {
       // An object's keys may be anything its sender chose (a record's): it
-      // is named by its parameter alone, with the IDs among its members.
-      for (const item of Object.values(value)) {
-        take(item, name);
+      // is named by its parameter alone, with the IDs of its members named
+      // as IDs; its keys are never written.
+      for (const [key, item] of Object.entries(value)) {
+        take(item, name, namesAnId(key));
       }
     } else {
-      take(value, name);
+      take(value, name, namesAnId(name));
     }
   }
   return {
