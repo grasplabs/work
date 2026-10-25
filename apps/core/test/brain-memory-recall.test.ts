@@ -46,10 +46,11 @@ const seed = async (
     ownerId: string;
     state?: "proposed" | "accepted" | "retired";
     sourceRefs?: unknown[];
+    recordedAt?: Date;
   }
 ): Promise<string> => {
   const id = crypto.randomUUID();
-  const now = new Date();
+  const now = record.recordedAt ?? new Date();
   await drizzle(env.KNOWLEDGE)
     .insert(brainMemories)
     .values({
@@ -426,6 +427,56 @@ describe("recalling the Brain's memory records", setUpTime, () => {
       found: { before: 1, retired: 1 },
       retired: 0,
       afterDelete: 0,
+    });
+  });
+
+  it("ranks a person's records by the words each holds, never by what others' private records hold", async () => {
+    const ada = await signedInApi(idp, "user");
+    const ben = await signedInApi(idp, "user");
+    const common = rareWord();
+    const rare = rareWord();
+    const older = new Date(Date.now() - 60_000);
+    const both = await seed(`Remember ${common} and ${rare}.`, {
+      scope: "person",
+      scopeId: ada.userId,
+      ownerId: ada.userId,
+      recordedAt: new Date(Date.now() - 120_000),
+    });
+    const onlyCommon = await seed(`Remember ${common}.`, {
+      scope: "person",
+      scopeId: ada.userId,
+      ownerId: ada.userId,
+    });
+    const onlyRare = await seed(`Remember ${rare}.`, {
+      scope: "person",
+      scopeId: ada.userId,
+      ownerId: ada.userId,
+      recordedAt: older,
+    });
+    const order = async () => {
+      const pack = await ada.api.knowledge.recall({
+        query: `${common} ${rare}`,
+      });
+      return pack.items.map(({ id }) => id);
+    };
+
+    const before = await order();
+    // Ben's private records, many of them holding one of the words: under
+    // BM25 that word would weigh less, and Ada's order would show it.
+    for (let n = 0; n < 30; n += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- seeded one by one
+      await seed(`Ben's note ${n}: ${rare}.`, {
+        scope: "person",
+        scopeId: ben.userId,
+        ownerId: ben.userId,
+      });
+    }
+    const after = await order();
+
+    expect({ before, after }).toStrictEqual({
+      // Both words first, then one word each, newest first.
+      before: [both, onlyCommon, onlyRare],
+      after: [both, onlyCommon, onlyRare],
     });
   });
 

@@ -873,8 +873,9 @@ export const memoriesFor = async <C>(
 /**
  * The records `audience` may read whose words match `query`'s, best
  * first, at most `limit` (GRA-298): any of its words, as a recall reads a
- * question (search.ts), ranked by BM25 over the statements' full-text
- * index (migration `0002_memory_search.sql`), newer first between equals.
+ * question (search.ts), in the statements' full-text index (migration
+ * `0002_memory_search.sql`), ranked by how many of its words each holds,
+ * newer first between equals.
  * The audience is part of the match, so a record outside it is never
  * ranked, counted or returned. Each with whose it is.
  */
@@ -889,6 +890,20 @@ export const searchMemories = async <C>(
   if (scope === undefined || terms.length === 0 || limit <= 0) {
     return [];
   }
+  // Ranked by how many of the question's words a record holds, then
+  // newest first: never by BM25, whose weights count the words of every
+  // record in the index, other people's private ones too, so the order of
+  // a reader's own records would tell them which words others' hold
+  // (the GRA-298 security review). The index only matches.
+  const hits = sql.join(
+    terms.map(
+      (term) => sql`(CASE WHEN brain_memory_words.rowid IN (
+        SELECT rowid FROM brain_memory_words
+        WHERE brain_memory_words MATCH ${asWord(term)}
+      ) THEN 1 ELSE 0 END)`
+    ),
+    sql` + `
+  );
   const matched = await db.all<{ id: string }>(sql`
     SELECT brain_memories.id AS id
     FROM brain_memory_words
@@ -896,7 +911,7 @@ export const searchMemories = async <C>(
     JOIN brain_memories ON brain_memories.id = brain_memory_rows.memory_id
     WHERE brain_memory_words MATCH ${terms.map(asWord).join(" OR ")}
       AND ${scope}
-    ORDER BY bm25(brain_memory_words), brain_memories.recorded_at DESC,
+    ORDER BY ${hits} DESC, brain_memories.recorded_at DESC,
       brain_memories.id DESC
     LIMIT ${limit}
   `);

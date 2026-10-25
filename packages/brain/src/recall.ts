@@ -33,9 +33,10 @@ import { tokensOf } from "./tokens.ts";
 // version, with how far the read got.
 //
 // This policy reads full text only, any of the question's words ranked by
-// BM25 (search.ts): document sections, and memory records (GRA-298) the
-// host's memory audience may read, kept or dropped by the host as a chat's
-// memory is. A recall narrowed to collections, or bound to some, reads no
+// BM25 (search.ts): document sections; and memory records (GRA-298) the
+// host's memory audience may read, ranked by how many of the words each
+// holds, never by statistics over others' records (memories.ts), kept or
+// dropped by the host as a chat's memory is. A recall narrowed to collections, or bound to some, reads no
 // memory record: none is in a collection, so no narrowing widens into
 // memory. Semantic routes are reported as
 // not enabled, and no model is used, so no source text reaches one here;
