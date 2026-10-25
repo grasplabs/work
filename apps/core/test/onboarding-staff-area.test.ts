@@ -142,9 +142,12 @@ describe("Grasp's onboarding area", () => {
     const staff = await asStaff();
 
     const seen: StaffInterview[] = [];
-    const events = await auditedDuring(async () => {
-      seen.push(await staff.onboardingStaff.interview(ids.oli));
-    });
+    const events = await auditedDuring(
+      async () => {
+        seen.push(await staff.onboardingStaff.interview(ids.oli));
+      },
+      { staffAccesses: true }
+    );
 
     const text = JSON.stringify(events);
     const [read] = seen;
@@ -176,8 +179,10 @@ describe("Grasp's onboarding area", () => {
         withdrawnAt: null,
       },
       words: false,
-      actions: [["onboarding.interview.read", "staff"]],
-      target: ["interview"],
+      // On record as a staff look before anything was read, by the kind of
+      // what was asked alone (staff-audit.ts).
+      actions: [["staff.accessed", "staff"]],
+      target: [undefined],
       names: false,
       wordsInLog: false,
     });

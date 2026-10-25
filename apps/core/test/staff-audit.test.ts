@@ -1,12 +1,27 @@
+import { appFilesPath } from "@grasp-os/shared/app-file-limits";
+import { appLinksPath } from "@grasp-os/shared/app-link-limits";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
-import { screenPersonHeader } from "@grasp-os/shared/screen-limits";
+import { connectionCallbackPath } from "@grasp-os/shared/connect";
+import { errorReportPath } from "@grasp-os/shared/error-reports";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import { labPath } from "@grasp-os/shared/lab";
+import { appTokenPath } from "@grasp-os/shared/portable";
+import {
+  screenLeaseHeader,
+  screenPersonHeader,
+} from "@grasp-os/shared/screen-limits";
 import { uploadOriginalPath } from "@grasp-os/shared/uploads";
+import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
+import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import worker from "../src/index.ts";
 import { CoreRpcTarget } from "../src/rpc-target.ts";
+import { ScreenFrameRpc } from "../src/screens-rpc.ts";
 import { SessionRpc } from "../src/session-rpc.ts";
+import { staffAudited } from "../src/staff-audit.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote } from "./knowledge.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -53,16 +68,6 @@ const surfacesOf = (events: readonly AuditEvent[]): unknown[] =>
 const callWaitMs = 3000;
 
 /**
- * Two methods name what staff looked at by its random link ID, never the
- * person's, and write that entry themselves (staff-audit.ts): called with
- * nothing, they look at nothing.
- */
-const selfAudited = new Set([
-  "session.onboardingStaff.interview",
-  "session.onboardingStaff.link",
-]);
-
-/**
  * Every method of `target` and of every target its getters hand out, by
  * path, each as a call with no arguments: what a browser can call.
  */
@@ -92,10 +97,7 @@ const targetMethods = (
         if (inner instanceof CoreRpcTarget) {
           found.push(...targetMethods(inner, name, seen));
         }
-      } else if (
-        typeof property.value === "function" &&
-        !selfAudited.has(name)
-      ) {
+      } else if (typeof property.value === "function") {
         const method: unknown = property.value;
         found.push({
           name,
@@ -160,6 +162,116 @@ describe("Grasp staff's views, audited", () => {
           await routed(uploadOriginalPath(uploadId), {
             headers: { cookie: session },
           }),
+      ],
+      [
+        "app.files",
+        async () =>
+          await routed(`${appFilesPath}/${app}/notes/files/f1`, {
+            headers: { cookie: session, [screenLeaseHeader]: "lease" },
+          }),
+      ],
+      [
+        "app.link.check",
+        async () =>
+          await routed(`${appLinksPath}/${app}/links/check`, {
+            method: "POST",
+            headers: {
+              cookie: session,
+              origin: clientOrigin,
+              "content-type": "application/json",
+              [screenLeaseHeader]: "lease",
+            },
+            body: JSON.stringify({}),
+          }),
+      ],
+      [
+        "app.token",
+        async () =>
+          await routed(`${appTokenPath}/${app}`, {
+            method: "POST",
+            headers: {
+              cookie: session,
+              origin: clientOrigin,
+              "content-type": "application/json",
+            },
+            body: "{}",
+          }),
+      ],
+      [
+        "connections.callback",
+        async () =>
+          await routed(`${connectionCallbackPath}?state=staff-probe`, {
+            headers: { cookie: session },
+          }),
+      ],
+      [
+        "error.report",
+        async () =>
+          await routed(errorReportPath, {
+            method: "POST",
+            headers: {
+              cookie: session,
+              origin: clientOrigin,
+              "content-type": "application/json",
+            },
+            body: "{}",
+          }),
+      ],
+      [
+        "onboarding.lab",
+        async () =>
+          await worker.fetch(
+            new Request(`http://localhost:8787${labPath}`, {
+              method: "POST",
+              headers: { "content-type": "application/json", cookie: session },
+              body: "{}",
+            }),
+            { ...env, DEV_SKIP_ROUTER_SECRET: "true" },
+            createExecutionContext()
+          ),
+      ],
+      [
+        "onboarding.speech",
+        async () =>
+          await routed(speechPath, {
+            method: "POST",
+            headers: { "content-type": "application/json", cookie: session },
+            body: JSON.stringify({ text: "Hello.", language: "en" }),
+          }),
+      ],
+      [
+        "onboarding.transcription",
+        async () => {
+          const response = await routed(transcriptionPath, {
+            headers: {
+              Upgrade: "websocket",
+              Origin: clientOrigin,
+              cookie: session,
+            },
+          });
+          const socket = response.webSocket;
+          if (socket === null) {
+            throw new Error(`Expected a WebSocket, got ${response.status}`);
+          }
+          const answered = Promise.withResolvers<null>();
+          socket.addEventListener("message", () => {
+            answered.resolve(null);
+          });
+          socket.addEventListener("close", () => {
+            answered.resolve(null);
+          });
+          socket.accept();
+          // Who listens is read once the page says how it will talk.
+          socket.send(
+            JSON.stringify({
+              type: "start",
+              language: "en",
+              sampleRate: 16_000,
+            })
+          );
+          await Promise.race([answered.promise, scheduler.wait(callWaitMs)]);
+          socket.close();
+        },
       ],
       [
         "app.functions",
@@ -338,6 +450,56 @@ describe("Grasp staff's views, audited", () => {
     }
 
     expect(calls.length).toBeGreaterThan(100);
+    expect(unaudited).toStrictEqual([]);
+  });
+
+  it("write an entry for a call of every method of a target a call hands out: a screen's frame", async () => {
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const staff = await whoami(session);
+    const frame = new ScreenFrameRpc({
+      env,
+      check: staffAudited(env, async () => await Promise.resolve(staff)),
+      userId: staff.userId,
+      app: appIdSchema.parse(crypto.randomUUID()),
+      build: undefined,
+      stillOpen: () => async () => await Promise.resolve(false),
+      // SAFETY: never reached: every call is checked first, and the App
+      // doesn't exist, so none follows a query or reads a standing.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      queries: {} as never,
+      runSubscriptions: new Set(),
+      // SAFETY: never reached either, as for `queries`.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      standingNow: async () => await Promise.resolve({} as never),
+    });
+    // Closing lets go of what the frame follows: it reads and changes
+    // nothing of the client's.
+    const calls = targetMethods(frame, "frame").filter(
+      ({ name }) => name !== "frame.close"
+    );
+    const unaudited: string[] = [];
+    for (const { name, call } of calls) {
+      // oxlint-disable-next-line no-await-in-loop -- one call, then its entry
+      const events = await auditedDuring(
+        async () => {
+          await Promise.race([
+            outcome(Promise.resolve().then(call)),
+            scheduler.wait(callWaitMs),
+          ]);
+        },
+        { staffAccesses: true }
+      );
+      const method = name.split(".").at(-1) ?? "";
+      if (
+        !staffViews(events).some(({ detail }) =>
+          String(detail.surface).endsWith(`.${method}`)
+        )
+      ) {
+        unaudited.push(name);
+      }
+    }
+
+    expect(calls.length).toBeGreaterThan(5);
     expect(unaudited).toStrictEqual([]);
   });
 });

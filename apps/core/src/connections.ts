@@ -725,7 +725,7 @@ export const handleConnectionCallback = async (
     return failed(authErrors.create("auth.unauthenticated").code);
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, identity, "connections.route");
+  await auditStaffRoute(env, identity, "connections.callback");
   let finished: { connectionId: string; returnTo: string };
   try {
     finished = await env.CONNECT.finishConnection({
@@ -795,7 +795,7 @@ export const catalogLogoResponse = async (
     );
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "connections.route");
+  await auditStaffRoute(env, person, "connections.catalog_logo");
   const logo = await env.CONNECT.catalogLogo({
     source: source.data,
     id: named.id,

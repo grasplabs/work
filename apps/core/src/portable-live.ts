@@ -37,6 +37,7 @@ import { isWorkflowRequest } from "./screen-workflows.ts";
 import { admitted, stillHasRole } from "./screens-rpc.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { auditStaffRoute, staffAudited } from "./staff-audit.ts";
 
 // A portable host's live connection (spec 10.7.1, 11): the App's UI
 // outside Grasp's shell follows the App's live queries as a screen does,
@@ -206,13 +207,16 @@ export class PortableQueriesRpc
     // window: a cached reading never outlives the token it was made with,
     // whenever the expiry timer runs. What the window's check carries
     // (dropping its latest reading) is carried over.
-    this.#check = Object.assign(async (): Promise<Identity> => {
+    const unaudited = Object.assign(async (): Promise<Identity> => {
       if (Date.now() >= this.#held.expiresAt) {
         this.#expire();
         throw authErrors.create("auth.unauthenticated");
       }
       return await verified();
     }, verified);
+    // A staff member's every query is in the client's audit log, as their
+    // calls over `/rpc` are (staff-audit.ts).
+    this.#check = staffAudited(env, unaudited);
     const hasRole = stillHasRole(env, this.#check, app);
     this.#queries = new QuerySubscriptions(
       env,
@@ -440,6 +444,9 @@ export class PortableLiveRpc extends CoreRpcTarget implements PortableLiveApi {
       }
       const { person, sessionId, expiresAt } = checked;
       const app = await admitted(this.#env, person, this.#app);
+      // A staff member's connection is in the client's audit log
+      // (staff-audit.ts); each query after it is too.
+      await auditStaffRoute(this.#env, person, "app.live.connect", { app });
       // Closed while the token was read (by the host, or at the deadline):
       // nothing is recorded for it, and nothing built on its socket.
       this.#stillOpen();

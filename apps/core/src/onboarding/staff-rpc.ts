@@ -54,7 +54,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { z } from "zod";
 
 import { snapshotOf } from "../admin-snapshot.ts";
-import { appendAuditEvent } from "../audit-outbox.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -271,15 +270,10 @@ export class OnboardingStaffRpc
       if (found === null) {
         throw onboardingErrors.create("onboarding.not_found");
       }
-      const { interviewId, ...interview } = found;
-      // On record before it is seen, by the link's random id: the company's
-      // admin reads the audit log, and the person's id would name them.
-      await appendAuditEvent(this.#env, {
-        actor: actorOf(person),
-        action: "onboarding.interview.read",
-        target: { type: "interview", id: interviewId },
-        detail: {},
-      });
+      // On record before anything was read, by the session check, naming
+      // the kind of what was asked for alone (staff-audit.ts): the person's
+      // ID would name them to the company's admin.
+      const { interviewId: _interviewId, ...interview } = found;
       return interview;
     });
   }
@@ -309,14 +303,8 @@ export class OnboardingStaffRpc
       if (linkId === null) {
         throw onboardingErrors.create("onboarding.not_found");
       }
-      // A link is a credential: on record before it is read, by its
-      // random id, as a look at an interview is.
-      await appendAuditEvent(this.#env, {
-        actor: actorOf(person),
-        action: "onboarding.link.read",
-        target: { type: "interview", id: linkId },
-        detail: {},
-      });
+      // On record before anything was read, by the session check, naming
+      // the kind of what was asked for alone (staff-audit.ts).
       const path = await store.linkOf(id);
       if (path === null) {
         throw onboardingErrors.create("onboarding.not_found");

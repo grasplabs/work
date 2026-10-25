@@ -82,6 +82,7 @@ const closers = new Set([")", "]", "}"]);
 export const paramNamesOf = (
   method: (...args: unknown[]) => unknown
 ): string[] => {
+  // From its source, which keeps its names as core's bundle isn't minified.
   const source = Function.prototype.toString.call(method);
   const start = source.indexOf("(");
   if (start === -1) {

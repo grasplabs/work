@@ -24,7 +24,7 @@ import type { SessionCheck } from "./session-check.ts";
 // (namespace and method, or route), how many arguments it took, the
 // platform IDs among them (UUIDs, bare or after one of our short prefixes,
 // as `ent_<uuid>`), and the kind of every other argument, by the name the
-// method gives it (`query`, `input.path`). So a search's terms, a name or
+// method gives it (`query`, `input`). So a search's terms, a name or
 // a secret never reach the log, whatever their shape. It is stored in
 // core's outbox before the call goes on: one that can't be stored fails
 // the call, so no view goes unrecorded. The same view on one connection
@@ -35,10 +35,10 @@ import type { SessionCheck } from "./session-check.ts";
 // live query, a timer) is the call it was started in, which the call
 // context carries on, so each subscription keeps a key of its own.
 //
-// Two methods of the onboarding name what staff looked at by its random
-// link ID rather than the person's (`selfAudited`): the person's ID would
-// tell the company who was interviewed. They write that entry themselves
-// (onboarding/staff-rpc.ts), and no other.
+// Two methods of the onboarding take a person's ID that would tell the
+// company who was interviewed (`kindsOnly`): their entries name the kinds
+// of their arguments alone, never an ID, written before anything of the
+// look, as every entry is.
 
 /** How long one connection's same view is one entry. */
 export const repeatWindowMs = 5 * 60_000;
@@ -54,15 +54,18 @@ const platformId =
   /^(?:[a-z]{2,8}_)?[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/u;
 
 /**
- * The surfaces that record each staff look themselves, by an ID that
- * names no one (see the header): no second entry.
+ * The surfaces whose IDs would name an interviewee (see the header): their
+ * entries name kinds alone.
  */
-const selfAudited: ReadonlySet<string> = new Set([
+const kindsOnly: ReadonlySet<string> = new Set([
   "onboardingStaff.interview",
   "onboardingStaff.link",
 ]);
 
-/** A target's name as a surface's: `KnowledgeRpc` is `knowledge`. */
+/**
+ * A target's name as a surface's: `KnowledgeRpc` is `knowledge`. Read from
+ * its class's name, which holds as core's bundle isn't minified.
+ */
 const namespaceOf = (target: object): string => {
   const name = target.constructor.name.replace(/Rpc$/u, "");
   return `${name.charAt(0).toLowerCase()}${name.slice(1)}`;
@@ -75,10 +78,10 @@ export interface Named {
 }
 
 /**
- * What `args`, named `names`, name: each argument a platform ID is, or
- * holds one level in (an object's members, a list's items), by its value;
- * every other one by its kind, its name (`query`, `input.path`). Nothing
- * else of what they hold.
+ * What `args`, named `names`, name: every argument by its kind, its
+ * parameter's name (`query`, `input`), never an object's keys; and each
+ * platform ID one is, or holds one level in (an object's members, a list's
+ * items), by its value. Nothing else of what they hold.
  */
 export const namedBy = (
   args: readonly unknown[],
@@ -87,10 +90,12 @@ export const namedBy = (
   const ids = new Set<string>();
   const kinds = new Set<string>();
   const take = (value: unknown, kind: string): void => {
+    if (value === undefined || value === null) {
+      return;
+    }
+    kinds.add(kind);
     if (typeof value === "string" && platformId.test(value)) {
       ids.add(value);
-    } else if (value !== undefined && value !== null) {
-      kinds.add(kind);
     }
   };
   for (const [index, value] of args.entries()) {
@@ -100,8 +105,10 @@ export const namedBy = (
         take(item, name);
       }
     } else if (typeof value === "object" && value !== null) {
-      for (const [key, item] of Object.entries(value)) {
-        take(item, `${name}.${key}`);
+      // An object's keys may be anything its sender chose (a record's): it
+      // is named by its parameter alone, with the IDs among its members.
+      for (const item of Object.values(value)) {
+        take(item, name);
       }
     } else {
       take(value, name);
@@ -186,18 +193,17 @@ export const staffAudited = (env: Env, check: SessionCheck): SessionCheck => {
         call === undefined
           ? "session"
           : `${namespaceOf(call.target)}.${call.method}`;
-      if (selfAudited.has(surface)) {
-        return person;
-      }
       const args = call?.args ?? [];
       const key = `${surface}\u0000${await argsHash(args)}`;
       const now = Date.now();
       const last = written.get(key);
       if (last === undefined || now - last >= repeatWindowMs) {
+        const named = namedBy(args, call?.params ?? []);
         await recordStaffView(env, person, {
           surface,
           args: args.length,
-          ...namedBy(args, call?.params ?? []),
+          kinds: named.kinds,
+          ids: kindsOnly.has(surface) ? [] : named.ids,
         });
         written.set(key, now);
       }

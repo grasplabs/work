@@ -184,9 +184,12 @@ describe("the interviews in Grasp's onboarding area", () => {
     const staff = await asStaff();
 
     const paths: string[] = [];
-    const events = await auditedDuring(async () => {
-      paths.push(await staff.onboardingStaff.link(ids.ona));
-    });
+    const events = await auditedDuring(
+      async () => {
+        paths.push(await staff.onboardingStaff.link(ids.ona));
+      },
+      { staffAccesses: true }
+    );
     const path = paths[0] ?? "";
     const secret = path.split("#")[1] ?? "";
     // The link staff were given opens Ona's interview, and nobody else's.
@@ -202,7 +205,9 @@ describe("the interviews in Grasp's onboarding area", () => {
     }).toStrictEqual({
       path: true,
       opens: true,
-      audited: [["onboarding.link.read", "interview"]],
+      // On record as a staff look before anything was read, by the kind of
+      // what was asked alone (staff-audit.ts).
+      audited: [["staff.accessed", undefined]],
       secretInLog: false,
       named: false,
       nobody: "onboarding.not_found",
