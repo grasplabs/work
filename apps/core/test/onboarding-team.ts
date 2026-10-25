@@ -18,7 +18,7 @@ import { routed, unique } from "./sign-in.ts";
 // A team on its way through the onboarding into the brain, as the tests
 // of the brain's intake (brain-intake.test.ts) and of deleting an
 // interview (interview-deletion.test.ts) share it: Lea leads Ops, with
-// Max, Mia, Mo, Noor and Pim; her map, their agreements, and the drawing of
+// Max, Mia, Mo, Noor, Pim and Rik; her map, their agreements, and the drawing of
 // their tickets, with AI Gateway faked behind the AI binding.
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -26,7 +26,7 @@ const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const sessionKey = z.object({ key: z.string().optional() });
 
 /** The people of a team, by key. */
-export type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim";
+export type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim" | "rik";
 
 const names: Record<Key, [string, string]> = {
   lea: ["Lea Lind", "Team lead"],
@@ -35,6 +35,7 @@ const names: Record<Key, [string, string]> = {
   mo: ["Mo Mertens", "Agent"],
   noor: ["Noor Nijs", "Agent"],
   pim: ["Pim Peeters", "Agent"],
+  rik: ["Rik Rooms", "Agent"],
 };
 
 /** Each person's and the team's id, by key. */
@@ -46,6 +47,7 @@ const idsOf = (id: string) => ({
   mo: `mo-${id}`,
   noor: `noor-${id}`,
   pim: `pim-${id}`,
+  rik: `rik-${id}`,
 });
 
 /** The staff list of Ops, led by Lea, with the people `keys`. */
@@ -69,7 +71,7 @@ export const rosterOf = (
  * a fresh onboarding that started yesterday.
  */
 export const team = async (
-  keys: readonly Key[] = ["lea", "max", "mia", "mo", "noor", "pim"]
+  keys: readonly Key[] = ["lea", "max", "mia", "mo", "noor", "pim", "rik"]
 ) => {
   const store = onboardingStore(env);
   const ids = idsOf(unique());
@@ -276,16 +278,18 @@ export const mapped = async (
 };
 
 /**
- * Noor and Pim agree to a step each: with Lea, Max, Mia and Mo they make
- * six, one more than the five a team needs before any of it reaches the
- * brain (`brainFloor`), so one interview going leaves the rest there.
+ * Noor, Pim and Rik agree to a step each: with Max, Mia and Mo they make
+ * six who tell their own work, one more than the five a team needs before
+ * any of it reaches the brain (`minTeamShown`; the lead isn't counted), so
+ * one interview going leaves the rest there.
  */
 export const othersTold = async (ids: Ids) => {
   await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
   await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
+  await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")]);
 };
 
-/** Max, Mia, Mo, Noor and Pim agree to what they told about tickets. */
+/** Max, Mia, Mo, Noor, Pim and Rik agree to what they told about tickets. */
 export const told = async (ids: Ids) => {
   await agree(ids.max, [
     fact("m1", "step", "Opens the ticket in Zendesk."),

@@ -322,7 +322,7 @@ const ways: {
     way: "by taking them off the staff list (L7)",
     remove: async (ids) => {
       await onboardingStore(env).saveRoster(
-        rosterOf(ids, ["lea", "mia", "mo", "noor", "pim"]),
+        rosterOf(ids, ["lea", "mia", "mo", "noor", "pim", "rik"]),
         { type: "system" }
       );
     },
@@ -419,8 +419,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
             `Tickets wait in ${said.max}.`,
             `Would like ${said.mia} filled in for them.`,
           ],
-          sources: ["6 people"],
-          drawings: [5],
+          sources: ["7 people"],
+          drawings: [6],
         },
         after: {
           // What Mia agreed to as well stays: it rests on her.
@@ -429,13 +429,13 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
             "Tickets arrive in Zendesk.",
             `Would like ${said.mia} filled in for them.`,
           ],
-          sources: ["5 people"],
+          sources: ["6 people"],
           // The drawing from five is gone; the one from who is left is there.
-          drawings: [4],
+          drawings: [5],
         },
         left: { words: [], person: [] },
         others: true,
-        drawnFrom: [ids.mia, ids.mo, ids.noor, ids.pim].toSorted(),
+        drawnFrom: [ids.mia, ids.mo, ids.noor, ids.pim, ids.rik].toSorted(),
         redrawnWith: false,
         restsOn: [],
         audited,
@@ -513,7 +513,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       works: [
         [
           "handling new tickets",
-          [ids.max, ids.mia, ids.mo, ids.noor, ids.pim].toSorted(),
+          [ids.max, ids.mia, ids.mo, ids.noor, ids.pim, ids.rik].toSorted(),
         ],
         ["planning the rota", null],
       ],
@@ -524,9 +524,9 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
           `Tickets wait in ${said.max}.`,
           `Would like ${said.mia} filled in for them.`,
         ],
-        sources: ["5 people"],
-        // Drawn again from the same five, without the lead's facts.
-        drawings: [5],
+        sources: ["6 people"],
+        // The map was hers: its work leaves the brain with her facts (GRA-329).
+        drawings: null,
       },
       restsOn: [],
     });
@@ -534,7 +534,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
 
   it("that leaves a team under five people takes all of the team's interviews out of the brain until five agree again (W5)", async () => {
     const store = onboardingStore(env);
-    const ids = await team(["lea", "max", "mia", "mo", "noor"]);
+    // Five who tell their own work, and the lead, who isn't counted.
+    const ids = await team(["lea", "max", "mia", "mo", "noor", "pim"]);
     const said = sentinels();
     await mapped(ids);
     await agree(ids.max, [fact("m9", "wait", `Tickets wait in ${said.max}.`)]);
@@ -543,6 +544,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     ]);
     await agree(ids.mo, [fact("o9", "rule", `Every ticket gets ${said.mo}.`)]);
     await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
+    await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
     await drawAll(ids);
     await store.intakeNext();
     const before = await kept(ids);
@@ -599,7 +601,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       drew: true,
       deleted: 200,
       thrown: null,
-      drawnFrom: [ids.mia, ids.mo, ids.noor, ids.pim].toSorted(),
+      drawnFrom: [ids.mia, ids.mo, ids.noor, ids.pim, ids.rik].toSorted(),
       left: { words: [], person: [] },
       restsOn: [],
     });
@@ -693,8 +695,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
           "Tickets arrive in Zendesk.",
           `Would like ${said.mia} filled in for them.`,
         ],
-        sources: ["5 people"],
-        drawings: [4],
+        sources: ["6 people"],
+        drawings: [5],
       },
       restsOn: [],
     });
@@ -863,6 +865,142 @@ describe(
       });
     });
 
+    it("a line put right whose work then can't be drawn again leaves no drawing of the old line, here or in the brain (T2)", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      const said = sentinels();
+      await inTheBrain(ids, said);
+      const versionsOf = async () => {
+        const records = await kept(ids);
+        return records
+          .filter(({ type }) => type === "workflowVersion")
+          .map(({ id }) => id);
+      };
+      const before = await versionsOf();
+      await putRight(ids, said, sentinelOf("inbox"));
+      // Every drawing of the tickets fails, until it is given up.
+      const failing: GatewayReply = {
+        status: 400,
+        errorType: "invalid_request_error",
+      };
+      for (const later of [0, 2, 10, 40, 90]) {
+        // oxlint-disable-next-line no-await-in-loop -- one try at a time, each later, as the alarm tries
+        await answering(
+          [failing],
+          async () => await store.drawNext(Date.now() + later * 60_000)
+        );
+      }
+      await store.purgeBrain();
+      const works = await store.teamWorks(ids.team);
+      const after = await versionsOf();
+      expect({
+        tickets: works.find(({ name }) => name === "handling new tickets")
+          ?.drawn,
+        oldInBrain: after.filter((id) => before.includes(id)),
+      }).toStrictEqual({ tickets: null, oldInBrain: [] });
+    });
+
+    it("a lead who withdraws takes the team's map out of the brain: its work stays out, and the statements of the rest stay in (T5, maps)", async () => {
+      const ids = await team();
+      const said = sentinels();
+      await inTheBrain(ids, said);
+      const before = await brainOf(ids);
+      await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
+      await drawAll(ids);
+      await givenToBrain(ids);
+      const after = await brainOf(ids);
+      const records = await kept(ids);
+      const types = new Set(records.map(({ type }) => type));
+      expect({
+        before: before.drawings,
+        after: after.drawings,
+        statements: after.statements.length,
+        workflows: types.has("workflow") || types.has("workflowVersion"),
+      }).toStrictEqual({
+        before: [6],
+        after: null,
+        statements: 4,
+        workflows: false,
+      });
+    });
+
+    it("a lead who puts a line right keeps the team's work out of the brain until the map is drawn again from what they approved now (T2, maps)", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      const said = sentinels();
+      await inTheBrain(ids, said);
+      const lea = await openLink(ids.lea);
+      const facts = [
+        fact("l1", "work", "Max, Mia and Mo handle new tickets."),
+        fact("l2", "system", "The team lives in Zendesk and a shared rota."),
+      ];
+      const progress: InterviewProgress = {
+        person: "completed",
+        told: true,
+        mode: "type",
+        lines: [{ from: "stephen", text: "What starts one?" }],
+        facts,
+        phase: "readback",
+        wants: "end",
+        startedAt: Date.now(),
+        confirmed: facts.length,
+        adding: false,
+        addedAt: 0,
+      };
+      await onLink({ action: "save", ...lea, version: 1, progress });
+      await store.purgeBrain();
+      const edited = await brainOf(ids);
+      await approve(lea, facts);
+      await answering([mapReply(ids)], async () => await store.drawNext());
+      await drawAll(ids);
+      await givenToBrain(ids);
+      const redrawn = await brainOf(ids);
+      expect({
+        edited: edited.drawings,
+        statements: edited.statements.length,
+        redrawn: redrawn.drawings !== null,
+      }).toStrictEqual({ edited: null, statements: 4, redrawn: true });
+    });
+
+    it("keeps the voice's lines of a withdrawn interview waiting while the cache can't be reached, and takes them out once it can (T5)", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      const said = sentinels();
+      await mapped(ids);
+      await toldWith(ids, said);
+      const key: SpokenKey = {
+        spoken: `[warm] ${stephenSays(said.max)}`,
+        voice: speakerVoices.stephen,
+        model: voiceModels.said,
+        language: "en",
+      };
+      const answer = JSON.stringify({ audio: "AAAA", mime: "audio/mpeg" });
+      await keepLine(env, key, answer);
+      const files: R2Bucket = env.FILES;
+      const spy = vi
+        .spyOn(files, "delete")
+        .mockRejectedValue(new Error("The cache can't be reached."));
+      try {
+        await onLink({ action: "withdraw", ...(await openLink(ids.max)) });
+      } finally {
+        spy.mockRestore();
+      }
+      const stuck = await keptLine(env, key);
+      // The alarm, once the cache answers again.
+      const gone = await store.forgetLinesNow();
+      expect({
+        stuck,
+        gone: gone > 0,
+        after: await keptLine(env, key),
+        left: await store.forgetLinesNow(),
+      }).toStrictEqual({
+        stuck: answer,
+        gone: true,
+        after: undefined,
+        left: 0,
+      });
+    });
+
     it("withdrawing from the link takes the brain's records on them out, draws the work again without them, and leaves their words theirs (T5)", async () => {
       const store = onboardingStore(env);
       const ids = await team();
@@ -900,11 +1038,11 @@ describe(
             "Tickets arrive in Zendesk.",
             `Would like ${said.mia} filled in for them.`,
           ],
-          sources: ["5 people"],
-          drawings: [4],
+          sources: ["6 people"],
+          drawings: [5],
         },
         words: ["interviews"],
-        drawnFrom: [ids.mia, ids.mo, ids.noor, ids.pim].toSorted(),
+        drawnFrom: [ids.mia, ids.mo, ids.noor, ids.pim, ids.rik].toSorted(),
         redrawnWith: false,
         restsOn: [],
         drawInput: null,
@@ -996,3 +1134,52 @@ describe(
     });
   }
 );
+
+describe("the alarm, while something else fails", { timeout: 180_000 }, () => {
+  it("still takes what rests on a withdrawn interview out of the brain first, and sets itself again (T5)", async () => {
+    const ids = await team();
+    const said = sentinels();
+    await inTheBrain(ids, said);
+    // Max withdraws while the brain can't be written: it waits for the alarm.
+    const batch = env.DB.batch.bind(env.DB);
+    const blocked = vi
+      .spyOn(env.DB, "batch")
+      .mockImplementation(async (statements) => {
+        if (new Error("where").stack?.includes("drainBatch") !== true) {
+          throw new Error("The brain can't be reached.");
+        }
+        return await batch(statements);
+      });
+    try {
+      await onLink({ action: "withdraw", ...(await openLink(ids.max)) });
+    } finally {
+      blocked.mockRestore();
+    }
+    const stuck = await brainOf(ids);
+    // The alarm, with releasing the links failing on its way.
+    const { failed, alarm } = await runInDurableObject(
+      onboardingStore(env),
+      async (instance, state) => {
+        const release = vi
+          .spyOn(instance, "releaseDue")
+          .mockRejectedValue(new Error("Releasing failed."));
+        let threw = false;
+        try {
+          await instance.alarm();
+        } catch {
+          threw = true;
+        } finally {
+          release.mockRestore();
+        }
+        return { failed: threw, alarm: await state.storage.getAlarm() };
+      }
+    );
+    const after = await brainOf(ids);
+    expect({
+      stuck: stuck.statements.includes(`Tickets wait in ${said.max}.`),
+      failed,
+      after: after.statements.some((text) => text.includes(said.max)),
+      armed: alarm !== null,
+    }).toStrictEqual({ stuck: true, failed: true, after: false, armed: true });
+  });
+});

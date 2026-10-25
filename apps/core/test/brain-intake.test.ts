@@ -29,7 +29,8 @@ import { outcome, signedInApi } from "./sign-in.ts";
 //   or quote, a source of their own, or the lead's facts, whose role alone
 //   says who they are.
 // - A small team in the brain before five of its people agreed (GRA-329:
-//   as many as the interview's notice promises).
+//   as many as the interview's notice promises), its lead counted among
+//   them though none of their facts reach it.
 // - A drawing written over when the work is drawn again.
 // - What a record rests on lost, so deleting an interview can't find it.
 // - Someone else adding, or squatting on, the onboarding's own records.
@@ -143,7 +144,7 @@ describe(
         team: "Ops",
         source: {
           title: "Interviews with Ops",
-          how: "6 people",
+          how: "7 people",
           kind: "interview",
           who: null,
         },
@@ -176,7 +177,7 @@ describe(
             "Send the answer.",
           ],
           minutes: { quickest: 1, normal: 2, longest: 5, basis: "estimated" },
-          people: 5,
+          people: 6,
           volumes: [
             {
               of: "me",
@@ -286,9 +287,9 @@ describe(
       });
     });
 
-    it("holds back a team until five of its people agreed", async () => {
+    it("holds back a team until five who tell their own work agreed: its lead isn't counted", async () => {
       const store = onboardingStore(env);
-      const ids = await team(["lea", "max", "mia", "mo", "noor"]);
+      const ids = await team(["lea", "max", "mia", "mo", "noor", "pim"]);
       await mapped(ids);
       await agree(ids.max, [
         fact("m2", "system", "Tickets arrive in Zendesk."),
@@ -303,11 +304,12 @@ describe(
       await agree(ids.mo, [
         fact("o1", "wait", "A ticket waits days for the customer's reply."),
       ]);
+      await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
-      // Lea, Max, Mia and Mo: four.
+      // Lea and four: five people, but only four whose facts reach it.
       const early = await store.intakeNext();
       const waiting = await kept(ids);
-      await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
+      await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
       const late = await store.intakeNext();
       const given = await kept(ids);

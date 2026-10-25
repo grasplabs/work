@@ -129,6 +129,7 @@ import {
   interviewTexts,
   interviewSettings,
   interviews,
+  linesToForget,
   linkCodes,
   documents,
   kickoff,
@@ -156,6 +157,7 @@ import {
 } from "../mail-outbox.ts";
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
 import { sendMail } from "../mail.ts";
+import { forgetStored } from "../speech-cache.ts";
 import { intakeIds, intakeOf, rosterSource } from "./brain-intake.ts";
 import type { TeamIntake } from "./brain-intake.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
@@ -179,7 +181,7 @@ import {
   takingPart,
 } from "./rules.ts";
 import type { InterviewState, TeamCount } from "./rules.ts";
-import { anyLanguage, forgetSpokenLines } from "./spoken-lines.ts";
+import { anyLanguage, spokenKeysOf } from "./spoken-lines.ts";
 import type { SaidIn } from "./spoken-lines.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
@@ -1036,17 +1038,30 @@ export class Onboarding extends DurableObject<Env> {
       .map(({ id }) => id);
     const mapped = new Map(
       this.#db
-        .select({ id: teams.id, mappedAt: teams.mappedAt })
+        .select({
+          id: teams.id,
+          lead: teams.lead,
+          mappedAt: teams.mappedAt,
+          mappedFrom: teams.mappedFrom,
+        })
         .from(teams)
         .all()
-        .map(({ id, mappedAt }) => [id, mappedAt])
+        .map((row) => [row.id, row])
     );
     this.#db.delete(teams).run();
     this.#db.delete(people).run();
     for (const [position, team] of roster.teams.entries()) {
+      const was = mapped.get(team.id);
       this.#db
         .insert(teams)
-        .values({ ...team, position, mappedAt: mapped.get(team.id) ?? null })
+        .values({
+          ...team,
+          position,
+          mappedAt: was?.mappedAt ?? null,
+          // A map stands on the lead it was drawn from, and no other.
+          mappedFrom:
+            was?.lead === team.lead ? (was?.mappedFrom ?? null) : null,
+        })
         .run();
     }
     for (const [position, person] of roster.people.entries()) {
@@ -3921,25 +3936,31 @@ export class Onboarding extends DurableObject<Env> {
    * the next.
    */
   override async alarm(): Promise<void> {
-    await this.#drainAudit();
-    await this.releaseDue();
-    // A team's map opens its links.
-    if ((await this.drawNext()) !== null) {
-      await this.releaseDue();
-    }
     try {
-      await this.purgeBrain();
-    } catch (error) {
-      log.error("onboarding.purge_failed", {
-        error: error instanceof Error ? error.name : "unknown",
-      });
+      // Erasure first (GRA-329): nothing else that fails holds it up.
+      try {
+        await this.purgeBrain();
+      } catch (error) {
+        log.error("onboarding.purge_failed", {
+          error: error instanceof Error ? error.name : "unknown",
+        });
+      }
+      await this.forgetLinesNow();
+      await this.#drainAudit();
+      await this.releaseDue();
+      // A team's map opens its links.
+      if ((await this.drawNext()) !== null) {
+        await this.releaseDue();
+      }
+      await this.intakeNext();
+      await this.remindDue();
+      await this.sendUpdate();
+      await this.deliverMail();
+    } finally {
+      // Set again whatever failed above, so what is left is tried again.
+      await this.#armLinks();
+      await this.#armDrawing();
     }
-    await this.intakeNext();
-    await this.remindDue();
-    await this.sendUpdate();
-    await this.deliverMail();
-    await this.#armLinks();
-    await this.#armDrawing();
   }
 
   /**
@@ -4590,9 +4611,9 @@ export class Onboarding extends DurableObject<Env> {
         person,
         title: who?.title ?? "",
         facts,
-        example:
-          this.#held(person)?.lines.find(({ file }) => file !== undefined)
-            ?.file ?? null,
+        // A file's name is said in the conversation, never read back or
+        // approved (GRA-329): only approved facts leave the store.
+        example: null,
         ...(about === undefined ? {} : { about }),
       };
     });
@@ -4810,24 +4831,21 @@ export class Onboarding extends DurableObject<Env> {
     if (roster === null || team === undefined || team.off) {
       return null;
     }
-    const members = roster.people.filter((person) => person.team === teamId);
-    const agreed = members.filter(({ id }) => this.#agreedAt(id) !== null);
-    if (agreed.length < minTeamShown) {
+    const tellers = this.#tellers(teamId);
+    if (tellers.length < minTeamShown) {
       return null;
     }
     const { lead } = team;
     const leadAgreed =
       lead !== null && this.#agreedAt(lead) !== null ? [lead] : [];
+    // The pieces of work are the lead's map: none reach the brain while
+    // what it was drawn from no longer counts (`#mapBacked`).
+    const mapped = this.#mapBacked(teamId) ? this.teamWorks(teamId) : [];
     return {
       team: { id: team.id, name: team.name },
       names: roster.people.map(({ name }) => name),
-      tellers: agreed.flatMap(({ id }) => {
-        const input = this.drawInput(id);
-        return input === null || input.kind !== "own" || id === lead
-          ? []
-          : [{ person: id, facts: input.facts }];
-      }),
-      works: this.teamWorks(teamId).flatMap((work) => {
+      tellers,
+      works: mapped.flatMap((work) => {
         const { drawn } = work;
         if (
           drawn === null ||
@@ -4853,6 +4871,63 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The people of a team whose facts reach the brain (GRA-329): on its
+   * list, not its lead, whose role alone says who they are, and with
+   * something they approved that counts. Only they count towards the five
+   * a team needs (`minTeamShown`).
+   */
+  #tellers(teamId: string): { person: string; facts: DrawInput["facts"] }[] {
+    const roster = this.#roster();
+    const team = roster?.teams.find(({ id }) => id === teamId);
+    if (roster === null || team === undefined) {
+      return [];
+    }
+    return roster.people.flatMap(({ id, team: of }) => {
+      if (of !== teamId || id === team.lead) {
+        return [];
+      }
+      const input = this.drawInput(id);
+      return input === null || input.kind !== "own"
+        ? []
+        : [{ person: id, facts: input.facts }];
+    });
+  }
+
+  /**
+   * Whether a team's map stands on what its lead's facts are now: drawn
+   * from their agreement, and nothing they approved stopped counting since
+   * (an edit or a withdrawal, `revokedAt`). A team without a lead has no
+   * map of anyone's.
+   */
+  #mapBacked(teamId: string): boolean {
+    const team = this.#roster()?.teams.find(({ id }) => id === teamId);
+    if (team === undefined || team.lead === null) {
+      return true;
+    }
+    const [row] = this.#db
+      .select({ mappedFrom: teams.mappedFrom })
+      .from(teams)
+      .where(eq(teams.id, teamId))
+      .all();
+    const [state] = this.#db
+      .select({
+        agreedAt: interviewStates.agreedAt,
+        revokedAt: interviewStates.revokedAt,
+      })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, team.lead))
+      .all();
+    const from = row?.mappedFrom ?? null;
+    const agreedAt = state?.agreedAt ?? null;
+    const revokedAt = state?.revokedAt ?? null;
+    return (
+      from !== null &&
+      agreedAt !== null &&
+      (revokedAt === null || from >= revokedAt)
+    );
+  }
+
+  /**
    * Gives the brain what a team learned, as it was due at `dueAt`
    * (brain-intake.ts), as the onboarding, which owns those records: kept
    * once each, so giving it again adds only what is new. Then notes who
@@ -4864,10 +4939,12 @@ export class Onboarding extends DurableObject<Env> {
       this.#brainSettled(teamId, dueAt);
       return;
     }
+    // Who it rests on, as their interviews stand now, before anything is
+    // awaited: whatever happens to them meanwhile is seen at the end.
+    const began = this.#interviewsOf(
+      this.#roster()?.people.map(({ id }) => id) ?? []
+    );
     const { records, rests } = await intakeOf(intake);
-    const began = this.#interviewsOf([
-      ...new Set(rests.map(({ person }) => person)),
-    ]);
     await keepOnboardingRecords(this.env, records, {
       sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
       teams: new Set([intakeIds.team(teamId)]),
@@ -4953,16 +5030,16 @@ export class Onboarding extends DurableObject<Env> {
         .map(({ person }) => person)
     );
     const roster = this.#roster();
+    const teamIds = [...new Set(rows.map(({ team }) => team))];
     const emptied = new Set(
-      [...new Set(rows.map(({ team }) => team))].filter((team) => {
+      teamIds.filter((team) => {
         const onRoster = roster?.teams.some(({ id }) => id === team) === true;
-        const left =
-          roster?.people.filter(
-            (person) => person.team === team && agreed.has(person.id)
-          ).length ?? 0;
-        return !onRoster || left < minTeamShown;
+        return !onRoster || this.#tellers(team).length < minTeamShown;
       })
     );
+    // A map no longer standing on its lead's facts takes its pieces of
+    // work, and every drawing of them, out of the brain (GRA-329).
+    const unmapped = new Set(teamIds.filter((team) => !this.#mapBacked(team)));
     const records = new Map<
       string,
       { type: string; team: string; people: string[] }
@@ -4978,7 +5055,9 @@ export class Onboarding extends DurableObject<Env> {
       if (
         emptied.has(team) ||
         left.length === 0 ||
-        (type === "workflowVersion" && left.length < on.length)
+        (type === "workflowVersion" && left.length < on.length) ||
+        (unmapped.has(team) &&
+          (type === "workflow" || type === "workflowVersion"))
       ) {
         purged.add(record);
       }
@@ -5094,8 +5173,17 @@ export class Onboarding extends DurableObject<Env> {
       ...this.#brainDueAt(now).flatMap(({ team, after }) =>
         drawn.has(team) ? [] : [after]
       ),
-      // What rests on an interview that is gone, still in the brain.
-      ...(records.length > 0 || gone.length > 0 ? [now + purgeRetryMs] : []),
+      // What rests on an interview that is gone, still in the brain, and
+      // the voice's lines of one still in the cache.
+      ...(records.length > 0 ||
+      gone.length > 0 ||
+      this.#db
+        .select({ key: linesToForget.key })
+        .from(linesToForget)
+        .limit(1)
+        .all().length > 0
+        ? [now + purgeRetryMs]
+        : []),
     ];
     if (afters.length > 0) {
       await this.#alarmBy(Math.max(Math.min(...afters), now + drawNextMs));
@@ -5245,7 +5333,10 @@ export class Onboarding extends DurableObject<Env> {
         .set({
           does: map.does === "" ? still.does : map.does,
           ...(agreedAt === input.agreedAt
-            ? { mappedAt: sql`coalesce(${teams.mappedAt}, ${at})` }
+            ? {
+                mappedAt: sql`coalesce(${teams.mappedAt}, ${at})`,
+                mappedFrom: input.agreedAt,
+              }
             : {}),
         })
         .where(eq(teams.id, teamId))
@@ -5532,6 +5623,10 @@ export class Onboarding extends DurableObject<Env> {
     now: string
   ): void {
     if (lost) {
+      // Every drawing it was in goes, whatever still counts: one drawn
+      // from what no longer does never comes back, even when drawing it
+      // again fails.
+      this.#forgetDrawings(person.id);
       this.#db
         .update(interviewStates)
         .set({ revokedAt: now })
@@ -5560,7 +5655,6 @@ export class Onboarding extends DurableObject<Env> {
       this.#brainDue(person.team, now);
       return;
     }
-    this.#forgetDrawings(person.id);
     this.#db
       .update(interviewStates)
       .set({ agreedAt: null, drawnAt: null })
@@ -5617,9 +5711,16 @@ export class Onboarding extends DurableObject<Env> {
       .delete(interviewSettings)
       .where(eq(interviewSettings.person, person))
       .run();
+    // Withdrawing is final (GRA-329): its mark outlives a delete and a new
+    // start, so they never take part again. Nothing said is in it.
     this.#db
       .delete(participations)
-      .where(eq(participations.person, person))
+      .where(
+        and(
+          eq(participations.person, person),
+          isNull(participations.withdrawnAt)
+        )
+      )
       .run();
     this.#db.delete(approvals).where(eq(approvals.person, person)).run();
     this.#db.delete(readbacks).where(eq(readbacks.person, person)).run();
@@ -5724,11 +5825,27 @@ export class Onboarding extends DurableObject<Env> {
    * What follows someone's interview going, once it's gone here: what is
    * left of the work it was in is drawn again, the brain's records that
    * rested on it are taken out (`purgeBrain`), and so are the lines said
-   * in it that were kept. A purge that fails is tried again by the alarm
-   * (`#armDrawing`); lines that can't be taken out go within the month
-   * they are kept (speech-cache.ts).
+   * in it that were kept. Both are tried again by the alarm until done
+   * (`#armDrawing`): the brain's records rest on someone gone until they
+   * are out, and the lines wait by their stored keys, hashes, never what
+   * was said (`linesToForget`, GRA-329).
    */
   async #afterForget(said: readonly (SaidIn | null)[]): Promise<void> {
+    const each = await Promise.all(
+      said.map(async (lines) =>
+        lines === null ? [] : await spokenKeysOf(this.env, lines)
+      )
+    );
+    const keys = each.flat();
+    this.ctx.storage.transactionSync(() => {
+      for (const key of keys) {
+        this.#db
+          .insert(linesToForget)
+          .values({ key })
+          .onConflictDoNothing()
+          .run();
+      }
+    });
     await this.#armDrawing();
     try {
       await this.purgeBrain();
@@ -5737,17 +5854,44 @@ export class Onboarding extends DurableObject<Env> {
         error: error instanceof Error ? error.name : "unknown",
       });
     }
-    for (const lines of said) {
-      if (lines !== null) {
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- one interview's lines at a time
-          await forgetSpokenLines(this.env, lines);
-        } catch (error) {
-          log.error("onboarding.lines_unforgotten", {
-            error: error instanceof Error ? error.name : "unknown",
-          });
-        }
+    await this.forgetLinesNow();
+  }
+
+  /** Most stored lines one try takes out of the cache. */
+  static readonly #linesPerTry = 1000;
+
+  /**
+   * Takes the voice's lines still waiting (`linesToForget`) out of the
+   * cache, a page at a time, each forgotten here once the cache confirms
+   * it. What fails waits for the alarm. Returns how many went.
+   */
+  async forgetLinesNow(): Promise<number> {
+    let gone = 0;
+    for (;;) {
+      const page = this.#db
+        .select({ key: linesToForget.key })
+        .from(linesToForget)
+        .orderBy(asc(linesToForget.key))
+        .limit(Onboarding.#linesPerTry)
+        .all()
+        .map(({ key }) => key);
+      if (page.length === 0) {
+        return gone;
       }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one page at a time
+        await forgetStored(this.env, page);
+      } catch (error) {
+        log.error("onboarding.lines_unforgotten", {
+          error: error instanceof Error ? error.name : "unknown",
+        });
+        return gone;
+      }
+      this.#db
+        .delete(linesToForget)
+        .where(inList(linesToForget.key, page))
+        .run();
+      gone += page.length;
     }
   }
 

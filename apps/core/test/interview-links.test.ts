@@ -57,7 +57,7 @@ import {
 // - T4: anyone else with the link, the admin too, can't take part, approve
 //   or withdraw for them.
 // - T5: withdrawing works whenever deleting does, and nobody takes part
-//   again after it.
+//   again after it: not after a delete, nor a new start from staff.
 // - T6: after the last day nothing is approved any more.
 // - T7: taking part and withdrawing asked again answer as the first time.
 
@@ -658,6 +658,30 @@ describe("taking part, approving and withdrawing", () => {
       deleted: 200,
     });
   });
+
+  it.each([
+    ["deleting it from the link", "delete"],
+    ["a new start from staff", "newStart"],
+  ] as const)(
+    "keeps a withdrawal final through %s: nobody takes part again (T5)",
+    async (_, how) => {
+      const { ids, store, secrets } = await running();
+      const { key } = await opened(secrets.oli);
+      await takePart(secrets.oli, key);
+      await save(secrets.oli, key, 0);
+      await withdraw(secrets.oli, key);
+      await (how === "delete"
+        ? remove(secrets.oli, key)
+        : store.newStart(ids.oli, { type: "system" }));
+      const { key: again } = await opened(secrets.oli);
+      const device = again === "" ? key : again;
+      const read = await sessionOf(await session(secrets.oli, device));
+      expect({
+        withdrawn: read.withdrawn,
+        back: await codeOf(await takePart(secrets.oli, device)),
+      }).toStrictEqual({ withdrawn: true, back: "interview.withdrawn" });
+    }
+  );
 
   it("approves nothing after the last day: what wasn't approved stays theirs alone (T6)", async () => {
     const { ids, store, secrets } = await running();

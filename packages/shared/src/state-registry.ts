@@ -603,6 +603,10 @@ const onboarding: DurableObjectState = {
       `${core}onboarding/store.ts`,
       "Receipts of the read-backs people approved."
     ),
+    forget_lines: transient(
+      `${core}onboarding/store.ts`,
+      "Voice cache keys of interviews that went, until the cache confirms they are gone."
+    ),
     approvals: exported(
       `${core}onboarding/store.ts`,
       "The exact fact revisions each person approved: only these count."

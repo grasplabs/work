@@ -73,6 +73,13 @@ export const teams = sqliteTable("teams", {
    * wait for that, or for `leadWaitWorkingDays`.
    */
   mappedAt: text("mapped_at"),
+  /**
+   * The lead's agreement (their `agreedAt`) its map, as it stands, was
+   * last drawn from (GRA-329). Its pieces of work reach the brain only
+   * while that lead's facts still count, as they were when it was drawn:
+   * an edit or a withdrawal since keeps them out until it is drawn again.
+   */
+  mappedFrom: text("mapped_from"),
 });
 
 /** The people, in the order the admin gave them. */
@@ -523,6 +530,16 @@ export const auditOutbox = sqliteTable("audit_outbox", {
   id: text().primaryKey(),
   event: text().notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/**
+ * The voice's lines of an interview that went, still to be taken out of
+ * the cache (speech-cache.ts), by their stored keys: hashes, never what
+ * was said. Each goes once the cache confirms it; the alarm tries what is
+ * left again until none is (GRA-329).
+ */
+export const linesToForget = sqliteTable("forget_lines", {
+  key: text().primaryKey(),
 });
 
 /**

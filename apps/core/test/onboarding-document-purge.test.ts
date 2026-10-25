@@ -120,9 +120,9 @@ const purge = async (
 };
 
 /** The people of a team, by key. */
-type Key = "lea" | "max" | "mia" | "mo" | "noor";
+type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim";
 
-/** A team called Ops, led by Lea, with Max, Mia, Mo and Noor, in an onboarding that started yesterday: five, as many as reach the brain. */
+/** A team called Ops, led by Lea, with Max, Mia, Mo, Noor and Pim, in an onboarding that started yesterday: five who tell their own work, as many as reach the brain. */
 const team = async () => {
   const store = onboardingStore(env);
   const id = unique();
@@ -133,6 +133,7 @@ const team = async () => {
     mia: `mia-${id}`,
     mo: `mo-${id}`,
     noor: `noor-${id}`,
+    pim: `pim-${id}`,
   };
   const names: Record<Key, [string, string]> = {
     lea: ["Lea Lind", "Team lead"],
@@ -140,8 +141,9 @@ const team = async () => {
     mia: ["Mia Moor", "Agent"],
     mo: ["Mo Mertens", "Agent"],
     noor: ["Noor Nijs", "Agent"],
+    pim: ["Pim Peeters", "Agent"],
   };
-  const keys: Key[] = ["lea", "max", "mia", "mo", "noor"];
+  const keys: Key[] = ["lea", "max", "mia", "mo", "noor", "pim"];
   const roster: Roster = {
     teams: [{ id: ids.team, name: "Ops", lead: ids.lea, does: "", off: false }],
     people: keys.map((key) => ({
@@ -273,7 +275,7 @@ const rotaReply = (ids: Ids): GatewayReply => ({
   outputTokens: 1,
 });
 
-/** Lea's map drawn and the rota out of the way, then Max, Mia, Mo and Noor agree to what they told about tickets. */
+/** Lea's map drawn and the rota out of the way, then Max, Mia, Mo, Noor and Pim agree to what they told about tickets. */
 const toldAll = async (ids: Ids) => {
   const store = onboardingStore(env);
   await store.releaseDue();
@@ -289,6 +291,7 @@ const toldAll = async (ids: Ids) => {
     fact("o1", "wait", "A ticket waits days for the customer's reply."),
   ]);
   await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
+  await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
 };
 
 /** What `run` returns while the gateway answers each request with what `respond` makes. */

@@ -7,6 +7,10 @@ CREATE TABLE `approvals` (
 	PRIMARY KEY(`person`, `fact`, `revision`)
 );
 --> statement-breakpoint
+CREATE TABLE `forget_lines` (
+	`key` text PRIMARY KEY NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `participations` (
 	`person` text PRIMARY KEY NOT NULL,
 	`notice` integer NOT NULL,
@@ -24,4 +28,5 @@ CREATE TABLE `readbacks` (
 );
 --> statement-breakpoint
 ALTER TABLE `interview_states` ADD `revoked_at` text;--> statement-breakpoint
-ALTER TABLE `interviews` ADD `revisions` text DEFAULT '{}' NOT NULL;
+ALTER TABLE `interviews` ADD `revisions` text DEFAULT '{}' NOT NULL;--> statement-breakpoint
+ALTER TABLE `teams` ADD `mapped_from` text;

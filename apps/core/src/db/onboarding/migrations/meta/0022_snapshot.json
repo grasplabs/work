@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b9da0823-3618-4704-b915-8608d1772abe",
+  "id": "7ae27543-11bf-445e-95cf-8c6068fa5c5c",
   "prevId": "1ff97fc9-39cc-4aef-b377-77d1f40c6fde",
   "tables": {
     "answer_waits": {
@@ -463,6 +463,23 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "forget_lines": {
+      "name": "forget_lines",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
           "autoincrement": false
         }
       },
@@ -1333,6 +1350,13 @@
         },
         "mapped_at": {
           "name": "mapped_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "mapped_from": {
+          "name": "mapped_from",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

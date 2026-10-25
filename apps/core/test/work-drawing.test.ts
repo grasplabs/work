@@ -323,9 +323,10 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       drew: drew[1],
       models: requests.map(modelOf),
       sent: {
-        max: sent.includes(
-          `## ${ids.max} (Agent), shared an example: ticket-4411.pdf`
-        ),
+        max: sent.includes(`## ${ids.max} (Agent)`),
+        // A file named in the conversation was never read back or
+        // approved: it doesn't leave the store (GRA-329).
+        example: sent.includes("ticket-4411.pdf"),
         mia: sent.includes("- (number) Mia does about 45 in a busy week."),
         mo: sent.includes("- (step) Mo looks the customer up in Salesforce."),
         // The lead's overview is context, never one of the tellers.
@@ -364,6 +365,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       models: ["claude-opus-4-8", "claude-opus-4-8"],
       sent: {
         max: true,
+        example: false,
         mia: true,
         mo: true,
         leadAsContext: true,
