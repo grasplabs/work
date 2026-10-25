@@ -15,8 +15,9 @@ import type {
 import { toHex } from "./encoding.ts";
 import type { CollectionId } from "./ids.ts";
 import { knowledgeErrors, searchMaxLimit } from "./knowledge.ts";
+import type { Provenance } from "./knowledge.ts";
 import { d1BrainStore } from "./recall-store.ts";
-import type { BrainStore } from "./recall-store.ts";
+import type { BrainStore, EvidenceQuery } from "./recall-store.ts";
 import type { FoundSection } from "./search.ts";
 import { tokensOf } from "./tokens.ts";
 
@@ -45,6 +46,13 @@ const indexGeneration = "knowledge-fts@1";
 
 /** Routes this policy doesn't read yet, and why. */
 const omittedRoutes = [{ route: "semantic", reason: "not_enabled" }];
+
+/** What a read of no collection read: nothing. */
+const noProvenance: Provenance = {
+  collectionIds: [],
+  sensitive: false,
+  restricted: false,
+};
 
 /** The longest statement one item quotes, in characters. */
 const statementMaxLength = 4000;
@@ -193,6 +201,45 @@ const timeout = async (ms: number): Promise<undefined> => {
 };
 
 /**
+ * The collections a recall reads: those its filter names, or all it is
+ * bound `within` (undefined: all the reader may read). A filter naming
+ * one outside them is refused as not found.
+ */
+const scopeOf = (
+  named: readonly CollectionId[] | undefined,
+  within: readonly CollectionId[] | undefined
+): readonly CollectionId[] | undefined => {
+  if (within === undefined || named === undefined) {
+    return named ?? within;
+  }
+  if (named.some((id) => !within.includes(id))) {
+    throw brainErrors.create("brain.not_found");
+  }
+  return named;
+};
+
+/**
+ * What `store` finds for `query` in `remaining` milliseconds, or undefined
+ * once they run out. Bound to no collection it may read, it searches
+ * nothing and finds nothing, as a search of them would answer.
+ */
+const evidenceWithin = async <C>(
+  store: BrainStore<C>,
+  reader: C,
+  { remaining, ...query }: EvidenceQuery & { remaining: number }
+): Promise<
+  { sections: FoundSection[]; provenance: Provenance } | undefined
+> => {
+  if (query.collectionIds?.length === 0) {
+    return { sections: [], provenance: noProvenance };
+  }
+  return await Promise.race([
+    store.findEvidence(reader, query),
+    timeout(remaining),
+  ]);
+};
+
+/**
  * `recall`, with every collection it read from: those its search reported
  * (a search records the collections it searched, found or not) and every
  * one it was told to read, so a caller that labels what it was handed
@@ -202,10 +249,20 @@ export const recallWithSources = async <C>(
   brain: Brain<C>,
   reader: C,
   input: unknown,
-  /** A collection's stub passes its own: the one collection it reads. */
-  only?: CollectionId,
+  /**
+   * The only collections it may read, for a caller bound to some: a
+   * collection's stub passes its own, an App's knowledge resource those
+   * it binds that its person may read (none reads nothing). A filter
+   * naming another is refused as not found.
+   */
+  within?: readonly CollectionId[],
   store: BrainStore<C> = d1BrainStore(brain)
-): Promise<{ pack: MemoryPack; sources: CollectionId[] }> => {
+): Promise<{
+  pack: MemoryPack;
+  sources: CollectionId[];
+  /** What the read handed over came from, and how it is classified. */
+  provenance: Provenance;
+}> => {
   try {
     const { query, filters, budget } = brainErrors.parse(
       "brain.invalid",
@@ -223,11 +280,7 @@ export const recallWithSources = async <C>(
     const startedAt = Date.now();
     await store.requireBrainGrant(reader);
     const limits = clampBudget(budget);
-    const named = filters?.collectionIds;
-    if (only !== undefined && named?.some((id) => id !== only) === true) {
-      throw brainErrors.create("brain.not_found");
-    }
-    const collectionIds = only === undefined ? named : [only];
+    const collectionIds = scopeOf(filters?.collectionIds, within);
     if (collectionIds !== undefined) {
       await store.requireReadable(reader, collectionIds);
     }
@@ -238,14 +291,12 @@ export const recallWithSources = async <C>(
     const read =
       remaining <= 0
         ? undefined
-        : await Promise.race([
-            store.findEvidence(reader, {
-              query,
-              limit,
-              ...(collectionIds === undefined ? {} : { collectionIds }),
-            }),
-            timeout(remaining),
-          ]);
+        : await evidenceWithin(store, reader, {
+            query,
+            limit,
+            remaining,
+            ...(collectionIds === undefined ? {} : { collectionIds }),
+          });
     const found = read?.sections ?? [];
     const { items, tokenCount } = packed(found, limits);
     const truncated =
@@ -277,7 +328,11 @@ export const recallWithSources = async <C>(
       indexGeneration,
       createdAt: brain.ports.clock().toISOString(),
     };
-    return { pack, sources };
+    const provenance: Provenance = {
+      ...(read?.provenance ?? noProvenance),
+      collectionIds: sources,
+    };
+    return { pack, sources, provenance };
   } catch (error) {
     throw asBrainError(brain, error);
   }
@@ -293,9 +348,9 @@ export const recall = async <C>(
   brain: Brain<C>,
   reader: C,
   input: unknown,
-  only?: CollectionId,
+  within?: readonly CollectionId[],
   store: BrainStore<C> = d1BrainStore(brain)
 ): Promise<MemoryPack> => {
-  const { pack } = await recallWithSources(brain, reader, input, only, store);
+  const { pack } = await recallWithSources(brain, reader, input, within, store);
   return pack;
 };

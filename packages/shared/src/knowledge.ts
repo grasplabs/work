@@ -10,6 +10,11 @@ import type {
   RecallInput,
   RememberInput,
 } from "@grasp-os/brain/contract";
+import {
+  recallBudgetSchema,
+  recallCollectionsMax,
+  recallInputSchema,
+} from "@grasp-os/brain/contract";
 import type {
   BacklinkPage,
   CollectionSearchOptions,
@@ -209,6 +214,27 @@ export interface CatalogSkill {
   /** When to use it, cut to fit the catalog. */
   description: string;
 }
+
+/**
+ * A recall as an App asks it of a knowledge resource: collections by the
+ * names its declaration gives them, never by ID, since the App doesn't
+ * know which collections an admin bound them to. Core maps the names to
+ * the bound collections; the Brain's own contract takes only IDs.
+ */
+export const resourceRecallInputSchema = z.strictObject({
+  query: recallInputSchema.shape.query,
+  /** Only these of the declared collections; each once. */
+  collections: z
+    .array(z.string().min(1).max(64))
+    .min(1)
+    .max(recallCollectionsMax)
+    .refine((names) => new Set(names).size === names.length, {
+      message: "Name each collection once.",
+    })
+    .optional(),
+  budget: recallBudgetSchema.optional(),
+});
+export type ResourceRecallInput = z.input<typeof resourceRecallInputSchema>;
 
 /**
  * What an agent always has in context: the collections it may read and the

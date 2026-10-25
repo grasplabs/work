@@ -1,3 +1,4 @@
+import type { MemoryPack } from "@grasp-os/brain/contract";
 import { originRefusal } from "@grasp-os/shared/app-link-limits";
 import type {
   GuestChat,
@@ -6,6 +7,7 @@ import type {
   GuestTranscript,
 } from "@grasp-os/shared/guests";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
+import type { ResourceRecallInput } from "@grasp-os/shared/knowledge";
 import {
   resourceAliasPattern,
   storeOperationPathMaxLength,
@@ -145,8 +147,12 @@ export interface ConnectorConfig<
   readonly actions: Actions;
 }
 
-/** The knowledge operations an action may ask for. */
-export type KnowledgeOperation = "search" | "read";
+/**
+ * The knowledge operations an action may ask for. `recall` is the Brain's
+ * (`brain.ts`): it answers only once an admin also grants the App the
+ * Brain's permission.
+ */
+export type KnowledgeOperation = "search" | "read" | "recall";
 
 /** What a declaration's config may say about knowledge. */
 export interface KnowledgeConfig<
@@ -512,6 +518,19 @@ export type KnowledgeClient<Operations extends readonly KnowledgeOperation[]> =
           readonly read: (request: {
             readonly id: string;
           }) => Promise<KnowledgeDocument>;
+        }
+      : unknown) &
+    ("recall" extends Operations[number]
+      ? {
+          /**
+           * The Brain's evidence for `query` from the declared collections,
+           * or those `collections` names of them, as far as the person may
+           * read each: a bounded memory pack, each item cited at its exact
+           * version. Needs the Brain's permission too.
+           */
+          readonly recall: (
+            request: ResourceRecallInput
+          ) => Promise<MemoryPack>;
         }
       : unknown);
 
@@ -1122,9 +1141,10 @@ export const resource = Object.freeze({
     const operations = checkedList(checked.operations, "operations", [
       "search",
       "read",
+      "recall",
     ]).filter(
       (operation): operation is KnowledgeOperation =>
-        operation === "search" || operation === "read"
+        operation === "search" || operation === "read" || operation === "recall"
     );
     // SAFETY: built from what was checked of the arguments the type is
     // inferred from: the alias given, and lists holding exactly the names

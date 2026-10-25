@@ -129,7 +129,7 @@ export const collectionReads = (
     recall: async (input) =>
       await asDelegate(
         async (reader) =>
-          await recall(brainOf(env), reader, input, collectionId)
+          await recall(brainOf(env), reader, input, [collectionId])
       ),
   };
 };
