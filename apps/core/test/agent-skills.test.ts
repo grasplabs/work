@@ -1,0 +1,209 @@
+import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
+
+import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
+import { mockIdp } from "./idp.ts";
+import { readCollection } from "./knowledge.ts";
+import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+
+// Skills for a chat's code (`env.brain.skillsSelect` / `skillsRead`,
+// GRA-310), through the chat, as its agent uses them. The ways they could
+// fail, tried here at core's boundary (the Brain's own tests try every
+// rule, packages/brain/test/skills.test.ts):
+// - an agent without the brain permission, or without read of the skills'
+//   collection, selects or reads a skill;
+// - a skill is selected whose required capability the agent doesn't hold;
+// - retiring a skill leaves it selectable, or changes what a pinned read
+//   returns; a pinned read outlives the agent's read of the collection;
+// - a selection goes unrecorded, or its record carries a skill's text.
+
+const idp = mockIdp();
+
+/** Signing people in and granting permissions can be slow on CI. */
+const setUpTime = { timeout: 60_000 };
+
+/** A `SKILL.md` named `name`, with `manifest` in its frontmatter. */
+const skillText = (name: string, manifest: string): string =>
+  `---\nname: ${name}\ndescription: Handles ${name}.\n${manifest}\n---\n\n# ${name}\n\nCheck the order first, then refund.\n`;
+
+/** Code that returns what `call` answered, or the message it was refused with. */
+const calling = (call: string) =>
+  codeStep(
+    `export default async (self, env) => { try { return await ${call}; } catch (error) { return error.message; } };`
+  );
+
+/** What a code step returned, as JSON, or its text when it isn't. */
+const returned = (text: string | undefined): unknown => {
+  const body = (text ?? "").replace(/^Returned:\n/u, "");
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return parsed;
+  } catch {
+    return body;
+  }
+};
+
+const skillRefSchema = z.object({ name: z.string(), version: z.number() });
+
+/** A selection, as far as a test reads it. */
+const selectionSchema = z.object({
+  result: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("skill"), skill: skillRefSchema }),
+    z.object({ kind: z.literal("none"), reason: z.string() }),
+  ]),
+});
+
+/** A pinned read, as far as a test reads it. */
+const readSchema = z.object({ skill: skillRefSchema, text: z.string() });
+
+/** A selection's result, as a test compares it: the skill's name and version, or why none; what it was otherwise. */
+const resultOf = (value: unknown) => {
+  const parsed = selectionSchema.safeParse(value);
+  if (!parsed.success) {
+    return value;
+  }
+  const { result } = parsed.data;
+  return result.kind === "skill"
+    ? { skill: result.skill.name, version: result.skill.version }
+    : { none: result.reason };
+};
+
+describe("a chat's skills", setUpTime, () => {
+  it("selects a skill only under the agent's grants, pins it, and reads that version after it is retired, until its read is revoked", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const knowledge: KnowledgeApi = admin.api.knowledge;
+    const { id: collectionId } = await knowledge.createCollection({
+      name: `Skills ${unique()}`,
+      access: "everyone",
+    });
+    const refunds = await knowledge.saveDocument({
+      collectionId,
+      path: "refunds/SKILL.md",
+      text: skillText("refunds", "tasks: [refund]"),
+      ifVersion: 0,
+    });
+    await knowledge.saveDocument({
+      collectionId,
+      path: "payouts/SKILL.md",
+      text: skillText(
+        "payouts",
+        "tasks: [payout]\nrequires: [connection:mail.send]"
+      ),
+      ifVersion: 0,
+    });
+    const select = (type: string) =>
+      calling(`env.brain.skillsSelect({ task: { type: "${type}" } })`);
+    const read = calling(
+      `env.brain.skillsRead({ documentId: "${refunds.id}", version: 1 })`
+    );
+    const { stub, agent, newChat } = await personalChatsOf(
+      person.userId,
+      // Before any grant.
+      select("refund"),
+      says("No skills."),
+      // Granted the brain and the collection.
+      select("refund"),
+      select("payout"),
+      says("Selected."),
+      // The skill retired since.
+      select("refund"),
+      read,
+      says("Pinned."),
+      // Its collection's read revoked.
+      read,
+      says("Gone.")
+    );
+    const ungranted = await newChat();
+    await ungranted.ask("How do I refund?");
+
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const collectionGrant = await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, collectionId)
+    );
+    const granted = await newChat();
+    await granted.ask("How do I refund, and pay out?");
+
+    await knowledge.saveDocument({
+      collectionId,
+      path: "refunds/SKILL.md",
+      text: skillText("refunds", "tasks: [refund]\nstatus: retired"),
+      ifVersion: 1,
+    });
+    const retired = await newChat();
+    await retired.ask("And now?");
+
+    await admin.api.permissions.revoke(collectionGrant);
+    const revoked = await newChat();
+    await revoked.ask("And now?");
+
+    // Each turn under the brain grant recalls for its question first: the
+    // last steps of each are this test's calls.
+    const last = async (chatId: string, count: number) => {
+      const results = await codeResults(stub, chatId);
+      return results.slice(-count).map(({ text }) => returned(text));
+    };
+    const [before] = await last(ungranted.chat.id, 1);
+    const [refund, payout] = await last(granted.chat.id, 2);
+    const [afterRetiring, pinned] = await last(retired.chat.id, 2);
+    const [afterRevoking] = await last(revoked.chat.id, 1);
+    const pinnedRead = readSchema.parse(pinned);
+
+    // Recorded by the Brain: what was selected, never the skill's text.
+    const selections = await vi.waitFor(
+      async () => {
+        const all = await allEvents();
+        const events = all.filter(
+          ({ actor, action }) =>
+            action === "knowledge.skill.select" &&
+            actor.type === "agent" &&
+            actor.agentId === agent.agentId
+        );
+        expect(events).toHaveLength(3);
+        return events;
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+
+    expect({
+      before: typeof before === "string" && before.length > 0,
+      refund: resultOf(refund),
+      payout: resultOf(payout),
+      afterRetiring: resultOf(afterRetiring),
+      pinned: {
+        version: pinnedRead.skill.version,
+        retired: pinnedRead.text.includes("retired"),
+      },
+      afterRevoking,
+      selections: selections.map(({ detail }) => ({
+        result: detail.result,
+        reason: detail.reason,
+      })),
+      texts: JSON.stringify(selections).includes("Check the order first"),
+    }).toStrictEqual({
+      before: true,
+      refund: { skill: "refunds", version: 1 },
+      payout: { none: "no_match" },
+      afterRetiring: { none: "no_match" },
+      pinned: { version: 1, retired: false },
+      afterRevoking:
+        "There's no such memory, source or receipt, or you can't see it.",
+      selections: [
+        { result: "skill", reason: null },
+        { result: "none", reason: "no_match" },
+        { result: "none", reason: "no_match" },
+      ],
+      texts: false,
+    });
+  });
+});

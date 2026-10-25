@@ -17,6 +17,7 @@ import {
 } from "./memory-audience.ts";
 import { mayPublish, mayRetire } from "./memory-publish.ts";
 import { recallKey, requireRecall } from "./recall-grants.ts";
+import { skillCapabilities } from "./skill-capabilities.ts";
 import { checkWrite } from "./write-rules.ts";
 
 // Core's side of the Brain's ports (brain.ts): what each port is in core.
@@ -34,6 +35,9 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
   onRead: async (reader, record, ...sources) =>
     await noteProvenance(env, reader, record, ...sources),
   actorOf: readerActor,
+  skills: {
+    capabilities: async (reader) => await skillCapabilities(env, reader),
+  },
   audiences: async (reader) => await audiencesOf(env, reader),
   ownerOf: (reader) => {
     if (reader.type !== "person") {

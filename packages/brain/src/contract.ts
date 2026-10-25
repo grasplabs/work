@@ -468,6 +468,146 @@ export const memoriesRetireInputSchema = z.strictObject({
 });
 export type MemoriesRetireInput = z.input<typeof memoriesRetireInputSchema>;
 
+// --- skills -----------------------------------------------------------------
+
+/**
+ * A word a skill's manifest and a task share (a task type, a trait, a
+ * capability): lowercase letters, digits and `.`, `_`, `:` or `-`, as the
+ * host names them. Matched exactly, never by similarity.
+ */
+export const skillTokenSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9][a-z0-9._:-]*$/u);
+
+/** Most traits a task names. */
+export const skillTraitsMax = 32;
+
+/**
+ * What a caller asks a skill for: the task's type and what holds of it
+ * (its traits), never who it is or what it may do: the host says that.
+ */
+export const skillsSelectInputSchema = z.strictObject({
+  task: z.strictObject({
+    type: skillTokenSchema,
+    traits: z
+      .array(skillTokenSchema)
+      .max(skillTraitsMax)
+      .refine((traits) => new Set(traits).size === traits.length, {
+        message: "Name each trait once.",
+      })
+      .optional(),
+  }),
+});
+export type SkillsSelectInput = z.input<typeof skillsSelectInputSchema>;
+
+/** A skill at one exact version: what a selection pins and a read returns. */
+export const skillRefSchema = z.strictObject({
+  documentId: documentIdSchema,
+  collectionId: collectionIdSchema,
+  name: z.string().min(1).max(64),
+  version: revisionSchema,
+});
+export type SkillRef = z.infer<typeof skillRefSchema>;
+
+/**
+ * Why a skill whose tasks name the task's type wasn't selected, or that
+ * it was. Given only for skills the caller may read.
+ */
+export const skillOutcomeSchema = z.enum([
+  "selected",
+  "ambiguous",
+  "excluded",
+  "precondition_unmet",
+  "missing_capability",
+  "prerequisite_missing",
+  "dependency_missing",
+  "replaced",
+  "retired",
+]);
+export type SkillOutcome = z.infer<typeof skillOutcomeSchema>;
+
+/** Why no skill was selected. */
+export const noSkillReasonSchema = z.enum([
+  /** No skill the caller may read applies to the task. */
+  "no_match",
+  /** More than one applies, and nothing says which: none is forced. */
+  "ambiguous",
+  /** More skills than one selection reads: none is chosen from a part. */
+  "incomplete",
+]);
+export type NoSkillReason = z.infer<typeof noSkillReasonSchema>;
+
+/**
+ * A selection: the one applicable skill, pinned at the version read, with
+ * the versions it depends on; or an explicit no-skill result. Either way,
+ * every skill considered, with why.
+ */
+export interface SkillSelection {
+  id: string;
+  contractVersion: number;
+  /** The rules it followed: deterministic, never a model's choice. */
+  selectionPolicyVersion: string;
+  result:
+    | { kind: "skill"; skill: SkillRef; dependencies: SkillRef[] }
+    | { kind: "none"; reason: NoSkillReason };
+  considered: { skill: SkillRef; outcome: SkillOutcome }[];
+  createdAt: string;
+}
+
+/** A skill read at the exact version a selection pinned. */
+export const skillsReadInputSchema = z.strictObject({
+  documentId: documentIdSchema,
+  version: revisionSchema,
+});
+export type SkillsReadInput = z.input<typeof skillsReadInputSchema>;
+
+/** A skill as read: its exact version, its manifest and its text. */
+export interface SkillRead {
+  skill: SkillRef;
+  /** Its manifest at that version; null when it has none that parses. */
+  manifest: SkillManifest | null;
+  /** The whole `SKILL.md` at that version: instructions are data to the host. */
+  text: string;
+}
+
+/**
+ * What a skill's frontmatter says of when to use it (the Brain design's
+ * skill manifest), all of it exact words the host defines, matched as
+ * they are. A skill without `tasks` applies to no task: none is ever
+ * selected because it exists.
+ */
+export const skillManifestSchema = z.object({
+  /** The task types it applies to. */
+  tasks: z.array(skillTokenSchema).max(32).default([]),
+  /** Traits that must all hold of the task. */
+  when: z.array(skillTokenSchema).max(32).default([]),
+  /** Traits any one of which rules it out. */
+  unless: z.array(skillTokenSchema).max(32).default([]),
+  /** Capabilities the caller must already hold: a skill never grants one. */
+  requires: z.array(skillTokenSchema).max(32).default([]),
+  /** Skills, by name, that must be accepted and usable by the caller too. */
+  prerequisites: z.array(skillTokenSchema).max(16).default([]),
+  /** Skills it rests on at exact versions, as `name@version`. */
+  dependencies: z
+    .array(
+      z
+        .string()
+        .max(80)
+        .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*@[1-9][0-9]{0,8}$/u)
+    )
+    .max(16)
+    .default([]),
+  /** Skills, by name, it takes the place of where both apply. */
+  replaces: z.array(skillTokenSchema).max(16).default([]),
+  /** What checks it does what it says: references the host resolves. */
+  acceptance: z.array(z.string().trim().min(1).max(512)).max(16).default([]),
+  /** A retired skill is never selected again; pinned reads still work. */
+  status: z.enum(["accepted", "retired"]).default("accepted"),
+});
+export type SkillManifest = z.infer<typeof skillManifestSchema>;
+
 // --- operations and errors --------------------------------------------------
 
 /**
@@ -485,6 +625,8 @@ export const brainOperationSchema = z.enum([
   "memories.proposeChange",
   "memories.publish",
   "memories.retire",
+  "skills.select",
+  "skills.read",
 ]);
 export type BrainOperation = z.infer<typeof brainOperationSchema>;
 
@@ -498,6 +640,10 @@ export const brainOperations = {
   "memories.proposeChange": "mutation",
   "memories.publish": "mutation",
   "memories.retire": "mutation",
+  // Deterministic rules over manifests: no model, but adaptive selection
+  // will be an action, so callers treat it as one from the start.
+  "skills.select": "action",
+  "skills.read": "query",
 } as const satisfies Record<BrainOperation, "query" | "mutation" | "action">;
 
 /**

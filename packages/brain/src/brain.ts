@@ -87,6 +87,15 @@ export interface BrainPorts<C> {
   audiences: (reader: C) => Promise<readonly string[]>;
   /** Who `reader` is, as the host's audit log names them. */
   actorOf: (reader: C) => Json;
+  /** Skills (skills.ts), as the host decides who may use them. */
+  skills: {
+    /**
+     * The capabilities `reader` holds now, by the host's names for them
+     * (core's: from its grants): a skill whose manifest requires one they
+     * lack is never selected. The Brain compares; it never grants.
+     */
+    capabilities: (reader: C) => Promise<readonly string[]>;
+  };
   /**
    * The person whose memories `reader`'s commands are (memories.ts), or a
    * refusal (`brain.denied`) for a caller with none.

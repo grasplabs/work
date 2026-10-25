@@ -22,6 +22,8 @@ export interface Caller {
   audiences?: readonly string[];
   /** Of those collections, only these paths (`Readable.only`). */
   only?: Readonly<Record<string, readonly string[]>>;
+  /** The capabilities the host says they hold. */
+  capabilities?: readonly string[];
 }
 
 /** A job the Brain asked its host to start. */
@@ -76,6 +78,10 @@ export const testHost = (
       isRefusal: () => false,
     },
     actorOf: (caller) => ({ type: "person", userId: caller.userId }),
+    skills: {
+      capabilities: async (caller) =>
+        await Promise.resolve(caller.capabilities ?? []),
+    },
     ownerOf: (caller) => caller.userId,
     mayPublish: async () => {
       await Promise.resolve();
