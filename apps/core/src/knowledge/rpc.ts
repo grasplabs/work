@@ -1,5 +1,9 @@
 import type {
+  ChangeOptions,
   CommandOptions,
+  MemoriesProposeChangeInput,
+  MemoriesPublishInput,
+  MemoriesRetireInput,
   CommandReceipt,
   MemoriesGetInput,
   MemoriesListInput,
@@ -20,6 +24,9 @@ import type { Writer } from "@grasp-os/brain/documents";
 import {
   memoriesGet,
   memoriesList,
+  memoriesProposeChange,
+  memoriesPublish,
+  memoriesRetire,
   receiptsGet,
   remember,
 } from "@grasp-os/brain/memories";
@@ -169,6 +176,39 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await this.#asReader(
       async (reader) =>
         await remember(brainOf(this.#env), reader, input, options)
+    );
+  }
+
+  /** Publishes a record into a team's, the company's or a chat's memory (GRA-298). */
+  async memoriesPublish(
+    input: MemoriesPublishInput,
+    options: CommandOptions
+  ): Promise<CommandReceipt> {
+    return await this.#asReader(
+      async (reader) =>
+        await memoriesPublish(brainOf(this.#env), reader, input, options)
+    );
+  }
+
+  /** Corrects one of the person's own records, keeping its history (GRA-298). */
+  async memoriesProposeChange(
+    input: MemoriesProposeChangeInput,
+    options: ChangeOptions
+  ): Promise<CommandReceipt> {
+    return await this.#asReader(
+      async (reader) =>
+        await memoriesProposeChange(brainOf(this.#env), reader, input, options)
+    );
+  }
+
+  /** Retires a shared record its publisher or an admin no longer wants used (GRA-298). */
+  async memoriesRetire(
+    input: MemoriesRetireInput,
+    options: ChangeOptions
+  ): Promise<CommandReceipt> {
+    return await this.#asReader(
+      async (reader) =>
+        await memoriesRetire(brainOf(this.#env), reader, input, options)
     );
   }
 

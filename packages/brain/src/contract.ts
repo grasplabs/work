@@ -299,7 +299,12 @@ export type CommandStatus = z.infer<typeof commandStatusSchema>;
 export const commandReceiptSchema = z.strictObject({
   id: brainReceiptIdSchema,
   contractVersion: z.literal(brainContractVersion),
-  operation: z.enum(["remember", "memories.proposeChange"]),
+  operation: z.enum([
+    "remember",
+    "memories.proposeChange",
+    "memories.publish",
+    "memories.retire",
+  ]),
   /** The validated request's hash, which a retry must match. */
   requestHash: z.string().min(1),
   status: commandStatusSchema,
@@ -376,6 +381,37 @@ export type MemoriesProposeChangeInput = z.input<
   typeof memoriesProposeChangeInputSchema
 >;
 
+/** The scopes a record is published into: shared ones, never a person's. */
+export const publishScopeSchema = z.enum(["team", "company", "session"]);
+export type PublishScope = z.infer<typeof publishScopeSchema>;
+
+/**
+ * A record published into a shared scope (GRA-298): its scope, and the
+ * key of it (a team's or a chat's ID; none for the company), what it says
+ * and what it rests on. The host decides who may publish where.
+ */
+export const memoriesPublishInputSchema = z
+  .strictObject({
+    scope: publishScopeSchema,
+    scopeId: z.string().min(1).max(128).optional(),
+    kind: memoryKindSchema,
+    text: z.string().trim().min(1).max(rememberTextMaxLength),
+    sourceRefs: z
+      .array(brainSourceRefSchema)
+      .max(brainSourceRefsMax)
+      .optional(),
+  })
+  .refine(
+    ({ scope, scopeId }) => (scope === "company") === (scopeId === undefined)
+  );
+export type MemoriesPublishInput = z.input<typeof memoriesPublishInputSchema>;
+
+/** A shared record to retire (GRA-298): by its publisher or an admin. */
+export const memoriesRetireInputSchema = z.strictObject({
+  memoryId: memoryIdSchema,
+});
+export type MemoriesRetireInput = z.input<typeof memoriesRetireInputSchema>;
+
 // --- operations and errors --------------------------------------------------
 
 /**
@@ -390,6 +426,8 @@ export const brainOperationSchema = z.enum([
   "memories.get",
   "memories.list",
   "memories.proposeChange",
+  "memories.publish",
+  "memories.retire",
 ]);
 export type BrainOperation = z.infer<typeof brainOperationSchema>;
 
@@ -400,6 +438,8 @@ export const brainOperations = {
   "memories.get": "query",
   "memories.list": "query",
   "memories.proposeChange": "mutation",
+  "memories.publish": "mutation",
+  "memories.retire": "mutation",
 } as const satisfies Record<BrainOperation, "query" | "mutation" | "action">;
 
 /**

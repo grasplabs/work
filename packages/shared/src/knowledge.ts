@@ -1,8 +1,12 @@
 import type {
+  ChangeOptions,
   CommandOptions,
   CommandReceipt,
   MemoriesGetInput,
   MemoriesListInput,
+  MemoriesProposeChangeInput,
+  MemoriesPublishInput,
+  MemoriesRetireInput,
   MemoryPack,
   MemoryPage,
   MemoryRecord,
@@ -321,6 +325,27 @@ export interface KnowledgeApi {
   memoriesGet: (input: MemoriesGetInput) => Promise<MemoryRecord>;
   /** The person's own Brain memory records, newest first, a page at a time. */
   memoriesList: (input?: MemoriesListInput) => Promise<MemoryPage>;
+  /**
+   * Publishes a record into a team's, the company's or a chat's memory,
+   * where the person may (GRA-298): retry-safe, as `remember`.
+   */
+  memoriesPublish: (
+    input: MemoriesPublishInput,
+    options: CommandOptions
+  ) => Promise<CommandReceipt>;
+  /**
+   * Corrects one of the person's own records against the revision read,
+   * keeping its history (GRA-298).
+   */
+  memoriesProposeChange: (
+    input: MemoriesProposeChangeInput,
+    options: ChangeOptions
+  ) => Promise<CommandReceipt>;
+  /** Retires a shared record, by its publisher or an admin (GRA-298). */
+  memoriesRetire: (
+    input: MemoriesRetireInput,
+    options: ChangeOptions
+  ) => Promise<CommandReceipt>;
   /** The collections the person may read and their skills, as an agent's. */
   catalog: KnowledgeTools["catalog"];
   /** A document, or one section of it. */
