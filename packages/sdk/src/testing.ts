@@ -331,7 +331,7 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
   // The step whose function runs now, by its engine name, and the first
   // of its calls refused as one its review doesn't show.
   let running: { step: string; refused?: Error } | undefined;
-  // The first refusal of a call, step or model the review doesn't show.
+  // The first refusal of a step or model call the review doesn't show.
   // As on the platform (the host's tampering), it ends the run: every
   // later call, step and model call fails with it at once, and the run
   // fails with it even if the workflow caught it (`testRun`).
@@ -362,8 +362,10 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
     if (!callReviewed(calls, running.step, binding)) {
       const error = workflowErrors.create("workflow.call_not_reviewed");
       error.message = `Step "${stepNameOf(running.step).name}" called ${binding}, which the review of this version doesn't show it calling: call each binding only in the step's own function, where the review shows it.`;
+      // As the host's `#requireReviewed`: it fails this step's attempt,
+      // caught or not, but isn't tampering, so the run goes on.
       running.refused = error;
-      refuse(error);
+      throw error;
     }
   };
 

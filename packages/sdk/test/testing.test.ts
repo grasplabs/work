@@ -454,6 +454,52 @@ describe("workflow tests", () => {
     });
   });
 
+  it("complete a run whose caught refused call failed only its step", async () => {
+    const reached: string[] = [];
+    const binding = (name: string) => ({
+      call: async () => {
+        reached.push(name);
+        return "ok";
+      },
+    });
+    const notify = workflow("notify", { params: {} }, async (step, { env }) => {
+      let sent = "not sent";
+      try {
+        sent = await step.do("send", { description: "Send" }, async () =>
+          String(await env.MAIL?.call?.("send"))
+        );
+      } catch {
+        // Goes on without the mail, as a workflow may.
+      }
+      const found = await step.do("find", { description: "Find" }, async () =>
+        String(await env.CRM?.call?.("find"))
+      );
+      return { sent, found };
+    });
+    const tests = workflowTests(notify, [
+      {
+        name: "runs",
+        env: { CRM: binding("CRM"), MAIL: binding("MAIL") },
+        expect: { output: { sent: "not sent", found: "ok" } },
+      },
+    ]);
+
+    const report = await runWorkflowTests(tests, {
+      steps: { send: [], find: ["CRM"] },
+      kinds: { send: "exact", find: "exact" },
+      models: {},
+      keyed: [],
+      all: ["CRM"],
+    });
+
+    // As on the platform, a refused call fails its step's attempts, not
+    // the run: the next step's reviewed call goes through.
+    expect({ passed: report.passed, reached }).toStrictEqual({
+      passed: true,
+      reached: ["CRM"],
+    });
+  });
+
   it("fail a run that caught a refused step or model call and went on", async () => {
     const summary = workflow("summary", { params: {} }, async (step) => {
       let text = "none";
