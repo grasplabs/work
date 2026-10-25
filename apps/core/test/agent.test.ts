@@ -506,6 +506,29 @@ describe("chat agent", () => {
     expect(results.at(-1)?.text).toMatch(/at most 5 times/u);
   });
 
+  it("counts reading an API's declaration as no code run", async () => {
+    const read = readApiStep("chat");
+    const run = codeStep(
+      "export default async () => 'ran';",
+      maxRunsPerResponse
+    );
+    const { stub, chat, ask } = await newChat(
+      // Reads, then runs code as often as one response may, in one response.
+      {
+        ...run,
+        toolCalls: [...(read.toolCalls ?? []), ...(run.toolCalls ?? [])],
+      },
+      says("Done.")
+    );
+
+    await ask("Read, then run it all.");
+
+    const results = await codeResults(stub, chat.id);
+    expect(results.filter(({ isError }) => !isError)).toHaveLength(
+      maxRunsPerResponse
+    );
+  });
+
   it("runs code at most 30 times per turn", async () => {
     const { stub, chat, ask } = await newChat(
       ...Array.from({ length: 7 }, () =>

@@ -1202,9 +1202,13 @@ export const runTurn = async ({
           stop.abort();
         }
       },
-      beforeToolCall: async ({ assistantMessage }) => {
-        const reason = refusal(progress, assistantMessage);
-        if (reason === undefined) {
+      beforeToolCall: async ({ assistantMessage, toolCall }) => {
+        // Reading a declaration runs no code: only the turn's steps bound it.
+        const runsCode = toolCall.name !== "readApi";
+        const reason = runsCode
+          ? refusal(progress, assistantMessage)
+          : undefined;
+        if (runsCode && reason === undefined) {
           progress.runs += 1;
         }
         return await Promise.resolve(
