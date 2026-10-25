@@ -8,6 +8,7 @@ import {
   idSchema,
   memoryIdSchema,
 } from "./ids.ts";
+import { searchQueryMaxLength } from "./limits.ts";
 
 // The Brain's general contract (GRA-294a; the Brain design's "Brain SDK and
 // API"): what callers ask of it and what it answers, the same for an App,
@@ -34,12 +35,7 @@ import {
 /** This contract's version: what a pack and a receipt say they follow. */
 export const brainContractVersion = 1;
 
-/**
- * The longest a search or recall query may be: a question, not a
- * document. Hosts that take queries for the Brain refuse a longer one up
- * front (core's operation limits).
- */
-export const searchQueryMaxLength = 500;
+export { searchQueryMaxLength } from "./limits.ts";
 
 /** A version number of a document or memory: 1 and up. */
 const revisionSchema = z.int().min(1);

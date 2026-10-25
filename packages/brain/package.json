@@ -9,7 +9,8 @@
     "./contract": "./src/contract.ts",
     "./errors": "./src/errors.ts",
     "./ids": "./src/ids.ts",
-    "./knowledge": "./src/knowledge.ts"
+    "./knowledge": "./src/knowledge.ts",
+    "./limits": "./src/limits.ts"
   },
   "dependencies": {
     "zod": "catalog:"
