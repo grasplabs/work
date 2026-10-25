@@ -111,6 +111,7 @@ import { signInConfig } from "../auth/config.ts";
 import {
   keepOnboardingRecords,
   purgeOnboardingDrawings,
+  onboardingStatementsOf,
   purgeOnboardingRecords,
 } from "../brain-records.ts";
 import { organizations } from "../db/core/schema.ts";
@@ -4999,25 +5000,43 @@ export class Onboarding extends DurableObject<Env> {
     });
     // The team's claims are these now: any statement given before that
     // isn't one of them goes, so no earlier one outlives what it was put
-    // together from. Read before the new rests are noted, and taken out
-    // after: until it is, the team stays due, so a failure is tried again.
+    // together from. Found both where it is noted whom each rests on and
+    // in the brain itself, so one given with no note of it goes too. Read
+    // before the new rests are noted, and taken out after: until it is,
+    // the team stays due, so a failure is tried again.
     const current = new Set(records.map(({ id }) => id));
+    const given = await onboardingStatementsOf(
+      this.env,
+      intakeIds.team(teamId)
+    );
     const stale = [
-      ...new Set(
-        this.#db
+      ...new Set([
+        ...given,
+        ...this.#db
           .select({ record: brainSent.record })
           .from(brainSent)
           .where(
             and(eq(brainSent.team, teamId), eq(brainSent.type, "statement"))
           )
           .all()
-          .flatMap(({ record }) => (current.has(record) ? [] : [record]))
+          .map(({ record }) => record),
+      ]),
+    ].filter((record) => !current.has(record));
+    const claimed = [
+      ...new Set(
+        rests.flatMap(({ record, type }) =>
+          type === "statement" ? [record] : []
+        )
       ),
     ];
     const gone = this.ctx.storage.transactionSync(() => {
       // Whose interview went meanwhile, though they began anew: what rests
       // on it rests on someone gone (`gonePrefix`), and is taken out.
       const since = new Set(this.#goneSince(began));
+      // A claim rests on exactly the people behind it now: whoever it
+      // rested on before and doesn't now no longer counts towards the five
+      // it needs (`#toPurge`).
+      this.#db.delete(brainSent).where(inList(brainSent.record, claimed)).run();
       // One row a statement: within SQLite's bound parameters.
       for (const rest of rests) {
         this.#db

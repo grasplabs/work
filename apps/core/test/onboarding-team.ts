@@ -342,75 +342,123 @@ export interface FakeClaim {
   text: string;
   /** Every fact shown with these words is cited; a label as is (`F99`) too. */
   cites: readonly string[];
+  /** The words of the facts that say it, as the check answers: all it cites, unless given. */
+  says?: readonly string[];
+  /** Its words as the check is asked about them, once names are taken out: `text`, unless given. */
+  checked?: string;
 }
 
-const factLine = /- (?<label>F\d+) \((?<kind>[a-z]+)\) (?<text>.*?)(?=\\n|")/gu;
+const shownSchema = z.array(
+  z.object({
+    facts: z.array(
+      z.object({ id: z.string(), kind: z.string(), text: z.string() })
+    ),
+  })
+);
+const checkSchema = z.object({ claim: z.string(), fact: z.string() });
+
+/** What a request gave the model as data between `<tag>` and `</tag>`, parsed; none when it gave none. */
+const dataOf = (request: GatewayRequest | undefined, tag: string): unknown => {
+  // The request as sent, read back to its text: the data is JSON in it.
+  const sent: string = JSON.stringify(request?.body ?? null);
+  const found = new RegExp(`<${tag}>\\\\n(?<data>.*?)\\\\n</${tag}>`, "u").exec(
+    sent
+  );
+  const data = found?.groups?.data;
+  if (data === undefined) {
+    return undefined;
+  }
+  const text: unknown = JSON.parse(`"${data}"`);
+  return typeof text === "string" ? JSON.parse(text) : undefined;
+};
+
+/** The facts a claims request showed the model, by label. */
+const shownIn = (request: GatewayRequest | undefined) =>
+  shownSchema
+    .parse(dataOf(request, "facts") ?? [])
+    .flatMap(({ facts }) => facts);
 
 /**
- * The model putting a team's claims together, faked: `claims`, each citing
- * the labels the prompt gave the facts it names by their words.
+ * The model, faked: a check of one fact against one claim answered by
+ * `says`; anything else, the claims, by `claims`.
  */
-export const claimsReply =
-  (claims: readonly FakeClaim[]) =>
+const claimsOrCheck =
+  (
+    claims: (request: GatewayRequest | undefined) => unknown,
+    says: (claim: string, fact: string) => boolean
+  ) =>
   (requests: readonly GatewayRequest[]): GatewayReply => {
-    const prompt = JSON.stringify(requests.at(-1)?.body ?? null);
-    const shown = [...prompt.matchAll(factLine)].map(({ groups }) => ({
-      label: groups?.label ?? "",
-      text: groups?.text ?? "",
-    }));
+    const request = requests.at(-1);
+    const check = checkSchema.safeParse(dataOf(request, "data"));
     return {
-      text: JSON.stringify({
-        claims: claims.map(({ kind, text, cites }) => ({
-          kind,
-          text,
-          facts: cites.flatMap((cited) => {
-            const labels = shown
-              .filter((each) => each.text === cited)
-              .map(({ label }) => label);
-            return labels.length === 0 ? [cited] : labels;
-          }),
-        })),
-      }),
+      text: JSON.stringify(
+        check.success
+          ? { says: says(check.data.claim, check.data.fact) }
+          : claims(request)
+      ),
       inputTokens: 1000,
       outputTokens: 200,
     };
   };
 
 /**
+ * The model putting a team's claims together, faked: `claims`, each citing
+ * the labels the prompt gave the facts it names by their words; checked,
+ * a fact says a claim when it is among those it `says`.
+ */
+export const claimsReply = (claims: readonly FakeClaim[]) =>
+  claimsOrCheck(
+    (request) => {
+      const shown = shownIn(request);
+      return {
+        claims: claims.map(({ kind, text, cites }) => ({
+          kind,
+          text,
+          facts: cites.flatMap((cited) => {
+            const labels = shown
+              .filter((each) => each.text === cited)
+              .map(({ id }) => id);
+            return labels.length === 0 ? [cited] : labels;
+          }),
+        })),
+      };
+    },
+    (claim, said) =>
+      claims.some(
+        ({ text, checked, cites, says }) =>
+          (checked ?? text) === claim && (says ?? cites).includes(said)
+      )
+  );
+
+/**
  * The model putting a team's claims together as a plain one would, faked:
  * a claim for each kind of fact shown, citing every fact of it, in the
- * words most of them used (the first, when as many used others).
+ * words most of them used (the first, when as many used others); checked,
+ * every fact says the claim of its kind.
  */
-export const alikeReply = (
-  requests: readonly GatewayRequest[]
-): GatewayReply => {
-  const prompt = JSON.stringify(requests.at(-1)?.body ?? null);
-  const byKind = new Map<string, { label: string; text: string }[]>();
-  for (const { groups } of prompt.matchAll(factLine)) {
-    const kind = groups?.kind ?? "";
-    byKind.set(kind, [
-      ...(byKind.get(kind) ?? []),
-      { label: groups?.label ?? "", text: groups?.text ?? "" },
-    ]);
-  }
-  const claims = [...byKind].map(([kind, facts]) => {
-    const counts = new Map<string, number>();
-    let text = "";
-    for (const shown of facts) {
-      const count = (counts.get(shown.text) ?? 0) + 1;
-      counts.set(shown.text, count);
-      if (count > (counts.get(text) ?? 0)) {
-        ({ text } = shown);
-      }
+export const alikeReply = claimsOrCheck(
+  (request) => {
+    const byKind = new Map<string, { id: string; text: string }[]>();
+    for (const { id, kind, text } of shownIn(request)) {
+      byKind.set(kind, [...(byKind.get(kind) ?? []), { id, text }]);
     }
-    return { kind, text, facts: facts.map(({ label }) => label) };
-  });
-  return {
-    text: JSON.stringify({ claims }),
-    inputTokens: 1000,
-    outputTokens: 200,
-  };
-};
+    return {
+      claims: [...byKind].map(([kind, facts]) => {
+        const counts = new Map<string, number>();
+        let text = "";
+        for (const shown of facts) {
+          const count = (counts.get(shown.text) ?? 0) + 1;
+          counts.set(shown.text, count);
+          if (count > (counts.get(text) ?? 0)) {
+            ({ text } = shown);
+          }
+        }
+        return { kind, text, facts: facts.map(({ id }) => id) };
+      }),
+    };
+  },
+  () => true
+);
 
 /** The onboarding giving the brain its next team, with the model putting claims together as a plain one would. */
 export const intakeAlike = async (): Promise<string | null> => {
