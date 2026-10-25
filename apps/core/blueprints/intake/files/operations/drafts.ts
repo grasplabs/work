@@ -11,9 +11,9 @@ import {
 
 // Drafts of a source and the statements taken from it, reviewed and
 // edited before they are saved as a `source` and its `statements`. Each
-// draft is typed in by hand (`create`), or proposed by a run of the
-// `extract` workflow (`propose`), which took the statements out of someone's
-// notes or a stakeholder's chat. Only the App's builders reach any of it:
+// draft is typed in by hand (`create`), or proposed (`propose`) with
+// what a run of the `extract` workflow took out of someone's notes or a
+// stakeholder's chat. Only the App's builders reach any of it:
 // the store refuses everyone else (app.ts).
 
 /** Most drafts the review lists: the newest. */
@@ -176,14 +176,13 @@ export const create = mutation({
 });
 
 /**
- * Keeps a draft a run of `extract` proposes, for review: out of notes, or
- * out of a stakeholder's chat (`guest`), whose words are untrusted. Run
- * again under the step's key, it answers the draft it kept the first
- * time. Called by anyone else who may write drafts (a builder), it keeps
- * a draft as theirs to review, as `create` does. `guest` records where
- * the draft came from, not who may be trusted: the App's builders are,
- * and one may mark a draft either way. A chat's words are marked by the
- * run that read them, which a builder started.
+ * Keeps, for review, what a run of `extract` found: in notes, or in a
+ * stakeholder's chat (`guest`), whose words are untrusted. The screen
+ * proposes it once the run is done, as the builder reviewing it; called
+ * by anyone else who may write drafts (a builder), it keeps a draft as
+ * theirs to review, as `create` does. `guest` records where the draft
+ * came from, not who may be trusted: the App's builders are, and one may
+ * mark a draft either way.
  */
 export const propose = mutation({
   args: { ...draftArgs, guest: v.boolean() },

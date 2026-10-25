@@ -85,13 +85,6 @@ export interface OpenedDraft {
   draft: Draft;
 }
 
-/**
- * Whether `value` may be a draft's ID: a string, as a run of `extract`
- * answers it. The App's functions check it is one.
- */
-export const isDraftId = (value: unknown): value is Id<"drafts"> =>
-  typeof value === "string" && value !== "";
-
 /** What a call answers, or the code of why it was refused. */
 export type Outcome<T> = { ok: T } | { error: string };
 

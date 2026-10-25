@@ -1,5 +1,5 @@
 {
-  // The intake's server code and workflows, checked as core's are, with
+  // The intake's server code, checked as core's are, with
   // `#grasp/server` resolved to what the host generates for it
   // (server-types.ts). Its screens import `#grasp`, generated from its
   // manifest, so the screen build checks them (../tsconfig.json leaves
@@ -11,11 +11,6 @@
       "#grasp/server": ["./server-types.ts"]
     }
   },
-  "include": [
-    "server-types.ts",
-    "files/*.ts",
-    "files/operations",
-    "files/workflows"
-  ],
+  "include": ["server-types.ts", "files/*.ts", "files/operations"],
   "exclude": []
 }
