@@ -774,6 +774,52 @@ export const lessonsOf = async <C>(
 };
 
 /**
+ * Retires the lesson `lessonId` at `expectedRevision` as a person's
+ * correction, once its caller decided they may: never patched or recreated
+ * after. One that doesn't exist is `brain.not_found`; a stale revision is
+ * `brain.revision_conflict`.
+ */
+export const retireLessonAt = async <C>(
+  brain: Brain<C>,
+  lessonId: string,
+  expectedRevision: number
+): Promise<void> => {
+  const current = await lessonAt(brain, lessonId);
+  const row = await brain.db
+    .select({
+      scope: brainLessons.scope,
+      scopeId: brainLessons.scopeId,
+      groupKey: brainLessons.groupKey,
+    })
+    .from(brainLessons)
+    .where(eq(brainLessons.id, lessonId))
+    .get();
+  if (
+    current === undefined ||
+    row === undefined ||
+    current.content === undefined
+  ) {
+    throw brainErrors.create("brain.not_found");
+  }
+  if (current.revision !== expectedRevision) {
+    throw brainErrors.create("brain.revision_conflict");
+  }
+  const moved = await applyPatch(brain, {
+    lessonId,
+    scope: { scope: row.scope, scopeId: row.scopeId },
+    groupKey: row.groupKey,
+    base: current.revision,
+    content: current.content,
+    state: "retired",
+    retiredBy: "owner",
+    since: brain.ports.clock(),
+  });
+  if (!moved) {
+    throw brainErrors.create("brain.revision_conflict");
+  }
+};
+
+/**
  * Retires the lesson `lessonId` at `expectedRevision` as its owner's
  * correction: the person whose own lessons they are (`ownerId`, the host's
  * caller). Never patched or recreated after. A lesson that isn't theirs,
@@ -794,10 +840,8 @@ export const retireLesson = async <C>(
     }),
     input
   );
-  const scope: ConsolidationScope = { scope: "person", scopeId: ownerId };
-  const current = await lessonAt(brain, lessonId);
   const [own] = await brain.db
-    .select({ id: brainLessons.id, groupKey: brainLessons.groupKey })
+    .select({ id: brainLessons.id })
     .from(brainLessons)
     .where(
       and(
@@ -806,29 +850,10 @@ export const retireLesson = async <C>(
         eq(brainLessons.scopeId, ownerId)
       )
     );
-  if (
-    current === undefined ||
-    own === undefined ||
-    current.content === undefined
-  ) {
+  if (own === undefined) {
     throw brainErrors.create("brain.not_found");
   }
-  if (current.revision !== expectedRevision) {
-    throw brainErrors.create("brain.revision_conflict");
-  }
-  const moved = await applyPatch(brain, {
-    lessonId,
-    scope,
-    groupKey: own.groupKey,
-    base: current.revision,
-    content: current.content,
-    state: "retired",
-    retiredBy: "owner",
-    since: brain.ports.clock(),
-  });
-  if (!moved) {
-    throw brainErrors.create("brain.revision_conflict");
-  }
+  await retireLessonAt(brain, lessonId, expectedRevision);
 };
 
 /**

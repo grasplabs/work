@@ -19,6 +19,7 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { LessonsView } from "./lessons-view.tsx";
 
 // The Brain's memory records, as a person inspects and corrects them
 // (GRA-298; the threat model is on the issue): their own, or the shared
@@ -33,6 +34,7 @@ type Page = Awaited<ReturnType<Knowledge["memoriesList"]>>;
 type Lineage = Awaited<ReturnType<Knowledge["memoriesLineage"]>>;
 type Shown = Lineage["record"];
 type Among = "mine" | "shared";
+type Tab = Among | "lessons";
 
 /** What a read from core came to. */
 type Read<T> =
@@ -456,7 +458,7 @@ const RecordList = ({
 
 /** The Brain's memory page: the records, and the one in hand. */
 export const MemoryPage = ({ admin }: { admin: boolean }) => {
-  const [among, setAmong] = useState<Among>("mine");
+  const [tab, setTab] = useState<Tab>("mine");
   const [picked, setPicked] = useState<string>();
   // Read again after a change: what changed shows as it is now.
   const [changes, setChanges] = useState(0);
@@ -469,10 +471,10 @@ export const MemoryPage = ({ admin }: { admin: boolean }) => {
         </h1>
         <Tabs
           onValueChange={(value: string) => {
-            setAmong(value === "shared" ? "shared" : "mine");
+            setTab(value === "shared" || value === "lessons" ? value : "mine");
             setPicked(undefined);
           }}
-          value={among}
+          value={tab}
         >
           <TabsList>
             <TabsTrigger value="mine">
@@ -483,29 +485,38 @@ export const MemoryPage = ({ admin }: { admin: boolean }) => {
                 Shared with you
               </Trans>
             </TabsTrigger>
+            <TabsTrigger value="lessons">
+              <Trans context="the Brain's lessons from repeated failures">
+                Lessons
+              </Trans>
+            </TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
-      <div className="grid min-h-0 gap-6 lg:grid-cols-2">
-        <RecordList
-          among={among}
-          key={`${among}:${changes}`}
-          onPick={setPicked}
-          picked={picked}
-        />
-        {picked === undefined ? null : (
-          <LineagePanel
-            admin={admin}
-            key={`${picked}:${changes}`}
-            memoryId={picked}
-            onChanged={(memoryId) => {
-              setChanges((count) => count + 1);
-              setPicked(memoryId);
-            }}
+      {tab === "lessons" ? (
+        <LessonsView />
+      ) : (
+        <div className="grid min-h-0 gap-6 lg:grid-cols-2">
+          <RecordList
+            among={tab}
+            key={`${tab}:${changes}`}
             onPick={setPicked}
+            picked={picked}
           />
-        )}
-      </div>
+          {picked === undefined ? null : (
+            <LineagePanel
+              admin={admin}
+              key={`${picked}:${changes}`}
+              memoryId={picked}
+              onChanged={(memoryId) => {
+                setChanges((count) => count + 1);
+                setPicked(memoryId);
+              }}
+              onPick={setPicked}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 };

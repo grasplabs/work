@@ -1821,6 +1821,11 @@ msgstr "Ein Lauf eines Workflows wartet auf diese Antwort."
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Eine Suche in {where} hat {searches, plural, one {einmal} other {#-mal}} nichts gefunden, bei {askers, plural, one {# fragenden Person} other {# fragenden Personen}}."
 
+#: src/brain/lessons-view.tsx
+msgctxt "lesson scope"
+msgid "A shared chat"
+msgstr "Ein geteilter Chat"
+
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
 msgstr "Eine Mitarbeiterliste ist der schnellste Weg: Namen, E-Mail-Adressen, Teams und Funktionen, als CSV- oder Excel-Datei. Ich nutze sie nur, um zu wissen, mit wem ich sprechen soll."
@@ -3451,6 +3456,11 @@ msgctxt "status of a workflow run"
 msgid "Cancelled"
 msgstr "Abgebrochen"
 
+#: src/brain/lessons-view.tsx
+msgctxt "lesson state"
+msgid "Candidate"
+msgstr "Kandidat"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Cap reached"
 msgstr "Obergrenze erreicht"
@@ -4013,6 +4023,11 @@ msgctxt "status of a workflow run"
 msgid "Completed"
 msgstr "Abgeschlossen"
 
+#. placeholder {0}: episode.taskType
+#: src/brain/lessons-view.tsx
+msgid "Completed: {0}"
+msgstr "Abgeschlossen: {0}"
+
 #: src/dashboard/report.ts
 msgid "Completed: {completed}"
 msgstr "Abgeschlossen: {completed}"
@@ -4223,6 +4238,11 @@ msgstr "Inhalt, als JSON"
 msgctxt "heading: the headings of a document, as a table of contents"
 msgid "Contents"
 msgstr "Inhalt"
+
+#: src/brain/lessons-view.tsx
+msgctxt "lesson evidence"
+msgid "Contested"
+msgstr "Umstritten"
 
 #: src/inbox/item-detail.tsx
 msgctxt "inbox item section"
@@ -5513,6 +5533,11 @@ msgstr "Fehlgeschlagen, als in Ihrem Namen gehandelt wurde"
 msgid "Failed, tried again"
 msgstr "Fehlgeschlagen, erneut versucht"
 
+#. placeholder {0}: episode.taskType
+#: src/brain/lessons-view.tsx
+msgid "Failed: {0}"
+msgstr "Fehlgeschlagen: {0}"
+
 #: src/dashboard/report.ts
 msgid "Failed: {failed}"
 msgstr "Fehlgeschlagen: {failed}"
@@ -6777,6 +6802,10 @@ msgstr "Er läuft nicht mehr."
 msgid "It rests on nothing you can see."
 msgstr "Es stützt sich auf nichts, was du sehen kannst."
 
+#: src/brain/lessons-view.tsx
+msgid "It rests on turns you were not part of."
+msgstr "Es stützt sich auf Beiträge, bei denen du nicht dabei warst."
+
 #: src/landscape/overview-tab.tsx
 msgid "It shows once the desktop agent or single sign-on sees someone use the app."
 msgstr "Die Angabe erscheint, sobald der Desktop-Agent oder Single Sign-on eine Nutzung der App erkennt."
@@ -7222,6 +7251,11 @@ msgstr "Rechtliche Dokumente und Richtlinien, die der Anbieter veröffentlicht."
 #: src/landscape/landscape.ts
 msgid "Legal data"
 msgstr "Rechtsdaten"
+
+#: src/brain/memory-page.tsx
+msgctxt "the Brain's lessons from repeated failures"
+msgid "Lessons"
+msgstr "Lektionen"
 
 #: src/routes/_shell.settings.security.tsx
 msgid "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it."
@@ -8169,6 +8203,10 @@ msgstr "Noch keine Interviews. Sie beginnen, sobald das Unternehmen sein Team in
 #: src/routes/_shell.settings.billing.tsx
 msgid "No invoices yet."
 msgstr "Noch keine Rechnungen."
+
+#: src/brain/lessons-view.tsx
+msgid "No lessons yet"
+msgstr "Noch keine Lektionen"
 
 #: src/settings/person-limits.tsx
 msgid "No limit"
@@ -10645,9 +10683,18 @@ msgstr "Pakete für {domain} stilllegen"
 msgid "Retire the packages for {domain}?"
 msgstr "Pakete für {domain} stilllegen?"
 
+#: src/brain/lessons-view.tsx
+msgid "Retire this lesson"
+msgstr "Diese Lektion zurückziehen"
+
 #: src/engines/package-approvals.tsx
 msgid "Retired"
 msgstr "Stillgelegt"
+
+#: src/brain/lessons-view.tsx
+msgctxt "lesson state"
+msgid "Retired"
+msgstr "Zurückgezogen"
 
 #: src/brain/memory-page.tsx
 msgctxt "memory record state"
@@ -10693,10 +10740,19 @@ msgstr "Prüfung überfällig"
 msgid "Review the apps of {name}"
 msgstr "Die Apps von {name} prüfen"
 
+#. placeholder {0}: lesson.revision
 #. placeholder {0}: record.revision
+#. placeholder {0}: version.revision
+#: src/brain/lessons-view.tsx
 #: src/brain/memory-page.tsx
 msgid "Revision {0}"
 msgstr "Revision {0}"
+
+#. placeholder {0}: version.revision
+#. placeholder {1}: version.supersedes
+#: src/brain/lessons-view.tsx
+msgid "Revision {0}, after revision {1}"
+msgstr "Revision {0}, nach Revision {1}"
 
 #: src/workflows/definition-editor.tsx
 msgid "Revision {revision} doesn't pass yet, and no revision has."
@@ -12007,6 +12063,11 @@ msgstr "Zusammenfassung"
 msgctxt "kind of app"
 msgid "Support"
 msgstr "Kundenservice"
+
+#: src/brain/lessons-view.tsx
+msgctxt "lesson evidence"
+msgid "Supported"
+msgstr "Belegt"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
@@ -14798,6 +14859,10 @@ msgstr "Wenn {when}"
 msgid "When a payment fails or the card is about to run out, so you can fix it in time."
 msgstr "Wenn eine Zahlung fehlschlägt oder die Karte bald abläuft, damit Sie es rechtzeitig beheben können."
 
+#: src/brain/lessons-view.tsx
+msgid "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
+msgstr "Wenn eine Aufgabe immer wieder auf dieselbe Weise fehlschlägt, notiert das Brain das hier als Lektion, die du prüfen kannst."
+
 #: src/onboarding/work-rules.tsx
 msgid "When a workflow is known"
 msgstr "Wann ein Workflow bekannt ist"
@@ -15633,6 +15698,11 @@ msgstr "Ihre Worte"
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Ihr Arbeitsbereich, wer darin was tun darf, und Ihr eigenes Konto."
+
+#: src/brain/lessons-view.tsx
+msgctxt "lesson scope"
+msgid "Yours"
+msgstr "Deine"
 
 #: src/brain/memory-page.tsx
 msgctxt "memory record scope"
