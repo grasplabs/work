@@ -729,7 +729,7 @@ const fullTextOf = async (
 };
 
 /** Grants `agent` reading the collection `key`, as an admin would. */
-const grantCollection = async (
+export const grantCollection = async (
   company: BrainCompany,
   agent: PermissionSubjectInput,
   key: string
@@ -745,7 +745,10 @@ const grantCollection = async (
 };
 
 /** A persona's Workspace object, its agent granted the shared collections. */
-const workspaceOf = async (company: BrainCompany, persona: BrainPersona) => {
+export const workspaceOf = async (
+  company: BrainCompany,
+  persona: BrainPersona
+) => {
   const id = workspaceIdSchema.parse(crypto.randomUUID());
   const stub = workspace(env, id);
   const agent = { type: "agent" as const, agentId: id };

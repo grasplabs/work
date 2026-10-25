@@ -260,7 +260,7 @@ export const resultsSinceQuestion = (body: unknown): string[] => {
 
 const tokensOf = (text: string): number => Math.ceil(text.length / 4);
 
-const codeStep = (code: string, input: string): GatewayReply => ({
+export const codeStep = (code: string, input: string): GatewayReply => ({
   text: "",
   toolCalls: [
     {
@@ -273,7 +273,7 @@ const codeStep = (code: string, input: string): GatewayReply => ({
   outputTokens: tokensOf(code),
 });
 
-const says = (text: string, input: string): GatewayReply => ({
+export const says = (text: string, input: string): GatewayReply => ({
   text,
   inputTokens: tokensOf(input),
   outputTokens: tokensOf(text),
