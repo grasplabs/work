@@ -35,7 +35,7 @@ const microsoftSignIn = [
  * their notes). The company's is SharePoint, others' calendars and the
  * Planner plans of the person's groups, and reaching others is sending
  * mail. Shared mailboxes' rights come with pointing Stephen at one
- * (GRA-724).
+ * (`sharedMailboxRights`).
  */
 const microsoftClassRights: Readonly<
   Record<CompanyToolClass, readonly string[]>
@@ -105,15 +105,30 @@ const heldWith = (rights: Iterable<string>): Set<string> => {
 };
 
 /**
- * The rights to ask Microsoft for, for `classes`: the sign-in's and each
- * class's, leaving out any another of them takes in, in a stable order.
+ * Shared mailboxes' rights, asked only while the company points Stephen at
+ * one (GRA-724): reading and sorting them, and sending from them only with
+ * Reach others on too.
+ */
+const sharedMailboxRights = (
+  classes: readonly CompanyToolClass[]
+): readonly string[] =>
+  classes.includes("reach-others")
+    ? ["Mail.ReadWrite.Shared", "Mail.Send.Shared"]
+    : ["Mail.ReadWrite.Shared"];
+
+/**
+ * The rights to ask Microsoft for, for `classes`, and shared mailboxes'
+ * with `sharedMailbox`: the sign-in's and each class's, leaving out any
+ * another of them takes in, in a stable order.
  */
 export const microsoftRights = (
-  classes: readonly CompanyToolClass[]
+  classes: readonly CompanyToolClass[],
+  sharedMailbox = false
 ): string[] => {
   const wanted = [
     ...microsoftSignIn,
     ...classes.flatMap((toolClass) => microsoftClassRights[toolClass]),
+    ...(sharedMailbox ? sharedMailboxRights(classes) : []),
   ];
   const unique = [...new Map(wanted.map((each) => [rightKey(each), each]))];
   return unique
@@ -158,11 +173,12 @@ export const microsoftRightsBefore = [
  */
 export const holdsMicrosoftRights = (
   granted: readonly string[],
-  classes: readonly CompanyToolClass[]
+  classes: readonly CompanyToolClass[],
+  sharedMailbox = false
 ): boolean => {
   const held = heldWith(granted);
   const signInKeys = new Set(microsoftSignIn.map(rightKey));
-  return microsoftRights(classes)
+  return microsoftRights(classes, sharedMailbox)
     .map(rightKey)
     .every((key) => signInKeys.has(key) || held.has(key));
 };
@@ -181,6 +197,9 @@ export const grantedRights = (scope: string | undefined): string[] | null =>
  */
 export const rightsFor = (
   provider: string,
-  classes: readonly CompanyToolClass[]
+  classes: readonly CompanyToolClass[],
+  sharedMailbox = false
 ): string[] | undefined =>
-  provider === "microsoft" ? microsoftRights(classes) : undefined;
+  provider === "microsoft"
+    ? microsoftRights(classes, sharedMailbox)
+    : undefined;

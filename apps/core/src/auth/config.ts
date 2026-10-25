@@ -32,6 +32,13 @@ export const providerIds = {
 type ProviderId = (typeof providerIds)[keyof typeof providerIds];
 
 /**
+ * The provider of the accounts the organization's directory made, keyed by
+ * Entra object id, beside Entra sign-ins' (directory-members.ts). Nobody
+ * signs in with it.
+ */
+export const directoryProviderId = "entra-directory";
+
+/**
  * One OIDC provider as the SSO plugin takes it. Endpoints are fixed rather
  * than discovered: no discovery fetch at sign-in, and no UserInfo call, so
  * the claims checked are always those of the verified ID token.

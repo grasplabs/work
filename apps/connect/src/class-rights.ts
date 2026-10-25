@@ -32,7 +32,7 @@ export const requireClassRights = async (
   env: Env,
   request: unknown
 ): Promise<{ reconnect: number }> => {
-  const { classes } = connectionErrors.parse(
+  const { classes, sharedMailbox = false } = connectionErrors.parse(
     "connection.invalid",
     requireClassRightsSchema,
     request
@@ -58,7 +58,8 @@ export const requireClassRights = async (
     ({ granted }) =>
       !holdsMicrosoftRights(
         grantedRights(granted ?? undefined) ?? microsoftRightsBefore,
-        classes
+        classes,
+        sharedMailbox
       )
   );
   const batches: (typeof lacking)[] = [];

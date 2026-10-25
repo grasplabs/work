@@ -14,6 +14,7 @@ import {
   markTaken,
 } from "@grasp-os/shared/connect";
 import type {
+  ActionShape,
   Catalog,
   CatalogLogo,
   CatalogTool,
@@ -41,6 +42,7 @@ import type {
 } from "@grasp-os/shared/connect";
 import type {
   DirectoryConnection,
+  DirectoryLookup,
   DirectoryRead,
 } from "@grasp-os/shared/directory";
 import type {
@@ -80,9 +82,13 @@ import {
   startToolkitConnection,
 } from "./composio-connections.ts";
 import { connectionOwners } from "./connections.ts";
-import { connectorContract } from "./contracts.ts";
+import { actionShape, connectorContract } from "./contracts.ts";
 import { requireDecision } from "./decisions.ts";
-import { directoryConnections, readDirectory } from "./directory.ts";
+import {
+  directoryConnections,
+  lookUpInDirectory,
+  readDirectory,
+} from "./directory.ts";
 import {
   placesConnections,
   readPlaceFile,
@@ -136,6 +142,7 @@ import {
   listPendingActions,
   pendingActionFor,
   refuseConfirmation,
+  refuseEnded,
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
@@ -448,7 +455,8 @@ export default class Connect
     return await readLandscape(this.env, request);
   }
 
-  // The directory (src/directory.ts): for the onboarding, in core, only.
+  // The directory (src/directory.ts): for the onboarding, and to know the
+  // people writing to Stephen on a chat platform, in core, only.
 
   async directoryConnections(): Promise<DirectoryConnection[]> {
     return await directoryConnections(this.env);
@@ -456,6 +464,10 @@ export default class Connect
 
   async readDirectory(request: unknown): Promise<DirectoryRead> {
     return await readDirectory(this.env, request);
+  }
+
+  async lookUpInDirectory(request: unknown): Promise<DirectoryLookup> {
+    return await lookUpInDirectory(this.env, request);
   }
 
   // The HR platform (src/hr.ts): for the onboarding, in core, only.
@@ -492,6 +504,14 @@ export default class Connect
 
   async connectorContract(request: unknown): Promise<ConnectorContract> {
     return await connectorContract(this.env, request);
+  }
+
+  /**
+   * Whether an action only reads, and the input it takes, as connect goes
+   * by them: what core checks a chat's write against before the call.
+   */
+  async actionShape(request: unknown): Promise<ActionShape> {
+    return await actionShape(this.env, request);
   }
 
   // Held actions (src/pending.ts). Core names the person from their
@@ -635,12 +655,14 @@ export default class Connect
     if (!parsed.success) {
       throw connectErrors.create("connect.invalid");
     }
-    const { person, id } = parsed.data;
+    const { person, id, via } = parsed.data;
     await take(
       this.env,
       person,
-      await heldFor(this.env, person, id, "decline"),
-      "decline"
+      await heldFor(this.env, person, id, "decline", via),
+      "decline",
+      false,
+      via
     );
   }
 
@@ -662,8 +684,10 @@ export default class Connect
     if (!parsed.success) {
       throw connectErrors.create("connect.invalid");
     }
-    const { capability, person, id, inputHash } = parsed.data;
-    const held = await heldFor(this.env, person, id, "confirm");
+    const { capability, person, id, inputHash, via } = parsed.data;
+    const held = await heldFor(this.env, person, id, "confirm", via);
+    // Its day over: declined as expired, whatever the press carries.
+    await refuseEnded(this.env, person, held);
     const call = callOf(held);
     let claims: CapabilityClaims | undefined;
     try {
@@ -685,11 +709,12 @@ export default class Connect
         id,
         codeOf(error) ?? "internal",
         held,
-        claims?.restricted
+        claims?.restricted,
+        via
       );
       throw error;
     }
-    await take(this.env, person, held, "confirm", claims.restricted);
+    await take(this.env, person, held, "confirm", claims.restricted, via);
     try {
       return await this.#carryOutAudited(call, claims, held);
     } catch (error) {

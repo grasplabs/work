@@ -67,7 +67,7 @@ const stored = async (
 export const mayComeIn = async (
   env: Pick<Env, "DB">,
   config: SignInConfig,
-  email: string | undefined
+  email?: string
 ): Promise<boolean> => {
   if (email !== undefined && config.admins.includes(email.toLowerCase())) {
     return true;

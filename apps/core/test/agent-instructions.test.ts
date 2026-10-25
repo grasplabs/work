@@ -3,6 +3,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { brainOf } from "../src/knowledge/ports.ts";
 import { noteListedSkills } from "../src/knowledge/tools.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
@@ -242,7 +243,7 @@ describe("a chat's instructions and memory", setUpTime, () => {
     // The catalog never lists a sensitive collection's skills; were one
     // listed, the read that lists it restricts the chat first.
     const provenance = await noteListedSkills(
-      env,
+      brainOf(env),
       { type: "delegate", authority, context },
       [
         {

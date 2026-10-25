@@ -50,6 +50,7 @@ import {
   personalCollectionId,
 } from "./memory-files.ts";
 import { readPayload } from "./payloads.ts";
+import { brainOf } from "./ports.ts";
 
 // An agent's memory: the files it always has in its context, by where it
 // works. The agent loop calls `forContext` for the memory of each turn,
@@ -332,7 +333,7 @@ const textsOf = async (
         const row = rows.find(
           (one) => one.documentId === documentId && one.number === version
         );
-        return row === undefined ? "" : await readPayload(env, row);
+        return row === undefined ? "" : await readPayload(brainOf(env), row);
       }
       const files = await versionFiles(env, at.appId, version);
       return files[appMemoryPath];
@@ -488,7 +489,7 @@ const personalCollection = async (
   actor: Parameters<typeof ensureCollection>[2]
 ): Promise<CollectionRow> => {
   const collection = await ensureCollection(
-    env,
+    brainOf(env),
     {
       id: await personalCollectionId(userId),
       name: "Personal",
@@ -522,7 +523,11 @@ export const memoryCollections = async (
   const actor = actorOf(person);
   const personal = await personalCollection(env, person.userId, actor);
   const memory = isAdmin(person.role)
-    ? await ensureCollection(env, memoryCollectionRow(person.userId), actor)
+    ? await ensureCollection(
+        brainOf(env),
+        memoryCollectionRow(person.userId),
+        actor
+      )
     : await drizzle(env.KNOWLEDGE)
         .select({ id: collections.id })
         .from(collections)
@@ -581,7 +586,7 @@ export const saveUserMemory = async (
   const actor = delegateActorOf(authority);
   const collection = await personalCollection(env, authority.onBehalfOf, actor);
   return await writeVersion(
-    env,
+    brainOf(env),
     { actor, userId: authority.onBehalfOf },
     {
       collection,

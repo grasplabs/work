@@ -28,7 +28,12 @@ export type GatewayReply =
        * What the model thought before it answered, streamed first, and how
        * many of `outputTokens` it took: providers count thinking as output.
        */
-      thinking?: { text: string; tokens: number };
+      thinking?: {
+        text: string;
+        tokens: number;
+        /** Anthropic's signature of the thinking, `signed` if not given. */
+        signature?: string;
+      };
       /** The model hit its output limit (Anthropic and chat completions). */
       truncated?: boolean;
       /**
@@ -54,8 +59,9 @@ export type GatewayReply =
       /** The model declined to answer (Anthropic's `refusal` stop). */
       refused?: true;
       /**
-       * Prompt tokens read from and written to the five-minute cache
-       * (Anthropic), besides `inputTokens`.
+       * Prompt tokens read from and written to the cache (Anthropic),
+       * besides `inputTokens`; with `cacheWrite1h`, `write` counts both
+       * lifetimes.
        */
       cache?: { read: number; write: number };
     }
@@ -190,7 +196,7 @@ const textDeltas = (
 
 /** A content block of Anthropic's, as its stream opens it. */
 type AnthropicBlock =
-  | { type: "thinking"; text: string }
+  | { type: "thinking"; text: string; signature: string }
   | { type: "text"; text: string }
   | ({ type: "tool_use" } & ScriptedToolCall);
 
@@ -208,7 +214,13 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
   const blocks = [
     ...(thinking === undefined
       ? []
-      : [{ type: "thinking" as const, text: thinking.text }]),
+      : [
+          {
+            type: "thinking" as const,
+            text: thinking.text,
+            signature: thinking.signature ?? "signed",
+          },
+        ]),
     ...(text === "" ? [] : [{ type: "text" as const, text }]),
     ...(answer.toolCalls ?? []).map((call) => ({
       type: "tool_use" as const,
@@ -240,7 +252,8 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
             ...(answer.cacheWrite1h === undefined
               ? {}
               : {
-                  cache_creation_input_tokens: answer.cacheWrite1h,
+                  cache_creation_input_tokens:
+                    answer.cache?.write ?? answer.cacheWrite1h,
                   cache_creation: {
                     ephemeral_1h_input_tokens: answer.cacheWrite1h,
                   },
@@ -276,7 +289,10 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
               data: {
                 type: "content_block_delta",
                 index,
-                delta: { type: "signature_delta", signature: "signed" },
+                delta: {
+                  type: "signature_delta",
+                  signature: block.signature,
+                },
               },
             },
           ]

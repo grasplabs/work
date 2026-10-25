@@ -31,7 +31,9 @@ export default defineConnector({
   scopes: [
     "User.Read",
     "Mail.ReadWrite",
+    "Mail.ReadWrite.Shared",
     "Mail.Send",
+    "Mail.Send.Shared",
     // The categories a person has, so mail.categorise sets only those.
     "MailboxSettings.Read",
     "Calendars.ReadWrite",
