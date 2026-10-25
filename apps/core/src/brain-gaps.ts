@@ -1,4 +1,8 @@
-import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import {
+  actorOf,
+  auditActorSchema,
+  createAuditEvent,
+} from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { Gap } from "@grasp-os/shared/brain";
 import {
@@ -501,9 +505,9 @@ export const gapAnswerErasure = (
 ): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => ({
   count: async (holds) => await countGapAnswers(env, holds),
   rewrite: async (by, rewrite) => {
-    await rewriteGapAnswers(env, by.actor, rewrite);
+    await rewriteGapAnswers(env, auditActorSchema.parse(by.actor), rewrite);
   },
   forgetActor: async (by, userId) => {
-    await eraseGapAnswerer(env, by.actor, userId);
+    await eraseGapAnswerer(env, auditActorSchema.parse(by.actor), userId);
   },
 });

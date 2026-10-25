@@ -11,11 +11,10 @@ import type {
   MemoryPack,
   RecallBudget,
 } from "@grasp-os/brain/contract";
-import { toHex } from "@grasp-os/shared/encoding";
-import type { CollectionId } from "@grasp-os/shared/ids";
-import { knowledgeErrors, searchMaxLimit } from "@grasp-os/shared/knowledge";
-import { memoryTokens } from "@grasp-os/shared/memory";
-import { permissionErrors } from "@grasp-os/shared/permissions";
+import { toHex } from "@grasp-os/brain/encoding";
+import type { CollectionId } from "@grasp-os/brain/ids";
+import { knowledgeErrors, searchMaxLimit } from "@grasp-os/brain/knowledge";
+import { tokensOf } from "@grasp-os/brain/tokens";
 
 import type { Brain } from "./brain.ts";
 import { d1BrainStore } from "./recall-store.ts";
@@ -67,7 +66,7 @@ export const clampBudget = (
 });
 
 /** A refusal from a read below, as the Brain's stable code. */
-const asBrainError = (error: unknown): unknown => {
+const asBrainError = <C>(brain: Brain<C>, error: unknown): unknown => {
   if (brainErrors.codeOf(error) !== undefined) {
     return error;
   }
@@ -77,7 +76,7 @@ const asBrainError = (error: unknown): unknown => {
   if (knowledgeErrors.codeOf(error) === "knowledge.invalid") {
     return brainErrors.create("brain.invalid");
   }
-  if (permissionErrors.codeOf(error) !== undefined) {
+  if (brain.ports.recall.isRefusal(error)) {
     return brainErrors.create("brain.denied");
   }
   return error;
@@ -127,7 +126,7 @@ const packed = (
       break;
     }
     const item = itemOf(section);
-    const tokens = memoryTokens(item.statement);
+    const tokens = tokensOf(item.statement);
     if (tokenCount + tokens > maxTokens) {
       break;
     }
@@ -281,7 +280,7 @@ export const recallWithSources = async <C>(
     };
     return { pack, sources };
   } catch (error) {
-    throw asBrainError(error);
+    throw asBrainError(brain, error);
   }
 };
 

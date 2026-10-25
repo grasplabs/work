@@ -1,5 +1,5 @@
-import type { CollectionId } from "@grasp-os/shared/ids";
-import type { Provenance } from "@grasp-os/shared/knowledge";
+import type { CollectionId } from "@grasp-os/brain/ids";
+import type { Provenance } from "@grasp-os/brain/knowledge";
 
 import { collections } from "../db/knowledge/schema.ts";
 import { allowedFor } from "./authorize.ts";
