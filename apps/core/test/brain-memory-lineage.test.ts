@@ -460,6 +460,140 @@ describe("a memory record's lineage", setUpTime, () => {
     });
   });
 
+  it("pages the shared listing as if records resting on what the reader can't read weren't there: full pages, and a cursor only when more follow", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ada = await signedInApi(idp, "user");
+    const ben = await signedInApi(idp, "user");
+    const both = await newTeam(admin, [ada, ben]);
+    const adaOnly = await newTeam(admin, [ada]);
+    // Shared with the team while the records are published, so citing it
+    // is allowed; then shared with Ada's team alone.
+    const cited = await documentIn(admin, {
+      name: `Team notes ${unique()}`,
+      access: "teams",
+      teams: [both],
+    });
+    // A word only these records hold, for recall.
+    const mark = `m${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    const publish = async (text: string, restsOnCited: boolean) =>
+      idOf(
+        await ada.api.knowledge.memoriesPublish(
+          {
+            scope: "team",
+            scopeId: both,
+            // A kind no other test's records have: the listing is of these.
+            kind: "preference",
+            text: `${text} ${mark}`,
+            ...(restsOnCited ? { sourceRefs: [cited] } : {}),
+          },
+          { idempotencyKey: key() }
+        )
+      );
+    // Three Ben may see, and one resting on the cited collection, all
+    // through the Brain's own writes.
+    const visible = [
+      await publish("First.", false),
+      await publish("Second.", false),
+      await publish("Third.", false),
+    ];
+    const restsOnCited = await publish("Hidden.", true);
+    await env.DB.prepare(
+      "UPDATE collection_teams SET team_id = ? WHERE collection_id = ? AND team_id = ?"
+    )
+      .bind(adaOnly, cited.collectionId, both)
+      .run();
+    // More records like the hidden one than one call reads (three batches
+    // of 100), between the first visible record and the others: each a
+    // copy of it, what it rests on included, newest first in that order.
+    const now = Date.now();
+    const timed = (id: string, msAgo: number) =>
+      env.KNOWLEDGE.prepare(
+        "UPDATE brain_memories SET recorded_at = ? WHERE id = ?"
+      ).bind(now - msAgo, id);
+    const hidden = [
+      restsOnCited,
+      ...Array.from({ length: 320 }, () => crypto.randomUUID()),
+    ];
+    await env.KNOWLEDGE.batch([
+      timed(visible[0] ?? "", 0),
+      timed(restsOnCited, 10),
+      timed(visible[1] ?? "", 1000),
+      timed(visible[2] ?? "", 1001),
+      ...hidden
+        .slice(1)
+        .flatMap((id, index) => [
+          env.KNOWLEDGE.prepare(
+            "INSERT INTO brain_memories SELECT ?, revision, scope, owner_id, kind, statement, source_refs, state, indexing_state, ?, updated_at, scope_id FROM brain_memories WHERE id = ?"
+          ).bind(id, now - 11 - index, restsOnCited),
+          env.KNOWLEDGE.prepare(
+            "INSERT INTO brain_memory_cites SELECT ?, collection_id FROM brain_memory_cites WHERE memory_id = ?"
+          ).bind(id, restsOnCited),
+        ]),
+    ]);
+    /** Every page of Ben's shared listing at `limit`, as sizes and cursors. */
+    const walk = async (limit: number) => {
+      const pages: { size: number; more: boolean }[] = [];
+      const shown: string[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 10; page += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- each page from the last
+        const listed = await ben.api.knowledge.memoriesList({
+          among: "shared",
+          kind: "preference",
+          limit,
+          ...(cursor === undefined ? {} : { cursor }),
+        });
+        const mine = idsOf(listed).filter(
+          (id) => visible.includes(id) || hidden.includes(id)
+        );
+        shown.push(...mine);
+        pages.push({
+          size: listed.records.length,
+          more: listed.cursor !== null,
+        });
+        if (listed.cursor === null) {
+          break;
+        }
+        ({ cursor } = listed);
+      }
+      return { pages, shown };
+    };
+
+    const byOne = await walk(1);
+    const byTwo = await walk(2);
+    // Recall ranks and limits within the same condition: the hidden ones
+    // take no place in its memory pass.
+    const pack = await ben.api.knowledge.recall({ query: mark });
+    const recalled = pack.items.flatMap(({ sourceRefs }) =>
+      sourceRefs.flatMap((ref) => (ref.kind === "memory" ? [ref.memoryId] : []))
+    );
+
+    expect({
+      byOne: byOne.pages,
+      byTwo: byTwo.pages,
+      shown: byOne.shown.toSorted(),
+      hiddenShown: [...byOne.shown, ...byTwo.shown].filter((id) =>
+        hidden.includes(id)
+      ),
+      recalled: recalled.toSorted(),
+    }).toStrictEqual({
+      // Three visible records: as many full pages as they fill, the last
+      // without a cursor, as though the 321 hidden ones weren't there.
+      byOne: [
+        { size: 1, more: true },
+        { size: 1, more: true },
+        { size: 1, more: false },
+      ],
+      byTwo: [
+        { size: 2, more: true },
+        { size: 1, more: false },
+      ],
+      shown: visible.toSorted(),
+      hiddenShown: [],
+      recalled: visible.toSorted(),
+    });
+  });
+
   it("reads a wide lineage within its bounds", async () => {
     const ada = await signedInApi(idp, "user");
     const fanOut = 20;
