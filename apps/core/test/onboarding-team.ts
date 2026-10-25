@@ -484,13 +484,30 @@ export const zendeskClaim: FakeClaim = {
   cites: zendeskSaid,
 };
 
-/** The onboarding giving the brain its next team, with the model putting `claims` together. */
-export const intake = async (claims: readonly FakeClaim[] = [zendeskClaim]) => {
-  const { requests, result } = await answeringWith(
-    claimsReply(claims),
-    async () => await onboardingStore(env).intakeNext()
-  );
-  return { gave: result, requests };
+/**
+ * The onboarding giving the brain `ids`' team, with the model putting
+ * `claims` together: a team an earlier test left due goes first, as the
+ * alarm would give it. What reached the gateway for that team alone.
+ */
+export const intake = async (
+  ids: { team: string },
+  claims: readonly FakeClaim[] = [zendeskClaim]
+) => {
+  let given: Awaited<ReturnType<typeof answeringWith<string | null>>> = {
+    requests: [],
+    result: null,
+  };
+  for (let round = 0; round < 5; round += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+    given = await answeringWith(
+      claimsReply(claims),
+      async () => await onboardingStore(env).intakeNext()
+    );
+    if (given.result === null || given.result === `brain:${ids.team}`) {
+      break;
+    }
+  }
+  return { gave: given.result, requests: given.requests };
 };
 
 /** Every record the brain keeps whose id is the onboarding's, for a team: as stored. */

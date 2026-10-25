@@ -147,7 +147,7 @@ describe(
       await mapped(ids);
       await told(ids);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
-      const { gave } = await intake();
+      const { gave } = await intake(ids);
       const member = await signedInApi(idp, "user");
       const brain = await member.api.brain.read();
       const records = await kept(ids);
@@ -216,7 +216,7 @@ describe(
       await mapped(ids);
       await told(ids);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
-      await intake();
+      await intake(ids);
       const before = await kept(ids);
       // Mia adds something and agrees again: tickets are drawn once more.
       await agree(
@@ -237,8 +237,8 @@ describe(
         async () => await store.drawNext()
       );
       // Given again with nothing new, nothing is kept twice.
-      const first = await intake();
-      const second = await intake();
+      const first = await intake(ids);
+      const second = await intake(ids);
       const again = [first.gave, second.gave];
       const after = await kept(ids);
       const member = await signedInApi(idp, "user");
@@ -482,7 +482,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
   it("keeps only claims five or more distinct people made, of facts of their kind, without a name, and shows the model no one", async () => {
     const ids = await drawnTeam();
     const [, ...fourOfThem] = zendeskSaid;
-    const { requests } = await intake([
+    const { requests } = await intake(ids, [
       zendeskClaim,
       // Four people: Mia, Mo, Noor and Pim, but not Max's words alone.
       {
@@ -568,7 +568,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       1
     );
     await drawTickets(ids);
-    const { requests } = await intake([
+    const { requests } = await intake(ids, [
       zendeskClaim,
       // The model did as it was told: six people's facts cited.
       {
@@ -627,7 +627,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     // Spanish claim writes them, are a claim.
     const accented =
       "Die Tickets kommen \u00FCber Zendesk, \u00E9t\u00E9 comme hiver.";
-    const { requests } = await intake([
+    const { requests } = await intake(ids, [
       zendeskClaim,
       { kind: "tool", text: accented, cites: zendeskSaid },
       ...unplain.map((text) => ({ kind: "tool", text, cites: zendeskSaid })),
@@ -645,7 +645,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
 
   it("writes nothing when a check fails at the gateway", async () => {
     const ids = await drawnTeam();
-    await intake([{ ...zendeskClaim, fails: true }]);
+    await intake(ids, [{ ...zendeskClaim, fails: true }]);
     const records = await kept(ids);
     expect(records.map(({ type }) => type)).toStrictEqual([]);
   });
@@ -660,7 +660,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       says: [],
     }));
     const events = await auditedDuring(async () => {
-      const { requests } = await intake(many);
+      const { requests } = await intake(ids, many);
       expect(requests).toHaveLength(1 + claimChecksMax);
     });
     const records = await kept(ids);
@@ -687,7 +687,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     );
     await drawTickets(ids);
     // Six behind it first.
-    await intake([{ ...zendeskClaim, cites: [...zendeskSaid, riks] }]);
+    await intake(ids, [{ ...zendeskClaim, cites: [...zendeskSaid, riks] }]);
     // Then put together anew, citing five: Rik still agrees, but isn't
     // behind it now.
     await agree(
@@ -700,7 +700,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       2
     );
     await drawTickets(ids);
-    await intake([zendeskClaim]);
+    await intake(ids, [zendeskClaim]);
     const member = await signedInApi(idp, "user");
     const before = await statementsFor(member.api, ids);
     // Pim withdraws: the alarm takes it out at once, with no model.
@@ -738,7 +738,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
         Date.now()
       )
       .run();
-    await intake();
+    await intake(ids);
     const records = await kept(ids);
     expect(
       records.filter(({ type }) => type === "statement").map(({ id }) => id)
@@ -747,7 +747,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
 
   it("shows members and admins the team's claims, and Grasp's staff none", async () => {
     const ids = await drawnTeam();
-    await intake();
+    await intake(ids);
     const member = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
     const staff = await asStaff();
@@ -764,7 +764,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
 
   it("takes a claim out once fewer than five of the people behind it still agree", async () => {
     const ids = await drawnTeam();
-    await intake();
+    await intake(ids);
     const member = await signedInApi(idp, "user");
     const before = await statementsFor(member.api, ids);
     await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
@@ -782,7 +782,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
 
   it("keeps only the claims put together last: an earlier one, reworded or no longer made, goes", async () => {
     const ids = await drawnTeam();
-    await intake();
+    await intake(ids);
     const member = await signedInApi(idp, "user");
     const first = await statementsFor(member.api, ids);
     // Rik, behind none of it, agrees again, and the claims are put
@@ -797,11 +797,13 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       1
     );
     await drawTickets(ids);
-    await intake([{ ...zendeskClaim, text: "Zendesk is the ticket inbox." }]);
+    await intake(ids, [
+      { ...zendeskClaim, text: "Zendesk is the ticket inbox." },
+    ]);
     const reworded = await statementsFor(member.api, ids);
     await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")], 2);
     await drawTickets(ids);
-    await intake([]);
+    await intake(ids, []);
     const none = await statementsFor(member.api, ids);
     expect({ first, reworded, none }).toStrictEqual({
       first: ["Tickets come in through Zendesk."],
