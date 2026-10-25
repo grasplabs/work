@@ -466,6 +466,35 @@ describe("a real organization as the admin reads it", () => {
     }).toStrictEqual({ said: 1, known: true });
   });
 
+  it("shares a count given for the whole team among everyone who does the work", () => {
+    /** The hours of handling tickets when Lisa's count is `volumeOf`'s. */
+    const hoursWhen = (volumeOf: "me" | "team") => {
+      const { lisa } = drawn.told;
+      const counted = orgOfSnapshot({
+        ...snapshot,
+        works: snapshot.works.map((work) => ({
+          ...work,
+          drawn:
+            lisa === undefined
+              ? drawn
+              : { ...drawn, told: { lisa: { ...lisa, volumeOf } } },
+        })),
+      });
+      const seen = adminViewOf(counted, counted.seed, "2026-10-06");
+      return (
+        valueOf(seen, "2026-10-06").works.find(
+          (each) => each.evidence.work.id === "w-tickets"
+        )?.hours ?? null
+      );
+    };
+    const own = hoursWhen("me") ?? 0;
+    const team = hoursWhen("team") ?? 0;
+
+    // Two people handle tickets: the team's count is half per person.
+    expect(team * 2).toBeCloseTo(own, 6);
+    expect(team).toBeGreaterThan(0);
+  });
+
   it("keeps the links of a six-week plan open past two weeks, and counts who finishes later", () => {
     const long = orgOfSnapshot({
       ...snapshot,
