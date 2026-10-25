@@ -40,6 +40,8 @@ import {
   repairResourceStarts,
   repairResourceTerminations,
   resourceRunFor,
+  runOf,
+  settleControl,
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
 import { removedText, sweepRunDetails } from "../src/workflows/retention.ts";
@@ -1236,6 +1238,58 @@ describe("a run's host, against a forged module", () => {
 });
 
 describe("whose word a run's row takes, and whose clock", () => {
+  it("audits a control settled once, though a screen and the engine settle it in the same millisecond", async () => {
+    const by = await builder();
+    const waiting = await waitingWorkflow(by);
+    const { runId } = await start(by, waiting.id);
+    const app = crypto.randomUUID();
+    const control = crypto.randomUUID();
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Desk', '', ?, ?)"
+      ).bind(app, by.userId, now),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, created_at, next_at, generation) VALUES (?, ?, ?, ?, ?, 'pause', 'admitted', ?, ?, 1)"
+      ).bind(control, runId, app, by.userId, "0".repeat(32), now, now),
+    ]);
+    const row = await runOf(env, runId ?? "");
+    if (row === undefined) {
+      throw new Error("No run");
+    }
+    // Both settlers read the same clock: the screen's apply and the
+    // engine's notification, landing together.
+    vi.useFakeTimers({ toFake: ["Date"], now });
+    try {
+      await Promise.all([
+        settleControl(
+          env,
+          row,
+          { id: control, kind: "pause", principalId: by.userId },
+          "applied"
+        ),
+        settleControl(
+          env,
+          row,
+          { id: control, kind: "pause", principalId: by.userId },
+          "applied"
+        ),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+    const settled = await env.DB.prepare(
+      "SELECT state FROM workflow_resource_run_controls WHERE id = ?"
+    )
+      .bind(control)
+      .first<{ state: string }>();
+    const audited = await runEvents(runId, "workflow.run.control_applied");
+    expect({ state: settled?.state, audited: audited.length }).toStrictEqual({
+      state: "applied",
+      audited: 1,
+    });
+  });
+
   it("shows what a run returned only within the retention the deployment has now", async () => {
     const by = await builder();
     const done = await published(by, (name) =>
