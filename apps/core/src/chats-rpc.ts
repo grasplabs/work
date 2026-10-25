@@ -64,6 +64,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
+import type { LeasedBuild } from "./screen-trust.ts";
 import {
   admitPreviewCall,
   admitWindow,
@@ -155,17 +156,24 @@ const previewAnswerOf = (text: string): PreviewAnswer =>
   JSON.parse(text) as PreviewAnswer;
 
 /** What a preview's live queries are keyed by: its chat and revision. */
-const previewKey = (chatId: ChatId, revision: number): string =>
-  `preview:${chatId}:${revision}`;
+const previewKey = (chatId: ChatId, revision: number): LeasedBuild => ({
+  artifact: `preview:${chatId}`,
+  version: revision,
+});
 
 /** The chat and revision `previewKey` made `key` of. */
 const previewOfKey = (
-  key: string | undefined
+  key: LeasedBuild | undefined
 ): { chatId: ChatId; revision: number } => {
-  const [kind, chat, revision] = (key ?? "").split(":");
+  const [kind, chat] = (key?.artifact ?? "").split(":");
   const parsed = chatIdSchema.safeParse(chat);
-  const at = Number(revision);
-  if (kind !== "preview" || !parsed.success || !Number.isInteger(at)) {
+  const at = key?.version;
+  if (
+    kind !== "preview" ||
+    !parsed.success ||
+    at === undefined ||
+    !Number.isInteger(at)
+  ) {
     throw appErrors.create("app.preview_outdated");
   }
   return { chatId: parsed.data, revision: at };

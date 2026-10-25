@@ -1497,10 +1497,11 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
       { app: appIdSchema.parse(opened.app), version: 1 },
       "Leaks data"
     );
+    // The frame was opened on version 1: its build is revoked with it.
     await expect(
       failureOf(client.stream(api.draft, input, keyed))
     ).resolves.toMatchObject({
-      code: "version.revoked",
+      code: "screen.revoked",
     });
   });
 
@@ -1527,8 +1528,9 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
       "Leaks data"
     );
     const revokedAt = Date.now();
+    // The frame was opened on version 1: its build is revoked with it.
     await expect(failureOf(running)).resolves.toMatchObject({
-      code: "version.revoked",
+      code: "screen.revoked",
     });
     // Stopped at the relay's next check, not once the run ends (40 s on).
     expect(Date.now() - revokedAt).toBeLessThan(15_000);
@@ -1550,9 +1552,21 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
       { app: appIdSchema.parse(opened.app), version: 1 },
       "Leaks data"
     );
-    // The same contract under version 2: the same invocation, made under 1.
+    // A screen opened on version 2, with its own lease, its build approved:
+    // the same contract, the same invocation, made under 1.
+    const review = await opened.admin.api.screenTrust.review(opened.app);
+    await opened.admin.api.screenTrust.approve(opened.app, {
+      version: review.version,
+      generation: review.generation,
+      artifacts: builtArtifacts(review.screens),
+    });
+    const { lease } = await opened.builderApi.api.screens.open(
+      opened.app,
+      "writer"
+    );
+    const later = clientFor(opened, { ...opened.builder, lease });
     await expect(
-      failureOf(client.stream(apiOf(second).draft, input, keyed))
+      failureOf(later.client.stream(apiOf(second).draft, input, keyed))
     ).resolves.toMatchObject({ code: "version.revoked" });
   });
 

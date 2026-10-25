@@ -618,6 +618,47 @@ export const publicOperationOf = (
   return operation.path;
 };
 
+/**
+ * `reference` as a screen pins it (spec 11.5): a screen opened on another
+ * version of the App than the one current now keeps calling with that
+ * version's references until it switches, a dirty editor among them
+ * saving before it does. Which version it was opened on is core's own
+ * word, signed into the frame's lease (`pinnedVersion`, screen-trust.ts's
+ * `LeasedBuild`), never what the frame's reference says. Threat model:
+ *
+ * - A screen of a revoked release calls on: while its pinned version
+ *   isn't the current one, that version's release must not be revoked
+ *   (`version.revoked`, `version.not_sealed` otherwise), whatever version
+ *   its reference names, the current one too.
+ * - A pinned call reaches a handler of another contract: a reference of
+ *   the pinned version names the current release instead, and the
+ *   resolution that follows compares its contract as it would any
+ *   reference's: the same fingerprint as the current release's function,
+ *   and it runs on the current handler, which takes and answers exactly
+ *   what the screen's contract says; another, and it is refused
+ *   (`version.mismatch`).
+ * - Anyone else borrows the rule: only a screen's calls carry a pinned
+ *   version (`FunctionCallOptions.pinnedVersion`, `invokeAppAction`); a
+ *   call without a lease, an agent's, another App's or a workflow's names
+ *   the version that runs.
+ */
+export const pinnedReference = async (
+  env: Env,
+  release: Release,
+  reference: FunctionRequest["reference"],
+  pinnedVersion: number | undefined
+): Promise<FunctionRequest["reference"]> => {
+  const { resourceId, resourceVersion } = release.manifest;
+  if (pinnedVersion === undefined || pinnedVersion === resourceVersion) {
+    return reference;
+  }
+  await requireNotRevoked(env, appIdSchema.parse(resourceId), pinnedVersion);
+  return reference.resourceId === resourceId &&
+    reference.resourceVersion === pinnedVersion
+    ? { ...reference, resourceVersion }
+    : reference;
+};
+
 /** What a call answers (spec 32.6). */
 export interface FunctionAnswer {
   readonly result: OperationResult;
@@ -681,6 +722,12 @@ interface FunctionCallOptions {
   readonly parentSession?: string;
   /** Only this kind of function may be called (a live query's). */
   readonly kind?: FunctionRequest["reference"]["kind"];
+  /**
+   * A screen's call: the version its lease says the screen was opened
+   * on, whose references are held to their contract in the one that runs
+   * (`pinnedReference`).
+   */
+  readonly pinnedVersion?: number;
   /**
    * Given, the call may read a paginated list's window (a screen's): what
    * charges the person for its pages past what the caller paid
@@ -994,6 +1041,7 @@ const callFunction = async (
     observeReads,
     observeClaim,
     chargeWindow,
+    pinnedVersion,
     agent,
     chain,
     fromRun,
@@ -1032,6 +1080,15 @@ const callFunction = async (
     // The release of the App's current version: its manifest names the
     // App and the version the reference must name.
     release = await loadRelease(env, found.id, found.currentVersion);
+    call = {
+      ...call,
+      reference: await pinnedReference(
+        env,
+        release,
+        call.reference,
+        pinnedVersion
+      ),
+    };
     ({ path, workflowQuery, preference } = await referenceIn(
       release,
       call.reference
@@ -1254,14 +1311,17 @@ export const callScreenFunction = async (
   request: unknown,
   deadline: number,
   chargeWindow: (pages: number, whole: number) => Promise<void>,
-  recovery?: Pick<FunctionCallOptions, "onAdmitted" | "observeClaim">
+  options: Pick<
+    FunctionCallOptions,
+    "onAdmitted" | "observeClaim" | "pinnedVersion"
+  > = {}
 ): Promise<FunctionAnswer> =>
   isWorkflowRequest(request)
     ? await workflowCommandAnswer(env, by, app, request)
     : await callFunction(env, by, app, request, {
         deadline,
         chargeWindow,
-        ...recovery,
+        ...options,
       });
 
 /**
@@ -1342,7 +1402,9 @@ export const evaluateAppQuery = async (
   app: unknown,
   request: string,
   deadline: number,
-  chargeWindow: (pages: number, whole: number) => Promise<void>
+  chargeWindow: (pages: number, whole: number) => Promise<void>,
+  /** The version the screen's lease says it was opened on (`pinnedReference`). */
+  pinnedVersion?: number
 ): Promise<EvaluatedQuery> => {
   if (isWorkflowRequest(request)) {
     return await workflowWatchRead(env, by, app, request);
@@ -1352,6 +1414,7 @@ export const evaluateAppQuery = async (
     deadline,
     kind: "query",
     chargeWindow,
+    ...(pinnedVersion === undefined ? {} : { pinnedVersion }),
     observeReads: (storeId, readSet) => {
       reads = { storeId, readSet };
     },
@@ -1376,10 +1439,13 @@ export const invokeAppAction = async (
     progress,
     cancelled,
     deadline,
+    pinnedVersion,
   }: {
     readonly progress?: ProgressSink;
     readonly cancelled: AbortSignal;
     readonly deadline: number;
+    /** A screen's: the version its lease names (`pinnedReference`). */
+    readonly pinnedVersion?: number | undefined;
   }
 ): Promise<{
   readonly result: OperationResult;
@@ -1397,7 +1463,10 @@ export const invokeAppAction = async (
       throw versionErrors.create("version.not_sealed");
     }
     const release = await loadRelease(env, found.id, found.currentVersion);
-    const path = publicOperationOf(release, call.reference);
+    const path = publicOperationOf(
+      release,
+      await pinnedReference(env, release, call.reference, pinnedVersion)
+    );
     const invocation = await invocationFor(env, release, {
       by,
       requestId,

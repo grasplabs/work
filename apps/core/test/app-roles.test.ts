@@ -9,6 +9,7 @@ import { newTeam } from "./knowledge.ts";
 import { calledAs } from "./sealed-apps.ts";
 import {
   auditedDuring,
+  firstVersion,
   letSessionRecheckPass,
   openRpc,
   outcome,
@@ -89,7 +90,11 @@ const callsOn = async ({ api }: Person, app: string) => ({
   // What its screens use.
   get: await outcome(api.apps.get(app)),
   contents: await outcome(api.apps.contents(app)),
-  screen: await outcome(api.screens.version(app)),
+  screen: await outcome(
+    firstVersion(
+      async (onVersion) => await api.screens.watchVersion(app, onVersion)
+    )
+  ),
   report: await outcome(
     api.screens.report(
       app,

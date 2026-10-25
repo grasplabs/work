@@ -9,7 +9,13 @@ import { outlook, published, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, readCollection, storedGrant } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
-import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
+import {
+  auditedDuring,
+  firstVersion,
+  outcome,
+  signedInApi,
+  unique,
+} from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
 // Provenance on sharing: an App keeps what it reads, so sharing it must
@@ -350,7 +356,12 @@ describe("sharing an App", () => {
     await expect(
       Promise.all([
         opens(anna),
-        outcome(anna.api.screens.version(app)),
+        outcome(
+          firstVersion(
+            async (onVersion) =>
+              await anna.api.screens.watchVersion(app, onVersion)
+          )
+        ),
         opens(owner),
         opens(admin),
       ])

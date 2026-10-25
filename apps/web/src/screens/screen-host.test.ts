@@ -3,10 +3,15 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { screenLimits } from "@grasp-os/shared/screen-limits";
 import { portTransport } from "@grasp-os/shared/screen-port";
 import { screenErrors } from "@grasp-os/shared/screens";
-import type { ScreenBundle, ScreenRoute } from "@grasp-os/shared/screens";
+import type {
+  AppVersionPush,
+  ScreenBundle,
+  ScreenRoute,
+} from "@grasp-os/shared/screens";
 import { RpcSession, RpcStub, RpcTarget } from "capnweb";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { wait } from "../core.ts";
 import { CoreLink } from "./core-link.ts";
 import {
   appDrafts,
@@ -194,9 +199,6 @@ const pageEvents = () => {
   };
 };
 
-const forbidden = (): Error =>
-  Object.assign(new Error("No."), { code: "role.forbidden" });
-
 /**
  * A link to core signed in as Ada, whose frames' `delivery` calls `present`, and
  * whose `whoami`, after the link's own, calls `whoami`.
@@ -217,7 +219,17 @@ const linkAsAda = (
   },
   received: (request: string) => Promise<void> = async () => {
     await Promise.resolve();
-  }
+  },
+  /** Core following the App's version for the page (`watchVersion`). */
+  watchVersion: (
+    app: string,
+    onVersion: (push: AppVersionPush) => void
+  ) => Promise<unknown> = async () =>
+    await Promise.resolve({
+      release: async () => {
+        await Promise.resolve();
+      },
+    })
 ): CoreLink => {
   let asked = 0;
   const session = {
@@ -244,7 +256,7 @@ const linkAsAda = (
             // Nothing to let go of.
           },
         }),
-      version: async () => await Promise.resolve(1),
+      watchVersion,
       // Core resolves only the App's `note` route, as it normalizes it.
       navigate: async (_app: string, route: ScreenRoute) => {
         whileResolving();
@@ -270,7 +282,7 @@ const linkAsAda = (
     },
   };
   // SAFETY: the page reaches only `authenticate`, `whoami`, the frame's
-  // `delivery`, `received`, `watchQuery` and `close`, `version`,
+  // `delivery`, `received`, `watchQuery` and `close`, `watchVersion`,
   // `onRpcBroken` and disposal, which this stand-in has.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
   const connection = core as unknown as ReturnType<
@@ -301,6 +313,8 @@ const runningWithDraft = async (
   present: () => Promise<string>,
   states: ScreenState[] = []
 ) => {
+  // What core pushes the page about the App's version, once it follows it.
+  const following = Promise.withResolvers<(push: AppVersionPush) => void>();
   vi.stubGlobal("sessionStorage", tabStorage());
   const events = pageEvents();
   saveDraft("ada", bundle.app, "n1", "Ada's draft");
@@ -311,7 +325,21 @@ const runningWithDraft = async (
     confirmNoLink,
     noNavigation
   );
-  const link = linkAsAda(present);
+  const link = linkAsAda(
+    present,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    async (_app, onVersion) => {
+      following.resolve(onVersion);
+      return await Promise.resolve({
+        release: async () => {
+          await Promise.resolve();
+        },
+      });
+    }
+  );
   const cleanups: (() => void)[] = [];
   const { target, running } = source.connect(
     link,
@@ -325,7 +353,14 @@ const runningWithDraft = async (
     states.push(state);
   });
   await expect(target.drafts()).resolves.toStrictEqual({ n1: "Ada's draft" });
-  return { target, cleanups, events };
+  const pushVersion = await following.promise;
+  /** Core's push of the App's version, once the page has taken it. */
+  const pushed = async (push: AppVersionPush): Promise<void> => {
+    pushVersion(push);
+    // The page asks core about its build in a turn of its own.
+    await wait(0);
+  };
+  return { target, cleanups, events, pushed };
 };
 
 describe("a running screen's submissions core keeps for recovery", () => {
@@ -468,17 +503,14 @@ describe("a running screen's drafts once core refuses the person", () => {
     }
   });
 
-  it("go when the page's own check is refused, though the screen asks for nothing", async () => {
-    vi.useFakeTimers();
-    let refusing = false;
-    const { target, cleanups } = await runningWithDraft(async () => {
-      if (refusing) {
-        throw forbidden();
-      }
-      return await Promise.resolve("open");
+  it("go when core refuses the person the App's version, though the screen asks for nothing", async () => {
+    const { target, cleanups, pushed } = await runningWithDraft(
+      async () => await Promise.resolve("open")
+    );
+    await pushed({
+      type: "refused",
+      error: { code: "role.forbidden", message: "No." },
     });
-    refusing = true;
-    await vi.advanceTimersByTimeAsync(30_000);
     await expect(target.drafts()).resolves.toStrictEqual({});
     for (const cleanup of cleanups) {
       cleanup();
@@ -504,7 +536,11 @@ describe("a screen core refuses to open", () => {
   });
 });
 
-describe("a running screen the page's own check is refused", () => {
+describe("a running screen whose App's version core refuses the person", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it.each([
     ["role.forbidden", { status: "failed", reason: "forbidden" }],
     ["app.not_found", { status: "failed", reason: "not-found" }],
@@ -515,24 +551,193 @@ describe("a running screen the page's own check is refused", () => {
       { status: "failed", reason: "principal-changed" },
     ],
     ["auth.unauthenticated", { status: "signed-out" }],
-    // Possibly passing: asked again at the next check, the screen runs on.
+    // Possibly passing: the screen runs on.
     ["auth.token_unavailable", undefined],
-  ])("on %s, ends as %o", async (code, ended) => {
-    vi.useFakeTimers();
+  ])("on %s, ends as %o, offering no new version", async (code, ended) => {
     const states: ScreenState[] = [];
-    let refusing = false;
-    const { cleanups } = await runningWithDraft(async () => {
-      if (refusing) {
-        throw Object.assign(new Error("Refused."), { code });
-      }
-      return await Promise.resolve("open");
-    }, states);
-    refusing = true;
-    await vi.advanceTimersByTimeAsync(30_000);
+    const { cleanups, pushed } = await runningWithDraft(
+      async () => await Promise.resolve("open"),
+      states
+    );
+    await pushed({ type: "refused", error: { code, message: "Refused." } });
     for (const cleanup of cleanups) {
       cleanup();
     }
     expect(states).toStrictEqual(ended === undefined ? [] : [ended]);
+  });
+});
+
+describe("a running screen as its App's version changes", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows a new version made current once, and nothing for the version it runs", async () => {
+    const states: ScreenState[] = [];
+    const { cleanups, pushed } = await runningWithDraft(
+      async () => await Promise.resolve("open"),
+      states
+    );
+    await pushed({ type: "current", version: 1, recheck: false });
+    const before = [...states];
+    await pushed({ type: "current", version: 2, recheck: false });
+    await pushed({ type: "current", version: 3, recheck: false });
+    for (const cleanup of cleanups) {
+      cleanup();
+    }
+    expect({ before, after: states }).toStrictEqual({
+      before: [],
+      after: [{ status: "updated" }],
+    });
+  });
+
+  it("asks core about its build when access may have dropped, and stops once it no longer gets the data", async () => {
+    let delivery = "open";
+    const refused: string[] = [];
+    vi.stubGlobal("sessionStorage", tabStorage());
+    pageEvents();
+    let pushVersion: ((push: AppVersionPush) => void) | undefined;
+    const link = linkAsAda(
+      async () => await Promise.resolve(delivery),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async (_app, onVersion) => {
+        pushVersion = onVersion;
+        return await Promise.resolve({
+          release: async () => {
+            await Promise.resolve();
+          },
+        });
+      }
+    );
+    const cleanups: (() => void)[] = [];
+    const { running } = appScreen(
+      bundle.app,
+      bundle.screen,
+      confirmNothing,
+      confirmNoLink,
+      noNavigation
+    ).connect(
+      link,
+      bundle,
+      (reason) => {
+        refused.push(reason);
+      },
+      cleanups
+    );
+    running?.(() => {
+      // Only core's refusal of the build matters here.
+    });
+    await vi.waitFor(() => {
+      expect(pushVersion).toBeDefined();
+    });
+    pushVersion?.({ type: "current", version: 1, recheck: false });
+    delivery = "revoked";
+    await wait(0);
+    const unasked = [...refused];
+    pushVersion?.({ type: "current", version: 1, recheck: true });
+    await vi.waitFor(() => {
+      expect(refused).toStrictEqual(["revoked"]);
+    });
+    for (const cleanup of cleanups) {
+      cleanup();
+    }
+    expect(unasked).toStrictEqual([]);
+  });
+
+  it.each(["screen.rate_limited", "screen.too_many_subscriptions"])(
+    "follows the App again once core's wait for %s is over, never dropping it",
+    async (code) => {
+      vi.useFakeTimers();
+      let asked = 0;
+      const link = linkAsAda(
+        async () => await Promise.resolve("open"),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async () => {
+          asked += 1;
+          if (asked === 1) {
+            throw Object.assign(new Error("Wait."), {
+              code,
+              details: { retryAfterMs: 60_000 },
+            });
+          }
+          return await Promise.resolve({
+            release: async () => {
+              await Promise.resolve();
+            },
+          });
+        }
+      );
+      const told: AppVersionPush[] = [];
+      const stop = link.followVersion("notes", (push) => {
+        told.push(push);
+      });
+      await vi.advanceTimersByTimeAsync(59_000);
+      const early = asked;
+      await vi.advanceTimersByTimeAsync(2000);
+      stop();
+      vi.useRealTimers();
+      expect({ early, later: asked, told }).toStrictEqual({
+        early: 1,
+        later: 2,
+        told: [],
+      });
+    }
+  );
+
+  it("shares one subscription of the App among the frames of a tab, the last version told to one that opens later", async () => {
+    let followed = 0;
+    let pushVersion: ((push: AppVersionPush) => void) | undefined;
+    let released = 0;
+    const link = linkAsAda(
+      async () => await Promise.resolve("open"),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async (_app, onVersion) => {
+        followed += 1;
+        pushVersion = onVersion;
+        return await Promise.resolve({
+          release: async () => {
+            released += 1;
+            await Promise.resolve();
+          },
+        });
+      }
+    );
+    const first: AppVersionPush[] = [];
+    const second: AppVersionPush[] = [];
+    const stopFirst = link.followVersion("notes", (push) => {
+      first.push(push);
+    });
+    await vi.waitFor(() => {
+      expect(pushVersion).toBeDefined();
+    });
+    pushVersion?.({ type: "current", version: 2, recheck: false });
+    const stopSecond = link.followVersion("notes", (push) => {
+      second.push(push);
+    });
+    await vi.waitFor(() => {
+      expect(second).toHaveLength(1);
+    });
+    stopFirst();
+    const afterFirst = released;
+    stopSecond();
+    await vi.waitFor(() => {
+      expect(released).toBe(1);
+    });
+    expect({ followed, afterFirst, first, second }).toStrictEqual({
+      followed: 1,
+      afterFirst: 0,
+      first: [{ type: "current", version: 2, recheck: false }],
+      second: [{ type: "current", version: 2, recheck: false }],
+    });
   });
 });
 
@@ -808,9 +1013,21 @@ describe("a running screen's drafts once core stops its build", () => {
     vi.stubGlobal("sessionStorage", tabStorage());
     pageEvents();
     const person = Promise.withResolvers<{ userId: string }>();
+    const following = Promise.withResolvers<(push: AppVersionPush) => void>();
     const link = linkAsAda(
       async () => await Promise.resolve("revoked"),
-      async () => await person.promise
+      async () => await person.promise,
+      undefined,
+      undefined,
+      undefined,
+      async (_app, onVersion) => {
+        following.resolve(onVersion);
+        return await Promise.resolve({
+          release: async () => {
+            await Promise.resolve();
+          },
+        });
+      }
     );
     await link.session();
     const source = appScreen(
@@ -830,7 +1047,9 @@ describe("a running screen's drafts once core stops its build", () => {
       // The page's state isn't looked at here.
     });
     target.saveDraft("n1", "Typed as it was revoked");
-    await vi.advanceTimersByTimeAsync(30_000);
+    // An approval taken back: core's version subscription says to look.
+    (await following.promise)({ type: "current", version: 1, recheck: true });
+    await vi.advanceTimersByTimeAsync(0);
     person.resolve({ userId: "ada" });
     await vi.advanceTimersByTimeAsync(draftGatherMs);
     expect({ stopped, kept: draftsFor("ada", bundle.app) }).toStrictEqual({

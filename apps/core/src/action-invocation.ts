@@ -106,6 +106,12 @@ export interface InvocationOpen {
   readonly streaming: boolean;
   /** Only read what already runs or ran; never start it. */
   readonly attach: boolean;
+  /**
+   * A screen's: the version its lease says it was opened on, whose
+   * references are held to their contract in the one that runs
+   * (app-functions.ts, `pinnedReference`). None for a portable host.
+   */
+  readonly pinnedVersion?: number;
 }
 
 /** Where an invocation stands (`ActionInvocation.standing`), never its result. */
@@ -693,6 +699,9 @@ export class ActionInvocation extends DurableObject<Env> {
           spec.app,
           spec.call,
           {
+            ...(spec.pinnedVersion === undefined
+              ? {}
+              : { pinnedVersion: spec.pinnedVersion }),
             ...(spec.streaming
               ? {
                   progress: {
