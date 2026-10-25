@@ -64,14 +64,13 @@ interface Card {
   missing: number;
 }
 
-const cardsOf = (view: OrgView, works: StaffWorks): Card[] =>
+const cardsOf = (view: OrgView): Card[] =>
   view.works.map((work) => {
     const record = recordOf(view, work.id);
-    const open = works.works.find(({ id }) => id === work.id)?.drawn?.open;
     return {
       work,
       standing: standingOf(work),
-      missing: record === null ? 0 : missingOf(record, open).length,
+      missing: record === null ? 0 : missingOf(record).length,
     };
   });
 
@@ -259,7 +258,7 @@ export const WorkList = ({
   const [team, setTeam] = useState(all);
   const [standing, setStanding] = useState<Standing | typeof all>(all);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const cards = cardsOf(view, works);
+  const cards = cardsOf(view);
   const teamName = (id: string) =>
     view.teams.find((each) => each.team.id === id)?.team.name ?? "";
   const rules = (

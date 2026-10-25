@@ -1,5 +1,6 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
+import { staffDrawingOf } from "@grasp-os/shared/admin/org-record";
 import type { Told } from "@grasp-os/shared/admin/org-record";
 import type { StaffWorks } from "@grasp-os/shared/onboarding-staff";
 import { expect } from "@playwright/test";
@@ -10,7 +11,7 @@ import { seededCalls } from "./seeded-calls.ts";
 
 // Grasp's staff see each piece of work as drawn from the interviews
 // (GRA-377), end to end: from the area's sidebar to a drawn piece of
-// work, with each person's numbers apart and its open questions. The
+// work, as numbers only (GRA-1084), its numbers as totals only (GRA-1079). The
 // local stack can't hold interviews (their links go out by email) or draw
 // work (it reaches no model), so core's answers to those two calls are
 // seeded on the page's connection, as core's own tests draw them
@@ -111,7 +112,7 @@ const told = (numbers: Partial<Told>): Told => ({
   ...numbers,
 });
 
-/** Taking orders, drawn from what Lisa and Tom agreed to, each with numbers of their own. */
+/** Taking orders, drawn from what Lisa and Tom agreed to, each with numbers of their own that staff see only as totals. */
 const works: StaffWorks = {
   works: [
     {
@@ -123,7 +124,7 @@ const works: StaffWorks = {
       share: 0.6,
       from: "lead",
       stale: false,
-      drawn: {
+      drawn: staffDrawingOf({
         at: isoAt("2026-10-07", "10:00:00.000Z"),
         from: ["lisa", "tom"],
         starts: "A shop calls with an order.",
@@ -167,14 +168,14 @@ const works: StaffWorks = {
           tom: told({ volume: [60, 80], volumeOf: "team", wrong: 2 }),
         },
         open: ["Who takes an order when Sales is out?"],
-      },
+      }),
     },
   ],
   rules: STARTING_ORG_RULES,
   counted: [],
 };
 
-test("staff see a drawn piece of work, each person's numbers apart, and its open questions", async ({
+test("staff see a drawn piece of work as numbers only, never what anyone said, its numbers as totals only", async ({
   page,
   cspViolations,
 }) => {
@@ -195,41 +196,39 @@ test("staff see a drawn piece of work, each person's numbers apart, and its open
   ).toContainText("0 of 1 workflows known");
   await page.getByRole("link", { name: "Open Taking orders" }).click();
 
-  // The canvas as it runs today, with the case off the usual way.
+  // The canvas as it runs today: each step by its place and how many told
+  // it, never what anyone said it is (GRA-1084).
   const today = page.getByRole("region", { name: "As it runs today" });
   await expect(
     today.getByRole("list", { name: "The steps" }).getByRole("button")
   ).toHaveText([
-    /Write the order down in the order sheet\..*Excel/u,
-    /Send the order to the bakery\./u,
+    // Two told each: under 5, how many isn't staff's (GRA-1079).
+    /Step 1.*Told by fewer than 5 people/u,
+    /Step 2.*Told by fewer than 5 people/u,
   ]);
-  await expect(today).toContainText("When the shop is new");
-  // What is still missing ends with what the next interviews should ask.
+  await expect(today).not.toContainText("Write the order down");
+  await expect(today).not.toContainText("When the shop is new");
   await expect(
     today.getByRole("list", { name: "Still missing" }).getByRole("listitem")
-  ).toContainText([
-    /1 person who does it has not talked/u,
-    /Who takes an order when Sales is out\?/u,
-  ]);
+  ).toContainText([/1 person who does it has not talked/u]);
 
-  // Each person's numbers apart, never averaged.
+  // Totals over everyone who said, never one person's numbers (GRA-1079).
   await expect(
-    page.getByRole("table", { name: "Each person's numbers" }).getByRole("row")
-  ).toHaveText([
-    /Who.*How many.*How long.*Wrong/u,
-    /Lisa de Vries.*20 to 40 a week, their own.*5 minutes, 2 to 10.*Not said/u,
-    /Tom Jansen.*60 to 80 a week, for the whole team.*Not said.*2 in 10/u,
-  ]);
+    page.getByRole("table", { name: "Each person's numbers" })
+  ).toHaveCount(0);
   await expect(
-    page.getByText("20 to 60 in a quiet week, 40 to 80 in a busy one.")
+    page.getByText("Fewer than 5 people gave it.").first()
   ).toBeVisible();
+  // Whom it was heard from is how many, never who: under 5, not even that.
+  const heard = page.getByRole("region", { name: "Heard from" });
+  await expect(heard).toContainText("Fewer than 5 people so far.");
+  await expect(heard).not.toContainText("Lisa");
+  await expect(heard).not.toContainText("Tom");
 
-  // A step opens who told it.
-  await today
-    .getByRole("button", { name: /Send the order to the bakery/u })
-    .click();
+  // A step opens how many told it, which under 5 it doesn't say.
+  await today.getByRole("button", { name: /Step 2/u }).click();
   await expect(
     page.getByRole("complementary", { name: "Who told this step" })
-  ).toContainText("2 of the 3 needed told it.");
+  ).toContainText("Fewer than 5 people told it so far.");
   expect(cspViolations).toStrictEqual([]);
 });

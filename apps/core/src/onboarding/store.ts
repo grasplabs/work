@@ -1,6 +1,10 @@
 import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
-import { addWorkingDays, dayOf } from "@grasp-os/shared/admin/org-record";
+import {
+  addWorkingDays,
+  dayOf,
+  staffDrawingOf,
+} from "@grasp-os/shared/admin/org-record";
 import type { DrawnWork, WorkRecord } from "@grasp-os/shared/admin/org-record";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
@@ -469,6 +473,10 @@ const agreedSchema = z.record(z.string(), z.string());
 /** Whose agreements a piece of work was drawn from, as the store keeps it. */
 const agreedOf = (stored: string): Record<string, string> =>
   agreedSchema.safeParse(JSON.parse(stored)).data ?? {};
+
+/** A drawing as staff see it (`staffDrawingOf`): totals only. */
+const staffDrawing = (drawn: DrawnWork | null) =>
+  drawn === null ? null : staffDrawingOf(drawn);
 
 /** A drawing as the store keeps it; null when there is none. */
 const drawingOf = (stored: string | null): DrawnWork | null =>
@@ -2520,7 +2528,8 @@ export class Onboarding extends DurableObject<Env> {
         doers: doersOf(row.doers),
         share: row.share,
         from: "lead",
-        drawn: drawings.get(row.id) ?? null,
+        // Staff see totals only, never one person's numbers (GRA-1079).
+        drawn: staffDrawing(drawings.get(row.id) ?? null),
         stale: due.has(row.id),
       }));
     const ids = new Set(all.map(({ id }) => id));
