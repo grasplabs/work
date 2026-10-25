@@ -6,6 +6,7 @@ import {
   costMicros,
   listPricesOf,
   pinnedPrice,
+  regionalPricesOf,
 } from "../src/model-prices.ts";
 
 // What model requests cost in whole micros: pure arithmetic, tested on
@@ -180,6 +181,42 @@ describe("model prices", () => {
       claude,
       gpt54,
     ]);
+  });
+
+  it("price Bedrock's regional endpoints, the EU's among them, 10 percent over the list, every kind and tier, and pin them as whole micros", async () => {
+    const opus55 = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 };
+    const regional = await pinnedPrice(regionalPricesOf(opus55));
+    if (regional === undefined) {
+      throw new Error("Expected Bedrock's regional prices to be prices");
+    }
+    expect(regional).toMatchObject({
+      input: 4_400_000,
+      output: 22_000_000,
+      cacheRead: 220_000,
+      cacheWrite: 5_500_000,
+      tiers: [],
+    });
+    const list = await pinnedPrice(opus55);
+    expect(regional.version).not.toBe(list?.version);
+    expect(
+      costMicros(regional, {
+        input: 1000,
+        output: 100,
+        cacheRead: 0,
+        cacheWrite: 0,
+      })
+    ).toBe(6600);
+    await expect(pinnedPrice(regionalPricesOf(gpt54))).resolves.toMatchObject({
+      tiers: [
+        {
+          inputTokensAbove: 272_000,
+          input: 5_500_000,
+          output: 24_750_000,
+          cacheRead: 550_000,
+          cacheWrite: 0,
+        },
+      ],
+    });
   });
 
   it("cost in exact dollars at the tier a count is in, as the ledger charges it before rounding", async () => {
