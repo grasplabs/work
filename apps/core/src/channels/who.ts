@@ -10,6 +10,7 @@ import {
   signInConfig,
 } from "../auth/config.ts";
 import { accounts } from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
 import { entraDirectoryOf } from "../onboarding/directory.ts";
 import { mayComeIn } from "../onboarding/gate.ts";
 import { personOnChannel } from "./accounts.ts";
@@ -114,4 +115,31 @@ export const writerOf = async (
   return userId === null
     ? { kind: "unknown" }
     : { kind: "member", userId, fromDirectory: false };
+};
+
+/**
+ * The organization's active members among the Teams users whose Entra
+ * object ids are `oids`, by object id: their user ids. Anyone else (no
+ * longer a member, or unknown to Grasp) isn't in it.
+ */
+export const teamsMembers = async (
+  env: Env,
+  oids: readonly string[]
+): Promise<Map<string, string>> => {
+  if (oids.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({ oid: accounts.oid, userId: accounts.userId })
+    .from(accounts)
+    .where(
+      and(
+        inList(accounts.oid, oids),
+        eq(accounts.providerId, providerIds.entra),
+        activeMember(accounts.userId)
+      )
+    );
+  return new Map(
+    rows.flatMap(({ oid, userId }) => (oid === null ? [] : [[oid, userId]]))
+  );
 };
