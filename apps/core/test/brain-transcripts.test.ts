@@ -294,6 +294,28 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     });
   });
 
+  it("fails captions without a word as having no text, and keeps nothing of them", async () => {
+    const owner = await personWithCollection();
+    const upload = await uploaded(
+      owner,
+      "Silence.vtt",
+      "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<b> </b>&#8203;\n"
+    );
+    const { documents } = await owner.api.knowledge.listDocuments(
+      owner.collectionId
+    );
+
+    expect({
+      status: upload.status,
+      failure: upload.failure?.code,
+      documents: documents.length,
+    }).toStrictEqual({
+      status: "failed",
+      failure: "upload.no_text",
+      documents: 0,
+    });
+  });
+
   it("refuses a .vtt that doesn't start as WebVTT, and keeps nothing of it", async () => {
     const owner = await personWithCollection();
     const result = await outcome(

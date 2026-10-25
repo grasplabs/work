@@ -20,10 +20,13 @@ export interface VttTurn {
   endMs: number;
 }
 
-/** A WebVTT file's transcript, and its text as the document holds it. */
+/**
+ * A WebVTT file's transcript, and its text as the document holds it; no
+ * transcript for a file without a word, which then has no text either.
+ */
 export interface VttExtraction {
   markdown: string;
-  transcript: { turns: VttTurn[]; chapters: [] };
+  transcript?: { turns: VttTurn[]; chapters: [] };
 }
 
 /** Most turns one transcript has: the Brain's limit. */
@@ -165,7 +168,7 @@ export const vttExtraction = (bytes: Uint8Array): VttExtraction => {
     }
   }
   if (turns.length === 0) {
-    return { markdown: "", transcript: { turns, chapters: [] } };
+    return { markdown: "" };
   }
   const sections: string[] = [];
   for (let start = 0; start < turns.length; start += turnsPerSection) {
