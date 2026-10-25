@@ -302,6 +302,36 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     });
   });
 
+  it("gives each voice in a cue its own turn: spans one after another, nested in markup or in each other, and left open", async () => {
+    const owner = await personWithCollection();
+    const upload = await uploaded(
+      owner,
+      "Replies.vtt",
+      `WEBVTT
+
+00:00:01.000 --> 00:00:03.000
+<v Ann>Hello.</v> <v Bob>Hi.</v>
+
+00:00:04.000 --> 00:00:06.000
+<v Ann>We start <i>now</i>.
+
+00:00:07.000 --> 00:00:09.000
+<v Bob>Fine <b><v Cy>says Cy</v></b> back to Bob</v>
+`
+    );
+    const opened = await openedOf(owner.api, upload.documentId);
+    expect(
+      opened?.turns.map(({ speaker, text, at }) => [speaker, text, at])
+    ).toStrictEqual([
+      ["Ann", "Hello.", "0:01"],
+      ["Bob", "Hi.", "0:01"],
+      ["Ann", "We start now.", "0:04"],
+      ["Bob", "Fine", "0:07"],
+      ["Cy", "says Cy", "0:07"],
+      ["Bob", "back to Bob", "0:07"],
+    ]);
+  });
+
   it("keeps every word of a cue longer than a turn may be, as turns of its voice that each fit", async () => {
     const owner = await personWithCollection();
     const words = Array.from({ length: 3000 }, (_, index) => `word${index}`);

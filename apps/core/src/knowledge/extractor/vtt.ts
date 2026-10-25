@@ -7,9 +7,10 @@ import { TooLargeError } from "./too-large.ts";
 // A WebVTT file (W3C's captions format, as meeting tools export a
 // recording's transcript) as a transcript and the Markdown its document
 // holds. Parsed by W3C's own parser (webvtt.js), only inside the
-// extractor's sandbox (worker.ts). Each cue's voice (`<v Anna>`) is its
-// speaker, and cues one after another in the same voice are one turn,
-// from the first one's start to the last one's end. Markup is dropped: a
+// extractor's sandbox (worker.ts). Each voice span (`<v Anna>`) is its
+// words' speaker, so a cue with several voices is several turns; and turns
+// one after another in the same voice are one, from the first one's start
+// to the last one's end. Markup is dropped: a
 // turn is the cue's words. Captions carry no chapters.
 
 /** A turn as the Brain keeps it (packages/brain transcripts.ts). */
@@ -79,34 +80,37 @@ const clipped = (text: string, max: number): string => {
   return kept;
 };
 
-/** A cue's words, without markup: ruby annotations (`<rt>`) left out. */
-const wordsOf = (nodes: readonly WebVTTNode[]): string =>
-  nodes
-    .map((node) => {
-      if (node.type === "text") {
-        return node.value;
-      }
-      if (node.type === "object" && node.name !== "rt") {
-        return wordsOf(node.children);
-      }
-      return "";
-    })
-    .join("");
+/** Words of a cue and the voice they are in. */
+interface Span {
+  speaker: string;
+  text: string;
+}
 
-/** The first voice a cue names, or empty for none. */
-const voiceOf = (nodes: readonly WebVTTNode[]): string => {
+/**
+ * A cue's words, without markup, each in the voice it is in: a voice span
+ * (`<v Ann>`) speaks for everything in it, a voice nested in it for its
+ * own part, and words outside any voice are no one's. The parser closes a
+ * span left open at the cue's end. Ruby annotations (`<rt>`) are left out.
+ */
+const spansOf = (
+  nodes: readonly WebVTTNode[],
+  speaker: string,
+  into: Span[]
+): Span[] => {
   for (const node of nodes) {
-    if (node.type === "object") {
-      if (node.name === "v") {
-        return clipped(plainOf(node.value ?? ""), maxSpeakerLength);
-      }
-      const inner = voiceOf(node.children);
-      if (inner !== "") {
-        return inner;
-      }
+    if (node.type === "text") {
+      into.push({ speaker, text: node.value });
+    } else if (node.type === "object" && node.name !== "rt") {
+      spansOf(
+        node.children,
+        node.name === "v"
+          ? clipped(plainOf(node.value ?? ""), maxSpeakerLength)
+          : speaker,
+        into
+      );
     }
   }
-  return "";
+  return into;
 };
 
 /** Where in the recording, as people read it: minutes and seconds. */
@@ -117,23 +121,39 @@ const placeOf = (ms: number): string => {
 };
 
 /**
- * A cue's turn: its voice, its words on one line, and its times, an end
- * before its start (which the parser lets through) taken as the start.
- * None for a cue past what a time in milliseconds can be exactly (a
- * timestamp of twenty hour digits): it is left out, the rest kept.
+ * A cue's turns: one for each voice in it, in order (`spansOf`), its words
+ * on one line, all at the cue's times, an end before its start (which the
+ * parser lets through) taken as the start. None for a cue past what a time
+ * in milliseconds can be exactly (a timestamp of twenty hour digits): it
+ * is left out, the rest kept.
  */
-const turnOf = (cue: WebVTTCue): VttTurn | undefined => {
+const turnsOf = (cue: WebVTTCue): VttTurn[] => {
   const startMs = Math.round(cue.startTime * msPerSecond);
   const endMs = Math.max(startMs, Math.round(cue.endTime * msPerSecond));
   if (!Number.isSafeInteger(startMs) || !Number.isSafeInteger(endMs)) {
-    return undefined;
+    return [];
   }
-  return {
-    speaker: voiceOf(cue.tree.children),
-    text: plainOf(wordsOf(cue.tree.children)),
+  // Words in one voice run on as written, markup or not, until another
+  // voice speaks; then each run is one line.
+  const runs: Span[] = [];
+  for (const span of spansOf(cue.tree.children, "", [])) {
+    const last = runs.at(-1);
+    if (plainOf(span.text) === "") {
+      if (last !== undefined) {
+        last.text += span.text;
+      }
+    } else if (last?.speaker === span.speaker) {
+      last.text += span.text;
+    } else {
+      runs.push({ ...span });
+    }
+  }
+  return runs.map(({ speaker, text }) => ({
+    speaker,
+    text: plainOf(text),
     startMs,
     endMs,
-  };
+  }));
 };
 
 /**
@@ -196,25 +216,23 @@ export const vttExtraction = (bytes: Uint8Array): VttExtraction => {
   }
   const turns: VttTurn[] = [];
   for (const cue of cues) {
-    const turn = turnOf(cue);
-    if (turn === undefined || turn.text === "") {
-      continue;
-    }
-    // A cue longer than a turn may be is several turns, never cut short.
-    for (const text of piecesOf(turn.text, maxTurnLength)) {
-      const last = turns.at(-1);
-      if (
-        last !== undefined &&
-        last.speaker === turn.speaker &&
-        last.text.length + text.length < maxTurnLength
-      ) {
-        last.text = `${last.text} ${text}`;
-        last.endMs = Math.max(last.endMs, turn.endMs);
-      } else {
-        turns.push({ ...turn, text });
-      }
-      if (turns.length > maxTurns) {
-        throw new TooLargeError();
+    for (const turn of turnsOf(cue)) {
+      // A turn longer than a turn may be is several, never cut short.
+      for (const text of piecesOf(turn.text, maxTurnLength)) {
+        const last = turns.at(-1);
+        if (
+          last !== undefined &&
+          last.speaker === turn.speaker &&
+          last.text.length + text.length < maxTurnLength
+        ) {
+          last.text = `${last.text} ${text}`;
+          last.endMs = Math.max(last.endMs, turn.endMs);
+        } else {
+          turns.push({ ...turn, text });
+        }
+        if (turns.length > maxTurns) {
+          throw new TooLargeError();
+        }
       }
     }
   }
