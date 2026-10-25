@@ -30,16 +30,13 @@ import {
   versions,
 } from "../db/knowledge/schema.ts";
 import { allowedFor } from "./authorize.ts";
-import { ensureCollection, requireWritable } from "./collections.ts";
+import { requireWritable } from "./collection-rules.ts";
+import { ensureCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
-import {
-  personWriter,
-  readableDocument,
-  versionText,
-  writeVersion,
-} from "./documents.ts";
+import { readableDocument, versionText, writeVersion } from "./documents.ts";
 import type { Writer } from "./documents.ts";
-import { portsOf } from "./ports.ts";
+import { personWriter } from "./person-writes.ts";
+import { portsOf, brainOf } from "./ports.ts";
 
 // Skills in two collections, both in every person's catalog, and in an
 // agent's once it is granted read of each, as for any collection (agents
@@ -163,19 +160,23 @@ export const syncGraspSkills = async (
   if (changed.length === 0) {
     return true;
   }
-  const collection = await ensureCollection(env, graspSkillsRow(), graspActor);
+  const collection = await ensureCollection(
+    brainOf(env),
+    graspSkillsRow(),
+    graspActor
+  );
   let complete = true;
   for (const skill of changed) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- a few skills, one at a time
-      await writeVersion(env, graspWriter, {
+      await writeVersion(brainOf(env), graspWriter, {
         collection,
         path: skill.path,
         text: skill.text,
         ifVersion: byPath.get(skill.path)?.currentVersion ?? 0,
         message: "From the release",
         restoredFrom: null,
-        graspSync: true,
+        sync: true,
       });
     } catch (error) {
       complete = false;
@@ -203,7 +204,7 @@ const clientSkills = async (
 ): Promise<CollectionRow | undefined> => {
   if (isAdmin(person.role)) {
     return await ensureCollection(
-      env,
+      brainOf(env),
       clientSkillsRow(person.userId),
       actorOf(person)
     );
@@ -284,7 +285,7 @@ export const copySkill = async (
   // purged), so this is the text of the version the document was at when
   // read, whatever the sync wrote since.
   const copied = await versionText(
-    env,
+    brainOf(env),
     db,
     document.id,
     document.currentVersion
@@ -292,7 +293,7 @@ export const copySkill = async (
   if (copied === undefined) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
-  return await writeVersion(env, personWriter(person), {
+  return await writeVersion(brainOf(env), personWriter(person), {
     collection: target,
     path: document.path,
     text: copied,

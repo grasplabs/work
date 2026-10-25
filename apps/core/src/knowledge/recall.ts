@@ -3,22 +3,20 @@ import {
   brainErrors,
   recallDefaults,
   recallInputSchema,
-} from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
 import type {
   BrainSourceRef,
   Coverage,
   MemoryItem,
   MemoryPack,
   RecallBudget,
-} from "@grasp-os/shared/brain-api";
-import { toHex } from "@grasp-os/shared/encoding";
-import type { CollectionId } from "@grasp-os/shared/ids";
-import { knowledgeErrors, searchMaxLimit } from "@grasp-os/shared/knowledge";
-import { memoryTokens } from "@grasp-os/shared/memory";
-import { permissionErrors } from "@grasp-os/shared/permissions";
+} from "@grasp-os/brain/contract";
+import { toHex } from "@grasp-os/brain/encoding";
+import type { CollectionId } from "@grasp-os/brain/ids";
+import { knowledgeErrors, searchMaxLimit } from "@grasp-os/brain/knowledge";
+import { tokensOf } from "@grasp-os/brain/tokens";
 
-import type { Reader } from "./access.ts";
-import { portsOf } from "./ports.ts";
+import type { Brain } from "./brain.ts";
 import { d1BrainStore } from "./recall-store.ts";
 import type { BrainStore } from "./recall-store.ts";
 import type { FoundSection } from "./search.ts";
@@ -68,7 +66,7 @@ export const clampBudget = (
 });
 
 /** A refusal from a read below, as the Brain's stable code. */
-const asBrainError = (error: unknown): unknown => {
+const asBrainError = <C>(brain: Brain<C>, error: unknown): unknown => {
   if (brainErrors.codeOf(error) !== undefined) {
     return error;
   }
@@ -78,7 +76,7 @@ const asBrainError = (error: unknown): unknown => {
   if (knowledgeErrors.codeOf(error) === "knowledge.invalid") {
     return brainErrors.create("brain.invalid");
   }
-  if (permissionErrors.codeOf(error) !== undefined) {
+  if (brain.ports.recall.isRefusal(error)) {
     return brainErrors.create("brain.denied");
   }
   return error;
@@ -128,7 +126,7 @@ const packed = (
       break;
     }
     const item = itemOf(section);
-    const tokens = memoryTokens(item.statement);
+    const tokens = tokensOf(item.statement);
     if (tokenCount + tokens > maxTokens) {
       break;
     }
@@ -177,8 +175,8 @@ const coverageOf = (timedOut: boolean, truncated: boolean): Coverage => {
  * with a key of the deployment's own, so it can't be computed, or guessed
  * back, from what a caller knows of its own access.
  */
-const digest = async (env: Env, text: string): Promise<string> => {
-  const key = await portsOf(env).keys.hmac("grasp-os brain access revision", [
+const digest = async <C>(brain: Brain<C>, text: string): Promise<string> => {
+  const key = await brain.ports.keys.hmac("grasp-os brain access revision", [
     "sign",
   ]);
   const mac = await crypto.subtle.sign(
@@ -201,13 +199,13 @@ const timeout = async (ms: number): Promise<undefined> => {
  * one it was told to read, so a caller that labels what it was handed
  * (a chat) labels a "nothing found in S" answer with S too.
  */
-export const recallWithSources = async (
-  env: Env,
-  reader: Reader,
+export const recallWithSources = async <C>(
+  brain: Brain<C>,
+  reader: C,
   input: unknown,
   /** A collection's stub passes its own: the one collection it reads. */
   only?: CollectionId,
-  store: BrainStore = d1BrainStore(env)
+  store: BrainStore<C> = d1BrainStore(brain)
 ): Promise<{ pack: MemoryPack; sources: CollectionId[] }> => {
   try {
     const { query, filters, budget } = brainErrors.parse(
@@ -234,7 +232,7 @@ export const recallWithSources = async (
     if (collectionIds !== undefined) {
       await store.requireReadable(reader, collectionIds);
     }
-    const accessRevision = await digest(env, await store.accessKey(reader));
+    const accessRevision = await digest(brain, await store.accessKey(reader));
     const remaining = limits.deadlineMs - (Date.now() - startedAt);
     // One more than asked, to tell a full pack from a cut one.
     const limit = Math.min(limits.maxItems + 1, searchMaxLimit);
@@ -278,11 +276,11 @@ export const recallWithSources = async (
       tokenCount,
       accessRevision,
       indexGeneration,
-      createdAt: portsOf(env).clock().toISOString(),
+      createdAt: brain.ports.clock().toISOString(),
     };
     return { pack, sources };
   } catch (error) {
-    throw asBrainError(error);
+    throw asBrainError(brain, error);
   }
 };
 
@@ -292,13 +290,13 @@ export const recallWithSources = async (
  * refuses the whole recall as `brain.not_found` before anything is read.
  * Refusals are the Brain's stable codes.
  */
-export const recall = async (
-  env: Env,
-  reader: Reader,
+export const recall = async <C>(
+  brain: Brain<C>,
+  reader: C,
   input: unknown,
   only?: CollectionId,
-  store: BrainStore = d1BrainStore(env)
+  store: BrainStore<C> = d1BrainStore(brain)
 ): Promise<MemoryPack> => {
-  const { pack } = await recallWithSources(env, reader, input, only, store);
+  const { pack } = await recallWithSources(brain, reader, input, only, store);
   return pack;
 };

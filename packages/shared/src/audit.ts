@@ -267,6 +267,13 @@ export const auditEventSchema = z.object({
 });
 export type AuditEvent = z.infer<typeof auditEventSchema>;
 
+/** An entry, as `createAuditEvent` takes it: an event before its ID, time and source. */
+export const auditEntrySchema = auditEventSchema.omit({
+  id: true,
+  at: true,
+  source: true,
+});
+
 /** What a caller records; the logger sets the ID, the time and the source. */
 export type AuditEntry = Omit<
   z.input<typeof auditEventSchema>,

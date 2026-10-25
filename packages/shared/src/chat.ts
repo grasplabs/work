@@ -26,6 +26,8 @@ export const chatPlatformSchema = z
     message: "web is Grasp's own channel, not a chat platform",
   });
 
+export type ChatPlatform = z.infer<typeof chatPlatformSchema>;
+
 /**
  * Which channel a chat came through: Grasp's own app (`web`), or a chat
  * platform.

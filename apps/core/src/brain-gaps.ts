@@ -1,4 +1,9 @@
-import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import {
+  actorOf,
+  auditActorSchema,
+  createAuditEvent,
+} from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import type { Gap } from "@grasp-os/shared/brain";
 import {
   brainGapAnswerSchema,
@@ -30,7 +35,7 @@ import {
 import type { OnErase } from "./knowledge/purge.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 
-// What became of the Playbook's gaps (`brain.askAboutGap`, `answerGap`,
+// What became of the brain's gaps (`brain.askAboutGap`, `answerGap`,
 // `closeGap`): the gap record itself is never written over (brain-records
 // .ts); its ask, answer and close are kept beside it, in
 // `brain_gap_states`, each set once. Threat model, and how each is closed
@@ -428,7 +433,7 @@ const countGapAnswers = async (
  */
 const rewriteGapAnswers = async (
   env: Env,
-  person: Identity,
+  actor: AuditActor,
   rewrite: (text: string) => string
 ): Promise<number> => {
   const db = drizzle(env.DB);
@@ -459,9 +464,9 @@ const rewriteGapAnswers = async (
     update(first),
     ...rest.map(update),
     outboxed(db, {
-      actor: actorOf(person),
+      actor,
       action: "brain.gap.answers_purged",
-      target: { type: "brain", id: "playbook" },
+      target: { type: "brain", id: "gaps" },
       detail: { gaps: changed.length },
     }),
   ]);
@@ -474,7 +479,7 @@ const rewriteGapAnswers = async (
  */
 const eraseGapAnswerer = async (
   env: Env,
-  person: Identity,
+  actor: AuditActor,
   userId: string
 ): Promise<void> => {
   const db = drizzle(env.DB);
@@ -484,7 +489,7 @@ const eraseGapAnswerer = async (
       .set({ answeredBy: null })
       .where(inArray(brainGapStates.answeredBy, [userId])),
     outboxedIfChanged(db, {
-      actor: actorOf(person),
+      actor,
       action: "brain.gap.answerer_erased",
       target: { type: "user", id: userId },
     }),
@@ -499,10 +504,10 @@ export const gapAnswerErasure = (
   env: Env
 ): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => ({
   count: async (holds) => await countGapAnswers(env, holds),
-  rewrite: async (person, rewrite) => {
-    await rewriteGapAnswers(env, person, rewrite);
+  rewrite: async (by, rewrite) => {
+    await rewriteGapAnswers(env, auditActorSchema.parse(by.actor), rewrite);
   },
-  forgetActor: async (person, userId) => {
-    await eraseGapAnswerer(env, person, userId);
+  forgetActor: async (by, userId) => {
+    await eraseGapAnswerer(env, auditActorSchema.parse(by.actor), userId);
   },
 });

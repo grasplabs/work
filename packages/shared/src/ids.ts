@@ -4,6 +4,20 @@ import { identifierMaxLength } from "./identifier.ts";
 
 export { identifierMaxLength } from "./identifier.ts";
 
+// The Brain's own IDs, as the Brain defines them (@grasp-os/brain/ids).
+export {
+  brainReceiptIdSchema,
+  collectionIdSchema,
+  documentIdSchema,
+  memoryIdSchema,
+} from "@grasp-os/brain/ids";
+export type {
+  BrainReceiptId,
+  CollectionId,
+  DocumentId,
+  MemoryId,
+} from "@grasp-os/brain/ids";
+
 /** An identifier: non-empty, and at most {@link identifierMaxLength}. */
 export const identifierSchema = z.string().min(1).max(identifierMaxLength);
 
@@ -64,22 +78,6 @@ export type WorkspaceId = z.infer<typeof workspaceIdSchema>;
 /** A chat in a workspace. */
 export const chatIdSchema = idSchema<"ChatId">();
 export type ChatId = z.infer<typeof chatIdSchema>;
-
-/** A knowledge collection. */
-export const collectionIdSchema = idSchema<"CollectionId">();
-export type CollectionId = z.infer<typeof collectionIdSchema>;
-
-/** A document in a knowledge collection. */
-export const documentIdSchema = idSchema<"DocumentId">();
-export type DocumentId = z.infer<typeof documentIdSchema>;
-
-/** A memory record in the Brain (brain-api.ts). */
-export const memoryIdSchema = idSchema<"MemoryId">();
-export type MemoryId = z.infer<typeof memoryIdSchema>;
-
-/** A Brain command's receipt (brain-api.ts). */
-export const brainReceiptIdSchema = idSchema<"BrainReceiptId">();
-export type BrainReceiptId = z.infer<typeof brainReceiptIdSchema>;
 
 /** A connection to an outside system, held by connect. */
 export const connectionIdSchema = idSchema<"ConnectionId">();

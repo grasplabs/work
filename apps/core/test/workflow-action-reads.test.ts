@@ -12,8 +12,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
-import { createCollection } from "../src/knowledge/collections.ts";
-import { saveDocument } from "../src/knowledge/documents.ts";
+import { createCollection } from "../src/knowledge/collection-rules.ts";
+import { saveDocument } from "../src/knowledge/person-writes.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,

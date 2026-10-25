@@ -14,9 +14,8 @@ import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import { z } from "zod";
 
 import { test } from "./csp.ts";
-import { interviewLinkOf } from "./interview-link.ts";
-import { apiOf, signInStaff } from "./people.ts";
-import type { Person } from "./people.ts";
+import { invited } from "./interview-turns.ts";
+import { signInStaff } from "./people.ts";
 
 // An interview by voice, end to end (GRA-383): someone talks with Stephen
 // through the browser's fake microphone, which plays a recording of a
@@ -103,9 +102,6 @@ test.use({
 /** What the page asks to have said: the line. */
 const speechSchema = z.object({ text: z.string() });
 
-/** Today, as core's plan reads it (UTC). */
-const today = (): string => new Date().toISOString().slice(0, 10);
-
 /** What the person says, in order: each closed stretch is written down as the next. */
 const answers = [
   "I handle the invoices that come in.",
@@ -183,26 +179,6 @@ const answerTo = (asked: InterviewTurnRequest, n: number): StephenTurn => {
       },
     ],
   });
-};
-
-/** Someone in a team of their own, with their interview link out; their link's path. */
-const invited = async (staff: Person, person: string): Promise<string> => {
-  const { core, api } = apiOf(staff);
-  try {
-    await api.onboarding.saveRoster({
-      teams: [{ id: `team-${person}`, name: "Finance", lead: null }],
-      people: [{ id: person, name: "Ines", team: `team-${person}` }],
-    });
-    await api.onboarding.savePlan({ start: today() });
-    await api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
-    });
-  } finally {
-    core[Symbol.dispose]();
-  }
-  return await interviewLinkOf(person);
 };
 
 /** What the page asked of the fakes. */
@@ -358,7 +334,7 @@ test("an interview by voice: he answers when they are done, drops his answer whe
   const staff = await signInStaff();
   const run = crypto.randomUUID().slice(0, 8);
   const person = `ines-${run}`;
-  const link = await invited(staff, person);
+  const link = await invited(staff, person, "Ines");
   const asked: Asked = { refused: [], answered: [], said: [], waited: [] };
   await fakeTurns(page, asked);
   await fakeVoice(page, asked);

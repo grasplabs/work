@@ -1,4 +1,6 @@
+import type { BrainEvent } from "@grasp-os/brain/events";
 import {
+  auditEntrySchema,
   auditEventSchema,
   auditOutboxTakeMax,
   auditRejectReasons,
@@ -385,6 +387,18 @@ const drainSoon = (env: OutboxEnv, db: AuditedDatabase): void => {
 /** Drains Knowledge's outbox soon, as `drainSoon` does: its `audit` port. */
 export const drainKnowledgeOutboxSoon = (env: OutboxEnv): void => {
   waitUntil(drainLogged(env, databaseOutbox("knowledge", env.KNOWLEDGE), 1));
+};
+
+/**
+ * The audit event for an entry the Brain records (knowledge/ports.ts
+ * `audit.eventOf`), checked as every event is, with its ID: what the
+ * Brain stores in Knowledge's outbox.
+ */
+export const brainEventOf = (
+  entry: BrainEvent
+): { id: string; event: string } => {
+  const event = createAuditEvent(auditEntrySchema.parse(entry), "core");
+  return { id: event.id, event: JSON.stringify(event) };
 };
 
 /** Stores the event for `entry`; run it in one batch with the change. */

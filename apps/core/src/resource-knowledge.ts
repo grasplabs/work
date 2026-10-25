@@ -13,6 +13,7 @@ import { z } from "zod";
 import { permissions } from "./db/core/schema.ts";
 import { documents } from "./db/knowledge/schema.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
+import { brainOf } from "./knowledge/ports.ts";
 import { search } from "./knowledge/search.ts";
 import { read } from "./knowledge/tools.ts";
 import type {
@@ -166,7 +167,8 @@ const searchOne = async (
       caller.authority,
       caller.context,
       permissionId,
-      async (reader) => await search(env, reader, text, { limit }, collectionId)
+      async (reader) =>
+        await search(brainOf(env), reader, text, { limit }, collectionId)
     );
   } catch (error) {
     if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
@@ -228,7 +230,7 @@ const readBound = async (
       caller.authority,
       caller.context,
       binding.permissionId,
-      async (reader) => await read(env, reader, request.id)
+      async (reader) => await read(brainOf(env), reader, request.id)
     );
     caller.sources.note(document.provenance);
     return { title: document.title, text: document.text };
