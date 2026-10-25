@@ -36,7 +36,7 @@ const objectIdOf = (object: Permission["object"]): string | undefined => {
 
 /** The capabilities `permissions` give, by core's names for them. */
 export const capabilitiesOf = (
-  permissions: readonly Permission[]
+  permissions: readonly Pick<Permission, "object" | "actions">[]
 ): string[] => [
   ...new Set(
     permissions.flatMap(({ object, actions }) => {
@@ -49,14 +49,20 @@ export const capabilitiesOf = (
   ),
 ];
 
-/** The capabilities `reader` holds now: none for a person (see above). */
+/**
+ * The capabilities `reader` holds now, where it works now (`context`), so
+ * a grant of the calling chat's alone counts too: none for a person (see
+ * above).
+ */
 export const skillCapabilities = async (
   env: Env,
   reader: Reader
 ): Promise<string[]> =>
   reader.type === "person"
     ? []
-    : capabilitiesOf(await grantedPermissions(env, reader.authority));
+    : capabilitiesOf(
+        await grantedPermissions(env, reader.authority, reader.context)
+      );
 
 /**
  * Which of `skillCollections` may hold a selectable skill (GRA-310): the

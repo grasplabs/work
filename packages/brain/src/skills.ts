@@ -26,7 +26,7 @@ import {
   versions,
 } from "./db/schema.ts";
 import { getDocument } from "./documents.ts";
-import { parseFrontmatter } from "./frontmatter.ts";
+import { parseBaseFields, parseFrontmatter } from "./frontmatter.ts";
 import { collectionIdSchema, documentIdSchema } from "./ids.ts";
 import { readPayload } from "./payloads.ts";
 import { asBrainError } from "./recall.ts";
@@ -111,6 +111,19 @@ const manifestOf = (path: string, text: string): Parsed => {
       : null;
   } catch {
     return null;
+  }
+};
+
+/**
+ * Whether `text` at `path` is a skill's, by its own frontmatter: checked
+ * as leniently as a purge reads it (`parseBaseFields`), so a skill whose
+ * manifest a later release reads more narrowly is still one.
+ */
+const isSkillText = (path: string, text: string): boolean => {
+  try {
+    return parseBaseFields(path, text).type === "skill";
+  } catch {
+    return false;
   }
 };
 
@@ -505,7 +518,10 @@ export const readSkill = async <C>(
     );
     await brain.ports.recall.require(reader);
     const read = await getDocument(brain, reader, documentId, version);
-    if (read.type !== "skill") {
+    // A skill at the pinned version itself, whatever the document is now:
+    // a later version of another type leaves the pin readable, and an
+    // earlier one that wasn't a skill never passes for one.
+    if (!isSkillText(read.path, read.version.text)) {
       throw brainErrors.create("brain.not_found");
     }
     const parsed = manifestOf(read.path, read.version.text);

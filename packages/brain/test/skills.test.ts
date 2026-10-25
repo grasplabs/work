@@ -606,7 +606,7 @@ describe("reading a pinned skill", () => {
     });
   });
 
-  it("reads only skills: another document, or a version that isn't there, is not found", async () => {
+  it("reads only skills, by the pinned version's own type: another document, a version that isn't there, or one that wasn't a skill is not found", async () => {
     const skills = await newCollection(brain, "Skills");
     const skill = await saved(skills, "refunds", "tasks: [refund]");
     const note = await writeVersion(brain, writerOf("writer"), {
@@ -617,7 +617,30 @@ describe("reading a pinned skill", () => {
       message: null,
       restoredFrom: null,
     });
+    const written = async (path: string, text: string, ifVersion: number) =>
+      await writeVersion(brain, writerOf("writer"), {
+        collection: skills,
+        path,
+        text,
+        ifVersion,
+        message: null,
+        restoredFrom: null,
+      });
+    // A skill that became a plain document since its pin, and a plain
+    // document that became a skill.
+    const became = await saved(skills, "payouts", "tasks: [payout]");
+    await written("payouts/SKILL.md", "---\ntype: doc\n---\n# Payouts", 1);
+    const was = await written(
+      "audits/SKILL.md",
+      "---\ntype: doc\n---\n# Audits",
+      0
+    );
+    await written("audits/SKILL.md", skillText("audits", "tasks: [audit]"), 1);
     const caller: Caller = { userId: "ann", reads: [skills.id] };
+    const pinned = await readSkill(brain, caller, {
+      documentId: became.id,
+      version: 1,
+    });
 
     expect({
       note: await outcome(
@@ -626,11 +649,43 @@ describe("reading a pinned skill", () => {
       later: await outcome(
         readSkill(brain, caller, { documentId: skill.id, version: 2 })
       ),
-    }).toStrictEqual({ note: "brain.not_found", later: "brain.not_found" });
+      pinnedSince: { name: pinned.skill.name, version: pinned.skill.version },
+      notYet: await outcome(
+        readSkill(brain, caller, { documentId: was.id, version: 1 })
+      ),
+    }).toStrictEqual({
+      note: "brain.not_found",
+      later: "brain.not_found",
+      pinnedSince: { name: "payouts", version: 1 },
+      notYet: "brain.not_found",
+    });
   });
 });
 
 describe("a skill's manifest", () => {
+  it("requires a capability by the host's own name for it, case and length kept", async () => {
+    const skills = await newCollection(brain, "Skills");
+    const long = `connection:${"c".repeat(256)}:${"SEND_".repeat(12)}MAIL`;
+    await saved(
+      skills,
+      "mailing",
+      `tasks: [mail]\nrequires: [connection:MAIL_SEND, "${long}"]`
+    );
+    const select = async (capabilities: string[]) =>
+      summary(
+        await selectSkill(
+          brain,
+          { userId: "ann", reads: [skills.id], capabilities },
+          { task: { type: "mail" } }
+        )
+      ).result;
+
+    expect({
+      held: await select(["connection:MAIL_SEND", long]),
+      lowercased: await select(["connection:mail_send", long]),
+    }).toStrictEqual({ held: "mailing", lowercased: "no_match" });
+  });
+
   it("is checked as it is saved: a skill resting on itself, or an unknown status, never gets in", async () => {
     const skills = await newCollection(brain, "Skills");
 

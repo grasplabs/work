@@ -471,15 +471,31 @@ export type MemoriesRetireInput = z.input<typeof memoriesRetireInputSchema>;
 // --- skills -----------------------------------------------------------------
 
 /**
- * A word a skill's manifest and a task share (a task type, a trait, a
- * capability): lowercase letters, digits and `.`, `_`, `:` or `-`, as the
- * host names them. Matched exactly, never by similarity.
+ * A word a skill's manifest and a task share (a task type, a trait):
+ * lowercase letters, digits and `.`, `_`, `:` or `-`. Matched exactly,
+ * never by similarity.
  */
 export const skillTokenSchema = z
   .string()
   .min(1)
   .max(64)
   .regex(/^[a-z0-9][a-z0-9._:-]*$/u);
+
+/** The longest capability name a manifest may require. */
+export const skillCapabilityMax = 512;
+
+/**
+ * A capability a skill requires, by the host's own name for it, whatever
+ * its case or length (core's: `connection:MAIL_SEND`, or with a 256
+ * character object ID in it): only the host names capabilities, and they
+ * are matched exactly, so the Brain bounds them and nothing more. No
+ * whitespace or control characters, which no host name holds.
+ */
+export const skillCapabilitySchema = z
+  .string()
+  .min(1)
+  .max(skillCapabilityMax)
+  .regex(/^[^\s\p{Cc}]+$/u);
 
 /** Most traits a task names. */
 export const skillTraitsMax = 32;
@@ -613,7 +629,7 @@ export const skillManifestSchema = z.object({
   /** Traits any one of which rules it out. */
   unless: z.array(skillTokenSchema).max(32).default([]),
   /** Capabilities the caller must already hold: a skill never grants one. */
-  requires: z.array(skillTokenSchema).max(32).default([]),
+  requires: z.array(skillCapabilitySchema).max(32).default([]),
   /**
    * Skills that must be accepted and usable by the caller too: by name, in
    * the skill's own collection, or by collection and name.

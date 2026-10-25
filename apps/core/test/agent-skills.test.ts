@@ -1,10 +1,13 @@
+import { skillCapabilitySchema } from "@grasp-os/brain/contract";
 import { selectSkill } from "@grasp-os/brain/skills";
+import { connectionIdSchema } from "@grasp-os/shared/ids";
 import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { brainOf } from "../src/knowledge/ports.ts";
+import { capabilitiesOf } from "../src/knowledge/skill-capabilities.ts";
 import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -18,7 +21,9 @@ import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 // rule, packages/brain/test/skills.test.ts):
 // - an agent without the brain permission, or without read of the skills'
 //   collection, selects or reads a skill;
-// - a skill is selected whose required capability the agent doesn't hold;
+// - a skill is selected whose required capability the agent doesn't hold,
+//   or isn't for one it holds by a grant of the calling chat's alone; a
+//   capability core names can't be required at all;
 // - retiring a skill leaves it selectable, or changes what a pinned read
 //   returns; a pinned read outlives the agent's read of the collection;
 // - a selection goes unrecorded, or its record carries a skill's text.
@@ -257,5 +262,91 @@ describe("a chat's skills", setUpTime, () => {
       result: { skill: "invoices", version: 1 },
       considered: [["invoices", "selected"]],
     });
+  });
+
+  it("counts a capability the agent holds by a grant of the calling chat alone, and only in that chat", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const { id: collectionId } = await admin.api.knowledge.createCollection({
+      name: `Skills ${unique()}`,
+      access: "everyone",
+    });
+    await admin.api.knowledge.saveDocument({
+      collectionId,
+      path: "mailing/SKILL.md",
+      text: skillText(
+        "mailing",
+        "tasks: [mail]\nrequires: [connection:MAIL_SEND]"
+      ),
+      ifVersion: 0,
+    });
+    const select = calling(
+      `env.brain.skillsSelect({ task: { type: "mail" } })`
+    );
+    const { stub, agent, newChat } = await personalChatsOf(
+      person.userId,
+      select,
+      says("In the granted chat."),
+      select,
+      says("In another.")
+    );
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    await requestGranted(idp, admin, readCollection(agent, collectionId));
+    const granted = await newChat();
+    // The person granted the agent their mail in this chat alone.
+    await env.DB.prepare(
+      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, granted_by, granted_at, chat_id) VALUES (?, 'agent', ?, 'connection', ?, '[\"MAIL_SEND\"]', 'MAIL', 'active', ?, ?, ?, ?, ?)"
+    )
+      .bind(
+        crypto.randomUUID(),
+        agent.agentId,
+        crypto.randomUUID(),
+        person.userId,
+        Date.now(),
+        person.userId,
+        Date.now(),
+        granted.chat.id
+      )
+      .run();
+    await granted.ask("Send it.");
+    const other = await newChat();
+    await other.ask("Send it here.");
+
+    const last = async (chatId: string) => {
+      const results = await codeResults(stub, chatId);
+      return returned(results.at(-1)?.text);
+    };
+
+    expect({
+      granted: resultOf(await last(granted.chat.id)),
+      other: resultOf(await last(other.chat.id)),
+    }).toStrictEqual({
+      granted: { skill: "mailing", version: 1 },
+      other: { none: "no_match" },
+    });
+  });
+
+  it("lets a manifest require every capability core names, at its longest", () => {
+    const names = capabilitiesOf([
+      {
+        object: {
+          type: "connection",
+          connectionId: connectionIdSchema.parse("c".repeat(256)),
+        },
+        actions: [`A${"_".repeat(63)}`, "mail.send"],
+      },
+    ]);
+
+    expect({
+      count: names.length,
+      rejected: names.filter(
+        (name) => !skillCapabilitySchema.safeParse(name).success
+      ),
+    }).toStrictEqual({ count: 4, rejected: [] });
   });
 });
