@@ -13,6 +13,7 @@ import { BuildsFailure, draftsOf, useChatBuilds } from "../chat/builds.tsx";
 import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
 import { chatMarkdown } from "../chat/chat-markdown.ts";
 import { useFollowedChat } from "../chat/chat-watch.ts";
+import { ComposerNote } from "../chat/composer-note.tsx";
 import { Composer } from "../chat/composer.tsx";
 import { ConnectionRequests } from "../chat/connection-requests.tsx";
 import { HeldWrites } from "../chat/held-writes.tsx";
@@ -51,7 +52,19 @@ interface ChatPage {
   efforts: Record<string, ModelEfforts>;
   /** The collections' and connections' names, by ID, for provenance. */
   sourceNames: ReadonlyMap<string, SourceName>;
+  /** The organization's name, when it has one and core could say it. */
+  organizationName: string | undefined;
 }
+
+/** The organization's name; none when it has none or core couldn't say. */
+const readOrganizationName = async (
+  session: Session
+): Promise<string | undefined> => {
+  const [organization] = await Promise.allSettled([session.organization.get()]);
+  const name =
+    organization.status === "fulfilled" ? organization.value.name.trim() : "";
+  return name === "" ? undefined : name;
+};
 
 /**
  * The names of the collections and connections the person can see, by
@@ -118,12 +131,6 @@ const NewChat = ({
             </p>
           )}
           <Composer running={false} {...composer} />
-          <p className="text-muted-foreground text-center text-xs text-balance">
-            <Trans>
-              Describe what you want. The agent answers from what it can read,
-              and holds every change to an outside system until you confirm it.
-            </Trans>
-          </p>
         </div>
       </div>
     </section>
@@ -167,6 +174,7 @@ const OpenChat = ({
   models,
   efforts,
   sourceNames,
+  organizationName,
   panel,
   onPanel,
   onBuilding,
@@ -175,6 +183,7 @@ const OpenChat = ({
   models: string[];
   efforts: Record<string, ModelEfforts>;
   sourceNames: ReadonlyMap<string, SourceName>;
+  organizationName: string | undefined;
   panel: boolean;
   onPanel: (open: boolean) => void;
   onBuilding: (building: boolean) => void;
@@ -280,12 +289,7 @@ const OpenChat = ({
             <BuildsFailure read={builds} />
             <ChatSources names={sourceNames} provenance={view.provenance} />
             <Composer running={view.running} {...composer} />
-            <p className="text-muted-foreground text-center text-xs">
-              <Trans>
-                Grasp holds every change to an outside system until you confirm
-                it.
-              </Trans>
-            </p>
+            <ComposerNote organizationName={organizationName} />
           </div>
         </section>
       </ChatStudio>
@@ -334,7 +338,8 @@ const Chat = () => {
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Chat` }]} page={page} />;
   }
-  const { chats, projects, models, efforts, sourceNames } = page.data;
+  const { chats, projects, models, efforts, sourceNames, organizationName } =
+    page.data;
   // One past the list's newest opens too, as core finds it (or says why not).
   const chat =
     chats.find(({ id }) => id === open) ??
@@ -421,6 +426,7 @@ const Chat = () => {
             models={models}
             onBuilding={setBuilding}
             onPanel={setPanel}
+            organizationName={organizationName}
             panel={panel}
             sourceNames={sourceNames}
           />
@@ -475,16 +481,23 @@ export const Route = createFileRoute("/_shell/")({
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session): Promise<ChatPage> => {
-      const [chats, projects, models, efforts, sourceNames] = await Promise.all(
-        [
+      const [chats, projects, models, efforts, sourceNames, organizationName] =
+        await Promise.all([
           session.chats.list(),
           session.chats.projects(),
           session.chats.models(),
           session.chats.efforts(),
           readSourceNames(session),
-        ]
-      );
-      return { chats, projects, models, efforts, sourceNames };
+          readOrganizationName(session),
+        ]);
+      return {
+        chats,
+        projects,
+        models,
+        efforts,
+        sourceNames,
+        organizationName,
+      };
     }),
   component: Chat,
 });
