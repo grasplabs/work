@@ -6,7 +6,6 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 
-import { StaffNumbersOnly } from "../brain/aggregate.tsx";
 import { folderHolding, regionGroups } from "../brain/atlas-map.ts";
 import { atlasOf, isRegion, REGIONS } from "../brain/brain-atlas.ts";
 import type { Atlas, Region, RegionId } from "../brain/brain-atlas.ts";
@@ -182,7 +181,6 @@ const atlasAt = (
 const BrainLayout = () => {
   const { t, i18n } = useLingui();
   const loaded = Route.useLoaderData();
-  const { identity } = Route.useRouteContext();
   const { noteId, sectionId } = useParams({ strict: false });
   const search = useSearch({ strict: false });
   const brainLabel = t`Brain`;
@@ -226,7 +224,6 @@ const BrainLayout = () => {
         <BrainNav brain={brain} note={note} sectionSlug={section?.slug} />
         {/* The brain, a part or a note; and over them, the layer that carries the brain's dots into a note's page. */}
         <div className="relative flex min-w-0 flex-1 flex-col">
-          <StaffNumbersOnly staff={identity.staff} />
           <Outlet />
           <NoteReveal />
         </div>

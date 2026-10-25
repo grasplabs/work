@@ -2833,10 +2833,6 @@ msgstr "Como para Stephen"
 msgid "As for the whole company"
 msgstr "Como para toda la empresa"
 
-#: src/brain/aggregate.tsx
-msgid "As Grasp staff, you see how many people took part and the numbers they gave, never what the company’s people said."
-msgstr "Como personal de Grasp, ves cuántas personas participaron y las cifras que dieron, nunca lo que dijeron las personas de la empresa."
-
 #: src/onboarding/work-record.tsx
 msgid "As it runs today"
 msgstr "Como funciona hoy"
@@ -15553,10 +15549,6 @@ msgstr "No tienes acceso a esta organización. Pregunta a un administrador."
 #: src/routes/guest.tsx
 msgid "You finished this chat. Thank you for your time."
 msgstr "Has terminado este chat. Gracias por tu tiempo."
-
-#: src/brain/aggregate.tsx
-msgid "You see the brain’s numbers only"
-msgstr "Solo ves las cifras del cerebro"
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."

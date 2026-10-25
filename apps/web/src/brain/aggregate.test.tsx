@@ -16,14 +16,12 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { StaffNumbersOnly } from "./aggregate.tsx";
 import { StatementsByKind } from "./brain-article/statements-by-kind.tsx";
 
 // What the Brain page says of what the interviews gave it (GRA-1084): a
 // statement the onboarding gave is a team's claim five or more of its
 // people made, and reads so, never as one person's words; one an admin
-// added reads as it always did. Grasp's staff, whom core gives numbers
-// only, are told why.
+// added reads as it always did.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -76,10 +74,6 @@ const shown = async (node: ReactElement): Promise<void> => {
   });
 };
 
-/** What the page shows for `viewer`. */
-const said = (viewer: string): string =>
-  document.querySelector(`[data-viewer="${viewer}"]`)?.textContent ?? "";
-
 /** Each statement's line on the page, and what is said under it. */
 const lines = () =>
   [...document.querySelectorAll<HTMLElement>("[data-statement]")].map(
@@ -117,22 +111,5 @@ describe("what the Brain page says of the interviews", () => {
       { id: claim.id, basis: true },
       { id: added.id, basis: false },
     ]);
-  });
-
-  it("tells Grasp's staff they see the brain's numbers only, and nobody else", async () => {
-    await shown(
-      <>
-        <div data-viewer="staff">
-          <StaffNumbersOnly staff />
-        </div>
-        <div data-viewer="member">
-          <StaffNumbersOnly staff={false} />
-        </div>
-      </>
-    );
-    expect({
-      staff: said("staff").includes("numbers only"),
-      member: said("member"),
-    }).toStrictEqual({ staff: true, member: "" });
   });
 });
