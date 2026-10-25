@@ -32,6 +32,9 @@ const maxTurns = 5000;
 /** Longest turn, in characters: the Brain's limit, with room to spare. */
 const maxTurnLength = 10_000;
 
+/** Longest speaker label, in characters: the Brain's limit. */
+const maxSpeakerLength = 200;
+
 /** Turns a section of the document holds: so search finds a passage, not the whole file. */
 const turnsPerSection = 50;
 
@@ -39,7 +42,31 @@ const msPerSecond = 1000;
 const secondsPerMinute = 60;
 
 const whitespace = /\s+/gu;
-const wikiLink = /\[\[/gu;
+/**
+ * Control and format characters: invisible, and some reorder what is
+ * shown around them (U+202E, right-to-left override).
+ */
+const invisible = /[\p{Cc}\p{Cf}]/gu;
+const openBracket = /\[/gu;
+
+/** Text as one plain line: no invisible characters, single spaces. */
+const plainOf = (text: string): string =>
+  text.replaceAll(whitespace, " ").replaceAll(invisible, "").trim();
+
+/** `text` cut to at most `max` UTF-16 code units, never inside a character. */
+const clipped = (text: string, max: number): string => {
+  if (text.length <= max) {
+    return text;
+  }
+  let kept = "";
+  for (const character of text) {
+    if (kept.length + character.length > max) {
+      break;
+    }
+    kept += character;
+  }
+  return kept;
+};
 
 /** A cue's words, without markup: ruby annotations (`<rt>`) left out. */
 const wordsOf = (nodes: readonly WebVTTNode[]): string =>
@@ -60,7 +87,7 @@ const voiceOf = (nodes: readonly WebVTTNode[]): string => {
   for (const node of nodes) {
     if (node.type === "object") {
       if (node.name === "v") {
-        return (node.value ?? "").replaceAll(whitespace, " ").trim();
+        return clipped(plainOf(node.value ?? ""), maxSpeakerLength);
       }
       const inner = voiceOf(node.children);
       if (inner !== "") {
@@ -78,23 +105,28 @@ const placeOf = (ms: number): string => {
   return `${minutes}:${String(seconds % secondsPerMinute).padStart(2, "0")}`;
 };
 
-/** A cue's turn: its voice, its words on one line, and its times. */
-const turnOf = (cue: WebVTTCue): VttTurn => ({
-  speaker: voiceOf(cue.tree.children),
-  text: wordsOf(cue.tree.children).replaceAll(whitespace, " ").trim(),
-  startMs: Math.round(cue.startTime * msPerSecond),
-  endMs: Math.round(cue.endTime * msPerSecond),
-});
+/**
+ * A cue's turn: its voice, its words on one line, and its times, an end
+ * before its start (which the parser lets through) taken as the start.
+ */
+const turnOf = (cue: WebVTTCue): VttTurn => {
+  const startMs = Math.round(cue.startTime * msPerSecond);
+  return {
+    speaker: voiceOf(cue.tree.children),
+    text: plainOf(wordsOf(cue.tree.children)),
+    startMs,
+    endMs: Math.max(startMs, Math.round(cue.endTime * msPerSecond)),
+  };
+};
 
 /**
- * One line of the document per turn: who, when and what. No line starts
- * a heading, and `[[` names no document.
+ * One line of the document per turn: when, who and what. Every line
+ * starts with its time, so none is a heading or a list, and every `[` is
+ * escaped, so no text makes a `[[link]]`.
  */
 const lineOf = ({ speaker, text, startMs }: VttTurn): string => {
-  const said = `(${placeOf(startMs)}) ${text}`.replaceAll(wikiLink, "[\\[");
-  return speaker === ""
-    ? said
-    : `${speaker.replaceAll(wikiLink, "[\\[")} ${said}`;
+  const said = speaker === "" ? text : `${speaker}: ${text}`;
+  return `(${placeOf(startMs)}) ${said.replaceAll(openBracket, "\\[")}`;
 };
 
 /** A WebVTT file's transcript and Markdown. Throws for a file that isn't one. */
@@ -126,10 +158,7 @@ export const vttExtraction = (bytes: Uint8Array): VttExtraction => {
       last.text = `${last.text} ${turn.text}`;
       last.endMs = Math.max(last.endMs, turn.endMs);
     } else {
-      turns.push({
-        ...turn,
-        text: turn.text.slice(0, maxTurnLength),
-      });
+      turns.push({ ...turn, text: clipped(turn.text, maxTurnLength) });
     }
     if (turns.length > maxTurns) {
       throw new TooLargeError();

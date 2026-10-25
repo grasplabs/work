@@ -1,10 +1,11 @@
-import type { Source } from "@grasp-os/shared/brain";
+import type { Source, Transcript } from "@grasp-os/shared/brain";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import type { Upload } from "@grasp-os/shared/uploads";
+import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { allEvents } from "./audit-events.ts";
+import { eventsAfter, logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import {
@@ -16,12 +17,13 @@ import {
   unique,
 } from "./sign-in.ts";
 
-// Transcripts on the brain's sources (`Source.transcript`, served by
-// `brain.read`), from the producer people use: a WebVTT file uploaded into
-// Knowledge, its text extracted in the sandbox, its turns saved with its
-// document (src/brain-transcripts.ts, packages/brain transcripts.ts). A
-// team's interviews' transcript is tried in brain-intake.test.ts, and the
-// kickoff's absence in brain.test.ts. The ways it can leak, tried here:
+// Transcripts on the brain's sources, from the producer people use: a
+// WebVTT file uploaded into Knowledge, its text extracted in the sandbox,
+// its turns saved with its document (src/brain-transcripts.ts,
+// packages/brain transcripts.ts). `brain.read` lists such a source by how
+// many turns it has; `brain.transcript` opens one. A team's interviews'
+// transcript is tried in brain-intake.test.ts, and the kickoff's absence
+// in brain.test.ts. The ways it can leak, tried here:
 //
 // - To someone who may not read the document: another person, an admin
 //   (who reads the collections for admins, never a person's own), or
@@ -29,8 +31,10 @@ import {
 // - Past an edit that replaced the text.
 // - Past a purge: a name left in a speaker or a turn, or found by search;
 //   anything of a Personal collection after a personal purge.
-// - Into the audit log: a speaker or a word.
-// - From a file that isn't WebVTT, or markup in a caption.
+// - Into the audit log: a speaker or a word, in any event of the upload.
+// - From a file that isn't WebVTT; from captions built to slip past the
+//   Brain's limits, hide text (direction overrides) or make links and
+//   headings in the document's text.
 
 const idp = mockIdp();
 
@@ -89,17 +93,28 @@ const uploaded = async (
   return await ended(person.api, upload.id);
 };
 
-/** The brain's source for a Knowledge document, as `api` reads the brain. */
-const sourceOf = async (
+/** A Knowledge document's source id, as the brain names it. */
+const sourceIdOf = (documentId: string | null): string =>
+  `src.knowledge-${documentId}`;
+
+/** The brain's listed source for a Knowledge document, as `api` reads the brain. */
+const listedOf = async (
   api: SessionApi,
   documentId: string | null
 ): Promise<Source | undefined> => {
   const { sources } = await api.brain.read();
-  return sources.find(({ id }) => id === `src.knowledge-${documentId}`);
+  return sources.find(({ id }) => id === sourceIdOf(documentId));
 };
 
+/** A Knowledge document's transcript, as `api` opens its source. */
+const openedOf = async (
+  api: SessionApi,
+  documentId: string | null
+): Promise<Transcript | null> =>
+  await api.brain.transcript(sourceIdOf(documentId));
+
 describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
-  it("shows a WebVTT upload's turns, by voice and minute, to whoever may read its document and nobody else", async () => {
+  it("lists a WebVTT upload by its turn count alone and opens its turns, by voice and minute, for whoever may read its document and nobody else", async () => {
     const owner = await personWithCollection();
     const other = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
@@ -114,44 +129,52 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       status: upload.status,
       mediaType: upload.mediaType,
       text: document?.version.text.includes(
-        `${name} Visser (0:01) Welcome all, let's start with the budget. It is due on Friday.`
+        `(0:01) ${name} Visser: Welcome all, let's start with the budget. It is due on Friday.`
       ),
-      source: await sourceOf(owner.api, upload.documentId),
-      other: await sourceOf(other.api, upload.documentId),
-      admin: await sourceOf(admin.api, upload.documentId),
+      listed: await listedOf(owner.api, upload.documentId),
+      opened: await openedOf(owner.api, upload.documentId),
+      other: {
+        listed: await listedOf(other.api, upload.documentId),
+        opened: await openedOf(other.api, upload.documentId),
+      },
+      admin: {
+        listed: await listedOf(admin.api, upload.documentId),
+        opened: await openedOf(admin.api, upload.documentId),
+      },
     }).toStrictEqual({
       status: "ready",
       mediaType: "text/vtt",
       text: true,
-      source: {
-        id: `src.knowledge-${upload.documentId}`,
+      listed: {
+        id: sourceIdOf(upload.documentId),
         kind: "document",
         title: "Budget call",
         date: new Date().toISOString().slice(0, 10),
-        transcript: {
-          unit: "minute",
-          turns: [
-            {
-              at: "0:01",
-              speaker: `${name} Visser`,
-              text: "Welcome all, let's start with the budget. It is due on Friday.",
-            },
-            {
-              at: "0:07",
-              speaker: "Grasp",
-              text: "What takes the longest each month?",
-            },
-            {
-              at: "62:03",
-              speaker: `${name} Visser`,
-              text: "Copying invoices & receipts by hand.",
-            },
-          ],
-          chapters: [],
-        },
+        transcriptTurns: 3,
       },
-      other: undefined,
-      admin: undefined,
+      opened: {
+        unit: "minute",
+        turns: [
+          {
+            at: "0:01",
+            speaker: `${name} Visser`,
+            text: "Welcome all, let's start with the budget. It is due on Friday.",
+          },
+          {
+            at: "0:07",
+            speaker: "Grasp",
+            text: "What takes the longest each month?",
+          },
+          {
+            at: "62:03",
+            speaker: `${name} Visser`,
+            text: "Copying invoices & receipts by hand.",
+          },
+        ],
+        chapters: [],
+      },
+      other: { listed: undefined, opened: null },
+      admin: { listed: undefined, opened: null },
     });
   });
 
@@ -169,7 +192,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       "Finance call.vtt",
       meetingVtt(`Fay${unique()}`)
     );
-    const before = await sourceOf(reader.api, upload.documentId);
+    const before = await openedOf(reader.api, upload.documentId);
     // They leave the team, on the session they read it in.
     await callAuth("/organization/remove-team-member", owner.session, {
       teamId,
@@ -179,29 +202,95 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     // once its reading of the session is due (`sessionRecheckMs`, as for
     // every call): the transcript itself is never kept.
     const { core: fresh } = await openRpc(reader.session);
-    const afterFresh = await sourceOf(fresh.authenticate(), upload.documentId);
+    const freshApi = fresh.authenticate();
+    const afterFresh = {
+      listed: await listedOf(freshApi, upload.documentId),
+      opened: await openedOf(freshApi, upload.documentId),
+    };
     const afterHeld = await (async () => {
       using _clock = letSessionRecheckPass();
-      return await sourceOf(reader.api, upload.documentId);
+      return await openedOf(reader.api, upload.documentId);
     })();
-
-    const ownerStill = await sourceOf(owner.api, upload.documentId);
+    const ownerStill = await openedOf(owner.api, upload.documentId);
 
     expect({
-      before: {
-        turns: before?.transcript?.turns.length,
-        chapters: before?.transcript?.chapters,
-      },
+      before: { turns: before?.turns.length, chapters: before?.chapters },
       afterFresh,
       afterHeld,
-      owner: ownerStill?.id,
+      owner: ownerStill?.turns.length,
     }).toStrictEqual({
       // Captions have no chapters (a WebVTT chapters track is a file of
       // its own): the field is there, empty.
       before: { turns: 3, chapters: [] },
-      afterFresh: undefined,
-      afterHeld: undefined,
-      owner: `src.knowledge-${upload.documentId}`,
+      afterFresh: { listed: undefined, opened: null },
+      afterHeld: null,
+      owner: 3,
+    });
+  });
+
+  it("opens nothing for a source id that isn't one, and refuses one that isn't an id", async () => {
+    const owner = await personWithCollection();
+    expect({
+      notADocument: await owner.api.brain.transcript("src.knowledge-nope"),
+      unknown: await owner.api.brain.transcript("src-kickoff"),
+      tooLong: await outcome(owner.api.brain.transcript("x".repeat(201))),
+    }).toStrictEqual({
+      notADocument: null,
+      unknown: null,
+      tooLong: "brain.invalid",
+    });
+  });
+
+  it("takes captions built to slip past the limits or hide text, and renders them as plain lines without a link or heading", async () => {
+    const owner = await personWithCollection();
+    const longVoice = "L".repeat(300);
+    const upload = await uploaded(
+      owner,
+      "Crafted.vtt",
+      `WEBVTT
+
+00:00:01.000 --> 00:00:03.000
+<v ${longVoice}>A voice past the limit.
+
+00:00:05.000 --> 00:00:04.000
+<v Ann\u202EelA>Ends &#8203;before &#8238;it starts.
+
+00:00:06.000 --> 00:00:07.000
+<v # Injected>hi [[[Secret]]] and [[Plan]]
+`
+    );
+    const opened = await openedOf(owner.api, upload.documentId);
+    const document =
+      upload.documentId === null
+        ? null
+        : await owner.api.knowledge.getDocument(upload.documentId);
+    const body = (document?.version.text ?? "").split("\n---\n").at(-1) ?? "";
+    const links = await env.KNOWLEDGE.prepare(
+      "SELECT count(*) AS n FROM links WHERE from_document_id = ?"
+    )
+      .bind(upload.documentId)
+      .first<{ n: number }>();
+
+    expect({
+      status: upload.status,
+      speakers: opened?.turns.map(({ speaker }) => speaker),
+      texts: opened?.turns.map(({ text }) => text),
+      at: opened?.turns.map(({ at }) => at),
+      headings: body
+        .split("\n")
+        .filter((line) => line.startsWith("#") && !/^## \d+:\d\d$/u.test(line)),
+      links: links?.n,
+    }).toStrictEqual({
+      status: "ready",
+      speakers: ["L".repeat(200), "AnnelA", "# Injected"],
+      texts: [
+        "A voice past the limit.",
+        "Ends before it starts.",
+        "hi [[[Secret]]] and [[Plan]]",
+      ],
+      at: ["0:01", "0:05", "0:06"],
+      headings: [],
+      links: 0,
     });
   });
 
@@ -233,7 +322,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       "Standup.vtt",
       meetingVtt(`Bo${unique()}`)
     );
-    const before = await sourceOf(owner.api, upload.documentId);
+    const before = await listedOf(owner.api, upload.documentId);
     await owner.api.knowledge.saveDocument({
       collectionId: owner.collectionId,
       path: "Standup.vtt",
@@ -242,9 +331,10 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     });
 
     expect({
-      before: before?.transcript?.turns.length,
-      after: await sourceOf(owner.api, upload.documentId),
-    }).toStrictEqual({ before: 3, after: undefined });
+      before: before?.transcriptTurns,
+      listed: await listedOf(owner.api, upload.documentId),
+      opened: await openedOf(owner.api, upload.documentId),
+    }).toStrictEqual({ before: 3, listed: undefined, opened: null });
   });
 
   it("loses a purged name from every speaker and turn, and search no longer finds it", async () => {
@@ -252,7 +342,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     const reader = await signedInApi(idp, "user");
     const name = `Cora${unique()}`;
     const upload = await uploaded(admin, "Board call.vtt", meetingVtt(name));
-    const before = await sourceOf(reader.api, upload.documentId);
+    const before = await openedOf(reader.api, upload.documentId);
     const input: PurgeInput = {
       type: "content",
       documentIds: [upload.documentId ?? ""],
@@ -261,13 +351,13 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     };
     const plan = await admin.api.knowledge.preparePurge(input);
     const result = await admin.api.knowledge.purge(input, plan.token);
-    const after = await sourceOf(reader.api, upload.documentId);
+    const after = await openedOf(reader.api, upload.documentId);
     const { hits } = await reader.api.knowledge.search(name);
 
     expect({
-      before: before?.transcript?.turns.map(({ speaker }) => speaker),
+      before: before?.turns.map(({ speaker }) => speaker),
       stillFound: result.stillFound,
-      speakers: after?.transcript?.turns.map(({ speaker }) => speaker),
+      speakers: after?.turns.map(({ speaker }) => speaker),
       holds: JSON.stringify(after).includes(name),
       found: hits.length,
     }).toStrictEqual({
@@ -288,7 +378,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       "One to one.vtt",
       meetingVtt(`Dirk${unique()}`)
     );
-    const before = await sourceOf(leaver.api, upload.documentId);
+    const before = await openedOf(leaver.api, upload.documentId);
     const input: PurgeInput = {
       type: "personal",
       userId: leaver.userId,
@@ -298,39 +388,47 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     await admin.api.knowledge.purge(input, plan.token);
 
     expect({
-      before: before?.transcript?.turns.length,
-      after: await sourceOf(leaver.api, upload.documentId),
-    }).toStrictEqual({ before: 3, after: undefined });
+      before: before?.turns.length,
+      listed: await listedOf(leaver.api, upload.documentId),
+      opened: await openedOf(leaver.api, upload.documentId),
+    }).toStrictEqual({ before: 3, listed: undefined, opened: null });
   });
 
-  it("is recorded in the audit log by counts and identifiers alone: no speaker, no word", async () => {
+  it("is recorded in the audit log by counts and identifiers alone: no event of the upload, listing or opening holds a speaker or a word", async () => {
     const owner = await personWithCollection();
     const name = `Eva${unique()}`;
+    const head = await logHead();
     const upload = await uploaded(owner, "Retro.vtt", meetingVtt(name));
-    await sourceOf(owner.api, upload.documentId);
-    const logged = await allEvents();
-    const events = logged.filter((event) =>
-      JSON.stringify(event).includes(upload.documentId ?? upload.id)
-    );
+    await listedOf(owner.api, upload.documentId);
+    await openedOf(owner.api, upload.documentId);
+    const events = await eventsAfter(head);
     const recorded = JSON.stringify(events);
+    const ofDocument = events.filter((event) =>
+      JSON.stringify(event).includes(upload.documentId ?? "")
+    );
 
     expect({
-      saved: events
+      upload: events
+        .filter(({ target }) => target?.id === upload.id)
+        .map(({ action }) => action)
+        .toSorted(),
+      saved: ofDocument
         .filter(({ action }) => action === "knowledge.document.saved")
         .map(({ detail }) => ({
           turns: detail?.transcriptTurns,
           chapters: detail?.transcriptChapters,
         })),
-      read: events.some(
-        ({ action, detail }) =>
-          action === "knowledge.read" && detail?.read === "transcripts"
-      ),
-      holds: [name, "budget", "invoices"].filter((words) =>
+      reads: ofDocument
+        .filter(({ action }) => action === "knowledge.read")
+        .map(({ detail }) => String(detail?.read))
+        .toSorted(),
+      holds: [name, "Visser", "budget", "invoices", "Friday"].filter((words) =>
         recorded.includes(words)
       ),
     }).toStrictEqual({
+      upload: ["knowledge.upload.extracted", "knowledge.upload.received"],
       saved: [{ turns: 3, chapters: 0 }],
-      read: true,
+      reads: ["transcript", "transcripts"],
       holds: [],
     });
   });

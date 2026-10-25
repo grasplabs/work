@@ -8,7 +8,11 @@ import type { Writer } from "../src/documents.ts";
 import { knowledgeErrors } from "../src/knowledge.ts";
 import { preparePurge, purge } from "../src/purge.ts";
 import { search } from "../src/search.ts";
-import { readTranscripts, transcriptMaxTurns } from "../src/transcripts.ts";
+import {
+  listTranscripts,
+  readTranscript,
+  transcriptMaxTurns,
+} from "../src/transcripts.ts";
 import type { Transcript } from "../src/transcripts.ts";
 import type { Caller } from "./host.ts";
 import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
@@ -90,15 +94,17 @@ const readOf = async (
   caller: Caller,
   documentId: string
 ) => {
-  const { transcripts } = await readTranscripts(brain, caller);
-  const found = transcripts.find((one) => one.documentId === documentId);
+  const found = await readTranscript(brain, caller, documentId);
   return found === undefined
     ? null
-    : JSON.stringify([found.transcript.turns, found.transcript.chapters]);
+    : JSON.stringify([
+        found.read.transcript.turns,
+        found.read.transcript.chapters,
+      ]);
 };
 
 describe("a document's transcript", () => {
-  it("reaches only a reader the host's authorize gives its document, by collection and by path, and each read is recorded", async () => {
+  it("reaches only a reader the host's authorize gives its document, by collection and by path, listed by counts alone, and each read is recorded", async () => {
     const { brain, reads } = testHost();
     const open = await newCollection(brain, "Open");
     const closed = await newCollection(brain, "Closed");
@@ -122,7 +128,7 @@ describe("a document's transcript", () => {
       only: { [byPath.id]: ["mine.md"] },
     };
 
-    const { transcripts } = await readTranscripts(brain, reader);
+    const { transcripts } = await listTranscripts(brain, reader);
     const saved: ReadonlySet<string> = new Set([
       shared.id,
       hidden.id,
@@ -130,25 +136,46 @@ describe("a document's transcript", () => {
       notAllowed.id,
     ]);
     const ours = transcripts.filter(({ documentId }) => saved.has(documentId));
+    const opened: Record<string, boolean> = {};
+    for (const document of [shared, hidden, allowed, notAllowed]) {
+      // oxlint-disable-next-line no-await-in-loop -- one read after another
+      const found = await readTranscript(brain, reader, document.id);
+      opened[document.path] = found !== undefined;
+    }
     const read = reads.filter(({ caller }) => caller === "reader");
 
     expect({
-      read: ours.map(({ path }) => path).toSorted(),
+      listed: ours
+        .map(({ path, turns, chapters }) => ({ path, turns, chapters }))
+        .toSorted((one, other) => (one.path < other.path ? -1 : 1)),
+      opened,
       recorded: read.map(({ record }) => ({
         action: record.action,
         read: record.detail.read,
-        ours: (record.documentIds ?? [])
+        ours: [...(record.documentIds ?? []), record.target?.id ?? ""]
           .filter((id) => saved.has(id))
           .toSorted(),
       })),
     }).toStrictEqual({
-      read: ["mine.md", "sync.md"],
+      // Counts, never turns: a listing loads none.
+      listed: [
+        { path: "mine.md", turns: 3, chapters: 2 },
+        { path: "sync.md", turns: 3, chapters: 2 },
+      ],
+      opened: {
+        "sync.md": true,
+        "board.md": false,
+        "mine.md": true,
+        "theirs.md": false,
+      },
       recorded: [
         {
           action: "knowledge.read",
           read: "transcripts",
           ours: [allowed.id, shared.id].toSorted(),
         },
+        { action: "knowledge.read", read: "transcript", ours: [shared.id] },
+        { action: "knowledge.read", read: "transcript", ours: [allowed.id] },
       ],
     });
   });
@@ -161,18 +188,16 @@ describe("a document's transcript", () => {
       transcript: meeting(name, "the plan"),
     });
     const shown = async (reads: string[]) => {
-      const { transcripts } = await readTranscripts(brain, {
-        userId: "reader",
-        reads,
-      });
-      const found = transcripts.find(
-        ({ documentId }) => documentId === call.id
+      const found = await readTranscript(
+        brain,
+        { userId: "reader", reads },
+        call.id
       );
       return found === undefined
         ? null
         : {
-            turns: found.transcript.turns.length,
-            chapters: found.transcript.chapters.map(({ title }) => title),
+            turns: found.read.transcript.turns.length,
+            chapters: found.read.transcript.chapters.map(({ title }) => title),
           };
     };
     const before = await shown([team.id]);
@@ -319,8 +344,8 @@ describe("a document's transcript", () => {
     };
     const plan = await preparePurge(brain, admin, input, noCopies);
     const result = await purge(brain, admin, input, plan.token, noCopies);
-    const { transcripts } = await readTranscripts(brain, caller);
-    const read = transcripts.find(({ documentId }) => documentId === call.id);
+    const found = await readTranscript(brain, caller, call.id);
+    const read = found?.read;
     const { hits } = await search(brain, caller, name);
 
     expect({
@@ -367,8 +392,8 @@ describe("a document's transcript", () => {
     };
     const plan = await preparePurge(brain, admin, input, noCopies);
     const result = await purge(brain, admin, input, plan.token, noCopies);
-    const { transcripts } = await readTranscripts(brain, caller);
-    const read = transcripts.find(({ documentId }) => documentId === call.id);
+    const found = await readTranscript(brain, caller, call.id);
+    const read = found?.read;
     const purged = events.find(({ action }) => action === "knowledge.purged");
 
     expect({
@@ -404,7 +429,8 @@ describe("a document's transcript", () => {
     const call = await save(brain, notes, "call.md", "# Call", {
       transcript: meeting(name, said),
     });
-    await readTranscripts(brain, caller);
+    await listTranscripts(brain, caller);
+    await readTranscript(brain, caller, call.id);
     await save(brain, notes, "call.md", "# Call\nEdited.", { ifVersion: 1 });
     const saved = events.find(
       ({ action, target, detail }) =>

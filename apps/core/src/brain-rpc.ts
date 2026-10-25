@@ -11,10 +11,10 @@ import type {
   Team,
   TeamCount,
   Tool,
+  Transcript,
   Vision,
   Workspace,
 } from "@grasp-os/shared/brain";
-import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
 import type {
   BrainRecordInput,
   BrainRecordsAdded,
@@ -46,7 +46,9 @@ import {
 } from "./brain-records.ts";
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
 import {
-  interviewTranscript,
+  brainTranscript,
+  interviewTurns,
+  isTeamInterviews,
   knowledgeTranscriptSources,
 } from "./brain-transcripts.ts";
 import { catalogEntries, personOf } from "./connections.ts";
@@ -74,9 +76,9 @@ import type { SessionCheck } from "./session-check.ts";
 // |                    | interview and the documents shared in the onboarding     |
 // |                    | (admins); each team's interviews, once the brain holds   |
 // |                    | what they learned, for whoever reads records naming them |
-// |                    | (its transcript: their admitted statements); Knowledge   |
-// |                    | documents saved with a transcript, for whoever may read  |
-// |                    | them (brain-transcripts.ts)                              |
+// |                    | (with how many admitted statements its transcript has);  |
+// |                    | Knowledge documents saved with a transcript, for whoever |
+// |                    | may read them, by turn count (brain-transcripts.ts)      |
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
@@ -457,10 +459,6 @@ const onboardingSources = (
   ];
 };
 
-/** Whether `id` is a team's interviews, as the onboarding gives them the brain. */
-const isTeamInterviews = (id: string): boolean =>
-  id.startsWith(`${onboardingIdPrefix}src-`);
-
 /**
  * The onboarding's sources `named` (the kickoff, the staff list, a team's
  * interviews), for a
@@ -804,20 +802,14 @@ export const readBrain = async (
     facts === null
       ? await sourcesForRecords(env, named)
       : onboardingSources(facts).map(({ source }) => source);
-  // A team's interviews carry their admitted statements as turns
-  // (brain-transcripts.ts), never what was said.
-  const teamNames = new Map(teams.map(({ id, name: team }) => [id, team]));
+  // A team's interviews have their admitted statements as turns
+  // (brain-transcripts.ts), never what was said: counted here, read by
+  // `brain.transcript` when the source is opened.
   const sources = fromOnboarding.map((source): Source => {
-    if (!isTeamInterviews(source.id)) {
-      return source;
-    }
-    const [teamId = ""] = source.teamIds ?? [];
-    const transcript = interviewTranscript(
-      source,
-      records.statements,
-      teamNames.get(teamId) ?? ""
-    );
-    return transcript === undefined ? source : { ...source, transcript };
+    const turns = isTeamInterviews(source.id)
+      ? interviewTurns(source, records.statements)
+      : 0;
+    return turns === 0 ? source : { ...source, transcriptTurns: turns };
   });
 
   return {
@@ -841,10 +833,12 @@ export const readBrain = async (
 };
 
 /**
- * The company brain over `/rpc`: for anyone signed in. Its workspace isn't
- * audited itself: it reads nothing from Knowledge. Its changes are, as the
- * Knowledge read they are (brain-changes.ts). Adding records is, with the
- * records it added.
+ * The company brain over `/rpc`: for anyone signed in. Of its workspace,
+ * only the Knowledge documents it lists as transcript sources are audited,
+ * as the Knowledge read that listing is; the rest reads nothing from
+ * Knowledge. Opening a source's transcript is audited as that one read
+ * (brain-transcripts.ts). Its changes are, as the Knowledge read they are
+ * (brain-changes.ts). Adding records is, with the records it added.
  */
 export class BrainRpc extends CoreRpcTarget implements BrainApi {
   readonly #env: Env;
@@ -860,6 +854,13 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await readBrain(this.#env, person)
+    );
+  }
+
+  async transcript(sourceId: unknown): Promise<Transcript | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await brainTranscript(this.#env, person, sourceId)
     );
   }
 

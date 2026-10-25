@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -275,38 +275,53 @@ export const replaceTranscript = (
       )
     );
 
-/** A transcript as a reader gets it: its document, and when it was saved. */
-export interface ReadTranscript {
+/** A document with a transcript, as a listing gives it: never its turns. */
+export interface TranscriptSummary {
   documentId: string;
   collectionId: string;
   path: string;
   title: string;
   version: number;
   savedAt: Date;
+  /** How many turns and chapters it has. */
+  turns: number;
+  chapters: number;
+}
+
+/** A transcript as a reader gets it: its document, and its turns and chapters. */
+export interface ReadTranscript extends Omit<
+  TranscriptSummary,
+  "turns" | "chapters"
+> {
   transcript: Transcript;
 }
 
-/** Most transcripts one read returns. */
-export const transcriptsMaxRead = 50;
+/** Most documents one listing names. */
+export const transcriptsMaxListed = 50;
 
-const readOptionsSchema = z
+const listOptionsSchema = z
   .strictObject({
-    limit: z.int().min(1).max(transcriptsMaxRead).default(transcriptsMaxRead),
+    limit: z
+      .int()
+      .min(1)
+      .max(transcriptsMaxListed)
+      .default(transcriptsMaxListed),
   })
-  .default({ limit: transcriptsMaxRead });
+  .default({ limit: transcriptsMaxListed });
 
 /**
- * The transcripts `reader` may read now, newest saved first, at most
- * `limit`: of the documents they may read (the host's `authorize`, inside
- * the query), each the transcript of its current version. Recorded
- * through `onRead` with the documents read, when there is any.
+ * The documents `reader` may read now (the host's `authorize`, inside the
+ * query) whose current version has a transcript, newest saved first, at
+ * most `limit`: each with how many turns and chapters it has, counted in
+ * the query, so no turn is loaded. Recorded through `onRead` with the
+ * documents named, when there is any.
  */
-export const readTranscripts = async <C>(
+export const listTranscripts = async <C>(
   brain: Brain<C>,
   reader: C,
   options?: { limit?: number }
-): Promise<{ transcripts: ReadTranscript[]; provenance?: Provenance }> => {
-  const { limit } = readOptionsSchema.parse(options);
+): Promise<{ transcripts: TranscriptSummary[]; provenance?: Provenance }> => {
+  const { limit } = listOptionsSchema.parse(options);
   const { db } = brain;
   const allowed = await allowedFor(brain.ports, reader);
   const rows = await db
@@ -316,8 +331,8 @@ export const readTranscripts = async <C>(
       title: documents.title,
       version: transcripts.version,
       savedAt: transcripts.createdAt,
-      turns: transcripts.turns,
-      chapters: transcripts.chapters,
+      turns: sql<number>`json_array_length(${transcripts.turns})`,
+      chapters: sql<number>`json_array_length(${transcripts.chapters})`,
       collection: {
         id: collections.id,
         sensitive: collections.sensitive,
@@ -351,7 +366,66 @@ export const readTranscripts = async <C>(
     ...sources.values()
   );
   return {
-    transcripts: rows.map((row) => ({
+    transcripts: rows.map(({ collection, ...row }) => ({
+      ...row,
+      collectionId: collection.id,
+    })),
+    provenance,
+  };
+};
+
+/**
+ * The transcript of `documentId`'s current version, if `reader` may read
+ * the document now (the host's `authorize`, inside the query) and it has
+ * one: undefined alike when it has none and when they may not read it.
+ * Recorded through `onRead` when read.
+ */
+export const readTranscript = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  documentId: string
+): Promise<{ read: ReadTranscript; provenance: Provenance } | undefined> => {
+  const { db } = brain;
+  const allowed = await allowedFor(brain.ports, reader);
+  const row = await db
+    .select({
+      documentId: documents.id,
+      path: documents.path,
+      title: documents.title,
+      version: transcripts.version,
+      savedAt: transcripts.createdAt,
+      turns: transcripts.turns,
+      chapters: transcripts.chapters,
+      collection: {
+        id: collections.id,
+        sensitive: collections.sensitive,
+      },
+    })
+    .from(transcripts)
+    .innerJoin(
+      documents,
+      and(
+        eq(documents.id, transcripts.documentId),
+        eq(documents.currentVersion, transcripts.version)
+      )
+    )
+    .innerJoin(collections, eq(collections.id, documents.collectionId))
+    .where(and(eq(transcripts.documentId, documentId), allowed.documents()))
+    .get();
+  if (row === undefined) {
+    return undefined;
+  }
+  const provenance = await brain.ports.onRead(
+    reader,
+    {
+      action: "knowledge.read",
+      target: { type: "document", id: row.documentId },
+      detail: { read: "transcript", version: row.version },
+    },
+    row.collection
+  );
+  return {
+    read: {
       documentId: row.documentId,
       collectionId: row.collection.id,
       path: row.path,
@@ -359,7 +433,7 @@ export const readTranscripts = async <C>(
       version: row.version,
       savedAt: row.savedAt,
       transcript: fromRow(row),
-    })),
+    },
     provenance,
   };
 };

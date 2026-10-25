@@ -5,6 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { eventsAfter, logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { answering } from "./interview-link.ts";
 import {
@@ -393,12 +394,17 @@ describe(
         const source = brain.sources.find(
           ({ teamIds }) => teamIds?.includes(teamId) === true
         );
-        const shown = JSON.stringify(source?.transcript);
+        const transcript =
+          source === undefined ? null : await api.brain.transcript(source.id);
+        const shown = JSON.stringify([source, transcript]);
         return {
-          transcript: source?.transcript,
+          // The listing says how many turns; opening the source reads them.
+          listed: source?.transcriptTurns,
+          inListing: source?.transcript,
+          transcript,
           sameAsStatements:
             JSON.stringify(
-              source?.transcript?.turns.map(({ text }) => text).toSorted()
+              transcript?.turns.map(({ text }) => text).toSorted()
             ) ===
             JSON.stringify(
               brain.statements
@@ -412,6 +418,8 @@ describe(
         };
       };
       const admitted = {
+        listed: 4,
+        inListing: undefined,
         transcript: {
           unit: "passage",
           turns: [
@@ -437,16 +445,44 @@ describe(
         sameAsStatements: true,
         unsaid: [],
       };
-      expect({
+      const head = await logHead();
+      const shown = {
         staff: await shownTo(staff),
         admin: await shownTo(admin.api),
         member: await shownTo(member.api),
-        nobody: await outcome(nobodyCore.authenticate().brain.read()),
+      };
+      const events = await eventsAfter(head);
+      const opened = events.filter(
+        ({ action }) => action === "brain.transcript.read"
+      );
+      expect({
+        ...shown,
+        // Each opening recorded, by source and count, never a word.
+        opened: opened.map(({ target, detail }) => ({
+          type: target?.type,
+          turns: detail?.turns,
+        })),
+        nobody: {
+          read: await outcome(nobodyCore.authenticate().brain.read()),
+          opened: await outcome(
+            nobodyCore
+              .authenticate()
+              .brain.transcript(`onb-src-${"0".repeat(32)}`)
+          ),
+        },
       }).toStrictEqual({
         staff: admitted,
         admin: admitted,
         member: admitted,
-        nobody: "auth.unauthenticated",
+        opened: [
+          { type: "source", turns: 4 },
+          { type: "source", turns: 4 },
+          { type: "source", turns: 4 },
+        ],
+        nobody: {
+          read: "auth.unauthenticated",
+          opened: "auth.unauthenticated",
+        },
       });
     });
 
