@@ -41,7 +41,7 @@ const summary = (revision: number, state: "candidate" | "retired") => ({
   updatedAt: at,
 });
 
-const shown = async () => {
+const shown = async (admin: boolean) => {
   const calls: string[] = [];
   let retired = false;
   const knowledge = {
@@ -102,7 +102,7 @@ const shown = async () => {
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <LessonsView />,
+    component: () => <LessonsView admin={admin} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -156,7 +156,7 @@ describe(LessonsView, () => {
   });
 
   it("shows a lesson's versions as far as its reader was part of them, and retires it at the revision read", async () => {
-    const { calls } = await shown();
+    const { calls } = await shown(true);
     await settle();
     await press("chat.turn failed");
     const text = document.body.textContent;
@@ -180,5 +180,16 @@ describe(LessonsView, () => {
       ],
       retireStillOffered: false,
     });
+  });
+
+  it("doesn't offer a shared chat's lesson's retirement to someone who isn't an admin", async () => {
+    await shown(false);
+    await settle();
+    await press("chat.turn failed");
+    const buttons = [...document.querySelectorAll("button")].map(
+      (each) => each.textContent
+    );
+
+    expect(buttons).not.toContain("Retire this lesson");
   });
 });

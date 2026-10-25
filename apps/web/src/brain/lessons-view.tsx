@@ -76,9 +76,11 @@ const LessonBadges = ({ lesson }: { lesson: Summary }) => {
 /** One lesson's versions and what it rests on, and its retirement. */
 const LessonPanel = ({
   lessonId,
+  admin,
   onChanged,
 }: {
   lessonId: string;
+  admin: boolean;
   onChanged: () => void;
 }) => {
   const core = useCore();
@@ -160,7 +162,9 @@ const LessonPanel = ({
           </li>
         ))}
       </ol>
-      {lesson.state === "candidate" ? (
+      {/* A person's own lesson is theirs to retire; a shared chat's, an
+          admin's among the people who may see it (core decides). */}
+      {lesson.state === "candidate" && (lesson.scope === "person" || admin) ? (
         <div className="flex flex-col gap-2">
           <div>
             <Button
@@ -255,7 +259,7 @@ const LessonList = ({
 };
 
 /** The lessons the person may see, and the one in hand. */
-export const LessonsView = () => {
+export const LessonsView = ({ admin }: { admin: boolean }) => {
   const [picked, setPicked] = useState<string>();
   const [changes, setChanges] = useState(0);
   return (
@@ -264,6 +268,7 @@ export const LessonsView = () => {
       {picked === undefined ? null : (
         <LessonPanel
           key={`${picked}:${changes}`}
+          admin={admin}
           lessonId={picked}
           onChanged={() => {
             setChanges((count) => count + 1);

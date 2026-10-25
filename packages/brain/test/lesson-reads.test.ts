@@ -8,7 +8,7 @@ import {
   lessonsRetire,
 } from "../src/lesson-reads.ts";
 import { consolidate, lessonsOf } from "../src/lessons.ts";
-import { recordOutcome } from "../src/outcomes.ts";
+import { eraseOutcomes, recordOutcome } from "../src/outcomes.ts";
 import type { TaskOutcome } from "../src/outcomes.ts";
 import { testHost } from "./host.ts";
 import type { Caller } from "./host.ts";
@@ -201,7 +201,9 @@ describe("inspecting lessons", () => {
         first: { text: false, episodes: 3, hidden: false },
         names: false,
       },
-      annFirst: { text: true, episodes: 4, hidden: true },
+      // Ann was in all four, but the version was written from three: one
+      // it doesn't know of hides its text from everyone.
+      annFirst: { text: false, episodes: 4, hidden: true },
     });
   });
 
@@ -232,5 +234,108 @@ describe("inspecting lessons", () => {
       stale: "brain.revision_conflict",
       byAnn: "ok",
     });
+  });
+
+  it("hides a shared lesson, and its older versions' text, once turns some reader wasn't part of are erased", async () => {
+    const { brain } = testHost();
+    const chat = named("chat");
+    const ann = named("ann");
+    const cas = named("cas");
+    // Two turns Ann had alone, then four with Cas.
+    const alone = [
+      failed(ann, { id: chat, members: [ann] }),
+      failed(ann, { id: chat, members: [ann] }),
+    ];
+    for (const each of [
+      ...alone,
+      ...Array.from({ length: 4 }, () =>
+        failed(ann, { id: chat, members: [ann, cas] })
+      ),
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await recordOutcome(brain, each);
+    }
+    const scope = { scope: "session" as const, scopeId: chat };
+    await consolidate(brain, scope);
+    const [lesson] = await lessonsOf(brain, scope);
+    const lessonId = lesson?.id ?? "";
+    const casBefore = await listed(brain, as(cas, [chat]));
+
+    await eraseOutcomes(
+      brain,
+      alone.map(({ evidenceId }) => evidenceId)
+    );
+    const afterErase = {
+      cas: await listed(brain, as(cas, [chat])),
+      ann: await outcome(lessonLineage(brain, as(ann, [chat]), { lessonId })),
+    };
+    // The next job writes a revision from the four turns left.
+    await consolidate(brain, scope);
+    const forCas = await lessonLineage(brain, as(cas, [chat]), { lessonId });
+    const textOf = (revision: number) =>
+      forCas.versions.find((each) => each.revision === revision)?.instruction;
+
+    expect({
+      casBefore,
+      afterErase,
+      current: forCas.lesson.instruction,
+      first: textOf(1) ?? null,
+    }).toStrictEqual({
+      casBefore: [],
+      // Its text counts turns Cas wasn't in: nobody sees it until the next
+      // revision, which rests on what is left.
+      afterErase: { cas: [], ann: "brain.not_found" },
+      current:
+        "chat.turn failed 4 of its last 4 finished runs on its current versions.",
+      first: null,
+    });
+  });
+
+  it("records who retired a lesson: its owner for their own, an admin for a shared one", async () => {
+    const { brain } = testHost();
+    const ann = named("ann");
+    const chat = named("chat");
+    for (let n = 0; n < 3; n += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await recordOutcome(brain, failed(ann));
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await recordOutcome(brain, failed(ann, { id: chat, members: [ann] }));
+    }
+    await consolidate(brain, { scope: "person", scopeId: ann });
+    await consolidate(brain, { scope: "session", scopeId: chat });
+    const [own] = await lessonsOf(brain, { scope: "person", scopeId: ann });
+    const [shared] = await lessonsOf(brain, {
+      scope: "session",
+      scopeId: chat,
+    });
+
+    await lessonsRetire(brain, as(ann), {
+      lessonId: own?.id ?? "",
+      expectedRevision: 1,
+    });
+    await lessonsRetire(brain, as(ann, [chat]), {
+      lessonId: shared?.id ?? "",
+      expectedRevision: 1,
+    });
+    const [ownAfter] = await lessonsOf(brain, {
+      scope: "person",
+      scopeId: ann,
+    });
+    const [sharedAfter] = await lessonsOf(brain, {
+      scope: "session",
+      scopeId: chat,
+    });
+    const { results } = await env.BRAIN.prepare(
+      "SELECT event FROM audit_outbox WHERE instr(event, 'knowledge.lesson.retired') > 0 AND instr(event, ?) > 0"
+    )
+      .bind(ann)
+      .all<{ event: string }>();
+
+    expect({
+      own: ownAfter?.retiredBy,
+      shared: sharedAfter?.retiredBy,
+      // Both attributed to Ann, never to the Brain itself.
+      attributed: results.length,
+    }).toStrictEqual({ own: "owner", shared: "admin", attributed: 2 });
   });
 });

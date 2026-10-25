@@ -494,7 +494,7 @@ export const MemoryPage = ({ admin }: { admin: boolean }) => {
         </Tabs>
       </div>
       {tab === "lessons" ? (
-        <LessonsView />
+        <LessonsView admin={admin} />
       ) : (
         <div className="grid min-h-0 gap-6 lg:grid-cols-2">
           <RecordList

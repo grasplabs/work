@@ -240,7 +240,7 @@ interface LessonAt {
   id: string;
   revision: number;
   state: "candidate" | "retired";
-  retiredBy: "owner" | "evidence" | null;
+  retiredBy: "owner" | "admin" | "evidence" | null;
   content: LessonContent | undefined;
 }
 
@@ -257,21 +257,37 @@ const storedContentSchema = z.strictObject({
   exclusions: z.array(z.string()),
   instruction: z.string(),
   evidenceStatus: z.enum(["supported", "contested"]),
+  /**
+   * How many episodes it rested on when it was written: a reader sees its
+   * text only while every one of them is still there and theirs, so an
+   * erased episode counts as one they weren't part of (lesson-reads.ts).
+   */
+  episodes: z.int().min(0),
 });
+
+/** A stored content without its episode count: what a lesson says. */
+const omitEpisodes = ({
+  episodes: _episodes,
+  ...said
+}: z.infer<typeof storedContentSchema>) => said;
 
 /** `content` as a version stores it. */
 const storedOf = ({
-  supporting: _supporting,
-  contradicting: _contradicting,
+  supporting,
+  contradicting,
   ...stored
-}: LessonContent): string => canonicalJson(stored);
+}: LessonContent): string =>
+  canonicalJson({
+    ...stored,
+    episodes: supporting.length + contradicting.length,
+  });
 
 /** A stored version's content, with the evidence it still has. */
 const contentFrom = (
   stored: string,
   evidence: readonly { episodeId: string; role: string }[]
 ): LessonContent => ({
-  ...storedContentSchema.parse(JSON.parse(stored)),
+  ...omitEpisodes(storedContentSchema.parse(JSON.parse(stored))),
   supporting: evidence
     .filter(({ role }) => role === "supporting")
     .map(({ episodeId }) => episodeId)
@@ -349,9 +365,11 @@ interface Patch {
   base: number;
   content: LessonContent;
   state: "candidate" | "retired";
-  retiredBy: "owner" | "evidence" | null;
+  retiredBy: "owner" | "admin" | "evidence" | null;
   /** When the work that made it started: a purge since outranks it. */
   since: Date;
+  /** Who made it, as the host's audit log names them: the Brain's own if none. */
+  actor?: Json;
 }
 
 /**
@@ -432,7 +450,7 @@ const applyPatch = async <C>(
     outboxedWhere(
       brain,
       {
-        actor: system,
+        actor: patch.actor ?? system,
         action:
           patch.state === "retired"
             ? "knowledge.lesson.retired"
@@ -518,7 +536,7 @@ const consolidateGroup = async <C>(
       contentOf(brain, scope, groupKey, taskType),
     ]);
     // Its owner's correction outranks repetition: never patched again.
-    if (current?.retiredBy === "owner") {
+    if (current?.retiredBy === "owner" || current?.retiredBy === "admin") {
       return false;
     }
     let patch: Patch | undefined;
@@ -704,7 +722,7 @@ export interface Lesson {
   scope: "person" | "session";
   scopeId: string;
   state: "candidate" | "retired";
-  retiredBy: "owner" | "evidence" | null;
+  retiredBy: "owner" | "admin" | "evidence" | null;
   versions: {
     revision: number;
     supersedes: number | null;
@@ -782,7 +800,8 @@ export const lessonsOf = async <C>(
 export const retireLessonAt = async <C>(
   brain: Brain<C>,
   lessonId: string,
-  expectedRevision: number
+  expectedRevision: number,
+  by: { actor: Json; as: "owner" | "admin" }
 ): Promise<void> => {
   const current = await lessonAt(brain, lessonId);
   const row = await brain.db
@@ -811,8 +830,9 @@ export const retireLessonAt = async <C>(
     base: current.revision,
     content: current.content,
     state: "retired",
-    retiredBy: "owner",
+    retiredBy: by.as,
     since: brain.ports.clock(),
+    actor: by.actor,
   });
   if (!moved) {
     throw brainErrors.create("brain.revision_conflict");
@@ -853,7 +873,10 @@ export const retireLesson = async <C>(
   if (own === undefined) {
     throw brainErrors.create("brain.not_found");
   }
-  await retireLessonAt(brain, lessonId, expectedRevision);
+  await retireLessonAt(brain, lessonId, expectedRevision, {
+    actor: brain.ports.actorOf(reader),
+    as: "owner",
+  });
 };
 
 /**

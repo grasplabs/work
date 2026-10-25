@@ -52,7 +52,10 @@ const visibleTo = (userId: string, audiences: readonly string[]): SQL => {
   // Every episode of its current revision had them as a member: there is
   // one, and none without them.
   const current = sql`${brainLessonEvidence.lessonId} = ${brainLessons.id} AND ${brainLessonEvidence.revision} = ${brainLessons.revision}`;
-  const shared = sql`${brainLessons.scope} = 'session' AND ${inList(brainLessons.scopeId, audiences)} AND EXISTS (SELECT 1 FROM ${brainLessonEvidence} WHERE ${current}) AND NOT EXISTS (SELECT 1 FROM ${brainLessonEvidence} WHERE ${current} AND NOT EXISTS (SELECT 1 FROM ${brainEpisodeMembers} WHERE ${brainEpisodeMembers.episodeId} = ${brainLessonEvidence.episodeId} AND ${brainEpisodeMembers.userId} = ${userId}))`;
+  // And every episode it was written from is still there: one erased
+  // counts as one they weren't part of (its version recorded how many).
+  const whole = sql`(SELECT count(*) FROM ${brainLessonEvidence} WHERE ${current}) = (SELECT json_extract(${brainLessonVersions.content}, '$.episodes') FROM ${brainLessonVersions} WHERE ${brainLessonVersions.lessonId} = ${brainLessons.id} AND ${brainLessonVersions.revision} = ${brainLessons.revision})`;
+  const shared = sql`${brainLessons.scope} = 'session' AND ${inList(brainLessons.scopeId, audiences)} AND EXISTS (SELECT 1 FROM ${brainLessonEvidence} WHERE ${current}) AND ${whole} AND NOT EXISTS (SELECT 1 FROM ${brainLessonEvidence} WHERE ${current} AND NOT EXISTS (SELECT 1 FROM ${brainEpisodeMembers} WHERE ${brainEpisodeMembers.episodeId} = ${brainLessonEvidence.episodeId} AND ${brainEpisodeMembers.userId} = ${userId}))`;
   return sql`(${own}) OR (${shared})`;
 };
 
@@ -128,6 +131,7 @@ const lineageInputSchema = z.strictObject({
 const storedSchema = z.object({
   instruction: z.string(),
   evidenceStatus: z.enum(["supported", "contested"]),
+  episodes: z.int().min(0),
 });
 
 /**
@@ -205,8 +209,13 @@ export const lessonLineage = async <C>(
         ({ revision }) => revision === version.revision
       );
       const seen = of.filter((each) => Boolean(each.seen));
-      const whole = seen.length === of.length;
       const stored = storedSchema.parse(JSON.parse(version.content));
+      // A session version's text only for someone part of every episode it
+      // was written from, none of them erased since; a person's own lesson
+      // is theirs, whatever was erased of it.
+      const whole =
+        row.scope === "person" ||
+        (seen.length === of.length && of.length === stored.episodes);
       return {
         revision: version.revision,
         supersedes: version.supersedes,
@@ -251,12 +260,21 @@ export const lessonsRetire = async <C>(
   );
   const { userId, audiences } = await readerOf(brain, reader);
   const row = await brain.db
-    .select({ scope: brainLessons.scope, scopeId: brainLessons.scopeId })
+    .select({
+      scope: brainLessons.scope,
+      scopeId: brainLessons.scopeId,
+      revision: brainLessons.revision,
+    })
     .from(brainLessons)
     .where(and(eq(brainLessons.id, lessonId), visibleTo(userId, audiences)))
     .get();
   if (row === undefined) {
     throw brainErrors.create("brain.not_found");
+  }
+  // The revision they may see is the one they retire: one consolidation
+  // moved since is a conflict, never a revision they never saw.
+  if (row.revision !== expectedRevision) {
+    throw brainErrors.create("brain.revision_conflict");
   }
   if (row.scope === "session") {
     // A shared lesson has no single owner: the host's rule for shared
@@ -267,5 +285,8 @@ export const lessonsRetire = async <C>(
       ownerId: "",
     });
   }
-  await retireLessonAt(brain, lessonId, expectedRevision);
+  await retireLessonAt(brain, lessonId, expectedRevision, {
+    actor: brain.ports.actorOf(reader),
+    as: row.scope === "session" ? "admin" : "owner",
+  });
 };

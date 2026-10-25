@@ -672,7 +672,7 @@ export interface LessonSummary {
   revision: number;
   scope: "person" | "session";
   state: "candidate" | "retired";
-  retiredBy: "owner" | "evidence" | null;
+  retiredBy: "owner" | "admin" | "evidence" | null;
   instruction: string;
   evidenceStatus: "supported" | "contested";
   taskType: string;
