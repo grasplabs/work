@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { ensureCollection } from "../src/collections.ts";
 import type { CollectionRow } from "../src/collections.ts";
@@ -101,6 +101,33 @@ const readOf = async (
         found.read.transcript.turns,
         found.read.transcript.chapters,
       ]);
+};
+
+/** How many transcript purges of `documentId` the audit outbox holds. */
+const recordedPurges = async (documentId: string): Promise<number> => {
+  const { results } = await env.BRAIN.prepare(
+    "SELECT event FROM audit_outbox WHERE instr(event, 'knowledge.transcript.purged') > 0 AND instr(event, ?) > 0"
+  )
+    .bind(documentId)
+    .all();
+  return results.length;
+};
+
+/** The SQL a batched statement runs, as drizzle writes it; empty for one it can't say. */
+const sqlOf = (statement: unknown): string => {
+  const toSQL: unknown =
+    typeof statement === "object" && statement !== null
+      ? Reflect.get(statement, "toSQL")
+      : undefined;
+  if (typeof toSQL !== "function") {
+    return "";
+  }
+  const query: unknown = Reflect.apply(toSQL, statement, []);
+  const text: unknown =
+    typeof query === "object" && query !== null
+      ? Reflect.get(query, "sql")
+      : undefined;
+  return typeof text === "string" ? text : "";
 };
 
 describe("a document's transcript", () => {
@@ -417,6 +444,82 @@ describe("a document's transcript", () => {
           detail: { purgeId: purged?.detail?.purgeId, version: 1 },
         },
       ],
+    });
+  });
+
+  it("never brings back a term one purge took out when another purges the same transcript at once", async () => {
+    const { brain } = testHost();
+    const notes = await newCollection(brain, "Notes");
+    const first = word();
+    const second = word();
+    const call = await save(brain, notes, "call.md", "# Call\nNo names.", {
+      transcript: meeting(first, second),
+    });
+    const admin = writerOf("admin");
+    const purgeOf = async (term: string) => {
+      const input = {
+        type: "content" as const,
+        documentIds: [call.id],
+        terms: [term],
+        reason: "erasure_request" as const,
+      };
+      const plan = await preparePurge(brain, admin, input, noCopies);
+      return await purge(brain, admin, input, plan.token, noCopies);
+    };
+    // Both read the transcript before either writes it; the first then
+    // finishes before the second writes the copy it read.
+    const batch = brain.db.batch.bind(brain.db);
+    const bothRead = Promise.withResolvers<null>();
+    let firstDone: Promise<unknown> = Promise.resolve(null);
+    let writes = 0;
+    const spy = vi
+      .spyOn(brain.db, "batch")
+      .mockImplementation(async (statements) => {
+        const writesTranscript = statements.some((statement) =>
+          sqlOf(statement).startsWith('update "transcripts"')
+        );
+        if (writesTranscript) {
+          writes += 1;
+          if (writes === 1) {
+            await bothRead.promise;
+          } else {
+            bothRead.resolve(null);
+            await firstDone;
+          }
+        }
+        return await batch(statements);
+      });
+    let one: Awaited<ReturnType<typeof purgeOf>>;
+    let two: Awaited<ReturnType<typeof purgeOf>>;
+    try {
+      const running = purgeOf(first);
+      firstDone = running;
+      [one, two] = await Promise.all([running, purgeOf(second)]);
+    } finally {
+      spy.mockRestore();
+    }
+    const afterRace = {
+      first: await storedHolds(first),
+      second: await storedHolds(second),
+    };
+    // The one that lost says so, and running it again finishes it.
+    const again = await purgeOf(second);
+    expect({
+      writes,
+      stillFound: [one.stillFound, two.stillFound],
+      afterRace,
+      recorded: await recordedPurges(call.id),
+      again: again.stillFound,
+      stored: await storedHolds(first, second),
+    }).toStrictEqual({
+      writes: 2,
+      // The first took its term out, and it stays out.
+      stillFound: [0, 1],
+      afterRace: { first: false, second: true },
+      // The second wrote nothing, and recorded nothing; run again, it does.
+      recorded: 2,
+      again: 0,
+      stored: false,
     });
   });
 

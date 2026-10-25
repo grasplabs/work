@@ -206,14 +206,25 @@ export const transcriptWrites = <C>(
   ];
 };
 
+/** A transcript as it was read, to be replaced only while it still stands so (`replaceTranscript`). */
+export interface ReadAt {
+  version: number;
+  /** Its turns and chapters exactly as stored. */
+  turns: string;
+  chapters: string;
+}
+
 /**
  * The transcript stored for a document, whatever version it was saved
- * with, and that version: for a purge, which reaches every copy.
+ * with, and that version and its stored form: for a purge, which reaches
+ * every copy.
  */
 export const storedTranscript = async (
   db: DrizzleD1Database,
   documentId: string
-): Promise<{ version: number; transcript: Transcript } | undefined> => {
+): Promise<
+  { version: number; transcript: Transcript; at: ReadAt } | undefined
+> => {
   const row = await db
     .select({
       version: transcripts.version,
@@ -225,7 +236,7 @@ export const storedTranscript = async (
     .get();
   return row === undefined
     ? undefined
-    : { version: row.version, transcript: fromRow(row) };
+    : { version: row.version, transcript: fromRow(row), at: row };
 };
 
 /** Every text a transcript holds: its speakers, words and chapter titles. */
@@ -250,28 +261,38 @@ export const rewrittenTranscript = (
   })),
 });
 
+/** A transcript as it is stored. */
+export const storedFormOf = (
+  transcript: Transcript
+): { turns: string; chapters: string } => ({
+  turns: JSON.stringify(transcript.turns),
+  chapters: JSON.stringify(transcript.chapters),
+});
+
 /**
- * Replaces a document's transcript where it stands, at the version it was
- * read at: a content purge's rewrite when no version's text changed but
- * the transcript did. A save in between replaced it, and its transcript
- * is left to a purge run again (counted in its `stillFound`).
+ * Replaces a document's transcript where it stands, only while it is
+ * still exactly as it was read (`at`): a content purge's rewrite when no
+ * version's text changed but the transcript did. A save, or another
+ * purge, in between changed it, and this one writes nothing: never its
+ * older copy over the other's, which would put back what that one took
+ * out. What it was to remove is then left to a purge run again (counted
+ * in its `stillFound`).
  */
 export const replaceTranscript = (
   db: DrizzleD1Database,
   documentId: string,
-  version: number,
+  at: ReadAt,
   transcript: Transcript
 ) =>
   db
     .update(transcripts)
-    .set({
-      turns: JSON.stringify(transcript.turns),
-      chapters: JSON.stringify(transcript.chapters),
-    })
+    .set(storedFormOf(transcript))
     .where(
       and(
         eq(transcripts.documentId, documentId),
-        eq(transcripts.version, version)
+        eq(transcripts.version, at.version),
+        eq(transcripts.turns, at.turns),
+        eq(transcripts.chapters, at.chapters)
       )
     );
 

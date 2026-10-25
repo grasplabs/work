@@ -3,7 +3,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { z } from "zod";
 
-import { auditedBatch, outboxed } from "./audit.ts";
+import { auditedBatch, outboxed, outboxedIfChanged } from "./audit.ts";
 import type { Brain } from "./brain.ts";
 import type { CollectionRow } from "./collections.ts";
 import { inList } from "./db/d1.ts";
@@ -64,7 +64,7 @@ import {
   storedTranscript,
   transcriptTexts,
 } from "./transcripts.ts";
-import type { Transcript } from "./transcripts.ts";
+import type { ReadAt, Transcript } from "./transcripts.ts";
 import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 
 // Purging personal data from Knowledge, for good, when someone leaves or
@@ -1149,6 +1149,7 @@ const transcriptPurgeOf = async (
 ): Promise<
   | {
       version: number;
+      at: ReadAt;
       texts: string[];
       redacted: Transcript;
       changed: boolean;
@@ -1174,7 +1175,7 @@ const transcriptPurgeOf = async (
       ],
     });
   }
-  return { version: stored.version, texts, redacted, changed };
+  return { version: stored.version, at: stored.at, texts, redacted, changed };
 };
 
 /**
@@ -1485,14 +1486,11 @@ const purgeDocument = async <C>(
   ) {
     // Only the transcript held a term: rewritten where it stands, with
     // its own event, as no version is saved to carry it.
+    // Written only over the transcript as it was read, and recorded only
+    // when it was: another purge at once never has its removal undone.
     await auditedBatch(brain.ports, db, [
-      replaceTranscript(
-        db,
-        document.id,
-        transcript.version,
-        transcript.redacted
-      ),
-      outboxed(brain, {
+      replaceTranscript(db, document.id, transcript.at, transcript.redacted),
+      outboxedIfChanged(brain, {
         actor,
         action: "knowledge.transcript.purged",
         target: { type: "document", id: document.id },

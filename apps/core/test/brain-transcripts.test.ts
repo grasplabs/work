@@ -302,6 +302,37 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     });
   });
 
+  it("keeps every word of a cue longer than a turn may be, as turns of its voice that each fit", async () => {
+    const owner = await personWithCollection();
+    const words = Array.from({ length: 3000 }, (_, index) => `word${index}`);
+    const last = "conclusion";
+    const upload = await uploaded(
+      owner,
+      "Monologue.vtt",
+      `WEBVTT
+
+00:00:01.000 --> 00:10:00.000
+<v Ann>${words.join(" ")} ${last}
+`
+    );
+    const opened = await openedOf(owner.api, upload.documentId);
+    const turns = opened?.turns ?? [];
+    expect({
+      status: upload.status,
+      several: turns.length > 1,
+      speakers: [...new Set(turns.map(({ speaker }) => speaker))],
+      fit: turns.every(({ text }) => text.length <= 10_000),
+      // Every word, in order, nothing cut short.
+      said: turns.map(({ text }) => text).join(" "),
+    }).toStrictEqual({
+      status: "ready",
+      several: true,
+      speakers: ["Ann"],
+      fit: true,
+      said: `${words.join(" ")} ${last}`,
+    });
+  });
+
   it("fails captions without a word as having no text, and keeps nothing of them", async () => {
     const owner = await personWithCollection();
     const upload = await uploaded(

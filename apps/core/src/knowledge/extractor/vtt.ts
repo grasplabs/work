@@ -137,6 +137,40 @@ const turnOf = (cue: WebVTTCue): VttTurn | undefined => {
 };
 
 /**
+ * A text in pieces of at most `most` characters, each ending at a word's
+ * end (`Intl.Segmenter`): a word longer than a piece alone is split
+ * between characters. Nothing is lost.
+ */
+const piecesOf = (text: string, most: number): string[] => {
+  if (text.length <= most) {
+    return [text];
+  }
+  const pieces: string[] = [];
+  let piece = "";
+  for (const { segment } of new Intl.Segmenter("und", {
+    granularity: "word",
+  }).segment(text)) {
+    if (piece.length + segment.length > most && piece.trim() !== "") {
+      pieces.push(piece.trim());
+      piece = "";
+    }
+    if (segment.length > most) {
+      // oxlint-disable-next-line typescript/no-misused-spread -- whole code points, never half a pair
+      const characters = [...segment];
+      for (let start = 0; start < characters.length; start += most) {
+        pieces.push(characters.slice(start, start + most).join(""));
+      }
+      continue;
+    }
+    piece += segment;
+  }
+  if (piece.trim() !== "") {
+    pieces.push(piece.trim());
+  }
+  return pieces;
+};
+
+/**
  * One line of the document per turn: when, who and what. Every line
  * starts with its time, so none is a heading or a list, and every `[` is
  * escaped, so no text makes a `[[link]]`.
@@ -163,22 +197,25 @@ export const vttExtraction = (bytes: Uint8Array): VttExtraction => {
   const turns: VttTurn[] = [];
   for (const cue of cues) {
     const turn = turnOf(cue);
-    const last = turns.at(-1);
     if (turn === undefined || turn.text === "") {
       continue;
     }
-    if (
-      last !== undefined &&
-      last.speaker === turn.speaker &&
-      last.text.length + turn.text.length < maxTurnLength
-    ) {
-      last.text = `${last.text} ${turn.text}`;
-      last.endMs = Math.max(last.endMs, turn.endMs);
-    } else {
-      turns.push({ ...turn, text: clipped(turn.text, maxTurnLength) });
-    }
-    if (turns.length > maxTurns) {
-      throw new TooLargeError();
+    // A cue longer than a turn may be is several turns, never cut short.
+    for (const text of piecesOf(turn.text, maxTurnLength)) {
+      const last = turns.at(-1);
+      if (
+        last !== undefined &&
+        last.speaker === turn.speaker &&
+        last.text.length + text.length < maxTurnLength
+      ) {
+        last.text = `${last.text} ${text}`;
+        last.endMs = Math.max(last.endMs, turn.endMs);
+      } else {
+        turns.push({ ...turn, text });
+      }
+      if (turns.length > maxTurns) {
+        throw new TooLargeError();
+      }
     }
   }
   if (turns.length === 0) {
