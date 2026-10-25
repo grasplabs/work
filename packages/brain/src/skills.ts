@@ -483,7 +483,12 @@ const outcomesOf = async <C>(
   }
   const left = applicable.filter(({ candidate }) => !outcomes.has(candidate));
   for (const { candidate } of left) {
-    outcomes.set(candidate, left.length === 1 ? "selected" : "ambiguous");
+    // A walk cut short selects none, so none of these says otherwise.
+    let outcome: SkillOutcome = left.length === 1 ? "selected" : "ambiguous";
+    if (walk.exceeded) {
+      outcome = "incomplete";
+    }
+    outcomes.set(candidate, outcome);
   }
   return { outcomes, left, exceeded: walk.exceeded };
 };

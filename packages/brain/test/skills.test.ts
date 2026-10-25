@@ -532,6 +532,8 @@ describe("who can make a skill selectable", () => {
     };
     await chain("small", 12);
     await chain("dense", 40);
+    // One that applies too, weighed before the dense one runs out.
+    await saved(company, "a-plain", "tasks: [dense-39]");
     const caller: Caller = { userId: "ann", reads: [company.id] };
 
     const small = await selectSkill(brain, caller, {
@@ -541,11 +543,16 @@ describe("who can make a skill selectable", () => {
       task: { type: "dense-39" },
     });
 
-    expect(
-      [small.result, dense.result].map((result) =>
+    expect({
+      results: [small.result, dense.result].map((result) =>
         result.kind === "skill" ? result.skill.name : result.reason
-      )
-    ).toStrictEqual(["small-11", "incomplete"]);
+      ),
+      // Nothing it weighed says selected when it selected none.
+      dense: summary(dense).considered,
+    }).toStrictEqual({
+      results: ["small-11", "incomplete"],
+      dense: { "a-plain": "incomplete", "dense-39": "prerequisite_missing" },
+    });
   });
 
   it("refuses a teammate's skill standing in for a company skill's dependency or prerequisite", async () => {

@@ -541,6 +541,8 @@ export const skillOutcomeSchema = z.enum([
   "dependency_missing",
   "replaced",
   "retired",
+  /** It applied so far, but the selection stopped before it could tell (`incomplete`). */
+  "incomplete",
 ]);
 export type SkillOutcome = z.infer<typeof skillOutcomeSchema>;
 
