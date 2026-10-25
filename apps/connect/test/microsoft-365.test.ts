@@ -27,6 +27,12 @@ import {
   someone,
 } from "./connect.ts";
 import {
+  meetingPage,
+  planIds,
+  sectionIds,
+  suppliersList,
+} from "./fixtures/graph-apps.ts";
+import {
   archiveFolderId,
   attachmentsSkipToken,
   categoriesSkipToken,
@@ -201,6 +207,14 @@ const mailboxInputs: Record<string, Input> = {
     timeZone: "Europe/Amsterdam",
     subject: "Focus time",
   },
+  "onenote.sections": {},
+  "onenote.pages": { section: sectionIds.own },
+  "onenote.read": { page: meetingPage.id },
+  "onenote.create": {
+    section: sectionIds.own,
+    title: "Notes",
+    text: "Call Northwind back",
+  },
 };
 
 /** Input for each file tool, but its drive. */
@@ -209,6 +223,7 @@ const driveInputs: Record<string, Input> = {
   "files.search": { query: "invoice" },
   "files.versions": { item: itemIds.procedure },
   "files.read": { item: itemIds.report },
+  "word.read": { item: itemIds.contract },
 };
 
 /** A row of the supplier table, as its cells are read and written. */
@@ -266,10 +281,26 @@ const workbookInputs: Record<string, Input> = {
 /** Input for each list tool, but its site. */
 const siteInputs: Record<string, Input> = {
   "lists.items": { list: contractsList },
+  "lists.addItem": {
+    list: suppliersList,
+    values: [{ column: "Title", value: "Fabrikam Metals" }],
+  },
+  "lists.updateItem": {
+    list: suppliersList,
+    item: "1",
+    before: [{ column: "CreditLimit", value: 5000 }],
+    after: [{ column: "CreditLimit", value: 7500 }],
+  },
+};
+
+/** Input for each Planner tool, but its plan. */
+const planInputs: Record<string, Input> = {
+  "planner.tasks": {},
+  "planner.create": { title: "Reconcile Fabrikam's statement" },
 };
 
 describe("the Microsoft 365 connector's scoping", () => {
-  it("binds every route of every tool to its mailbox, drive, site or workbook's named table, reads /me only to know whose a mailbox is, and writes under /me only for drafts in the person's own OneDrive", () => {
+  it("binds every route of every tool to its mailbox, drive, site, plan or workbook's named table, reads /me only to know whose a mailbox is, and writes under /me only for drafts in the person's own OneDrive", () => {
     const unbound = Object.entries(manifest.actions).flatMap(
       ([name, { resource, routes }]) =>
         routes
@@ -282,6 +313,14 @@ describe("the Microsoft 365 connector's scoping", () => {
                   path.startsWith("/v1.0/drives/{drive}/")) ||
                 (resource === "site" &&
                   path.startsWith("/v1.0/sites/{site}/")) ||
+                (resource === "plan" &&
+                  (path === "/v1.0/planner/plans/{plan}" ||
+                    path.startsWith("/v1.0/planner/plans/{plan}/"))) ||
+                // Planner names a new task's plan in its body: the tool puts
+                // its bound plan there, after reading that plan.
+                (name === "planner.create" &&
+                  method === "POST" &&
+                  path === "/v1.0/planner/tasks") ||
                 (resource === "workbook" &&
                   path.startsWith(
                     "/v1.0/drives/{drive}/items/{workbook}/workbook/tables/{table}/"
@@ -318,6 +357,7 @@ describe("the Microsoft 365 connector's scoping", () => {
         ...Object.keys(mailboxInputs),
         ...Object.keys(driveInputs),
         ...Object.keys(siteInputs),
+        ...Object.keys(planInputs),
         ...Object.keys(workbookInputs),
         "files.createDraft",
       ].toSorted()
@@ -364,6 +404,14 @@ describe("the Microsoft 365 connector's scoping", () => {
         hrSite,
         financeSite.toUpperCase(),
       ])
+    ).resolves.toStrictEqual(new Set(["connect.resource_out_of_scope"]));
+    expect(graph.sent).toStrictEqual([]);
+  });
+
+  it("keeps a call for one plan out of every other", async () => {
+    const connection = await connected();
+    await expect(
+      refusalsFor(connection, planInputs, "plan", planIds.finance, [planIds.hr])
     ).resolves.toStrictEqual(new Set(["connect.resource_out_of_scope"]));
     expect(graph.sent).toStrictEqual([]);
   });
@@ -3543,6 +3591,7 @@ describe("the Microsoft 365 connector's calendar writes, when something goes wro
     const granted = await connectedWith([
       ...readOnlyCalendars,
       "Calendars.ReadWrite",
+      "Notes.ReadWrite",
     ]);
     // Tokens stored before connect kept their grant.
     const unknown = await connected();

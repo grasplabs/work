@@ -30,10 +30,11 @@ const microsoftSignIn = [
 
 /**
  * Each class's rights. Reading the person's own is reading their mailbox
- * (and its categories), calendar and OneDrive; changing it, writing them
- * (drafts, flags, events, their own documents, their To Do). The
- * company's is SharePoint and others' calendars, and reaching others is
- * sending mail. Shared mailboxes' rights come with pointing Stephen at one
+ * (and its categories), calendar, OneDrive and OneNote; changing it,
+ * writing them (drafts, flags, events, their own documents, their To Do,
+ * their notes). The company's is SharePoint, others' calendars and the
+ * Planner plans of the person's groups, and reaching others is sending
+ * mail. Shared mailboxes' rights come with pointing Stephen at one
  * (`sharedMailboxRights`).
  */
 const microsoftClassRights: Readonly<
@@ -44,15 +45,26 @@ const microsoftClassRights: Readonly<
     "MailboxSettings.Read",
     "Calendars.Read",
     "Files.Read",
+    "Notes.Read",
   ],
   "change-own": [
     "Mail.ReadWrite",
     "Calendars.ReadWrite",
     "Files.ReadWrite.All",
     "Tasks.ReadWrite",
+    "Notes.ReadWrite",
   ],
-  "read-company": ["Files.Read.All", "Sites.Read.All", "Calendars.Read.Shared"],
-  "change-company": ["Files.ReadWrite.All", "Sites.ReadWrite.All"],
+  "read-company": [
+    "Files.Read.All",
+    "Sites.Read.All",
+    "Calendars.Read.Shared",
+    "Tasks.Read",
+  ],
+  "change-company": [
+    "Files.ReadWrite.All",
+    "Sites.ReadWrite.All",
+    "Tasks.ReadWrite",
+  ],
   "reach-others": ["Mail.Send"],
 };
 
@@ -68,6 +80,8 @@ const impliedRights: Readonly<Record<string, readonly string[]>> = {
   "files.readwrite": ["files.read"],
   "files.read.all": ["files.read"],
   "sites.readwrite.all": ["sites.read.all"],
+  "tasks.readwrite": ["tasks.read"],
+  "notes.readwrite": ["notes.read"],
 };
 
 /** How Entra may prefix a Microsoft Graph right in a token's answer. */
