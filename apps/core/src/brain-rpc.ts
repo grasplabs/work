@@ -836,11 +836,17 @@ export const readBrain = async (
 export class BrainRpc extends CoreRpcTarget implements BrainApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
+  readonly #text: SessionCheck;
 
-  constructor(env: Env, check: SessionCheck) {
+  /**
+   * `text`: the check of what serves Knowledge's words (notes, changes),
+   * which Grasp staff never pass (session-check.ts `clientText`).
+   */
+  constructor(env: Env, check: SessionCheck, text: SessionCheck) {
     super();
     this.#env = env;
     this.#check = check;
+    this.#text = text;
   }
 
   async read(): Promise<Workspace> {
@@ -859,14 +865,14 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
 
   async notes(options?: unknown): Promise<BrainNotePage> {
     return await withPerson(
-      this.#check,
+      this.#text,
       async (person) => await brainNotes(brainOf(this.#env), person, options)
     );
   }
 
   async changes(options: unknown): Promise<BrainChangePage> {
     return await withPerson(
-      this.#check,
+      this.#text,
       async (person) =>
         await brainChanges(
           brainOf(this.#env),

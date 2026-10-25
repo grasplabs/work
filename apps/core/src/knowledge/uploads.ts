@@ -14,6 +14,7 @@ import {
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { roleErrors } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -848,6 +849,11 @@ export const originalResponse = async (
       authErrors.create("auth.unauthenticated"),
       requestId
     );
+  }
+  // A file is a client's own words: never to Grasp staff (GRA-1087,
+  // session-check.ts `clientText`).
+  if (person.staff) {
+    return errorResponse(403, roleErrors.create("role.forbidden"), requestId);
   }
   const knowledge = drizzle(env.KNOWLEDGE);
   const reader = { type: "person", person } as const;

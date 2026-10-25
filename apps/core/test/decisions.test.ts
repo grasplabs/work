@@ -718,8 +718,9 @@ describe("decisions", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       role: "admin",
       asked: true,
-      get: "decision.forbidden",
-      answer: "decision.forbidden",
+      // Refused before the decision is looked at: staff see numbers only.
+      get: "role.forbidden",
+      answer: "role.forbidden",
     });
   });
 

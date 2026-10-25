@@ -30,7 +30,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { ScreenSubmissionsRpc } from "./screen-submissions.ts";
 import { ScreenTrustRpc } from "./screen-trust-rpc.ts";
 import { ScreensRpc } from "./screens-rpc.ts";
-import { fullAccess, withPerson } from "./session-check.ts";
+import { clientText, fullAccess, withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
 import { StoresRpc } from "./stores-rpc.ts";
@@ -94,33 +94,37 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#check = check;
     // Everything but the onboarding refuses staff who reach the onboarding alone.
     const full = fullAccess(check);
+    // What serves a client's free text refuses Grasp staff altogether
+    // (GRA-1087): whole namespaces here, and the text methods of those that
+    // mix it with numbers and settings (brain, audit, workflows).
+    const text = clientText(full);
     this.#apps = new AppsRpc(env, full);
-    this.#knowledge = new KnowledgeRpc(env, full);
-    this.#brain = new BrainRpc(env, full);
-    this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
-    this.#memory = new MemoryRpc(env, full);
-    this.#uploads = new UploadsRpc(env, full);
+    this.#knowledge = new KnowledgeRpc(env, text);
+    this.#brain = new BrainRpc(env, full, text);
+    this.#knowledgeSignals = new KnowledgeSignalsRpc(env, text);
+    this.#memory = new MemoryRpc(env, text);
+    this.#uploads = new UploadsRpc(env, text);
     this.#permissions = new PermissionsRpc(env, full);
     this.#resourceBindings = new ResourceBindingsRpc(env, full);
     this.#templates = new TemplatesRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
     this.#landscape = new LandscapeRpc(env, full);
-    this.#workflows = new WorkflowsRpc(env, full);
+    this.#workflows = new WorkflowsRpc(env, full, text);
     this.#workflowResources = new WorkflowResourcesRpc(env, full);
-    this.#decisions = new DecisionsRpc(env, full);
+    this.#decisions = new DecisionsRpc(env, text);
     this.#dependencies = new DependenciesRpc(env, full);
     this.#screens = new ScreensRpc(env, full);
     this.#screenTrust = new ScreenTrustRpc(env, full);
     this.#members = new MembersRpc(env, full);
     this.#organization = new OrganizationRpc(env, full);
-    this.#audit = new AuditRpc(env, full);
+    this.#audit = new AuditRpc(env, full, text);
     this.#models = new ModelsRpc(env, full);
-    this.#stores = new StoresRpc(env, full);
+    this.#stores = new StoresRpc(env, text);
     this.#pendingActions = new PendingActionsRpc(env, full);
     this.#unknownOutcomes = new UnknownOutcomesRpc(env, full);
-    this.#screenSubmissions = new ScreenSubmissionsRpc(env, full);
+    this.#screenSubmissions = new ScreenSubmissionsRpc(env, text);
     this.#signals = new SignalsRpc(env, full);
-    this.#chats = new ChatsRpc(env, full);
+    this.#chats = new ChatsRpc(env, text);
     this.#dashboard = new DashboardRpc(env, full);
     this.#emailPreferences = new EmailPreferencesRpc(env, full);
     this.#sessions = new SessionsRpc(env, full, sessionId);
