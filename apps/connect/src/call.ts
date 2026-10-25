@@ -21,6 +21,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { requirePointedResource } from "./app-pointers.ts";
 import { changeOf } from "./changes.ts";
 import type { CallChange } from "./changes.ts";
 import {
@@ -42,6 +43,7 @@ import {
   scopeOf,
 } from "./idempotency.ts";
 import type { Repeat, Row, StoredAnswer } from "./idempotency.ts";
+import { requirePointedMailbox } from "./mailboxes.ts";
 import { McpError } from "./mcp.ts";
 import type {
   McpServer,
@@ -49,6 +51,7 @@ import type {
   McpTool,
   McpToolResult,
 } from "./mcp.ts";
+import { isNeverTool } from "./never.ts";
 import { hold, waitingUnder } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
 import {
@@ -267,6 +270,10 @@ const actionFor = async (
   open: () => Promise<McpServer>;
   openLookup: () => Promise<McpServer>;
 }> => {
+  // Never, whatever is allowed: before anything else is looked up.
+  if (isNeverTool(action)) {
+    throw connectErrors.create("connect.never");
+  }
   if (connection.serverKind === "native") {
     const native = nativeAction(connection, action);
     return {
@@ -876,6 +883,8 @@ export const carryOut = async (
   progress.sideEffect = sideEffect;
   requireAllowedEffect(claims, sideEffect);
   checkResourceScope(resource, tool, input);
+  requirePointedMailbox(claims, connection, call.action, tool, input);
+  requirePointedResource(claims, connection, call.action, input);
   if (recovering !== undefined) {
     // Recovered only as the call itself would run now: every check above
     // has passed again (the capability core signed for this caller now,

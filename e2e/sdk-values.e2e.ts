@@ -13,6 +13,7 @@ import { z } from "zod";
 
 const sdkDir = path.join(import.meta.dirname, "../packages/sdk");
 const sharedDir = path.join(import.meta.dirname, "../packages/shared/src");
+const brainDir = path.join(import.meta.dirname, "../packages/brain/src");
 
 /** An origin of its own, served below: no page of Grasp is involved. */
 const origin = "http://sdk-values.test";
@@ -26,6 +27,24 @@ const modulePath = /^\/(?:src|test)\/[\w-]+\.ts$/u;
  * along (Zod) fails the page, as it would fail a browser's copy of the SDK.
  */
 const sharedPath = /^\/shared\/(?<name>[\w-]+?)(?:\.ts)?$/u;
+
+/**
+ * A module of `@grasp-os/brain` those import (its limits), on the same
+ * terms: only the dependency-free ones load.
+ */
+const brainPath = /^\/brain\/(?<name>[\w-]+?)(?:\.ts)?$/u;
+
+/** The file a `/shared/` or `/brain/` path serves, if it is one. */
+const dependencyFile = (pathname: string): string | undefined => {
+  const shared = sharedPath.exec(pathname)?.groups?.name;
+  if (shared !== undefined) {
+    return path.join(sharedDir, `${shared}.ts`);
+  }
+  const fromBrain = brainPath.exec(pathname)?.groups?.name;
+  return fromBrain === undefined
+    ? undefined
+    : path.join(brainDir, `${fromBrain}.ts`);
+};
 
 const outcomesSchema = z
   .array(
@@ -52,7 +71,7 @@ test("the SDK's values give the same outcomes in a browser as in workerd", async
         contentType: "text/html",
         body: `<!doctype html><title>SDK values</title><pre id="outcomes"></pre>
           <script type="importmap">
-            { "imports": { "@grasp-os/shared/": "/shared/" } }
+            { "imports": { "@grasp-os/shared/": "/shared/", "@grasp-os/brain/": "/brain/" } }
           </script>
           <script type="module">
             import { runValueCases } from "/test/value-cases.ts";
@@ -62,12 +81,9 @@ test("the SDK's values give the same outcomes in a browser as in workerd", async
       });
       return;
     }
-    const shared = sharedPath.exec(pathname)?.groups?.name;
-    if (shared !== undefined) {
-      const source = await readFile(
-        path.join(sharedDir, `${shared}.ts`),
-        "utf-8"
-      );
+    const dependency = dependencyFile(pathname);
+    if (dependency !== undefined) {
+      const source = await readFile(dependency, "utf-8");
       await route.fulfill({
         contentType: "text/javascript",
         body: stripTypeScriptTypes(source),

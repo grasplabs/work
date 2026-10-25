@@ -33,6 +33,7 @@
     "package:definition": "node scripts/package-definition.ts",
     "parity": "node scripts/parity/run.ts",
     "discord:commands": "node scripts/discord-commands.ts",
+    "composio:review": "node scripts/composio-review.ts",
     "lab": "node scripts/lab/run.ts"
   },
   "devDependencies": {

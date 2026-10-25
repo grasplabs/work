@@ -313,6 +313,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "SANDBOX_HOST",
   "SANDBOX_IN_PROCESS",
   "SIGN_IN",
+  // The client's own Slack app (core's src/channels/slack.ts, connect's
+  // src/channels.ts).
+  "SLACK_BOT_TOKEN",
+  "SLACK_SIGNING_SECRET",
   // An App's statistics (core's src/statistics.ts), next to its permissions.
   "STATISTICS",
   "STATISTICS_POINT_LIMITS",
@@ -321,8 +325,18 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "TEAMS_BOT_ID",
   "TEAMS_BOT_SECRET",
   "TEAMS_BOT_TENANT_ID",
+  // The client's own Telegram bot (core's src/channels/telegram.ts,
+  // connect's src/channels.ts).
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_WEBHOOK_SECRET",
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
+  // The client's own WhatsApp number (core's src/channels/whatsapp.ts,
+  // connect's src/channels.ts).
+  "WHATSAPP_ACCESS_TOKEN",
+  "WHATSAPP_APP_SECRET",
+  "WHATSAPP_PHONE_NUMBER_ID",
+  "WHATSAPP_VERIFY_TOKEN",
   "WORKFLOW_BETWEEN_STEPS_MS",
   "WORKFLOW_BUILD_READ_MS",
   "WORKFLOW_OFF_WAIT_MS",

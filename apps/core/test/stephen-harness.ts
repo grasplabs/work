@@ -162,6 +162,14 @@ const graphSeen = async () => {
   return graphSeenSchema.parse(await response.json());
 };
 
+/**
+ * What Entra grants the eval's connections: every class's rights, and a
+ * shared mailbox's, so turning a class on later asks no one to connect
+ * again (connect's provider-rights.ts).
+ */
+const everyRight =
+  "openid profile email offline_access User.Read MailboxSettings.Read Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send Mail.Send.Shared Calendars.ReadWrite Calendars.Read.Shared Files.ReadWrite.All Sites.ReadWrite.All Tasks.ReadWrite Notes.ReadWrite";
+
 /** A Microsoft 365 account `person` connects at `scope`, as `subject`. */
 const connectMicrosoft = async (
   person: Person,
@@ -174,7 +182,7 @@ const connectMicrosoft = async (
   });
   const authorization = new URL(url);
   const query = new URLSearchParams({
-    code: consentCode(authorization, acmeTenant, subject),
+    code: consentCode(authorization, acmeTenant, subject, everyRight),
     state: authorization.searchParams.get("state") ?? "",
   });
   await routed(`/api/connections/callback?${query.toString()}`, {

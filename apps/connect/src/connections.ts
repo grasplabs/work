@@ -20,6 +20,7 @@ import { composioKey } from "./composio.ts";
 import { connections } from "./db/schema.ts";
 import { mcpServer } from "./mcp.ts";
 import type { McpServer } from "./mcp.ts";
+import { isNeverTool } from "./never.ts";
 
 // The connection registry: which connections exist, whose they are, and
 // which MCP server carries out their actions.
@@ -160,6 +161,8 @@ const reviewedClass = (
  * recorded, or can't be read, allows none. A tool allowed by name alone
  * is a side effect with no resource.
  *
+ * A tool Grasp never runs (never.ts) has no rule either.
+ *
  * A call is a read only when both say so: the class Grasp gave the tool
  * and the admin's rule. Neither alone makes a change a read: a classed
  * read the admin didn't mark is held as a change of the same reach, and a
@@ -173,8 +176,11 @@ export const allowedTool = (
   const tool = storedTools(connection).find(
     (each) => composioToolName(each) === action
   );
+  // Never offered, served or run, whatever its review or the admin say.
   const reviewed =
-    tool === undefined ? undefined : reviewedClass(connection.provider, action);
+    tool === undefined || isNeverTool(action)
+      ? undefined
+      : reviewedClass(connection.provider, action);
   if (tool === undefined || reviewed === undefined) {
     return undefined;
   }
@@ -222,12 +228,27 @@ export const composioServer = (env: Env, connection: Connection): McpServer => {
 };
 
 /**
+ * The class each tool a Composio connection offers is taken to be
+ * (`allowedTool`), by its name.
+ */
+const offeredToolClasses = (
+  connection: Pick<Connection, "provider" | "tools">
+): Record<string, Exclude<ToolClass, "never">> =>
+  Object.fromEntries(
+    offeredToolNames(connection).flatMap((name) => {
+      const rule = allowedTool(connection, name);
+      return rule === undefined ? [] : [[name, rule.class]];
+    })
+  );
+
+/**
  * Whose each connection `request` names is (`ConnectApi.connectionOwners`),
  * disconnected ones too: what an App read through a connection before it
  * was disconnected is still its owner's alone. With what it is (its
  * source and provider) and its account: its ID, name, email address and
  * the other addresses it receives mail at, which core records with the
- * mail a workflow run sends through it. Unknown IDs are left out.
+ * mail a workflow run sends through it, and, for a Composio one, the
+ * class of each tool it offers. Unknown IDs are left out.
  */
 export const connectionOwners = async (
   db: D1Database,
@@ -253,12 +274,16 @@ export const connectionOwners = async (
       accountEmail: connections.accountEmail,
       accountAddresses: connections.accountAddresses,
       accountSenders: connections.accountSenders,
+      tools: connections.tools,
     })
     .from(connections)
     .where(inArray(connections.id, ids));
-  return rows.map(({ accountAddresses, accountSenders, ...row }) => ({
+  return rows.map(({ accountAddresses, accountSenders, tools, ...row }) => ({
     ...row,
     accountAddresses: accountAddresses ?? [],
     accountSenders: accountSenders ?? [],
+    ...(row.source === "composio" && {
+      toolClasses: offeredToolClasses({ provider: row.provider, tools }),
+    }),
   }));
 };
