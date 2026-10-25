@@ -1906,6 +1906,11 @@ msgstr "À propos des équipes"
 msgid "About tools"
 msgstr "À propos des outils"
 
+#: src/brain/memory-page.tsx
+msgctxt "memory record state"
+msgid "Accepted"
+msgstr "Accepté"
+
 #: src/landscape/landscape-audit.ts
 msgctxt "category of an audit event"
 msgid "Access"
@@ -3305,6 +3310,10 @@ msgctxt "column of the audit trail export: who recorded the event"
 msgid "By"
 msgstr "Par"
 
+#: src/brain/memory-page.tsx
+msgid "By {by}"
+msgstr "Par {by}"
+
 #. Column value: a team named this application
 #: src/brain/brain-source-contents.tsx
 msgid "By a team"
@@ -3808,6 +3817,12 @@ msgstr "Choisi pendant l’exécution : {options}"
 msgid "Chosen teams"
 msgstr "Équipes choisies"
 
+#. placeholder {0}: node.citedRevision
+#. placeholder {1}: node.record.revision
+#: src/brain/memory-page.tsx
+msgid "Cited at revision {0}; it is at revision {1} now."
+msgstr "Cité à la révision {0} ; il en est maintenant à la révision {1}."
+
 #: src/activity/audit-log.tsx
 msgid "Clear"
 msgstr "Effacer"
@@ -3957,6 +3972,11 @@ msgstr "Compact"
 
 #: src/brain/brain.ts
 #: src/routes/_shell.settings.billing.tsx
+msgid "Company"
+msgstr "Entreprise"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
 msgid "Company"
 msgstr "Entreprise"
 
@@ -4272,6 +4292,14 @@ msgstr "Copier le lien de {name}"
 #: src/landscape/landscape.ts
 msgid "Core AI"
 msgstr "IA centrale"
+
+#: src/brain/memory-page.tsx
+msgid "Correct it"
+msgstr "Corriger"
+
+#: src/brain/memory-page.tsx
+msgid "Corrected by"
+msgstr "Corrigé par"
 
 #: src/dashboard/signals.tsx
 #: src/dashboard/widget-board.tsx
@@ -6687,6 +6715,10 @@ msgstr "Il ne s’exécute plus (il pouvait modifier des choses)."
 msgid "It no longer runs."
 msgstr "Il ne s’exécute plus."
 
+#: src/brain/memory-page.tsx
+msgid "It rests on nothing you can see."
+msgstr "Il ne repose sur rien que vous puissiez voir."
+
 #: src/landscape/overview-tab.tsx
 msgid "It shows once the desktop agent or single sign-on sees someone use the app."
 msgstr "Cette section s’affiche dès que l’agent pour postes de travail ou l’authentification unique détecte une personne utilisant l’application."
@@ -7459,6 +7491,8 @@ msgstr "Membres"
 msgid "Members and roles"
 msgstr "Membres et rôles"
 
+#: src/brain/brain-nav.tsx
+#: src/brain/memory-page.tsx
 #: src/labels.ts
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Memory"
@@ -8203,6 +8237,10 @@ msgstr "Sans Pulse"
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
 msgstr "Aucun enregistrement n’est en cause : un admin peut seulement abandonner la modification, sur la page du domaine."
+
+#: src/brain/memory-page.tsx
+msgid "No records yet"
+msgstr "Aucun souvenir pour l'instant"
 
 #: src/landscape/data-tab.tsx
 msgid "No residency disclosed"
@@ -9943,6 +9981,11 @@ msgctxt "kind of app"
 msgid "Projects and tasks"
 msgstr "Projets et tâches"
 
+#: src/brain/memory-page.tsx
+msgctxt "memory record state"
+msgid "Proposed"
+msgstr "Proposé"
+
 #: src/chat/builds.tsx
 msgid "Proposed by the agent in chat \"{chatTitle}\"."
 msgstr "Proposée par l’agent dans le chat « {chatTitle} »."
@@ -10515,6 +10558,10 @@ msgstr "Durée de conservation"
 msgid "Retire"
 msgstr "Mettre hors service"
 
+#: src/brain/memory-page.tsx
+msgid "Retire it"
+msgstr "Retirer"
+
 #: src/engines/package-approvals.tsx
 msgid "Retire the packages for {domain}"
 msgstr "Mettre hors service les paquets de {domain}"
@@ -10526,6 +10573,11 @@ msgstr "Mettre hors service les paquets de {domain} ?"
 #: src/engines/package-approvals.tsx
 msgid "Retired"
 msgstr "Hors service"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record state"
+msgid "Retired"
+msgstr "Retiré"
 
 #: src/engines/package-approvals.tsx
 msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
@@ -10565,6 +10617,11 @@ msgstr "Révision en retard"
 #: src/dashboard/to-do.tsx
 msgid "Review the apps of {name}"
 msgstr "Examiner les applications de {name}"
+
+#. placeholder {0}: record.revision
+#: src/brain/memory-page.tsx
+msgid "Revision {0}"
+msgstr "Révision {0}"
 
 #: src/workflows/definition-editor.tsx
 msgid "Revision {revision} doesn't pass yet, and no revision has."
@@ -10895,6 +10952,10 @@ msgstr "Enregistrer d'abord"
 msgid "Save the agreements"
 msgstr "Enregistrer les accords"
 
+#: src/brain/memory-page.tsx
+msgid "Save the correction"
+msgstr "Enregistrer la correction"
+
 #: src/interview/composer.tsx
 msgid "Saved"
 msgstr "Enregistré"
@@ -11176,6 +11237,11 @@ msgstr "Boîtes partagées, registres et données de l'entreprise, après avoir 
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Shared with"
 msgstr "Partagée avec"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory records: others' that you read"
+msgid "Shared with you"
+msgstr "Partagés avec vous"
 
 #: src/brain/atlas-overlays.tsx
 #: src/onboarding/work-record.tsx
@@ -12020,6 +12086,11 @@ msgstr "Équipe"
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
+msgid "Team"
+msgstr "Équipe"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
 msgid "Team"
 msgstr "Équipe"
 
@@ -13169,6 +13240,11 @@ msgstr "Cette modification est de nouveau en cours d’application : elle ne peu
 msgid "This change was already abandoned."
 msgstr "Cette modification a déjà été abandonnée."
 
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
+msgid "This chat"
+msgstr "Cette conversation"
+
 #: src/settings/chat-accounts.tsx
 msgid "This chat account is linked to someone else. They need to unlink it first."
 msgstr "Ce compte de chat est relié à quelqu’un d’autre. Cette personne doit d’abord le dissocier."
@@ -13984,6 +14060,17 @@ msgstr "Vérifié"
 msgid "Version"
 msgstr "Version"
 
+#. placeholder {0}: node.version
+#: src/brain/memory-page.tsx
+msgid "version {0}, the current one"
+msgstr "version {0}, l'actuelle"
+
+#. placeholder {0}: node.version
+#. placeholder {1}: node.currentVersion
+#: src/brain/memory-page.tsx
+msgid "version {0}; it is at version {1} now"
+msgstr "version {0} ; il en est maintenant à la version {1}"
+
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Version {currentVersion}"
 msgstr "Version {currentVersion}"
@@ -14428,6 +14515,14 @@ msgstr "Ce à quoi elle est liée ne peut plus la servir : son autorisation a é
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "Ce à quoi elle est liée a changé depuis l'approbation de la liaison. Liez-la à nouveau une fois que vous avez vérifié que cela convient toujours."
 
+#: src/brain/memory-page.tsx
+msgid "What it rests on"
+msgstr "Ce sur quoi il repose"
+
+#: src/brain/memory-page.tsx
+msgid "What it should say"
+msgstr "Ce qu'il devrait dire"
+
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "What it was for, and which model did it."
 msgstr "À quoi elle a servi, et quel modèle l’a fait."
@@ -14577,6 +14672,10 @@ msgstr "Ce que nous faisons"
 #: src/interview/closed.tsx
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
 msgstr "Ce que vous avez validé est conservé. Vous avez oublié quelque chose ? Ce lien fonctionne jusqu’au {closes}."
+
+#: src/brain/memory-page.tsx
+msgid "What you and your agents remember, and what others share with you, shows here."
+msgstr "Ce dont vous et vos agents vous souvenez, et ce que d'autres partagent avec vous, apparaissent ici."
 
 #: src/landscape/data-tab.tsx
 msgid "What your identity provider granted {appName}."
@@ -15431,6 +15530,16 @@ msgstr "Vos mots"
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Votre espace de travail, qui peut y faire quoi, et votre propre compte."
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
+msgid "Yours"
+msgstr "Les vôtres"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory records: the person's own"
+msgid "Yours"
+msgstr "Les vôtres"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Zoom in"

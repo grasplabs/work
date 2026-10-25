@@ -21,6 +21,7 @@
     "./limits": "./src/limits.ts",
     "./markdown": "./src/markdown.ts",
     "./memories": "./src/memories.ts",
+    "./memory-lineage": "./src/memory-lineage.ts",
     "./migrations/journal": "./src/db/migrations/meta/_journal.json",
     "./outcomes": "./src/outcomes.ts",
     "./payloads": "./src/payloads.ts",
