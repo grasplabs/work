@@ -2716,7 +2716,6 @@ const refusedFailureTask = (
       emitter.refusals.add(pointerJoin(pointer, key), `raise:${key}`, id);
       refused = true;
     }
-    }
   }
   return refused;
 };
