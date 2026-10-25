@@ -289,6 +289,58 @@ describe("who answers for a draft", slow, () => {
   });
 });
 
+describe("an App's owner, named again to answer for it", slow, () => {
+  it("qualifies only as anyone else would: not once removed, nor for a draft once they no longer build", async () => {
+    const [demoted, removed, builder, admin] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("builder"),
+      personApi("admin"),
+    ]);
+    // Drafts, which only those who build them open.
+    const draftOf = async (owner: Person): Promise<string> => {
+      const { id } = await owner.api.apps.create({ name: `Draft ${unique()}` });
+      await share(owner, id, builder, "builder");
+      await builder.api.apps.update(id, { responsible: builder.userId });
+      return id;
+    };
+    const [ofDemoted, ofRemoved] = await Promise.all([
+      draftOf(demoted),
+      draftOf(removed),
+    ]);
+    await admin.api.members.setRole(demoted.userId, "user");
+    await admin.api.members.remove(removed.userId);
+
+    const refused = {
+      demoted: await outcome(
+        builder.api.apps.update(ofDemoted, { responsible: demoted.userId })
+      ),
+      removed: await outcome(
+        builder.api.apps.update(ofRemoved, { responsible: removed.userId })
+      ),
+    };
+    const kept = await builder.api.apps.get(ofDemoted);
+    // Published, the App is open to its owner as a user: they may answer.
+    await published(ofDemoted);
+    const named = await builder.api.apps.update(ofDemoted, {
+      responsible: demoted.userId,
+    });
+
+    expect({
+      refused,
+      kept: kept.responsible,
+      named: named.responsible,
+    }).toStrictEqual({
+      refused: {
+        demoted: "app.responsible_invalid",
+        removed: "app.responsible_invalid",
+      },
+      kept: builder.userId,
+      named: demoted.userId,
+    });
+  });
+});
+
 describe("whom an App is made for", slow, () => {
   it("is a team or a member of the organization a builder names, or nobody in particular, and grants nothing", async () => {
     const [owner, admin, person] = await Promise.all([

@@ -127,8 +127,10 @@ const planText = (plan: Plan, row: Row, changes: Changes): void => {
 };
 
 /**
- * Who answers for it, where that changes, once they qualify: kept as none
- * for its owner, who always may.
+ * Who answers for it, where that changes, once they qualify (`mayAnswer`):
+ * its owner too, whom being its owner doesn't qualify once they were
+ * removed from the organization or can no longer open it as it is. Its
+ * owner is kept as none.
  */
 const planResponsible = async (
   env: Env,
@@ -140,10 +142,8 @@ const planResponsible = async (
   if (responsibleId === row.responsibleId) {
     return;
   }
-  if (responsibleId !== null) {
-    await requireResponsible(env, row.id, responsibleId);
-    plan.guards.push(mayAnswer(responsibleId, row.id));
-  }
+  await requireResponsible(env, row.id, responsible);
+  plan.guards.push(mayAnswer(responsible, row.id));
   plan.set.responsibleId = responsibleId;
   plan.guards.push(holds(apps.responsibleId, row.responsibleId));
   plan.detail.responsible = responsible;
