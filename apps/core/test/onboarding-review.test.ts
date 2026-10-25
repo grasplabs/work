@@ -7,13 +7,13 @@ import type {
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
-import { answering } from "./interview-link.ts";
+import { answering, holdAlarm } from "./interview-link.ts";
 import {
   auditedDuring,
   outcome,
@@ -196,6 +196,8 @@ const drawn = async (ids: Ids) => {
 };
 
 describe("what needs the admin", { timeout: 60_000 }, () => {
+  beforeEach(holdAlarm);
+
   it("is a step told two ways that nobody could explain, never who told which, and keeps how the admin settled it", async () => {
     const ids = await team();
     const { tickets } = await drawn(ids);
