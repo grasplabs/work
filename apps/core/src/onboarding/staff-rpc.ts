@@ -45,7 +45,7 @@ import type {
   StaffLog,
   StaffNote,
   StaffOverview,
-  StaffTranscript,
+  StaffInterview,
   StaffWorks,
   StephenSetup,
   StephenSetupView,
@@ -255,7 +255,12 @@ export class OnboardingStaffRpc
     });
   }
 
-  async transcript(personId: string): Promise<StaffTranscript> {
+  /**
+   * Where someone's interview stands, and its numbers: never a word of it.
+   * Grasp's staff don't read what anyone said (GRA-329); there is no way
+   * here, or anywhere in core, for them to.
+   */
+  async interview(personId: string): Promise<StaffInterview> {
     return await withPerson(this.#check, async (person) => {
       requireStaff(person);
       const id = onboardingErrors.parse(
@@ -263,20 +268,20 @@ export class OnboardingStaffRpc
         rosterPersonSchema.shape.id,
         personId
       );
-      const found = await onboardingStore(this.#env).transcriptOf(id);
+      const found = await onboardingStore(this.#env).interviewOf(id);
       if (found === null) {
         throw onboardingErrors.create("onboarding.not_found");
       }
-      const { interviewId, ...transcript } = found;
-      // On record before it is read, by the link's random id: the company's
+      const { interviewId, ...interview } = found;
+      // On record before it is seen, by the link's random id: the company's
       // admin reads the audit log, and the person's id would name them.
       await appendAuditEvent(this.#env, {
         actor: actorOf(person),
-        action: "onboarding.transcript.read",
+        action: "onboarding.interview.read",
         target: { type: "interview", id: interviewId },
         detail: {},
       });
-      return transcript;
+      return interview;
     });
   }
 
@@ -312,7 +317,7 @@ export class OnboardingStaffRpc
         throw onboardingErrors.create("onboarding.not_found");
       }
       // A link is a credential: on record before it is read, by its
-      // random id, as a transcript read is.
+      // random id, as a look at an interview is.
       await appendAuditEvent(this.#env, {
         actor: actorOf(person),
         action: "onboarding.link.read",

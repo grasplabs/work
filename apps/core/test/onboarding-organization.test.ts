@@ -16,7 +16,7 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
-import { answering } from "./interview-link.ts";
+import { answering, approveAgreed } from "./interview-link.ts";
 import {
   auditedDuring,
   openRpc,
@@ -152,6 +152,10 @@ const mapOps = async (ids: Awaited<ReturnType<typeof running>>) => {
   });
   const { version }: InterviewSaved = await saved.json();
   expect(version).toBe(1);
+  await approveAgreed(
+    { secret, key: key ?? "" },
+    progressOf("Max and Mia handle tickets; Lea plans the rota.").facts
+  );
   const reply: GatewayReply = {
     text: JSON.stringify({
       does: "Answers customers' questions",

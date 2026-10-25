@@ -734,7 +734,7 @@ const StepsTold = ({ record }: { record: RecordOfWork }) => {
   );
 };
 
-/** Who it was heard from, each with their transcript a click away. */
+/** Who it was heard from, each with where their interview stands a click away. */
 const HeardFrom = ({
   view,
   record,
@@ -780,7 +780,7 @@ const HeardFrom = ({
                 </span>
                 <span className="flex justify-end">
                   <Button
-                    aria-label={t`Read the transcript of ${name}`}
+                    aria-label={t`See the interview of ${name}`}
                     render={
                       <Link
                         params={{ person: interview.person.id }}
@@ -790,7 +790,7 @@ const HeardFrom = ({
                     size="sm"
                     variant="ghost"
                   >
-                    <Trans context="button: read a transcript">Read</Trans>
+                    <Trans context="button: see an interview">See</Trans>
                   </Button>
                 </span>
               </li>

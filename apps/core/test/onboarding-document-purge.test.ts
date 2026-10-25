@@ -18,7 +18,7 @@ import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
 import type { Answer, GatewayReply } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, gatewayConfig } from "./interview-link.ts";
+import { answering, approveAgreed, gatewayConfig } from "./interview-link.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
@@ -120,9 +120,9 @@ const purge = async (
 };
 
 /** The people of a team, by key. */
-type Key = "lea" | "max" | "mia" | "mo";
+type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim";
 
-/** A team called Ops, led by Lea, with Max, Mia and Mo, in an onboarding that started yesterday. */
+/** A team called Ops, led by Lea, with Max, Mia, Mo, Noor and Pim, in an onboarding that started yesterday: five who tell their own work, as many as reach the brain. */
 const team = async () => {
   const store = onboardingStore(env);
   const id = unique();
@@ -132,14 +132,18 @@ const team = async () => {
     max: `max-${id}`,
     mia: `mia-${id}`,
     mo: `mo-${id}`,
+    noor: `noor-${id}`,
+    pim: `pim-${id}`,
   };
   const names: Record<Key, [string, string]> = {
     lea: ["Lea Lind", "Team lead"],
     max: ["Max Mol", "Agent"],
     mia: ["Mia Moor", "Agent"],
     mo: ["Mo Mertens", "Agent"],
+    noor: ["Noor Nijs", "Agent"],
+    pim: ["Pim Peeters", "Agent"],
   };
-  const keys: Key[] = ["lea", "max", "mia", "mo"];
+  const keys: Key[] = ["lea", "max", "mia", "mo", "noor", "pim"];
   const roster: Roster = {
     teams: [{ id: ids.team, name: "Ops", lead: ids.lea, does: "", off: false }],
     people: keys.map((key) => ({
@@ -208,6 +212,7 @@ const agree = async (person: string, facts: InterviewFact[]) => {
     body: JSON.stringify({ action: "save", ...link, version: 0, progress }),
   });
   const saved: InterviewSaved = await response.json();
+  await approveAgreed(link, facts);
   return saved.version;
 };
 
@@ -270,7 +275,7 @@ const rotaReply = (ids: Ids): GatewayReply => ({
   outputTokens: 1,
 });
 
-/** Lea's map drawn and the rota out of the way, then Max, Mia and Mo agree to what they told about tickets. */
+/** Lea's map drawn and the rota out of the way, then Max, Mia, Mo, Noor and Pim agree to what they told about tickets. */
 const toldAll = async (ids: Ids) => {
   const store = onboardingStore(env);
   await store.releaseDue();
@@ -285,6 +290,8 @@ const toldAll = async (ids: Ids) => {
   await agree(ids.mo, [
     fact("o1", "wait", "A ticket waits days for the customer's reply."),
   ]);
+  await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
+  await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
 };
 
 /** What `run` returns while the gateway answers each request with what `respond` makes. */

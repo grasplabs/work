@@ -6,16 +6,22 @@ import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import {
+  factRevision,
   interviewPagePath,
   interviewProgressSchema,
+  participationNotice,
 } from "@grasp-os/shared/interview-links";
 import type {
+  ApprovedFact,
+  InterviewApproval,
   InterviewElsewhere,
+  InterviewFact,
+  InterviewParticipation,
   InterviewProgress,
   InterviewSaved,
   InterviewSession,
+  InterviewWithdrawal,
 } from "@grasp-os/shared/interview-links";
-import { agreedFacts, agreedKey } from "@grasp-os/shared/interview-story";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { visionFields } from "@grasp-os/shared/kickoff";
 import type {
@@ -27,6 +33,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   agreementsSchema,
   firstInterviewer,
+  minTeamShown,
   planSchema,
   remindAfterWorkingDays,
   rosterSchema,
@@ -68,7 +75,7 @@ import type {
   StaffLog,
   StaffLogEntry,
   StaffNote,
-  StaffTranscript,
+  StaffInterview,
   StaffWorks,
   StephenSetup,
   StephenSetupView,
@@ -107,6 +114,7 @@ import { inList } from "../db/d1.ts";
 import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
 import {
+  approvals,
   askedAbout,
   answerWaits,
   auditOutbox,
@@ -121,13 +129,16 @@ import {
   interviewTexts,
   interviewSettings,
   interviews,
+  linesToForget,
   linkCodes,
   documents,
   kickoff,
   links,
   notes,
   onboarding,
+  participations,
   people,
+  readbacks,
   teamCounts,
   teams,
   settledWorks,
@@ -146,12 +157,8 @@ import {
 } from "../mail-outbox.ts";
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
 import { sendMail } from "../mail.ts";
-import {
-  brainFloor,
-  intakeIds,
-  intakeOf,
-  rosterSource,
-} from "./brain-intake.ts";
+import { forgetStored } from "../speech-cache.ts";
+import { intakeIds, intakeOf, rosterSource } from "./brain-intake.ts";
 import type { TeamIntake } from "./brain-intake.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import {
@@ -174,7 +181,7 @@ import {
   takingPart,
 } from "./rules.ts";
 import type { InterviewState, TeamCount } from "./rules.ts";
-import { anyLanguage, forgetSpokenLines } from "./spoken-lines.ts";
+import { anyLanguage, spokenKeysOf } from "./spoken-lines.ts";
 import type { SaidIn } from "./spoken-lines.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
@@ -256,7 +263,10 @@ export type LinkRefusal =
   | "interview.closed"
   | "interview.elsewhere"
   | "interview.deleted"
-  | "interview.limited";
+  | "interview.limited"
+  | "interview.not_participating"
+  | "interview.notice_changed"
+  | "interview.withdrawn";
 
 /** What a link's request gets from the store: an answer, or why not. */
 export type LinkAnswer<T> =
@@ -264,6 +274,28 @@ export type LinkAnswer<T> =
   | { ok: false; code: LinkRefusal };
 
 const refused = (code: LinkRefusal) => ({ ok: false, code }) as const;
+
+/** Each fact's revision as saved, by its id (`interviews.revisions`). */
+const revisionsSchema = z.record(z.string(), z.string());
+
+/** A fact at a revision, as approvals are looked up by. */
+const revisionKey = (fact: string, revision: string): string =>
+  `${fact}\u0000${revision}`;
+
+/** What counts of an interview, as it stands for comparing: the same facts at the same revisions. */
+const admissionKey = (keys: readonly string[]): string =>
+  keys.toSorted().join("\u0001");
+
+/**
+ * The receipt of a read-back: from exactly the revisions approved, so the
+ * same approval asked again, a lost answer retried, finds the same one.
+ */
+const receiptOf = async (facts: readonly ApprovedFact[]): Promise<string> => {
+  const hash = await sha256Hex(
+    admissionKey(facts.map(({ id, revision }) => revisionKey(id, revision)))
+  );
+  return `rb-${hash.slice(0, 32)}`;
+};
 const answered = <T>(value: T) => ({ ok: true, value }) as const;
 
 /** A person's first name, as Stephen calls them. */
@@ -648,6 +680,32 @@ const countsOf = (progress: InterviewProgress): InterviewCounts => ({
   interviewer: progress.interviewer ?? null,
 });
 
+/** How someone's interview was held, as staff see it: never what was said. */
+const howHeld = (
+  progress: InterviewProgress | null
+): Pick<StaffInterview, "state" | "mode" | "rating" | "interviewer"> =>
+  progress === null
+    ? { state: null, mode: null, rating: null, interviewer: null }
+    : {
+        state: progress.person,
+        mode: progress.mode,
+        rating: progress.rating ?? null,
+        interviewer: progress.interviewer ?? firstInterviewer,
+      };
+
+/** How much someone said and how much was written down: numbers, never what. */
+const countsOfSaid = (
+  progress: InterviewProgress | null
+): { said: number; facts: number; out: number } => {
+  const facts = progress?.facts ?? [];
+  return {
+    said: (progress?.lines ?? []).filter(({ from }) => from === "person")
+      .length,
+    facts: facts.filter(({ out }) => out !== true).length,
+    out: facts.filter(({ out }) => out === true).length,
+  };
+};
+
 /** Why staff's change to the organization wasn't made. */
 export type OrganizationRefusal =
   | ListRefusal
@@ -838,10 +896,12 @@ export class Onboarding extends DurableObject<Env> {
     { confirmed = true }: { confirmed?: boolean } = {}
   ): Promise<OnboardingView> {
     const fresh = await this.#freshCodes(roster);
+    const lines = await this.#lineKeysOf(this.#leaving(roster));
     const said = this.ctx.storage.transactionSync(() => {
       const before = this.#roster();
       const { removed, erased } = this.#writeRoster(roster, fresh, {
         late: false,
+        lines,
       });
       if (confirmed) {
         this.#confirmed(before, roster);
@@ -964,10 +1024,21 @@ export class Onboarding extends DurableObject<Env> {
    * (`#askNewcomers`). Returns how many left, and what was said in the
    * interviews of whoever left (`#erase`), for `#afterForget`.
    */
+  /** Who has an interview here and isn't on `roster`: whose `#writeRoster` erases. */
+  #leaving(roster: Roster): string[] {
+    const kept = new Set(roster.people.map(({ id }) => id));
+    return this.#db
+      .select({ person: interviews.person })
+      .from(interviews)
+      .all()
+      .map(({ person }) => person)
+      .filter((person) => !kept.has(person));
+  }
+
   #writeRoster(
     roster: Roster,
     fresh: readonly { person: string; linkId: string; mark: string }[],
-    { late }: { late: boolean },
+    { late, lines }: { late: boolean; lines: ReadonlyMap<string, string[]> },
     now: string = new Date().toISOString()
   ): { removed: number; erased: (SaidIn | null)[] } {
     const kept = new Set(roster.people.map((person) => person.id));
@@ -980,17 +1051,30 @@ export class Onboarding extends DurableObject<Env> {
       .map(({ id }) => id);
     const mapped = new Map(
       this.#db
-        .select({ id: teams.id, mappedAt: teams.mappedAt })
+        .select({
+          id: teams.id,
+          lead: teams.lead,
+          mappedAt: teams.mappedAt,
+          mappedFrom: teams.mappedFrom,
+        })
         .from(teams)
         .all()
-        .map(({ id, mappedAt }) => [id, mappedAt])
+        .map((row) => [row.id, row])
     );
     this.#db.delete(teams).run();
     this.#db.delete(people).run();
     for (const [position, team] of roster.teams.entries()) {
+      const was = mapped.get(team.id);
       this.#db
         .insert(teams)
-        .values({ ...team, position, mappedAt: mapped.get(team.id) ?? null })
+        .values({
+          ...team,
+          position,
+          mappedAt: was?.mappedAt ?? null,
+          // A map stands on the lead it was drawn from, and no other.
+          mappedFrom:
+            was?.lead === team.lead ? (was?.mappedFrom ?? null) : null,
+        })
         .run();
     }
     for (const [position, person] of roster.people.entries()) {
@@ -1033,7 +1117,14 @@ export class Onboarding extends DurableObject<Env> {
     }
     const erased: (SaidIn | null)[] = [];
     for (const person of new Set([...gone, ...stale])) {
+      this.#queueLines(lines.get(person) ?? []);
       erased.push(this.#erase(person));
+      // Off the list, they take part in nothing: no mark of theirs stays,
+      // their withdrawal's neither.
+      this.#db
+        .delete(participations)
+        .where(eq(participations.person, person))
+        .run();
       this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
       this.#db.delete(links).where(eq(links.person, person)).run();
       dropMailAbout(this.ctx.storage.sql, person);
@@ -1323,8 +1414,9 @@ export class Onboarding extends DurableObject<Env> {
       kind: leads(roster, person.id) ? "lead" : "own",
       closes,
       closed: dayOf(now) > closes,
-      progress: this.#held(person.id),
+      progress: this.#forSpeaker(person.id, this.#held(person.id)),
       version: link.version,
+      withdrawn: this.#withdrawnAt(person.id) !== null,
     });
   }
 
@@ -1334,13 +1426,22 @@ export class Onboarding extends DurableObject<Env> {
    * two tabs never quietly overwrite each other. Deleting moves the version
    * on too: only a copy opened since the delete saves again.
    */
-  saveInterview(
+  async saveInterview(
     secretMark: string,
     keyMark: string,
     version: number,
     progress: InterviewProgress,
     now: string = new Date().toISOString()
-  ): LinkAnswer<InterviewSaved> {
+  ): Promise<LinkAnswer<InterviewSaved>> {
+    // Each fact's revision, from the save alone, before anything here is
+    // read: what an approval must name for the fact to count.
+    const revisions = new Map(
+      await Promise.all(
+        progress.facts.map(
+          async (fact) => [fact.id, await factRevision(fact)] as const
+        )
+      )
+    );
     const found = this.#onLink(secretMark, now, "save");
     if (!found.ok) {
       return found;
@@ -1354,7 +1455,11 @@ export class Onboarding extends DurableObject<Env> {
       if (held === null && link.deletedAt !== null) {
         return refused("interview.deleted");
       }
-      return answered({ saved: false, version: link.version, progress: held });
+      return answered({
+        saved: false,
+        version: link.version,
+        progress: this.#forSpeaker(person.id, held),
+      });
     }
     const next = link.version + 1;
     const [state] = this.#db
@@ -1366,31 +1471,28 @@ export class Onboarding extends DurableObject<Env> {
       state?.startedAt ?? (progress.startedAt === null ? null : now);
     const completedAt =
       state?.completedAt ?? (progress.person === "completed" ? now : null);
-    // Agreed to for the first time, or something added after and agreed to
-    // as well: what it was about is drawn again. Only what they agreed to
-    // counts (`agreedFacts`), so lines still being read back change nothing.
-    const agreed = agreedKey(progress.facts);
-    const newlyAgreed =
-      progress.person === "completed" &&
-      agreed !== "" &&
-      agreed !== agreedKey(this.#held(person.id)?.facts ?? []);
+    // What counts is what they approved, at the revision they approved
+    // (GRA-329), never what the page says it agreed to: an edit, or a fact
+    // taken out, stops counting until it is approved as it is now.
+    const before = this.#admittedKeys(person.id);
+    const after = this.#admittedKeys(person.id, progress, revisions);
+    const lost = before.some((key) => !after.includes(key));
+    const changed = admissionKey(before) !== admissionKey(after);
     this.ctx.storage.transactionSync(() => {
       this.#db
         .update(links)
         .set({ version: next })
         .where(eq(links.person, person.id))
         .run();
+      const kept = {
+        progress: JSON.stringify(progress),
+        updatedAt: now,
+        revisions: JSON.stringify(Object.fromEntries(revisions)),
+      };
       this.#db
         .insert(interviews)
-        .values({
-          person: person.id,
-          progress: JSON.stringify(progress),
-          updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: interviews.person,
-          set: { progress: JSON.stringify(progress), updatedAt: now },
-        })
+        .values({ person: person.id, ...kept })
+        .onConflictDoUpdate({ target: interviews.person, set: kept })
         .run();
       this.#noteState(
         {
@@ -1407,19 +1509,201 @@ export class Onboarding extends DurableObject<Env> {
       if (completedAt !== null && (state?.completedAt ?? null) === null) {
         this.#noted(person.id, "interview.completed", now);
       }
-      if (newlyAgreed) {
-        this.#db
-          .update(interviewStates)
-          .set({ agreedAt: now })
-          .where(eq(interviewStates.person, person.id))
-          .run();
-        this.#brainDue(person.team, now);
+      if (changed) {
+        this.#admissionChanged(person, after.length > 0, lost, now);
       }
     });
-    if (newlyAgreed) {
+    if (lost) {
+      // What rested on a revision that no longer counts leaves the brain
+      // now, or from the alarm until it does.
+      this.ctx.waitUntil(this.#afterForget([]));
+    } else if (changed) {
       this.ctx.waitUntil(this.#alarmBy(Date.parse(now) + drawAfterMs));
     }
     return answered({ saved: true, version: next });
+  }
+
+  /**
+   * They read what the interview is for (`participationNotice`) and agree
+   * to take part: nothing they say is recorded or read by a model before
+   * (GRA-329). The same notice agreed to again answers as the first time;
+   * someone who withdrew can't take part again in this interview.
+   */
+  participate(
+    secretMark: string,
+    keyMark: string,
+    notice: number,
+    now: string = new Date().toISOString()
+  ): LinkAnswer<InterviewParticipation> {
+    const found = this.#onLink(secretMark, now, "save");
+    if (!found.ok) {
+      return found;
+    }
+    const { person, link } = found.value;
+    if (link.keyMark === null || link.keyMark !== keyMark) {
+      return refused("interview.elsewhere");
+    }
+    const [held] = this.#db
+      .select()
+      .from(participations)
+      .where(eq(participations.person, person.id))
+      .all();
+    if (held !== undefined && held.withdrawnAt !== null) {
+      return refused("interview.withdrawn");
+    }
+    if (notice !== participationNotice.version) {
+      return refused("interview.notice_changed");
+    }
+    if (held?.notice === notice) {
+      return answered({ notice, at: held.at });
+    }
+    const agreed = {
+      notice,
+      purpose: participationNotice.purpose,
+      audience: participationNotice.audience,
+      at: now,
+    };
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .insert(participations)
+        .values({ person: person.id, ...agreed })
+        .onConflictDoUpdate({ target: participations.person, set: agreed })
+        .run();
+      this.#noted(person.id, "interview.participated", now);
+    });
+    return answered({ notice, at: now });
+  }
+
+  /**
+   * They approve the facts read back to them, each at the revision they
+   * saw: from now on those, exactly as they are, count (GRA-329). A
+   * revision that isn't the one kept, read back from an older copy or
+   * changed since, is refused with the copy kept, so they read it again.
+   * The same approval asked again answers its first receipt.
+   */
+  async approve(
+    secretMark: string,
+    keyMark: string,
+    facts: readonly ApprovedFact[],
+    now: string = new Date().toISOString()
+  ): Promise<LinkAnswer<InterviewApproval>> {
+    // From the request alone, before anything here is read.
+    const receipt = await receiptOf(facts);
+    const found = this.#onLink(secretMark, now, "save");
+    if (!found.ok) {
+      return found;
+    }
+    const { person, link } = found.value;
+    if (link.keyMark === null || link.keyMark !== keyMark) {
+      return refused("interview.elsewhere");
+    }
+    const taking = this.#participating(person.id);
+    if (taking !== null) {
+      return refused(taking);
+    }
+    const progress = this.#held(person.id);
+    const revisions = this.#revisionsOf(person.id);
+    const standing = new Set(
+      (progress?.facts ?? [])
+        .filter(({ out }) => out !== true)
+        .map(({ id }) => id)
+    );
+    const stale = facts.some(
+      ({ id, revision }) => !standing.has(id) || revisions.get(id) !== revision
+    );
+    if (progress === null || stale) {
+      return answered({
+        approved: false,
+        version: link.version,
+        progress: this.#forSpeaker(person.id, progress),
+      });
+    }
+    const [kept] = this.#db
+      .select({ at: readbacks.at })
+      .from(readbacks)
+      .where(
+        and(eq(readbacks.person, person.id), eq(readbacks.receipt, receipt))
+      )
+      .all();
+    if (kept !== undefined) {
+      return answered({ approved: true, receipt, at: kept.at });
+    }
+    const changed = this.ctx.storage.transactionSync(() => {
+      const before = admissionKey(this.#admittedKeys(person.id));
+      this.#db
+        .insert(readbacks)
+        .values({ person: person.id, receipt, at: now })
+        .run();
+      for (const { id, revision } of facts) {
+        this.#db
+          .insert(approvals)
+          .values({ person: person.id, fact: id, revision, receipt, at: now })
+          .onConflictDoNothing()
+          .run();
+      }
+      this.#noted(person.id, "interview.approved", now);
+      const moved = admissionKey(this.#admittedKeys(person.id)) !== before;
+      if (moved) {
+        this.#admissionChanged(person, true, false, now);
+      }
+      return moved;
+    });
+    if (changed) {
+      await this.#alarmBy(Date.parse(now) + drawAfterMs);
+    }
+    return answered({ approved: true, receipt, at: now });
+  }
+
+  /**
+   * They withdraw (GRA-329), for good: from now on nothing they said is
+   * recorded, read by a model, drawn or given to the brain; what the brain
+   * has that rests on them is taken out now, or from the alarm until it
+   * is, every drawing they were in is drawn again without them, and the
+   * interviewer's lines that read it back are forgotten. What they said
+   * stays theirs to read and delete. Works whenever deleting does;
+   * withdrawing again answers as the first time.
+   */
+  async withdraw(
+    secretMark: string,
+    keyMark: string,
+    now: string = new Date().toISOString()
+  ): Promise<LinkAnswer<InterviewWithdrawal>> {
+    const found = this.#onLink(secretMark, now, "delete");
+    if (!found.ok) {
+      return found;
+    }
+    const { person, link } = found.value;
+    if (link.keyMark === null || link.keyMark !== keyMark) {
+      return refused("interview.elsewhere");
+    }
+    const [held] = this.#db
+      .select({ withdrawnAt: participations.withdrawnAt })
+      .from(participations)
+      .where(eq(participations.person, person.id))
+      .all();
+    if (held === undefined) {
+      return refused("interview.not_participating");
+    }
+    if (held.withdrawnAt !== null) {
+      return answered({ withdrawn: true, at: held.withdrawnAt });
+    }
+    const lines = await this.#lineKeysOf([person.id]);
+    const said = this.ctx.storage.transactionSync(() => {
+      this.#queueLines(lines.get(person.id) ?? []);
+      this.#db
+        .update(participations)
+        .set({ withdrawnAt: now })
+        .where(eq(participations.person, person.id))
+        .run();
+      this.#admissionChanged(person, false, true, now);
+      this.#noted(person.id, "interview.withdrawn", now);
+      return this.#saidIn(person.id);
+    });
+    // Final, with no undo (GRA-329): every output it was in is erased, the
+    // brain's records now or from the alarm until they are, and the lines
+    // of the interviewer's voice that read it back.
+    await this.#afterForget([said]);
+    return answered({ withdrawn: true, at: now });
   }
 
   /**
@@ -1445,6 +1729,11 @@ export class Onboarding extends DurableObject<Env> {
     const { person, link, roster } = found.value;
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
+    }
+    // Nothing they said goes to a model before they agreed to take part.
+    const taking = this.#participating(person.id);
+    if (taking !== null) {
+      return refused(taking);
     }
     const context = this.#contextOf(person, roster);
     if (texts !== undefined) {
@@ -1572,7 +1861,7 @@ export class Onboarding extends DurableObject<Env> {
       .from(interviewStates)
       .where(eq(interviewStates.person, person))
       .all();
-    const facts = agreedFacts(this.#held(person)?.facts ?? []);
+    const facts = this.#admitted(person);
     if (state === undefined || state.agreedAt === null || facts.length === 0) {
       return null;
     }
@@ -2072,6 +2361,7 @@ export class Onboarding extends DurableObject<Env> {
       return next;
     }
     const fresh = await this.#freshCodes(next);
+    const lines = await this.#lineKeysOf(this.#leaving(next));
     const written = this.ctx.storage.transactionSync(() => {
       // Made again on the list as it is now: what changed meanwhile stands.
       const before = this.#roster();
@@ -2079,7 +2369,10 @@ export class Onboarding extends DurableObject<Env> {
       if (typeof after === "string" || before === null) {
         return typeof after === "string" ? after : "onboarding.no_roster";
       }
-      const { erased } = this.#writeRoster(after, fresh, { late: true });
+      const { erased } = this.#writeRoster(after, fresh, {
+        late: true,
+        lines,
+      });
       const { action, detail, about } = listChangeOf(change, before, id);
       this.#changed(by, action, detail, about);
       return erased;
@@ -2368,12 +2661,14 @@ export class Onboarding extends DurableObject<Env> {
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
     }
+    const lines = await this.#lineKeysOf([person.id]);
     const said = this.ctx.storage.transactionSync(() => {
       const forgotten = this.#forget(
         person.id,
         now,
         "interview.deleted",
-        interviewee
+        interviewee,
+        lines
       );
       this.#db
         .update(links)
@@ -2401,12 +2696,14 @@ export class Onboarding extends DurableObject<Env> {
       return false;
     }
     const now = new Date().toISOString();
+    const lines = await this.#lineKeysOf([person]);
     const said = this.ctx.storage.transactionSync(() => {
       const forgotten = this.#forget(
         person,
         now,
         "interview.new_start",
-        whoIs(by)
+        whoIs(by),
+        lines
       );
       this.#db
         .update(links)
@@ -2572,6 +2869,11 @@ export class Onboarding extends DurableObject<Env> {
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
     }
+    // The interviewer's voice reads what this is before they agree to take
+    // part, so it doesn't wait for that; once they withdrew it says nothing.
+    if (this.#withdrawnAt(person.id) !== null) {
+      return refused("interview.withdrawn");
+    }
     const who = `${linkWho}${person.id}`;
     return answered({ who, said: this.voiceSaid(who, now) });
   }
@@ -2619,6 +2921,11 @@ export class Onboarding extends DurableObject<Env> {
     }
     const who = heardKey(found.value.who);
     const person = found.value.who.slice(linkWho.length);
+    // Nothing they say is heard before they agreed to take part.
+    const taking = this.#participating(person);
+    if (taking !== null) {
+      return refused(taking);
+    }
     return answered({ who, heard: this.voiceSaid(who, now), person });
   }
 
@@ -2636,9 +2943,14 @@ export class Onboarding extends DurableObject<Env> {
     if (!found.ok) {
       return found;
     }
-    const { link } = found.value;
+    const { person, link } = found.value;
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
+    }
+    // Withdrawing stops what is being heard, too.
+    const taking = this.#participating(person.id);
+    if (taking !== null) {
+      return refused(taking);
     }
     return answered(null);
   }
@@ -3355,12 +3667,14 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Someone's interview for Grasp's staff, with who held it and the texts
-   * it was held with, and the link's random id to audit its read by.
+   * Someone's interview for Grasp's staff (GRA-329): who held it, the
+   * texts it was held with, where it stands and its numbers, read here,
+   * inside the store, so not a word of it leaves; and the link's random id
+   * to audit the look by.
    */
-  transcriptOf(
+  interviewOf(
     person: string
-  ): (StaffTranscript & { interviewId: string }) | null {
+  ): (StaffInterview & { interviewId: string }) | null {
     const roster = this.#roster();
     const one = roster?.people.find(({ id }) => id === person);
     const [code] = this.#db
@@ -3379,17 +3693,51 @@ export class Onboarding extends DurableObject<Env> {
       .where(eq(interviewTexts.person, person))
       .orderBy(asc(interviewTexts.at), asc(interviewTexts.mark))
       .all();
+    const [taking] = this.#db
+      .select({
+        at: participations.at,
+        withdrawnAt: participations.withdrawnAt,
+      })
+      .from(participations)
+      .where(eq(participations.person, person))
+      .all();
     return {
       person,
       name: one.name,
       team: roster?.teams.find(({ id }) => id === one.team)?.name ?? "",
       startedAt: state?.startedAt ?? null,
       completedAt: state?.completedAt ?? null,
-      progress,
-      interviewer:
-        progress === null ? null : (progress.interviewer ?? firstInterviewer),
+      ...howHeld(progress),
       texts: texts.map(({ mark }) => mark),
+      counts: {
+        ...countsOfSaid(progress),
+        approved: this.#admitted(person, progress).length,
+      },
+      participatedAt: taking?.at ?? null,
+      withdrawnAt: taking?.withdrawnAt ?? null,
       interviewId: code.linkId,
+    };
+  }
+
+  /**
+   * What a practice person said and approved, for the Stephen Lab alone
+   * (lab.ts, on a local stack): the lab played them, and scores what was
+   * written down. Never reached on a deployed core, where Grasp's staff
+   * see no word of an interview (GRA-329, `interviewOf`).
+   */
+  practiceInterviewOf(person: string): {
+    startedAt: string | null;
+    completedAt: string | null;
+    progress: InterviewProgress | null;
+  } | null {
+    if (!this.#onRoster(person)) {
+      return null;
+    }
+    const state = this.#interviews().get(person);
+    return {
+      startedAt: state?.startedAt ?? null,
+      completedAt: state?.completedAt ?? null,
+      progress: this.#forSpeaker(person, this.#held(person)),
     };
   }
 
@@ -3498,12 +3846,14 @@ export class Onboarding extends DurableObject<Env> {
     if (link === undefined) {
       return false;
     }
+    const lines = await this.#lineKeysOf([person]);
     const said = this.ctx.storage.transactionSync(() => {
       const forgotten = this.#forget(
         person,
         now,
         "interview.deleted",
-        whoIs(by)
+        whoIs(by),
+        lines
       );
       this.#db
         .update(links)
@@ -3618,25 +3968,31 @@ export class Onboarding extends DurableObject<Env> {
    * the next.
    */
   override async alarm(): Promise<void> {
-    await this.#drainAudit();
-    await this.releaseDue();
-    // A team's map opens its links.
-    if ((await this.drawNext()) !== null) {
-      await this.releaseDue();
-    }
     try {
-      await this.purgeBrain();
-    } catch (error) {
-      log.error("onboarding.purge_failed", {
-        error: error instanceof Error ? error.name : "unknown",
-      });
+      // Erasure first (GRA-329): nothing else that fails holds it up.
+      try {
+        await this.purgeBrain();
+      } catch (error) {
+        log.error("onboarding.purge_failed", {
+          error: error instanceof Error ? error.name : "unknown",
+        });
+      }
+      await this.forgetLinesNow();
+      await this.#drainAudit();
+      await this.releaseDue();
+      // A team's map opens its links.
+      if ((await this.drawNext()) !== null) {
+        await this.releaseDue();
+      }
+      await this.intakeNext();
+      await this.remindDue();
+      await this.sendUpdate();
+      await this.deliverMail();
+    } finally {
+      // Set again whatever failed above, so what is left is tried again.
+      await this.#armLinks();
+      await this.#armDrawing();
     }
-    await this.intakeNext();
-    await this.remindDue();
-    await this.sendUpdate();
-    await this.deliverMail();
-    await this.#armLinks();
-    await this.#armDrawing();
   }
 
   /**
@@ -4287,9 +4643,9 @@ export class Onboarding extends DurableObject<Env> {
         person,
         title: who?.title ?? "",
         facts,
-        example:
-          this.#held(person)?.lines.find(({ file }) => file !== undefined)
-            ?.file ?? null,
+        // A file's name is said in the conversation, never read back or
+        // approved (GRA-329): only approved facts leave the store.
+        example: null,
         ...(about === undefined ? {} : { about }),
       };
     });
@@ -4363,10 +4719,13 @@ export class Onboarding extends DurableObject<Env> {
         person: interviewStates.person,
         startedAt: interviewStates.startedAt,
         agreedAt: interviewStates.agreedAt,
+        revokedAt: interviewStates.revokedAt,
       })
       .from(interviewStates)
       .where(inList(interviewStates.person, whose))
       .all();
+    // Something they approved stopping counting (`revokedAt`) makes what
+    // was read before it as gone as a delete does.
     return new Map(
       whose.map((person) => {
         const row = rows.find((each) => each.person === person);
@@ -4374,7 +4733,7 @@ export class Onboarding extends DurableObject<Env> {
           person,
           row === undefined || row.agreedAt === null
             ? null
-            : (row.startedAt ?? ""),
+            : `${row.startedAt ?? ""}|${row.revokedAt ?? ""}`,
         ];
       })
     );
@@ -4495,7 +4854,7 @@ export class Onboarding extends DurableObject<Env> {
    * names (for none to reach it), the facts each person who told their
    * own work agreed to, and its pieces of work as drawn. Never the lead's
    * facts, whose role alone says who they are, nor a piece of work drawn
-   * from the lead alone. None while fewer than `brainFloor` of its people
+   * from the lead alone. None while fewer than `minTeamShown` of its people
    * agreed: it waits.
    */
   #teamIntake(teamId: string): TeamIntake | null {
@@ -4504,24 +4863,21 @@ export class Onboarding extends DurableObject<Env> {
     if (roster === null || team === undefined || team.off) {
       return null;
     }
-    const members = roster.people.filter((person) => person.team === teamId);
-    const agreed = members.filter(({ id }) => this.#agreedAt(id) !== null);
-    if (agreed.length < brainFloor) {
+    const tellers = this.#tellers(teamId);
+    if (tellers.length < minTeamShown) {
       return null;
     }
     const { lead } = team;
     const leadAgreed =
       lead !== null && this.#agreedAt(lead) !== null ? [lead] : [];
+    // The pieces of work are the lead's map: none reach the brain while
+    // what it was drawn from no longer counts (`#mapBacked`).
+    const mapped = this.#mapBacked(teamId) ? this.teamWorks(teamId) : [];
     return {
       team: { id: team.id, name: team.name },
       names: roster.people.map(({ name }) => name),
-      tellers: agreed.flatMap(({ id }) => {
-        const input = this.drawInput(id);
-        return input === null || input.kind !== "own" || id === lead
-          ? []
-          : [{ person: id, facts: input.facts }];
-      }),
-      works: this.teamWorks(teamId).flatMap((work) => {
+      tellers,
+      works: mapped.flatMap((work) => {
         const { drawn } = work;
         if (
           drawn === null ||
@@ -4547,6 +4903,63 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The people of a team whose facts reach the brain (GRA-329): on its
+   * list, not its lead, whose role alone says who they are, and with
+   * something they approved that counts. Only they count towards the five
+   * a team needs (`minTeamShown`).
+   */
+  #tellers(teamId: string): { person: string; facts: DrawInput["facts"] }[] {
+    const roster = this.#roster();
+    const team = roster?.teams.find(({ id }) => id === teamId);
+    if (roster === null || team === undefined) {
+      return [];
+    }
+    return roster.people.flatMap(({ id, team: of }) => {
+      if (of !== teamId || id === team.lead) {
+        return [];
+      }
+      const input = this.drawInput(id);
+      return input === null || input.kind !== "own"
+        ? []
+        : [{ person: id, facts: input.facts }];
+    });
+  }
+
+  /**
+   * Whether a team's map stands on what its lead's facts are now: drawn
+   * from their agreement, and nothing they approved stopped counting since
+   * (an edit or a withdrawal, `revokedAt`). A team without a lead has no
+   * map of anyone's.
+   */
+  #mapBacked(teamId: string): boolean {
+    const team = this.#roster()?.teams.find(({ id }) => id === teamId);
+    if (team === undefined || team.lead === null) {
+      return true;
+    }
+    const [row] = this.#db
+      .select({ mappedFrom: teams.mappedFrom })
+      .from(teams)
+      .where(eq(teams.id, teamId))
+      .all();
+    const [state] = this.#db
+      .select({
+        agreedAt: interviewStates.agreedAt,
+        revokedAt: interviewStates.revokedAt,
+      })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, team.lead))
+      .all();
+    const from = row?.mappedFrom ?? null;
+    const agreedAt = state?.agreedAt ?? null;
+    const revokedAt = state?.revokedAt ?? null;
+    return (
+      from !== null &&
+      agreedAt !== null &&
+      (revokedAt === null || from >= revokedAt)
+    );
+  }
+
+  /**
    * Gives the brain what a team learned, as it was due at `dueAt`
    * (brain-intake.ts), as the onboarding, which owns those records: kept
    * once each, so giving it again adds only what is new. Then notes who
@@ -4558,10 +4971,12 @@ export class Onboarding extends DurableObject<Env> {
       this.#brainSettled(teamId, dueAt);
       return;
     }
+    // Who it rests on, as their interviews stand now, before anything is
+    // awaited: whatever happens to them meanwhile is seen at the end.
+    const began = this.#interviewsOf(
+      this.#roster()?.people.map(({ id }) => id) ?? []
+    );
     const { records, rests } = await intakeOf(intake);
-    const began = this.#interviewsOf([
-      ...new Set(rests.map(({ person }) => person)),
-    ]);
     await keepOnboardingRecords(this.env, records, {
       sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
       teams: new Set([intakeIds.team(teamId)]),
@@ -4626,7 +5041,7 @@ export class Onboarding extends DurableObject<Env> {
    * - a drawing once anyone it rests on is gone: their numbers and words
    *   are in it, and what is left is drawn again without them;
    * - a workflow once nobody it rests on is left, or none of its drawings;
-   * - everything of a team fewer than `brainFloor` of whose people still
+   * - everything of a team fewer than `minTeamShown` of whose people still
    *   agreed, or that left the staff list: the brain has a team's work
    *   only from three of its people (GRA-359), and gets it again once it
    *   does.
@@ -4647,16 +5062,16 @@ export class Onboarding extends DurableObject<Env> {
         .map(({ person }) => person)
     );
     const roster = this.#roster();
+    const teamIds = [...new Set(rows.map(({ team }) => team))];
     const emptied = new Set(
-      [...new Set(rows.map(({ team }) => team))].filter((team) => {
+      teamIds.filter((team) => {
         const onRoster = roster?.teams.some(({ id }) => id === team) === true;
-        const left =
-          roster?.people.filter(
-            (person) => person.team === team && agreed.has(person.id)
-          ).length ?? 0;
-        return !onRoster || left < brainFloor;
+        return !onRoster || this.#tellers(team).length < minTeamShown;
       })
     );
+    // A map no longer standing on its lead's facts takes its pieces of
+    // work, and every drawing of them, out of the brain (GRA-329).
+    const unmapped = new Set(teamIds.filter((team) => !this.#mapBacked(team)));
     const records = new Map<
       string,
       { type: string; team: string; people: string[] }
@@ -4672,7 +5087,9 @@ export class Onboarding extends DurableObject<Env> {
       if (
         emptied.has(team) ||
         left.length === 0 ||
-        (type === "workflowVersion" && left.length < on.length)
+        (type === "workflowVersion" && left.length < on.length) ||
+        (unmapped.has(team) &&
+          (type === "workflow" || type === "workflowVersion"))
       ) {
         purged.add(record);
       }
@@ -4788,8 +5205,17 @@ export class Onboarding extends DurableObject<Env> {
       ...this.#brainDueAt(now).flatMap(({ team, after }) =>
         drawn.has(team) ? [] : [after]
       ),
-      // What rests on an interview that is gone, still in the brain.
-      ...(records.length > 0 || gone.length > 0 ? [now + purgeRetryMs] : []),
+      // What rests on an interview that is gone, still in the brain, and
+      // the voice's lines of one still in the cache.
+      ...(records.length > 0 ||
+      gone.length > 0 ||
+      this.#db
+        .select({ key: linesToForget.key })
+        .from(linesToForget)
+        .limit(1)
+        .all().length > 0
+        ? [now + purgeRetryMs]
+        : []),
     ];
     if (afters.length > 0) {
       await this.#alarmBy(Math.max(Math.min(...afters), now + drawNextMs));
@@ -4939,7 +5365,10 @@ export class Onboarding extends DurableObject<Env> {
         .set({
           does: map.does === "" ? still.does : map.does,
           ...(agreedAt === input.agreedAt
-            ? { mappedAt: sql`coalesce(${teams.mappedAt}, ${at})` }
+            ? {
+                mappedAt: sql`coalesce(${teams.mappedAt}, ${at})`,
+                mappedFrom: input.agreedAt,
+              }
             : {}),
         })
         .where(eq(teams.id, teamId))
@@ -5083,6 +5512,188 @@ export class Onboarding extends DurableObject<Env> {
       : interviewProgressSchema.parse(JSON.parse(row.progress));
   }
 
+  /**
+   * Whether what someone says may be recorded or read by a model now
+   * (GRA-329): they agreed to take part, to the notice as it is now, and
+   * didn't withdraw. Null when it may; why not otherwise.
+   */
+  #participating(person: string): LinkRefusal | null {
+    const [held] = this.#db
+      .select()
+      .from(participations)
+      .where(eq(participations.person, person))
+      .all();
+    if (held === undefined) {
+      return "interview.not_participating";
+    }
+    if (held.withdrawnAt !== null) {
+      return "interview.withdrawn";
+    }
+    return held.notice === participationNotice.version
+      ? null
+      : "interview.notice_changed";
+  }
+
+  /** When someone withdrew; null while they haven't. */
+  #withdrawnAt(person: string): string | null {
+    const [held] = this.#db
+      .select({ withdrawnAt: participations.withdrawnAt })
+      .from(participations)
+      .where(eq(participations.person, person))
+      .all();
+    return held?.withdrawnAt ?? null;
+  }
+
+  /** Each of someone's facts' revision as last saved, by id. */
+  #revisionsOf(person: string): Map<string, string> {
+    const [row] = this.#db
+      .select({ revisions: interviews.revisions })
+      .from(interviews)
+      .where(eq(interviews.person, person))
+      .all();
+    const parsed = revisionsSchema.safeParse(
+      row === undefined ? {} : parsedJson(row.revisions)
+    );
+    return new Map(parsed.success ? Object.entries(parsed.data) : []);
+  }
+
+  /** The fact revisions someone approved (`revisionKey`). */
+  #approvedOf(person: string): Set<string> {
+    return new Set(
+      this.#db
+        .select({ fact: approvals.fact, revision: approvals.revision })
+        .from(approvals)
+        .where(eq(approvals.person, person))
+        .all()
+        .map(({ fact, revision }) => revisionKey(fact, revision))
+    );
+  }
+
+  /**
+   * The facts of someone's interview that count (GRA-329): not taken out,
+   * and approved at the revision they stand at, while they take part and
+   * didn't withdraw. A changed notice doesn't take back what was approved
+   * under the one before; it only stops anything new being recorded.
+   * Nothing else ever leaves the store for a drawing, a map or the brain.
+   */
+  #admitted(
+    person: string,
+    progress: InterviewProgress | null = this.#held(person),
+    revisions: ReadonlyMap<string, string> = this.#revisionsOf(person)
+  ): InterviewFact[] {
+    const [held] = this.#db
+      .select({ withdrawnAt: participations.withdrawnAt })
+      .from(participations)
+      .where(eq(participations.person, person))
+      .all();
+    if (progress === null || held === undefined || held.withdrawnAt !== null) {
+      return [];
+    }
+    const approved = this.#approvedOf(person);
+    return progress.facts.filter(({ id, out }) => {
+      const revision = revisions.get(id);
+      return (
+        out !== true &&
+        revision !== undefined &&
+        approved.has(revisionKey(id, revision))
+      );
+    });
+  }
+
+  /** What counts of someone's interview, as fact revisions (`revisionKey`). */
+  #admittedKeys(
+    person: string,
+    progress: InterviewProgress | null = this.#held(person),
+    revisions: ReadonlyMap<string, string> = this.#revisionsOf(person)
+  ): string[] {
+    return this.#admitted(person, progress, revisions).map(({ id }) =>
+      revisionKey(id, revisions.get(id) ?? "")
+    );
+  }
+
+  /**
+   * Someone's interview as they read it back, and staff: whether they
+   * read what this is (`told`) and which facts they agreed to (`agreed`)
+   * as this store holds them, never as the page last said.
+   */
+  #forSpeaker(
+    person: string,
+    progress: InterviewProgress | null
+  ): InterviewProgress | null {
+    if (progress === null) {
+      return null;
+    }
+    const revisions = this.#revisionsOf(person);
+    const approved = this.#approvedOf(person);
+    return {
+      ...progress,
+      told: this.#participating(person) === null,
+      facts: progress.facts.map(({ agreed: _agreed, ...fact }) => {
+        const revision = revisions.get(fact.id);
+        return revision !== undefined &&
+          approved.has(revisionKey(fact.id, revision))
+          ? { ...fact, agreed: true as const }
+          : fact;
+      }),
+    };
+  }
+
+  /**
+   * What follows what counts of someone's interview changing, in the
+   * transaction it changed in. Something they had approved that stopped
+   * counting (`lost`) makes every record the brain has resting on them
+   * rest on someone gone, so it is taken out unless someone else's
+   * approval keeps it, and what is drawn or given from before is thrown
+   * away (`revokedAt`). While anything still counts (`counts`) it is
+   * drawn and given to the brain again; once nothing does, it is as if
+   * they never agreed.
+   */
+  #admissionChanged(
+    person: Roster["people"][number],
+    counts: boolean,
+    lost: boolean,
+    now: string
+  ): void {
+    if (lost) {
+      // Every drawing it was in goes, whatever still counts: one drawn
+      // from what no longer does never comes back, even when drawing it
+      // again fails.
+      this.#forgetDrawings(person.id);
+      this.#db
+        .update(interviewStates)
+        .set({ revokedAt: now })
+        .where(eq(interviewStates.person, person.id))
+        .run();
+      const sent = this.#db
+        .select()
+        .from(brainSent)
+        .where(eq(brainSent.person, person.id))
+        .all();
+      for (const row of sent) {
+        this.#db
+          .insert(brainSent)
+          .values({ ...row, person: `${gonePrefix}${person.id}` })
+          .onConflictDoNothing()
+          .run();
+      }
+      this.#db.delete(brainSent).where(eq(brainSent.person, person.id)).run();
+    }
+    if (counts) {
+      this.#db
+        .update(interviewStates)
+        .set({ agreedAt: now })
+        .where(eq(interviewStates.person, person.id))
+        .run();
+      this.#brainDue(person.team, now);
+      return;
+    }
+    this.#db
+      .update(interviewStates)
+      .set({ agreedAt: null, drawnAt: null })
+      .where(eq(interviewStates.person, person.id))
+      .run();
+  }
+
   #onRoster(person: string): boolean {
     return this.#db
       .select({ id: people.id })
@@ -5101,8 +5712,10 @@ export class Onboarding extends DurableObject<Env> {
     person: string,
     now: string,
     what: string,
-    by: string
+    by: string,
+    lines: ReadonlyMap<string, string[]>
   ): SaidIn | null {
+    this.#queueLines(lines.get(person) ?? []);
     const said = this.#erase(person);
     this.#noted(person, what, now, by);
     return said;
@@ -5132,6 +5745,20 @@ export class Onboarding extends DurableObject<Env> {
       .delete(interviewSettings)
       .where(eq(interviewSettings.person, person))
       .run();
+    // Withdrawing is final (GRA-329): its mark outlives a delete and a new
+    // start, so they never take part again while on the list. Nothing said
+    // is in it; leaving the list takes it too (`#writeRoster`).
+    this.#db
+      .delete(participations)
+      .where(
+        and(
+          eq(participations.person, person),
+          isNull(participations.withdrawnAt)
+        )
+      )
+      .run();
+    this.#db.delete(approvals).where(eq(approvals.person, person)).run();
+    this.#db.delete(readbacks).where(eq(readbacks.person, person)).run();
     return said;
   }
 
@@ -5230,14 +5857,53 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The stored keys of the voice's lines of each of `persons`' interviews,
+   * as they stand: hashed before anything is erased, so the erasing
+   * transaction keeps them waiting itself (`#queueLines`, GRA-329).
+   */
+  async #lineKeysOf(persons: Iterable<string>): Promise<Map<string, string[]>> {
+    const keys = new Map<string, string[]>();
+    for (const person of persons) {
+      const said = this.#saidIn(person);
+      if (said !== null) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview's lines at a time
+        keys.set(person, await spokenKeysOf(this.env, said));
+      }
+    }
+    return keys;
+  }
+
+  /** Keeps the voice's lines `keys` waiting to go, in the transaction it is called in. */
+  #queueLines(keys: readonly string[]): void {
+    for (const key of keys) {
+      this.#db
+        .insert(linesToForget)
+        .values({ key })
+        .onConflictDoNothing()
+        .run();
+    }
+  }
+
+  /**
    * What follows someone's interview going, once it's gone here: what is
    * left of the work it was in is drawn again, the brain's records that
    * rested on it are taken out (`purgeBrain`), and so are the lines said
-   * in it that were kept. A purge that fails is tried again by the alarm
-   * (`#armDrawing`); lines that can't be taken out go within the month
-   * they are kept (speech-cache.ts).
+   * in it that were kept. Both are tried again by the alarm until done
+   * (`#armDrawing`): the brain's records rest on someone gone until they
+   * are out, and the lines wait by their stored keys, hashes, never what
+   * was said (`linesToForget`, GRA-329), queued by the erasing transaction
+   * itself; any line said after they were hashed is queued here.
    */
   async #afterForget(said: readonly (SaidIn | null)[]): Promise<void> {
+    const each = await Promise.all(
+      said.map(async (lines) =>
+        lines === null ? [] : await spokenKeysOf(this.env, lines)
+      )
+    );
+    const keys = each.flat();
+    this.ctx.storage.transactionSync(() => {
+      this.#queueLines(keys);
+    });
     await this.#armDrawing();
     try {
       await this.purgeBrain();
@@ -5246,17 +5912,44 @@ export class Onboarding extends DurableObject<Env> {
         error: error instanceof Error ? error.name : "unknown",
       });
     }
-    for (const lines of said) {
-      if (lines !== null) {
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- one interview's lines at a time
-          await forgetSpokenLines(this.env, lines);
-        } catch (error) {
-          log.error("onboarding.lines_unforgotten", {
-            error: error instanceof Error ? error.name : "unknown",
-          });
-        }
+    await this.forgetLinesNow();
+  }
+
+  /** Most stored lines one try takes out of the cache. */
+  static readonly #linesPerTry = 1000;
+
+  /**
+   * Takes the voice's lines still waiting (`linesToForget`) out of the
+   * cache, a page at a time, each forgotten here once the cache confirms
+   * it. What fails waits for the alarm. Returns how many went.
+   */
+  async forgetLinesNow(): Promise<number> {
+    let gone = 0;
+    for (;;) {
+      const page = this.#db
+        .select({ key: linesToForget.key })
+        .from(linesToForget)
+        .orderBy(asc(linesToForget.key))
+        .limit(Onboarding.#linesPerTry)
+        .all()
+        .map(({ key }) => key);
+      if (page.length === 0) {
+        return gone;
       }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one page at a time
+        await forgetStored(this.env, page);
+      } catch (error) {
+        log.error("onboarding.lines_unforgotten", {
+          error: error instanceof Error ? error.name : "unknown",
+        });
+        return gone;
+      }
+      this.#db
+        .delete(linesToForget)
+        .where(inList(linesToForget.key, page))
+        .run();
+      gone += page.length;
     }
   }
 

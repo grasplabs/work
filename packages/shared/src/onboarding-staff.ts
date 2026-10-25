@@ -135,14 +135,23 @@ export interface StaffOverview {
   notes: StaffNote[];
 }
 
-/** Someone's interview, as Grasp's staff read it: every read is on record. */
-export interface StaffTranscript {
+/**
+ * Someone's interview, as Grasp's staff see it (GRA-329): where it stands
+ * and its numbers, never a word of it. Nobody at Grasp reads what anyone
+ * said; every look is on record all the same, as it names the person.
+ */
+export interface StaffInterview {
   person: string;
   name: string;
   team: string;
   startedAt: string | null;
   completedAt: string | null;
-  progress: InterviewProgress | null;
+  /** Where their interview is (`personStates`); null before anything was kept. */
+  state: InterviewProgress["person"] | null;
+  /** By voice or typed; null before they chose. */
+  mode: InterviewProgress["mode"];
+  /** How they found it, from 1 to 5, when they said so. */
+  rating: number | null;
   /** Who held it: whoever they chose on the way in; null before anything was kept. */
   interviewer: Interviewer | null;
   /**
@@ -151,6 +160,11 @@ export interface StaffTranscript {
    * text changed while it went on.
    */
   texts: string[];
+  /** How many lines they said, facts were written down, taken out, and approved as they stand. */
+  counts: { said: number; facts: number; out: number; approved: number };
+  /** When they agreed to take part, and when they withdrew; null when they didn't. */
+  participatedAt: string | null;
+  withdrawnAt: string | null;
 }
 
 /** The longest note. */

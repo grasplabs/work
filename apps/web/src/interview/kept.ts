@@ -1,8 +1,9 @@
+import { factRevision } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 import { useSyncExternalStore } from "react";
 
-import { isRefused, saveProgress } from "./api.ts";
+import { approveFacts, isRefused, saveProgress } from "./api.ts";
 import { freshProgress } from "./progress.ts";
 
 // Someone's interview as this page holds it, kept in core after every
@@ -12,6 +13,11 @@ import { freshProgress } from "./progress.ts";
 // went stale (another tab saved meanwhile) takes the one core kept, and
 // says so. Ported from the prototype (grasplabs/prototype, packages/grasp:
 // src/data/interviews.ts, `openOwnLink` and `saveOwn`).
+//
+// Agreeing to the read-back is its own call (`approve`, GRA-329), once what
+// was read back is kept: it names each fact at the revision they saw, so
+// only exactly that counts. Asked again until core answers, it answers the
+// same receipt; when core keeps another copy, that one is read back again.
 
 /**
  * Where what they said stands: kept, on its way, not kept yet and tried
@@ -36,6 +42,8 @@ interface Kept {
   failed: number;
   /** Nothing more is saved: deleted, or refused for good. */
   gone: boolean;
+  /** They agreed to the read-back, and core is to be told once it is kept. */
+  approving: boolean;
 }
 
 /** How soon after a change it is kept: changes close together are kept together. */
@@ -130,6 +138,58 @@ const saveOnce = async (mine: Kept): Promise<void> => {
   }
 };
 
+/** Tells core they approve the facts read back, as kept now: each at its revision. */
+const approveOnce = async (mine: Kept): Promise<void> => {
+  const facts = await Promise.all(
+    mine.progress.facts
+      .filter(({ out }) => out !== true)
+      .map(async (fact) => ({
+        id: fact.id,
+        revision: await factRevision(fact),
+      }))
+  );
+  if (facts.length === 0) {
+    mine.approving = false;
+    return;
+  }
+  const answer = await approveFacts(mine.secret, mine.key, facts);
+  if (kept !== mine || mine.gone) {
+    return;
+  }
+  if (isRefused(answer)) {
+    const passing =
+      answer.status === 0 || answer.status === 429 || answer.status >= 500;
+    if (passing) {
+      mine.failed += 1;
+      setSaveState({ state: "retrying" });
+      mine.waiting = window.setTimeout(() => {
+        // oxlint-disable-next-line no-use-before-define -- tried again as a save is
+        void save(mine);
+      }, retryAfter(mine.failed));
+    } else {
+      mine.approving = false;
+      setSaveState({ state: "refused", message: answer.message });
+    }
+    return;
+  }
+  mine.approving = false;
+  mine.failed = 0;
+  if (answer.approved) {
+    setSaveState({ state: "saved" });
+    return;
+  }
+  // What was read back isn't what core keeps: its copy is the interview
+  // now, and what isn't approved in it is read back again.
+  mine.version = answer.version;
+  if (answer.progress !== null) {
+    mine.progress = answer.progress;
+    setSaveState({ state: "elsewhere" });
+    for (const taker of takers) {
+      taker();
+    }
+  }
+};
+
 /** Saves now, one at a time; a change made meanwhile is saved right after. */
 const save = async (mine: Kept): Promise<void> => {
   window.clearTimeout(mine.waiting);
@@ -142,9 +202,22 @@ const save = async (mine: Kept): Promise<void> => {
   }
   mine.saving = true;
   try {
-    await saveOnce(mine);
+    // Once all is kept, what they agreed to goes.
+    await (mine.approving && !(mine.dirty || mine.again)
+      ? approveOnce(mine)
+      : saveOnce(mine));
   } finally {
     mine.saving = false;
+  }
+  if (
+    kept === mine &&
+    !mine.gone &&
+    mine.approving &&
+    !(mine.again || mine.dirty) &&
+    mine.failed === 0
+  ) {
+    void save(mine);
+    return;
   }
   if (kept === mine && !mine.gone && (mine.again || mine.dirty)) {
     mine.again = false;
@@ -162,6 +235,15 @@ export const keepNow = (): void => {
   if (kept !== null && kept.dirty) {
     void save(kept);
   }
+};
+
+/** They agreed to the read-back: core is told, once what was read back is kept. */
+export const approveWhenKept = (): void => {
+  if (kept === null || kept.gone) {
+    return;
+  }
+  kept.approving = true;
+  void save(kept);
 };
 
 /** The page goes: what is not kept yet goes with it, however it closes. */
@@ -210,6 +292,7 @@ export const holdInterview = ({
     waiting: undefined,
     failed: 0,
     gone: false,
+    approving: false,
   };
   saveState = { state: "saved" };
   window.removeEventListener("pagehide", onPageHide);

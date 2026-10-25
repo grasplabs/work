@@ -23,8 +23,9 @@ import { dayDate, phaseTitles } from "./interview-words.ts";
 // The interviews one by one (prototype `org-transcripts.tsx`): every one
 // that was finished or stopped halfway, with how long it took, how much
 // was agreed to, how the person rated it and who held it. A name opens
-// its transcript, and every one opened is on record. The company never
-// sees anyone's words.
+// where it stands and its numbers, never a word of it (GRA-329), and every
+// one opened is on record. Nobody at Grasp, and not the company, reads
+// anyone's words.
 
 const shows = ["all", "stopped"] as const;
 type Shows = (typeof shows)[number];
@@ -76,8 +77,8 @@ export const InterviewList = ({
           </ToggleGroup>
         ) : null
       }
-      description={t`Every interview, finished or stopped halfway. A name opens what was said, and every transcript read is in the audit log; the company never sees anyone's words.`}
-      title={t`Transcripts`}
+      description={t`Every interview, finished or stopped halfway. A name opens where it stands and its numbers; what was said stays with the person who said it, and every look is in the audit log.`}
+      title={t`One by one`}
     >
       {view.interviews.length === 0 ? (
         <p className="text-muted-foreground border-t px-5 py-4">{empty}</p>
@@ -142,7 +143,7 @@ export const InterviewList = ({
                     <TableCell className="whitespace-normal" variant="card">
                       <span className="flex flex-col">
                         <Link
-                          aria-label={t`Read the transcript of ${name}`}
+                          aria-label={t`See the interview of ${name}`}
                           className="underline-offset-4 hover:underline"
                           params={{ person: interview.id }}
                           to="/onboarding/interviews/$person"

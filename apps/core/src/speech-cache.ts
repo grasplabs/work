@@ -73,6 +73,25 @@ export const keepLine = async (
 /** Most keys one delete of the bucket takes. */
 const deleteBatch = 1000;
 
+/** The keys `keys` are stored by: hashes, never the lines themselves. */
+export const storedKeysOf = async (
+  keys: readonly SpokenKey[]
+): Promise<string[]> => [...new Set(await Promise.all(keys.map(keyOf)))];
+
+/**
+ * Deletes the lines stored by `stored` (`storedKeysOf`), whether or not
+ * any is: what was said from someone's interview, once it is deleted.
+ */
+export const forgetStored = async (
+  env: Pick<Env, "FILES">,
+  stored: readonly string[]
+): Promise<void> => {
+  for (let at = 0; at < stored.length; at += deleteBatch) {
+    // oxlint-disable-next-line no-await-in-loop -- one page of keys at a time
+    await env.FILES.delete(stored.slice(at, at + deleteBatch));
+  }
+};
+
 /**
  * Deletes the lines kept for `keys`, whether or not any is: what was said
  * from someone's interview, once it is deleted.
@@ -81,11 +100,7 @@ export const forgetLines = async (
   env: Pick<Env, "FILES">,
   keys: readonly SpokenKey[]
 ): Promise<void> => {
-  const stored = [...new Set(await Promise.all(keys.map(keyOf)))];
-  for (let at = 0; at < stored.length; at += deleteBatch) {
-    // oxlint-disable-next-line no-await-in-loop -- one page of keys at a time
-    await env.FILES.delete(stored.slice(at, at + deleteBatch));
-  }
+  await forgetStored(env, await storedKeysOf(keys));
 };
 
 /**

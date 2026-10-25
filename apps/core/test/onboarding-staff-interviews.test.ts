@@ -140,7 +140,7 @@ describe("the interviews in Grasp's onboarding area", () => {
         outcome(api.onboardingStaff.remind([ids.ona])),
         outcome(api.onboardingStaff.askIn("labs")),
         outcome(api.onboardingStaff.deleteInterview(ids.oli)),
-        outcome(api.onboardingStaff.transcript(ids.oli)),
+        outcome(api.onboardingStaff.interview(ids.oli)),
       ])
     );
     expect(new Set(refused)).toStrictEqual(new Set(["onboarding.staff_only"]));
@@ -263,7 +263,7 @@ describe("the interviews in Grasp's onboarding area", () => {
     const events = await auditedDuring(async () => {
       await staff.onboardingStaff.deleteInterview(ids.oli);
     });
-    const read = await staff.onboardingStaff.transcript(ids.oli);
+    const read = await staff.onboardingStaff.interview(ids.oli);
     const resaved = await routed(interviewApiPath, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -277,7 +277,7 @@ describe("the interviews in Grasp's onboarding area", () => {
     });
     const { links } = await staff.onboardingStaff.interviews();
     expect({
-      progress: read.progress,
+      state: read.state,
       resaved: resaved.status,
       deleted:
         (links.find(({ person }) => person === ids.oli)?.deletedAt ?? null) !==
@@ -286,7 +286,7 @@ describe("the interviews in Grasp's onboarding area", () => {
       named: JSON.stringify(events).includes(ids.oli),
       nobody: await outcome(staff.onboardingStaff.deleteInterview(ids.lia)),
     }).toStrictEqual({
-      progress: null,
+      state: null,
       resaved: 410,
       deleted: true,
       audited: ["onboarding.interview.deleted"],
@@ -295,10 +295,10 @@ describe("the interviews in Grasp's onboarding area", () => {
     });
   });
 
-  it("show who held a transcript, and the text it was held with, by its mark", async () => {
+  it("show who held an interview, and the text it was held with, by its mark", async () => {
     const { link, person } = await openedFor();
     const staff = await asStaff();
-    const before = await staff.onboardingStaff.transcript(person);
+    const before = await staff.onboardingStaff.interview(person);
     await answering(
       [
         {
@@ -330,7 +330,7 @@ describe("the interviews in Grasp's onboarding area", () => {
         await turn.text();
       }
     );
-    const after = await staff.onboardingStaff.transcript(person);
+    const after = await staff.onboardingStaff.interview(person);
     expect({ before: before.texts, after: after.texts }).toStrictEqual({
       before: [],
       after: [labMarks.claire.own.nl],

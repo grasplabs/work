@@ -2,8 +2,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { InterviewFact } from "../src/interview-links.ts";
 import {
-  agreedFacts,
-  agreedKey,
   interviewStoryRequestSchema,
   readBackMost,
   readBackParts,
@@ -244,35 +242,5 @@ describe("the read-back", () => {
       fact("c", "step"),
     ]);
     expect(idsOf(parts)).toStrictEqual([["c"]]);
-  });
-});
-
-describe("what counts", () => {
-  const facts = [
-    fact("a", "step", { agreed: true }),
-    fact("b", "step", { agreed: true, out: true }),
-    fact("c", "number"),
-  ];
-
-  it("is only what they agreed to and kept", () => {
-    expect(agreedFacts(facts).map(({ id }) => id)).toStrictEqual(["a"]);
-  });
-
-  it("changes with what is agreed to, and not with what is still being read back", () => {
-    const now = agreedKey(facts);
-    expect({
-      nothing: agreedKey([fact("c", "number")]),
-      unagreed: agreedKey([...facts, fact("d", "step")]) === now,
-      added: agreedKey([...facts, fact("d", "step", { agreed: true })]) === now,
-      changed:
-        agreedKey([
-          fact("a", "step", { agreed: true, record: "Weigh the box." }),
-        ]) === now,
-    }).toStrictEqual({
-      nothing: "",
-      unagreed: true,
-      added: false,
-      changed: false,
-    });
   });
 });

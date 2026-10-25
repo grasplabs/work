@@ -73,6 +73,13 @@ export const teams = sqliteTable("teams", {
    * wait for that, or for `leadWaitWorkingDays`.
    */
   mappedAt: text("mapped_at"),
+  /**
+   * The lead's agreement (their `agreedAt`) its map, as it stands, was
+   * last drawn from (GRA-329). Its pieces of work reach the brain only
+   * while that lead's facts still count, as they were when it was drawn:
+   * an edit or a withdrawal since keeps them out until it is drawn again.
+   */
+  mappedFrom: text("mapped_from"),
 });
 
 /** The people, in the order the admin gave them. */
@@ -144,7 +151,65 @@ export const interviews = sqliteTable("interviews", {
   person: text().primaryKey(),
   progress: text().notNull(),
   updatedAt: text("updated_at").notNull(),
+  /**
+   * Each fact's revision as saved (`factRevision`), by its id, as JSON:
+   * what an approval must name to count (`approvals`).
+   */
+  revisions: text().notNull().default("{}"),
 });
+
+/**
+ * Whether each person agreed to take part (GRA-329), before anything they
+ * say is recorded or read by a model: the notice they read
+ * (`participationNotice`), its purpose and audience, when, and when they
+ * withdrew. Goes with the interview, unless they withdrew: then it stays
+ * through a delete and a new start, so withdrawing is final, until they
+ * leave the roster, which takes it.
+ */
+export const participations = sqliteTable("participations", {
+  person: text().primaryKey(),
+  notice: integer().notNull(),
+  purpose: text().notNull(),
+  audience: text().notNull(),
+  at: text().notNull(),
+  /** When they withdrew (ISO 8601): nothing of theirs is used from then on. */
+  withdrawnAt: text("withdrawn_at"),
+});
+
+/**
+ * Each read-back someone approved: its receipt, made from exactly which
+ * revisions (`approvals`), so approving the same again finds it.
+ * Goes with the interview.
+ */
+export const readbacks = sqliteTable(
+  "readbacks",
+  {
+    person: text().notNull(),
+    receipt: text().notNull(),
+    at: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.person, table.receipt] })]
+);
+
+/**
+ * Each fact revision someone approved, under the read-back it was first
+ * approved in. Only a fact whose revision as saved is here counts: an
+ * edit makes a new revision, which waits for its own approval. Goes with
+ * the interview.
+ */
+export const approvals = sqliteTable(
+  "approvals",
+  {
+    person: text().notNull(),
+    fact: text().notNull(),
+    revision: text().notNull(),
+    receipt: text().notNull(),
+    at: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.person, table.fact, table.revision] }),
+  ]
+);
 
 /**
  * Where each interview stands, without anything that was said in it: all
@@ -171,6 +236,12 @@ export const interviewStates = sqliteTable("interview_states", {
   agreedAt: text("agreed_at"),
   /** When what they agreed to was last drawn (ISO 8601); null before it ever was. */
   drawnAt: text("drawn_at"),
+  /**
+   * When something they had approved last stopped counting (ISO 8601): an
+   * edit, a fact taken out, or withdrawing. Drawing and giving the brain
+   * what was read before then is thrown away.
+   */
+  revokedAt: text("revoked_at"),
   updatedAt: text("updated_at").notNull(),
 });
 
@@ -461,6 +532,16 @@ export const auditOutbox = sqliteTable("audit_outbox", {
   id: text().primaryKey(),
   event: text().notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/**
+ * The voice's lines of an interview that went, still to be taken out of
+ * the cache (speech-cache.ts), by their stored keys: hashes, never what
+ * was said. Each goes once the cache confirms it; the alarm tries what is
+ * left again until none is (GRA-329).
+ */
+export const linesToForget = sqliteTable("forget_lines", {
+  key: text().primaryKey(),
 });
 
 /**

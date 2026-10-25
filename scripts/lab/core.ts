@@ -27,6 +27,7 @@ import {
   labAnswerSchema,
   labContextSchema,
   labDrawingsSchema,
+  labInterviewSchema,
   labJsonSchema,
   labLinksSchema,
   labPath,
@@ -34,6 +35,7 @@ import {
 } from "@grasp-os/shared/lab";
 import type {
   LabDrawings,
+  LabInterview,
   LabRequest,
   LabVia,
   LabWho,
@@ -387,6 +389,15 @@ export const contextOf = async (
   labContextSchema.parse(
     await labCall(core.session, { action: "context", person })
   ).who;
+
+/** What a practice person said and approved, as the local core keeps it; null when they aren't on the roster. */
+export const interviewOf = async (
+  core: Core,
+  person: string
+): Promise<LabInterview["interview"]> =>
+  labInterviewSchema.parse(
+    await labCall(core.session, { action: "interview", person })
+  ).interview;
 
 /** Every piece of work of the local core, drawn again from what its people agreed to. */
 export const drawnAgain = async (

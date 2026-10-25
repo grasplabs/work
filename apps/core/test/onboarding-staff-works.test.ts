@@ -13,7 +13,7 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
-import { answering } from "./interview-link.ts";
+import { answering, approveAgreed } from "./interview-link.ts";
 import {
   auditedDuring,
   openRpc,
@@ -88,6 +88,7 @@ const agreeAs = async (
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "save", secret, key, version: 0, progress }),
   });
+  await approveAgreed({ secret, key }, facts);
 };
 
 const reply = (value: object): GatewayReply => ({

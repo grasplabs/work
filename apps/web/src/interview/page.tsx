@@ -1,5 +1,8 @@
 import { interviewPhases } from "@grasp-os/shared/interview-links";
-import type { InterviewLine } from "@grasp-os/shared/interview-links";
+import type {
+  InterviewLine,
+  InterviewProgress,
+} from "@grasp-os/shared/interview-links";
 import type { InterviewPhase } from "@grasp-os/shared/interview-turn";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
@@ -19,7 +22,7 @@ import { formatDay } from "../format.ts";
 import { GraspMark } from "../grasp-mark.tsx";
 import { isLocale } from "../i18n.ts";
 import { LanguageButton } from "../language-picker.tsx";
-import { deleteInterview, isRefused } from "./api.ts";
+import { deleteInterview, isRefused, withdrawInterview } from "./api.ts";
 import type { OpenSession } from "./api.ts";
 import { Before } from "./before.tsx";
 import { Closed, DeleteInterview } from "./closed.tsx";
@@ -291,6 +294,27 @@ const Deleted = ({ room }: { room: number }) => {
   );
 };
 
+/** They withdrew: what they said stays theirs to read and delete, and nothing of it is used. */
+const Withdrawn = ({ room }: { room: number }) => {
+  const { t } = useLingui();
+  const who = interviewerNames[useInterviewer()];
+  return (
+    <Said label={t`${who}, drawn in dots.`} room={room}>
+      <div className="flex flex-col gap-2">
+        <h1
+          aria-live="polite"
+          className="text-2xl font-medium tracking-tight text-balance"
+        >
+          {t`You withdrew. Nothing you said is used from now on.`}
+        </h1>
+        <p className="text-muted-foreground text-balance">
+          {t`It stays here for you to read. You can still delete it.`}
+        </p>
+      </div>
+    </Said>
+  );
+};
+
 /**
  * Runs the conversation until stopped; a moment after, so a screen that
  * only flashes by asks nothing.
@@ -364,6 +388,7 @@ const Stage = ({
   reading,
   stopped,
   deleted,
+  withdrawn,
   onCarryOn,
 }: {
   session: OpenSession;
@@ -371,6 +396,7 @@ const Stage = ({
   reading: boolean;
   stopped: boolean;
   deleted: boolean;
+  withdrawn: boolean;
   onCarryOn: () => void;
 }) => {
   const progress = useProgress();
@@ -380,6 +406,9 @@ const Stage = ({
   if (deleted) {
     stage = <Deleted room={room} />;
     key = "deleted";
+  } else if (withdrawn) {
+    stage = <Withdrawn room={room} />;
+    key = "withdrawn";
   } else if (session.closed) {
     stage = <Over room={room} />;
     key = "over";
@@ -403,7 +432,9 @@ const Stage = ({
       />
     );
     key = "closed";
-  } else if (!started) {
+  } else if (!(started && progress.told)) {
+    // Not started, or core doesn't hold that they agreed to take part, to
+    // what this is as it says now: they read it, and agree, first.
     stage = (
       <Before
         kind={session.kind}
@@ -499,6 +530,54 @@ const useDeleting = () => {
   return { deleted, deleteFailed, remove };
 };
 
+/** In the conversation, and core holds that they agreed to take part. */
+const inConversation = (progress: InterviewProgress): boolean =>
+  isTalking(progress) && progress.told;
+
+/** Whether there is an interview to delete: something said, and it is agreed to, over or withdrawn from. */
+const deletable = (progress: InterviewProgress, ended: boolean): boolean =>
+  (progress.person === "completed" || ended) && progress.lines.length > 0;
+
+/** Why deleting or withdrawing didn't work, when it didn't. */
+const Failed = ({ message }: { message: string | null }) =>
+  message === null ? null : (
+    <p className="text-destructive pt-4 text-sm" role="alert">
+      {message}
+    </p>
+  );
+
+/** Withdrawing is offered while they take part and haven't withdrawn. */
+const withdrawOffered = (
+  withdrawn: boolean,
+  told: boolean,
+  withdraw: () => Promise<void>
+): (() => void) | undefined =>
+  withdrawn || !told
+    ? undefined
+    : () => {
+        void withdraw();
+      };
+
+/** Withdrawing: whether they did, and why it didn't work when it didn't. */
+const useWithdrawing = (session: OpenSession) => {
+  const [withdrawn, setWithdrawn] = useState(session.withdrawn);
+  const [withdrawFailed, setWithdrawFailed] = useState<string | null>(null);
+  const withdraw = async (): Promise<void> => {
+    const link = linkNow();
+    if (link === null) {
+      return;
+    }
+    const answer = await withdrawInterview(link.secret, link.key);
+    if (isRefused(answer)) {
+      setWithdrawFailed(answer.message);
+      return;
+    }
+    setWithdrawFailed(null);
+    setWithdrawn(true);
+  };
+  return { withdrawn, withdrawFailed, withdraw };
+};
+
 /** What the conversation says by itself follows the language on screen. */
 const useWordsOnScreen = (): void => {
   const { i18n } = useLingui();
@@ -513,9 +592,12 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const progress = useProgress();
   const [stopped, setStopped] = useState(false);
   const { deleted, deleteFailed, remove } = useDeleting();
+  const { withdrawn, withdrawFailed, withdraw } = useWithdrawing(session);
   const [transcript, setTranscript] = useState(false);
   const talking =
-    isTalking(progress) && !stopped && deleted === "no" && !session.closed;
+    inConversation(progress) &&
+    !(stopped || withdrawn || session.closed) &&
+    deleted === "no";
   const reading = talking && isReading(progress);
   const { top, bottom, room } = useStageRoom(talking ? overBox + 8 : 16);
 
@@ -543,9 +625,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const marked = markedIn(progress.lines);
   const [seen, setSeen] = useState(marked);
   const canDelete =
-    deleted !== "yes" &&
-    (progress.person === "completed" || session.closed) &&
-    progress.lines.length > 0;
+    deleted !== "yes" && deletable(progress, session.closed || withdrawn);
 
   let right: ReactNode = null;
   if (talking) {
@@ -565,6 +645,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
         onDelete={() => {
           void remove();
         }}
+        onWithdraw={withdrawOffered(withdrawn, progress.told, withdraw)}
       />
     );
   }
@@ -611,13 +692,10 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
           room={room}
           session={session}
           stopped={stopped}
+          withdrawn={withdrawn}
         />
       </div>
-      {deleteFailed === null ? null : (
-        <p className="text-destructive pt-4 text-sm" role="alert">
-          {deleteFailed}
-        </p>
-      )}
+      <Failed message={deleteFailed ?? withdrawFailed} />
       <Transcript alone={away} lines={progress.lines} open={floating} />
     </InterviewFrame>
   );

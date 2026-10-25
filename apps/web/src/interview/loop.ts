@@ -26,7 +26,7 @@ import type { EarlyEvent, TurnFailed } from "./api.ts";
 import type { DotSign } from "./dot-signs.ts";
 import { openEar, pauseMs } from "./ear.ts";
 import type { Ear, EarEvent } from "./ear.ts";
-import { keepNow, linkNow, progressNow, update } from "./kept.ts";
+import { approveWhenKept, linkNow, progressNow, update } from "./kept.ts";
 import { hangUp, lastHeard, muteMic } from "./mic.ts";
 import {
   afterTurn,
@@ -684,7 +684,7 @@ const finish = (): void => {
   rest();
   show("idle", { line: "", said: null, sign: null });
   update(approved);
-  keepNow();
+  approveWhenKept();
 };
 
 /** He tells the lines of a part, each lighting up as he gets to it; false when something else happened meanwhile. */
