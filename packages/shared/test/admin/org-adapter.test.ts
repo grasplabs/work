@@ -14,7 +14,11 @@ import {
   stephenOf,
 } from "../../src/admin/onboarding-admin-record.ts";
 import { meteredOf, orgOfSnapshot } from "../../src/admin/org-adapter.ts";
-import { NEW_CLIENT, NOTHING_SAID } from "../../src/admin/org-record.ts";
+import {
+  NEW_CLIENT,
+  NOTHING_SAID,
+  staffDrawingOf,
+} from "../../src/admin/org-record.ts";
 import type {
   DrawnWork,
   HeldInterview,
@@ -204,7 +208,7 @@ const snapshot: StaffSnapshot = {
       doers: ["lisa", "tim"],
       share: 0.8,
       from: "lead",
-      drawn,
+      drawn: staffDrawingOf(drawn),
       stale: false,
     },
   ],

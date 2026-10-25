@@ -959,14 +959,6 @@ msgid "{nobody, plural, one {# with nobody asked} other {# with nobody asked}}"
 msgstr "{nobody, plural, one {# with nobody asked} other {# with nobody asked}}"
 
 #: src/onboarding/work-record.tsx
-msgid "{normal} hours, {quickest} to {longest}"
-msgstr "{normal} hours, {quickest} to {longest}"
-
-#: src/onboarding/work-record.tsx
-msgid "{normal} minutes, {quickest} to {longest}"
-msgstr "{normal} minutes, {quickest} to {longest}"
-
-#: src/onboarding/work-record.tsx
 msgid "{notTalked, plural, one {# person who does it has not talked} other {# people who do it have not talked}}"
 msgstr "{notTalked, plural, one {# person who does it has not talked} other {# people who do it have not talked}}"
 
@@ -1107,30 +1099,6 @@ msgstr "{quiet} in a quiet month, {busy} in a busy one."
 #: src/onboarding/work-record.tsx
 msgid "{quiet} in a quiet week, {busy} in a busy one."
 msgstr "{quiet} in a quiet week, {busy} in a busy one."
-
-#: src/onboarding/work-record.tsx
-msgid "{quiet} to {busy} a month"
-msgstr "{quiet} to {busy} a month"
-
-#: src/onboarding/work-record.tsx
-msgid "{quiet} to {busy} a month, for the whole team"
-msgstr "{quiet} to {busy} a month, for the whole team"
-
-#: src/onboarding/work-record.tsx
-msgid "{quiet} to {busy} a month, their own"
-msgstr "{quiet} to {busy} a month, their own"
-
-#: src/onboarding/work-record.tsx
-msgid "{quiet} to {busy} a week"
-msgstr "{quiet} to {busy} a week"
-
-#: src/onboarding/work-record.tsx
-msgid "{quiet} to {busy} a week, for the whole team"
-msgstr "{quiet} to {busy} a week, for the whole team"
-
-#: src/onboarding/work-record.tsx
-msgid "{quiet} to {busy} a week, their own"
-msgstr "{quiet} to {busy} a week, their own"
 
 #: src/interview/closed.tsx
 #: src/onboarding/interview-people.tsx
@@ -1592,10 +1560,6 @@ msgstr "{workflows, plural, one {# workflow} other {# workflows}}: {steps}"
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "{works, plural, one {# piece of work} other {# pieces of work}}"
 msgstr "{works, plural, one {# piece of work} other {# pieces of work}}"
-
-#: src/onboarding/work-record.tsx
-msgid "{wrongCount} in 10"
-msgstr "{wrongCount} in 10"
 
 #. Who answered, in an exported chat.
 #: src/chat/chat-markdown.ts
@@ -2378,8 +2342,8 @@ msgid "Alright, here’s the plan."
 msgstr "Alright, here’s the plan."
 
 #: src/onboarding/work-record.tsx
-msgid "Always the range people gave, never an average, and each person's own."
-msgstr "Always the range people gave, never an average, and each person's own."
+msgid "Always the range people gave and how many it rests on, never an average or one person's own."
+msgstr "Always the range people gave and how many it rests on, never an average or one person's own."
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -5010,10 +4974,6 @@ msgstr "Each invoice as a PDF, as soon as it is issued."
 #: src/routes/_shell.settings.models.tsx
 msgid "Each person"
 msgstr "Each person"
-
-#: src/onboarding/work-record.tsx
-msgid "Each person's numbers"
-msgstr "Each person's numbers"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Each workflow"
@@ -8731,10 +8691,6 @@ msgstr "Not released"
 #: src/dashboard/widget-board.tsx
 msgid "Not run yet"
 msgstr "Not run yet"
-
-#: src/onboarding/work-record.tsx
-msgid "Not said"
-msgstr "Not said"
 
 #: src/interview/composer.tsx
 msgid "Not saved yet. Trying again."
@@ -15284,10 +15240,6 @@ msgstr "Writing"
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Written down"
 msgstr "Written down"
-
-#: src/onboarding/work-record.tsx
-msgid "Wrong"
-msgstr "Wrong"
 
 #: src/landscape/landscape-audit.ts
 #: src/routes/_shell.settings.members.tsx

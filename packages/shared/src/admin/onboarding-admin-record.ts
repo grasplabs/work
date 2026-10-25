@@ -19,10 +19,10 @@ import type {
   OrgTeam,
   OrgView,
   PlatformPart,
-  Telling,
   Work,
   WorkEvidence,
 } from "./onboarding-admin.ts";
+import { totalsOf } from "./org-record.ts";
 import { present } from "./present.ts";
 
 /**
@@ -35,10 +35,6 @@ import { present } from "./present.ts";
 const bare = (sentence: string) => sentence.replace(/[.!?]$/u, "");
 const lower = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 const upper = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
-const range = (values: number[]): [number, number] => [
-  Math.min(...values),
-  Math.max(...values),
-];
 
 /** Something said about a piece of work, with how many of the people who talked said it. */
 export interface Said {
@@ -143,22 +139,22 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
   });
   const said = (fact: string) =>
     tellings.filter((each) => each.kept.has(fact)).length;
-  // What each of them gave for a number, for the ones who gave it and left it in.
-  const numbers = <Value>(
-    fact: string,
-    of: (telling: Telling) => Value | null
-  ): Value[] =>
-    tellings.flatMap((each) => {
-      const value = each.kept.has(fact) ? of(each.telling) : null;
-      return value === null ? [] : [value];
-    });
+  // The numbers as totals over the ones who gave them and left them in, never one person's: a
+  // real organization's as its drawing totals them, a sample's from its made-up people.
+  const totals =
+    work.totals ??
+    totalsOf(
+      tellings.map(({ telling }) => ({
+        volume: telling.numbers?.volume ?? null,
+        takes: telling.numbers?.takes ?? null,
+        wrong: telling.numbers?.wrong ?? null,
+        out: telling.out,
+      }))
+    );
   const needed = evidence.everyone
     ? 1
     : Math.max(1, Math.min(state.rules.people, evidence.doers));
   const { differs } = work;
-  const volumes = numbers("volume", (telling) => telling.volume);
-  const times = numbers("takes", (telling) => telling.takes);
-  const wrongs = numbers("wrong", (telling) => telling.wrong);
   const one = (text: string | undefined, fact: string): Said | null =>
     text === undefined ? null : { text, people: said(fact) };
   return {
@@ -207,27 +203,9 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
     decides: one(work.decides, "decides"),
     own: one(work.own, "own"),
     ai: one(work.ai, "ai"),
-    volume:
-      volumes.length === 0
-        ? null
-        : {
-            quiet: range(volumes.map((each) => each[0])),
-            busy: range(volumes.map((each) => each[1])),
-            people: volumes.length,
-          },
-    takes:
-      times.length === 0
-        ? null
-        : {
-            least: Math.min(...times.map((each) => each[0])),
-            most: Math.max(...times.map((each) => each[2])),
-            normal: range(times.map((each) => each[1])),
-            people: times.length,
-          },
-    wrong:
-      wrongs.length === 0
-        ? null
-        : { outOfTen: range(wrongs), people: wrongs.length },
+    volume: totals.volume,
+    takes: totals.takes,
+    wrong: totals.wrong,
     right: { text: work.right, people: said("right") },
     ask:
       work.ask === undefined

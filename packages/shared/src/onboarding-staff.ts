@@ -329,9 +329,10 @@ export const orgRulesSchema = z.strictObject({
 
 /**
  * Every piece of work as staff see it: as each team's map holds it, with
- * its drawing (each person's own numbers in `drawn.told`, and what the
- * next interviews still need to ask in `drawn.open`), this organization's
- * rules, and the pieces Grasp counts as known by hand.
+ * its drawing (which parts each person told in `drawn.told`, its numbers
+ * as totals over everyone in `drawn.totals`, never one person's, and what
+ * the next interviews still need to ask in `drawn.open`), this
+ * organization's rules, and the pieces Grasp counts as known by hand.
  */
 export interface StaffWorks {
   works: WorkRecord[];

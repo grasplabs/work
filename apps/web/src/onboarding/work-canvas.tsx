@@ -1,4 +1,4 @@
-import type { DrawnWork } from "@grasp-os/shared/admin/org-record";
+import type { StaffDrawing } from "@grasp-os/shared/admin/org-record";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
@@ -32,7 +32,7 @@ const MinutesBadge = ({
 };
 
 /** A case that goes off the usual way after a step. */
-const Case = ({ each }: { each: DrawnWork["differently"][number] }) => {
+const Case = ({ each }: { each: StaffDrawing["differently"][number] }) => {
   const { t } = useLingui();
   const share = each.outOfTen;
   const { when } = each;
@@ -54,7 +54,7 @@ export const WorkCanvas = ({
   selected,
   onSelect,
 }: {
-  drawn: DrawnWork | null;
+  drawn: StaffDrawing | null;
   /** The step that is open, from 0. */
   selected: number | null;
   onSelect: (step: number | null) => void;

@@ -23,7 +23,7 @@ import type {
 } from "./onboarding-admin.ts";
 import { daysBetween, METER_PURPOSES, PLAN_DAYS } from "./org-record.ts";
 import type {
-  DrawnWork,
+  StaffDrawing,
   HeldInterview,
   MeterDay,
   StaffSnapshot,
@@ -43,14 +43,9 @@ const first = (name: string) => name.split(" ")[0] ?? name;
 /** A name as a title starts: the drawing names work as people say it, in small letters. */
 const capital = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 
-/** The middle of some numbers; none for none. */
-const middle = (values: number[]): number | null => {
-  if (values.length === 0) {
-    return null;
-  }
-  const sorted = values.toSorted((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)] ?? null;
-};
+/** The middle of a range people gave, to a whole number. */
+const middleOf = ([low, high]: readonly [number, number]): number =>
+  Math.round((low + high) / 2);
 
 /** A term as a piece of work keeps it: the word, and what it means. */
 const termOf = (term: { word: string; meaning: string }): [string, string] => [
@@ -58,19 +53,17 @@ const termOf = (term: { word: string; meaning: string }): [string, string] => [
   term.meaning,
 ];
 
-/** A piece of work as the admin keeps one: what was drawn, and the middle of what people said for the numbers the admin works out. */
+/**
+ * A piece of work as the admin keeps one: what was drawn, its numbers as the drawing totals them
+ * (never one person's), and the middle of those ranges for the numbers the admin works out.
+ */
 // oxlint-disable-next-line complexity -- ported as the prototype has it, one optional part of a drawing after another; org-adapter.test.ts pins it
 export const workOf = (record: WorkRecord): Work => {
-  const drawn: DrawnWork | null = record.drawn;
-  const told = Object.values(drawn?.told ?? {});
-  const volumes = told.flatMap((each) => (each.volume ? [each.volume] : []));
-  const takes = told.flatMap((each) => (each.takes ? [each.takes] : []));
-  const wrongs = told.flatMap((each) =>
-    each.wrong === null ? [] : [each.wrong]
-  );
-  const quiet = middle(volumes.map((each) => each[0])) ?? 0;
-  const busy = middle(volumes.map((each) => each[1])) ?? quiet;
-  const normal = middle(takes.map((each) => each[1])) ?? 0;
+  const drawn: StaffDrawing | null = record.drawn;
+  const totals = drawn?.totals ?? null;
+  const quiet = totals?.volume ? middleOf(totals.volume.quiet) : 0;
+  const busy = totals?.volume ? middleOf(totals.volume.busy) : quiet;
+  const normal = totals?.takes ? middleOf(totals.takes.normal) : 0;
   return {
     id: record.id,
     team: record.team,
@@ -95,12 +88,13 @@ export const workOf = (record: WorkRecord): Work => {
     volume: [quiet, Math.max(busy, quiet)],
     ...(drawn?.per === "month" ? { per: "month" as const } : {}),
     takes: [
-      Math.min(normal, ...takes.map((each) => each[0])),
+      Math.min(normal, totals?.takes?.least ?? normal),
       normal,
-      Math.max(normal, ...takes.map((each) => each[2])),
+      Math.max(normal, totals?.takes?.most ?? normal),
     ],
     ...(drawn?.unit === "hours" ? { unit: "hours" as const } : {}),
-    wrong: middle(wrongs) ?? 0,
+    wrong: totals?.wrong ? middleOf(totals.wrong.outOfTen) : 0,
+    ...(totals === null ? {} : { totals }),
     right: drawn?.right ?? "",
     ...(present(drawn?.ask) ? { ask: drawn.ask } : {}),
     next: drawn?.next ?? "",

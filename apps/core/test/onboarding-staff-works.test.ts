@@ -212,7 +212,7 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     expect(new Set(refused)).toStrictEqual(new Set(["onboarding.staff_only"]));
   });
 
-  it("shows staff each piece of work with each person's numbers apart and its open questions, and every read is on record", async () => {
+  it("shows staff each piece of work with its numbers as totals only, who told which parts, and its open questions, and every read is on record", async () => {
     const { ids, booking, filing } = await drawn();
     const staff = await asStaff();
 
@@ -222,10 +222,27 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     });
     const works = reads[0]?.works ?? [];
     const work = works.find(({ id }) => id === booking);
-    const numbers = (person: string) => {
+    // Which parts each person told: yes or no, never their numbers.
+    const parts = (person: string) => {
       const told = work?.drawn?.told[person];
       return [told?.volume, told?.takes, told?.wrong];
     };
+    // Every value a person's entry carries, whatever its name: a number of
+    // theirs would show here as a number outside `steps`, `waits`,
+    // `differently` and `way.step`, which are positions in the drawing.
+    const ownValues = Object.values(work?.drawn?.told ?? {}).flatMap(
+      ({
+        steps: _steps,
+        waits: _waits,
+        differently: _differently,
+        way,
+        ...rest
+      }) =>
+        Object.entries({ ...rest, way: way?.other ?? null }).filter(
+          ([key, value]) =>
+            !(key === "out" || typeof value === "boolean" || value === null)
+        )
+    );
     const text = JSON.stringify(events);
     expect({
       works: works
@@ -236,8 +253,10 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
           doers,
           drawing === null,
         ]),
-      max: numbers(ids.max),
-      mia: numbers(ids.mia),
+      max: parts(ids.max),
+      mia: parts(ids.mia),
+      ownValues,
+      totals: work?.drawn?.totals,
       open: work?.drawn?.open,
       rules: reads[0]?.rules,
       audited: events.map(({ action, actor, target }) => [
@@ -251,8 +270,16 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
         [booking, ["invoice", "invoices"], [ids.max, ids.mia, ids.noor], false],
         [filing, ["receipt", "receipts"], [ids.noor], true],
       ],
-      max: [[20, 40], [2, 4, 9], null],
-      mia: [[60, 90], null, 1],
+      max: [true, true, false],
+      mia: [true, false, true],
+      ownValues: [],
+      // The lowest and the highest anyone said, and how many it rests on:
+      // a number one person alone gave shows with one person.
+      totals: {
+        volume: { quiet: [20, 60], busy: [40, 90], people: 2 },
+        takes: { least: 2, most: 9, normal: [4, 4], people: 1 },
+        wrong: { outOfTen: [1, 1], people: 1 },
+      },
       open: ["Who approves an invoice over 5,000 euros?"],
       rules: STARTING_ORG_RULES,
       audited: [["onboarding.works.read", "staff", "organization"]],

@@ -9,7 +9,12 @@ import {
   STARTING_ORG_RULES,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
-import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
+import { toldPartsOf } from "@grasp-os/shared/admin/org-record";
+import type {
+  DrawnWork,
+  StaffDrawing,
+  Told,
+} from "@grasp-os/shared/admin/org-record";
 import type { SettleChoice } from "@grasp-os/shared/onboarding";
 import { orgRulesSchema } from "@grasp-os/shared/onboarding-staff";
 import type { StaffWorks } from "@grasp-os/shared/onboarding-staff";
@@ -477,6 +482,55 @@ export const drawnWorkSchema = z.object({
   open: z.array(z.string()),
 }) satisfies z.ZodType<DrawnWork>;
 
+const pair = z.tuple([z.number(), z.number()]);
+
+/**
+ * A drawing as staff read it (`StaffDrawing`, GRA-1079): which parts each
+ * person told, as positions and yes or no, and its numbers as totals over
+ * everyone. Staff see totals only, never one person's numbers or example:
+ * the schema names none, so a value that slipped into a drawing is
+ * stripped on its way out rather than sent.
+ */
+const staffDrawingSchema = drawnWorkSchema.omit({ told: true }).extend({
+  told: z.record(
+    z.string(),
+    z.object({
+      start: z.boolean(),
+      steps: z.array(z.number()),
+      end: z.boolean(),
+      way: z.object({ step: z.number(), other: z.boolean() }).nullable(),
+      waits: z.array(z.number()),
+      differently: z.array(z.number()),
+      decides: z.boolean(),
+      own: z.boolean(),
+      ai: z.boolean(),
+      volume: z.boolean(),
+      takes: z.boolean(),
+      wrong: z.boolean(),
+      right: z.boolean(),
+      ask: z.boolean(),
+      next: z.boolean(),
+      example: z.boolean(),
+      term: z.boolean(),
+      out: z.array(z.string()),
+    })
+  ),
+  totals: z.object({
+    volume: z
+      .object({ quiet: pair, busy: pair, people: z.number() })
+      .nullable(),
+    takes: z
+      .object({
+        least: z.number(),
+        most: z.number(),
+        normal: pair,
+        people: z.number(),
+      })
+      .nullable(),
+    wrong: z.object({ outOfTen: pair, people: z.number() }).nullable(),
+  }),
+}) satisfies z.ZodType<StaffDrawing>;
+
 /**
  * Every piece of work as staff read it (`StaffWorks`), checked on its way
  * out: only what the schema names leaves core.
@@ -492,7 +546,7 @@ export const staffWorksSchema = z.object({
       doers: z.array(z.string()),
       share: z.number(),
       from: z.enum(["lead", "grasp"]),
-      drawn: drawnWorkSchema.nullable(),
+      drawn: staffDrawingSchema.nullable(),
       stale: z.boolean(),
     })
   ),
@@ -515,7 +569,7 @@ const heardOf = (drawn: DrawnWork | null, talked: readonly string[]) => {
     if (telling === undefined) {
       continue;
     }
-    const facts = factsSaid(telling, null);
+    const facts = factsSaid(toldPartsOf(telling), null);
     added.push({
       fresh: facts.filter((fact) => !seen.has(fact)).length,
       all: facts.length,

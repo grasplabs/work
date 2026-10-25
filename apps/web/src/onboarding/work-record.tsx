@@ -5,7 +5,7 @@ import type {
   StepWay,
   WorkRecord as RecordOfWork,
 } from "@grasp-os/shared/admin/onboarding-admin-record";
-import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
+import type { StaffDrawing } from "@grasp-os/shared/admin/org-record";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
@@ -252,7 +252,7 @@ const StepEvidence = ({
 }: {
   record: RecordOfWork;
   index: number;
-  drawn: DrawnWork | null;
+  drawn: StaffDrawing | null;
 }) => {
   const { t } = useLingui();
   const step = record.steps[index];
@@ -394,89 +394,11 @@ const NumberRow = ({
   );
 };
 
-/** One person's own numbers, as they gave them: never another's, never averaged. */
-const OwnNumbers = ({
-  name,
-  told,
-  per,
-  unit,
-}: {
-  name: string;
-  told: Told;
-  per: DrawnWork["per"];
-  unit: DrawnWork["unit"];
-}) => {
-  const { t } = useLingui();
-  const unknown = t`Not said`;
-  let volume = unknown;
-  if (told.volume !== null) {
-    const [quiet, busy] = told.volume;
-    // Whose count it is, as they said: their own, the whole team's, or not said.
-    const said =
-      per === "month"
-        ? {
-            me: t`${quiet} to ${busy} a month, their own`,
-            team: t`${quiet} to ${busy} a month, for the whole team`,
-            unknown: t`${quiet} to ${busy} a month`,
-          }
-        : {
-            me: t`${quiet} to ${busy} a week, their own`,
-            team: t`${quiet} to ${busy} a week, for the whole team`,
-            unknown: t`${quiet} to ${busy} a week`,
-          };
-    volume = said[told.volumeOf ?? "unknown"];
-  }
-  let takes = unknown;
-  if (told.takes !== null) {
-    const [quickest, normal, longest] = told.takes;
-    takes =
-      unit === "hours"
-        ? t`${normal} hours, ${quickest} to ${longest}`
-        : t`${normal} minutes, ${quickest} to ${longest}`;
-  }
-  const wrongCount = told.wrong;
-  const wrong = wrongCount === null ? unknown : t`${wrongCount} in 10`;
-  return (
-    <tr className="border-t">
-      <th className="px-5 py-2.5 text-left font-normal" scope="row">
-        {name}
-      </th>
-      <td
-        className={cn(
-          "px-3 py-2.5",
-          told.volume === null && "text-muted-foreground"
-        )}
-      >
-        {volume}
-      </td>
-      <td
-        className={cn(
-          "px-3 py-2.5",
-          told.takes === null && "text-muted-foreground"
-        )}
-      >
-        {takes}
-      </td>
-      <td
-        className={cn(
-          "px-5 py-2.5",
-          wrongCount === null && "text-muted-foreground"
-        )}
-      >
-        {wrong}
-      </td>
-    </tr>
-  );
-};
-
-/** The numbers: the range people gave, never an average, and each person's own beside it. */
-const Numbers = ({
-  record,
-  drawn,
-}: {
-  record: RecordOfWork;
-  drawn: DrawnWork | null;
-}) => {
+/**
+ * The numbers: the range people gave, never an average and never one person's own; staff see
+ * totals only (GRA-1079).
+ */
+const Numbers = ({ record }: { record: RecordOfWork }) => {
   const { t } = useLingui();
   // A range as people gave it: one number when the ends meet.
   const span = (low: number, high: number) =>
@@ -502,16 +424,9 @@ const Numbers = ({
         : t`A normal one takes ${normal} minutes. The quickest took ${least}, the longest ${most}.`;
   }
   const outOfTen = wrong === null ? "" : span(...wrong.outOfTen);
-  const own = record.interviews.flatMap((interview) => {
-    const told = drawn?.told[interview.person.id];
-    return told === undefined ||
-      (told.volume === null && told.takes === null && told.wrong === null)
-      ? []
-      : [{ id: interview.person.id, name: interview.person.name, told }];
-  });
   return (
     <SettingsSection
-      description={t`Always the range people gave, never an average, and each person's own.`}
+      description={t`Always the range people gave and how many it rests on, never an average or one person's own.`}
       title={t`The numbers`}
     >
       <NumberRow label={t`How many`} people={volume?.people ?? 0}>
@@ -526,42 +441,6 @@ const Numbers = ({
       >
         {wrong === null ? null : t`${outOfTen} in 10.`}
       </NumberRow>
-      {own.length === 0 || drawn === null ? null : (
-        <div className="overflow-x-auto border-t">
-          <table
-            aria-label={t`Each person's numbers`}
-            className="w-full text-sm"
-          >
-            <thead className="text-muted-foreground text-xs">
-              <tr>
-                <th className="px-5 py-2 text-left font-normal" scope="col">
-                  {t`Who`}
-                </th>
-                <th className="px-3 py-2 text-left font-normal" scope="col">
-                  {t`How many`}
-                </th>
-                <th className="px-3 py-2 text-left font-normal" scope="col">
-                  {t`How long`}
-                </th>
-                <th className="px-5 py-2 text-left font-normal" scope="col">
-                  {t`Wrong`}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {own.map((each) => (
-                <OwnNumbers
-                  key={each.id}
-                  name={each.name}
-                  per={drawn.per}
-                  told={each.told}
-                  unit={drawn.unit}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </SettingsSection>
   );
 };
@@ -956,7 +835,7 @@ const Today = ({
 }: {
   view: OrgView;
   record: RecordOfWork;
-  drawn: DrawnWork | null;
+  drawn: StaffDrawing | null;
   missing: Missing[];
 }) => {
   const { t } = useLingui();
@@ -1053,7 +932,7 @@ export const WorkRecord = ({
   view: OrgView;
   record: RecordOfWork;
   /** As drawn from the interviews; null before it is. */
-  drawn: DrawnWork | null;
+  drawn: StaffDrawing | null;
   /** Someone agreed to more since it was drawn: it is drawn again soon. */
   stale: boolean;
 }) => {
@@ -1070,7 +949,7 @@ export const WorkRecord = ({
           <StepsTold record={record} />
           <div className="grid items-start gap-6 xl:grid-cols-2">
             <Around record={record} />
-            <Numbers drawn={drawn} record={record} />
+            <Numbers record={record} />
           </div>
         </>
       )}

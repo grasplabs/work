@@ -522,7 +522,11 @@ export const stateOfInterview = (held: HeldInterview): InterviewState => {
   };
 };
 
-/** What one person said about a piece of work, as positions in the drawn work: what the admin's record counts. */
+/**
+ * What one person said about a piece of work, as positions in the drawn work, with their own
+ * numbers: core's drawing keeps it. Staff never get it whole: they get `ToldParts` and the
+ * drawing's `DrawnTotals` (`StaffDrawing`).
+ */
 export interface Told {
   start: boolean;
   steps: number[];
@@ -545,6 +549,151 @@ export interface Told {
   term: boolean;
   out: string[];
 }
+
+/**
+ * Which parts of a piece of work one person told, as staff see it: positions and yes or no,
+ * never a number of theirs or their example. Their numbers count only in the drawing's
+ * `DrawnTotals`.
+ */
+export interface ToldParts {
+  start: boolean;
+  steps: number[];
+  end: boolean;
+  way: { step: number; other: boolean } | null;
+  waits: number[];
+  differently: number[];
+  decides: boolean;
+  own: boolean;
+  ai: boolean;
+  /** They said how many there are, how long one takes, how many come in wrong. */
+  volume: boolean;
+  takes: boolean;
+  wrong: boolean;
+  right: boolean;
+  ask: boolean;
+  next: boolean;
+  /** They shared an example. */
+  example: boolean;
+  term: boolean;
+  out: string[];
+}
+
+/**
+ * A drawing's numbers over everyone who gave them and left them in when it was read back: the
+ * lowest and the highest anyone said, and how many people that rests on. Never an average, never
+ * one person's; a team of one shows its number with one person.
+ */
+export interface DrawnTotals {
+  /** How many there are in a quiet and in a busy week or month. */
+  volume: {
+    quiet: [low: number, high: number];
+    busy: [low: number, high: number];
+    people: number;
+  } | null;
+  /** How long one takes: the quickest and the longest anyone named, and what they call normal. */
+  takes: {
+    least: number;
+    most: number;
+    normal: [low: number, high: number];
+    people: number;
+  } | null;
+  /** How many out of ten come in wrong. */
+  wrong: { outOfTen: [low: number, high: number]; people: number } | null;
+}
+
+/** A drawing as staff get it: who told which parts, and its numbers as totals only. */
+export type StaffDrawing = Omit<DrawnWork, "told"> & {
+  /** Which parts each person told, by person. */
+  told: Record<string, ToldParts>;
+  totals: DrawnTotals;
+};
+
+/** Which parts `told` covers, without a number of theirs or their example (`ToldParts`). */
+export const toldPartsOf = (told: Told): ToldParts => ({
+  start: told.start,
+  steps: [...told.steps],
+  end: told.end,
+  way: told.way === null ? null : { ...told.way },
+  waits: [...told.waits],
+  differently: [...told.differently],
+  decides: told.decides,
+  own: told.own,
+  ai: told.ai,
+  volume: told.volume !== null,
+  takes: told.takes !== null,
+  wrong: told.wrong !== null,
+  right: told.right,
+  ask: told.ask,
+  next: told.next,
+  example: told.example !== null && told.example !== "",
+  term: told.term,
+  out: [...told.out],
+});
+
+/** The lowest and the highest of some numbers. */
+const rangeOf = (values: readonly number[]): [low: number, high: number] => [
+  Math.min(...values),
+  Math.max(...values),
+];
+
+/** The numbers someone gave, as far as `totalsOf` reads them. */
+export type GivenNumbers = Pick<Told, "volume" | "takes" | "wrong" | "out">;
+
+/**
+ * The totals of what everyone in `given` said and left in when it was read back (`DrawnTotals`):
+ * a number someone took out again counts for nothing.
+ */
+export const totalsOf = (given: readonly GivenNumbers[]): DrawnTotals => {
+  const kept = <Value>(
+    fact: string,
+    of: (each: GivenNumbers) => Value | null
+  ): Value[] =>
+    given.flatMap((each) => {
+      const value = of(each);
+      return value === null || each.out.includes(fact) ? [] : [value];
+    });
+  const volumes = kept("volume", (each) => each.volume);
+  const takes = kept("takes", (each) => each.takes);
+  const wrongs = kept("wrong", (each) => each.wrong);
+  return {
+    volume:
+      volumes.length === 0
+        ? null
+        : {
+            quiet: rangeOf(volumes.map(([quiet]) => quiet)),
+            busy: rangeOf(volumes.map(([, busy]) => busy)),
+            people: volumes.length,
+          },
+    takes:
+      takes.length === 0
+        ? null
+        : {
+            least: Math.min(...takes.map(([least]) => least)),
+            most: Math.max(...takes.map((each) => each[2])),
+            normal: rangeOf(takes.map(([, normal]) => normal)),
+            people: takes.length,
+          },
+    wrong:
+      wrongs.length === 0
+        ? null
+        : { outOfTen: rangeOf(wrongs), people: wrongs.length },
+  };
+};
+
+/**
+ * A drawing as staff get it (`StaffDrawing`): which parts each person told, and its numbers as
+ * totals over everyone, never one person's.
+ */
+export const staffDrawingOf = ({
+  told,
+  ...drawn
+}: DrawnWork): StaffDrawing => ({
+  ...drawn,
+  told: Object.fromEntries(
+    Object.entries(told).map(([person, each]) => [person, toldPartsOf(each)])
+  ),
+  totals: totalsOf(Object.values(told)),
+});
 
 /** A step as drawn: one instruction, who does it, where, and how long people said one takes. */
 export interface DrawnStep {
@@ -613,7 +762,8 @@ export interface WorkRecord {
   share: number;
   /** Named by the lead in their interview, or added by Grasp. */
   from: "lead" | "grasp";
-  drawn: DrawnWork | null;
+  /** Its drawing, as staff get it: totals only. */
+  drawn: StaffDrawing | null;
   /** Agreed facts came in since it was drawn. */
   stale: boolean;
 }

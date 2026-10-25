@@ -243,8 +243,10 @@ const employee = (
   }
 
   stephen("numbers", `How many ${many} in a quiet ${per}?`);
-  if (telling.volume) {
-    const [quiet, busy] = telling.volume;
+  // A sample's made-up person gives their own numbers (`Telling.numbers`).
+  const numbers = telling.numbers ?? { volume: null, takes: null, wrong: null };
+  if (numbers.volume) {
+    const [quiet, busy] = numbers.volume;
     they("numbers", `About ${quiet}.`, [
       { quote: `About ${quiet}`, tag: "number" },
     ]);
@@ -261,8 +263,8 @@ const employee = (
     they("numbers", "I never counted.");
   }
   stephen("numbers", `How long does a normal ${one} take you?`);
-  if (telling.takes) {
-    const [least, normal, most] = telling.takes;
+  if (numbers.takes) {
+    const [least, normal, most] = numbers.takes;
     they(
       "numbers",
       `About ${normal} ${time}. The quickest takes ${least}, the longest ${most}.`,
@@ -277,18 +279,18 @@ const employee = (
     they("numbers", "That differs too much to say.");
   }
   stephen("numbers", `Out of ten ${many}, how many arrive incomplete?`);
-  if (telling.wrong === null) {
+  if (numbers.wrong === null) {
     they("numbers", "I couldn’t say.");
   } else {
     const said =
-      telling.wrong === 0
+      numbers.wrong === 0
         ? "Hardly any"
-        : `${upper(COUNT[telling.wrong] ?? "")}, maybe`;
+        : `${upper(COUNT[numbers.wrong] ?? "")}, maybe`;
     they("numbers", `${said}.`, [{ quote: said, tag: "number" }]);
     note(
       "wrong",
       "number",
-      `About ${telling.wrong} in 10 ${many} arrive incomplete or wrong.`
+      `About ${numbers.wrong} in 10 ${many} arrive incomplete or wrong.`
     );
   }
 
@@ -311,9 +313,10 @@ const employee = (
     }
   }
   stephen("result", "Can you share one real example?");
-  if (present(telling.example)) {
-    they("result", "", [], telling.example);
-    note("example", "case", `One real example was shared: ${telling.example}.`);
+  if (telling.example) {
+    const example = `${one.replaceAll(" ", "-")}-example.pdf`;
+    they("result", "", [], example);
+    note("example", "case", `One real example was shared: ${example}.`);
   } else {
     they("result", "Not right now.");
   }
