@@ -2274,7 +2274,8 @@ export class Workspace extends DurableObject<Env> {
   heldWriteRefusal(
     chatId: ChatId,
     input: unknown,
-    inputs: readonly string[] | null
+    inputs: readonly string[] | null,
+    senders: readonly string[] = []
   ): HeldWriteRefusal | undefined {
     const kept = traceSchema.safeParse(
       this.ctx.storage.kv.get(`${traceKeyPrefix}${chatId}`)
@@ -2294,6 +2295,7 @@ export class Workspace extends DurableObject<Env> {
     return heldWriteRefusal(input, inputs, {
       said,
       read: kept.success ? kept.data : [],
+      senders,
     });
   }
 
