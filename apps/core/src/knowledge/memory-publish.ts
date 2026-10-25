@@ -123,6 +123,55 @@ const audienceOf = async (
   return { people: await accessOf(env, userIds) };
 };
 
+/** Deepest a chain of cited memories is read through. */
+const lineageDepth = 8;
+
+/**
+ * Stands for a lineage deeper than `lineageDepth`: no collection has it,
+ * so nothing resting on one is readable.
+ */
+const tooDeep = "lineage:too-deep";
+
+/**
+ * The collections of the documents `refs` cite, read through every memory
+ * they cite, and the memories those cite, to `lineageDepth`: what a record
+ * rests on, however it was corrected or built on another.
+ */
+export const citedCollectionIds = async (
+  env: Env,
+  refs: readonly BrainSourceRef[]
+): Promise<Set<string>> => {
+  const found = new Set<string>();
+  const seen = new Set<string>();
+  let current: readonly BrainSourceRef[] = refs;
+  for (let depth = 0; ; depth += 1) {
+    const next: string[] = [];
+    for (const ref of current) {
+      if (ref.kind === "document") {
+        found.add(ref.collectionId);
+      } else if (!seen.has(ref.memoryId)) {
+        seen.add(ref.memoryId);
+        next.push(ref.memoryId);
+      }
+    }
+    if (next.length === 0) {
+      return found;
+    }
+    if (depth >= lineageDepth) {
+      found.add(tooDeep);
+      return found;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one level of the lineage at a time
+    const rows = await drizzle(env.KNOWLEDGE)
+      .select({ sourceRefs: brainMemories.sourceRefs })
+      .from(brainMemories)
+      .where(inList(brainMemories.id, next));
+    current = rows.flatMap(({ sourceRefs }) =>
+      refsSchema.parse(JSON.parse(sourceRefs))
+    );
+  }
+};
+
 /** `ids`' collections with what reading one takes, and their teams. */
 const collectionsOf = async (env: Env, ids: readonly string[]) => {
   const [rows, shares] = await Promise.all([
@@ -211,28 +260,9 @@ export const mayPublish = async (
     throw brainErrors.create("brain.denied");
   }
   const audience = await audienceOf(env, reader.person, target);
-  // A memory it cites is read through: the documents that one rests on
+  // The documents a cited memory rests on, and so on through its lineage,
   // must be the scope's whole audience's too.
-  const memoryIds = refs.flatMap((ref) =>
-    ref.kind === "memory" ? [ref.memoryId] : []
-  );
-  const cited =
-    memoryIds.length === 0
-      ? []
-      : await drizzle(env.KNOWLEDGE)
-          .select({ sourceRefs: brainMemories.sourceRefs })
-          .from(brainMemories)
-          .where(inList(brainMemories.id, memoryIds));
-  const throughMemories = cited.flatMap(({ sourceRefs }) =>
-    refsSchema.parse(JSON.parse(sourceRefs))
-  );
-  const ids = [
-    ...new Set(
-      [...refs, ...throughMemories].flatMap((ref) =>
-        ref.kind === "document" ? [ref.collectionId] : []
-      )
-    ),
-  ];
+  const ids = [...(await citedCollectionIds(env, refs))];
   if (ids.length === 0) {
     return;
   }

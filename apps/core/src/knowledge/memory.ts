@@ -61,7 +61,7 @@ import {
   memoryLimit,
   personalCollectionId,
 } from "./memory-files.ts";
-import { readableByAll } from "./memory-publish.ts";
+import { citedCollectionIds, readableByAll } from "./memory-publish.ts";
 import { brainOf } from "./ports.ts";
 
 // An agent's memory: the files it always has in its context, by where it
@@ -229,23 +229,19 @@ const stillReadable = async <Record extends MemoryRecord>(
   people: readonly string[],
   records: readonly Record[]
 ): Promise<Record[]> => {
-  const ids = [
-    ...new Set(
-      records.flatMap(({ sourceRefs }) =>
-        sourceRefs.flatMap((ref) =>
-          ref.kind === "document" ? [ref.collectionId] : []
-        )
-      )
-    ),
-  ];
+  // Each record's whole lineage: a correction rests on what it corrected.
+  const each = await Promise.all(
+    records.map(
+      async ({ sourceRefs }) => await citedCollectionIds(env, sourceRefs)
+    )
+  );
+  const ids = [...new Set(each.flatMap((cited) => [...cited]))];
   if (ids.length === 0) {
     return [...records];
   }
   const readable = await readableByAll(env, people, ids);
-  return records.filter(({ sourceRefs }) =>
-    sourceRefs.every(
-      (ref) => ref.kind !== "document" || readable.has(ref.collectionId)
-    )
+  return records.filter((_record, index) =>
+    [...(each[index] ?? [])].every((id) => readable.has(id))
   );
 };
 
@@ -305,15 +301,12 @@ const citedCollections = async (
   env: Env,
   records: readonly MemoryRecord[]
 ): Promise<{ id: string; sensitive: boolean }[]> => {
-  const ids = [
-    ...new Set(
-      records.flatMap(({ sourceRefs }) =>
-        sourceRefs.flatMap((ref) =>
-          ref.kind === "document" ? [ref.collectionId] : []
-        )
-      )
-    ),
-  ];
+  const each = await Promise.all(
+    records.map(
+      async ({ sourceRefs }) => await citedCollectionIds(env, sourceRefs)
+    )
+  );
+  const ids = [...new Set(each.flatMap((cited) => [...cited]))];
   return ids.length === 0
     ? []
     : await drizzle(env.KNOWLEDGE)

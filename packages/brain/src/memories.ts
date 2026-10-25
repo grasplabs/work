@@ -905,6 +905,8 @@ const storeCommand = async <C>(
     now: Date;
     resourceRefs: BrainSourceRef[];
     condition: SQL;
+    /** Whether it counts toward the caller's bound: a retirement only removes. */
+    bounded?: boolean;
     writes: (stored: SQL, receiptId: string) => readonly BatchItem<"sqlite">[];
   }
 ): Promise<CommandReceipt | undefined> => {
@@ -928,7 +930,7 @@ const storeCommand = async <C>(
       db
         .insert(brainReceipts)
         .select(
-          sql`SELECT ${receipt.id}, ${receipt.keyHash}, ${receipt.caller}, ${receipt.operation}, ${receipt.requestHash}, ${receipt.status}, ${receipt.indexingState}, ${receipt.resourceRefs}, ${receipt.createdAt.getTime()}, ${receipt.retentionUntil.getTime()} WHERE ${withinBound(caller, now)} AND ${command.condition}`
+          sql`SELECT ${receipt.id}, ${receipt.keyHash}, ${receipt.caller}, ${receipt.operation}, ${receipt.requestHash}, ${receipt.status}, ${receipt.indexingState}, ${receipt.resourceRefs}, ${receipt.createdAt.getTime()}, ${receipt.retentionUntil.getTime()} WHERE ${command.bounded === false ? sql`1` : withinBound(caller, now)} AND ${command.condition}`
         )
         .returning({ id: brainReceipts.id }),
       ...command.writes(receiptStored(receipt.id), receipt.id),
@@ -1226,7 +1228,6 @@ export const memoriesRetire = async <C>(
   if (row.revision !== expectedRevision || row.state === "retired") {
     throw brainErrors.create("brain.revision_conflict");
   }
-  await requireWithinBound(brain, caller, now);
   const live = and(
     eq(brainMemories.id, memoryId),
     eq(brainMemories.revision, expectedRevision),
@@ -1235,6 +1236,9 @@ export const memoriesRetire = async <C>(
   const receipt = await storeCommand(brain, {
     caller,
     operation: "memories.retire",
+    // Only removes: an admin cleaning up after many publishers isn't held
+    // to one person's bound.
+    bounded: false,
     keyHash,
     requestHash,
     now,
