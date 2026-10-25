@@ -164,7 +164,10 @@ const readApi = (
  * `null` without any.
  */
 const memorySection = (memory: Memory | undefined): string | null => {
-  if (memory === undefined || memory.files.length === 0) {
+  if (
+    memory === undefined ||
+    (memory.files.length === 0 && memory.records.length === 0)
+  ) {
     return null;
   }
   const user = memory.files.find(
