@@ -17,6 +17,7 @@ import {
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import {
   approveRollout,
+  ringChecksSchema,
   cancelRollout,
   pauseRollout,
   pinClient,
@@ -92,11 +93,11 @@ export const startRolloutFn = createServerFn({ method: "POST" })
   );
 
 export const approveRolloutFn = createServerFn({ method: "POST" })
-  .validator(rolloutSchema)
+  .validator(rolloutSchema.extend({ checks: ringChecksSchema }))
   .handler(
     async ({ data, context }) =>
       await change(async () => {
-        await approveRollout(env, context.staff, data.rolloutId);
+        await approveRollout(env, context.staff, data.rolloutId, data.checks);
         return data.rolloutId;
       })
   );

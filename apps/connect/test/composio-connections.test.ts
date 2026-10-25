@@ -37,7 +37,7 @@ const composio = fakeComposioApi(
       tools: [
         { slug: "HUBSPOT_LIST_CONTACTS" },
         { slug: "HUBSPOT_CREATE_CONTACT" },
-        { slug: "HUBSPOT_DELETE_CONTACT" },
+        { slug: "HUBSPOT_UPDATE_CONTACT" },
       ],
     },
     // Composio holds no app for it: it would take the organization's own.
@@ -60,7 +60,7 @@ const composio = fakeComposioApi(
         run: () => ({ output: { id: "contact-3" } }),
       },
       {
-        name: "HUBSPOT_DELETE_CONTACT",
+        name: "HUBSPOT_UPDATE_CONTACT",
         run: () => ({ output: { deleted: true } }),
       },
     ],
@@ -716,13 +716,13 @@ describe("a Composio connection", () => {
   it("refuses a tool the admin didn't allow, without reaching Composio", async () => {
     const connectionId = await connectHubSpot(someone("admin"));
     await expect(
-      outcome(callAs(workflow, call(connectionId, "HUBSPOT_DELETE_CONTACT")))
+      outcome(callAs(workflow, call(connectionId, "HUBSPOT_UPDATE_CONTACT")))
     ).resolves.toBe("connect.action_not_found");
     expect(composio.state.mcp.requests).toBe(0);
     const recorded = await events();
     const refused = recorded.find(({ action }) => action === "connection.call");
     expect(refused?.detail).toMatchObject({
-      action: "HUBSPOT_DELETE_CONTACT",
+      action: "HUBSPOT_UPDATE_CONTACT",
       outcome: "refused",
       reason: "connect.action_not_found",
     });

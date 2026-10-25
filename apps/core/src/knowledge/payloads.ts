@@ -4,7 +4,6 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { inList } from "../db/d1.ts";
@@ -13,7 +12,7 @@ import {
   brainPayloads,
   versions,
 } from "../db/knowledge/schema.ts";
-import { portsOf } from "./ports.ts";
+import type { Brain } from "./brain.ts";
 
 // The texts of Knowledge's versions: each an immutable object in the
 // deployment's private `BRAIN_OBJECTS` bucket (EU jurisdiction, set when
@@ -87,13 +86,13 @@ const objectKey = (sha256: string): string =>
  * Whether the object `key` is there as stored: its size, and the SHA-256
  * R2 checked as it took it, from its metadata alone (no body read).
  */
-const intact = async (
-  env: Env,
+const intact = async <C>(
+  brain: Brain<C>,
   key: string,
   sha256: string,
   bytes: number
 ): Promise<boolean> => {
-  const head = await portsOf(env).blobs.head(key);
+  const head = await brain.ports.blobs.head(key);
   const stored = head?.checksums.sha256;
   return (
     head !== null &&
@@ -109,8 +108,8 @@ const intact = async (
  * one whose object is in R2. Throws when the upload fails, leaving the row
  * for `collectPayloads`.
  */
-export const stagePayload = async (
-  env: Env,
+export const stagePayload = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   collectionId: string,
   text: string
@@ -130,7 +129,7 @@ export const stagePayload = async (
     .get();
   if (
     committed &&
-    (await intact(env, committed.key, sha256, body.byteLength))
+    (await intact(brain, committed.key, sha256, body.byteLength))
   ) {
     return {
       key: committed.key,
@@ -161,9 +160,9 @@ export const stagePayload = async (
     sha256,
     bytes: body.byteLength,
     state: "pending",
-    createdAt: portsOf(env).clock(),
+    createdAt: brain.ports.clock(),
   });
-  await portsOf(env).blobs.put(key, body, { sha256 });
+  await brain.ports.blobs.put(key, body, { sha256 });
   return { key, collectionId, sha256, bytes: body.byteLength, fresh: true };
 };
 
@@ -264,11 +263,11 @@ const unavailable = (ref: PayloadRef, why: string) => {
  * The text of a version's payload, checked against its hash: refused with
  * `knowledge.unavailable` when its object is missing or isn't that text.
  */
-export const readPayload = async (
-  env: Env,
+export const readPayload = async <C>(
+  brain: Brain<C>,
   ref: PayloadRef
 ): Promise<string> => {
-  const object = await portsOf(env).blobs.get(ref.key);
+  const object = await brain.ports.blobs.get(ref.key);
   if (object === null) {
     throw unavailable(ref, "missing");
   }
@@ -289,10 +288,10 @@ export const readPayload = async (
  * many it deleted; throws when R2 refuses a delete. The cron trigger runs it; a purge runs it right after
  * its batch, so what it erased leaves R2 too.
  */
-export const collectPayloads = async (
-  env: Env,
+export const collectPayloads = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
-  now = portsOf(env).clock().getTime()
+  now = brain.ports.clock().getTime()
 ): Promise<number> => {
   await db
     .update(brainPayloads)
@@ -319,7 +318,7 @@ export const collectPayloads = async (
     const keys = page.map(({ key }) => key);
     try {
       // oxlint-disable-next-line no-await-in-loop -- a page at a time
-      await portsOf(env).blobs.delete(keys);
+      await brain.ports.blobs.delete(keys);
     } catch (error) {
       // Thrown, so a purge that called it fails rather than say the text
       // is gone; its rows stay `collecting`, for the next run or sweep.
@@ -344,6 +343,9 @@ export const collectPayloads = async (
 };
 
 /** The cron trigger's `collectPayloads`, every minute. */
-export const sweepPayloads = async (env: Env, now: Date): Promise<void> => {
-  await collectPayloads(env, drizzle(env.KNOWLEDGE), now.getTime());
+export const sweepPayloads = async <C>(
+  brain: Brain<C>,
+  now: Date
+): Promise<void> => {
+  await collectPayloads(brain, brain.db, now.getTime());
 };

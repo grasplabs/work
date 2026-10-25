@@ -80,8 +80,20 @@ export const landscapeGranted =
  * it carries the authorization's PKCE challenge, so only the flow's own
  * verifier redeems it.
  */
-export const consentCode = (url: URL, tenant: string, subject: string) =>
-  [url.searchParams.get("code_challenge"), tenant, subject].join(".");
+export const consentCode = (
+  url: URL,
+  tenant: string,
+  subject: string,
+  granted?: string
+) =>
+  [
+    url.searchParams.get("code_challenge"),
+    tenant,
+    subject,
+    // What Entra says it granted (`scope`), when the test gives it: base64,
+    // since rights have dots of their own.
+    ...(granted === undefined ? [] : [btoa(granted)]),
+  ].join(".");
 
 /**
  * Where tests post a message arriving in a mailbox's inbox:
@@ -200,6 +212,14 @@ export const slackApp = {
  * method, its form or JSON fields, and whether it carried the bot's token.
  */
 export const slackPostedUrl = "https://slack-control.test/posted";
+
+/**
+ * Where tests remove the bot from a conversation, as uninstalling its app
+ * does: POST `{ conversation }`; the Bot Connector refuses its posts there
+ * with 403 from then on.
+ */
+export const botConnectorUninstallUrl =
+  "https://bot-connector-control.test/uninstall";
 
 /**
  * The client's WhatsApp Business number, as core (`WHATSAPP_APP_SECRET`,
@@ -442,6 +462,13 @@ export default {
       Object.assign(documents, await request.json());
       return new Response(null, { status: 204 });
     }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname.startsWith("/v1.0/users/") && url.pathname.split("/").length === 4 && url.searchParams.has("$expand")) {
+      const id = url.pathname.split("/").pop().toLowerCase();
+      const found = directory.users.find((user) => user.id.toLowerCase() === id);
+      return found === undefined
+        ? Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 })
+        : Response.json(found);
+    }
     if ((url.hostname === "graph.microsoft.com" || url.hostname === "acme-my.sharepoint.com") && request.method === "GET") {
       const answered = documentsGraph(url);
       if (answered !== undefined) {
@@ -569,6 +596,11 @@ export default {
       botConnector.refuseStreams(refuse);
       return new Response(null, { status: 204 });
     }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorUninstallUrl)}) {
+      const { conversation } = await request.json();
+      botConnector.uninstall(conversation);
+      return new Response(null, { status: 204 });
+    }
     if (url.href === ${JSON.stringify(botConnectorPostedUrl)}) {
       return Response.json({ posted: botConnector.posted, asked: botConnector.asked });
     }
@@ -629,7 +661,7 @@ export default {
       return new Response("Not found", { status: 404 });
     }
     const form = new URLSearchParams(await request.text());
-    const [challenge, tenant, subject] = (form.get("code") ?? "").split(".");
+    const [challenge, tenant, subject, granted] = (form.get("code") ?? "").split(".");
     const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
     const digest = base64Url(
       new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
@@ -668,6 +700,7 @@ export default {
       ...(forLandscape ? { scope: ${JSON.stringify(landscapeGranted)} } : {}),
       ...(forDirectory ? { scope: ${JSON.stringify(directoryGranted)} } : {}),
       ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
+      ...(granted === undefined ? {} : { scope: atob(granted) }),
     });
   },
 };

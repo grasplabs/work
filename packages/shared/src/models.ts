@@ -452,6 +452,8 @@ export interface PersonLimits {
   people: PersonLimitSpend[];
   /** More people are in the organization than `people` lists. */
   more: boolean;
+  /** The organization's teams, by name: what an exception for a team may name. */
+  teams: { teamId: string; name: string }[];
 }
 
 /**

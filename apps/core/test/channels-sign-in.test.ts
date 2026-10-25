@@ -37,9 +37,13 @@ const signInLink = `${clientOrigin}/sign-in`;
 /** The cards and lines sent in `conversation`, each as JSON. */
 const sentIn = async (conversation: string): Promise<string[]> => {
   const { activities } = await reached(conversation);
-  return activities
-    .filter(({ type }) => type === "message")
-    .map((activity) => JSON.stringify(activity));
+  return (
+    activities
+      .filter(({ type }) => type === "message")
+      .map((activity) => JSON.stringify(activity))
+      // Not the card offering their own Microsoft 365 (connect-own.ts).
+      .filter((activity) => !activity.includes("/connect-microsoft"))
+  );
 };
 
 /** Someone of the client's tenant whom Grasp hasn't seen, as Teams' roster has them. */

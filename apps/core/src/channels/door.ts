@@ -21,22 +21,38 @@
  *   they are dropped, with one line a minute to say so.
  * - Someone writing who isn't one of the client's people: who writes is
  *   only ever the platform's verified id (who.ts), never a name, an email
- *   or a phone number. Group chats and channels, other companies, guests,
- *   removed people and people Grasp doesn't know each get one line, in
- *   the language their app is set to, and nothing they wrote is read.
- *   The lines go out through connect like every send.
- * - One of the client's own people Grasp hasn't seen yet (Teams' roster
- *   says they are of the client's tenant, and no guest) is sent a link to
+ *   or a phone number. Other companies, guests, removed people and people
+ *   Grasp doesn't know each get one line, in the language their app is set
+ *   to, and nothing they wrote is read. The lines go out through connect
+ *   like every send.
+ * - Talk in a group chat or channel that isn't for Stephen: only a message
+ *   that @mentions the bot is taken; the rest is dropped unread, uncounted
+ *   and unanswered.
+ * - Someone Settings › Stephen doesn't let reach him, here or at all
+ *   (`stephenFor`), is told so in one line, and nothing they wrote is read.
+ * - One of the client's own people Grasp hasn't seen yet whom the
+ *   organization's directory holds, by the object id Teams verified, is
+ *   made a member from it and answered at once, with no sign-in first
+ *   (auth/directory-members.ts). Someone the directory made a member, who
+ *   never signed in since, is answered only while the directory still
+ *   holds them, looked up again at most once an hour.
+ * - One of the client's own people Grasp hasn't seen yet and the directory
+ *   can't vouch for (Teams' roster says they are of the client's tenant,
+ *   and no guest) is sent a link to
  *   the deployment's own sign-in, once a day: it carries no token and
  *   binds nothing, as their sign-in's ID token names them by the object
  *   id their messages carry. Their first question is kept for the hour,
  *   and answered with their next message once they have signed in.
  *   Nobody from outside the tenant is ever sent the link.
  *
- * Only a member's message in their own private chat with the bot reaches
- * the Chat SDK, with who they are, and its conversation is kept
- * (`channel_conversations`) so a later message, and the answer, find it.
- * It is answered in the person's own chat for the platform (answer.ts).
+ * Only a member's message reaches the Chat SDK, with who they are: in their
+ * own private chat with the bot, whose conversation is kept
+ * (`channel_conversations`) so a later message, and the answer, find it;
+ * or one that @mentions the bot in a group chat or channel, with who is
+ * in it, read from the platform's roster then (`audienceIn`). It is
+ * answered in the person's own chat for the platform, or their one chat
+ * for that group or channel thread, whose agent reads only what everyone
+ * in it may (answer.ts, knowledge/access.ts).
  *
  * Slack (slack.ts) comes in the same way, by its own signature and ids:
  * its people are known only by the Slack account they linked to Grasp, and
@@ -55,6 +71,7 @@
  */
 import "@grasp-os/chat/workerd";
 import { durableObjectState } from "@grasp-os/chat/state";
+import type { DirectoryPerson } from "@grasp-os/shared/directory";
 import { requestErrors } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
@@ -64,13 +81,19 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { signInConfig } from "../auth/config.ts";
+import { memberFromDirectory } from "../auth/directory-members.ts";
 import { channelConversations } from "../db/core/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import { errorResponse } from "../errors.ts";
+import { audienceMaxMembers } from "../knowledge/access.ts";
+import type { Audience } from "../knowledge/access.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
+import { stephenFor } from "../stephen-reach.ts";
 import { offerChannelLink } from "./accounts.ts";
 import { answerInChat } from "./answer.ts";
-import { signInCard } from "./cards.tsx";
+import { cancelAction, confirmAction, signInCard } from "./cards.tsx";
+import { pressCard } from "./press.ts";
+import { countSignal } from "./signals.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
@@ -86,7 +109,7 @@ import {
   whatsAppSetUp,
   whatsAppSubscription,
 } from "./whatsapp.ts";
-import { writerOf } from "./who.ts";
+import { inDirectory, teamsMembers, writerOf } from "./who.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
@@ -159,6 +182,12 @@ const signInPath = "/sign-in";
 /** Where a newcomer's first question waits, by their object id. */
 const keptKey = (oid: string): string => `door:teams:kept:${oid}`;
 
+/** How long the directory's word that it holds someone is taken. */
+const heldMs = 60 * 60 * 1000;
+
+/** How long the directory's word that it doesn't is taken. */
+const notHeldMs = 5 * 60 * 1000;
+
 /** How long the door remembers a message it took, to take a resend once. */
 const seenTtlMs = 24 * 60 * 60 * 1000;
 
@@ -176,7 +205,8 @@ type DoorLine =
   | "otherCompany"
   | "guest"
   | "removed"
-  | "signIn";
+  | "signIn"
+  | "notTurnedOn";
 
 /**
  * A Teams activity, as far as the door reads it. Its text is read only to
@@ -197,6 +227,14 @@ const activitySchema = z.object({
     id: z.string().min(1).max(1024),
     conversationType: z.enum(["personal", "groupChat", "channel"]),
   }),
+  entities: z
+    .array(
+      z.looseObject({
+        type: z.string().optional(),
+        mentioned: z.object({ id: z.string().optional() }).optional(),
+      })
+    )
+    .optional(),
 });
 type Activity = z.infer<typeof activitySchema>;
 
@@ -206,11 +244,23 @@ const localeOf = (locale: string | undefined): ChannelLocale => {
   return channelLocales.find((each) => each === language) ?? "en";
 };
 
+/** Where a member asked in a chat others share, as the door hands it on. */
+export interface SharedPlace {
+  kind: "group" | "channel";
+  /** Who is in it, as the platform's roster says now. */
+  audience: Audience;
+}
+
 /** A member's message, as the door hands it on. */
 export interface ChannelMessage {
   platform: Platform;
   /** The member who wrote it. */
   userId: string;
+  /**
+   * Whether Settings › Stephen lets him do things for them here, or only
+   * answer (`stephenFor`): what holds writes for a press must ask it.
+   */
+  acts: boolean;
   thread: Thread;
   message: Message;
   /**
@@ -218,6 +268,8 @@ export interface ChannelMessage {
    * message, to be answered first: once, within the hour.
    */
   kept?: string;
+  /** Where they asked, when it was a group chat or channel. */
+  shared?: SharedPlace;
   /**
    * Sends `send` once the platform has the reply as it stands: on Teams,
    * after a streamed answer's last words, which Microsoft's SDK sends only
@@ -333,6 +385,70 @@ const newcomer = async (
   return offered ? { line: "signIn" } : {};
 };
 
+/**
+ * Whether `activity` @mentions the client's bot, as Teams marks a mention:
+ * by the bot's id, alone or after its `28:` prefix.
+ */
+const mentionsBot = (env: Env, activity: Activity): boolean =>
+  (activity.entities ?? []).some(
+    ({ type, mentioned }) =>
+      type === "mention" &&
+      mentioned?.id !== undefined &&
+      env.TEAMS_BOT_ID !== undefined &&
+      env.TEAMS_BOT_ID !== "" &&
+      (mentioned.id === env.TEAMS_BOT_ID ||
+        mentioned.id.endsWith(`:${env.TEAMS_BOT_ID}`))
+  );
+
+/**
+ * Who is in the group chat or channel `activity` came from, read from the
+ * conversation's roster (a channel's: its team's, or a private channel's
+ * own): its members Grasp knows as the organization's active people, and
+ * whether anyone else is in it, a guest, another tenant's, someone Grasp
+ * hasn't seen, or anyone at all when the roster can't be read or is too
+ * large. Whoever is not named narrows what the answer reads to nothing.
+ */
+const audienceIn = async (
+  env: Env,
+  adapter: ConnectedTeamsAdapter,
+  activity: Activity
+): Promise<Audience> => {
+  const nobody = { members: [], outsiders: true };
+  // A channel thread's conversation is the channel's, with `;messageid=`.
+  const [conversationId = activity.conversation.id] =
+    activity.conversation.id.split(";");
+  let roster: Awaited<ReturnType<ConnectedTeamsAdapter["rosterOf"]>>;
+  try {
+    roster = await adapter.rosterOf(
+      activity.serviceUrl,
+      conversationId,
+      audienceMaxMembers
+    );
+  } catch (error) {
+    log.warn("channel.roster_unread", {
+      platform: "teams",
+      ...errorFields(error),
+    });
+    return nobody;
+  }
+  if (roster === undefined) {
+    return nobody;
+  }
+  const tenant = signInConfig(env)?.entra?.tenantId;
+  const ours = roster.flatMap(({ aadObjectId, tenantId, userRole }) =>
+    aadObjectId !== undefined && tenantId === tenant && userRole !== "guest"
+      ? [aadObjectId]
+      : []
+  );
+  const known = await teamsMembers(env, ours);
+  return {
+    members: [...new Set(known.values())],
+    outsiders:
+      roster.length === 0 ||
+      roster.some(({ aadObjectId }) => !known.has(aadObjectId ?? "")),
+  };
+};
+
 /** What a member asked before Grasp knew them, if it is still kept: taken once. */
 const keptQuestion = async (
   state: StateAdapter,
@@ -347,6 +463,49 @@ const keptQuestion = async (
 };
 
 /**
+ * The person the organization's directory holds under `oid`. Its word that
+ * it holds them is taken for the hour when `keepHeld` (for a member it
+ * made, so their messages don't each ask it again), and that it holds
+ * nobody for five minutes. While it can't be read, it holds nobody, and
+ * that isn't kept.
+ */
+const heldInDirectory = async (
+  env: Env,
+  state: StateAdapter,
+  oid: string,
+  { keepHeld }: { keepHeld: boolean }
+): Promise<DirectoryPerson | null> => {
+  const key = `door:teams:directory:${oid}`;
+  const said = await state.get<{ person: DirectoryPerson | null }>(key);
+  if (said !== null) {
+    return said.person;
+  }
+  const person = await inDirectory(env, oid);
+  if (person === null) {
+    await state.set(key, { person }, notHeldMs);
+  } else if (person !== undefined && keepHeld) {
+    await state.set(key, { person }, heldMs);
+  }
+  return person ?? null;
+};
+
+/**
+ * Someone neither a sign-in nor the directory vouches for: the sign-in
+ * link if Teams' roster has them as one of the client's own people,
+ * otherwise the line for who they are.
+ */
+const notKnown = async (
+  env: Env,
+  state: StateAdapter,
+  adapter: ConnectedTeamsAdapter,
+  activity: Activity,
+  oid: string
+): Promise<{ line?: DoorLine }> => {
+  const line = await unknownLine(env, adapter, activity);
+  return line === "signIn" ? await newcomer(state, activity, oid) : { line };
+};
+
+/**
  * What the door does with a message before the Chat SDK sees it: the line
  * it sends and nothing more, or the member it is from.
  */
@@ -355,9 +514,20 @@ const gate = async (
   state: StateAdapter,
   adapter: ConnectedTeamsAdapter,
   activity: Activity
-): Promise<{ line?: DoorLine; userId?: string; kept?: string }> => {
+): Promise<{
+  line?: DoorLine;
+  userId?: string;
+  acts?: boolean;
+  kept?: string;
+  shared?: SharedPlace;
+}> => {
   // A message without an id can't be told from its resends: dropped.
   if (activity.id === undefined) {
+    return {};
+  }
+  const { conversationType } = activity.conversation;
+  // In a group chat or channel, only what is said to Stephen is his.
+  if (conversationType !== "personal" && !mentionsBot(env, activity)) {
     return {};
   }
   const first = await state.setIfNotExists(
@@ -375,9 +545,6 @@ const gate = async (
     log.info("channel.limited", { platform: "teams" });
     return told.take(`teams:${sender}`) ? { line: "tooFast" } : {};
   }
-  if (activity.conversation.conversationType !== "personal") {
-    return { line: "privateOnly" };
-  }
   if (activity.from.aadObjectId === undefined) {
     return { line: "otherCompany" };
   }
@@ -385,78 +552,61 @@ const gate = async (
   const writer = await writerOf(env, "teams", oid);
   switch (writer.kind) {
     case "member": {
-      return { userId: writer.userId, kept: await keptQuestion(state, oid) };
+      // Known only from the directory: answered while it still holds them.
+      if (
+        writer.fromDirectory &&
+        (await heldInDirectory(env, state, oid, { keepHeld: true })) === null
+      ) {
+        return await notKnown(env, state, adapter, activity, oid);
+      }
+      // Settings › Stephen: whether he answers them here at all, asked
+      // before anything they wrote is read.
+      const reach = await stephenFor(env, writer.userId, "teams");
+      if (!reach.reaches) {
+        return { line: "notTurnedOn" };
+      }
+      const kept = await keptQuestion(state, oid);
+      if (conversationType === "personal") {
+        return { userId: writer.userId, acts: reach.acts, kept };
+      }
+      const kind = conversationType === "groupChat" ? "group" : "channel";
+      const audience = await audienceIn(env, adapter, activity);
+      return {
+        userId: writer.userId,
+        acts: reach.acts,
+        kept,
+        shared: { kind, audience },
+      };
     }
     case "removed": {
       return { line: "removed" };
     }
     case "unknown": {
-      const line = await unknownLine(env, adapter, activity);
-      return line === "signIn"
-        ? await newcomer(state, activity, oid)
-        : { line };
+      const person = await heldInDirectory(env, state, oid, {
+        keepHeld: false,
+      });
+      if (person === null) {
+        return await notKnown(env, state, adapter, activity, oid);
+      }
+      const userId = await memberFromDirectory(env, oid, person);
+      if (userId === null) {
+        return { line: "removed" };
+      }
+      // Settings › Stephen, as for any member.
+      const reach = await stephenFor(env, userId, "teams");
+      if (!reach.reaches) {
+        return { line: "notTurnedOn" };
+      }
+      return {
+        userId,
+        acts: reach.acts,
+        kept: await keptQuestion(state, oid),
+      };
     }
     default: {
       return writer satisfies never;
     }
   }
-};
-
-/**
- * Hands a member's message on to `chat`, through the platform's webhook
- * (`webhook`), as the request's background work, and answers the platform
- * at once: it gives up on a webhook long before an answer is ready, and
- * sends it again. Its conversation is kept, and what the hand-off asks to
- * send afterward goes once the platform has the reply as it stands.
- */
-const handOn = (
-  env: Env,
-  ctx: Pick<ExecutionContext, "waitUntil">,
-  chat: Chat,
-  {
-    platform,
-    userId,
-    kept,
-    handoff,
-    webhook,
-  }: {
-    platform: Platform;
-    userId: string;
-    kept?: string;
-    handoff: ChannelHandoff | undefined;
-    webhook: (
-      waitUntil: (promise: Promise<unknown>) => void
-    ) => Promise<unknown>;
-  }
-): Response => {
-  const takeOn = handoff ?? answerInChat(env);
-  const later: (() => Promise<unknown>)[] = [];
-  const afterward = (send: () => Promise<unknown>): void => {
-    later.push(send);
-  };
-  chat.onDirectMessage(async (thread, message) => {
-    await keepConversation(env, platform, thread.id, userId);
-    await takeOn({ platform, userId, thread, message, kept, afterward });
-  });
-  const settled = async (promise: Promise<unknown>): Promise<void> => {
-    try {
-      await promise;
-    } catch (error) {
-      log.error("channel.handle_failed", { platform, ...errorFields(error) });
-    }
-  };
-  const background = (promise: Promise<unknown>): void => {
-    ctx.waitUntil(settled(promise));
-  };
-  const handled = async (): Promise<void> => {
-    await webhook(background);
-    for (const send of later) {
-      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
-      await send();
-    }
-  };
-  background(handled());
-  return new Response(null, { status: 200 });
 };
 
 /**
@@ -600,6 +750,15 @@ const slackResponse = async (
   if (userId === undefined) {
     return new Response(null, { status: 200 });
   }
+  // Settings › Stephen, as for Teams: whether he answers them in Slack at
+  // all, asked before anything they wrote is read.
+  const reach = await stephenFor(env, userId, "slack");
+  if (!reach.reaches) {
+    ctx.waitUntil(sendSlackLine(env, origin, from, "notTurnedOn"));
+    return new Response(null, { status: 200 });
+  }
+  // As for Teams: one turn at a time per conversation, answered by the
+  // same agent in the person's own chat for Slack (answer.ts).
   const chat = new Chat({
     userName: "Stephen",
     adapters: { slack: slackAdapter(env) },
@@ -607,20 +766,39 @@ const slackResponse = async (
     logger: "silent",
     concurrency: "queue",
   });
-  return handOn(env, ctx, chat, {
-    platform: "slack",
-    userId,
-    handoff,
-    webhook: async (waitUntil) =>
-      await chat.webhooks.slack(
-        new Request(request.url, {
-          method: "POST",
-          headers: request.headers,
-          body,
-        }),
-        { waitUntil }
-      ),
+  const takeOn = handoff ?? answerInChat(env);
+  chat.onDirectMessage(async (thread, message) => {
+    await keepConversation(env, "slack", thread.id, userId);
+    // Slack takes a reply whole, no stream: it has it once the handler
+    // posted it, so what comes after goes right after, in order.
+    const later: (() => Promise<unknown>)[] = [];
+    await takeOn({
+      platform: "slack",
+      userId,
+      thread,
+      message,
+      acts: reach.acts,
+      afterward: (send) => {
+        later.push(send);
+      },
+    });
+    for (const send of later) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
+      await send();
+    }
   });
+  return await chat.webhooks.slack(
+    new Request(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body,
+    }),
+    {
+      waitUntil: (promise) => {
+        ctx.waitUntil(promise);
+      },
+    }
+  );
 };
 
 /**
@@ -728,6 +906,65 @@ const sendWhatsAppLine = async (
 };
 
 /**
+ * Hands a member's message on to `chat`, through the platform's webhook
+ * (`webhook`), as the request's background work, and answers the platform
+ * at once: it gives up on a webhook long before an answer is ready, and
+ * sends it again. Its conversation is kept, and what the hand-off asks to
+ * send afterward goes once the platform has the reply as it stands.
+ */
+const handOn = (
+  env: Env,
+  ctx: Pick<ExecutionContext, "waitUntil">,
+  chat: Chat,
+  {
+    platform,
+    userId,
+    acts,
+    kept,
+    handoff,
+    webhook,
+  }: {
+    platform: Platform;
+    userId: string;
+    acts: boolean;
+    kept?: string;
+    handoff: ChannelHandoff | undefined;
+    webhook: (
+      waitUntil: (promise: Promise<unknown>) => void
+    ) => Promise<unknown>;
+  }
+): Response => {
+  const takeOn = handoff ?? answerInChat(env);
+  const later: (() => Promise<unknown>)[] = [];
+  const afterward = (send: () => Promise<unknown>): void => {
+    later.push(send);
+  };
+  chat.onDirectMessage(async (thread, message) => {
+    await keepConversation(env, platform, thread.id, userId);
+    await takeOn({ platform, userId, thread, message, acts, kept, afterward });
+  });
+  const settled = async (promise: Promise<unknown>): Promise<void> => {
+    try {
+      await promise;
+    } catch (error) {
+      log.error("channel.handle_failed", { platform, ...errorFields(error) });
+    }
+  };
+  const background = (promise: Promise<unknown>): void => {
+    ctx.waitUntil(settled(promise));
+  };
+  const handled = async (): Promise<void> => {
+    await webhook(background);
+    for (const send of later) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
+      await send();
+    }
+  };
+  background(handled());
+  return new Response(null, { status: 200 });
+};
+
+/**
  * Answers a WhatsApp request whose body the door read: 401 unless Meta
  * signed it for this client's number, and otherwise 200 at once. Each
  * message is gated on its own; a member's is handed on alone, in a body
@@ -763,7 +1000,17 @@ const whatsAppResponse = async (
         if (line !== undefined || link !== undefined) {
           ctx.waitUntil(sendWhatsAppLine(env, origin, message, line ?? "link"));
         }
-        if (userId !== undefined) {
+        // Settings › Stephen, as for Teams and Slack: whether he answers
+        // them in WhatsApp at all, asked before anything they wrote is read.
+        const reach =
+          userId === undefined
+            ? undefined
+            : // oxlint-disable-next-line no-await-in-loop -- one message after another, in order
+              await stephenFor(env, userId, "whatsapp");
+        if (reach !== undefined && !reach.reaches) {
+          ctx.waitUntil(sendWhatsAppLine(env, origin, message, "notTurnedOn"));
+        }
+        if (userId !== undefined && reach?.reaches === true) {
           const alone = JSON.stringify({
             object: parsed.data.object,
             entry: [
@@ -790,6 +1037,7 @@ const whatsAppResponse = async (
           handOn(env, ctx, chat, {
             platform: "whatsapp",
             userId,
+            acts: reach.acts,
             handoff,
             webhook: async (waitUntil) =>
               await chat.webhooks.whatsapp(
@@ -1020,6 +1268,7 @@ export const channelResponse = async (
     return await telegramResponse(request, env, body, ctx, handoff);
   }
   if (!(await verifiedTeamsRequest(env, request, body, teamsKeys))) {
+    ctx.waitUntil(countSignal(env, platform, "refused"));
     return new Response("Unauthorized", { status: 401 });
   }
   const parsed = activitySchema.safeParse(jsonOf(body));
@@ -1031,7 +1280,12 @@ export const channelResponse = async (
   const activity = parsed.data;
   const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
   const adapter = teamsAdapter(env, teamsKeys);
-  const { line, userId, kept } = await gate(env, state, adapter, activity);
+  const { line, userId, acts, kept, shared } = await gate(
+    env,
+    state,
+    adapter,
+    activity
+  );
   if (line !== undefined) {
     ctx.waitUntil(sendLine(env, adapter, activity, line));
   }
@@ -1048,19 +1302,72 @@ export const channelResponse = async (
     logger: "silent",
     concurrency: "queue",
   });
-  return handOn(env, ctx, chat, {
-    platform,
-    userId,
-    kept,
-    handoff,
-    webhook: async (waitUntil) =>
-      await chat.webhooks.teams(
-        new Request(request.url, {
-          method: "POST",
-          headers: request.headers,
-          body,
-        }),
-        { waitUntil }
-      ),
+  const takeOn = handoff ?? answerInChat(env);
+  const later: (() => Promise<unknown>)[] = [];
+  const afterward = (send: () => Promise<unknown>): void => {
+    later.push(send);
+  };
+  chat.onDirectMessage(async (thread, message) => {
+    await keepConversation(env, platform, thread.id, userId);
+    await takeOn({
+      platform,
+      userId,
+      thread,
+      message,
+      acts: acts ?? false,
+      kept,
+      afterward,
+    });
   });
+  // A press on a card of held writes, by the member the gate let in, in
+  // their own private chat (press.ts).
+  chat.onAction([confirmAction, cancelAction], async (event) => {
+    await pressCard(env, { platform, userId, event, state });
+  });
+  // A group chat's or channel's: only ever one that @mentioned the bot,
+  // which the door let through with who is in it.
+  chat.onNewMention(async (thread, message) => {
+    if (shared === undefined || thread.isDM) {
+      return;
+    }
+    await takeOn({
+      platform,
+      userId,
+      thread,
+      message,
+      acts: acts ?? false,
+      kept,
+      shared,
+      afterward,
+    });
+  });
+  // Answered at once: the platform gives up on a webhook long before an
+  // answer is ready, and sends it again. The message is handled after,
+  // as the request's background work.
+  const settled = async (promise: Promise<unknown>): Promise<void> => {
+    try {
+      await promise;
+    } catch (error) {
+      log.error("channel.handle_failed", { platform, ...errorFields(error) });
+    }
+  };
+  const background = (promise: Promise<unknown>): void => {
+    ctx.waitUntil(settled(promise));
+  };
+  const handled = async (): Promise<void> => {
+    await chat.webhooks.teams(
+      new Request(request.url, {
+        method: "POST",
+        headers: request.headers,
+        body,
+      }),
+      { waitUntil: background }
+    );
+    for (const send of later) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
+      await send();
+    }
+  };
+  background(handled());
+  return new Response(null, { status: 200 });
 };
