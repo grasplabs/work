@@ -80,6 +80,7 @@ const alertsFor = async (messages: ChatMessage[]): Promise<string[]> => {
   const rootRoute = createRootRoute({
     component: () => (
       <ChatThread
+        chatId="chat-1"
         loaded
         messages={messages}
         onRetry={() => {
