@@ -414,6 +414,7 @@ const knowledgeDb: D1State = {
       "The current version's text, split by heading."
     ),
     links: cache(`${brain}documents.ts`),
+    transcripts: exported(`${brain}transcripts.ts`, brainPending),
     search_rows: cache(`${brain}search.ts`, "Search projection."),
     search_words: cache(`${brain}search.ts`, "Search projection."),
     search_trigrams: cache(`${brain}search.ts`, "Search projection."),

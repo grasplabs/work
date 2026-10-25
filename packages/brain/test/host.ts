@@ -20,6 +20,8 @@ export interface Caller {
   reads: readonly string[];
   /** The audiences the host counts them in now. */
   audiences?: readonly string[];
+  /** Of those collections, only these paths (`Readable.only`). */
+  only?: Readonly<Record<string, readonly string[]>>;
 }
 
 /** The Brain over the test database, and what its ports were told. */
@@ -32,7 +34,10 @@ export const testHost = (): {
   const events: BrainEvent[] = [];
   const ports: BrainPorts<Caller> = {
     authorize: async (caller) =>
-      await Promise.resolve({ collections: caller.reads }),
+      await Promise.resolve({
+        collections: caller.reads,
+        ...(caller.only === undefined ? {} : { only: caller.only }),
+      }),
     onRead: async (caller, record, ...sources) => {
       reads.push({ caller: caller.userId, record });
       return await Promise.resolve({

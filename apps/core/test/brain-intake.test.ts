@@ -1,7 +1,9 @@
 import type { Workspace } from "@grasp-os/shared/brain";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
+import type { SessionApi } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
@@ -16,7 +18,13 @@ import {
   told,
 } from "./onboarding-team.ts";
 import type { Ids } from "./onboarding-team.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
+import {
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+} from "./sign-in.ts";
 
 // What the onboarding learned, in the brain (GRA-367,
 // src/onboarding/brain-intake.ts): once a piece of work is drawn, its
@@ -34,6 +42,8 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // - A drawing written over when the work is drawn again.
 // - What a record rests on lost, so deleting an interview can't find it.
 // - Someone else adding, or squatting on, the onboarding's own records.
+// - What someone said, approved or not, on their team's interviews'
+//   source: it has no transcript, for members, admins and staff alike.
 
 const idp = mockIdp();
 
@@ -323,6 +333,98 @@ describe(
         waiting: 0,
         late: `brain:${ids.team}`,
         types: ["statement", "team", "workflow", "workflowVersion"],
+      });
+    });
+
+    it("gives its interviews' source no transcript and no statement, for members, admins and staff alike, and nothing to anyone outside", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      await mapped(ids);
+      await told(ids);
+      // Rik also says something he doesn’t approve.
+      await agree(
+        ids.rik,
+        [
+          fact("r1", "step", "Checks the queue at noon."),
+          {
+            id: "r2",
+            tag: "rule",
+            text: "You said: Rik skips the queue for his friends.",
+            record: "Rik skips the queue for his friends.",
+          },
+        ],
+        1,
+        [{ from: "person", text: "Honestly Lea never answers her mail." }]
+      );
+      await answering([ticketsReply(ids)], async () => await store.drawNext());
+      await store.intakeNext();
+      // Nick (GRA-529): members and admins see only what five or more
+      // people said, put together, and staff only numbers. Nothing core
+      // holds is that yet, so the source has no turns for anyone: only how
+      // many people it rests on.
+      const member = await signedInApi(idp, "user");
+      const admin = await signedInApi(idp, "admin");
+      const { core: staffCore } = await openRpc(
+        await signedIn(idp, "grasp-staff", staffPerson())
+      );
+      const staff = staffCore.authenticate();
+      const { core: nobodyCore } = await openRpc();
+      const teamId = `team-${ids.team}`;
+      const records = await kept(ids);
+      const said = [
+        ...records.flatMap(({ type, body }) =>
+          type === "statement"
+            ? [z.object({ text: z.string() }).parse(JSON.parse(body)).text]
+            : []
+        ),
+        "Lea never answers",
+        "skips the queue",
+      ];
+      const shownTo = async (api: SessionApi) => {
+        const brain = await api.brain.read();
+        const source = brain.sources.find(
+          ({ teamIds }) => teamIds?.includes(teamId) === true
+        );
+        const opened =
+          source === undefined ? null : await api.brain.transcript(source.id);
+        const shown = JSON.stringify([source, opened]);
+        return {
+          listed: source === undefined ? null : { how: source.how },
+          turns: source?.transcriptTurns,
+          inListing: source?.transcript,
+          opened,
+          statements: said.filter((words) => shown.includes(words)),
+        };
+      };
+      const safe = {
+        listed: { how: "7 people" },
+        turns: undefined,
+        inListing: undefined,
+        opened: null,
+        statements: [],
+      };
+      expect({
+        said: said.length > 2,
+        staff: await shownTo(staff),
+        admin: await shownTo(admin.api),
+        member: await shownTo(member.api),
+        nobody: {
+          read: await outcome(nobodyCore.authenticate().brain.read()),
+          opened: await outcome(
+            nobodyCore
+              .authenticate()
+              .brain.transcript(`onb-src-${"0".repeat(32)}`)
+          ),
+        },
+      }).toStrictEqual({
+        said: true,
+        staff: safe,
+        admin: safe,
+        member: safe,
+        nobody: {
+          read: "auth.unauthenticated",
+          opened: "auth.unauthenticated",
+        },
       });
     });
 

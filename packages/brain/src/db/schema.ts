@@ -286,6 +286,35 @@ export const sections = sqliteTable(
 );
 
 /**
+ * A document's transcript (../transcripts.ts): its turns and chapters, as
+ * the producer that saved the version gave them, written in the batch of
+ * that version and of no other, so it is always the version's own. Any
+ * later save without one deletes it; a content purge rewrites it with
+ * the version's text (../purge.ts). One row per document, so a purge has
+ * one copy to reach. Turns get no search index of their own: they are
+ * found as the text the producer saved with them.
+ */
+export const transcripts = sqliteTable(
+  "transcripts",
+  {
+    documentId: text("document_id").primaryKey(),
+    /** The version it was saved with: the document's current one. */
+    version: integer().notNull(),
+    /** JSON array of turns: `{ speaker, text, startMs?, endMs? }`. */
+    turns: text().notNull(),
+    /** JSON array of chapters: `{ title, firstTurn, lastTurn }`. */
+    chapters: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.documentId, table.version],
+      foreignColumns: [versions.documentId, versions.number],
+    }).onDelete("cascade"),
+  ]
+);
+
+/**
  * The current version's `[[links]]`, by the path they name, so a link to a
  * document that doesn't exist yet finds it once it does.
  */

@@ -56,6 +56,15 @@ import {
   stagePayload,
 } from "./payloads.ts";
 import type { StagedPayload } from "./payloads.ts";
+import {
+  hasTranscript,
+  transcriptDetail,
+  transcriptSchema,
+  isTranscriptMoved,
+  transcriptUnmoved,
+  transcriptWrites,
+} from "./transcripts.ts";
+import type { ReadAt, Transcript } from "./transcripts.ts";
 
 // Saving a document: its frontmatter is read and checked (and a memory
 // file's size, memory-files.ts), its Markdown split into sections and its
@@ -384,6 +393,24 @@ export interface Write {
    * document's limits (`parseBaseFields`).
    */
   purge?: true;
+  /**
+   * The version's transcript (transcripts.ts), as its producer gives it:
+   * saved in the same batch, and served while this version is current.
+   * Left out, the document has none from this version on.
+   */
+  transcript?: unknown;
+  /**
+   * Set only by a purge, in place of `transcript`: the transcript it
+   * rewrote, kept with the version it saves. Removing data comes before
+   * limits, so it isn't checked against them again.
+   */
+  purgedTranscript?: Transcript;
+  /**
+   * With `purgedTranscript`: the transcript as the purge read it. The save
+   * fails with `knowledge.conflict` when it is no longer so, as another
+   * purge changed it meanwhile (`transcriptUnmoved`).
+   */
+  transcriptRead?: ReadAt;
 }
 
 /**
@@ -460,9 +487,21 @@ export const writeVersion = async <C>(
     sync,
     write.purge === true
   );
+  const transcript =
+    write.transcript === undefined
+      ? write.purgedTranscript
+      : knowledgeErrors.parse(
+          "knowledge.invalid",
+          transcriptSchema,
+          write.transcript
+        );
   if ((existing?.currentVersion ?? 0) !== ifVersion) {
     throw conflict(existing);
   }
+  const had =
+    existing !== undefined && transcript === undefined
+      ? await hasTranscript(db, existing.id)
+      : false;
   const now = brain.ports.clock();
   const number = ifVersion + 1;
   const documentId = existing?.id ?? crypto.randomUUID();
@@ -500,6 +539,7 @@ export const writeVersion = async <C>(
       collectionId: collection.id,
       version: number,
       ...(restoredFrom === null ? {} : { restoredFrom }),
+      ...(transcript === undefined ? {} : transcriptDetail(transcript)),
     },
   };
   const statements = (staged: StagedPayload): BatchItem<"sqlite">[] => [
@@ -515,6 +555,16 @@ export const writeVersion = async <C>(
       restoredFrom,
       createdAt: now,
     }),
+    ...(write.transcriptRead === undefined
+      ? []
+      : [transcriptUnmoved(db, documentId, write.transcriptRead)]),
+    ...transcriptWrites(
+      brain,
+      by.actor,
+      { documentId, version: number, had },
+      transcript,
+      now
+    ),
     db.delete(links).where(eq(links.fromDocumentId, documentId)),
     ...inChunks(
       prepared.links.map((link) => ({
@@ -546,7 +596,7 @@ export const writeVersion = async <C>(
     try {
       await auditedBatch(brain.ports, db, [document, ...statements(staged)]);
     } catch (error) {
-      if (isUniqueViolation(error)) {
+      if (isUniqueViolation(error) || isTranscriptMoved(error)) {
         throw conflict(await findByPath(db, collection.id, path));
       }
       throw error;

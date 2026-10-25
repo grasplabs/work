@@ -44,6 +44,7 @@
     "postal-mime": "catalog:",
     "semver": "catalog:",
     "unpdf": "catalog:",
+    "webvtt-parser": "catalog:",
     "yaml": "catalog:",
     "zod": "catalog:"
   },
