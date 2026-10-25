@@ -5013,17 +5013,11 @@ export class Onboarding extends DurableObject<Env> {
       this.meter(took, at);
     });
     const { records, rests } = await intakeOf(intake, claims);
-    await keepOnboardingRecords(this.env, records, {
-      sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
-      teams: new Set([intakeIds.team(teamId)]),
-    });
     // The team's claims are these now: any statement given before that
     // isn't one of them goes, so no earlier one outlives what it was put
     // together from. Found both where it is noted whom each rests on and
-    // in the brain itself, so one given with no note of it goes too. Each
-    // is noted as resting on nobody left (`gonePrefix`), in the same
-    // transaction as the new rests: taken out at once, or by the alarm
-    // (`#toPurge`) until it is, however the intake itself ends.
+    // in the brain itself, so one given with no note of it goes too: read
+    // before anything is written.
     const current = new Set(records.map(({ id }) => id));
     const given = await onboardingStatementsOf(
       this.env,
@@ -5049,33 +5043,24 @@ export class Onboarding extends DurableObject<Env> {
         )
       ),
     ];
-    const gone = this.ctx.storage.transactionSync(() => {
-      // Whose interview went meanwhile, though they began anew: what rests
-      // on it rests on someone gone (`gonePrefix`), and is taken out.
-      const since = new Set(this.#goneSince(began));
+    // Whom each record rests on is noted before the brain holds it, so no
+    // record is ever there without it: a withdrawal finds it whatever
+    // happens after (`#toPurge`). Each earlier claim is noted as resting
+    // on nobody left (`gonePrefix`), to be taken out at once or by the
+    // alarm until it is, however the intake itself ends.
+    this.ctx.storage.transactionSync(() => {
       // A claim rests on exactly the people behind it now: whoever it
       // rested on before and doesn't now no longer counts towards the five
-      // it needs (`#toPurge`).
+      // it needs.
       this.#db.delete(brainSent).where(inList(brainSent.record, claimed)).run();
-      // One row a statement: within SQLite's bound parameters.
+      // One row a record: within SQLite's bound parameters.
       for (const rest of rests) {
         this.#db
           .insert(brainSent)
-          .values({
-            ...rest,
-            person: since.has(rest.person)
-              ? `${gonePrefix}${rest.person}`
-              : rest.person,
-            team: teamId,
-          })
+          .values({ ...rest, team: teamId })
           .onConflictDoNothing()
           .run();
       }
-      this.#db
-        .update(brainTeams)
-        .set({ sentAt: sql`coalesce(${brainTeams.sentAt}, ${at})` })
-        .where(eq(brainTeams.team, teamId))
-        .run();
       for (const record of stale) {
         this.#db
           .update(brainSent)
@@ -5098,8 +5083,32 @@ export class Onboarding extends DurableObject<Env> {
           .onConflictDoNothing()
           .run();
       }
+    });
+    await keepOnboardingRecords(this.env, records, {
+      sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
+      teams: new Set([intakeIds.team(teamId)]),
+    });
+    const gone = this.ctx.storage.transactionSync(() => {
+      // Whose interview went meanwhile, though they began anew: what rests
+      // on it rests on someone gone (`gonePrefix`), and is taken out.
+      const since = this.#goneSince(began);
+      const ours = [...new Set(rests.map(({ record }) => record))];
+      for (const person of since) {
+        this.#db
+          .update(brainSent)
+          .set({ person: `${gonePrefix}${person}` })
+          .where(
+            and(eq(brainSent.person, person), inList(brainSent.record, ours))
+          )
+          .run();
+      }
+      this.#db
+        .update(brainTeams)
+        .set({ sentAt: sql`coalesce(${brainTeams.sentAt}, ${at})` })
+        .where(eq(brainTeams.team, teamId))
+        .run();
       this.#brainSettled(teamId, dueAt);
-      return since.size > 0 || stale.length > 0;
+      return since.length > 0 || stale.length > 0;
     });
     // Someone it rests on deleted their interview while it was given, or a
     // claim it gave before isn't the team's now: taken out again at once,

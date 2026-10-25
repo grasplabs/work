@@ -902,6 +902,52 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     });
   });
 
+  it("never holds a claim in the brain without whom it rests on: a withdrawal takes it out even when the intake failed just after writing it", async () => {
+    const ids = await drawnTeam();
+    // The brain keeps the claim, and the intake fails right after: the
+    // batch that writes it lands, and its answer is lost.
+    const prepare = env.DB.prepare.bind(env.DB);
+    const batch = env.DB.batch.bind(env.DB);
+    // Drizzle binds what it prepares, so the batch is known by what was
+    // prepared just before it: the brain's records written.
+    let writing = false;
+    let failed = 0;
+    const prepared = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
+      writing ||= query.startsWith('insert into "brain_records"');
+      return prepare(query);
+    });
+    const spy = vi
+      .spyOn(env.DB, "batch")
+      .mockImplementation(async (statements) => {
+        const results = await batch(statements);
+        if (writing) {
+          writing = false;
+          failed += 1;
+          throw new Error("Lost on the way back.");
+        }
+        return results;
+      });
+    try {
+      await intake(ids);
+    } finally {
+      spy.mockRestore();
+      prepared.mockRestore();
+    }
+    const member = await signedInApi(idp, "user");
+    const landed = await statementsFor(member.api, ids);
+    await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+    await onboardingStore(env).purgeBrain();
+    expect({
+      failed: failed > 0,
+      landed,
+      after: await statementsFor(member.api, ids),
+    }).toStrictEqual({
+      failed: true,
+      landed: ["Tickets come in through Zendesk."],
+      after: [],
+    });
+  });
+
   it("sets the alarm when it wakes with a team due and none set, as a finished onboarding after the hard cut's migrations is", async () => {
     const ids = await drawnTeam();
     await intake(ids);
