@@ -3,11 +3,13 @@ import type {
   CommandOptions,
   CommandReceipt,
   MemoriesGetInput,
+  MemoriesLineageInput,
   MemoriesListInput,
   MemoriesProposeChangeInput,
   MemoriesPublishInput,
   MemoriesRetireInput,
   MemoryPack,
+  MemoryLineage,
   MemoryPage,
   MemoryRecord,
   ReceiptsGetInput,
@@ -323,8 +325,17 @@ export interface KnowledgeApi {
   receiptsGet: (input: ReceiptsGetInput) => Promise<CommandReceipt>;
   /** One of the person's own Brain memory records. */
   memoriesGet: (input: MemoriesGetInput) => Promise<MemoryRecord>;
-  /** The person's own Brain memory records, newest first, a page at a time. */
+  /**
+   * The person's own Brain memory records, or (`among: "shared"`) the
+   * shared records of others their memory reads, newest first, a page at
+   * a time.
+   */
   memoriesList: (input?: MemoriesListInput) => Promise<MemoryPage>;
+  /**
+   * A record the person may see, what it rests on as far as they may
+   * follow it now, and the correction that superseded it (GRA-298).
+   */
+  memoriesLineage: (input: MemoriesLineageInput) => Promise<MemoryLineage>;
   /**
    * Publishes a record into a team's, the company's or a chat's memory,
    * where the person may (GRA-298): retry-safe, as `remember`.
