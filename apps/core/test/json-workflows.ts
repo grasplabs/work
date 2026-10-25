@@ -17,6 +17,7 @@ import { runObjectOf } from "../src/workflows/engine.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import type {
+  HostedResourceRun,
   ResourceHostHooks,
   ScopeFences,
 } from "../src/workflows/resource-host.ts";
@@ -149,6 +150,7 @@ export const hostOf = async (
     step: given,
     fences,
     admitAttempt = admittedFreely,
+    candidate,
   }: {
     /** The engine's steps, if not ones that run each step at once. */
     step?: RunStep;
@@ -156,6 +158,8 @@ export const hostOf = async (
     fences?: ScopeFences;
     /** How each attempt is admitted, if not at once. */
     admitAttempt?: ResourceHostHooks["admitAttempt"];
+    /** A test run's bindings, by alias, if it is one. */
+    candidate?: HostedResourceRun["calling"]["candidate"];
   } = {}
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
@@ -200,6 +204,7 @@ export const hostOf = async (
         principal: by.userId,
         invoker: { type: "person", id: by.userId, appVersion: null },
         bindings: new Map(),
+        ...(candidate === undefined ? {} : { candidate }),
         restricted: false,
       },
       maxModelCalls: 1,

@@ -261,7 +261,7 @@ import { heldWakeType } from "./wakes.ts";
 //   what they decided, never a second send (`#waitWhileHeld`).
 // - A catch taking a failure it mustn't, or one that never happened. A
 //   try's catch step asks the host (`#catches`), which decides from its
-//   own record of the run (`#failure`): the failure of the last step it
+//   own record of the run (`#failures`): the failure of the last step it
 //   reached, fresh or replayed, while nothing after it succeeded, mapped
 //   by resource-errors.ts, which never lets a catch take an unknown
 //   outcome or a refusal; only one of a task in the try's own list, with
@@ -806,6 +806,49 @@ const placeOf = (
   scope.length === 0
     ? id
     : `${id}@${scope.map((segment) => `${segment.id}.${segment.index}`).join("/")}`;
+
+/** A failure no catch took yet, and the scope of the step that failed. */
+interface PendingFailure {
+  readonly failure: Failure;
+  readonly scope: readonly { id: string; index: number }[];
+}
+
+/** Scope `scope`, as a key: `<for>.<index>/…`, empty for the workflow's own. */
+const scopeKey = (scope: readonly { id: string; index: number }[]): string =>
+  scope.map(({ id, index }) => `${id}.${index}`).join("/");
+
+/** Whether scope `inner` is scope `outer` or nested in it. */
+const isWithin = (
+  inner: readonly { id: string; index: number }[],
+  outer: readonly { id: string; index: number }[]
+): boolean =>
+  outer.length <= inner.length &&
+  outer.every(
+    ({ id, index }, depth) =>
+      inner[depth]?.id === id && inner[depth]?.index === index
+  );
+
+/**
+ * Whether `step` is the own step of a `for` or `fork` task (its `task:`
+ * step, which settles its scope), and `pending` a failure in one of its
+ * items or branches, which that step isn't held back by: a race settles
+ * past its branches' failures a catch may take, on a branch that didn't
+ * fail (`#raceMaySettle`); any other scope settles on the item or branch
+ * that failed, only to start none of the others after, the failure still
+ * pending past it. One no catch may take still holds a race back.
+ */
+const settlesPast = (step: StepOf, pending: PendingFailure): boolean => {
+  const { task } = step;
+  if (
+    step.kind !== "task" ||
+    (task?.kind !== "fork" && task?.kind !== "for") ||
+    !isWithin(pending.scope, step.scope) ||
+    pending.scope[step.scope.length]?.id !== task.id
+  ) {
+    return false;
+  }
+  return task.kind === "for" || !task.fork.compete || pending.failure.catchable;
+};
 
 /** The workflow's own `flow` step of `build`, if it has one. */
 const workflowStep = (
@@ -1376,7 +1419,7 @@ interface StepRun {
   decided: DecisionOutcome | undefined;
   /**
    * For a catch step, the failure that left its try's list, as the run
-   * stood when the step began (`ResourceRunHost.#failure`).
+   * stood when the step began (`ResourceRunHost.#failures`).
    */
   failure: Failure | undefined;
 }
@@ -1680,30 +1723,29 @@ export class ResourceRunHost
   /** What the run keeps of its tried-once steps' attempts. */
   readonly #triedOnce: TriedOnceMarks;
   /**
-   * The failure of the step the run reached last, fresh or replayed, while
-   * no step after it succeeded and no catch took it: what a `try` task's
-   * catch step decides on. A step's success, or a catch taking it, clears
-   * it; a catch that doesn't take it leaves it for the next catch out.
-   * Generated code runs its tasks one at a time, so between a step's
-   * failure and the catch steps it reaches nothing else runs.
+   * The failures no catch took yet, fresh or replayed, each pending in the
+   * scope of the step that failed, by that scope (`scopeKey`): what a `try`
+   * task's catch step decides on. A failure holds back the steps of its
+   * own scope, those nested in it and those around it (`#pendingAt`),
+   * never a sibling item's or branch's, which may run at once; one in an
+   * item or branch another settled its scope over is that scope's no more
+   * (`#fencedOff`). A step's success clears its scope's; a catch taking
+   * one clears those in its try; a catch that doesn't leaves them for the
+   * next catch out.
    */
-  #failure: Failure | undefined;
+  readonly #failures = new Map<string, PendingFailure>();
   /**
    * The error each `try` task's catch took, by the task's place, as its catch step
    * journaled it, fresh or replayed: what its catch's variable is to the
    * expressions of its `do`.
    */
   readonly #caughtErrors = new Map<string, CaughtError>();
-  /** The scope of the step whose failure is pending (`#failure`). */
-  #failureScope: readonly { id: string; index: number }[] = [];
   /**
    * The branches of each race (a competing fork, by its place) that
    * failed, as this activation reached them, fresh or replayed: a failure
    * of theirs no catch took, which the race went past (`#passRace`).
    */
   readonly #raceFailures = new Map<string, Set<number>>();
-  /** The branch each race recorded as its winner, by its place. */
-  readonly #raceWinners = new Map<string, number>();
   readonly #fences: ScopeFences;
   /** Tests only: the host's own I/O made slower (host-latency.ts). */
   readonly #latency: () => Promise<void>;
@@ -1866,6 +1908,12 @@ export class ResourceRunHost
           `Step of "${task?.id ?? "the workflow"}" settles no such scope, or settles it twice.`
         );
       }
+      // A race settles only on a branch that got there (`#raceMaySettle`).
+      if (task?.kind === "fork" && !this.#raceMaySettle(step, task, branch)) {
+        return this.#refuse(
+          `Task "${task.id}"'s race settles only on a branch that got there.`
+        );
+      }
       attempt.settled = this.#fences.settle(step.place, branch);
       return { ok: true, value: attempt.settled };
     } catch (error) {
@@ -1925,6 +1973,7 @@ export class ResourceRunHost
         if (
           index >= task.fork.branches ||
           (task.fork.compete &&
+            task.fork.concurrency === 1 &&
             !this.#raceAdmits(placeOf(id, scope.slice(0, depth)), index))
         ) {
           return undefined;
@@ -1947,18 +1996,21 @@ export class ResourceRunHost
   }
 
   /**
-   * Whether the race at `place` lets a step of its branch `branch` run:
-   * only once every branch before it failed, while it hasn't failed
-   * itself, and, once the race recorded its winner, only the winner's.
-   * Its branches run one after another, the next only past a failure
-   * (open-workflow.ts, `fork`): the host holds a module to that order, so
-   * a branch after one that succeeded, or a failed one, never runs on,
-   * and a race is never a way past a failure.
+   * Whether the race at `place`, one branch at a time, lets a step of its
+   * branch `branch` run: only once every branch before it failed, and
+   * while it hasn't (`#raceGoesTo`); once it settled, as its fence says
+   * (`#fencedOff`). Its branches run one after another, the next only
+   * past a failure (open-workflow.ts, `fork`), each done before the next
+   * starts, items at once inside it too: the host holds a module to that
+   * order, so a branch after one that succeeded never runs, and a race is
+   * never a way past a failure. A race of branches at once has no order:
+   * its fence settles it.
    */
   #raceAdmits(place: string, branch: number): boolean {
-    const winner = this.#raceWinners.get(place);
-    if (winner !== undefined) {
-      return winner === branch;
+    // Settled: its fence decides from then on, every activation, a branch
+    // it settled over replaying only what it recorded (`#fencedOff`).
+    if (this.#fences.settled(place) !== undefined) {
+      return true;
     }
     return this.#raceGoesTo(place, branch);
   }
@@ -1969,6 +2021,36 @@ export class ResourceRunHost
       this.#raceFailures.get(place)?.has(branch) !== true &&
       this.#failedBefore(place, branch)
     );
+  }
+
+  /**
+   * Whether fork `task`, whose own step `step` is, may settle on `branch`:
+   * any fork that doesn't compete; a race only on a branch with no failure
+   * pending, and, one branch at a time, only past the failure of every
+   * branch before it (`#raceGoesTo`).
+   */
+  #raceMaySettle(
+    step: StepOf,
+    task: Extract<SealedTask, { kind: "fork" }>,
+    branch: number
+  ): boolean {
+    // Settled already, by an earlier activation's first writer, checked as
+    // it settled: the fence answers that branch, whatever this one asks.
+    if (!task.fork.compete || this.#fences.settled(step.place) !== undefined) {
+      return true;
+    }
+    const branchScope = [...step.scope, { id: task.id, index: branch }];
+    return (
+      this.#pendingAt(branchScope, true).length === 0 &&
+      (task.fork.concurrency > 1 || this.#raceGoesTo(step.place, branch))
+    );
+  }
+
+  /** The failure a catch step `step` decides on: the first pending in its scope. */
+  #catchFailure(step: StepOf): Failure | undefined {
+    return step.kind === "catch"
+      ? this.#pendingAt(step.scope, true)[0]?.failure
+      : undefined;
   }
 
   /**
@@ -1991,30 +2073,74 @@ export class ResourceRunHost
     this.#raceFailures.set(place, failed);
   }
 
+  /** Notes `failure` as pending in `scope`, the scope of the step that failed. */
+  #failed(
+    scope: readonly { id: string; index: number }[],
+    failure: Failure
+  ): void {
+    this.#failures.set(scopeKey(scope), { failure, scope });
+  }
+
   /**
-   * Lets the race the pending failure (`#failure`) came from go past it,
-   * for a step in `scope`, by the host's own rule and no other: a failure
-   * a catch may take, that none in its branch took, is that branch's, and
-   * the race goes on to its next branch (open-workflow.ts, `fork`), so a
-   * step of exactly that branch takes it; past the race's last branch,
-   * the race fails as that branch did, a failure of the scope around it,
-   * for the races and catches out there. Nothing else gets past a
-   * failure: a step anywhere else still meets it (`#requireNoFailure`),
-   * and one the race may not take (an unknown outcome, a refusal) goes on
-   * to fail the run, whatever a module calls a race.
+   * The failures pending that hold back a step in `scope`: those not
+   * fenced off, in its own scope, nested in it, or around it; with
+   * `within`, only those in it or nested in it, what a catch there reads.
+   * In the order they failed.
+   */
+  #pendingAt(
+    scope: readonly { id: string; index: number }[],
+    within = false
+  ): PendingFailure[] {
+    return [...this.#failures.values()].filter(
+      (pending) =>
+        !this.#fencedOff(pending.scope) &&
+        (within
+          ? isWithin(pending.scope, scope)
+          : isWithin(pending.scope, scope) || isWithin(scope, pending.scope))
+    );
+  }
+
+  /**
+   * Lets a race one branch at a time go past a failure pending in one of
+   * its branches, for a step in `scope`, by the host's own rule and no
+   * other: a failure a catch may take, that none in its branch took, is
+   * that branch's, and the race goes on to its next branch
+   * (open-workflow.ts, `fork`), so a step of exactly that branch takes it;
+   * past the race's last branch, the race fails as that branch did, a
+   * failure of the scope around it, for the races and catches out there.
+   * Nothing else gets past a failure: a step anywhere else still meets it
+   * (`#requireNoFailure`), and one the race may not take (an unknown
+   * outcome, a refusal) goes on to fail the run, whatever a module calls
+   * a race. A race of branches at once runs them beside a failure, as
+   * siblings, and settles past it (`#requireNoFailure`, `#settleOf`).
    */
   #passRace(scope: readonly { id: string; index: number }[]): void {
-    if (this.#failure?.catchable !== true) {
-      return;
+    // Every failure pending, its branch's sibling's next included.
+    for (const pending of this.#failures.values()) {
+      if (
+        pending.failure.catchable &&
+        !this.#fencedOff(pending.scope) &&
+        this.#raceTakes(pending, scope)
+      ) {
+        this.#failures.delete(scopeKey(pending.scope));
+      }
     }
-    const failed = this.#failureScope;
+  }
+
+  /** Whether a race one branch at a time takes `pending` for a step in `scope`. */
+  #raceTakes(
+    pending: PendingFailure,
+    scope: readonly { id: string; index: number }[]
+  ): boolean {
+    const failed = pending.scope;
     for (let depth = failed.length - 1; depth >= 0; depth -= 1) {
       const segment = failed[depth];
       const task = this.#run.build.tasks.find((one) => one.id === segment?.id);
       if (
         segment === undefined ||
         task?.kind !== "fork" ||
-        !task.fork.compete
+        !task.fork.compete ||
+        task.fork.concurrency !== 1
       ) {
         continue;
       }
@@ -2032,18 +2158,19 @@ export class ResourceRunHost
         // branch leaves it to its catches, and any other to its refusal.
         if (next.index === segment.index + 1) {
           this.#raceFailed(place, segment.index);
-          this.#failure = undefined;
+          return true;
         }
-        return;
+        return false;
       }
       if (
         segment.index !== task.fork.branches - 1 ||
         !this.#failedBefore(place, segment.index)
       ) {
-        return;
+        return false;
       }
       this.#raceFailed(place, segment.index);
     }
+    return false;
   }
 
   /**
@@ -2126,7 +2253,13 @@ export class ResourceRunHost
    * module that goes on past it otherwise is refused, and the run fails.
    */
   #requireNoFailure(step: StepOf | undefined): void {
-    if (this.#failure !== undefined && step?.kind !== "catch") {
+    if (step?.kind === "catch") {
+      return;
+    }
+    const holding = this.#pendingAt(step?.scope ?? []).filter(
+      (pending) => !(step !== undefined && settlesPast(step, pending))
+    );
+    if (holding.length > 0) {
       this.#refuse("A run goes on past a failure only once a catch took it.");
     }
   }
@@ -2172,7 +2305,7 @@ export class ResourceRunHost
    * (resource-runs.ts).
    */
   get failureUntaken(): boolean {
-    return this.#failure !== undefined;
+    return this.#pendingAt([]).length > 0;
   }
 
   /**
@@ -2336,16 +2469,16 @@ export class ResourceRunHost
           // A catch step's own failure is no catch's to take: a catch
           // around it would otherwise take it in place of a failure no
           // catch may take, an unknown outcome's, that it decided on.
-          this.#failure =
+          this.#failed(
+            reached?.scope ?? [],
             reached?.kind === "catch"
               ? notCaught()
               : failureOf(
                   failedWith(error),
                   reached?.task,
                   this.#tampered !== undefined
-                );
-          // Where it failed: what a race goes past it by (`#passRace`).
-          this.#failureScope = reached?.scope ?? [];
+                )
+          );
           throw error;
         }
       });
@@ -2395,7 +2528,7 @@ export class ResourceRunHost
       collecting: false,
       decided: undefined,
       // As the run stands as it begins, for every attempt and round.
-      failure: step.kind === "catch" ? this.#failure : undefined,
+      failure: this.#catchFailure(step),
     };
     // A decision task's call step runs once its decision has an
     // outcome, waited for durably before it, fresh or replayed.
@@ -2477,8 +2610,8 @@ export class ResourceRunHost
     if (step.kind === "catch") {
       outcome = this.#noteCatch(step, recorded);
     } else {
-      // A step that succeeded: no failure is left for a catch.
-      this.#failure = undefined;
+      // A step that succeeded: no failure is left in its scope for a catch.
+      this.#failures.delete(scopeKey(step.scope));
     }
     // Fresh or replayed alike: what the run has reached, in order.
     this.#noteRecorded(step, outcome);
@@ -2500,7 +2633,9 @@ export class ResourceRunHost
     }
     if (journal.error !== undefined) {
       this.#caughtErrors.set(step.place, journal.error);
-      this.#failure = undefined;
+      for (const pending of this.#pendingAt(step.scope, true)) {
+        this.#failures.delete(scopeKey(pending.scope));
+      }
     }
     return journal.record;
   }
@@ -3036,13 +3171,6 @@ export class ResourceRunHost
     }
     if (
       step.kind === "task" &&
-      task.kind === "fork" &&
-      record.data.branch !== undefined
-    ) {
-      this.#raceWinners.set(step.place, record.data.branch);
-    }
-    if (
-      step.kind === "task" &&
       task.kind === "call" &&
       task.call.name === "grasp.model" &&
       // Made in this activation: counted as it was asked for.
@@ -3205,14 +3333,15 @@ export class ResourceRunHost
    * left for a catch; one that failed (a test run's wait past its limit, a
    * refusal) is no failure of a step's work, which no catch takes.
    */
-  async #sleeping(work: () => Promise<null>): Promise<null> {
+  async #sleeping(name: unknown, work: () => Promise<null>): Promise<null> {
+    const scope = sealedStep(this.#run.build, name, true)?.scope ?? [];
     try {
       await work();
     } catch (error) {
-      this.#failure = notCaught();
+      this.#failed(scope, notCaught());
       throw error;
     }
-    this.#failure = undefined;
+    this.#failures.delete(scopeKey(scope));
     return null;
   }
 
@@ -3230,17 +3359,26 @@ export class ResourceRunHost
     let reached: StepOf | undefined;
     try {
       reached = this.#stepOf(name, true);
+      // Not a refusal of the module: a wait of a branch another settled
+      // its scope over waits for nothing, every activation, so it never
+      // takes an event or a child's end meant for a step after the scope
+      // (`#awaitsUnfenced` checks again as it waits).
+      if (reached.fenced === true) {
+        throw workflowResourceErrors.create("workflow.branch_cancelled");
+      }
       this.#requireNoFailure(reached);
       const answered = await work(reached);
-      this.#failure = undefined;
+      this.#failures.delete(scopeKey(reached.scope));
       return answered;
     } catch (error) {
-      this.#failure = failureOf(
-        failedWith(error),
-        reached?.task,
-        this.#tampered !== undefined
+      this.#failed(
+        reached?.scope ?? [],
+        failureOf(
+          failedWith(error),
+          reached?.task,
+          this.#tampered !== undefined
+        )
       );
-      this.#failureScope = reached?.scope ?? [];
       throw error;
     }
   }
@@ -3253,7 +3391,7 @@ export class ResourceRunHost
   async #sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
     return await settle(
       async () =>
-        await this.#sleeping(async () => {
+        await this.#sleeping(name, async () => {
           const sleeping = this.#stepOf(name, true);
           this.#requireNoFailure(sleeping);
           const { task } = sleeping;
@@ -3289,7 +3427,7 @@ export class ResourceRunHost
   async #sleepUntil(name: unknown, timestamp: unknown): Promise<Settled<null>> {
     return await settle(
       async () =>
-        await this.#sleeping(async () => {
+        await this.#sleeping(name, async () => {
           const sleeping = this.#stepOf(name, true);
           this.#requireNoFailure(sleeping);
           const { task } = sleeping;
@@ -3358,6 +3496,9 @@ export class ResourceRunHost
           for (const [index, match] of groups.entries()) {
             const wait =
               index === 0 ? listening.name : `${listening.name}:${index + 1}`;
+            // Settled over meanwhile (its person or authority checked):
+            // it takes nothing, as its scope's steps after start nothing.
+            this.#awaitsUnfenced(listening);
             // One at a time, in the filters' order: waits come one at a time.
             // oxlint-disable-next-line no-await-in-loop -- see above
             const taken = await this.#taken(
@@ -3415,6 +3556,8 @@ export class ResourceRunHost
             });
           }
           let ended: { payload: unknown };
+          // Settled over meanwhile: it takes no end.
+          this.#awaitsUnfenced(waiting);
           try {
             ended = await this.#step.waitForMatch(waiting.name, {
               match: [{ type: childEndType(child) }],
@@ -3440,6 +3583,21 @@ export class ResourceRunHost
           return end.output;
         })
     );
+  }
+
+  /**
+   * Refuses, with `workflow.branch_cancelled` and no refusal of the module,
+   * a wait of step `step` whose item or branch another settled its scope
+   * over, checked again just before the engine is asked: a wait the engine
+   * hasn't been asked for takes no event (Workerflow takes one only as a
+   * wait is asked, in the activation that asks it), so a branch that lost
+   * never takes an event or a child's end meant for a step after its
+   * scope, nor does any replay of it.
+   */
+  #awaitsUnfenced(step: StepOf): void {
+    if (this.#fencedOff(step.scope)) {
+      throw workflowResourceErrors.create("workflow.branch_cancelled");
+    }
   }
 
   /**
