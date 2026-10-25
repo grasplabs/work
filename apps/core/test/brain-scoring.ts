@@ -9,6 +9,7 @@
  * comparison whatever its quality.
  */
 import type { TranscriptPart } from "./brain-stub-model.ts";
+import type { BrainLanguage } from "./fixtures/brain-corpus.ts";
 import type { BrainExpectation, BrainFact } from "./fixtures/brain-tasks.ts";
 
 /** What the harness observed of one trial: one task, arm and repeat. */
@@ -103,6 +104,167 @@ export interface TrialScore {
 /** Text compared as people read it: case, spacing and Unicode forms aside. */
 export const normalized = (text: string): string =>
   text.normalize("NFC").toLowerCase().replaceAll(/\s+/gu, " ").trim();
+
+/**
+ * The locales an answer is read in: its task's language, and English as
+ * either side of the Atlantic writes it, since a model often answers in
+ * English conventions whatever the question's language.
+ */
+const readingLocales = (language: BrainLanguage): string[] => [
+  ...new Set([language, "en-GB", "en-US"]),
+];
+
+/** What a pattern reads as syntax, outside a character class. */
+const regexSpecial = /[\\^$.*+?()[\]{}|]/gu;
+const escaped = (text: string): string =>
+  text.replaceAll(regexSpecial, String.raw`\$&`);
+
+/** Unicode spaces (a narrow no-break space groups French thousands) as one. */
+const spaced = (text: string): string => text.replaceAll(/\s/gu, " ");
+
+/** A date the formats below hold every part of: 16 November 2026. */
+const sampleDate = new Date(Date.UTC(2026, 10, 16));
+const monthStyles = ["long", "short", "numeric"] as const;
+const monthIndexes = Array.from({ length: 12 }, (_, index) => index);
+
+/** One of a locale's ways of writing a date, and its month names if any. */
+interface DateFormat {
+  pattern: RegExp;
+  /** Each month's name, January first; `null` when it writes a number. */
+  names: string[] | null;
+}
+
+/**
+ * The locale's own ways of writing a date (CLDR's, through
+ * `Intl.DateTimeFormat`) as patterns over normalized text: "16 november
+ * 2026", "16 de noviembre de 2026", "november 16, 2026", "16-11-2026".
+ */
+const dateFormats = (locale: string): DateFormat[] =>
+  monthStyles.map((month) => {
+    const format = new Intl.DateTimeFormat(locale, {
+      day: "numeric",
+      month,
+      year: "numeric",
+      timeZone: "UTC",
+    });
+    const names =
+      month === "numeric"
+        ? null
+        : monthIndexes.map((index) =>
+            normalized(
+              format
+                .formatToParts(new Date(Date.UTC(2026, index, 1)))
+                .find(({ type }) => type === "month")?.value ?? ""
+            )
+          );
+    const source = format
+      .formatToParts(sampleDate)
+      .map(({ type, value }) => {
+        if (type === "day") {
+          return String.raw`(?<day>\d{1,2})`;
+        }
+        if (type === "year") {
+          return String.raw`(?<year>\d{4})`;
+        }
+        if (type === "month") {
+          return names === null
+            ? String.raw`(?<month>\d{1,2})`
+            : `(?<name>${names.map(escaped).join("|")})`;
+        }
+        return escaped(spaced(value).toLowerCase());
+      })
+      .join("");
+    return {
+      pattern: new RegExp(
+        String.raw`(?<![\p{L}\p{N}])${source}(?![\p{L}\p{N}])`,
+        "gu"
+      ),
+      names,
+    };
+  });
+
+/** A day as ISO 8601 writes it, if there is one: no 31 November. */
+const isoDate = (year: number, month: number, day: number): string | null => {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+    ? date.toISOString().slice(0, "yyyy-mm-dd".length)
+    : null;
+};
+
+/** A locale's thousands and decimal separators, and a number that uses them. */
+interface NumberFormat {
+  group: string;
+  decimal: string;
+  pattern: RegExp;
+}
+
+/**
+ * The locale's thousands and decimal separators (CLDR's, through
+ * `Intl.NumberFormat`), and a pattern of a number that uses them: grouped
+ * ("18.240" in Dutch, "18,240" in English) or with a decimal part. A
+ * number neither grouped nor decimal is written alike everywhere.
+ */
+const numberFormat = (locale: string): NumberFormat => {
+  const parts = new Intl.NumberFormat(locale).formatToParts(12_345.6);
+  const separator = (type: string) =>
+    spaced(parts.find((part) => part.type === type)?.value ?? "");
+  const group = separator("group");
+  const decimal = separator("decimal");
+  const [g, d] = [escaped(group), escaped(decimal)];
+  return {
+    group,
+    decimal,
+    pattern: new RegExp(
+      // Not part of a code, a signed number, a time or a longer number.
+      String.raw`(?<![\p{L}\p{N}\-+\u2212]|\p{N}[.,:])(?:\d{1,3}(?:${g}\d{3})+(?:${d}\d+)?|\d+${d}\d+)(?![\p{L}\p{N}]|[.,:]\p{N})`,
+      "gu"
+    ),
+  };
+};
+
+/** Each locale's formats, made once: `Intl` formats are slow to make. */
+const formats = new Map<
+  string,
+  { dates: DateFormat[]; number: NumberFormat }
+>();
+const formatsOf = (locale: string) => {
+  const known = formats.get(locale);
+  if (known !== undefined) {
+    return known;
+  }
+  const made = { dates: dateFormats(locale), number: numberFormat(locale) };
+  formats.set(locale, made);
+  return made;
+};
+
+/**
+ * Normalized text as `locale` writes it, read into one form: its dates in
+ * ISO 8601 ("16 november 2026" is "2026-11-16") and its numbers without
+ * thousands separators and with a decimal point ("18.240" in Dutch is
+ * "18240", "1,5" is "1.5"). A date that isn't one stays as written.
+ */
+const readAs = (text: string, locale: string): string => {
+  const { dates, number } = formatsOf(locale);
+  let read = text;
+  for (const { pattern, names } of dates) {
+    read = read.replaceAll(pattern, (written) => {
+      // The pattern matched just this text: its groups match it again.
+      const groups = new RegExp(pattern.source, "u").exec(written)?.groups;
+      const month =
+        names === null
+          ? Number(groups?.month)
+          : names.indexOf(groups?.name ?? "") + 1;
+      return (
+        isoDate(Number(groups?.year), month, Number(groups?.day)) ?? written
+      );
+    });
+  }
+  return read.replaceAll(number.pattern, (written) =>
+    String(
+      Number(written.replaceAll(number.group, "").replace(number.decimal, "."))
+    )
+  );
+};
 
 /**
  * The protocol's abstention: `ABSTAIN` first, bold or not (`**ABSTAIN:**`),
@@ -237,20 +399,19 @@ const trailing = /[\s.,!]+$/u;
  * fact's words exactly, or those words with the wording around them in
  * the evidence ("37 trucks" when the source says "37 trucks"). Anything
  * else it adds ("Ilse Vermeer, Marta Ruiz", "37 or 99") isn't the fact.
+ * All of them normalized and read (`readAs`).
  */
 const says = (
   part: string,
-  fact: BrainFact,
+  fact: readonly string[],
   evidence: readonly string[]
 ): boolean => {
   const value = part.replace(trailing, "");
-  return fact.some((variant) => {
-    const words = normalized(variant);
-    return (
+  return fact.some(
+    (words) =>
       value === words ||
       (holds(value, words) && evidence.some((marker) => holds(marker, value)))
-    );
-  });
+  );
 };
 
 /** Every ordering of `0 … count - 1`: for the few values of one answer. */
@@ -265,40 +426,40 @@ const orderings = (count: number): number[][] =>
         ])
       );
 
+/** A task's expected answer, its facts and evidence normalized and read. */
+interface ReadExpectation {
+  facts: readonly (readonly string[])[];
+  evidence: readonly string[];
+  anyOrder: boolean;
+}
+
 /**
  * Whether the answer line's values, separated by semicolons, are the
- * task's facts: one value each, in the order asked unless any order goes,
- * none denied ("not 37"). A value joined to another ("37 or 99") isn't
- * the fact (`says`).
+ * task's facts: one value each, in the order asked unless any order goes.
+ * A value joined to another ("37 or 99") isn't the fact (`says`).
  */
-const answers = (
+const answersAs = (
   said: string,
-  expected: Extract<BrainExpectation, { kind: "answer" }>
+  { facts, evidence, anyOrder }: ReadExpectation
 ): boolean => {
-  if (negation.test(said)) {
-    return false;
-  }
   // A semicolon after the last value ("Tor 4;") ends the list: it adds
   // no value.
   const values = said
     .split(";")
     .map((value) => value.trim())
     .filter((value) => value !== "");
-  const evidence = expected.evidence.map(({ marker }) => normalized(marker));
-  if (values.length !== expected.facts.length) {
+  if (values.length !== facts.length) {
     return false;
   }
   // A value that also holds another of the requested facts ("06:00 and
   // 09:00") answers two slots at once: it fits neither.
   const holdsOther = (value: string, index: number) =>
-    expected.facts.some(
-      (other, at) =>
-        at !== index &&
-        other.some((variant) => holds(value, normalized(variant)))
+    facts.some(
+      (other, at) => at !== index && other.some((words) => holds(value, words))
     );
   const fits = (order: readonly number[]) =>
     order.every((value, index) => {
-      const fact = expected.facts[index];
+      const fact = facts[index];
       const given = values[value] ?? "";
       return (
         fact !== undefined &&
@@ -306,9 +467,43 @@ const answers = (
         !holdsOther(given, index)
       );
     });
-  return expected.anyOrder === true
+  return anyOrder
     ? orderings(values.length).some(fits)
     : fits(values.map((_, index) => index));
+};
+
+/**
+ * Whether the answer line (`said`, normalized) gives the task's facts and
+ * nothing stale, none denied ("not 37"). It is read as its task's
+ * language writes dates and numbers, and as English does: "18240" and
+ * "18,240" both say the Dutch source's "18.240". The facts, evidence and
+ * stale values come from the sources, in the task's language.
+ */
+const answers = (
+  said: string,
+  expected: Extract<BrainExpectation, { kind: "answer" }>,
+  language: BrainLanguage
+): boolean => {
+  if (negation.test(said)) {
+    return false;
+  }
+  const read = (text: string) => readAs(normalized(text), language);
+  const expectation: ReadExpectation = {
+    facts: expected.facts.map((fact: BrainFact) => fact.map(read)),
+    evidence: expected.evidence.map(({ marker }) => read(marker)),
+    anyOrder: expected.anyOrder === true,
+  };
+  const stale = (expected.forbidden ?? []).map(read);
+  const readings = readingLocales(language).map((locale) =>
+    readAs(said, locale)
+  );
+  // However it is read, it says nothing stale.
+  if (
+    readings.some((reading) => stale.some((words) => holds(reading, words)))
+  ) {
+    return false;
+  }
+  return readings.some((reading) => answersAs(reading, expectation));
 };
 
 /** Whether `cited` names `source`: the same path is enough, whatever heading. */
@@ -341,9 +536,14 @@ const revokedLeaks = (observed: TrialObservation, answer: string): string[] => {
     : reachedIn(revoked.forbidden, normalized(revoked.modelInput), answer);
 };
 
+/**
+ * Scores one trial of a task asked in `language`, the language its
+ * sources write dates and numbers in.
+ */
 export const scoreTrial = (
   expect: BrainExpectation,
-  observed: TrialObservation
+  observed: TrialObservation,
+  language: BrainLanguage
 ): TrialScore => {
   const failed = observed.error !== undefined;
   const answer = normalized(observed.answer);
@@ -432,9 +632,7 @@ export const scoreTrial = (
     expect.evidence.some((evidence) => names(source, evidence.source))
   ).length;
   const answered = !failed && !abstained;
-  const right =
-    answers(said, expect) &&
-    !(expect.forbidden ?? []).some((stale) => holds(said, normalized(stale)));
+  const right = answers(said, expect, language);
   return {
     ...common,
     evidenceRecall: reached / expect.evidence.length,
