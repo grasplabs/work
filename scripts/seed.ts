@@ -26,13 +26,15 @@ import { onboardingErrors, planDays } from "@grasp-os/shared/onboarding";
 import { organizationErrors } from "@grasp-os/shared/organization";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
-import { workflowErrors } from "@grasp-os/shared/workflows";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
+import { engineFiles } from "./seed/apps.ts";
 import { chats, writeTranscript } from "./seed/chats.ts";
 import { companyName, people, roster, teamNames } from "./seed/company.ts";
 import type { Person, PersonKey, TeamName } from "./seed/company.ts";
-import { engines } from "./seed/engines.ts";
+import { definitionText } from "./seed/definitions.ts";
+import { decisionResponse, engines } from "./seed/engines.ts";
 import type { EngineSeed, WorkflowSeed } from "./seed/engines.ts";
 import { collections } from "./seed/knowledge.ts";
 import type { CollectionSeed } from "./seed/knowledge.ts";
@@ -54,7 +56,7 @@ const signInsAtOnce = 4;
 
 const [admin] = people;
 
-const core = localD1("workflow_runs");
+const core = localD1("workflow_resource_runs");
 
 /** Runs `work` for each item, `limit` at a time, keeping their order. */
 const mapLimited = async <T, R>(
@@ -312,27 +314,134 @@ const upgradeScreens = async (
   await adminSession.api.apps.versions.setCurrent(app.id, version);
 };
 
-/** Each workflow's owner, as the prototype names them, where it isn't so yet. */
-const setOwners = async (
-  owner: Session,
+/** A workflow's name in the organization, as an error says it is taken. */
+const isTaken = (error: unknown): boolean =>
+  workflowResourceErrors.codeOf(error) === "workflow.name_taken";
+
+/**
+ * An engine's workflow, as an independent workflow of its owner's: its
+ * version 1 published from the seed's definition and modules; for one
+ * that asks a decision, its decision contract published by an admin, its
+ * binding approved for the team that answers it, and its person parameter
+ * set to that team; shared with the engine's teams. Returns its ID.
+ * Found by name when seeded before, and then left as it is.
+ */
+const seedWorkflow = async (
+  workflow: WorkflowSeed,
+  engine: EngineSeed,
+  sessions: ReadonlyMap<PersonKey, Session>,
+  teams: ReadonlyMap<TeamName, string>
+): Promise<string> => {
+  const adminSession = sessionFor(sessions, admin.key);
+  const owner = sessionFor(sessions, workflow.owner ?? engine.owner);
+  const resources = owner.api.workflowResources;
+  const listed = await adminSession.api.workflowResources.list();
+  const found = listed.find(({ name }) => name === workflow.id);
+  if (found !== undefined) {
+    return found.id;
+  }
+  let created: { id: string; name: string };
+  try {
+    created = await resources.create(workflow.id);
+  } catch (error) {
+    if (isTaken(error)) {
+      throw new Error(
+        `A workflow named ${workflow.id} is taken by one the seed can't see: start over to seed again.`,
+        { cause: error }
+      );
+    }
+    throw error;
+  }
+  const { decision } = workflow;
+  if (decision !== undefined) {
+    try {
+      await adminSession.api.workflowResources.publishContract({
+        key: decision.contract,
+        kind: "decision",
+        input: decision.input,
+        response: decisionResponse,
+      });
+    } catch (error) {
+      // Published for another workflow, or a seed before: the same one.
+      if (workflowResourceErrors.codeOf(error) !== "workflow.contract_exists") {
+        throw error;
+      }
+    }
+  }
+  await resources.publish(created.id, {
+    definition: definitionText(created.name, workflow.title, workflow.parts),
+    basedOn: null,
+    modules: workflow.modules,
+  });
+  if (decision !== undefined) {
+    const teamId = teams.get(decision.team);
+    if (teamId === undefined) {
+      throw new Error(`No team ${decision.team}`);
+    }
+    await adminSession.api.workflowResources.approveBinding(created.id, {
+      alias: decision.binding,
+      target: { kind: "decision", deciders: [`team:${teamId}`] },
+      reviewed: { version: 1 },
+    });
+    const { revision } = await resources.params(created.id);
+    await resources.setParams(created.id, {
+      values: { [decision.param]: `team:${teamId}` },
+      expectedRevision: revision,
+    });
+  }
+  for (const { team, role } of engine.teams) {
+    const id = teams.get(team);
+    if (id !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one change at a time
+      await resources.share(created.id, { type: "team", id, role });
+    }
+  }
+  return created.id;
+};
+
+/** The binding name an App's permission to start `alias` goes by. */
+const startBindingOf = (alias: string): string =>
+  alias
+    .replaceAll(/(?<lower>[a-z0-9])(?<upper>[A-Z])/gu, "$<lower>_$<upper>")
+    .toUpperCase();
+
+/**
+ * The App's permission to start each of its workflows from its screens,
+ * asked by the engine's owner and granted by an admin, where it has none.
+ */
+const seedStartPermissions = async (
+  engine: EngineSeed,
   app: string,
-  workflows: readonly WorkflowSeed[],
+  workflowIds: ReadonlyMap<string, string>,
   sessions: ReadonlyMap<PersonKey, Session>
 ): Promise<void> => {
-  const overview = await owner.api.workflows.overview();
-  for (const { id: workflow, owner: key } of workflows) {
-    const userId = key === undefined ? undefined : sessions.get(key)?.userId;
-    const summary = overview.find(
-      (listed) => listed.app === app && listed.workflow === workflow
-    );
+  const adminSession = sessionFor(sessions, admin.key);
+  const held = await adminSession.api.permissions.list({
+    type: "app",
+    appId: app,
+  });
+  const { currentVersion } = await adminSession.api.apps.get(app);
+  for (const { alias } of engine.workflows) {
+    const workflowId = workflowIds.get(alias);
+    const binding = startBindingOf(alias);
     if (
-      userId !== undefined &&
-      summary !== undefined &&
-      summary.owner.userId !== userId
+      workflowId === undefined ||
+      held.some(({ binding: name }) => name === binding)
     ) {
-      // oxlint-disable-next-line no-await-in-loop -- one change at a time
-      await owner.api.workflows.setOwner(app, workflow, userId);
+      continue;
     }
+    // oxlint-disable-next-line no-await-in-loop -- one request at a time
+    const { id } = await sessionFor(
+      sessions,
+      engine.owner
+    ).api.permissions.request({
+      subject: { type: "app", appId: app },
+      object: { type: "workflow", workflowId },
+      actions: ["start"],
+      binding,
+    });
+    // oxlint-disable-next-line no-await-in-loop -- one grant at a time
+    await adminSession.api.permissions.grant(id, { version: currentVersion });
   }
 };
 
@@ -369,21 +478,33 @@ const seedEngine = async (
       code,
     ])
   );
+  const workflowIds = new Map<string, string>();
+  for (const workflow of seed.workflows) {
+    workflowIds.set(
+      workflow.alias,
+      // oxlint-disable-next-line no-await-in-loop -- one workflow at a time
+      await seedWorkflow(workflow, seed, sessions, teams)
+    );
+  }
   if (app.currentVersion === null) {
-    const files: Record<string, string> = {
-      "AGENTS.md": seed.agents,
-      ...screens,
-    };
-    for (const { id, code, tests } of seed.workflows) {
-      files[`workflows/${id}.ts`] = code;
-      files[`workflows/${id}.workflow-tests.ts`] = tests;
+    for (const { alias } of seed.workflows) {
+      const id = workflowIds.get(alias);
+      if (id !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- one binding at a time
+        await owner.api.workflowResources.bindToApp(id, {
+          app: app.id,
+          alias,
+          version: 1,
+        });
+      }
     }
     const { version } = await owner.api.apps.files.commit(
       app.id,
-      files,
+      engineFiles(seed, screens),
       "Release the engine's workflows and apps"
     );
-    // An admin makes it current, which approves its code.
+    // An admin makes it current, which approves its code, once its
+    // workflow tests pass.
     await adminSession.api.apps.versions.setCurrent(app.id, version);
   } else if (Object.keys(screens).length > 0) {
     await upgradeScreens(owner, adminSession, app, screens);
@@ -408,27 +529,16 @@ const seedEngine = async (
       await owner.api.apps.members.add(app.id, { type: "team", id, role });
     }
   }
-  await setOwners(owner, app.id, seed.workflows, sessions);
-  for (const { id: workflow, deciders = {} } of seed.workflows) {
-    for (const [param, team] of Object.entries(deciders)) {
-      const teamId = teams.get(team);
-      if (teamId !== undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- one change at a time
-        await owner.api.workflows.params.set(
-          app.id,
-          workflow,
-          param,
-          `team:${teamId}`
-        );
-      }
+  await seedStartPermissions(seed, app.id, workflowIds, sessions);
+  for (const id of workflowIds.values()) {
+    // oxlint-disable-next-line no-await-in-loop -- one workflow at a time
+    const ran = await owner.api.workflowResources.runs(id);
+    if (ran.length > 0) {
+      return { id: app.id, runs: 0 };
     }
   }
-  const ran = await owner.api.workflows.list(app.id);
-  if (ran.length > 0) {
-    return { id: app.id, runs: 0 };
-  }
   const runs = await seedRuns({
-    app: app.id,
+    workflowIds,
     engine: seed.name,
     workflows: seed.workflows,
     sessions,
@@ -660,7 +770,7 @@ try {
     knowledgeErrors.codeOf(error) ??
     onboardingErrors.codeOf(error) ??
     organizationErrors.codeOf(error) ??
-    workflowErrors.codeOf(error);
+    workflowResourceErrors.codeOf(error);
   console.error(
     `The seed stopped${coded === undefined ? "" : ` (${coded})`}: ${error instanceof Error ? error.message : String(error)}`
   );
