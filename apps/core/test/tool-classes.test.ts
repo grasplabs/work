@@ -37,8 +37,11 @@ const setUpTime = { timeout: 60_000 };
 
 type Admin = Awaited<ReturnType<typeof signedInApi>>;
 
-/** A shared Microsoft 365 mailbox, as an admin connects it. */
-const connectShared = async (admin: Admin) => {
+/**
+ * A shared Microsoft 365 mailbox, as an admin connects it: granted
+ * `granted`, if given, or made before connect kept grants.
+ */
+const connectShared = async (admin: Admin, granted?: string) => {
   const subject = `team-${crypto.randomUUID()}`;
   const { url } = await admin.api.connections.start({
     provider: "microsoft",
@@ -46,7 +49,7 @@ const connectShared = async (admin: Admin) => {
   });
   const authorization = new URL(url);
   const query = new URLSearchParams({
-    code: consentCode(authorization, acmeTenant, subject),
+    code: consentCode(authorization, acmeTenant, subject, granted),
     state: authorization.searchParams.get("state") ?? "",
   });
   await routed(`/api/connections/callback?${query.toString()}`, {
@@ -60,6 +63,17 @@ const connectShared = async (admin: Admin) => {
   }
   return { id: connection.id, mailbox };
 };
+
+/**
+ * A grant that holds Read company's rights, and a shared mailbox's, to read
+ * and send from it, as pointing Stephen at one asks for.
+ */
+const readCompanyGrant =
+  "openid profile email offline_access User.Read Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send.Shared Files.Read.All Sites.Read.All Calendars.Read.Shared Tasks.Read";
+
+/** A grant that holds every class's rights, and a shared mailbox's. */
+const everyRightGrant =
+  "openid profile email offline_access User.Read MailboxSettings.Read Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send Mail.Send.Shared Calendars.ReadWrite Calendars.Read.Shared Files.ReadWrite.All Sites.ReadWrite.All Tasks.ReadWrite Notes.ReadWrite";
 
 const sentSchema = z.array(z.object({ subject: z.string() }).loose());
 
@@ -163,6 +177,7 @@ describe("the classes a company turned on", setUpTime, () => {
     await env.DB.batch([
       env.DB.prepare("DELETE FROM tool_class_settings"),
       env.DB.prepare("DELETE FROM shared_mailbox_pointers"),
+      env.DB.prepare("DELETE FROM app_tool_classes"),
     ]);
   });
 
@@ -188,7 +203,9 @@ describe("the classes a company turned on", setUpTime, () => {
   it("let a class through once an admin turns it on for everyone", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
-    const { id, mailbox } = await connectShared(admin);
+    // Granted every right already, so turning it on asks no one to connect
+    // again.
+    const { id, mailbox } = await connectShared(admin, everyRightGrant);
     await pointedAt(admin, mailbox);
     const chat = await chatCalling(admin, person.userId, mailbox, id);
 
@@ -224,6 +241,47 @@ describe("the classes a company turned on", setUpTime, () => {
     );
     // Held for the person to confirm: nothing has gone out yet.
     await expect(sentWith(theirs.subject)).resolves.toStrictEqual([]);
+  });
+
+  it("let an app narrow a class to some teams, from the next call on, but never widen it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const inTeam = await signedInApi(idp, "user");
+    const outside = await signedInApi(idp, "user");
+    // Granted Read company's rights already: the class is turned on below.
+    const { id, mailbox } = await connectShared(admin, readCompanyGrant);
+    await pointedAt(admin, mailbox);
+    const team = await teamOf(inTeam.userId);
+    await admin.api.connections.setToolClass("read-company", {
+      who: "everyone",
+    });
+    // Microsoft 365 reads the company's for one team only; Reach others,
+    // off for the company, stays off however the app has it.
+    await admin.api.connections.setAppToolClass("microsoft", "read-company", {
+      who: "teams",
+      teams: [team],
+    });
+    await admin.api.connections.setAppToolClass("microsoft", "reach-others", {
+      who: "everyone",
+    });
+
+    const theirs = await chatCalling(admin, inTeam.userId, mailbox, id);
+    await expect(theirs.answered()).resolves.toBe(
+      answer({ list: "done", send: off })
+    );
+    const others = await chatCalling(admin, outside.userId, mailbox, id);
+    await expect(others.answered()).resolves.toBe(
+      answer({ list: off, send: off })
+    );
+
+    // As the class again: the person outside the team reads from the next
+    // call on.
+    await admin.api.connections.setAppToolClass("microsoft", "read-company", {
+      who: "asClass",
+    });
+    const again = await chatCalling(admin, outside.userId, mailbox, id);
+    await expect(again.answered()).resolves.toBe(
+      answer({ list: "done", send: off })
+    );
   });
 
   it("are changed by the company's admins only, never by Grasp staff, and only to teams it has", async () => {

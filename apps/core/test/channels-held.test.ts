@@ -120,8 +120,8 @@ describe("the card's check line", () => {
 describe("a Teams turn that holds writes", setUpTime, () => {
   it("sends one card naming both, after its answer, carrying what a press confirms", async () => {
     const admin = await signedInApi(idp, "admin");
-    // By the name its contract serves: a write from a chat app is checked
-    // against the fields its action takes (channels/stephen-rules.ts).
+    // A send whose fields its server lists, so core can check a chat
+    // app's write against them (channels/stephen-rules.ts).
     const mail = await mailConnection([], ["MAIL_SEND"]);
     const binding = `MAIL${unique()}`.toUpperCase();
     await requestGranted(idp, admin, {
@@ -142,7 +142,7 @@ describe("a Teams turn that holds writes", setUpTime, () => {
 
     await post(
       messageFrom(person.teams, {
-        text: "Mail ben@acme.test the invoice INV-7 and remind cleo@acme.test.",
+        text: "Mail ben@acme.test the invoice and remind cleo@acme.test.",
       })
     );
 
@@ -150,6 +150,10 @@ describe("a Teams turn that holds writes", setUpTime, () => {
     const { activities } = await reached(person.teams.conversation);
     const messages = activities
       .filter(({ type }) => type === "message")
+      // Not the card offering their own Microsoft 365 (connect-own.ts).
+      .filter(
+        (activity) => !JSON.stringify(activity).includes("/connect-microsoft")
+      )
       .map((activity) => JSON.stringify(activity));
     const [answer, card, ...more] = messages;
     expect({

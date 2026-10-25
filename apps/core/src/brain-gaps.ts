@@ -1,4 +1,8 @@
-import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import {
+  actorOf,
+  auditActorSchema,
+  createAuditEvent,
+} from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { Gap } from "@grasp-os/shared/brain";
 import {
@@ -31,7 +35,7 @@ import {
 import type { OnErase } from "./knowledge/purge.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 
-// What became of the Playbook's gaps (`brain.askAboutGap`, `answerGap`,
+// What became of the brain's gaps (`brain.askAboutGap`, `answerGap`,
 // `closeGap`): the gap record itself is never written over (brain-records
 // .ts); its ask, answer and close are kept beside it, in
 // `brain_gap_states`, each set once. Threat model, and how each is closed
@@ -462,7 +466,7 @@ const rewriteGapAnswers = async (
     outboxed(db, {
       actor,
       action: "brain.gap.answers_purged",
-      target: { type: "brain", id: "playbook" },
+      target: { type: "brain", id: "gaps" },
       detail: { gaps: changed.length },
     }),
   ]);
@@ -501,9 +505,9 @@ export const gapAnswerErasure = (
 ): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => ({
   count: async (holds) => await countGapAnswers(env, holds),
   rewrite: async (by, rewrite) => {
-    await rewriteGapAnswers(env, by.actor, rewrite);
+    await rewriteGapAnswers(env, auditActorSchema.parse(by.actor), rewrite);
   },
   forgetActor: async (by, userId) => {
-    await eraseGapAnswerer(env, by.actor, userId);
+    await eraseGapAnswerer(env, auditActorSchema.parse(by.actor), userId);
   },
 });

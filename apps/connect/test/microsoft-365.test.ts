@@ -27,6 +27,12 @@ import {
   someone,
 } from "./connect.ts";
 import {
+  meetingPage,
+  planIds,
+  sectionIds,
+  suppliersList,
+} from "./fixtures/graph-apps.ts";
+import {
   archiveFolderId,
   attachmentsSkipToken,
   categoriesSkipToken,
@@ -184,6 +190,12 @@ const mailboxInputs: Record<string, Input> = {
     list: todoListIds.tasks,
     task: "AAkALgAAAAAAHYQDEapmEc2b=",
   },
+  "calendar.freeTime": {
+    start: "2026-10-26T00:00",
+    end: "2026-10-27T00:00",
+    timeZone: "Europe/Amsterdam",
+    minutes: 30,
+  },
   "calendar.create": {
     subject: "Focus time",
     start: "2026-10-26T14:00",
@@ -195,6 +207,14 @@ const mailboxInputs: Record<string, Input> = {
     timeZone: "Europe/Amsterdam",
     subject: "Focus time",
   },
+  "onenote.sections": {},
+  "onenote.pages": { section: sectionIds.own },
+  "onenote.read": { page: meetingPage.id },
+  "onenote.create": {
+    section: sectionIds.own,
+    title: "Notes",
+    text: "Call Northwind back",
+  },
 };
 
 /** Input for each file tool, but its drive. */
@@ -203,6 +223,7 @@ const driveInputs: Record<string, Input> = {
   "files.search": { query: "invoice" },
   "files.versions": { item: itemIds.procedure },
   "files.read": { item: itemIds.report },
+  "word.read": { item: itemIds.contract },
 };
 
 /** A row of the supplier table, as its cells are read and written. */
@@ -260,10 +281,26 @@ const workbookInputs: Record<string, Input> = {
 /** Input for each list tool, but its site. */
 const siteInputs: Record<string, Input> = {
   "lists.items": { list: contractsList },
+  "lists.addItem": {
+    list: suppliersList,
+    values: [{ column: "Title", value: "Fabrikam Metals" }],
+  },
+  "lists.updateItem": {
+    list: suppliersList,
+    item: "1",
+    before: [{ column: "CreditLimit", value: 5000 }],
+    after: [{ column: "CreditLimit", value: 7500 }],
+  },
+};
+
+/** Input for each Planner tool, but its plan. */
+const planInputs: Record<string, Input> = {
+  "planner.tasks": {},
+  "planner.create": { title: "Reconcile Fabrikam's statement" },
 };
 
 describe("the Microsoft 365 connector's scoping", () => {
-  it("binds every route of every tool to its mailbox, drive, site or workbook's named table, reads /me only to know whose a mailbox is, and writes under /me only for drafts in the person's own OneDrive", () => {
+  it("binds every route of every tool to its mailbox, drive, site, plan or workbook's named table, reads /me only to know whose a mailbox is, and writes under /me only for drafts in the person's own OneDrive", () => {
     const unbound = Object.entries(manifest.actions).flatMap(
       ([name, { resource, routes }]) =>
         routes
@@ -276,6 +313,14 @@ describe("the Microsoft 365 connector's scoping", () => {
                   path.startsWith("/v1.0/drives/{drive}/")) ||
                 (resource === "site" &&
                   path.startsWith("/v1.0/sites/{site}/")) ||
+                (resource === "plan" &&
+                  (path === "/v1.0/planner/plans/{plan}" ||
+                    path.startsWith("/v1.0/planner/plans/{plan}/"))) ||
+                // Planner names a new task's plan in its body: the tool puts
+                // its bound plan there, after reading that plan.
+                (name === "planner.create" &&
+                  method === "POST" &&
+                  path === "/v1.0/planner/tasks") ||
                 (resource === "workbook" &&
                   path.startsWith(
                     "/v1.0/drives/{drive}/items/{workbook}/workbook/tables/{table}/"
@@ -290,14 +335,15 @@ describe("the Microsoft 365 connector's scoping", () => {
     );
     expect(unbound).toStrictEqual([]);
     // Only the tools that work in the person's own mailbox or OneDrive go
-    // to /me: the mail tools to ask whose the token is, files.createDraft
-    // to write its draft.
+    // to /me: the mail tools and calendar.freeTime to ask whose the token
+    // is, files.createDraft to write its draft.
     const askWho = Object.entries(manifest.actions)
       .filter(([, { routes }]) =>
         routes.some(({ path }) => path.startsWith("/v1.0/me"))
       )
       .map(([name, { reach }]) => `${name} ${reach}`);
     expect(askWho.toSorted()).toStrictEqual([
+      "calendar.freeTime own",
       "files.createDraft own",
       "mail.categorise own",
       "mail.flag own",
@@ -311,6 +357,7 @@ describe("the Microsoft 365 connector's scoping", () => {
         ...Object.keys(mailboxInputs),
         ...Object.keys(driveInputs),
         ...Object.keys(siteInputs),
+        ...Object.keys(planInputs),
         ...Object.keys(workbookInputs),
         "files.createDraft",
       ].toSorted()
@@ -357,6 +404,14 @@ describe("the Microsoft 365 connector's scoping", () => {
         hrSite,
         financeSite.toUpperCase(),
       ])
+    ).resolves.toStrictEqual(new Set(["connect.resource_out_of_scope"]));
+    expect(graph.sent).toStrictEqual([]);
+  });
+
+  it("keeps a call for one plan out of every other", async () => {
+    const connection = await connected();
+    await expect(
+      refusalsFor(connection, planInputs, "plan", planIds.finance, [planIds.hr])
     ).resolves.toStrictEqual(new Set(["connect.resource_out_of_scope"]));
     expect(graph.sent).toStrictEqual([]);
   });
@@ -1418,8 +1473,139 @@ describe("the Microsoft 365 connector's calendar tools", () => {
   });
 });
 
-/** The organization's time zone, in the calendar writes below. */
+/** The organization's time zone, in the calendar tools below. */
 const amsterdam = "Europe/Amsterdam";
+
+/** Looks for free time in a calendar. */
+const freeTime = async (connection: Connection, input: Input) =>
+  await call(connection, "calendar.freeTime", input);
+
+describe("the Microsoft 365 connector's free time", () => {
+  it("finds free stretches around a person's events in working hours, in the organization's time zone", async () => {
+    const connection = await connected();
+    const own = connection.person.email;
+    // Monday 26 October in Amsterdam, a day after the clocks went back:
+    // UTC+1, so 09:00 there is 08:00 UTC.
+    graph.holdEvents(own, [
+      { start: "2026-10-26T08:00:00", end: "2026-10-26T09:00:00" },
+      { start: "2026-10-26T11:00:00", end: "2026-10-26T12:00:00" },
+      { start: "2026-10-26T12:20:00", end: "2026-10-26T14:00:00" },
+      {
+        start: "2026-10-26T14:00:00",
+        end: "2026-10-26T15:00:00",
+        showAs: "free",
+      },
+      {
+        start: "2026-10-26T15:00:00",
+        end: "2026-10-26T15:30:00",
+        isCancelled: true,
+      },
+    ]);
+    // From Saturday, over the weekend and the change of clocks.
+    await expect(
+      outputOf(
+        freeTime(connection, {
+          mailbox: own,
+          start: "2026-10-24T00:00",
+          end: "2026-10-27T00:00",
+          timeZone: amsterdam,
+          minutes: 30,
+        })
+      )
+    ).resolves.toStrictEqual({
+      mailbox: own,
+      timeZone: amsterdam,
+      // 13:00 to 13:20 is too short; the free and the cancelled events
+      // leave their time free.
+      free: [
+        { start: "2026-10-26T10:00", end: "2026-10-26T12:00", minutes: 120 },
+        { start: "2026-10-26T15:00", end: "2026-10-26T17:00", minutes: 120 },
+      ],
+    });
+    const ownPath = `/v1.0/users/${encodeURIComponent(own)}`;
+    expect(requests()).toMatchObject([
+      {
+        path: `${ownPath}/calendarView`,
+        query: {
+          startDateTime: "2026-10-23T22:00:00.000Z",
+          endDateTime: "2026-10-26T23:00:00.000Z",
+        },
+        headers: { prefer: 'outlook.timezone="UTC"' },
+      },
+      { path: `${ownPath}/calendarView`, query: { $skiptoken: "2" } },
+      { path: `${ownPath}/calendarView`, query: { $skiptoken: "4" } },
+    ]);
+  });
+
+  it("puts each event on the organization's day, not UTC's, and takes working hours as given", async () => {
+    const connection = await connected();
+    const own = connection.person.email;
+    const auckland = "Pacific/Auckland";
+    // Auckland is UTC+13 in October: its Tuesday morning is Monday evening
+    // in UTC, and its Wednesday morning Tuesday evening.
+    graph.holdEvents(own, [
+      { start: "2026-10-26T20:00:00", end: "2026-10-26T22:30:00" },
+      { start: "2026-10-27T19:00:00", end: "2026-10-27T21:00:00" },
+      // All of Thursday, as the person sees it.
+      {
+        start: "2026-10-29T00:00:00",
+        end: "2026-10-30T00:00:00",
+        isAllDay: true,
+      },
+    ]);
+    await expect(
+      outputOf(
+        freeTime(connection, {
+          mailbox: own,
+          start: "2026-10-27T00:00",
+          end: "2026-10-30T00:00",
+          timeZone: auckland,
+          minutes: 60,
+          workingHours: {
+            from: "08:00",
+            to: "12:00",
+            days: ["tuesday", "wednesday", "thursday"],
+          },
+        })
+      )
+    ).resolves.toMatchObject({
+      free: [
+        { start: "2026-10-27T08:00", end: "2026-10-27T09:00", minutes: 60 },
+        { start: "2026-10-28T10:00", end: "2026-10-28T12:00", minutes: 120 },
+      ],
+    });
+  });
+
+  it("refuses another person's calendar, a shared one, and a range it can't read", async () => {
+    const connection = await connected();
+    const range = {
+      start: "2026-10-26T00:00",
+      end: "2026-10-27T00:00",
+      timeZone: amsterdam,
+      minutes: 30,
+    };
+    for (const mailbox of [ceo, invoices]) {
+      // oxlint-disable-next-line no-await-in-loop -- one calendar at a time
+      await expect(
+        toolError(freeTime(connection, { ...range, mailbox }))
+      ).resolves.toMatchObject({ error: { code: "invalid" } });
+    }
+    // Neither calendar's events were read: only whose the token is.
+    expect(graphPaths()).toStrictEqual([]);
+    const own = connection.person.email;
+    const wrongs: Input[] = [
+      { end: range.start },
+      { end: "2026-12-01T00:00" },
+      { workingHours: { from: "17:00", to: "09:00", days: ["monday"] } },
+    ];
+    for (const wrong of wrongs) {
+      // oxlint-disable-next-line no-await-in-loop -- one input at a time
+      await expect(
+        toolError(freeTime(connection, { ...range, mailbox: own, ...wrong }))
+      ).resolves.toMatchObject({ error: { code: "invalid" } });
+    }
+  });
+});
 
 /** An hour of focus time in `mailbox`'s calendar, in Amsterdam time. */
 const focusTime = (mailbox: string) => ({
@@ -3405,6 +3591,7 @@ describe("the Microsoft 365 connector's calendar writes, when something goes wro
     const granted = await connectedWith([
       ...readOnlyCalendars,
       "Calendars.ReadWrite",
+      "Notes.ReadWrite",
     ]);
     // Tokens stored before connect kept their grant.
     const unknown = await connected();

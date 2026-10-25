@@ -105,6 +105,7 @@ import {
   listPricesOf,
   microsPerDollar,
   pinnedPrice,
+  regionalPricesOf,
 } from "./model-prices.ts";
 import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
@@ -139,6 +140,54 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 // Only providers whose pi adapter takes a custom fetch can ride the binding.
 // Google's refuses one, so Google models would need a gateway token over
 // HTTPS, and aren't offered.
+//
+// Claude in the EU (GRA-702): Anthropic's own API can't be pinned to the
+// EU (its `inference_geo` is `us` or `global`), and neither can AI
+// Gateway's route to it. Claude in Amazon Bedrock serves the same Messages
+// API at `https://bedrock-mantle.<region>.api.aws/anthropic`, so pi's
+// Anthropic adapter speaks to it unchanged. AI Gateway reaches it as a
+// custom provider of the deployment's gateway, `custom-bedrock-eu`, whose
+// base URL is Frankfurt's endpoint (`eu-central-1`) and which holds the
+// Bedrock key, as `custom-elevenlabs-eu` does for ElevenLabs's EU host:
+// core still holds no key. Each model is asked for by its EU inference
+// profile (`eu.anthropic.<model>`), which routes only within the EU's
+// regions. Bedrock keeps neither prompts nor answers unless the account
+// turns invocation logging on, and the gateway logs metadata only
+// (`cf-aig-collect-log-payload`): zero retention is the AWS account's
+// setting and the contract's, not a request's.
+
+/**
+ * The Claude models Bedrock serves through its EU inference profile, by
+ * their Anthropic IDs. Not Claude Fable 5.1 (regional only in us-east-1)
+ * or Claude Fable 5, which Anthropic serves only with 30-day retention.
+ */
+const euClaudeModels = [
+  "claude-opus-5-5",
+  "claude-sonnet-5-5",
+  "claude-haiku-5-5",
+  "claude-opus-5",
+  "claude-sonnet-5",
+  "claude-opus-4-8",
+] as const;
+
+/**
+ * pi's Anthropic catalog entry for each EU model, pointed at Bedrock: sent
+ * as its EU inference profile, at Bedrock's regional prices.
+ */
+const bedrockEuModels: Readonly<Record<string, Model<"anthropic-messages">>> =
+  Object.fromEntries(
+    euClaudeModels.map((id) => {
+      const model = ANTHROPIC_MODELS[id];
+      return [
+        id,
+        {
+          ...model,
+          id: `eu.anthropic.${id}`,
+          cost: regionalPricesOf(model.cost),
+        },
+      ];
+    })
+  );
 
 /**
  * The providers the gateway offers, by their AI Gateway path: the pi adapter
@@ -155,6 +204,13 @@ const providers = {
     stream: openaiResponses,
     catalog: OPENAI_MODELS,
     path: "openai",
+  },
+  // Claude in Amazon Bedrock, in the EU, through the gateway's custom
+  // provider for it (above).
+  "bedrock-eu": {
+    stream: anthropicMessages,
+    catalog: bedrockEuModels,
+    path: "custom-bedrock-eu",
   },
   // Workers AI's own OpenAI-compatible endpoint, not the gateway's
   // cross-provider /compat layer, which drops provider features.

@@ -36,6 +36,7 @@ import {
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { AskStephen } from "../workflows/ask-stephen.tsx";
 import { DefinitionEditor } from "../workflows/definition-editor.tsx";
 import { ResourceParams } from "../workflows/resource-params.tsx";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
@@ -169,6 +170,7 @@ const WorkflowResourceView = ({
   versions,
   params,
   runs,
+  askable,
   me,
 }: {
   resource: WorkflowResource;
@@ -176,6 +178,7 @@ const WorkflowResourceView = ({
   versions: Loaded<WorkflowResourceVersion[]>;
   params: Loaded<WorkflowParams>;
   runs: Loaded<WorkflowResourceRun[]>;
+  askable: Loaded<boolean>;
   me: string;
 }) => {
   const router = useRouter();
@@ -210,6 +213,9 @@ const WorkflowResourceView = ({
               </Link>
             ) : null}
           </div>
+          {resource.owner === me && askable.state === "ready" ? (
+            <AskStephen askable={askable.data} workflow={resource.id} />
+          ) : null}
         </div>
         <TabsList variant="line">
           {draft === undefined ? null : (
@@ -292,7 +298,8 @@ const WorkflowResourceView = ({
 };
 
 const WorkflowResourcePage = () => {
-  const { resource, draft, versions, params, runs } = Route.useLoaderData();
+  const { resource, draft, versions, params, runs, askable } =
+    Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { t } = useLingui();
   const name = resource.state === "ready" ? resource.data.name : undefined;
@@ -318,6 +325,7 @@ const WorkflowResourcePage = () => {
           // Another workflow starts afresh; a new current version of this
           // one keeps what is typed in its editor.
           key={resource.data.id}
+          askable={askable}
           draft={draft}
           me={identity.userId}
           params={params}
@@ -333,7 +341,7 @@ const WorkflowResourcePage = () => {
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   pendingComponent: PageLoading,
   loader: async ({ context: { core }, params: { workflow } }) => {
-    const [resource, versions, params, runs] = await Promise.all([
+    const [resource, versions, params, runs, askable] = await Promise.all([
       loadFromCore(
         core,
         async (session) => await session.workflowResources.get(workflow)
@@ -350,6 +358,10 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
         core,
         async (session) => await session.workflowResources.runs(workflow)
       ),
+      loadFromCore(
+        core,
+        async (session) => await session.workflowResources.askable(workflow)
+      ),
     ]);
     // Only its builders read its draft.
     const draft =
@@ -359,7 +371,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
             async (session) => await session.workflowResources.draft(workflow)
           )
         : undefined;
-    return { resource, draft, versions, params, runs };
+    return { resource, draft, versions, params, runs, askable };
   },
   component: WorkflowResourcePage,
 });

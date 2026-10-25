@@ -305,6 +305,14 @@ export const pendingActions = sqliteTable(
      * any other call.
      */
     stamp: text(),
+    /**
+     * When it ends unconfirmed: a write held in a chat on a chat platform
+     * (a Teams card scrolls away, and its values may have moved on) ends
+     * at midnight of the company's day it was held on, as core signed it
+     * (`CapabilityClaims.heldUntil`). Null for one that waits until it is
+     * decided, as every other does.
+     */
+    endsAt: timestamp("ends_at"),
   },
   (table) => [
     uniqueIndex("pending_actions_call_idx").on(
@@ -321,6 +329,10 @@ export const pendingActions = sqliteTable(
     index("pending_actions_connection_idx").on(table.connectionId),
     // Dropping an ended run's, by the range of its steps' keys.
     index("pending_actions_key_idx").on(table.idempotencyKey),
+    // Ending those whose day is over.
+    index("pending_actions_ends_idx")
+      .on(table.endsAt)
+      .where(sql`${table.endsAt} IS NOT NULL`),
   ]
 );
 

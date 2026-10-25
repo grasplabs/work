@@ -297,6 +297,10 @@ const confirmHeld = async (
   } catch (error) {
     // Only when this confirmation took it (`markTaken`): a refused one
     // tells nothing, whatever another decision did meanwhile.
+    // Its day ended (a chat platform's): connect declined it as expired.
+    if (connectErrors.codeOf(error) === "connect.pending_expired") {
+      await tellChat(env, held, identity.userId, "expired");
+    }
     if (wasTaken(error)) {
       // Sent, with no answer: it may have been carried out, which a
       // failure would deny.
