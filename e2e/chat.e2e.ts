@@ -420,24 +420,25 @@ test("one control picks the model and how hard it thinks, sends both with the qu
 
   // The stack's first model doesn't think: the control names it alone.
   await expect(control).toHaveAccessibleName(
-    "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
+    "Model: llama-3.3-70b-instruct-fp8-fast by Meta. Change model"
   );
   await control.click();
   const choices = page
     .getByRole("group", { name: "Model" })
     .getByRole("button");
+  // Each by its maker, not by Workers AI, which runs both.
   await expect(choices).toHaveText([
-    /llama-3\.3-70b-instruct-fp8-fast/u,
-    /glm-5\.3-flash/u,
+    /^Meta llama-3\.3-70b-instruct-fp8-fast/u,
+    /^Z\.ai glm-5\.3-flash/u,
   ]);
   const thinking = page.getByRole("slider", { name: "Thinking" });
   await expect(thinking).toHaveCount(0);
 
   // One that thinks offers its efforts in a bar under the models, which
   // stay open for it, at the model's own default.
-  await page.getByRole("button", { name: /^glm-5\.3-flash/u }).click();
+  await page.getByRole("button", { name: /^Z\.ai glm-5\.3-flash/u }).click();
   await expect(
-    page.getByRole("button", { name: /^glm-5\.3-flash/u })
+    page.getByRole("button", { name: /^Z\.ai glm-5\.3-flash/u })
   ).toHaveAttribute("aria-pressed", "true");
   await expect(thinking).toHaveAttribute("aria-valuetext", "High");
   await thinking.focus();
@@ -446,7 +447,7 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   await page.keyboard.press("Escape");
   await expect(choices).toHaveCount(0);
   await expect(control).toHaveAccessibleName(
-    "Model: glm-5.3-flash, thinking max. Change model or thinking"
+    "Model: glm-5.3-flash by Z.ai, thinking max. Change model or thinking"
   );
 
   const question = `Think hard ${tag}.`;
@@ -466,19 +467,19 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   // Kept for the person in this browser.
   await page.reload();
   await expect(control).toHaveAccessibleName(
-    "Model: glm-5.3-flash, thinking max. Change model or thinking"
+    "Model: glm-5.3-flash by Z.ai, thinking max. Change model or thinking"
   );
 
   // Back on the model that doesn't think, the effort goes.
   await control.click();
   await page
-    .getByRole("button", { name: /^llama-3\.3-70b-instruct-fp8-fast/u })
+    .getByRole("button", { name: /^Meta llama-3\.3-70b-instruct-fp8-fast/u })
     .click();
   await expect(choices).toHaveCount(2);
   await expect(thinking).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(control).toHaveAccessibleName(
-    "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
+    "Model: llama-3.3-70b-instruct-fp8-fast by Meta. Change model"
   );
 });
 

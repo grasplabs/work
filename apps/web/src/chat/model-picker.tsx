@@ -13,14 +13,15 @@ import { Link } from "@tanstack/react-router";
 import { CheckIcon, ChevronDownIcon, PlusIcon } from "lucide-react";
 import { useId } from "react";
 
-import { ProviderMark } from "./provider-mark.tsx";
+import { MakerMark } from "./maker-mark.tsx";
+import { makerOf } from "./model-maker.ts";
 
 // The chat box's one control for who answers and how hard it thinks
 // first, as the prototype has it (grasplabs/prototype
 // `components/chat/model-picker.tsx`, `thinking-bar.tsx`): it reads
 // "glm-5.3-flash · ●●○ High", and opens on the models core offers, one
-// line each with its provider's mark, and under them, for a model that
-// thinks, a bar from its least effort to its most. Picking a model leaves
+// line each with its maker's mark or name (maker-mark.tsx), and under
+// them, for a model that thinks, a bar from its least effort to its most. Picking a model leaves
 // it open, so the thinking can be set in the same go. For an admin, one
 // last line adds another provider, in the models' settings. What the
 // person picks is kept as before (model-choice.ts).
@@ -173,6 +174,7 @@ export const ModelPicker = ({
 }) => {
   const { t } = useLingui();
   const name = modelName(model);
+  const maker = makerOf(model);
   const thinking =
     efforts.length > 0 && onEffort !== undefined && effort !== undefined
       ? { effort, onEffort }
@@ -182,8 +184,8 @@ export const ModelPicker = ({
       <PopoverTrigger
         aria-label={
           thinking === undefined || effort === undefined
-            ? t`Model: ${name}. Change model`
-            : t`Model: ${name}, thinking ${select(effort, {
+            ? t`Model: ${name} by ${maker}. Change model`
+            : t`Model: ${name} by ${maker}, thinking ${select(effort, {
                 low: "low",
                 medium: "medium",
                 high: "high",
@@ -193,7 +195,7 @@ export const ModelPicker = ({
         }
         render={<PromptInputButton size="sm" />}
       >
-        <ProviderMark model={model} />
+        <MakerMark model={model} />
         {/* As the text in the box is written: not heavier, not larger. */}
         <span className="text-foreground max-w-48 truncate font-normal">
           {name}
@@ -227,7 +229,8 @@ export const ModelPicker = ({
               title={each}
               type="button"
             >
-              <ProviderMark model={each} />
+              {/* The space reads "Z.ai glm-5.3-flash"; a flex box doesn't draw it. */}
+              <MakerMark model={each} />{" "}
               <span className="min-w-0 flex-1 truncate">{modelName(each)}</span>
               {index === 0 ? (
                 <span className="text-muted-foreground text-xs">

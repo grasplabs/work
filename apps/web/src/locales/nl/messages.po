@@ -7724,12 +7724,12 @@ msgid "Model training"
 msgstr "Modeltraining"
 
 #: src/chat/model-picker.tsx
-msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
-msgstr "Model: {name}, denkniveau {effort, select, low {laag} medium {gemiddeld} high {hoog} xhigh {extra hoog} other {maximaal}}. Model of denkniveau wijzigen"
+msgid "Model: {name} by {maker}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
+msgstr "Model: {name} van {maker}, denkniveau {effort, select, low {laag} medium {gemiddeld} high {hoog} xhigh {extra hoog} other {maximaal}}. Model of denkniveau wijzigen"
 
 #: src/chat/model-picker.tsx
-msgid "Model: {name}. Change model"
-msgstr "Model: {name}. Model wijzigen"
+msgid "Model: {name} by {maker}. Change model"
+msgstr "Model: {name} van {maker}. Model wijzigen"
 
 #: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.settings.tsx
