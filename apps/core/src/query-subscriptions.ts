@@ -26,6 +26,7 @@ import { appHost, inJurisdiction } from "./durable-objects.ts";
 import { windowPages } from "./query-windows.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { delivering } from "./screen-trust.ts";
+import type { LeasedBuild } from "./screen-trust.ts";
 import type { SessionCheck } from "./session-check.ts";
 
 // Live queries (spec 11): what one page's connection to core (one browser
@@ -93,7 +94,9 @@ import type { SessionCheck } from "./session-check.ts";
 //     followed when the event arrives.
 // - A subscription outlives its session or the App's version: a session
 //   that ended refuses the read (`check`) and ends it; a reference to a
-//   version that is no longer current is refused (`version.*`) and ends
+//   version that is no longer current is read on the current release only
+//   while its contract there is the same (app-functions.ts,
+//   `pinnedReference`), and refused otherwise (`version.*`), which ends
 //   it, never read against another contract.
 // - Results cross people or builds: a connection is one session's, and
 //   one read is shared only by subscriptions of the same App, build,
@@ -248,7 +251,7 @@ interface Listener {
 interface Evaluation {
   readonly key: string;
   readonly app: AppId;
-  readonly artifact: string | undefined;
+  readonly build: LeasedBuild | undefined;
   readonly request: string;
   readonly listeners: Set<Listener>;
   /** How many pushes it made: each push's `Snapshot.seq`. */
@@ -325,7 +328,7 @@ interface Following {
 export type AccessCheck<By = Identity> = (
   by: By,
   app: AppId,
-  artifact: string | undefined
+  build: LeasedBuild | undefined
 ) => Promise<"open" | "role" | "revoked" | "unreviewed">;
 
 /** Whoever a connection's live queries are read for, by `userId`. */
@@ -379,14 +382,14 @@ export interface LiveReads<By extends Reader> {
   /** Drops the latest reading of who reads, so `check` reads now. */
   forget: () => void;
   /**
-   * Reads the query `request` names as `by`, as build `artifact`, by
+   * Reads the query `request` names as `by`, as `build`, by
    * `deadline`, a window's pages past what its read paid charged through
    * `chargePages`; a throw is a refusal that ends the subscription.
    */
   evaluate: (
     by: By,
     app: AppId,
-    artifact: string | undefined,
+    build: LeasedBuild | undefined,
     request: string,
     deadline: number,
     chargePages: (pages: number) => Promise<void>
@@ -413,15 +416,23 @@ export const screenReads = (
   forget: () => {
     check.forget?.();
   },
-  evaluate: async (by, app, artifact, request, deadline, chargePages) => {
+  evaluate: async (by, app, build, request, deadline, chargePages) => {
     const { answer, reads, revision } = await delivering(
       env,
       by,
       app,
-      artifact,
+      build,
       "watchQuery",
       async () =>
-        await evaluateAppQuery(env, by, app, request, deadline, chargePages)
+        await evaluateAppQuery(
+          env,
+          by,
+          app,
+          request,
+          deadline,
+          chargePages,
+          build?.version
+        )
     );
     return {
       result: answer.result,
@@ -442,7 +453,7 @@ const storeOf = (env: Env, storeId: StoreId) =>
  */
 const keyOf = (
   app: AppId,
-  artifact: string | undefined,
+  build: LeasedBuild | undefined,
   userId: string,
   request: string
 ): string => {
@@ -454,7 +465,13 @@ const keyOf = (
   } catch {
     // Keyed by its text.
   }
-  return canonicalJson([app, artifact ?? null, userId, call]);
+  return canonicalJson([
+    app,
+    build?.artifact ?? null,
+    build?.version ?? null,
+    userId,
+    call,
+  ]);
 };
 
 /**
@@ -490,11 +507,14 @@ const allHaveLatest = (evaluation: Evaluation): boolean =>
 /**
  * A callback of an App's that isn't a live query, as the connection looks
  * at it again (`QuerySubscriptions.follow`): `look` checks its access now,
- * `lose` lets go of it, when the App's revocations can't be followed.
+ * `lose` lets go of it, when the App's revocations can't be followed;
+ * `versioned`, if given, is told another version of the App was made
+ * current.
  */
 interface Look {
   readonly look: () => Promise<void>;
   readonly lose: () => void;
+  readonly versioned?: () => Promise<void>;
 }
 
 export class QuerySubscriptions<By extends Reader = Identity> {
@@ -551,14 +571,14 @@ export class QuerySubscriptions<By extends Reader = Identity> {
 
   /**
    * Follows the query `request` names of `app` for `by`, its results
-   * pushed to `onSnapshot`, as the build `artifact` the subscribing
+   * pushed to `onSnapshot`, as the build `build` the subscribing
    * frame's lease names (see the header). The caller admitted the
    * request and checked the build's trust.
    */
   subscribe(
     by: By,
     app: AppId,
-    artifact: string | undefined,
+    build: LeasedBuild | undefined,
     request: string,
     onSnapshot: SnapshotCallback,
     /**
@@ -571,9 +591,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     if (this.#count >= querySubscriptionLimits.perConnection) {
       throw screenErrors.create("screen.too_many_queries");
     }
-    const key = keyOf(app, artifact, by.userId, request);
+    const key = keyOf(app, build, by.userId, request);
     const evaluation =
-      this.#evaluations.get(key) ?? this.#start(key, app, artifact, request);
+      this.#evaluations.get(key) ?? this.#start(key, app, build, request);
     const listener: Listener = {
       toPage: onSnapshot.dup(),
       sent: 0,
@@ -627,13 +647,13 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   #start(
     key: string,
     app: AppId,
-    artifact: string | undefined,
+    build: LeasedBuild | undefined,
     request: string
   ): Evaluation {
     const evaluation: Evaluation = {
       key,
       app,
-      artifact,
+      build,
       request,
       listeners: new Set(),
       revision: 0,
@@ -738,7 +758,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   }
 
   async #readAndPush(evaluation: Evaluation): Promise<void> {
-    const { app, artifact, request } = evaluation;
+    const { app, build, request } = evaluation;
     // Nothing of the App is read before the connection follows its
     // revocations (see the header).
     await this.#followed(app);
@@ -776,7 +796,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       evaluated = await this.#reads.evaluate(
         before.by,
         app,
-        artifact,
+        build,
         request,
         Date.now() + evaluationMs,
         // Pages past what this read paid, and every read again, are
@@ -964,21 +984,25 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   async #gate(
     evaluation: Evaluation
   ): Promise<{ refusal: Result } | { roles: string; by: By }> {
-    const { app, artifact } = evaluation;
+    const { app, build } = evaluation;
     let by: By;
     try {
       by = await this.#reads.check();
     } catch (error) {
       return { refusal: refusalResult(error) };
     }
-    const key = canonicalJson([app, artifact ?? null]);
+    const key = canonicalJson([
+      app,
+      build?.artifact ?? null,
+      build?.version ?? null,
+    ]);
     const now = Date.now();
     let cached = this.#cleared.get(key);
     if (cached === undefined || cached.by !== by || cached.until <= now) {
       cached = {
         by,
         until: now + accessCacheMs,
-        access: this.#reads.access(by, app, artifact),
+        access: this.#reads.access(by, app, build),
         roles: this.#reads.roles(by, app),
       };
       this.#cleared.set(key, cached);
@@ -1456,19 +1480,28 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    * pushed doesn't stay on screen until its next push. When the App's
    * revocations can't be followed, `lose` lets go of it, as the App's
    * queries are then (`#lose`); its own check before each push stays.
+   * `versioned`, if given, is called each time the App's host says another
+   * of its versions was made current (`versionChanged`): a page following
+   * the App's version (screens-rpc.ts, `watchVersion`). An event missed
+   * while the host restarted is made up for by the look that follows.
    */
   follow(
     by: By,
     app: AppId,
     look: () => Promise<void>,
-    lose: () => void
+    lose: () => void,
+    versioned?: () => Promise<void>
   ): Disposable {
     let looks = this.#looks.get(app);
     if (looks === undefined) {
       looks = new Set();
       this.#looks.set(app, looks);
     }
-    const entry: Look = { look, lose };
+    const entry: Look = {
+      look,
+      lose,
+      ...(versioned === undefined ? {} : { versioned }),
+    };
     looks.add(entry);
     if (this.#reads.revocable && !this.#following.has(app)) {
       this.#follow(by.userId, app);
@@ -1528,7 +1561,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       }
     };
     const watcher = Object.assign(
-      (revoked: boolean, runsChanged = false): void => {
+      (revoked: boolean, runsChanged = false, versionChanged = false): void => {
         // Once it no longer follows, it says it is gone, so the host drops
         // it even if core's word that it let go never arrived.
         if (!current()) {
@@ -1539,6 +1572,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         }
         if (runsChanged) {
           this.#runsChanged(app);
+        }
+        if (versionChanged) {
+          this.#versionChanged(app);
         }
       },
       {
@@ -1637,6 +1673,19 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
     for (const { look } of this.#looks.get(app) ?? []) {
       void QuerySubscriptions.#lookAgain(look);
+    }
+  }
+
+  /**
+   * Another version of `app` was made current: each callback of it that
+   * follows its version is told. Its live queries are left as they are:
+   * each reads under its own reference, which decides (app-functions.ts).
+   */
+  #versionChanged(app: AppId): void {
+    for (const { versioned } of this.#looks.get(app) ?? []) {
+      if (versioned !== undefined) {
+        void QuerySubscriptions.#lookAgain(versioned);
+      }
     }
   }
 

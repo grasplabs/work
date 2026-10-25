@@ -477,7 +477,6 @@ test("loading an app again after a new version shows that version, and the engin
     counterApp()
   );
   const page = await pageOf(builder);
-  await page.clock.install();
   await page.goto(`/domains/${swapped}/apps/counter`);
   await counterScreen(page);
 
@@ -489,13 +488,8 @@ test("loading an app again after a new version shows that version, and the engin
       "Rename the screen"
     );
   });
-  // The frame asks for a new version every 30 seconds.
-  await page.clock.fastForward(30_000);
-  await expect(
-    page.getByText("A new version of this domain is available.")
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Reload" }).click();
-
+  // Told over the tab's connection, the screen holds nothing unsaved, so
+  // it loads again by itself: no timer, and nothing to click.
   await expect(page).toHaveURL(
     new RegExp(`/domains/${swapped}/apps/tally$`, "u")
   );

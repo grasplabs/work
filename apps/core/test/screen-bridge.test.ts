@@ -1,6 +1,7 @@
 import { kitModuleName, screenRuntime } from "@grasp-os/compiler";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
+import type { AppVersionPush } from "@grasp-os/shared/screens";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -28,7 +29,14 @@ import {
 } from "./screen-frames.ts";
 import type { Framed } from "./screen-frames.ts";
 import type { RawSettled } from "./sign-in.ts";
-import { openRawRpc, openRpc, outcome, signedInApi } from "./sign-in.ts";
+import {
+  firstVersion,
+  followedVersion,
+  openRawRpc,
+  openRpc,
+  outcome,
+  signedInApi,
+} from "./sign-in.ts";
 
 // What the frontend's screen host reaches for an App's screens, taken from
 // the side of the screen: App code nobody reviewed line by line, which the
@@ -327,7 +335,12 @@ describe("screens", { timeout: 60_000 }, () => {
     const asUser = await Promise.all([
       outcome(user.api.screens.open(app, "notes")),
       outcome(user.api.screens.frame(app, "").startRun("notes")),
-      outcome(user.api.screens.version(app)),
+      outcome(
+        firstVersion(
+          async (onVersion) =>
+            await user.api.screens.watchVersion(app, onVersion)
+        )
+      ),
       outcome(
         user.api.screens.report(
           app,
@@ -340,7 +353,12 @@ describe("screens", { timeout: 60_000 }, () => {
     const { core } = await openRpc();
     const signedOut = await Promise.all([
       outcome(core.authenticate().screens.frame(app, "").startRun("notes")),
-      outcome(core.authenticate().screens.version(app)),
+      outcome(
+        firstVersion(
+          async (onVersion) =>
+            await core.authenticate().screens.watchVersion(app, onVersion)
+        )
+      ),
     ]);
     expect({ asUser, signedOut }).toStrictEqual({
       // As for an App that isn't there (app-roles.test.ts).
@@ -751,17 +769,104 @@ describe("screens", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("follows the App's current version", async () => {
+  it("tells a page each version of the App made current, until its person lost the App", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
-    const before = await builder.api.screens.version(app);
+    const user = await personApi("user");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const followed = await followedVersion(
+      async (onVersion) => await user.api.screens.watchVersion(app, onVersion)
+    );
+    /** The next push that isn't the same version again (a look's). */
+    const nextVersion = async (seen: number): Promise<AppVersionPush> => {
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop -- one push after another
+        const push = await followed.next();
+        if (push.type !== "current" || push.version !== seen) {
+          return push;
+        }
+      }
+    };
+    const first = await followed.next();
     await release(builder, app, {
       "screens/notes.tsx": `${screenCode}// v2\n`,
     });
+    const second = await nextVersion(1);
+    await builder.api.apps.members.remove(app, {
+      type: "person",
+      id: user.userId,
+    });
+    const last = await nextVersion(2);
     expect({
-      before,
-      after: await builder.api.screens.version(app),
-    }).toStrictEqual({ before: 1, after: 2 });
+      first,
+      // Whichever event brought it: making a version current may take
+      // back what an earlier approval granted too, which looks again.
+      second: second.type === "current" ? second.version : second,
+      last: last.type === "refused" ? last.error.code : last,
+    }).toStrictEqual({
+      first: { type: "current", version: 1, recheck: false },
+      second: 2,
+      last: "app.not_found",
+    });
+  });
+
+  it("reads the version again, as its person, when the App's host says another was made current", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const followed = await followedVersion(
+      async (onVersion) =>
+        await builder.api.screens.watchVersion(app, onVersion)
+    );
+    // Its first push, then the look once the connection follows the App.
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- one push after another
+      const push = await followed.next();
+      if (push.type === "current" && push.recheck) {
+        break;
+      }
+    }
+    await appHost(env, appIdSchema.parse(app)).versionChanged();
+    await expect(followed.next()).resolves.toStrictEqual({
+      type: "current",
+      version: 1,
+      recheck: false,
+    });
+  });
+
+  it("follows at most 20 Apps' versions on one connection", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    // Another App, as one App's twenty follows spend its burst of requests.
+    const other = await sampleApp(builder);
+    const held = await Promise.all(
+      Array.from(
+        { length: 20 },
+        async () =>
+          await followedVersion(
+            async (onVersion) =>
+              await builder.api.screens.watchVersion(app, onVersion)
+          )
+      )
+    );
+    const over = await outcome(
+      firstVersion(
+        async (onVersion) =>
+          await builder.api.screens.watchVersion(other, onVersion)
+      )
+    );
+    await held[0]?.release();
+    const freed = await firstVersion(
+      async (onVersion) =>
+        await builder.api.screens.watchVersion(other, onVersion)
+    );
+    expect({ over, freed }).toStrictEqual({
+      over: "screen.too_many_subscriptions",
+      freed: { type: "current", version: 1, recheck: false },
+    });
   });
 
   it("keeps the newest problems a screen reports in the App's error log, held to size", async () => {

@@ -27,7 +27,7 @@ import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { delivering, leasedArtifact, personRefusal } from "./screen-trust.ts";
+import { delivering, leasedBuild, personRefusal } from "./screen-trust.ts";
 import { admitted } from "./screens-rpc.ts";
 
 // Core's link channel (spec 10.7.7, 32.3): whether a running App's screen,
@@ -283,7 +283,7 @@ export const appLinkResponse = async (
   }
   try {
     const app = await admitted(env, person, route.app);
-    const artifact = await leasedArtifact(
+    const build = await leasedBuild(
       env,
       person.userId,
       app,
@@ -291,7 +291,7 @@ export const appLinkResponse = async (
     );
     // A lease that doesn't verify, for this person and App, is no screen
     // of theirs: nothing else opens links through the channel.
-    if (artifact === undefined) {
+    if (build === undefined) {
       throw requestErrors.create("request.forbidden");
     }
     const { url, intent } = await askedOf(request, route.kind);
@@ -299,7 +299,7 @@ export const appLinkResponse = async (
       env,
       person,
       app,
-      artifact,
+      build,
       "link",
       async () => {
         const allowed = await decided(env, person, app, route.resource, url);

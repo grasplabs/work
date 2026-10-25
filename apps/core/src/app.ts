@@ -529,11 +529,13 @@ export type RunWatcher = Rpc.Stub<(change: RunChange) => Promise<void>>;
  * so it checks their access again now (query-subscriptions.ts), and with
  * `false` only to see that it is still there. Called with `false, true`
  * when the person's independent runs the App started changed
- * (`workflowRunsChanged`), so its workflow queries read again. It throws
- * once the connection no longer follows the App.
+ * (`workflowRunsChanged`), so its workflow queries read again, and with
+ * `false, false, true` when another version of the App was made current
+ * (`versionChanged`), so its pages see it. It throws once the connection
+ * no longer follows the App.
  */
 export type AccessWatcher = Rpc.Stub<
-  (revoked: boolean, runsChanged?: boolean) => void
+  (revoked: boolean, runsChanged?: boolean, versionChanged?: boolean) => void
 >;
 
 /**
@@ -1611,6 +1613,33 @@ export class App extends DurableObject<Env> {
       }
     }
     return told;
+  }
+
+  /**
+   * Tells every connection that follows the App that another of its
+   * versions was made current (apps.ts, `makeCurrent`): each tells the
+   * pages that follow its version (screens-rpc.ts, `watchVersion`), which
+   * read it again as their person. Returns at once, with how many
+   * connections it told; a connection that is gone is dropped.
+   */
+  versionChanged(): number {
+    let told = 0;
+    for (const [id, { onRevoked }] of this.#accessFollowers) {
+      told += 1;
+      void this.#tellVersionChanged(id, onRevoked);
+    }
+    return told;
+  }
+
+  async #tellVersionChanged(
+    id: string,
+    onRevoked: AccessWatcher
+  ): Promise<void> {
+    try {
+      await onRevoked(false, false, true);
+    } catch {
+      this.#dropFollower(id);
+    }
   }
 
   async #tellRevoked(id: string, onRevoked: AccessWatcher): Promise<void> {

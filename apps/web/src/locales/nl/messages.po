@@ -1750,8 +1750,12 @@ msgid "A new template"
 msgstr "Een nieuwe sjabloon"
 
 #: src/screens/screen-frame.tsx
-msgid "A new version of this domain is available."
-msgstr "Er is een nieuwe versie van dit domein."
+msgid "A new version of this app is ready"
+msgstr "Er staat een nieuwe versie van deze app klaar"
+
+#: src/screens/screen-frame.tsx
+msgid "A new version of this domain is ready. It opens once your changes are saved."
+msgstr "Er staat een nieuwe versie van dit domein klaar. Die opent zodra je wijzigingen zijn opgeslagen."
 
 #: src/settings/chat-accounts.tsx
 msgid "A newer link was sent since. Open the latest one from the chat app."
@@ -6562,6 +6566,10 @@ msgstr "Het is gebeurd: {who}"
 msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
 msgstr "Er zijn wijzigingen die niet zijn opgeslagen, of een wijziging waarop nog geen antwoord is. Bij verlaten gaan niet-opgeslagen wijzigingen verloren; wat al is opgeslagen of loopt, blijft."
 
+#: src/screens/screen-frame.tsx
+msgid "It has changes that aren't saved, or a change it hasn't heard back about. Save them first and it switches once they are, or switch now and lose what isn't saved."
+msgstr "Er zijn wijzigingen die niet zijn opgeslagen, of een wijziging waarop nog geen antwoord is. Sla ze eerst op, dan wisselt de app zodra ze zijn opgeslagen, of wissel nu en verlies wat niet is opgeslagen."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "Er zijn geen parameters."
@@ -10273,10 +10281,6 @@ msgstr "Vrijgeven"
 msgid "Release the {amount} held for this model call?"
 msgstr "De {amount} vrijgeven die voor deze modelaanroep wordt vastgehouden?"
 
-#: src/screens/screen-frame.tsx
-msgid "Reload"
-msgstr "Opnieuw laden"
-
 #: src/onboarding/interview-words.ts
 msgid "Reminded on {date}"
 msgstr "Herinnerd op {date}"
@@ -10805,6 +10809,10 @@ msgstr "Opslaan"
 #: src/dashboard/report-dialog.tsx
 msgid "Save as PDF"
 msgstr "Opslaan als pdf"
+
+#: src/screens/screen-frame.tsx
+msgid "Save first"
+msgstr "Eerst opslaan"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"
@@ -11765,6 +11773,10 @@ msgstr "Klantenservice"
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
 msgstr "Zet een team uit en niemand erin krijgt een link."
+
+#: src/screens/screen-frame.tsx
+msgid "Switch now"
+msgstr "Nu wisselen"
 
 #: src/frame/person-menu.tsx
 msgid "System"

@@ -152,6 +152,32 @@ const accessMayHaveDropped = async (
   }
 };
 
+/**
+ * Tells `app`'s host that another of its versions was made current
+ * (apps.ts, `makeCurrent`), once that committed, so the pages that follow
+ * its version read it again (screens-rpc.ts, `watchVersion`); tried again
+ * after `retryDelaysMs` while the host can't be reached. A host that
+ * restarted meanwhile let go of every connection, and each looks again
+ * as it follows anew, reading the version then. One that still can't be
+ * reached gets a revocation for everyone, kept for the cron trigger
+ * (`keepForLater`): the looks it causes read the version too, so no page
+ * misses it. Never throws: the version is current already.
+ */
+export const versionMadeCurrent = async (
+  env: Env,
+  app: AppId
+): Promise<void> => {
+  try {
+    await withRetries(async () => await appHost(env, app).versionChanged());
+  } catch (error) {
+    log.error("app.version_change_untold", {
+      appId: app,
+      ...errorFields(error),
+    });
+    await keepForLater(env, app, null);
+  }
+};
+
 /** A revocation kept in the table, told until its host takes it. */
 export type KeptRevocation = typeof accessRevocations.$inferSelect;
 

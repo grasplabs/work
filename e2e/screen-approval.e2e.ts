@@ -134,13 +134,13 @@ test("a screen gets its engine's data only while an admin's approval of its code
     screen.getByRole("list", { name: "Ledger" }).getByText(secret)
   ).toBeVisible({ timeout: 20_000 });
 
-  // Taken back: the screen's next call is refused, and the page stops it
-  // and empties its frame.
+  // Taken back: the App's version subscription tells the page to look,
+  // core says the build gets nothing more, and the page stops the screen
+  // and empties its frame, without waiting for its next call.
   await row
     .getByRole("button", { name: "Take back the approval of ledger" })
     .click();
   await expect(row).toContainText("Approval taken back");
-  await screen.getByRole("button", { name: "Load again" }).click();
   await expect(
     using.getByText(
       "The approval of this app's code was taken back, and the app was stopped."

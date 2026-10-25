@@ -194,8 +194,8 @@ test("the panel closes once its App is no longer shared with the person", async 
   } finally {
     again.core[Symbol.dispose]();
   }
-  // The frame checks on its App every 30 seconds.
-  await page.clock.fastForward(30_000);
+  // Unshared: the App's version subscription refuses the person, and the
+  // page stops its screens, with no timer to wait for.
   await expect(page.locator('iframe[title="home app"]')).toHaveCount(0, {
     timeout: 20_000,
   });

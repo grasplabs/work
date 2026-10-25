@@ -367,6 +367,18 @@ export interface QuerySnapshotPush {
 }
 
 /**
+ * What core pushes to a page following an App's current version
+ * (`ScreensApi.watchVersion`): the version current now (null while it
+ * has none), read for the person; `recheck` when their access to the App,
+ * or a build's approval, may have dropped, so the page asks each frame's
+ * build again (`ScreenFrameApi.delivery`). A refusal, the person having
+ * lost the App or their session, is the last push.
+ */
+export type AppVersionPush =
+  | { type: "current"; version: number | null; recheck: boolean }
+  | { type: "refused"; error: { code: string; message: string } };
+
+/**
  * A screen's hold on its App's runs of one workflow (`watchRuns`), until
  * it releases it: then core calls its callback no more, and the slot it
  * took of the 20 a screen may hold is free again.
@@ -540,8 +552,22 @@ export interface ScreensApi {
    * names no build, and the frame runs one nobody approved.
    */
   frame: (app: string, lease: string) => Promise<ScreenFrameApi>;
-  /** The App's current version; null while it has none. */
-  version: (app: string) => Promise<number | null>;
+  /**
+   * Follows the App's current version for the page (spec 11.5): one
+   * subscription per App a tab's frames run, shared by all of them.
+   * Core pushes the version current now to `onVersion` at once, again
+   * each time another version is made current, and whenever the person's
+   * access to the App may have dropped (`recheck`), each push read as
+   * the person behind the connection then. Once they lost the App, the
+   * last push is the refusal, and core lets go of `onVersion`; it lets go
+   * of it, too, when it can no longer follow the App, which tells the
+   * page to follow again. One connection follows at most 20 Apps at once
+   * (`screen.too_many_subscriptions`).
+   */
+  watchVersion: (
+    app: string,
+    onVersion: (push: AppVersionPush) => void
+  ) => Promise<RunSubscriptionApi>;
   /**
    * Adds a problem in a screen at `version` to the App's error log:
    * `screen.rate_limited` past what one person's screens, or all of the
