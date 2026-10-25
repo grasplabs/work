@@ -3,6 +3,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import type { Readable, ReadRecord } from "./authorize.ts";
 import type { CollectionRow } from "./collections.ts";
+import type { BrainSourceRef } from "./contract.ts";
 import type { BrainEvent } from "./events.ts";
 import type { Json } from "./json.ts";
 import type { Provenance } from "./knowledge.ts";
@@ -75,6 +76,17 @@ export interface BrainPorts<C> {
    * refusal (`brain.denied`) for a caller with none.
    */
   ownerOf: (reader: C) => string;
+  /**
+   * Whether `reader` may publish a record into `target`, resting on
+   * `refs` (GRA-298): the host's decision, refused as `brain.denied` (the
+   * scope isn't theirs) or `brain.not_found` (a reference the scope's
+   * whole audience couldn't read). The Brain asks; it never decides.
+   */
+  mayPublish: (
+    reader: C,
+    target: { scope: "team" | "company" | "session"; scopeId: string | null },
+    refs: readonly BrainSourceRef[]
+  ) => Promise<void>;
   /** Payloads (payloads.ts), in a bucket whose jurisdiction the host set. */
   blobs: BlobStore;
   /**

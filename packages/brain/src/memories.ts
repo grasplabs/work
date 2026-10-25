@@ -1,4 +1,6 @@
 import { and, count, desc, eq, gt, lt, lte, ne, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -9,9 +11,12 @@ import {
   brainContractVersion,
   brainErrors,
   brainSourceRefSchema,
+  changeOptionsSchema,
   commandOptionsSchema,
   memoriesGetInputSchema,
   memoriesListInputSchema,
+  memoriesProposeChangeInputSchema,
+  memoriesPublishInputSchema,
   receiptsGetInputSchema,
   rememberInputSchema,
 } from "./contract.ts";
@@ -847,4 +852,309 @@ export const memoriesFor = async <C>(
     }
   }
   return kept;
+};
+
+/** The documents and memories `refs` name, as an event's provenance. */
+const refIds = (refs: readonly BrainSourceRef[]): string[] =>
+  refs
+    .map((ref) => (ref.kind === "document" ? ref.documentId : ref.memoryId))
+    .slice(0, 20);
+
+/**
+ * A command's keys: its key keyed to the deployment and scoped to `caller`
+ * and `operation`, and its validated request's hash, `caller`'s too, so the
+ * same request by two people hashes apart.
+ */
+const commandKeys = async <C>(
+  brain: Brain<C>,
+  caller: string,
+  operation: CommandReceipt["operation"],
+  idempotencyKey: string,
+  request: Json
+): Promise<{ keyHash: string; requestHash: string }> => ({
+  keyHash: await keyed(brain, "grasp-os brain command key", [
+    caller,
+    operation,
+    brainContractVersion,
+    idempotencyKey,
+  ]),
+  requestHash: await keyed(brain, "grasp-os brain request", [
+    caller,
+    operation,
+    brainContractVersion,
+    request,
+  ]),
+});
+
+/**
+ * Stores `operation`'s receipt for `caller` with `writes`, in one batch:
+ * the receipt only while the caller is within the bound and `condition`
+ * holds, and each write only if the receipt was stored, so never one
+ * without the others. A command a race committed first under the same key
+ * answers as its retry. `undefined` when the receipt wasn't stored.
+ */
+const storeCommand = async <C>(
+  brain: Brain<C>,
+  command: {
+    caller: string;
+    operation: CommandReceipt["operation"];
+    keyHash: string;
+    requestHash: string;
+    now: Date;
+    resourceRefs: BrainSourceRef[];
+    condition: SQL;
+    writes: (stored: SQL) => readonly BatchItem<"sqlite">[];
+  }
+): Promise<CommandReceipt | undefined> => {
+  const { db } = brain;
+  const { caller, operation, keyHash, requestHash, now } = command;
+  const receipt = {
+    id: crypto.randomUUID(),
+    keyHash,
+    caller,
+    operation,
+    requestHash,
+    status: "committed" as const,
+    indexingState: "pending" as const,
+    resourceRefs: JSON.stringify(command.resourceRefs),
+    createdAt: now,
+    retentionUntil: new Date(now.getTime() + receiptRetentionMs),
+  };
+  let stored: { id: string }[];
+  try {
+    [stored] = await auditedBatch(brain.ports, db, [
+      db
+        .insert(brainReceipts)
+        .select(
+          sql`SELECT ${receipt.id}, ${receipt.keyHash}, ${receipt.caller}, ${receipt.operation}, ${receipt.requestHash}, ${receipt.status}, ${receipt.indexingState}, ${receipt.resourceRefs}, ${receipt.createdAt.getTime()}, ${receipt.retentionUntil.getTime()} WHERE ${withinBound(caller, now)} AND ${command.condition}`
+        )
+        .returning({ id: brainReceipts.id }),
+      ...command.writes(receiptStored(receipt.id)),
+    ]);
+  } catch (error) {
+    const raced = await keptReceipt(brain, keyHash, now);
+    if (raced !== undefined) {
+      return replayed(raced, requestHash);
+    }
+    throw error;
+  }
+  return stored.length === 0 ? undefined : receiptOf({ ...receipt });
+};
+
+/**
+ * Publishes `input` into a shared scope for `reader` (GRA-298): a team's,
+ * the company's or a chat's, only where the host lets them
+ * (`mayPublish`), resting only on what that scope's whole audience may
+ * read. Retry-safe under `options`' key, as a remember is. The record is
+ * `accepted`: the publication is the authorized act.
+ */
+export const memoriesPublish = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown,
+  options: unknown
+): Promise<CommandReceipt> => {
+  const ownerId = brain.ports.ownerOf(reader);
+  const request = brainErrors.parse(
+    "brain.invalid",
+    memoriesPublishInputSchema,
+    input
+  );
+  const { idempotencyKey, expectedRevision } = brainErrors.parse(
+    "brain.invalid",
+    commandOptionsSchema,
+    options
+  );
+  if (expectedRevision !== undefined) {
+    throw brainErrors.create("brain.invalid");
+  }
+  const caller = callerKey(ownerId);
+  const sourceRefs = request.sourceRefs ?? [];
+  const scopeId = request.scopeId ?? null;
+  const { keyHash, requestHash } = await commandKeys(
+    brain,
+    caller,
+    "memories.publish",
+    idempotencyKey,
+    [request.scope, scopeId, request.kind, request.text, sourceRefs]
+  );
+  const now = brain.ports.clock();
+  const kept = await keptReceipt(brain, keyHash, now);
+  if (kept !== undefined) {
+    return replayed(kept, requestHash);
+  }
+  await requireWithinBound(brain, caller, now);
+  await brain.ports.mayPublish(
+    reader,
+    { scope: request.scope, scopeId },
+    sourceRefs
+  );
+  await requireCitable(brain, reader, ownerId, sourceRefs);
+  const { db } = brain;
+  const memoryId = crypto.randomUUID();
+  const receipt = await storeCommand(brain, {
+    caller,
+    operation: "memories.publish",
+    keyHash,
+    requestHash,
+    now,
+    resourceRefs: [
+      { kind: "memory", memoryId: memoryIdSchema.parse(memoryId), revision: 1 },
+    ],
+    condition: sql`1`,
+    writes: (stored) => [
+      db
+        .insert(brainMemories)
+        .select(
+          sql`SELECT ${memoryId}, 1, ${request.scope}, ${ownerId}, ${request.kind}, ${request.text}, ${JSON.stringify(sourceRefs)}, 'accepted', 'pending', ${now.getTime()}, ${now.getTime()}, ${scopeId} WHERE ${stored}`
+        ),
+      outboxedWhere(
+        brain,
+        {
+          actor: brain.ports.actorOf(reader),
+          action: "knowledge.memory.published",
+          target: { type: "memory", id: memoryId },
+          provenance: refIds(sourceRefs),
+          detail: { kind: request.kind, scope: request.scope },
+        },
+        stored
+      ),
+    ],
+  });
+  if (receipt === undefined) {
+    throw brainErrors.create("brain.budget_exceeded");
+  }
+  return receipt;
+};
+
+/** That `memoryId` is `ownerId`'s own live personal record at `revision`, as SQL. */
+const ownLive = (memoryId: string, ownerId: string, revision: number) =>
+  and(
+    eq(brainMemories.id, memoryId),
+    eq(brainMemories.ownerId, ownerId),
+    eq(brainMemories.scope, "person"),
+    eq(brainMemories.revision, revision),
+    ne(brainMemories.state, "retired")
+  );
+
+/**
+ * Corrects one of `reader`'s own personal records (GRA-298): a new record
+ * with the corrected statement, citing the one it corrects at the revision
+ * it was made against, which is retired and kept, so its history stays.
+ * Only the owner corrects their own; a stale revision is
+ * `brain.revision_conflict`, never an overwrite. Retry-safe under
+ * `options`' key. The correction is `accepted`: the owner's own word.
+ */
+export const memoriesProposeChange = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown,
+  options: unknown
+): Promise<CommandReceipt> => {
+  const ownerId = brain.ports.ownerOf(reader);
+  const request = brainErrors.parse(
+    "brain.invalid",
+    memoriesProposeChangeInputSchema,
+    input
+  );
+  const { idempotencyKey, expectedRevision } = brainErrors.parse(
+    "brain.invalid",
+    changeOptionsSchema,
+    options
+  );
+  const caller = callerKey(ownerId);
+  const corrected = {
+    kind: "memory" as const,
+    memoryId: request.memoryId,
+    revision: expectedRevision,
+  };
+  const sourceRefs = [...(request.sourceRefs ?? []), corrected];
+  const { keyHash, requestHash } = await commandKeys(
+    brain,
+    caller,
+    "memories.proposeChange",
+    idempotencyKey,
+    [request.memoryId, expectedRevision, request.statement, sourceRefs]
+  );
+  const now = brain.ports.clock();
+  const kept = await keptReceipt(brain, keyHash, now);
+  if (kept !== undefined) {
+    return replayed(kept, requestHash);
+  }
+  const { db } = brain;
+  const current = await db
+    .select({
+      revision: brainMemories.revision,
+      state: brainMemories.state,
+      kind: brainMemories.kind,
+      scope: brainMemories.scope,
+    })
+    .from(brainMemories)
+    .where(
+      and(
+        eq(brainMemories.id, request.memoryId),
+        eq(brainMemories.ownerId, ownerId)
+      )
+    )
+    .get();
+  // Anyone else's, or one that doesn't exist, answers alike.
+  if (current === undefined || current.scope !== "person") {
+    throw brainErrors.create("brain.not_found");
+  }
+  if (current.revision !== expectedRevision || current.state === "retired") {
+    throw brainErrors.create("brain.revision_conflict");
+  }
+  await requireWithinBound(brain, caller, now);
+  await requireCitable(brain, reader, ownerId, request.sourceRefs ?? []);
+  const memoryId = crypto.randomUUID();
+  const live = ownLive(request.memoryId, ownerId, expectedRevision);
+  const receipt = await storeCommand(brain, {
+    caller,
+    operation: "memories.proposeChange",
+    keyHash,
+    requestHash,
+    now,
+    resourceRefs: [
+      { kind: "memory", memoryId: memoryIdSchema.parse(memoryId), revision: 1 },
+    ],
+    // Still the revision it was made against, and still live, as the
+    // batch writes: a change that landed first wins, never overwritten.
+    condition: sql`EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${live})`,
+    writes: (stored) => [
+      db
+        .insert(brainMemories)
+        .select(
+          sql`SELECT ${memoryId}, 1, 'person', ${ownerId}, ${current.kind}, ${request.statement}, ${JSON.stringify(sourceRefs)}, 'accepted', 'pending', ${now.getTime()}, ${now.getTime()}, ${ownerId} WHERE ${stored}`
+        ),
+      db
+        .update(brainMemories)
+        .set({ state: "retired", updatedAt: now })
+        .where(and(live, stored)),
+      outboxedWhere(
+        brain,
+        {
+          actor: brain.ports.actorOf(reader),
+          action: "knowledge.memory.corrected",
+          target: { type: "memory", id: memoryId },
+          provenance: refIds(sourceRefs),
+          detail: { corrects: request.memoryId, revision: expectedRevision },
+        },
+        stored
+      ),
+    ],
+  });
+  if (receipt === undefined) {
+    // Changed meanwhile, or past the bound: say which.
+    const stillLive = await db
+      .select({ id: brainMemories.id })
+      .from(brainMemories)
+      .where(live)
+      .get();
+    throw brainErrors.create(
+      stillLive === undefined
+        ? "brain.revision_conflict"
+        : "brain.budget_exceeded"
+    );
+  }
+  return receipt;
 };

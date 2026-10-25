@@ -398,7 +398,9 @@ export const brainReceipts = sqliteTable(
     keyHash: text("key_hash").notNull(),
     /** Who may read it back: the same caller, as `callerKey` names it. */
     caller: text().notNull(),
-    operation: text({ enum: ["remember", "memories.proposeChange"] }).notNull(),
+    operation: text({
+      enum: ["remember", "memories.proposeChange", "memories.publish"],
+    }).notNull(),
     requestHash: text("request_hash").notNull(),
     status: text({
       enum: ["committed", "proposed", "queued", "completed", "failed"],

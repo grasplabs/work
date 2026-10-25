@@ -53,6 +53,9 @@ export const testHost = (): {
     },
     actorOf: (caller) => ({ type: "person", userId: caller.userId }),
     ownerOf: (caller) => caller.userId,
+    mayPublish: async () => {
+      await Promise.resolve();
+    },
     blobs: env.BLOBS,
     audit: {
       eventOf: (entry) => {
