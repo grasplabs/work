@@ -2379,7 +2379,7 @@ msgstr "Bien, este es el plan."
 
 #: src/onboarding/work-record.tsx
 msgid "Always the range people gave, never an average, and each person's own."
-msgstr "Siempre el rango que dio la gente, nunca una media, y los de cada persona."
+msgstr "Siempre el rango que dio la gente, nunca una media, y el de cada persona."
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx

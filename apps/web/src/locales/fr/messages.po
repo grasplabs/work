@@ -1118,7 +1118,7 @@ msgstr "{quiet} à {busy} par mois, pour toute l’équipe"
 
 #: src/onboarding/work-record.tsx
 msgid "{quiet} to {busy} a month, their own"
-msgstr "{quiet} à {busy} par mois, les siens"
+msgstr "{quiet} à {busy} par mois, à titre individuel"
 
 #: src/onboarding/work-record.tsx
 msgid "{quiet} to {busy} a week"
@@ -1130,7 +1130,7 @@ msgstr "{quiet} à {busy} par semaine, pour toute l’équipe"
 
 #: src/onboarding/work-record.tsx
 msgid "{quiet} to {busy} a week, their own"
-msgstr "{quiet} à {busy} par semaine, les siens"
+msgstr "{quiet} à {busy} par semaine, à titre individuel"
 
 #: src/interview/closed.tsx
 #: src/onboarding/interview-people.tsx
