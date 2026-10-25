@@ -34,10 +34,12 @@ const firstTokenBudgetMs = 500;
 const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const anthropic = "anthropic/claude-sonnet-4-5";
 const openai = "openai/gpt-5.4";
+/** Claude in Amazon Bedrock, through its EU profile. */
+const bedrockEu = "bedrock-eu/claude-sonnet-5-5";
 
 const config = {
   gateway: "grasp-os-test",
-  models: [workersAi, anthropic, openai],
+  models: [workersAi, anthropic, openai, bedrockEu],
 };
 
 const answer = (text: string): GatewayReply => ({
@@ -168,6 +170,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
     [workersAi, "/workers-ai/v1/chat/completions"],
     [anthropic, "/anthropic/v1/messages"],
     [openai, "/openai/responses"],
+    [bedrockEu, "/custom-bedrock-eu/v1/messages"],
   ])(
     "answers a chat call to %s through the deployment's AI Gateway",
     async (model, route) => {
