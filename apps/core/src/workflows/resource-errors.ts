@@ -123,10 +123,23 @@ const timesOutUnknown: ReadonlySet<string> = new Set([
   "grasp.connector",
 ]);
 
+/**
+ * The codes of a task that ran out of time: an operation past its deadline,
+ * a listen past its timeout, a child run that hadn't ended by it.
+ */
+const timeoutCodes: ReadonlySet<string> = new Set([
+  "operation.deadline_exceeded",
+  "workflow.event_timeout",
+  "workflow.child_timeout",
+]);
+
 /** The standard type of a failure of a step's work, by its code. */
 const typeOf = (error: StepError): StandardType => {
   const { code } = error;
-  if (error.name === "TimeoutError" || code === "operation.deadline_exceeded") {
+  if (
+    error.name === "TimeoutError" ||
+    (code !== undefined && timeoutCodes.has(code))
+  ) {
     return "timeout";
   }
   if (code === undefined) {

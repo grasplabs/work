@@ -2518,6 +2518,34 @@ export class ResourceRunHost
     return null;
   }
 
+  /**
+   * `work`, a durable wait of step `name` for something outside the run (a
+   * listen's events, a child's end), as a catch sees it: refused while a
+   * failure no catch took is pending; once it answered, no failure is left
+   * for a catch; one that failed is the task's failure, as a step's is
+   * (`do`), mapped by resource-errors.ts.
+   */
+  async #awaited(
+    name: unknown,
+    work: (step: StepOf) => Promise<Json>
+  ): Promise<Json> {
+    let reached: StepOf | undefined;
+    try {
+      reached = this.#stepOf(name, true);
+      this.#requireNoFailure(reached);
+      const answered = await work(reached);
+      this.#failure = undefined;
+      return answered;
+    } catch (error) {
+      this.#failure = failureOf(
+        failedWith(error),
+        reached?.task,
+        this.#tampered !== undefined
+      );
+      throw error;
+    }
+  }
+
   /** Runs a `wait` task: a durable sleep of exactly its sealed length. */
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
     return await settle(
@@ -2590,41 +2618,51 @@ export class ResourceRunHost
    * deadline, `workflow.event_timeout`.
    */
   async listen(name: unknown): Promise<Settled<Json>> {
-    return await settle(async () => {
-      const listening = this.#stepOf(name, true);
-      const { task } = listening;
-      const resolved =
-        task === undefined ? undefined : this.#listens.get(listening.place);
-      const deadline =
-        task === undefined ? undefined : this.#deadlines.get(listening.place);
-      if (
-        task?.kind !== "listen" ||
-        resolved === undefined ||
-        deadline === undefined
-      ) {
-        return this.#refuse(
-          `Task "${task?.id ?? ""}" listens as its enter step recorded.`
-        );
-      }
-      // From the run's start, both recorded: the same on every replay.
-      this.#requireShortSleep(deadline - this.#run.createdAt);
-      await this.#requirePerson();
-      await this.#requireListenAuthority(task.listen.binding);
-      const groups =
-        task.listen.strategy === "all"
-          ? resolved.map((filter) => [filter])
-          : [resolved];
-      const events: Json[] = [];
-      for (const [index, match] of groups.entries()) {
-        const wait =
-          index === 0 ? listening.name : `${listening.name}:${index + 1}`;
-        // One at a time, in the filters' order: waits come one at a time.
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        events.push(await this.#taken(wait, match, deadline, task.listen.read));
-      }
-      this.#takenOutputs.set(listening.place, events);
-      return events;
-    });
+    return await settle(
+      async () =>
+        await this.#awaited(name, async (listening) => {
+          const { task } = listening;
+          const resolved =
+            task === undefined ? undefined : this.#listens.get(listening.place);
+          const deadline =
+            task === undefined
+              ? undefined
+              : this.#deadlines.get(listening.place);
+          if (
+            task?.kind !== "listen" ||
+            resolved === undefined ||
+            deadline === undefined
+          ) {
+            return this.#refuse(
+              `Task "${task?.id ?? ""}" listens as its enter step recorded.`
+            );
+          }
+          // From the run's start, both recorded: the same on every replay.
+          this.#requireShortSleep(deadline - this.#run.createdAt);
+          await this.#requirePerson();
+          await this.#requireListenAuthority(task.listen.binding);
+          const groups =
+            task.listen.strategy === "all"
+              ? resolved.map((filter) => [filter])
+              : [resolved];
+          const events: Json[] = [];
+          for (const [index, match] of groups.entries()) {
+            const wait =
+              index === 0 ? listening.name : `${listening.name}:${index + 1}`;
+            // One at a time, in the filters' order: waits come one at a time.
+            // oxlint-disable-next-line no-await-in-loop -- see above
+            const taken = await this.#taken(
+              wait,
+              match,
+              deadline,
+              task.listen.read
+            );
+            events.push(taken);
+          }
+          this.#takenOutputs.set(listening.place, events);
+          return events;
+        })
+    );
   }
 
   /**
@@ -2635,62 +2673,64 @@ export class ResourceRunHost
    * again before the wait, so an end told while no one waited is taken.
    */
   async child(name: unknown): Promise<Settled<Json>> {
-    return await settle(async () => {
-      const waiting = this.#stepOf(name, true);
-      const { task } = waiting;
-      const child =
-        task === undefined ? undefined : this.#children.get(waiting.place);
-      const deadline =
-        task === undefined ? undefined : this.#deadlines.get(waiting.place);
-      const { children } = this.#hooks;
-      if (
-        task?.kind !== "run" ||
-        child === undefined ||
-        deadline === undefined ||
-        children === undefined
-      ) {
-        return this.#refuse(
-          `Task "${task?.id ?? ""}" waits for the child its enter step started.`
-        );
-      }
-      await this.#requirePerson();
-      try {
-        // A nudge, in case its end was told while nobody waited: the
-        // engine's own telling of the end, again until core takes it,
-        // stands whether or not this gets through.
-        await children.remind(child);
-      } catch (error) {
-        log.warn("workflow.child_remind_failed", {
-          runId: this.#run.runId,
-          child,
-          ...errorFields(error),
-        });
-      }
-      let ended: { payload: unknown };
-      try {
-        ended = await this.#step.waitForMatch(waiting.name, {
-          match: [{ type: childEndType(child) }],
-          until: deadline,
-        });
-      } catch (error) {
-        if (isTimeout(error)) {
-          throw workflowResourceErrors.create("workflow.child_timeout");
-        }
-        throw error;
-      }
-      // How it ended, as its end's event said and the wait journaled: the
-      // same on every replay.
-      const end = childEndSchema.parse(ended.payload);
-      if (end.status !== "completed") {
-        throw workflowResourceErrors.create("workflow.child_failed", {
-          child,
-          status: end.status,
-          code: end.code,
-        });
-      }
-      this.#takenOutputs.set(waiting.place, end.output);
-      return end.output;
-    });
+    return await settle(
+      async () =>
+        await this.#awaited(name, async (waiting) => {
+          const { task } = waiting;
+          const child =
+            task === undefined ? undefined : this.#children.get(waiting.place);
+          const deadline =
+            task === undefined ? undefined : this.#deadlines.get(waiting.place);
+          const { children } = this.#hooks;
+          if (
+            task?.kind !== "run" ||
+            child === undefined ||
+            deadline === undefined ||
+            children === undefined
+          ) {
+            return this.#refuse(
+              `Task "${task?.id ?? ""}" waits for the child its enter step started.`
+            );
+          }
+          await this.#requirePerson();
+          try {
+            // A nudge, in case its end was told while nobody waited: the
+            // engine's own telling of the end, again until core takes it,
+            // stands whether or not this gets through.
+            await children.remind(child);
+          } catch (error) {
+            log.warn("workflow.child_remind_failed", {
+              runId: this.#run.runId,
+              child,
+              ...errorFields(error),
+            });
+          }
+          let ended: { payload: unknown };
+          try {
+            ended = await this.#step.waitForMatch(waiting.name, {
+              match: [{ type: childEndType(child) }],
+              until: deadline,
+            });
+          } catch (error) {
+            if (isTimeout(error)) {
+              throw workflowResourceErrors.create("workflow.child_timeout");
+            }
+            throw error;
+          }
+          // How it ended, as its end's event said and the wait journaled: the
+          // same on every replay.
+          const end = childEndSchema.parse(ended.payload);
+          if (end.status !== "completed") {
+            throw workflowResourceErrors.create("workflow.child_failed", {
+              child,
+              status: end.status,
+              code: end.code,
+            });
+          }
+          this.#takenOutputs.set(waiting.place, end.output);
+          return end.output;
+        })
+    );
   }
 
   /**

@@ -504,6 +504,40 @@ describe("listen tasks", { timeout: 120_000 }, () => {
     });
   });
 
+  it("hand a try's catch their timeout, as a timeout, so the run goes on", async () => {
+    const admin = await person("admin");
+    const { workflow } = await listening(admin, [
+      {
+        guard: {
+          try: [
+            listen(
+              "await-job",
+              { one: ofThisJob(completed) },
+              { timeout: { seconds: 2 } }
+            ),
+          ],
+          catch: {
+            errors: {
+              with: {
+                type: "https://open-workflow-specification.org/spec/1.0.0/errors/timeout",
+              },
+            },
+            as: "failure",
+            do: [{ noted: { set: { notes: ["${ $failure.instance }"] } } }],
+          },
+        },
+      },
+    ]);
+    const runId = await started(admin, workflow.id);
+
+    const run = await endOf(admin, workflow.id, runId);
+
+    expect({ status: run.status, output: run.output }).toStrictEqual({
+      status: "completed",
+      output: { notes: ["/do/0/guard/try/0/await-job"] },
+    });
+  });
+
   it("keep an event that comes while the run is paused, and take it once, when it resumes", async () => {
     const admin = await person("admin");
     const { workflow } = await listening(admin, [
