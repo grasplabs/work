@@ -785,6 +785,17 @@ describe("a workflow action's knowledge and template uses", () => {
     );
     await revokePermission(env, admin, brainGrant);
     const revokedEnd = await ended(ada, revoked.workflow.id, revokedRun);
+    // A sensitive collection's evidence never reaches a run that isn't
+    // restricted, as its search's doesn't.
+    const sensitive = await readingWorkflow(ada, admin, recalls, {
+      sensitive: true,
+    });
+    await brainOf(ada, admin, sensitive.workflow.id);
+    const sensitiveEnd = await ended(
+      ada,
+      sensitive.workflow.id,
+      await started(ada, sensitive.workflow.id, sensitive.documents.leave)
+    );
     const events = await allEvents();
     expect({
       allowed: allowedEnd,
@@ -796,6 +807,7 @@ describe("a workflow action's knowledge and template uses", () => {
       ),
       withoutBrain: withoutBrainEnd,
       revoked: revokedEnd,
+      sensitive: sensitiveEnd,
     }).toStrictEqual({
       // The bound collection's evidence alone, though another holds
       // "leave" too.
@@ -806,6 +818,8 @@ describe("a workflow action's knowledge and template uses", () => {
       recorded: true,
       withoutBrain: { status: "failed", code: "brain.denied" },
       revoked: { status: "failed", code: "brain.denied" },
+      // Refused as the Brain refuses: the run may not have it.
+      sensitive: { status: "failed", code: "brain.denied" },
     });
   });
 });

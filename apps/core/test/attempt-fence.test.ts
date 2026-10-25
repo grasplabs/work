@@ -636,9 +636,16 @@ describe(
       });
     });
 
-    it("refuses a recall once the App's brain permission is revoked, though the run started with it", async () => {
+    it("refuses a recall once its binding's brain permission is revoked, though the run started with it and another holds", async () => {
       const admin = await personApi("admin");
       const { app, brainGrant, calls } = await recallingApp(admin);
+      // Another `brain` permission of the App's, under another name.
+      await requestGranted(idp, admin, {
+        subject: { type: "app", appId: appIdSchema.parse(app) },
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "MEMORY",
+      });
       const { answered } = await cancelledAt(
         app,
         admin.userId,
@@ -652,6 +659,20 @@ describe(
       );
 
       expect(codeOf(answered)).toBe("brain.denied");
+    });
+
+    it("refuses a recall from a step whose review doesn't show it calling the Brain", async () => {
+      const admin = await personApi("admin");
+      const { app } = await recallingApp(admin);
+      const { answered } = await cancelledAt(
+        app,
+        admin.userId,
+        { steps: { tidy: [] }, kinds: { tidy: "exact" }, all: [] },
+        undefined,
+        recallNote
+      );
+
+      expect(codeOf(answered)).toBe("workflow.call_not_reviewed");
     });
   }
 );

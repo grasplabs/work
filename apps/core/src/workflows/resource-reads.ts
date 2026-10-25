@@ -193,7 +193,7 @@ const recalled = async (
     runContext(run),
     bound.permissionId,
     async (reader) =>
-      await recall(brainOf(env), reader, request, bound.collectionId)
+      await recall(brainOf(env), reader, request, [bound.collectionId])
   );
   // A memory pack is plain data: what the contract's schemas parse.
   return z.json().parse(pack);

@@ -371,7 +371,7 @@ const runWorkflow = async (
         input: event.payload,
         collections: Object.keys(bindings),
         connections: Object.keys(connections),
-        brains,
+        brains: Object.keys(brains),
       });
     } catch (error) {
       return await afterCpuKill(error, calls);

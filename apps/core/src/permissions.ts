@@ -1752,7 +1752,14 @@ const holdsBrain = (actions: string | undefined): boolean => {
   if (actions === undefined) {
     return false;
   }
-  const parsed = z.array(z.string()).safeParse(JSON.parse(actions));
+  let stored: unknown;
+  try {
+    stored = JSON.parse(actions);
+  } catch {
+    // Not a list of actions: none of them `brain`.
+    return false;
+  }
+  const parsed = z.array(z.string()).safeParse(stored);
   return parsed.success && parsed.data.includes("brain");
 };
 

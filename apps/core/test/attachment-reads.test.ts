@@ -101,7 +101,7 @@ const runReading = async (changes: Partial<Env> = {}) => {
         appVersion: 1,
       }),
       connections: {},
-      brains: [],
+      brains: {},
       collections: {},
       calls: { steps: null, kinds: {}, all: [] },
     },
