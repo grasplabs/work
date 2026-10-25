@@ -173,10 +173,6 @@ msgstr "{app} n’est pas encore connecté."
 msgid "{app} needs someone to sign in again"
 msgstr "{app} a besoin que quelqu’un se reconnecte"
 
-#: src/workflows/workflows-table.tsx
-msgid "{appName} · Version {version}"
-msgstr "{appName} · Version {version}"
-
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "{approvals, plural, one {# approval} other {# approvals}}"
 msgstr "{approvals, plural, one {# approbation} other {# approbations}}"
@@ -947,6 +943,10 @@ msgstr "{name} : {shown} de la limite"
 #: src/settings/person-limits.tsx
 msgid "{name}: {shown} of their limit"
 msgstr "{name} : {shown} de sa limite"
+
+#: src/dashboard/report.ts
+msgid "{name}: {started} started, {completed} completed, {failed} failed"
+msgstr ""
 
 #: src/chat/builds.tsx
 msgid "{name}: version {version} waiting for review"
@@ -6727,6 +6727,16 @@ msgstr "Dans vos documents, j’ai vu {tools}."
 msgid "Inbox"
 msgstr "Boîte de réception"
 
+#: src/dashboard/runs-widget.tsx
+#: src/workflows/runs.tsx
+#: src/workflows/workflows-table.tsx
+msgid "Independent"
+msgstr ""
+
+#: src/workflows/workflows-table.tsx
+msgid "Independent workflow"
+msgstr ""
+
 #: src/workflows/independent-workflows.tsx
 msgid "Independent workflows"
 msgstr "Workflows indépendants"
@@ -9057,6 +9067,7 @@ msgstr "Pas encore prévu"
 
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/independent-workflows.tsx
+#: src/workflows/workflows-table.tsx
 msgid "Not published"
 msgstr "Non publié"
 
