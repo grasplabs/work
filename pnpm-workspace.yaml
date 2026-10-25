@@ -68,6 +68,9 @@ catalog:
   # Text of uploaded files, extracted in core: PDF, Word and Excel.
   fflate: 0.8.3
   unpdf: 1.8.1
+  # WebVTT captions, parsed in the extractor's sandbox: W3C's own parser
+  # and validator (webvtt.js, CC0).
+  webvtt-parser: 2.2.0
   # Whether a proposed package's peer version meets the range it states
   # (core's src/dependencies/peers.ts): npm's own range rules.
   semver: 7.8.5

@@ -263,11 +263,11 @@ export const transcriptOf = async (
     }
     try {
       if (kind === "docx") {
-        text = await localExtractor(env)({
+        ({ markdown: text } = await localExtractor(env)({
           name,
           mediaType: uploadTypes.docx,
           bytes,
-        });
+        }));
       } else {
         const decoded = new TextDecoder("utf-8", {
           fatal: true,

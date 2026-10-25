@@ -45,6 +45,10 @@ import {
   readBrainRecords,
 } from "./brain-records.ts";
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
+import {
+  interviewTranscript,
+  knowledgeTranscriptSources,
+} from "./brain-transcripts.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { brainOf } from "./knowledge/ports.ts";
@@ -70,6 +74,9 @@ import type { SessionCheck } from "./session-check.ts";
 // |                    | interview and the documents shared in the onboarding     |
 // |                    | (admins); each team's interviews, once the brain holds   |
 // |                    | what they learned, for whoever reads records naming them |
+// |                    | (its transcript: their admitted statements); Knowledge   |
+// |                    | documents saved with a transcript, for whoever may read  |
+// |                    | them (brain-transcripts.ts)                              |
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
@@ -89,7 +96,8 @@ import type { SessionCheck } from "./session-check.ts";
 // company, so its reading reaches the company's admins here too, never its
 // transcript. Everyone else gets the brain without them. No
 // interview's words reach the brain: the onboarding keeps them for staff
-// alone, so sources carry no transcript. A team lead's interview shows as
+// alone, so a team's interviews carry as transcript only the statements
+// their people approved (brain-transcripts.ts). A team lead's interview shows as
 // its team's stakeholder interview: only someone who led the team when
 // their link went out, as the admin's progress counts them, and only by
 // the week it finished in, from the week after. An employee's never does,
@@ -760,11 +768,12 @@ export const readBrain = async (
   env: Env,
   person: Identity
 ): Promise<Workspace> => {
-  const [facts, name, connections, records] = await Promise.all([
+  const [facts, name, connections, records, transcribed] = await Promise.all([
     onboardingFacts(env, person),
     organizationName(env),
     connectionsOf(env, person),
     readBrainRecords(env),
+    knowledgeTranscriptSources(env, person),
   ]);
 
   const company: Company = {
@@ -791,10 +800,25 @@ export const readBrain = async (
         id === kickoffSourceId || id === rosterSourceId || isTeamInterviews(id)
     )
   );
-  const sources =
+  const fromOnboarding =
     facts === null
       ? await sourcesForRecords(env, named)
       : onboardingSources(facts).map(({ source }) => source);
+  // A team's interviews carry their admitted statements as turns
+  // (brain-transcripts.ts), never what was said.
+  const teamNames = new Map(teams.map(({ id, name: team }) => [id, team]));
+  const sources = fromOnboarding.map((source): Source => {
+    if (!isTeamInterviews(source.id)) {
+      return source;
+    }
+    const [teamId = ""] = source.teamIds ?? [];
+    const transcript = interviewTranscript(
+      source,
+      records.statements,
+      teamNames.get(teamId) ?? ""
+    );
+    return transcript === undefined ? source : { ...source, transcript };
+  });
 
   return {
     company,
@@ -805,7 +829,7 @@ export const readBrain = async (
       documentTools(facts, teamsByName(onboarding)),
       records.tools
     ),
-    sources: [...sources, ...records.sources],
+    sources: [...sources, ...records.sources, ...transcribed],
     statements: records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),

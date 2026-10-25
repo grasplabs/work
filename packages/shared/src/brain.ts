@@ -117,6 +117,13 @@ export interface Tool {
   ai?: AiKind;
 }
 
+/**
+ * Most transcripts of Knowledge documents `brain.read` puts on its
+ * sources, the newest saved first: each up to the Brain's transcript limit,
+ * so a workspace stays a size one call carries.
+ */
+export const brainTranscriptsMaxRead = 20;
+
 /** One turn, answer or passage in a transcript. */
 export interface TranscriptTurn {
   /** Where it is, in the transcript's unit: "12:26", or the answer or passage number. */

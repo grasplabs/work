@@ -276,6 +276,9 @@ catalogs:
     vite-plus:
       specifier: 0.3.3
       version: 0.3.3
+    webvtt-parser:
+      specifier: 2.2.0
+      version: 2.2.0
     workerd:
       specifier: 1.20261012.1
       version: 1.20261012.1
@@ -596,6 +599,9 @@ importers:
       unpdf:
         specifier: 'catalog:'
         version: 1.8.1
+      webvtt-parser:
+        specifier: 'catalog:'
+        version: 2.2.0
       yaml:
         specifier: 'catalog:'
         version: 2.9.1
@@ -8119,6 +8125,9 @@ packages:
   webpack-virtual-modules@0.6.2:
     resolution: {integrity: sha512-66/V2i5hQanC51vBQKPH4aI8NMAcBW59FVBs+rC7eGHupMyfn34q7rZIE+ETlJ+XTevqfUhVVBgSUNSW2flEUQ==}
 
+  webvtt-parser@2.2.0:
+    resolution: {integrity: sha512-FzmaED+jZyt8SCJPTKbSsimrrnQU8ELlViE1wuF3x1pgiQUM8Llj5XWj2j/s6Tlk71ucPfGSMFqZWBtKn/0uEA==}
+
   whatwg-mimetype@3.0.0:
     resolution: {integrity: sha512-nt+N2dzIutVRxARx1nghPKGv1xHikU7HKdfafKkLNLindmPU/ch3U31NOCGGA/dmPcmb1VlofO0vnKAcsm0o/Q==}
     engines: {node: '>=12'}
@@ -15380,6 +15389,8 @@ snapshots:
   web-streams-polyfill@3.3.3: {}
 
   webpack-virtual-modules@0.6.2: {}
+
+  webvtt-parser@2.2.0: {}
 
   whatwg-mimetype@3.0.0: {}
 

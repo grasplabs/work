@@ -56,6 +56,12 @@ import {
   stagePayload,
 } from "./payloads.ts";
 import type { StagedPayload } from "./payloads.ts";
+import {
+  transcriptDetail,
+  transcriptSchema,
+  transcriptWrites,
+} from "./transcripts.ts";
+import type { Transcript } from "./transcripts.ts";
 
 // Saving a document: its frontmatter is read and checked (and a memory
 // file's size, memory-files.ts), its Markdown split into sections and its
@@ -384,6 +390,18 @@ export interface Write {
    * document's limits (`parseBaseFields`).
    */
   purge?: true;
+  /**
+   * The version's transcript (transcripts.ts), as its producer gives it:
+   * saved in the same batch, and served while this version is current.
+   * Left out, the document has none from this version on.
+   */
+  transcript?: unknown;
+  /**
+   * Set only by a purge, in place of `transcript`: the transcript it
+   * rewrote, kept with the version it saves. Removing data comes before
+   * limits, so it isn't checked against them again.
+   */
+  purgedTranscript?: Transcript;
 }
 
 /**
@@ -460,6 +478,14 @@ export const writeVersion = async <C>(
     sync,
     write.purge === true
   );
+  const transcript =
+    write.transcript === undefined
+      ? write.purgedTranscript
+      : knowledgeErrors.parse(
+          "knowledge.invalid",
+          transcriptSchema,
+          write.transcript
+        );
   if ((existing?.currentVersion ?? 0) !== ifVersion) {
     throw conflict(existing);
   }
@@ -500,6 +526,7 @@ export const writeVersion = async <C>(
       collectionId: collection.id,
       version: number,
       ...(restoredFrom === null ? {} : { restoredFrom }),
+      ...(transcript === undefined ? {} : transcriptDetail(transcript)),
     },
   };
   const statements = (staged: StagedPayload): BatchItem<"sqlite">[] => [
@@ -515,6 +542,7 @@ export const writeVersion = async <C>(
       restoredFrom,
       createdAt: now,
     }),
+    ...transcriptWrites(brain, by.actor, documentId, number, transcript, now),
     db.delete(links).where(eq(links.fromDocumentId, documentId)),
     ...inChunks(
       prepared.links.map((link) => ({
