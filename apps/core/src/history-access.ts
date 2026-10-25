@@ -1,3 +1,4 @@
+import { collections } from "@grasp-os/brain/schema";
 import type { AppRole } from "@grasp-os/shared/apps";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { Permission } from "@grasp-os/shared/permissions";
@@ -11,7 +12,6 @@ import { appFor } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { inList } from "./db/d1.ts";
-import { collections } from "./db/knowledge/schema.ts";
 import { collectionsAllowed } from "./knowledge/access.ts";
 import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { grantedPermissions } from "./permissions.ts";

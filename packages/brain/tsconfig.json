@@ -1,8 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    // Web Crypto and the Encoding API: globals in Workers and in Node.
-    "lib": ["es2024", "dom"]
+    // The Brain runs in Workers: R2, D1 and the scheduler are its globals.
+    "types": ["@cloudflare/workers-types"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "drizzle.config.ts"]
 }

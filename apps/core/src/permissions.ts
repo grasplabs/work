@@ -1,3 +1,4 @@
+import { collections } from "@grasp-os/brain/schema";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { AppRole } from "@grasp-os/shared/apps";
 import type {
@@ -80,7 +81,6 @@ import {
   workflowResources,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
-import { collections } from "./db/knowledge/schema.ts";
 import { appHost, workspace } from "./durable-objects.ts";
 import { madeSensitiveByGrant, widenedByGrant } from "./screen-trust.ts";
 import type { Grantee } from "./screen-trust.ts";

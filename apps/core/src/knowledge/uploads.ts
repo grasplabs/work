@@ -1,3 +1,8 @@
+import { readableCollection } from "@grasp-os/brain/collections";
+import type { CollectionRow } from "@grasp-os/brain/collections";
+import { findByPath, writeVersion } from "@grasp-os/brain/documents";
+import type { ErasedFiles, OnErase } from "@grasp-os/brain/purge";
+import { collections } from "@grasp-os/brain/schema";
 import { actorOf, auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import {
@@ -38,17 +43,12 @@ import {
   teamsOf,
 } from "../auth/identity.ts";
 import { uploadCleanups, uploads } from "../db/core/schema.ts";
-import { collections } from "../db/knowledge/schema.ts";
 import { errorResponse } from "../errors.ts";
 import { runEngine } from "../workflows/engine.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
 import { requireWritable } from "./collection-rules.ts";
-import { readableCollection } from "./collections.ts";
-import type { CollectionRow } from "./collections.ts";
-import { findByPath, writeVersion } from "./documents.ts";
 import { ExtractorUnavailableError, extractorFor } from "./extract.ts";
 import { brainOf } from "./ports.ts";
-import type { ErasedFiles, OnErase } from "./purge.ts";
 
 // Files uploaded into Knowledge (see @grasp-os/shared/uploads). An upload
 // is checked by what arrived (its size, and that its first bytes are the

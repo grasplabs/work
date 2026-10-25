@@ -1,3 +1,6 @@
+import { readableCollection } from "@grasp-os/brain/collections";
+import { writeVersion } from "@grasp-os/brain/documents";
+import { pendingGraceMs } from "@grasp-os/brain/payloads";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
@@ -6,9 +9,6 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { readableCollection } from "../src/knowledge/collections.ts";
-import { writeVersion } from "../src/knowledge/documents.ts";
-import { pendingGraceMs } from "../src/knowledge/payloads.ts";
 import { personWriter } from "../src/knowledge/person-writes.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { allEvents } from "./audit-events.ts";

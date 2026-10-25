@@ -166,7 +166,8 @@
     {
       "binding": "KNOWLEDGE",
       "database_name": "grasp-os-knowledge",
-      "migrations_dir": "src/db/knowledge/migrations",
+      // The Brain's own migrations: the package owns its whole database.
+      "migrations_dir": "../../packages/brain/src/db/migrations",
     },
   ],
   "r2_buckets": [

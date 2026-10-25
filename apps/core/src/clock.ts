@@ -1,3 +1,6 @@
+import { sweepIndexing } from "@grasp-os/brain/indexing";
+import { sweepBrainReceipts } from "@grasp-os/brain/memories";
+import { sweepPayloads } from "@grasp-os/brain/payloads";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   ClockObject,
@@ -23,9 +26,6 @@ import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
-import { sweepIndexing } from "./knowledge/indexing.ts";
-import { sweepBrainReceipts } from "./knowledge/memories.ts";
-import { sweepPayloads } from "./knowledge/payloads.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { syncLandscapes } from "./landscape.ts";

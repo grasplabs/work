@@ -1,3 +1,5 @@
+import { ensureCollection } from "@grasp-os/brain/collections";
+import type { OnErase } from "@grasp-os/brain/purge";
 import { actorOf, auditActorSchema } from "@grasp-os/shared/audit";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
@@ -17,10 +19,8 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import { ensureCollection } from "../knowledge/collections.ts";
 import { localExtractor } from "../knowledge/extract.ts";
 import { brainOf } from "../knowledge/ports.ts";
-import type { OnErase } from "../knowledge/purge.ts";
 import { uploadFile } from "../knowledge/uploads.ts";
 import { gatewaySettings, modelForRole, models } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";

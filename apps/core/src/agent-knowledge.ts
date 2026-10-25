@@ -1,4 +1,7 @@
 import type { MemoryPack } from "@grasp-os/brain/contract";
+import { recallWithSources } from "@grasp-os/brain/recall";
+import { search } from "@grasp-os/brain/search";
+import { follow, read } from "@grasp-os/brain/tools";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type {
   FollowResult,
@@ -30,10 +33,7 @@ import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { catalog } from "./knowledge/catalog.ts";
 import { brainOf } from "./knowledge/ports.ts";
-import { recallWithSources } from "./knowledge/recall.ts";
-import { search } from "./knowledge/search.ts";
 import { agentKnowledgeSignals } from "./knowledge/signals.ts";
-import { follow, read } from "./knowledge/tools.ts";
 
 // Knowledge for a chat's code: `await env.knowledge.search("leave policy")`.
 // The agent's Knowledge tools (knowledge/tools.ts), read as the chat's
