@@ -2,8 +2,10 @@ import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { appBindingKinds } from "../../src/permissions.ts";
 import { sandboxVerdictOf } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
+import { buildWorkflows } from "../../src/screens.ts";
 import {
   declaredParams,
   dryRunTests,
@@ -76,10 +78,18 @@ describe("a workflow's code read on-prem", () => {
   it("holds each App to its own place: a held App's reads are busy, to try again, while another's go on", async () => {
     const held = newApp();
     const other = newApp();
-    // Built, and version 1's parameters kept, before the App's place is held.
-    await expect(
-      declaredParams(env, held, 1, notes, spinning)
-    ).resolves.toHaveLength(1);
+    // Built, and version 1's parameters kept, before the App's place is
+    // held; and the spin's own build too: a draft's workflows build as a
+    // preview, under keys of their own, so the version's build isn't it.
+    const declared = await declaredParams(env, held, 1, notes, spinning);
+    const preview = await buildWorkflows(
+      env,
+      spinning,
+      held,
+      await appBindingKinds(env, held),
+      { profile: "preview" }
+    );
+    expect([declared.length, preview.ok]).toStrictEqual([1, true]);
     const giveUp = new AbortController();
     const spin = dryRunTests(
       env,

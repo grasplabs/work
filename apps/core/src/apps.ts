@@ -897,12 +897,16 @@ export const commitFiles = async (
   // the files as the version reads back, paths in order, so a build says
   // the same here as at its first use.
   const saved = storedTreeSchema.parse(JSON.parse(json));
-  const builds = await buildOnSave(env, {
-    app: appId,
-    version: row.version,
-    files: saved,
-    bindings: workflowBindings,
-  });
+  const builds = await buildOnSave(
+    env,
+    {
+      app: appId,
+      version: row.version,
+      files: saved,
+      bindings: workflowBindings,
+    },
+    { profile: "production" }
+  );
   // The pages open on the App hear of it (spec 11.5): their screens show
   // a new version ready, and switch to it (screens-rpc.ts, `watchVersion`).
   waitUntil(versionMadeCurrent(env, appId));
