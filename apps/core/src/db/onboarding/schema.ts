@@ -242,6 +242,13 @@ export const interviewStates = sqliteTable("interview_states", {
    * what was read before then is thrown away.
    */
   revokedAt: text("revoked_at"),
+  /**
+   * How often something they had approved stopped counting: one more each
+   * time `revokedAt` is set. Part of their admission's generation, which
+   * two revocations in one millisecond would leave the same as a time
+   * (GRA-1089).
+   */
+  revocations: integer().notNull().default(0),
   updatedAt: text("updated_at").notNull(),
 });
 

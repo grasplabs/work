@@ -4782,13 +4782,14 @@ export class Onboarding extends DurableObject<Env> {
         person: interviewStates.person,
         startedAt: interviewStates.startedAt,
         agreedAt: interviewStates.agreedAt,
-        revokedAt: interviewStates.revokedAt,
+        revocations: interviewStates.revocations,
       })
       .from(interviewStates)
       .where(inList(interviewStates.person, whose))
       .all();
-    // Something they approved stopping counting (`revokedAt`) makes what
-    // was read before it as gone as a delete does.
+    // Something they approved stopping counting (`revocations`, a count,
+    // so two in one millisecond still differ) makes what was read before
+    // it as gone as a delete does.
     return new Map(
       whose.map((person) => {
         const row = rows.find((each) => each.person === person);
@@ -4796,7 +4797,7 @@ export class Onboarding extends DurableObject<Env> {
           person,
           row === undefined || row.agreedAt === null
             ? null
-            : `${row.startedAt ?? ""}|${row.revokedAt ?? ""}`,
+            : `${row.startedAt ?? ""}|${row.revocations}`,
         ];
       })
     );
@@ -5927,7 +5928,10 @@ export class Onboarding extends DurableObject<Env> {
       this.#forgetDrawings(person.id);
       this.#db
         .update(interviewStates)
-        .set({ revokedAt: now })
+        .set({
+          revokedAt: now,
+          revocations: sql`${interviewStates.revocations} + 1`,
+        })
         .where(eq(interviewStates.person, person.id))
         .run();
       const sent = this.#db

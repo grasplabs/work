@@ -1,0 +1,1 @@
+ALTER TABLE `interview_states` ADD `revocations` integer DEFAULT 0 NOT NULL;
