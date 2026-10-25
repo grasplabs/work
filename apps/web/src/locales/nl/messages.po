@@ -2833,6 +2833,10 @@ msgstr "Zoals voor Stephen"
 msgid "As for the whole company"
 msgstr "Zoals voor het hele bedrijf"
 
+#: src/brain/aggregate.tsx
+msgid "As Grasp staff, you see how many people took part and the numbers they gave, never what the company’s people said."
+msgstr "Als medewerker van Grasp zie je hoeveel mensen meededen en welke aantallen ze gaven, nooit wat de mensen van het bedrijf zeiden."
+
 #: src/onboarding/work-record.tsx
 msgid "As it runs today"
 msgstr "Zoals het nu gaat"
@@ -11044,6 +11048,11 @@ msgstr "Runs deze week"
 msgid "Runs: {total}"
 msgstr "Runs: {total}"
 
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+msgid "Said by five or more people"
+msgstr "Gezegd door vijf of meer mensen"
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "Said it didn't happen: {who}."
@@ -15544,6 +15553,10 @@ msgstr "Je hebt geen toegang tot deze organisatie. Vraag een beheerder."
 #: src/routes/guest.tsx
 msgid "You finished this chat. Thank you for your time."
 msgstr "Je hebt deze chat afgerond. Bedankt voor je tijd."
+
+#: src/brain/aggregate.tsx
+msgid "You see the brain’s numbers only"
+msgstr "Je ziet alleen de aantallen van het brein"
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."

@@ -2833,6 +2833,10 @@ msgstr "As for Stephen"
 msgid "As for the whole company"
 msgstr "As for the whole company"
 
+#: src/brain/aggregate.tsx
+msgid "As Grasp staff, you see how many people took part and the numbers they gave, never what the company’s people said."
+msgstr "As Grasp staff, you see how many people took part and the numbers they gave, never what the company’s people said."
+
 #: src/onboarding/work-record.tsx
 msgid "As it runs today"
 msgstr "As it runs today"
@@ -11044,6 +11048,11 @@ msgstr "Runs this week"
 msgid "Runs: {total}"
 msgstr "Runs: {total}"
 
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+msgid "Said by five or more people"
+msgstr "Said by five or more people"
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "Said it didn't happen: {who}."
@@ -15544,6 +15553,10 @@ msgstr "You don't have access to this organization. Ask an admin."
 #: src/routes/guest.tsx
 msgid "You finished this chat. Thank you for your time."
 msgstr "You finished this chat. Thank you for your time."
+
+#: src/brain/aggregate.tsx
+msgid "You see the brain’s numbers only"
+msgstr "You see the brain’s numbers only"
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."

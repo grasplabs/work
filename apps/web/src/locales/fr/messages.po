@@ -2833,6 +2833,10 @@ msgstr "Comme pour Stephen"
 msgid "As for the whole company"
 msgstr "Comme pour toute l'entreprise"
 
+#: src/brain/aggregate.tsx
+msgid "As Grasp staff, you see how many people took part and the numbers they gave, never what the company’s people said."
+msgstr "En tant que membre de l’équipe Grasp, vous voyez combien de personnes ont participé et les chiffres qu’elles ont donnés, jamais ce que les personnes de l’entreprise ont dit."
+
 #: src/onboarding/work-record.tsx
 msgid "As it runs today"
 msgstr "Comme cela se passe aujourd’hui"
@@ -11044,6 +11048,11 @@ msgstr "Exécutions cette semaine"
 msgid "Runs: {total}"
 msgstr "Exécutions : {total}"
 
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+msgid "Said by five or more people"
+msgstr "Dit par cinq personnes ou plus"
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "Said it didn't happen: {who}."
@@ -15544,6 +15553,10 @@ msgstr "Vous n’avez pas accès à cette organisation. Demandez à un admin."
 #: src/routes/guest.tsx
 msgid "You finished this chat. Thank you for your time."
 msgstr "Vous avez terminé ce chat. Merci pour votre temps."
+
+#: src/brain/aggregate.tsx
+msgid "You see the brain’s numbers only"
+msgstr "Vous ne voyez que les chiffres du cerveau"
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."
