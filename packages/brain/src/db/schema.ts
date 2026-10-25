@@ -471,6 +471,12 @@ export const brainEpisodes = sqliteTable(
     versionRefs: text("version_refs").notNull(),
     occurredAt: timestamp("occurred_at").notNull(),
     recordedAt: timestamp("recorded_at").notNull(),
+    /**
+     * The delivery that recorded it, random: its audience's members are
+     * written only by that delivery, so one made again restores no member
+     * a personal purge took out (../outcomes.ts).
+     */
+    delivery: text().notNull(),
   },
   (table) => [
     // A personal purge's delete by owner, and a person's events by time.
@@ -500,6 +506,18 @@ export const brainEpisodeMembers = sqliteTable(
     index("brain_episode_members_user_idx").on(table.userId),
   ]
 );
+
+/**
+ * The people a personal purge forgot, and when: a capture of their work
+ * from before then, delivered again after a lost reply or a restart, is
+ * never recorded again, and never makes them a member again
+ * (../outcomes.ts). Their user ID alone, kept for as long as a capture
+ * from before could still arrive: the erasure's own record.
+ */
+export const brainForgottenPeople = sqliteTable("brain_forgotten_people", {
+  userId: text("user_id").primaryKey(),
+  forgottenAt: timestamp("forgotten_at").notNull(),
+});
 
 /**
  * How far each host boundary's deliveries reached: the highest capture

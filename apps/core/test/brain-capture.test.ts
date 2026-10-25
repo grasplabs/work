@@ -81,6 +81,32 @@ const racingKnowledge = (first: () => Promise<unknown>): D1Database => {
   });
 };
 
+/**
+ * The Brain's database, with its first batch landing and its reply lost:
+ * a delivery that recorded its event and stopped before its check after.
+ */
+const lostReply = (): D1Database => {
+  let lost = false;
+  return new Proxy(knowledge, {
+    get: (target, property) => {
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]) => {
+          const results = await target.batch(statements);
+          if (!lost) {
+            lost = true;
+            throw new Error("D1_ERROR: Network connection lost.");
+          }
+          return results;
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+};
+
 /** The Brain's events of the run or chat `id`. */
 const eventsOf = async (id: string) => await outcomesOf(brainOf(env), id);
 
@@ -317,6 +343,64 @@ describe("a workflow run's outcome", () => {
       ),
       erased: await audited("knowledge.episode.erased", `workflow.run:${run}`),
     }).toStrictEqual({ events: [], recorded: 1, erased: 1 });
+  });
+
+  it("is taken back on its next delivery when the last one recorded it and stopped short, its person removed meanwhile", async () => {
+    const { builder, app } = await newApp(true);
+    const run = await runningRun(app, builder.userId);
+    const admin = await signedInApi(idp, "admin");
+
+    await completed(run, { ...env, KNOWLEDGE: lostReply() });
+    await failedOnce(run);
+    const recordedBefore = await executionsOf(run);
+    await admin.api.members.remove(builder.userId);
+    await runCron();
+
+    expect({
+      recordedBefore,
+      events: await eventsOf(run),
+      intent: await runIntent(run),
+    }).toStrictEqual({
+      recordedBefore: ["completed"],
+      events: [],
+      intent: null,
+    });
+  });
+
+  it("isn't recorded again after a personal purge erased it, when its delivery is made again", async () => {
+    const { builder, app } = await newApp(true);
+    const run = await runningRun(app, builder.userId);
+    const admin = await signedInApi(idp, "admin");
+    // A personal purge needs the person's own collection.
+    await builder.api.memory.collections();
+
+    await completed(run, { ...env, KNOWLEDGE: lostReply() });
+    await failedOnce(run);
+    const recordedBefore = await executionsOf(run);
+    const input = {
+      type: "personal" as const,
+      userId: builder.userId,
+      reason: "offboarding" as const,
+    };
+    const plan = await admin.api.knowledge.preparePurge(input);
+    await admin.api.knowledge.purge(input, plan.token);
+    // Still a member: the delivery made again finds the run eligible.
+    await runCron();
+
+    expect({
+      recordedBefore,
+      events: await eventsOf(run),
+      intent: await runIntent(run),
+      recorded: await audited(
+        "knowledge.episode.recorded",
+        `workflow.run:${run}`
+      ),
+    }).toStrictEqual({
+      recordedBefore: ["completed"],
+      events: [],
+      intent: null,
+      recorded: 1,
+    });
   });
 
   it("goes with the run's details when its retention is over", async () => {

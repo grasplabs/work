@@ -1,14 +1,17 @@
-import { and, desc, eq, exists, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, exists, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedWhere } from "./audit.ts";
 import type { Brain } from "./brain.ts";
 import { brainErrors } from "./contract.ts";
+import { inList } from "./db/d1.ts";
 import {
   brainCaptureCursors,
   brainEpisodeMembers,
   brainEpisodes,
+  brainForgottenPeople,
 } from "./db/schema.ts";
 import { idSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
@@ -55,9 +58,6 @@ export const executionRefsMax = 20;
 
 /** Most members one event's audience names. */
 export const audienceMembersMax = 1000;
-
-/** Member rows one statement inserts: two values each, within D1's 100. */
-const membersPerStatement = 50;
 
 /**
  * How the execution ended, from the host's own records (a run's journal, a
@@ -131,15 +131,6 @@ export interface OutcomeReceipt {
   recorded: boolean;
 }
 
-/** `members` in the slices one statement each inserts. */
-const membersOf = (members: readonly string[]): string[][] => {
-  const slices: string[][] = [];
-  for (let at = 0; at < members.length; at += membersPerStatement) {
-    slices.push(members.slice(at, at + membersPerStatement));
-  }
-  return slices;
-};
-
 /** The system, as the Brain's own events name it. */
 const system: Json = { type: "system" };
 
@@ -157,7 +148,15 @@ export const recordOutcome = async <C>(
   const outcome = brainErrors.parse("brain.invalid", taskOutcomeSchema, input);
   const { db } = brain;
   const now = brain.ports.clock();
-  const isNew = sql`NOT EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${brainEpisodes.id} = ${outcome.eventId})`;
+  const occurredAt = new Date(outcome.occurredAt);
+  // A random mark of this delivery: the members below are written only if
+  // it is the one that recorded the event.
+  const delivery = crypto.randomUUID();
+  // Forgotten by a personal purge after it happened: its work from before
+  // the purge is never learned from again, however late it arrives.
+  const forgotten = (userId: SQL | string) =>
+    sql`EXISTS (SELECT 1 FROM ${brainForgottenPeople} WHERE ${brainForgottenPeople.userId} = ${userId} AND ${brainForgottenPeople.forgottenAt} >= ${occurredAt.getTime()})`;
+  const isNew = sql`NOT EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${brainEpisodes.id} = ${outcome.eventId}) AND NOT ${forgotten(outcome.ownerId)}`;
   const [, inserted] = await auditedBatch(brain.ports, db, [
     // Before the insert, on its condition: recorded only if it is new.
     outboxedWhere(
@@ -176,32 +175,19 @@ export const recordOutcome = async <C>(
     ),
     db
       .insert(brainEpisodes)
-      .values({
-        id: outcome.eventId,
-        source: outcome.source,
-        sourceSeq: outcome.sourceSeq,
-        ownerId: outcome.ownerId,
-        scope: outcome.scope,
-        audience: outcome.audience?.id ?? null,
-        taskType: outcome.taskType,
-        execution: outcome.execution,
-        result: outcome.result,
-        evidenceId: outcome.evidenceId,
-        evidenceRefs: JSON.stringify(outcome.evidenceRefs),
-        versionRefs: JSON.stringify(outcome.versionRefs),
-        occurredAt: new Date(outcome.occurredAt),
-        recordedAt: now,
-      })
+      .select(
+        sql`SELECT ${outcome.eventId}, ${outcome.source}, ${outcome.sourceSeq}, ${outcome.ownerId}, ${outcome.scope}, ${outcome.audience?.id ?? null}, ${outcome.taskType}, ${outcome.execution}, ${outcome.result}, ${outcome.evidenceId}, ${JSON.stringify(outcome.evidenceRefs)}, ${JSON.stringify(outcome.versionRefs)}, ${occurredAt.getTime()}, ${now.getTime()}, ${delivery} WHERE ${isNew}`
+      )
       .onConflictDoNothing({ target: brainEpisodes.id })
       .returning({ id: brainEpisodes.id }),
-    ...membersOf(outcome.audience?.members ?? []).map((members) =>
-      db
-        .insert(brainEpisodeMembers)
-        .values(
-          members.map((userId) => ({ episodeId: outcome.eventId, userId }))
-        )
-        .onConflictDoNothing()
-    ),
+    // Its audience, by the delivery that recorded it only, and never one
+    // a personal purge forgot since: a delivery made again adds no one.
+    db
+      .insert(brainEpisodeMembers)
+      .select(
+        sql`SELECT ${outcome.eventId}, members.value FROM json_each(${JSON.stringify(outcome.audience?.members ?? [])}) AS members WHERE EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${brainEpisodes.id} = ${outcome.eventId} AND ${brainEpisodes.delivery} = ${delivery}) AND NOT ${forgotten(sql`members.value`)}`
+      )
+      .onConflictDoNothing(),
     db
       .insert(brainCaptureCursors)
       .values({
@@ -311,7 +297,7 @@ export const outcomesFor = async <C>(
           ? undefined
           : and(
               eq(brainEpisodes.scope, "session"),
-              inArray(brainEpisodes.audience, [...audiences]),
+              inList(brainEpisodes.audience, audiences),
               member
             )
       )
@@ -394,13 +380,26 @@ export const eraseOutcome = async <C>(
   })) > 0;
 
 /**
- * The statements that delete `userId`'s events and take them out of every
- * shared session's audience, for a personal purge.
+ * The statements that delete `userId`'s events, take them out of every
+ * shared session's audience, and remember they were forgotten now, for a
+ * personal purge.
  */
-export const forgetPersonOutcomes = (db: DrizzleD1Database, userId: string) =>
+export const forgetPersonOutcomes = (
+  db: DrizzleD1Database,
+  userId: string,
+  now: Date = new Date()
+) =>
   [
     db
       .delete(brainEpisodeMembers)
       .where(eq(brainEpisodeMembers.userId, userId)),
     db.delete(brainEpisodes).where(eq(brainEpisodes.ownerId, userId)),
+    // So a capture from before now, delivered again, stays forgotten.
+    db
+      .insert(brainForgottenPeople)
+      .values({ userId, forgottenAt: now })
+      .onConflictDoUpdate({
+        target: brainForgottenPeople.userId,
+        set: { forgottenAt: now },
+      }),
   ] as const;

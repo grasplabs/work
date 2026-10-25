@@ -26,8 +26,13 @@ CREATE TABLE `brain_episodes` (
 	`evidence_refs` text NOT NULL,
 	`version_refs` text NOT NULL,
 	`occurred_at` integer NOT NULL,
-	`recorded_at` integer NOT NULL
+	`recorded_at` integer NOT NULL,
+	`delivery` text NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `brain_episodes_owner_idx` ON `brain_episodes` (`owner_id`,`occurred_at`);--> statement-breakpoint
-CREATE INDEX `brain_episodes_evidence_idx` ON `brain_episodes` (`evidence_id`);
+CREATE INDEX `brain_episodes_evidence_idx` ON `brain_episodes` (`evidence_id`);--> statement-breakpoint
+CREATE TABLE `brain_forgotten_people` (
+	`user_id` text PRIMARY KEY NOT NULL,
+	`forgotten_at` integer NOT NULL
+);

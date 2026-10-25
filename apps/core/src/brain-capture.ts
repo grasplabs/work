@@ -112,12 +112,28 @@ const deliver = async (
   store: CaptureStore,
   intent: PendingCapture
 ): Promise<void> => {
+  const brain = brainOf(env);
   const outcome = await store.outcomeOf(intent);
   if (outcome === undefined) {
+    // No longer eligible: and a delivery before this one may have recorded
+    // it and stopped short of its check after (a lost reply, a restart),
+    // so it is taken back first. The intent stays until that worked.
+    try {
+      await eraseOutcome(brain, intent.eventId);
+    } catch (error) {
+      const code = brainErrors.codeOf(error) ?? "unavailable";
+      log.warn("brain.capture.failed", {
+        source: store.source,
+        seq: intent.seq,
+        code,
+        ...errorFields(error),
+      });
+      await store.failed(intent.seq, code, false);
+      return;
+    }
     await store.settled(intent.seq);
     return;
   }
-  const brain = brainOf(env);
   try {
     await recordOutcome(brain, {
       ...outcome,

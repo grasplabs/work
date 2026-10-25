@@ -6,6 +6,7 @@ import {
   eraseOutcomes,
   outcomeCursors,
   outcomesFor,
+  forgetPersonOutcomes,
   outcomesOf,
   recordOutcome,
 } from "../src/outcomes.ts";
@@ -22,6 +23,9 @@ import { testHost } from "./host.ts";
 // 4. An event carries more than identifiers: a field the host never meant.
 // 5. A shared session's event reaches someone outside its audience: one
 //    who was never in it, or one the host no longer counts in it.
+// 6. A delivery made again after a personal purge brings back what the
+//    purge erased: the person's own event, or their place in a shared one.
+// 7. A reader in many shared chats can't read their events at all.
 
 /** The code of what `promise` refused with, or "ok". */
 const outcome = async (promise: Promise<unknown>): Promise<string> => {
@@ -199,5 +203,73 @@ describe("task outcomes", () => {
       noAudience: "brain.invalid",
       personWithAudience: "brain.invalid",
     });
+  });
+
+  it("never brings back what a personal purge erased when a delivery is made again", async () => {
+    const { brain } = testHost();
+    const chat = crypto.randomUUID();
+    const before = new Date(Date.now() - 60_000).toISOString();
+    const own = settled({ ownerId: "ben", occurredAt: before });
+    const shared = settled({
+      scope: "session",
+      audience: { id: chat, members: ["ann", "ben"] },
+      occurredAt: before,
+    });
+    await recordOutcome(brain, own);
+    await recordOutcome(brain, shared);
+    const reaches = async (userId: string, eventId: string) => {
+      const events = await outcomesFor(brain, {
+        userId,
+        reads: [],
+        audiences: [chat],
+      });
+      return events.some((event) => event.eventId === eventId);
+    };
+
+    await brain.db.batch(forgetPersonOutcomes(brain.db, "ben"));
+    // Each delivered again, as after a lost reply or a restart.
+    const again = [
+      await recordOutcome(brain, own),
+      await recordOutcome(brain, shared),
+    ];
+    // Ben's work after the purge is his again.
+    const after = settled({
+      scope: "session",
+      audience: { id: chat, members: ["ann", "ben"] },
+    });
+    await recordOutcome(brain, after);
+
+    expect({
+      recordedAgain: again.map(({ recorded }) => recorded),
+      own: await reaches("ben", own.eventId),
+      sharedForBen: await reaches("ben", shared.eventId),
+      sharedForAnn: await reaches("ann", shared.eventId),
+      after: await reaches("ben", after.eventId),
+    }).toStrictEqual({
+      recordedAgain: [false, false],
+      own: false,
+      sharedForBen: false,
+      sharedForAnn: true,
+      after: true,
+    });
+  });
+
+  it("reads the events of a reader in more shared chats than one statement could bind", async () => {
+    const { brain } = testHost();
+    const chats = Array.from({ length: 150 }, () => crypto.randomUUID());
+    const last = chats.at(-1) ?? "";
+    const shared = settled({
+      scope: "session",
+      audience: { id: last, members: ["ann"] },
+    });
+    await recordOutcome(brain, shared);
+
+    const events = await outcomesFor(brain, {
+      userId: "ann",
+      reads: [],
+      audiences: chats,
+    });
+
+    expect(events.map(({ eventId }) => eventId)).toContain(shared.eventId);
   });
 });

@@ -445,6 +445,10 @@ const knowledgeDb: D1State = {
       `${brain}outcomes.ts`,
       "How far each host boundary's task outcomes reached."
     ),
+    brain_forgotten_people: exported(
+      `${brain}outcomes.ts`,
+      "Who a personal purge forgot, and when: late captures stay forgotten."
+    ),
     audit_outbox: transient(
       `${brain}audit.ts`,
       "Drained into core's audit log (src/audit-outbox.ts)."
