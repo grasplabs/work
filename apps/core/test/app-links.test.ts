@@ -344,6 +344,25 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     });
   });
 
+  it("opens nothing for anyone once its App is archived, builders included, and opens again once it is restored", async () => {
+    const { app, builder, screen } = await openedApp();
+    const url = "https://help.example.com/";
+    const before = await outcomeOf(screen.channel.check("help", url));
+    await builder.api.apps.archive(app);
+    const archived = {
+      check: await outcomeOf(screen.channel.check("help", url)),
+      open: await outcomeOf(screen.channel.open("help", url, "activation")),
+    };
+    await builder.api.apps.restore(app);
+    const restored = await outcomeOf(screen.channel.check("help", url));
+
+    expect({ before, archived, restored }).toStrictEqual({
+      before: "opened",
+      archived: { check: "app.archived", open: "app.archived" },
+      restored: "opened",
+    });
+  });
+
   it("opens nothing through a release revoked since its screen opened", async () => {
     const { app, version, screen } = await openedApp();
     await revokeRelease(
