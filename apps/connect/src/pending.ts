@@ -5,6 +5,7 @@ import type {
   CapabilityClaims,
   HeldBinding,
 } from "@grasp-os/shared/capability";
+import type { ChatPlatform } from "@grasp-os/shared/chat";
 import {
   bindingDropRequestSchema,
   connectCallSchema,
@@ -631,13 +632,18 @@ export const hold = async (
 
 type Decision = "confirm" | "decline";
 
+/**
+ * A person's decision's event, naming the chat platform they decided on
+ * (`via`, a press on a Teams card) when it wasn't Grasp's own app.
+ */
 const decisionEvent = (
   person: ConnectionPerson,
   action: string,
   connectionId: string | undefined,
-  detail: Record<string, AuditDetailValue>
+  detail: Record<string, AuditDetailValue>,
+  via?: ChatPlatform
 ): AuditEntry => ({
-  actor: actorOf(person),
+  actor: actorOf(person, via),
   action,
   target:
     connectionId === undefined
@@ -657,7 +663,8 @@ export const auditRefusedDecision = async (
   id: string,
   reason: string,
   row?: HeldAction,
-  restricted = false
+  restricted = false,
+  via?: ChatPlatform
 ): Promise<void> => {
   try {
     await recordEvents(env, [
@@ -671,7 +678,8 @@ export const auditRefusedDecision = async (
             : detailOf(row, row.restricted || restricted)),
           pendingActionId: id,
           reason,
-        }
+        },
+        via
       ),
     ]);
   } catch (error) {
@@ -688,7 +696,8 @@ export const heldFor = async (
   env: Env,
   person: ConnectionPerson,
   id: string,
-  decision: Decision
+  decision: Decision,
+  via?: ChatPlatform
 ): Promise<HeldAction> => {
   const row = await drizzle(env.DB)
     .select()
@@ -705,7 +714,9 @@ export const heldFor = async (
       decision,
       id,
       "connect.pending_not_found",
-      row
+      row,
+      false,
+      via
     );
     throw connectErrors.create("connect.pending_not_found");
   }
@@ -723,7 +734,8 @@ export const take = async (
   person: ConnectionPerson,
   row: HeldAction,
   decision: Decision,
-  restricted = false
+  restricted = false,
+  via?: ChatPlatform
 ): Promise<void> => {
   const taken = await deleteWith(
     env,
@@ -734,7 +746,8 @@ export const take = async (
         ? "connection.action.confirmed"
         : "connection.action.declined",
       row.connectionId,
-      detailOf(row, row.restricted || restricted)
+      detailOf(row, row.restricted || restricted),
+      via
     ),
     decision === "decline" ? "declined" : undefined
   );
@@ -745,7 +758,9 @@ export const take = async (
       decision,
       row.id,
       "connect.pending_not_found",
-      row
+      row,
+      restricted,
+      via
     );
     throw connectErrors.create("connect.pending_not_found");
   }

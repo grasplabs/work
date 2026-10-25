@@ -1,5 +1,6 @@
 import type { ConnectionPerson, PendingAction } from "@grasp-os/shared/connect";
 import { roleSchema } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -15,13 +16,17 @@ import type { HeldWriteView, ReadCheck } from "./cards.tsx";
 // exact values. Connect keeps them (its src/pending.ts), with their input
 // hashes, which the card carries so a press confirms exactly these.
 
-/** The person `userId` as connect names them, while they are a member. */
-const memberPerson = async (
+/**
+ * The member `userId` as core's decisions take them (`identity`, as a
+ * session would give it, with only what a decision reads) and as connect
+ * names them (`person`), while they are a member; null otherwise.
+ */
+export const memberOf = async (
   env: Env,
   userId: string
-): Promise<ConnectionPerson | null> => {
+): Promise<{ identity: Identity; person: ConnectionPerson } | null> => {
   const [row] = await drizzle(env.DB)
-    .select({ role: members.role, email: users.email })
+    .select({ role: members.role, email: users.email, name: users.name })
     .from(members)
     .innerJoin(users, eq(users.id, members.userId))
     .where(
@@ -36,12 +41,16 @@ const memberPerson = async (
   if (row === undefined || !role.success) {
     return null;
   }
-  return await personOf(env, {
+  const identity: Identity = {
     userId,
-    role: role.data,
-    staff: false,
     email: row.email,
-  });
+    name: row.name,
+    role: role.data,
+    teams: [],
+    staff: false,
+    expiresAt: new Date().toISOString(),
+  };
+  return { identity, person: await personOf(env, identity) };
 };
 
 /** One value as the card shows it: text as it is, a list joined, else JSON. */
@@ -108,11 +117,11 @@ export const turnHeldWrites = async (
   chatId: string,
   since: number
 ): Promise<HeldWriteView[]> => {
-  const person = await memberPerson(env, userId);
-  if (person === null) {
+  const member = await memberOf(env, userId);
+  if (member === null) {
     return [];
   }
-  const waiting = await env.CONNECT.listPendingActions(person);
+  const waiting = await env.CONNECT.listPendingActions(member.person);
   return waiting
     .filter(
       ({ context, requestedAt }) =>
