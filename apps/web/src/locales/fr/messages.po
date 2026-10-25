@@ -600,10 +600,6 @@ msgstr "{going, plural, one {Le responsable de # équipe reçoit son lien {when}
 msgid "{going} of {count}"
 msgstr "{going} sur {count}"
 
-#: src/onboarding/work-record.tsx
-msgid "{heard, plural, one {# person so far.} other {# people so far.}}"
-msgstr "{heard, plural, one {# personne jusqu’ici.} other {# personnes jusqu’ici.}}"
-
 #: src/brain/brain-chips.tsx
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
@@ -749,6 +745,10 @@ msgstr "{live} sur {count}"
 #: src/dashboard/standard-widgets.tsx
 msgid "{live} of {count} live"
 msgstr "{live} sur {count} en service"
+
+#: src/onboarding/work-record.tsx
+msgid "{low} to {high}"
+msgstr "{low} à {high}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
@@ -922,6 +922,10 @@ msgstr "{name}, par {key}"
 msgid "{name}: {count}"
 msgstr "{name} : {count}"
 
+#: src/onboarding/work-record.tsx
+msgid "{name}: {outOfTen} in 10"
+msgstr "{name} : {outOfTen} sur 10"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "{name}: {shown} of the limit"
 msgstr "{name} : {shown} de la limite"
@@ -959,6 +963,14 @@ msgid "{nobody, plural, one {# with nobody asked} other {# with nobody asked}}"
 msgstr "{nobody, plural, one {# sans personne d’interrogé} other {# sans personne d’interrogé}}"
 
 #: src/onboarding/work-record.tsx
+msgid "{normal} hours, {quickest} to {longest}"
+msgstr "{normal} heures, de {quickest} à {longest}"
+
+#: src/onboarding/work-record.tsx
+msgid "{normal} minutes, {quickest} to {longest}"
+msgstr "{normal} minutes, de {quickest} à {longest}"
+
+#: src/onboarding/work-record.tsx
 msgid "{notTalked, plural, one {# person who does it has not talked} other {# people who do it have not talked}}"
 msgstr "{notTalked, plural, one {# personne qui le fait n’a pas encore parlé} other {# personnes qui le font n’ont pas encore parlé}}"
 
@@ -993,6 +1005,10 @@ msgstr "{out, plural, one {Tout est en place : # lien est parti, les autres part
 #: src/onboarding/interviews-progress.tsx
 msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
 msgstr "{outCount, plural, one {Le lien disponible, sous forme de liste} other {Les # liens disponibles, sous forme de liste}}"
+
+#: src/onboarding/work-record.tsx
+msgid "{outOfTen} in 10."
+msgstr "{outOfTen} sur 10."
 
 #: src/chat/builds-state.ts
 msgid "{path}, as it would run"
@@ -1039,10 +1055,6 @@ msgstr "{people, plural, one {Tout votre annuaire, soit # personne. Les problèm
 msgid "{people, plural, one {From # person.} other {From # people.}}"
 msgstr "{people, plural, one {D’après # personne.} other {D’après # personnes.}}"
 
-#: src/onboarding/work-canvas.tsx
-msgid "{people, plural, one {Told by # person} other {Told by # people}}"
-msgstr "{people, plural, one {Raconté par # personne} other {Raconté par # personnes}}"
-
 #: src/onboarding/work-record.tsx
 msgid "{people} of {talked}"
 msgstr "{people} sur {talked}"
@@ -1050,10 +1062,6 @@ msgstr "{people} sur {talked}"
 #: src/onboarding/work-record.tsx
 msgid "{people} of the {needed} needed told it."
 msgstr "{people} des {needed} personnes nécessaires l’ont décrite."
-
-#: src/onboarding/work-record.tsx
-msgid "{people} people"
-msgstr "{people} personnes"
 
 #: src/onboarding/work-record.tsx
 msgid "{people} told it: enough for it to count."
@@ -1095,6 +1103,38 @@ msgstr "{position} sur {count}"
 #: src/policies/policies-table.tsx
 msgid "{proposed, plural, one {# proposed} other {# proposed}}"
 msgstr "{proposed, plural, one {# proposée} other {# proposées}}"
+
+#: src/onboarding/work-record.tsx
+msgid "{quiet} in a quiet month, {busy} in a busy one."
+msgstr "{quiet} lors d’un mois calme, {busy} lors d’un mois chargé."
+
+#: src/onboarding/work-record.tsx
+msgid "{quiet} in a quiet week, {busy} in a busy one."
+msgstr "{quiet} lors d’une semaine calme, {busy} lors d’une semaine chargée."
+
+#: src/onboarding/work-record.tsx
+msgid "{quiet} to {busy} a month"
+msgstr "{quiet} à {busy} par mois"
+
+#: src/onboarding/work-record.tsx
+msgid "{quiet} to {busy} a month, for the whole team"
+msgstr "{quiet} à {busy} par mois, pour toute l’équipe"
+
+#: src/onboarding/work-record.tsx
+msgid "{quiet} to {busy} a month, their own"
+msgstr "{quiet} à {busy} par mois, à titre individuel"
+
+#: src/onboarding/work-record.tsx
+msgid "{quiet} to {busy} a week"
+msgstr "{quiet} à {busy} par semaine"
+
+#: src/onboarding/work-record.tsx
+msgid "{quiet} to {busy} a week, for the whole team"
+msgstr "{quiet} à {busy} par semaine, pour toute l’équipe"
+
+#: src/onboarding/work-record.tsx
+msgid "{quiet} to {busy} a week, their own"
+msgstr "{quiet} à {busy} par semaine, à titre individuel"
 
 #: src/interview/closed.tsx
 #: src/onboarding/interview-people.tsx
@@ -1439,13 +1479,17 @@ msgstr "{users, plural, one {{vendor} · # utilisateur} other {{vendor} · # uti
 msgid "{users, plural, one {# user} other {# users}}"
 msgstr "{users, plural, one {# utilisateur} other {# utilisateurs}}"
 
+#: src/onboarding/work-canvas.tsx
+msgid "{usual} min"
+msgstr "{usual} min"
+
+#: src/onboarding/work-canvas.tsx
+msgid "{usual} min, {quickest} to {longest}"
+msgstr "{usual} min, de {quickest} à {longest}"
+
 #: src/onboarding/work-rules.tsx
 msgid "{value, plural, one {# agreed interview} other {# agreed interviews}}"
 msgstr "{value, plural, one {# entretien validé} other {# entretiens validés}}"
-
-#: src/onboarding/work-canvas.tsx
-msgid "{value} min"
-msgstr "{value} min"
 
 #: src/onboarding/work-list.tsx
 msgid "{value} of {of}"
@@ -1553,6 +1597,10 @@ msgstr "{workflows, plural, one {# workflow} other {# workflows}} : {steps}"
 msgid "{works, plural, one {# piece of work} other {# pieces of work}}"
 msgstr "{works, plural, one {# tâche} other {# tâches}}"
 
+#: src/onboarding/work-record.tsx
+msgid "{wrongCount} in 10"
+msgstr "{wrongCount} sur 10"
+
 #. Who answered, in an exported chat.
 #: src/chat/chat-markdown.ts
 msgid "**Grasp:**"
@@ -1602,10 +1650,6 @@ msgstr "50 à 99 utilisateurs"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "A .txt, .vtt, .srt or .docx file, or pasted text."
 msgstr "Un fichier .txt, .vtt, .srt ou .docx, ou du texte collé."
-
-#: src/onboarding/work-canvas.tsx
-msgid "A case off the usual way"
-msgstr "Un cas hors du chemin habituel"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
@@ -1734,12 +1778,12 @@ msgid "A newer link was sent since. Open the latest one from the chat app."
 msgstr "Un lien plus récent a été envoyé depuis. Ouvrez le dernier depuis l’application de chat."
 
 #: src/onboarding/work-record.tsx
-msgid "A normal one takes about {normal} hours."
-msgstr "Un cas normal prend environ {normal} heures."
+msgid "A normal one takes {normal} hours. The quickest took {least}, the longest {most}."
+msgstr "Un cas normal prend {normal} heures. Le plus rapide a pris {least}, le plus long {most}."
 
 #: src/onboarding/work-record.tsx
-msgid "A normal one takes about {normal} minutes."
-msgstr "Un cas normal prend environ {normal} minutes."
+msgid "A normal one takes {normal} minutes. The quickest took {least}, the longest {most}."
+msgstr "Un cas normal prend {normal} minutes. Le plus rapide a pris {least}, le plus long {most}."
 
 #: src/chat/project-dialog.tsx
 msgid "A picked file couldn't be read. Pick it again."
@@ -1848,18 +1892,6 @@ msgstr "Objet"
 #: src/routes/_shell.settings.spend.tsx
 msgid "About {ending}"
 msgstr "Environ {ending}"
-
-#: src/onboarding/work-record.tsx
-msgid "About {outOfTen} in 10."
-msgstr "Environ {outOfTen} sur 10."
-
-#: src/onboarding/work-record.tsx
-msgid "About {quiet} in a quiet month, {busy} in a busy one."
-msgstr "Environ {quiet} dans un mois calme, {busy} dans un mois chargé."
-
-#: src/onboarding/work-record.tsx
-msgid "About {quiet} in a quiet week, {busy} in a busy one."
-msgstr "Environ {quiet} dans une semaine calme, {busy} dans une semaine chargée."
 
 #: src/onboarding/work-canvas.tsx
 msgid "About {share} in 10"
@@ -2348,6 +2380,10 @@ msgstr "Déjà là, au cas où vous penseriez à l’une d’elles"
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
 msgstr "Bon, voici le plan."
+
+#: src/onboarding/work-record.tsx
+msgid "Always the range people gave, never an average, and each person's own."
+msgstr "Toujours la fourchette donnée, jamais une moyenne, et les chiffres de chacun."
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -4983,6 +5019,14 @@ msgstr "Chaque facture en PDF, dès son émission."
 msgid "Each person"
 msgstr "Chaque personne"
 
+#: src/onboarding/work-record.tsx
+msgid "Each person's numbers"
+msgstr "Les chiffres de chacun"
+
+#: src/onboarding/work-record.tsx
+msgid "Each person's share"
+msgstr "La part de chaque personne"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Each workflow"
 msgstr "Chaque workflow"
@@ -5438,26 +5482,6 @@ msgstr "Moins de {least} sur {of}"
 #: src/landscape/landscape.ts
 msgid "Fewer than 10 users"
 msgstr "Moins de 10 utilisateurs"
-
-#: src/onboarding/work-record.tsx
-msgid "Fewer than 5"
-msgstr "Moins de 5"
-
-#: src/onboarding/work-canvas.tsx
-msgid "Fewer than 5 people"
-msgstr "Moins de 5 personnes"
-
-#: src/onboarding/work-record.tsx
-msgid "Fewer than 5 people gave it."
-msgstr "Moins de 5 personnes l’ont donné."
-
-#: src/onboarding/work-record.tsx
-msgid "Fewer than 5 people so far."
-msgstr "Moins de 5 personnes jusqu’ici."
-
-#: src/onboarding/work-record.tsx
-msgid "Fewer than 5 people told it so far."
-msgstr "Jusqu’ici, moins de 5 personnes l’ont décrite."
 
 #: src/onboarding/work-rules.tsx
 msgid "Fewer than this, and the workflow is still being heard."
@@ -8720,6 +8744,10 @@ msgstr "Non publiée"
 msgid "Not run yet"
 msgstr "Pas encore lancé"
 
+#: src/onboarding/work-record.tsx
+msgid "Not said"
+msgstr "Non précisé"
+
 #: src/interview/composer.tsx
 msgid "Not saved yet. Trying again."
 msgstr "Pas encore enregistré. Nouvel essai en cours."
@@ -11654,6 +11682,10 @@ msgstr "Commence le {starts}"
 msgid "Starts the day the company tells its team."
 msgstr "Commence le jour où l’entreprise informe son équipe."
 
+#: src/onboarding/work-canvas.tsx
+msgid "Starts when: {starts}"
+msgstr "Commence quand : {starts}"
+
 #: src/policies/findings-table.tsx
 msgctxt "column: what a rule does to an app"
 msgid "State"
@@ -11715,16 +11747,10 @@ msgctxt "kind of fact"
 msgid "Step"
 msgstr "Étape"
 
-#. placeholder {0}: index + 1
-#: src/onboarding/work-record.tsx
-msgid "Step {0}"
-msgstr "Étape {0}"
-
 #: src/onboarding/setup-frame.tsx
 msgid "Step {n}"
 msgstr "Étape {n}"
 
-#: src/onboarding/work-canvas.tsx
 #: src/onboarding/work-record.tsx
 msgid "Step {number}"
 msgstr "Étape {number}"
@@ -11736,10 +11762,6 @@ msgstr "L’étape {number} est décrite de deux façons, et personne ne sait po
 #: src/onboarding/work-record.tsx
 msgid "Step {number}: {people} of {needed} needed told it"
 msgstr "Étape {number} : {people} des {needed} personnes nécessaires l’ont décrite"
-
-#: src/onboarding/work-record.tsx
-msgid "Step {number}: fewer than 5 people told it so far"
-msgstr "Étape {number} : décrite jusqu’ici par moins de 5 personnes"
 
 #: src/workflows/history-view.tsx
 msgid "Step {ordinal}"
@@ -12749,10 +12771,6 @@ msgstr "Le message"
 msgid "The microphone is not available here. Type your answer."
 msgstr "Le micro n’est pas disponible ici. Écrivez votre réponse."
 
-#: src/onboarding/work-record.tsx
-msgid "The middle of what people gave once at least 5 did, never an average of a few or one person's own."
-msgstr "La valeur médiane de ce que les gens ont donné dès qu’au moins 5 l’ont fait, jamais une moyenne de quelques-uns ni les chiffres d’une seule personne."
-
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
 msgstr "La migration {migration} a échoué sur son enregistrement de test {fixture} quand cette version a été scellée : {reason}. Elle ne s'exécute sur aucun enregistrement, donc la version ne peut pas être rendue actuelle : corrigez la migration ou son enregistrement de test et reconstruisez le domaine."
@@ -13070,6 +13088,10 @@ msgstr "Sa propre limite"
 #: src/settings/stephen-settings.tsx
 msgid "Their own mail, calendar and files. Runs at once."
 msgstr "Leur propre courrier, agenda et fichiers. S'exécute tout de suite."
+
+#: src/onboarding/work-record.tsx
+msgid "Their own: {minutes}"
+msgstr "À titre individuel : {minutes}"
 
 #: src/onboarding/interview-people.tsx
 msgid "Their rating"
@@ -13578,13 +13600,13 @@ msgstr "Tokens lus"
 msgid "Tokens written"
 msgstr "Tokens écrits"
 
-#: src/onboarding/work-canvas.tsx
-msgid "Told by fewer than 5 people"
-msgstr "Raconté par moins de 5 personnes"
-
 #: src/onboarding/work-record.tsx
 msgid "Told it"
 msgstr "L’a décrite"
+
+#: src/onboarding/work-canvas.tsx
+msgid "Told two ways"
+msgstr "Décrite de deux façons"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "Tomorrow"
@@ -14685,6 +14707,10 @@ msgctxt "column: when an interview was held"
 msgid "When"
 msgstr "Quand"
 
+#: src/onboarding/work-canvas.tsx
+msgid "When {when}"
+msgstr "Quand {when}"
+
 #: src/routes/_shell.settings.notifications.tsx
 msgid "When a payment fails or the card is about to run out, so you can fix it in time."
 msgstr "Quand un paiement échoue ou que la carte arrive à expiration, pour que vous puissiez régler cela à temps."
@@ -14748,6 +14774,7 @@ msgid "When to stop"
 msgstr "Quand s’arrêter"
 
 #: src/interview/words.ts
+#: src/onboarding/work-record.tsx
 msgid "Where"
 msgstr "Où"
 
@@ -14850,6 +14877,7 @@ msgid "While Stephen talks to your team: how far the interviews are, team by tea
 msgstr "Pendant que Stephen parle à votre équipe : où en sont les entretiens, équipe par équipe, et le lien de chacun à envoyer."
 
 #: src/inbox/item-detail.tsx
+#: src/onboarding/work-record.tsx
 #: src/settings/person-limits.tsx
 msgid "Who"
 msgstr "Qui"
@@ -15272,6 +15300,10 @@ msgstr "Rédaction"
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Written down"
 msgstr "Noté"
+
+#: src/onboarding/work-record.tsx
+msgid "Wrong"
+msgstr "Erronés"
 
 #: src/landscape/landscape-audit.ts
 #: src/routes/_shell.settings.members.tsx

@@ -23,7 +23,7 @@ import type {
 } from "./onboarding-admin.ts";
 import { daysBetween, METER_PURPOSES, PLAN_DAYS } from "./org-record.ts";
 import type {
-  StaffDrawing,
+  DrawnWork,
   HeldInterview,
   MeterDay,
   StaffSnapshot,
@@ -43,44 +43,80 @@ const first = (name: string) => name.split(" ")[0] ?? name;
 /** A name as a title starts: the drawing names work as people say it, in small letters. */
 const capital = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 
-/**
- * A piece of work as the admin keeps one, from what staff get of its drawing (GRA-1084): its
- * steps and cases by position with how many people each rests on, never what anyone said them
- * to be; and its numbers as the drawing totals them, never one person's: the medians where
- * enough people gave them, none otherwise.
- */
-// oxlint-disable-next-line complexity -- one optional part of what staff get after another; org-adapter.test.ts pins it
+/** The middle of some numbers; none for none. */
+const middle = (values: number[]): number | null => {
+  if (values.length === 0) {
+    return null;
+  }
+  const sorted = values.toSorted((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? null;
+};
+
+/** A term as a piece of work keeps it: the word, and what it means. */
+const termOf = (term: { word: string; meaning: string }): [string, string] => [
+  term.word,
+  term.meaning,
+];
+
+/** A piece of work as the admin keeps one: what was drawn, and the middle of what people said for the numbers the admin works out. */
+// oxlint-disable-next-line complexity -- ported as the prototype has it, one optional part of a drawing after another; org-adapter.test.ts pins it
 export const workOf = (record: WorkRecord): Work => {
-  const drawn: StaffDrawing | null = record.drawn;
-  const totals = drawn?.totals ?? null;
-  const quiet = totals?.volume.value?.quiet ?? 0;
-  const busy = totals?.volume.value?.busy ?? quiet;
-  const normal = totals?.takes.value ?? 0;
+  const drawn: DrawnWork | null = record.drawn;
+  const told = Object.values(drawn?.told ?? {});
+  const volumes = told.flatMap((each) => (each.volume ? [each.volume] : []));
+  const takes = told.flatMap((each) => (each.takes ? [each.takes] : []));
+  const wrongs = told.flatMap((each) =>
+    each.wrong === null ? [] : [each.wrong]
+  );
+  const quiet = middle(volumes.map((each) => each[0])) ?? 0;
+  const busy = middle(volumes.map((each) => each[1])) ?? quiet;
+  const normal = middle(takes.map((each) => each[1])) ?? 0;
   return {
     id: record.id,
     team: record.team,
     name: capital(record.name),
     item: record.item,
     share: record.share,
-    starts: "",
-    // Where each step is, never what it is.
-    steps: drawn?.steps.map(() => "") ?? [],
-    waits: [],
+    starts: drawn?.starts ?? "",
+    steps: drawn?.steps.map((step) => step.text) ?? [],
+    documented:
+      drawn?.steps.flatMap((step, index) => (step.documented ? [index] : [])) ??
+      [],
+    waits: drawn?.waits ?? [],
     differently:
       drawn?.differently.map((each): [string, string, number | null] => [
-        "",
-        "",
-        each.outOfTen.value,
+        each.when,
+        each.does,
+        each.outOfTen,
       ]) ?? [],
+    ...(present(drawn?.decides) ? { decides: drawn.decides } : {}),
+    ...(present(drawn?.own) ? { own: drawn.own } : {}),
+    ...(present(drawn?.ai) ? { ai: drawn.ai } : {}),
     volume: [quiet, Math.max(busy, quiet)],
     ...(drawn?.per === "month" ? { per: "month" as const } : {}),
-    takes: [normal, normal, normal],
+    takes: [
+      Math.min(normal, ...takes.map((each) => each[0])),
+      normal,
+      Math.max(normal, ...takes.map((each) => each[2])),
+    ],
     ...(drawn?.unit === "hours" ? { unit: "hours" as const } : {}),
-    wrong: totals?.wrong.value ?? 0,
-    ...(totals === null ? {} : { totals }),
-    ...(drawn ? { stepPeople: drawn.steps.map(({ people }) => people) } : {}),
-    right: "",
-    next: "",
+    wrong: middle(wrongs) ?? 0,
+    right: drawn?.right ?? "",
+    ...(present(drawn?.ask) ? { ask: drawn.ask } : {}),
+    next: drawn?.next ?? "",
+    ...(drawn?.term ? { term: termOf(drawn.term) } : {}),
+    ...(drawn?.differs
+      ? {
+          differs: {
+            step: drawn.differs.step,
+            other: drawn.differs.other,
+            why: drawn.differs.why,
+            ...(present(drawn.differs.because)
+              ? { because: drawn.differs.because }
+              : {}),
+          },
+        }
+      : {}),
     ...(record.from === "grasp" ? { found: true as const } : {}),
   };
 };
@@ -239,8 +275,12 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     });
   }
 
-  // What each person told is never staff's (GRA-1084): nothing by person.
   const told = new Map<string, Telling>();
+  for (const record of snapshot.works) {
+    for (const [person, telling] of Object.entries(record.drawn?.told ?? {})) {
+      told.set(`${person}/${record.id}`, telling);
+    }
+  }
 
   // A team's own links went out the day its first member's did; a team of its lead alone, the day
   // its lead finished.
@@ -332,8 +372,10 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
         ...factsOf(interview),
         mistakes: 0,
         kinds: [],
-        // What the next interviews should ask is the drawing's text: not staff's.
-        followUps: 0,
+        followUps: work
+          ? (snapshot.works.find((each) => each.id === work.id)?.drawn?.open
+              .length ?? 0)
+          : 0,
         toRead: false,
         rating: interview.progress.rating ?? null,
         interviewer: interviewerOf(interview.progress.interviewer),
@@ -370,8 +412,18 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     clientCode: snapshot.clientCode,
     test: profile.test,
     doers: new Map(snapshot.works.map((work) => [work.id, work.doers])),
-    // Which tools the steps use is what people said: not staff's (GRA-1084).
-    tools: new Map(snapshot.works.map((work) => [work.id, []])),
+    tools: new Map(
+      snapshot.works.map((work) => [
+        work.id,
+        [
+          ...new Set(
+            (work.drawn?.steps ?? [])
+              .map((step) => step.tool.trim())
+              .filter(Boolean)
+          ),
+        ],
+      ])
+    ),
     // A snapshot from before the Worker counted has none.
     metered: meteredOf(snapshot.usage ?? []),
     ...(snapshot.known === undefined ? {} : { known: snapshot.known }),

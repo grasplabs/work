@@ -31,9 +31,9 @@ const record = (more: Partial<WorkRecord> = {}): WorkRecord => ({
   ...claims,
   toAsk: 0,
   steps: [step("Write the claim."), step("Ask for photos.")],
-  volume: { people: 5, value: { quiet: 11, busy: 22 } },
-  takes: { people: 5, value: 18 },
-  wrong: { people: 5, value: 1 },
+  volume: { quiet: [10, 12], busy: [20, 24], people: 3 },
+  takes: { least: 10, most: 40, normal: [15, 20], people: 3 },
+  wrong: { outOfTen: [1, 2], people: 3 },
   starts: { text: "A client calls.", people: 3 },
   right: { text: "The insurer has it.", people: 3 },
   next: { text: "The insurer.", people: 3 },
@@ -61,7 +61,7 @@ describe("what a piece of work still lacks", () => {
           }),
           step("Send it.", { enough: false, people: 1 }),
         ],
-        wrong: { people: 0, value: null },
+        wrong: null,
       }),
       ["Who checks the photos?"]
     );
@@ -107,8 +107,8 @@ describe("what a piece of work still lacks", () => {
       record({
         interviews: [],
         toAsk: 4,
-        volume: { people: 0, value: null },
-        takes: { people: 0, value: null },
+        volume: null,
+        takes: null,
         steps: [step("a", { enough: false, people: 0 })],
       })
     );
