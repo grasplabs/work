@@ -94,6 +94,26 @@ export const directoryReadRequestSchema = z.strictObject({
 });
 export type DirectoryReadRequest = z.input<typeof directoryReadRequestSchema>;
 
+/** What core asks connect to look up: one person, by their ID at the provider. */
+export const directoryLookupRequestSchema = z.strictObject({
+  connectionId: z.string().min(1).max(128),
+  id: z.string().min(1).max(128),
+});
+export type DirectoryLookupRequest = z.input<
+  typeof directoryLookupRequestSchema
+>;
+
+/** One person looked up in a directory, by their ID at the provider. */
+export interface DirectoryLookup {
+  /** The connection's tenant at the provider, as it was connected. */
+  tenant: string;
+  /**
+   * Them, as a read would answer them; null when the directory holds
+   * nobody by that ID, or only a guest or an account that is turned off.
+   */
+  person: DirectoryPerson | null;
+}
+
 /** The directory the onboarding is connected to, as its admin sees it. */
 export interface OnboardingDirectory {
   suite: DirectorySuite;

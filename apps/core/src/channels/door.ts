@@ -27,8 +27,15 @@
  *   The lines go out through connect like every send.
  * - Someone Settings › Stephen doesn't let reach him, here or at all
  *   (`stephenFor`), is told so in one line, and nothing they wrote is read.
- * - One of the client's own people Grasp hasn't seen yet (Teams' roster
- *   says they are of the client's tenant, and no guest) is sent a link to
+ * - One of the client's own people Grasp hasn't seen yet whom the
+ *   organization's directory holds, by the object id Teams verified, is
+ *   made a member from it and answered at once, with no sign-in first
+ *   (auth/directory-members.ts). Someone the directory made a member, who
+ *   never signed in since, is answered only while the directory still
+ *   holds them, looked up again at most once an hour.
+ * - One of the client's own people Grasp hasn't seen yet and the directory
+ *   can't vouch for (Teams' roster says they are of the client's tenant,
+ *   and no guest) is sent a link to
  *   the deployment's own sign-in, once a day: it carries no token and
  *   binds nothing, as their sign-in's ID token names them by the object
  *   id their messages carry. Their first question is kept for the hour,
@@ -54,6 +61,7 @@
  */
 import "@grasp-os/chat/workerd";
 import { durableObjectState } from "@grasp-os/chat/state";
+import type { DirectoryPerson } from "@grasp-os/shared/directory";
 import { requestErrors } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
@@ -63,6 +71,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { signInConfig } from "../auth/config.ts";
+import { memberFromDirectory } from "../auth/directory-members.ts";
 import { channelConversations } from "../db/core/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import { errorResponse } from "../errors.ts";
@@ -83,7 +92,7 @@ import {
   whatsAppSetUp,
   whatsAppSubscription,
 } from "./whatsapp.ts";
-import { writerOf } from "./who.ts";
+import { inDirectory, writerOf } from "./who.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
@@ -151,6 +160,12 @@ const signInPath = "/sign-in";
 
 /** Where a newcomer's first question waits, by their object id. */
 const keptKey = (oid: string): string => `door:teams:kept:${oid}`;
+
+/** How long the directory's word that it holds someone is taken. */
+const heldMs = 60 * 60 * 1000;
+
+/** How long the directory's word that it doesn't is taken. */
+const notHeldMs = 5 * 60 * 1000;
 
 /** How long the door remembers a message it took, to take a resend once. */
 const seenTtlMs = 24 * 60 * 60 * 1000;
@@ -346,6 +361,49 @@ const keptQuestion = async (
 };
 
 /**
+ * The person the organization's directory holds under `oid`. Its word that
+ * it holds them is taken for the hour when `keepHeld` (for a member it
+ * made, so their messages don't each ask it again), and that it holds
+ * nobody for five minutes. While it can't be read, it holds nobody, and
+ * that isn't kept.
+ */
+const heldInDirectory = async (
+  env: Env,
+  state: StateAdapter,
+  oid: string,
+  { keepHeld }: { keepHeld: boolean }
+): Promise<DirectoryPerson | null> => {
+  const key = `door:teams:directory:${oid}`;
+  const said = await state.get<{ person: DirectoryPerson | null }>(key);
+  if (said !== null) {
+    return said.person;
+  }
+  const person = await inDirectory(env, oid);
+  if (person === null) {
+    await state.set(key, { person }, notHeldMs);
+  } else if (person !== undefined && keepHeld) {
+    await state.set(key, { person }, heldMs);
+  }
+  return person ?? null;
+};
+
+/**
+ * Someone neither a sign-in nor the directory vouches for: the sign-in
+ * link if Teams' roster has them as one of the client's own people,
+ * otherwise the line for who they are.
+ */
+const notKnown = async (
+  env: Env,
+  state: StateAdapter,
+  adapter: ConnectedTeamsAdapter,
+  activity: Activity,
+  oid: string
+): Promise<{ line?: DoorLine }> => {
+  const line = await unknownLine(env, adapter, activity);
+  return line === "signIn" ? await newcomer(state, activity, oid) : { line };
+};
+
+/**
  * What the door does with a message before the Chat SDK sees it: the line
  * it sends and nothing more, or the member it is from.
  */
@@ -389,6 +447,13 @@ const gate = async (
   const writer = await writerOf(env, "teams", oid);
   switch (writer.kind) {
     case "member": {
+      // Known only from the directory: answered while it still holds them.
+      if (
+        writer.fromDirectory &&
+        (await heldInDirectory(env, state, oid, { keepHeld: true })) === null
+      ) {
+        return await notKnown(env, state, adapter, activity, oid);
+      }
       // Settings › Stephen: whether he answers them here at all, asked
       // before anything they wrote is read.
       const reach = await stephenFor(env, writer.userId, "teams");
@@ -405,10 +470,26 @@ const gate = async (
       return { line: "removed" };
     }
     case "unknown": {
-      const line = await unknownLine(env, adapter, activity);
-      return line === "signIn"
-        ? await newcomer(state, activity, oid)
-        : { line };
+      const person = await heldInDirectory(env, state, oid, {
+        keepHeld: false,
+      });
+      if (person === null) {
+        return await notKnown(env, state, adapter, activity, oid);
+      }
+      const userId = await memberFromDirectory(env, oid, person);
+      if (userId === null) {
+        return { line: "removed" };
+      }
+      // Settings › Stephen, as for any member.
+      const reach = await stephenFor(env, userId, "teams");
+      if (!reach.reaches) {
+        return { line: "notTurnedOn" };
+      }
+      return {
+        userId,
+        acts: reach.acts,
+        kept: await keptQuestion(state, oid),
+      };
     }
     default: {
       return writer satisfies never;

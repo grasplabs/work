@@ -416,6 +416,13 @@ export default {
       Object.assign(documents, await request.json());
       return new Response(null, { status: 204 });
     }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname.startsWith("/v1.0/users/") && url.pathname.split("/").length === 4 && url.searchParams.has("$expand")) {
+      const id = url.pathname.split("/").pop().toLowerCase();
+      const found = directory.users.find((user) => user.id.toLowerCase() === id);
+      return found === undefined
+        ? Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 })
+        : Response.json(found);
+    }
     if ((url.hostname === "graph.microsoft.com" || url.hostname === "acme-my.sharepoint.com") && request.method === "GET") {
       const answered = documentsGraph(url);
       if (answered !== undefined) {
