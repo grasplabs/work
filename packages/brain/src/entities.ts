@@ -7,8 +7,12 @@ import { z } from "zod";
 import { auditedBatch, outboxedIfChanged } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
-import { brainErrors } from "./contract.ts";
-import type { BrainSourceRef } from "./contract.ts";
+import {
+  brainErrors,
+  entitiesListInputSchema,
+  entitySourcesInputSchema,
+} from "./contract.ts";
+import type { BrainSourceRef, EntitySummary } from "./contract.ts";
 import { inList, insertChunks } from "./db/d1.ts";
 import {
   brainAssertions,
@@ -1597,23 +1601,43 @@ const noteRead = async <C>(
   );
 };
 
-/** An entity as a reader sees it, from what they may read only. */
-export interface EntitySummary {
-  id: string;
-  kind: string;
-  /** The name its readable mentions give it most. */
-  label: string;
-  /** Every name its readable mentions give it. */
-  names: string[];
-  /** How many readable sources mention it. */
-  sources: number;
-}
+export type { EntitySummary } from "./contract.ts";
 
-const entitiesInputSchema = z.strictObject({
-  /** The start of a name: suggestions as someone types. */
-  query: z.string().min(1).max(nameMaxLength).optional(),
-  limit: z.int().min(1).max(100).optional(),
-});
+/** The fewest characters of a name a caller that isn't a person lists by. */
+const listQueryMin = 2;
+
+/**
+ * Refuses, as `brain.denied`, a reader the host doesn't let read the Brain
+ * (its `recall.require` port: an App or agent without the `brain` grant),
+ * before anything is read: the gate every entity and relation read
+ * passes, as a recall does.
+ */
+export const requireBrainRead = async <C>(
+  brain: Brain<C>,
+  reader: C
+): Promise<void> => {
+  try {
+    await brain.ports.recall.require(reader);
+  } catch (error) {
+    if (brain.ports.recall.isRefusal(error)) {
+      throw brainErrors.create("brain.denied");
+    }
+    throw error;
+  }
+};
+
+/** Whether `reader` is a person, as the host's `ownerOf` port says. */
+const isPerson = <C>(brain: Brain<C>, reader: C): boolean => {
+  try {
+    brain.ports.ownerOf(reader);
+    return true;
+  } catch (error) {
+    if (brainErrors.codeOf(error) === "brain.denied") {
+      return false;
+    }
+    throw error;
+  }
+};
 
 /**
  * The entities `reader`'s readable sources mention, most mentioned first,
@@ -1627,10 +1651,18 @@ export const entitiesFor = async <C>(
 ): Promise<EntitySummary[]> => {
   const { query, limit = 20 } = brainErrors.parse(
     "brain.invalid",
-    entitiesInputSchema,
+    entitiesListInputSchema,
     input
   );
+  await requireBrainRead(brain, reader);
   const folded = query === undefined ? undefined : fold(query);
+  // An App or agent lists by a name's start, never the whole list.
+  if (
+    (folded === undefined || folded.length < listQueryMin) &&
+    !isPerson(brain, reader)
+  ) {
+    throw brainErrors.create("brain.invalid");
+  }
   const rows = await readableMentions(
     brain,
     reader,
@@ -1700,8 +1732,14 @@ const refOf = (row: ReadableMention): BrainSourceRef =>
 export const entitySources = async <C>(
   brain: Brain<C>,
   reader: C,
-  entityId: string
+  input: unknown
 ): Promise<BrainSourceRef[]> => {
+  const { entityId } = brainErrors.parse(
+    "brain.invalid",
+    entitySourcesInputSchema,
+    input
+  );
+  await requireBrainRead(brain, reader);
   const rows = await readableMentions(
     brain,
     reader,
