@@ -147,6 +147,20 @@ const drawAll = async (ids: Ids): Promise<GatewayRequest[]> => {
 };
 
 /**
+ * Gives the brain what is due until it has given this team: a team an
+ * earlier test left due goes first, as the alarm would give it.
+ */
+const givenToBrain = async (ids: Ids): Promise<void> => {
+  for (let round = 0; round < 5; round += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+    const gave = await onboardingStore(env).intakeNext();
+    if (gave === null || gave === `brain:${ids.team}`) {
+      return;
+    }
+  }
+};
+
+/**
  * Lea's map drawn, with words of her own in her interview, then the
  * tickets drawn from what the others agreed to, and the team given to
  * the brain.
@@ -158,7 +172,7 @@ const inTheBrain = async (ids: Ids, said: Said) => {
   });
   await toldWith(ids, said);
   await drawAll(ids);
-  await onboardingStore(env).intakeNext();
+  await givenToBrain(ids);
 };
 
 /**
@@ -746,6 +760,109 @@ describe(
   { timeout: 180_000 },
   () => {
     beforeEach(holdAlarm);
+
+    it("withdrawing while the brain can't be reached leaves its records to the alarm, which takes them out once it can (T5)", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      const said = sentinels();
+      await inTheBrain(ids, said);
+      const before = await brainOf(ids);
+      const link = await openLink(ids.max);
+      // The brain can't be written while Max withdraws.
+      const batch = env.DB.batch.bind(env.DB);
+      const spy = vi
+        .spyOn(env.DB, "batch")
+        .mockImplementation(async (statements) => {
+          // What the brain is written by, not the audit log's drain.
+          if (new Error("where").stack?.includes("drainBatch") !== true) {
+            throw new Error("The brain can't be reached.");
+          }
+          return await batch(statements);
+        });
+      let withdrawn: number;
+      try {
+        const response = await onLink({ action: "withdraw", ...link });
+        withdrawn = response.status;
+      } finally {
+        spy.mockRestore();
+      }
+      const stuck = await brainOf(ids);
+      const alarm = await runInDurableObject(
+        onboardingStore(env),
+        async (_instance, state) => await state.storage.getAlarm()
+      );
+      // The alarm, once the brain answers again.
+      await store.purgeBrain();
+      const after = await brainOf(ids);
+      expect({
+        before: before.statements.includes(`Tickets wait in ${said.max}.`),
+        withdrawn,
+        stuck: stuck.statements.includes(`Tickets wait in ${said.max}.`),
+        alarm: alarm !== null,
+        after: after.statements.some((text) => text.includes(said.max)),
+        restsOn: await store.sentFor(ids.max),
+        gone: await store.sentFor(`gone:${ids.max}`),
+      }).toStrictEqual({
+        before: true,
+        withdrawn: 200,
+        stuck: true,
+        alarm: true,
+        after: false,
+        restsOn: [],
+        gone: [],
+      });
+    });
+
+    it("withdrawing takes the interviewer's lines that read it back out of the voice's cache, and leaves everyone else's (T5)", async () => {
+      const ids = await team();
+      const said = sentinels();
+      await mapped(ids);
+      await toldWith(ids, said);
+      const keyOf = (words: string): SpokenKey => ({
+        spoken: `[warm] ${stephenSays(words)}`,
+        voice: speakerVoices.stephen,
+        model: voiceModels.said,
+        language: "en",
+      });
+      const answer = JSON.stringify({
+        audio: "AAAA",
+        mime: "audio/mpeg",
+        words: [],
+      });
+      await keepLine(env, keyOf(said.max), answer);
+      await keepLine(env, keyOf(said.mia), answer);
+      await onLink({ action: "withdraw", ...(await openLink(ids.max)) });
+      expect({
+        max: await keptLine(env, keyOf(said.max)),
+        mia: await keptLine(env, keyOf(said.mia)),
+      }).toStrictEqual({ max: undefined, mia: answer });
+    });
+
+    it("withdrawing from a lead's interview draws all of the team's work again without their facts, and nothing in the brain rests on them (T5)", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      const said = sentinels();
+      await inTheBrain(ids, said);
+      await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
+      const redrawn = await drawAll(ids);
+      await store.intakeNext();
+      const brain = await brainOf(ids);
+      expect({
+        redrawnWith: JSON.stringify(redrawn.map(({ body }) => body)).includes(
+          said.lea
+        ),
+        redrawn: redrawn.length > 0,
+        drawInput: await store.drawInput(ids.lea),
+        restsOn: await store.sentFor(ids.lea),
+        statements: brain.statements.length,
+      }).toStrictEqual({
+        redrawnWith: false,
+        redrawn: true,
+        drawInput: null,
+        restsOn: [],
+        statements: 4,
+      });
+    });
 
     it("withdrawing from the link takes the brain's records on them out, draws the work again without them, and leaves their words theirs (T5)", async () => {
       const store = onboardingStore(env);

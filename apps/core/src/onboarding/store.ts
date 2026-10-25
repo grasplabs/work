@@ -1620,11 +1620,13 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * They withdraw (GRA-329): from now on nothing they said is recorded,
-   * read by a model, drawn or given to the brain, and what the brain has
-   * that rests on them is taken out now, or from the alarm until it is.
-   * What they said stays theirs to read and delete. Works whenever
-   * deleting does; withdrawing again answers as the first time.
+   * They withdraw (GRA-329), for good: from now on nothing they said is
+   * recorded, read by a model, drawn or given to the brain; what the brain
+   * has that rests on them is taken out now, or from the alarm until it
+   * is, every drawing they were in is drawn again without them, and the
+   * interviewer's lines that read it back are forgotten. What they said
+   * stays theirs to read and delete. Works whenever deleting does;
+   * withdrawing again answers as the first time.
    */
   async withdraw(
     secretMark: string,
@@ -1650,7 +1652,7 @@ export class Onboarding extends DurableObject<Env> {
     if (held.withdrawnAt !== null) {
       return answered({ withdrawn: true, at: held.withdrawnAt });
     }
-    this.ctx.storage.transactionSync(() => {
+    const said = this.ctx.storage.transactionSync(() => {
       this.#db
         .update(participations)
         .set({ withdrawnAt: now })
@@ -1658,8 +1660,12 @@ export class Onboarding extends DurableObject<Env> {
         .run();
       this.#admissionChanged(person, false, true, now);
       this.#noted(person.id, "interview.withdrawn", now);
+      return this.#saidIn(person.id);
     });
-    await this.#afterForget([]);
+    // Final, with no undo (GRA-329): every output it was in is erased, the
+    // brain's records now or from the alarm until they are, and the lines
+    // of the interviewer's voice that read it back.
+    await this.#afterForget([said]);
     return answered({ withdrawn: true, at: now });
   }
 
