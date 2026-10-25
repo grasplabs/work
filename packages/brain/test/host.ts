@@ -56,6 +56,9 @@ export const testHost = (): {
     mayPublish: async () => {
       await Promise.resolve();
     },
+    mayRetire: async () => {
+      await Promise.resolve();
+    },
     blobs: env.BLOBS,
     audit: {
       eventOf: (entry) => {

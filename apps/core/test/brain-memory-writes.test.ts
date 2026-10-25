@@ -1,13 +1,15 @@
 import { brainErrors } from "@grasp-os/brain/contract";
+import { memoriesPublish } from "@grasp-os/brain/memories";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { keepAudience } from "../src/knowledge/access.ts";
 import { forContext } from "../src/knowledge/memory.ts";
+import { brainOf } from "../src/knowledge/ports.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
 // Writing the Brain's shared memory, and correcting a person's own
 // (GRA-298, slice 2; the threat model is on the issue). It starts from the
@@ -55,6 +57,23 @@ const documentIn = async (
     collectionId,
     version: 1,
   };
+};
+
+/** Whether `text`, once read, holds `marker`. */
+const holds = async (text: Promise<string>, marker: string) => {
+  const read = await text;
+  return read.includes(marker);
+};
+
+/** The record a publication's receipt names. */
+const idOf = (receipt: {
+  resourceRefs: readonly { kind: string; memoryId?: string }[];
+}) => {
+  const [ref] = receipt.resourceRefs;
+  if (ref?.memoryId === undefined) {
+    throw new Error("A publication answers its record");
+  }
+  return ref.memoryId;
 };
 
 /** What `person`'s agent reads of memory in a chat of their own. */
@@ -326,6 +345,179 @@ describe("correcting one's own memory", setUpTime, () => {
         cites: [{ kind: "memory", memoryId: original.memoryId, revision: 1 }],
       },
       reads: { corrected: true, retired: false },
+    });
+  });
+});
+
+describe("shared memory over time", setUpTime, () => {
+  it("keeps Grasp staff from publishing to the company, and lets only a record's publisher or an admin retire it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ada = await signedInApi(idp, "user");
+    const ben = await signedInApi(idp, "user");
+    const team = await newTeam(admin, [ada, ben]);
+    const u = unique();
+    const staff = {
+      type: "person" as const,
+      person: {
+        userId: admin.userId,
+        email: `${admin.userId}@grasp.test`,
+        name: "Staff",
+        role: "admin" as const,
+        teams: [],
+        staff: true,
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+    };
+    const byStaff = await codeOf(
+      memoriesPublish(
+        brainOf(env),
+        staff,
+        { scope: "company", kind: "fact", text: `From staff ${u}` },
+        { idempotencyKey: key() }
+      )
+    );
+    const company = await admin.api.knowledge.memoriesPublish(
+      { scope: "company", kind: "fact", text: `Company rule ${u}` },
+      { idempotencyKey: key() }
+    );
+    const teamRecord = await ada.api.knowledge.memoriesPublish(
+      { scope: "team", scopeId: team, kind: "fact", text: `Team rule ${u}` },
+      { idempotencyKey: key() }
+    );
+    const retire = async (by: Person, memoryId: string) =>
+      await codeOf(
+        by.api.knowledge.memoriesRetire(
+          { memoryId },
+          { idempotencyKey: key(), expectedRevision: 1 }
+        )
+      );
+
+    const outcomes = {
+      byStaff,
+      companyByMember: await retire(ben, idOf(company)),
+      teamByOtherMember: await retire(ben, idOf(teamRecord)),
+      teamByPublisher: await retire(ada, idOf(teamRecord)),
+      companyByAdmin: await retire(admin, idOf(company)),
+    };
+    const reads = await memoryTextOf(ben);
+
+    expect({
+      outcomes,
+      reads: [`Company rule ${u}`, `Team rule ${u}`].filter((text) =>
+        reads.includes(text)
+      ),
+    }).toStrictEqual({
+      outcomes: {
+        byStaff: "brain.denied",
+        companyByMember: "brain.not_found",
+        teamByOtherMember: "brain.not_found",
+        teamByPublisher: "ok",
+        companyByAdmin: "ok",
+      },
+      // Retired: kept, never used again.
+      reads: [],
+    });
+  });
+
+  it("names who published a record that isn't the reader's", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ada = await signedInApi(idp, "user");
+    const ben = await signedInApi(idp, "user");
+    const team = await newTeam(admin, [ada, ben]);
+    const u = unique();
+    await ada.api.knowledge.memoriesPublish(
+      { scope: "team", scopeId: team, kind: "fact", text: `Team rule ${u}` },
+      { idempotencyKey: key() }
+    );
+
+    const line = (text: string) =>
+      text.split("\n").find((each) => each.includes(`Team rule ${u}`)) ?? "";
+    const forBen = line(await memoryTextOf(ben));
+    const forAda = line(await memoryTextOf(ada));
+
+    expect({
+      ben: forBen.includes(", by "),
+      ada: forAda.includes(", by "),
+    }).toStrictEqual({ ben: true, ada: false });
+  });
+
+  it("drops a record once its audience includes someone who can't read what it rests on, and a chat's records once outsiders join it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ada = await signedInApi(idp, "user");
+    const ben = await signedInApi(idp, "user");
+    const cas = await signedInApi(idp, "user");
+    const team = await newTeam(admin, [ada, ben]);
+    const readers = await newTeam(admin, [ada, ben]);
+    const cited = await documentIn(admin, {
+      name: `Readers ${unique()}`,
+      access: "teams",
+      teams: [readers],
+    });
+    const u = unique();
+    await ada.api.knowledge.memoriesPublish(
+      {
+        scope: "team",
+        scopeId: team,
+        kind: "fact",
+        text: `Rests on it ${u}`,
+        sourceRefs: [cited],
+      },
+      { idempotencyKey: key() }
+    );
+    const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
+    const shared = await newChat(agent);
+    await keepAudience(env, shared, ada.userId, {
+      members: [ada.userId, ben.userId],
+      outsiders: false,
+    });
+    await ada.api.knowledge.memoriesPublish(
+      {
+        scope: "session",
+        scopeId: shared.chatId,
+        kind: "fact",
+        text: `This chat ${u}`,
+      },
+      { idempotencyKey: key() }
+    );
+    const sharedText = async () => {
+      const found = await forContext(
+        env,
+        actingFor(agent, ada.userId),
+        shared,
+        {
+          type: "own",
+        }
+      );
+      return found.text;
+    };
+    const beforeSession = await holds(sharedText(), `This chat ${u}`);
+    const beforeCas = await holds(memoryTextOf(cas), `Rests on it ${u}`);
+    // Cas joins the team, but not the readers of what the record rests on.
+    await callAuth("/organization/add-team-member", admin.session, {
+      teamId: team,
+      userId: cas.userId,
+    });
+    const afterCas = await holds(memoryTextOf(cas), `Rests on it ${u}`);
+    const forAda = await holds(memoryTextOf(ada), `Rests on it ${u}`);
+    await keepAudience(env, shared, ada.userId, {
+      members: [ada.userId, ben.userId],
+      outsiders: true,
+    });
+    const afterOutsiders = await holds(sharedText(), `This chat ${u}`);
+
+    expect({
+      beforeSession,
+      beforeCas,
+      afterCas,
+      forAda,
+      afterOutsiders,
+    }).toStrictEqual({
+      beforeSession: true,
+      beforeCas: false,
+      // A member of the team, but not of what it rests on: not for her.
+      afterCas: false,
+      forAda: true,
+      afterOutsiders: false,
     });
   });
 });

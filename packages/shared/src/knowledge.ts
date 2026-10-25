@@ -6,6 +6,7 @@ import type {
   MemoriesListInput,
   MemoriesProposeChangeInput,
   MemoriesPublishInput,
+  MemoriesRetireInput,
   MemoryPack,
   MemoryPage,
   MemoryRecord,
@@ -338,6 +339,11 @@ export interface KnowledgeApi {
    */
   memoriesProposeChange: (
     input: MemoriesProposeChangeInput,
+    options: ChangeOptions
+  ) => Promise<CommandReceipt>;
+  /** Retires a shared record, by its publisher or an admin (GRA-298). */
+  memoriesRetire: (
+    input: MemoriesRetireInput,
     options: ChangeOptions
   ) => Promise<CommandReceipt>;
   /** The collections the person may read and their skills, as an agent's. */

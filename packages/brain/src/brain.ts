@@ -87,6 +87,19 @@ export interface BrainPorts<C> {
     target: { scope: "team" | "company" | "session"; scopeId: string | null },
     refs: readonly BrainSourceRef[]
   ) => Promise<void>;
+  /**
+   * Whether `reader` may retire the shared record `record` (GRA-298): the
+   * host's decision, refused as `brain.not_found` (alike for one they
+   * can't see and one that isn't theirs to retire).
+   */
+  mayRetire: (
+    reader: C,
+    record: {
+      scope: "team" | "company" | "session";
+      scopeId: string | null;
+      ownerId: string;
+    }
+  ) => Promise<void>;
   /** Payloads (payloads.ts), in a bucket whose jurisdiction the host set. */
   blobs: BlobStore;
   /**

@@ -9,7 +9,7 @@ import { runEngine } from "../workflows/engine.ts";
 import { noteProvenance, readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { authorize } from "./app-entries.ts";
-import { mayPublish } from "./memory-publish.ts";
+import { mayPublish, mayRetire } from "./memory-publish.ts";
 import { recallKey, requireRecall } from "./recall-grants.ts";
 import { checkWrite } from "./write-rules.ts";
 
@@ -36,6 +36,9 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
   },
   mayPublish: async (reader, target, refs) => {
     await mayPublish(env, reader, target, refs);
+  },
+  mayRetire: async (reader, record) => {
+    await mayRetire(reader, record);
   },
   recall: {
     require: async (reader) => {

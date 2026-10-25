@@ -17,6 +17,7 @@ import {
   memoriesListInputSchema,
   memoriesProposeChangeInputSchema,
   memoriesPublishInputSchema,
+  memoriesRetireInputSchema,
   receiptsGetInputSchema,
   rememberInputSchema,
 } from "./contract.ts";
@@ -798,13 +799,14 @@ export const turnMemoryLimits = { records: 20, chars: 4000 } as const;
 /**
  * The records `audience` may read, newest first, within `limits`: the
  * accepted ones of its scopes, and an owner's own proposed records, which
- * they wrote themselves. Retired records never.
+ * they wrote themselves. Retired records never. Each with whose it is, for
+ * the host to say who wrote one that isn't the reader's.
  */
 export const memoriesFor = async <C>(
   { db }: Brain<C>,
   audience: MemoryAudience,
   limits: { records: number; chars: number } = turnMemoryLimits
-): Promise<MemoryRecord[]> => {
+): Promise<(MemoryRecord & { ownerId: string })[]> => {
   const scopes = [
     audience.owners.length === 0
       ? undefined
@@ -842,13 +844,13 @@ export const memoriesFor = async <C>(
     .where(and(or(...scopes), ne(brainMemories.state, "retired")))
     .orderBy(desc(brainMemories.recordedAt), desc(brainMemories.id))
     .limit(limits.records);
-  const kept: MemoryRecord[] = [];
+  const kept: (MemoryRecord & { ownerId: string })[] = [];
   let chars = 0;
   for (const row of rows) {
     // One too long for what is left is passed over; older ones may fit.
     if (chars + row.statement.length <= limits.chars) {
       chars += row.statement.length;
-      kept.push(recordOf(row));
+      kept.push({ ...recordOf(row), ownerId: row.ownerId });
     }
   }
   return kept;
@@ -903,7 +905,7 @@ const storeCommand = async <C>(
     now: Date;
     resourceRefs: BrainSourceRef[];
     condition: SQL;
-    writes: (stored: SQL) => readonly BatchItem<"sqlite">[];
+    writes: (stored: SQL, receiptId: string) => readonly BatchItem<"sqlite">[];
   }
 ): Promise<CommandReceipt | undefined> => {
   const { db } = brain;
@@ -929,7 +931,7 @@ const storeCommand = async <C>(
           sql`SELECT ${receipt.id}, ${receipt.keyHash}, ${receipt.caller}, ${receipt.operation}, ${receipt.requestHash}, ${receipt.status}, ${receipt.indexingState}, ${receipt.resourceRefs}, ${receipt.createdAt.getTime()}, ${receipt.retentionUntil.getTime()} WHERE ${withinBound(caller, now)} AND ${command.condition}`
         )
         .returning({ id: brainReceipts.id }),
-      ...command.writes(receiptStored(receipt.id)),
+      ...command.writes(receiptStored(receipt.id), receipt.id),
     ]);
   } catch (error) {
     const raced = await keptReceipt(brain, keyHash, now);
@@ -938,7 +940,13 @@ const storeCommand = async <C>(
     }
     throw error;
   }
-  return stored.length === 0 ? undefined : receiptOf({ ...receipt });
+  if (stored.length === 0) {
+    // A call with the same key committed first and changed what this one
+    // was conditional on: answer as its retry.
+    const raced = await keptReceipt(brain, keyHash, now);
+    return raced === undefined ? undefined : replayed(raced, requestHash);
+  }
+  return receiptOf({ ...receipt });
 };
 
 /**
@@ -1002,7 +1010,7 @@ export const memoriesPublish = async <C>(
       { kind: "memory", memoryId: memoryIdSchema.parse(memoryId), revision: 1 },
     ],
     condition: sql`1`,
-    writes: (stored) => [
+    writes: (stored, receiptId) => [
       db
         .insert(brainMemories)
         .select(
@@ -1015,7 +1023,12 @@ export const memoriesPublish = async <C>(
           action: "knowledge.memory.published",
           target: { type: "memory", id: memoryId },
           provenance: refIds(sourceRefs),
-          detail: { kind: request.kind, scope: request.scope },
+          detail: {
+            kind: request.kind,
+            scope: request.scope,
+            scopeId,
+            receipt: receiptId,
+          },
         },
         stored
       ),
@@ -1145,6 +1158,117 @@ export const memoriesProposeChange = async <C>(
   });
   if (receipt === undefined) {
     // Changed meanwhile, or past the bound: say which.
+    const stillLive = await db
+      .select({ id: brainMemories.id })
+      .from(brainMemories)
+      .where(live)
+      .get();
+    throw brainErrors.create(
+      stillLive === undefined
+        ? "brain.revision_conflict"
+        : "brain.budget_exceeded"
+    );
+  }
+  return receipt;
+};
+
+/**
+ * Retires one of the shared records (GRA-298): a team's, the company's or
+ * a chat's, by whoever the host lets (`mayRetire`: its publisher or an
+ * admin). It is kept, retired, so its history stays, and never reaches a
+ * prompt again. Retry-safe under `options`' key; a stale revision is
+ * `brain.revision_conflict`.
+ */
+export const memoriesRetire = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown,
+  options: unknown
+): Promise<CommandReceipt> => {
+  const callerId = brain.ports.ownerOf(reader);
+  const { memoryId } = brainErrors.parse(
+    "brain.invalid",
+    memoriesRetireInputSchema,
+    input
+  );
+  const { idempotencyKey, expectedRevision } = brainErrors.parse(
+    "brain.invalid",
+    changeOptionsSchema,
+    options
+  );
+  const caller = callerKey(callerId);
+  const { keyHash, requestHash } = await commandKeys(
+    brain,
+    caller,
+    "memories.retire",
+    idempotencyKey,
+    [memoryId, expectedRevision]
+  );
+  const now = brain.ports.clock();
+  const kept = await keptReceipt(brain, keyHash, now);
+  if (kept !== undefined) {
+    return replayed(kept, requestHash);
+  }
+  const { db } = brain;
+  const row = await db
+    .select()
+    .from(brainMemories)
+    .where(eq(brainMemories.id, memoryId))
+    .get();
+  if (row === undefined || row.scope === "person") {
+    throw brainErrors.create("brain.not_found");
+  }
+  await brain.ports.mayRetire(reader, {
+    scope: row.scope,
+    scopeId: row.scopeId,
+    ownerId: row.ownerId,
+  });
+  if (row.revision !== expectedRevision || row.state === "retired") {
+    throw brainErrors.create("brain.revision_conflict");
+  }
+  await requireWithinBound(brain, caller, now);
+  const live = and(
+    eq(brainMemories.id, memoryId),
+    eq(brainMemories.revision, expectedRevision),
+    ne(brainMemories.state, "retired")
+  );
+  const receipt = await storeCommand(brain, {
+    caller,
+    operation: "memories.retire",
+    keyHash,
+    requestHash,
+    now,
+    resourceRefs: [
+      {
+        kind: "memory",
+        memoryId: memoryIdSchema.parse(memoryId),
+        revision: expectedRevision,
+      },
+    ],
+    condition: sql`EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${live})`,
+    writes: (stored, receiptId) => [
+      db
+        .update(brainMemories)
+        .set({ state: "retired", updatedAt: now })
+        .where(and(live, stored)),
+      outboxedWhere(
+        brain,
+        {
+          actor: brain.ports.actorOf(reader),
+          action: "knowledge.memory.retired",
+          target: { type: "memory", id: memoryId },
+          detail: {
+            scope: row.scope,
+            scopeId: row.scopeId,
+            revision: expectedRevision,
+            receipt: receiptId,
+          },
+        },
+        stored
+      ),
+    ],
+  });
+  if (receipt === undefined) {
     const stillLive = await db
       .select({ id: brainMemories.id })
       .from(brainMemories)

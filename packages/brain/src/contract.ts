@@ -299,7 +299,12 @@ export type CommandStatus = z.infer<typeof commandStatusSchema>;
 export const commandReceiptSchema = z.strictObject({
   id: brainReceiptIdSchema,
   contractVersion: z.literal(brainContractVersion),
-  operation: z.enum(["remember", "memories.proposeChange", "memories.publish"]),
+  operation: z.enum([
+    "remember",
+    "memories.proposeChange",
+    "memories.publish",
+    "memories.retire",
+  ]),
   /** The validated request's hash, which a retry must match. */
   requestHash: z.string().min(1),
   status: commandStatusSchema,
@@ -401,6 +406,12 @@ export const memoriesPublishInputSchema = z
   );
 export type MemoriesPublishInput = z.input<typeof memoriesPublishInputSchema>;
 
+/** A shared record to retire (GRA-298): by its publisher or an admin. */
+export const memoriesRetireInputSchema = z.strictObject({
+  memoryId: memoryIdSchema,
+});
+export type MemoriesRetireInput = z.input<typeof memoriesRetireInputSchema>;
+
 // --- operations and errors --------------------------------------------------
 
 /**
@@ -416,6 +427,7 @@ export const brainOperationSchema = z.enum([
   "memories.list",
   "memories.proposeChange",
   "memories.publish",
+  "memories.retire",
 ]);
 export type BrainOperation = z.infer<typeof brainOperationSchema>;
 
@@ -427,6 +439,7 @@ export const brainOperations = {
   "memories.list": "query",
   "memories.proposeChange": "mutation",
   "memories.publish": "mutation",
+  "memories.retire": "mutation",
 } as const satisfies Record<BrainOperation, "query" | "mutation" | "action">;
 
 /**
