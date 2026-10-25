@@ -33,6 +33,8 @@ const appAt = (status: AppStatus): App & { pendingVersion: number } => ({
   name: "Invoices",
   description: "",
   owner: "user-1",
+  responsible: "user-1",
+  audience: null,
   blueprint: null,
   currentVersion: 1,
   pendingVersion: 2,

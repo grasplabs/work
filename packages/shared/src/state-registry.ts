@@ -257,6 +257,7 @@ const coreDb: D1State = {
     apps: exported(`${core}apps.ts`),
     access_revocations: exported(`${core}access-revocations.ts`),
     app_members: exported(`${core}app-access.ts`),
+    app_integrations: exported(`${core}app-integrations.ts`),
     screen_artifacts: exported(`${core}screen-trust.ts`),
     screen_builds: cache(`${core}screen-builds.ts`),
     build_receipts: cache(
