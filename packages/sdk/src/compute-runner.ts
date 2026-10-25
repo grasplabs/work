@@ -236,7 +236,7 @@ const resourceOf = (
     };
   }
   if (kind === "knowledge") {
-    // Both methods; the host refuses one the use didn't declare.
+    // Every method; the host refuses one the use didn't declare.
     return {
       // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
       search: (request: unknown) =>
@@ -254,6 +254,17 @@ const resourceOf = (
         callHost(alias, {
           operation: "read",
           arguments: { id: exportOf(request, "id") },
+        }),
+      // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+      recall: (request: unknown) =>
+        callHost(alias, {
+          operation: "recall",
+          arguments: {
+            query: exportOf(request, "query"),
+            ...(exportOf(request, "budget") === undefined
+              ? {}
+              : { budget: exportOf(request, "budget") }),
+          },
         }),
     };
   }

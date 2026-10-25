@@ -439,6 +439,26 @@ export const readerActor = (reader: Reader): AuditActor =>
     : delegateActorOf(reader.authority);
 
 /**
+ * Where a delegate read, for its read's audit event: every chat's agent
+ * and every App is the organization's, so which chat or run read
+ * (GRA-1067: a run's reads, a recall among them, are recorded with it).
+ */
+const readIn = (
+  reader: Reader
+): { chat: string } | { run: string } | Record<string, never> => {
+  if (reader.type !== "delegate") {
+    return {};
+  }
+  const { context } = reader;
+  if (context.type === "chat") {
+    return { chat: context.chatId };
+  }
+  return context.type === "run" || context.type === "workflowRun"
+    ? { run: context.runId }
+    : {};
+};
+
+/**
  * Knowledge's `onRead` port (ports.ts): notes where what `reader` read came from, `sources` (a collection, or
  * those a search found something in; none when it found nothing), and
  * returns the read's provenance. Call it after the read and before handing
@@ -487,11 +507,7 @@ export const noteProvenance = async (
     provenance: [
       ...new Set([...provenance.collectionIds, ...documentIds]),
     ].slice(0, auditProvenanceMaxItems),
-    // Every chat's agent is the organization's: which chat read.
-    detail:
-      reader.type === "delegate" && reader.context.type === "chat"
-        ? { ...detail, sensitive, chat: reader.context.chatId }
-        : { ...detail, sensitive },
+    detail: { ...detail, sensitive, ...readIn(reader) },
   });
   return provenance;
 };

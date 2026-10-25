@@ -40,6 +40,7 @@ import {
   callTemplate,
   requireKnowledgeRequest,
 } from "./resource-reads.ts";
+import type { KnowledgeCall } from "./resource-reads.ts";
 import { callFiles, requireFilesArguments } from "./run-files.ts";
 import type { FilesCallOperation } from "./run-files.ts";
 
@@ -142,10 +143,10 @@ export type BuiltCall =
       readonly maxOutputTokens?: Json;
     }
   | {
-      /** A Knowledge collection's search or read, by an action (GRA-700). */
+      /** A Knowledge collection's search, read or recall, by an action (GRA-700). */
       readonly name: "grasp.knowledge";
       readonly binding: string;
-      readonly operation: "search" | "read";
+      readonly operation: KnowledgeCall["operation"];
       readonly arguments: Json;
     }
   | {

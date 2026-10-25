@@ -1,3 +1,5 @@
+import { brainErrors } from "@grasp-os/brain/contract";
+import { recall } from "@grasp-os/brain/recall";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { connectErrors } from "@grasp-os/shared/connect";
@@ -6,13 +8,19 @@ import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema, isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { identifierSchema } from "@grasp-os/shared/ids";
-import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
+import type {
+  AppId,
+  PermissionId,
+  RunId,
+  WorkflowId,
+} from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
@@ -65,9 +73,11 @@ import type {
   DecisionOutcome,
   DecisionRecipient,
 } from "../decisions/decisions.ts";
+import { readAsDelegate } from "../knowledge/binding.ts";
 import type { CollectionBinding } from "../knowledge/binding.ts";
+import { brainOf } from "../knowledge/ports.ts";
 import { models } from "../models.ts";
-import { requireActivePerson } from "../permissions.ts";
+import { authorize, requireActivePerson } from "../permissions.ts";
 import type { StepModel } from "../resource-bindings.ts";
 import { tokensOfBound } from "../resource-model.ts";
 import { commitStepStatistics } from "../statistic-steps.ts";
@@ -149,6 +159,11 @@ export interface HostedRun {
   collections: Record<string, Fetcher<CollectionBinding>>;
   /** Its connection permissions, by binding name (`runBindingsFor`). */
   connections: Record<string, ConnectionGrant>;
+  /**
+   * The names its `brain` permissions bind the Brain by, each with its
+   * permission (`runBindingsFor`).
+   */
+  brains: Readonly<Record<string, PermissionId>>;
   /**
    * The bindings its workflow calls, by step, as the review of its version
    * shows them (`app_versions.workflow_calls`).
@@ -2368,6 +2383,8 @@ export class RunHost extends RpcTarget {
           await this.#callCollection(attempt, binding, method, args),
         callConnection: async (binding, call) =>
           await this.#callConnection(attempt, binding, call),
+        callBrain: async (binding, request) =>
+          await this.#callBrain(attempt, binding, request),
         callFunction: async (reference, input) =>
           await this.#callFunction(attempt, reference, input),
         openDecision: async (request) =>
@@ -2666,6 +2683,67 @@ export class RunHost extends RpcTarget {
           throw workflowErrors.create("workflow.invalid");
         }
       }
+    });
+  }
+
+  /**
+   * Recalls from the Brain through the run's Brain binding (`binding`,
+   * `brain(env.BRAIN).recall(request)`), only inside a step whose code its
+   * review shows calling it (`#requireReviewed`), as the run: its App on
+   * behalf of its person, under the App's collection grants and `brain`
+   * permission as they are now (GRA-1067; the threat model is on the
+   * issue). The same service and checks as every caller's recall: the
+   * Brain refuses without the `brain` grant (`brain.denied`), and a filter
+   * naming a collection the run may not read (`brain.not_found`); what it
+   * read is recorded with the run (knowledge/access.ts, `noteProvenance`).
+   */
+  async #callBrain(
+    attempt: StepAttempt,
+    binding: unknown,
+    request: unknown
+  ): Promise<Settled<unknown>> {
+    return await settle(async () => {
+      this.#requireUntampered();
+      await this.#requireCurrent(attempt, "brain");
+      const { brains, authority } = this.#run;
+      const name = checked(z.string(), binding);
+      const permissionId = Object.hasOwn(brains, name)
+        ? brains[name]
+        : undefined;
+      if (permissionId === undefined) {
+        throw workflowErrors.create("workflow.invalid");
+      }
+      await this.#requireReviewed(attempt, name);
+      await this.#requireCurrent(attempt, name);
+      const context = {
+        type: "run",
+        appId: this.#run.app,
+        runId: this.#run.runId,
+      } as const;
+      // Under this binding's own permission, read now: one revoked stops
+      // its name, though another `brain` permission of the App's holds.
+      try {
+        await authorize(
+          this.#env,
+          authority,
+          { type: "platform" },
+          "brain",
+          permissionId,
+          context
+        );
+      } catch (error) {
+        if (permissionErrors.codeOf(error) === "permission.denied") {
+          throw brainErrors.create("brain.denied");
+        }
+        throw error;
+      }
+      return await readAsDelegate(
+        this.#env,
+        authority,
+        context,
+        undefined,
+        async (reader) => await recall(brainOf(this.#env), reader, request)
+      );
     });
   }
 

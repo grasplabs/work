@@ -141,11 +141,14 @@ const nameOf = (node: Node): string | undefined => {
   return typeof literal === "string" ? literal : undefined;
 };
 
-/** The SDK's typed stub of the App's bindings, which takes `env`. */
-type Stub = "appFunctions";
+/**
+ * The SDK's typed stubs of the App's bindings: `appFunctions`, which takes
+ * `env`, and `brain`, which takes the Brain's binding, `env.NAME`.
+ */
+type Stub = "appFunctions" | "brain";
 
 const isStub = (name: string | undefined): name is Stub =>
-  name === "appFunctions";
+  name === "appFunctions" || name === "brain";
 
 /** Names the workflow function binds for its steps and parameters. */
 interface Bindings {
@@ -170,7 +173,7 @@ const contextHint =
 const parametersHint =
   "The workflow function takes `step` and its context, without default values or computed names";
 const envHint = (env: string): string =>
-  `Call the App's bindings as \`${env}.NAME.method(…)\` or \`appFunctions(${env}).query(…)\`; don't keep \`${env}\`, a binding or a stub in a variable or pass it on`;
+  `Call the App's bindings as \`${env}.NAME.method(…)\`, \`appFunctions(${env}).query(…)\` or \`brain(${env}.NAME).recall(…)\`; don't keep \`${env}\`, a binding or a stub in a variable or pass it on`;
 const stepHint =
   "Call the App's bindings in the step's own function, not between steps or in a function inside it (loop with `for...of` there)";
 
@@ -362,6 +365,17 @@ const envCallOf = (
   }
   if (parent?.node.type !== "MemberExpression" || !isObjectOfMember(parent)) {
     return undefined;
+  }
+  if (isStubArgument(bindings, ancestors.at(-2), "brain")) {
+    // `brain(env.NAME).recall(…)`: the Brain's binding by its name, a
+    // recall its only call.
+    const member = ancestors.at(-3)?.node;
+    return !parent.node.computed &&
+      isMethodCalled(ancestors.slice(0, -2)) &&
+      member?.type === "MemberExpression" &&
+      nameOf(member.property) === "recall"
+      ? nameOf(parent.node.property)
+      : undefined;
   }
   return isMethodCalled(ancestors.slice(0, -1))
     ? nameOf(parent.node.property)

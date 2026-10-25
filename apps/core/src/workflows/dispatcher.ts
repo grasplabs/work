@@ -284,7 +284,7 @@ const runWorkflow = async (
   const waking = { open: true };
   const result = await settledRun(async () => {
     const authority = await authorityOf(env, row);
-    const { bindings, connections } = await runBindingsFor(
+    const { bindings, connections, brains } = await runBindingsFor(
       env,
       authority,
       contextOf(pinned.app, runId)
@@ -307,6 +307,7 @@ const runWorkflow = async (
       shareSubject: await admissionSubjectOf(env, row),
       collections: bindings,
       connections,
+      brains,
       calls: await callsFor(env, pinned),
     };
     // Read on every load, though only the run's first uses them: after
@@ -370,6 +371,7 @@ const runWorkflow = async (
         input: event.payload,
         collections: Object.keys(bindings),
         connections: Object.keys(connections),
+        brains: Object.keys(brains),
       });
     } catch (error) {
       return await afterCpuKill(error, calls);

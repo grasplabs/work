@@ -145,6 +145,29 @@ const searchesOrReads = lookModule(`if (args.doc.startsWith("search:")) {
     const found = await ctx.resources.docs.read({ id: args.doc });
     return { status: found.title };`);
 
+/**
+ * Recalls "leave" from the collection through the Brain (GRA-1067),
+ * answering the headings its evidence cites.
+ */
+const recalls = lookModule(
+  `const pack = await ctx.resources.docs.recall({ query: "leave" });
+    return { status: JSON.stringify(pack.items.map(({ citationLocator }) => citationLocator[0] ?? "")) };`,
+  '[resource.knowledge("docs", { operations: ["recall"] }), resource.template("letter")]'
+);
+
+/** The workflow's `brain` permission, granted by `admin`. */
+const brainOf = async (
+  by: Identity,
+  admin: Identity,
+  workflowId: string
+): Promise<string> =>
+  await granted(by, admin, {
+    subject: { type: "workflow", workflowId },
+    object: { type: "platform" },
+    actions: ["brain"],
+    binding: `BRAIN_${unique().toUpperCase().replaceAll("-", "_")}`,
+  });
+
 /** A definition of `name` calling action `look`, after `before`. */
 const definitionOf = (
   name: string,
@@ -732,5 +755,71 @@ describe("a workflow action's knowledge and template uses", () => {
         expect.stringContaining("binding.unknown_use"),
       ]);
     }
+  });
+
+  it("recall their one collection through the Brain only while the workflow holds the brain permission, and stop once it is revoked", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const allowed = await readingWorkflow(ada, admin, recalls);
+    await brainOf(ada, admin, allowed.workflow.id);
+    const allowedRun = await started(
+      ada,
+      allowed.workflow.id,
+      allowed.documents.leave
+    );
+    const allowedEnd = await ended(ada, allowed.workflow.id, allowedRun);
+    const withoutBrain = await readingWorkflow(ada, admin, recalls);
+    const withoutBrainEnd = await ended(
+      ada,
+      withoutBrain.workflow.id,
+      await started(ada, withoutBrain.workflow.id, withoutBrain.documents.leave)
+    );
+    const revoked = await readingWorkflow(ada, admin, recalls, {
+      before: [hold],
+    });
+    const brainGrant = await brainOf(ada, admin, revoked.workflow.id);
+    const revokedRun = await started(
+      ada,
+      revoked.workflow.id,
+      revoked.documents.leave
+    );
+    await revokePermission(env, admin, brainGrant);
+    const revokedEnd = await ended(ada, revoked.workflow.id, revokedRun);
+    // A sensitive collection's evidence never reaches a run that isn't
+    // restricted, as its search's doesn't.
+    const sensitive = await readingWorkflow(ada, admin, recalls, {
+      sensitive: true,
+    });
+    await brainOf(ada, admin, sensitive.workflow.id);
+    const sensitiveEnd = await ended(
+      ada,
+      sensitive.workflow.id,
+      await started(ada, sensitive.workflow.id, sensitive.documents.leave)
+    );
+    const events = await allEvents();
+    expect({
+      allowed: allowedEnd,
+      recorded: events.some(
+        ({ action, detail }) =>
+          action === "knowledge.search" &&
+          detail.via === "recall" &&
+          detail.run === allowedRun
+      ),
+      withoutBrain: withoutBrainEnd,
+      revoked: revokedEnd,
+      sensitive: sensitiveEnd,
+    }).toStrictEqual({
+      // The bound collection's evidence alone, though another holds
+      // "leave" too.
+      allowed: {
+        status: "completed",
+        output: { status: JSON.stringify(["Leave"]) },
+      },
+      recorded: true,
+      withoutBrain: { status: "failed", code: "brain.denied" },
+      revoked: { status: "failed", code: "brain.denied" },
+      // Refused as the Brain refuses: the run may not have it.
+      sensitive: { status: "failed", code: "brain.denied" },
+    });
   });
 });

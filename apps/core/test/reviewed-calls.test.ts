@@ -199,6 +199,7 @@ const hostHeldTo = async (
       authority,
       collections: {},
       connections,
+      brains: {},
       calls,
     },
     hooks

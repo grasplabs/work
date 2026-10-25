@@ -797,6 +797,7 @@ server.listen(socket, () => {
       "callModel",
       "callCollection",
       "callConnection",
+      "callBrain",
       "callFunction",
       "openDecision",
       "decisionRecipients",

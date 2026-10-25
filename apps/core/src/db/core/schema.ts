@@ -948,7 +948,7 @@ export const appVersions = sqliteTable(
      * previous release writes gets none (the default).
      */
     workflowBindings: text("workflow_bindings", { mode: "json" })
-      .$type<Record<string, "connection" | "collection">>()
+      .$type<Record<string, "connection" | "collection" | "brain">>()
       .notNull()
       .default(sql`'{}'`),
   },

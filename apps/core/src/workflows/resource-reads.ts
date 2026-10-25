@@ -1,3 +1,5 @@
+import { recallInputSchema } from "@grasp-os/brain/contract";
+import { recall } from "@grasp-os/brain/recall";
 import { documents } from "@grasp-os/brain/schema";
 import { search } from "@grasp-os/brain/search";
 import { read } from "@grasp-os/brain/tools";
@@ -43,6 +45,13 @@ import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 // - A template other than the one approved. A binding pins one version by
 //   its content's hash; content that no longer hashes to it serves
 //   nothing (`resource.unavailable`).
+// - A recall wider than the binding, or without the Brain (GRA-1067; the
+//   threat model is on the issue). A recall is the Brain's own, the same
+//   service as every caller's: over the binding's one collection, under
+//   its one permission, as the run, and only while the workflow holds the
+//   `brain` permission (the recall port, `brain.denied`); a filter naming
+//   another collection is refused as one that isn't there
+//   (`brain.not_found`). What it read is recorded with the run.
 
 /** What a search asks: text, as Knowledge takes it, and how many hits. */
 const searchSchema = z.strictObject({
@@ -53,6 +62,9 @@ const searchSchema = z.strictObject({
 /** What a read asks: one document, by its ID. */
 const readSchema = z.strictObject({ id: z.string().min(1).max(256) });
 
+/** What a recall asks: the Brain's recall input, over the binding's collection. */
+const recallSchema = recallInputSchema;
+
 /** How many hits a search answers when it doesn't say. */
 const defaultHits = 20;
 
@@ -61,7 +73,7 @@ const callInvalid = (issue: string) =>
 
 /** A knowledge call, as an action asks it: an operation and its request. */
 export interface KnowledgeCall {
-  readonly operation: "search" | "read";
+  readonly operation: "search" | "read" | "recall";
   readonly arguments: Json;
 }
 
@@ -166,14 +178,38 @@ const document = async (
 };
 
 /**
- * What knowledge call `call` asks, checked: a search's text and limit, or
- * a read's document ID (`workflow.call_invalid` otherwise).
+ * The Brain's recall over the bound collection, as the run, under the
+ * binding's permission: the same recall as every caller's, as JSON.
+ */
+const recalled = async (
+  env: Env,
+  run: CallingRun,
+  bound: { permissionId: PermissionId; collectionId: CollectionId },
+  request: z.infer<typeof recallSchema>
+): Promise<Json> => {
+  const pack = await readAsDelegate(
+    env,
+    runAuthority(run),
+    runContext(run),
+    bound.permissionId,
+    async (reader) =>
+      await recall(brainOf(env), reader, request, [bound.collectionId])
+  );
+  // A memory pack is plain data: what the contract's schemas parse.
+  return z.json().parse(pack);
+};
+
+/**
+ * What knowledge call `call` asks, checked: a search's text and limit, a
+ * read's document ID, or a recall's input (`workflow.call_invalid`
+ * otherwise).
  */
 export const requireKnowledgeRequest = (
   call: KnowledgeCall
 ):
   | { operation: "search"; request: z.infer<typeof searchSchema> }
-  | { operation: "read"; request: z.infer<typeof readSchema> } => {
+  | { operation: "read"; request: z.infer<typeof readSchema> }
+  | { operation: "recall"; request: z.infer<typeof recallSchema> } => {
   if (call.operation === "search") {
     const request = searchSchema.safeParse(call.arguments);
     if (!request.success) {
@@ -182,6 +218,15 @@ export const requireKnowledgeRequest = (
       );
     }
     return { operation: "search", request: request.data };
+  }
+  if (call.operation === "recall") {
+    const request = recallSchema.safeParse(call.arguments);
+    if (!request.success) {
+      throw callInvalid(
+        `arguments: Give a query of 1 to ${knowledgeSearchMaxLength} characters, and a budget if any.`
+      );
+    }
+    return { operation: "recall", request: request.data };
   }
   const request = readSchema.safeParse(call.arguments);
   if (!request.success) {
@@ -206,9 +251,20 @@ export const callKnowledge = async (
   }
   const bound = await boundCollection(env, run, target.permissionId);
   const request = requireKnowledgeRequest(call);
-  return request.operation === "search"
-    ? await searched(env, run, bound, request.request)
-    : await document(env, run, bound, request.request);
+  switch (request.operation) {
+    case "search": {
+      return await searched(env, run, bound, request.request);
+    }
+    case "recall": {
+      return await recalled(env, run, bound, request.request);
+    }
+    case "read": {
+      return await document(env, run, bound, request.request);
+    }
+    default: {
+      throw workflowResourceErrors.create("workflow.call_denied");
+    }
+  }
 };
 
 /**
