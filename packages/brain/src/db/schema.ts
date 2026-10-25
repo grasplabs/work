@@ -427,3 +427,87 @@ export const brainReceipts = sqliteTable(
     index("brain_receipts_caller_idx").on(table.caller, table.createdAt),
   ]
 );
+
+/**
+ * Settled task outcomes a host recorded through its runtime API
+ * (../outcomes.ts `recordOutcome`): one row per learning event, its ID the
+ * host's, derived from what settled, so a delivery made twice is one row.
+ * Identifiers and states only, never what the task read, wrote or said:
+ * `evidence_refs` point at the host's own execution records, which stay
+ * where they are, and `evidence_id` names the one whose erasure erases
+ * the event (`eraseOutcomes`). Only production work is kept: the runtime
+ * API refuses evaluation, test and learning-job events.
+ */
+export const brainEpisodes = sqliteTable(
+  "brain_episodes",
+  {
+    /** The host's event ID. */
+    id: text().primaryKey(),
+    /** The host's boundary the event settled at, such as `workflow.run`. */
+    source: text().notNull(),
+    /** The host's sequence of the event's capture on `source`. */
+    sourceSeq: integer("source_seq").notNull(),
+    /** User ID of the person whose experience it is. */
+    ownerId: text("owner_id").notNull(),
+    /** Who may learn from it, as the host set it. */
+    scope: text({ enum: ["person", "session", "team", "company"] }).notNull(),
+    /**
+     * For a `session` event, the host's audience it is for (a chat others
+     * share), whose members at the time are `brain_episode_members`: a
+     * reader reaches it only while among both (../outcomes.ts).
+     */
+    audience: text(),
+    /** The host's name for the kind of task, such as an App's workflow. */
+    taskType: text("task_type").notNull(),
+    /** How the execution ended, as the host's own records say. */
+    execution: text({ enum: ["completed", "failed", "cancelled"] }).notNull(),
+    /** Whether the task did what it was for, as far as verified. */
+    result: text({ enum: ["success", "failure", "unknown"] }).notNull(),
+    /** The host's execution record whose erasure erases this event. */
+    evidenceId: text("evidence_id").notNull(),
+    /** JSON array of references to the host's execution records. */
+    evidenceRefs: text("evidence_refs").notNull(),
+    /** JSON array of the versions the task ran on. */
+    versionRefs: text("version_refs").notNull(),
+    occurredAt: timestamp("occurred_at").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    // A personal purge's delete by owner, and a person's events by time.
+    index("brain_episodes_owner_idx").on(table.ownerId, table.occurredAt),
+    // Erasing the events of an execution record (`eraseOutcomes`).
+    index("brain_episodes_evidence_idx").on(table.evidenceId),
+  ]
+);
+
+/**
+ * Who a `session` event is for: its audience's members when it was
+ * recorded, exactly. Goes with its event; a personal purge takes its
+ * person out.
+ */
+export const brainEpisodeMembers = sqliteTable(
+  "brain_episode_members",
+  {
+    episodeId: text("episode_id")
+      .notNull()
+      .references(() => brainEpisodes.id, { onDelete: "cascade" }),
+    /** User ID. */
+    userId: text("user_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.episodeId, table.userId] }),
+    // A reader's events, and a personal purge's delete by person.
+    index("brain_episode_members_user_idx").on(table.userId),
+  ]
+);
+
+/**
+ * How far each host boundary's deliveries reached: the highest capture
+ * sequence recorded from it. Only grows, whatever order deliveries land
+ * in; what the host still owes is its own backlog of capture intents.
+ */
+export const brainCaptureCursors = sqliteTable("brain_capture_cursors", {
+  source: text().primaryKey(),
+  seq: integer().notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});

@@ -349,6 +349,43 @@ export const auditOutbox = sqliteTable("audit_outbox", {
 });
 
 /**
+ * Settled turns' outcomes still owed to the Brain (src/brain-capture.ts),
+ * each written in the same transaction as the turn's last message, so a
+ * turn never settles without its capture. `facts` is what the turn's end
+ * said (how it ended, its model, its answer), identifiers only; the
+ * object delivers the rest from the chat when it delivers. Deleted once
+ * the Brain has it, or once its chat is deleted; one the Brain refused for
+ * good stays `dead`. `seq` only grows (AUTOINCREMENT): the Brain's cursor
+ * of this object's turns.
+ */
+export const brainCaptureIntents = sqliteTable(
+  "brain_capture_intents",
+  {
+    seq: integer().primaryKey({ autoIncrement: true }),
+    eventId: text("event_id").notNull(),
+    /** The chat the outcome rests on. */
+    evidenceId: text("evidence_id").notNull(),
+    /** JSON: the turn's end, as `brain-capture.ts` reads it. */
+    facts: text().notNull(),
+    state: text({ enum: ["pending", "dead"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer().notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("brain_capture_intents_event_idx").on(table.eventId),
+    index("brain_capture_intents_evidence_idx").on(table.evidenceId),
+    index("brain_capture_intents_state_idx").on(
+      table.state,
+      table.attempts,
+      table.seq
+    ),
+  ]
+);
+
+/**
  * What a chat was started with, besides its question: for now, the
  * failure report of the workflow run the person asked its agent to fix
  * (`chats.fixRun` in chats-rpc.ts), as JSON. Its agent reads it through

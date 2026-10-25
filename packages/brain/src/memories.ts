@@ -40,6 +40,7 @@ import { toHex } from "./encoding.ts";
 import { brainReceiptIdSchema, memoryIdSchema } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
 import type { Json } from "./json.ts";
+import { forgetPersonOutcomes } from "./outcomes.ts";
 import { asWord, termsOf } from "./search.ts";
 
 // The Brain's memory commands (GRA-297; the Brain design's "Brain SDK and
@@ -118,13 +119,15 @@ const keyed = async <C>(
 const refsSchema = z.array(brainSourceRefSchema);
 
 /**
- * The statements that delete `userId`'s records and receipts, for a
+ * The statements that delete `userId`'s records and receipts, and the
+ * task outcomes recorded as their experience (outcomes.ts), for a
  * personal purge's batch (purge.ts), which records the audit event.
  */
 export const forgetPerson = (db: DrizzleD1Database, userId: string) =>
   [
     db.delete(brainMemories).where(eq(brainMemories.ownerId, userId)),
     db.delete(brainReceipts).where(eq(brainReceipts.caller, callerKey(userId))),
+    ...forgetPersonOutcomes(db, userId),
   ] as const;
 
 /** How many records and receipts `forgetPerson` deletes. */

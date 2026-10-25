@@ -6,7 +6,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { brainEventOf, drainKnowledgeOutboxSoon } from "../audit-outbox.ts";
 import { derivedHmacKey } from "../derived-keys.ts";
 import { runEngine } from "../workflows/engine.ts";
-import { noteProvenance, readerActor } from "./access.ts";
+import { audiencesOf, noteProvenance, readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { authorize } from "./app-entries.ts";
 import {
@@ -32,6 +32,7 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
   onRead: async (reader, record, ...sources) =>
     await noteProvenance(env, reader, record, ...sources),
   actorOf: readerActor,
+  audiences: async (reader) => await audiencesOf(env, reader),
   ownerOf: (reader) => {
     if (reader.type !== "person") {
       throw brainErrors.create("brain.denied");
