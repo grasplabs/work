@@ -257,6 +257,12 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
 
 00:00:06.000 --> 00:00:07.000
 <v # Injected>hi [[[Secret]]] and [[Plan]]
+
+00:00:08.000 --> 00:00:09.000
+<v Grasp>Spaced &#8203; out
+
+99999999999999999999:00:00.000 --> 99999999999999999999:00:01.000
+<v Grasp>Far past any recording.
 `
     );
     const opened = await openedOf(owner.api, upload.documentId);
@@ -282,13 +288,15 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       links: links?.n,
     }).toStrictEqual({
       status: "ready",
-      speakers: ["L".repeat(200), "AnnelA", "# Injected"],
+      speakers: ["L".repeat(200), "AnnelA", "# Injected", "Grasp"],
+      // The cue past what a time can be exactly is left out, the rest kept.
       texts: [
         "A voice past the limit.",
         "Ends before it starts.",
         "hi [[[Secret]]] and [[Plan]]",
+        "Spaced out",
       ],
-      at: ["0:01", "0:05", "0:06"],
+      at: ["0:01", "0:05", "0:06", "0:08"],
       headings: [],
       links: 0,
     });

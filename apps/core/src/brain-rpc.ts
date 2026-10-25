@@ -761,6 +761,19 @@ const onboardingHeld = async (env: Env): Promise<OnboardingHeld> => {
   };
 };
 
+/**
+ * The brain's teams as `brain.read` gives them `person`: the onboarding's
+ * (the roster's, for an admin) with what the records added, then the
+ * records' own. What `brain.transcript` names a team's interviews' speaker
+ * by, so both name it alike.
+ */
+const brainTeams = async (
+  env: Env,
+  person: Identity,
+  records: HeldRecords
+): Promise<Team[]> =>
+  teamsOf(onboardingTeams(await onboardingFacts(env, person)), records);
+
 /** The brain's workspace, as `person` may read it. */
 export const readBrain = async (
   env: Env,
@@ -860,7 +873,13 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
   async transcript(sourceId: unknown): Promise<Transcript | null> {
     return await withPerson(
       this.#check,
-      async (person) => await brainTranscript(this.#env, person, sourceId)
+      async (person) =>
+        await brainTranscript(
+          this.#env,
+          person,
+          sourceId,
+          async (records) => await brainTeams(this.#env, person, records)
+        )
     );
   }
 

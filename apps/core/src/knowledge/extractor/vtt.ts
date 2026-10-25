@@ -52,9 +52,17 @@ const whitespace = /\s+/gu;
 const invisible = /[\p{Cc}\p{Cf}]/gu;
 const openBracket = /\[/gu;
 
-/** Text as one plain line: no invisible characters, single spaces. */
+/**
+ * Text as one plain line: no invisible characters, single spaces. Line
+ * breaks become spaces first (they are control characters too), then the
+ * invisible ones go, then runs of spaces close up.
+ */
 const plainOf = (text: string): string =>
-  text.replaceAll(whitespace, " ").replaceAll(invisible, "").trim();
+  text
+    .replaceAll(whitespace, " ")
+    .replaceAll(invisible, "")
+    .replaceAll(whitespace, " ")
+    .trim();
 
 /** `text` cut to at most `max` UTF-16 code units, never inside a character. */
 const clipped = (text: string, max: number): string => {
@@ -111,14 +119,20 @@ const placeOf = (ms: number): string => {
 /**
  * A cue's turn: its voice, its words on one line, and its times, an end
  * before its start (which the parser lets through) taken as the start.
+ * None for a cue past what a time in milliseconds can be exactly (a
+ * timestamp of twenty hour digits): it is left out, the rest kept.
  */
-const turnOf = (cue: WebVTTCue): VttTurn => {
+const turnOf = (cue: WebVTTCue): VttTurn | undefined => {
   const startMs = Math.round(cue.startTime * msPerSecond);
+  const endMs = Math.max(startMs, Math.round(cue.endTime * msPerSecond));
+  if (!Number.isSafeInteger(startMs) || !Number.isSafeInteger(endMs)) {
+    return undefined;
+  }
   return {
     speaker: voiceOf(cue.tree.children),
     text: plainOf(wordsOf(cue.tree.children)),
     startMs,
-    endMs: Math.max(startMs, Math.round(cue.endTime * msPerSecond)),
+    endMs,
   };
 };
 
@@ -150,7 +164,7 @@ export const vttExtraction = (bytes: Uint8Array): VttExtraction => {
   for (const cue of cues) {
     const turn = turnOf(cue);
     const last = turns.at(-1);
-    if (turn.text === "") {
+    if (turn === undefined || turn.text === "") {
       continue;
     }
     if (

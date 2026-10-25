@@ -6,7 +6,12 @@ import {
   brainTranscriptSourcesMax,
   sourceIdSchema,
 } from "@grasp-os/shared/brain";
-import type { Source, Statement, Transcript } from "@grasp-os/shared/brain";
+import type {
+  Source,
+  Statement,
+  Team,
+  Transcript,
+} from "@grasp-os/shared/brain";
 import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
 import { documentIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -14,6 +19,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { readBrainRecords } from "./brain-records.ts";
+import type { HeldRecords } from "./brain-records.ts";
 import { brainOf } from "./knowledge/ports.ts";
 
 // The brain's sources' transcripts: `brain.read` (brain-rpc.ts) says only
@@ -181,12 +187,18 @@ const interviewTranscript = (
  * when the source has none, isn't one they may read, or isn't a source.
  * A Knowledge document's through the Brain (its `authorize` and `onRead`
  * ports); a team's interviews' from their admitted statements, which every
- * reader of the brain reads, its opening recorded.
+ * reader of the brain reads, its opening recorded, spoken by the team as
+ * `teamsOf` names it: `brain.read`'s own teams for `person`, so the
+ * transcript names the team the page does (a roster team by the roster,
+ * for an admin).
  */
 export const brainTranscript = async (
   env: Env,
   person: Identity,
-  sourceId: unknown
+  sourceId: unknown,
+  teamsOf: (
+    records: HeldRecords
+  ) => Promise<readonly Pick<Team, "id" | "name">[]>
 ): Promise<Transcript | null> => {
   const id = brainErrors.parse("brain.invalid", sourceIdSchema, sourceId);
   if (id.startsWith(knowledgeSourcePrefix)) {
@@ -206,9 +218,14 @@ export const brainTranscript = async (
   if (!isTeamInterviews(id)) {
     return null;
   }
-  const { statements, teams } = await readBrainRecords(env);
+  const records = await readBrainRecords(env);
+  const { statements } = records;
   const [teamId] =
     statements.find(({ sourceId: of }) => of === id)?.teamIds ?? [];
+  if (teamId === undefined) {
+    return null;
+  }
+  const teams = await teamsOf(records);
   const team = teams.find(({ id: of }) => of === teamId)?.name ?? "";
   const transcript = interviewTranscript({ id }, statements, team);
   if (transcript === undefined) {

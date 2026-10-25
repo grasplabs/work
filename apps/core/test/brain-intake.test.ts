@@ -14,6 +14,7 @@ import {
   kept,
   mapped,
   othersTold,
+  rosterOf,
   team,
   ticketsReply,
   told,
@@ -483,6 +484,47 @@ describe(
           read: "auth.unauthenticated",
           opened: "auth.unauthenticated",
         },
+      });
+
+      // The admin renames the roster team: their brain names it by the
+      // roster, a member's by its record, and each transcript's speaker is
+      // the team as that reader's brain names it.
+      const renamed = rosterOf(ids, [
+        "lea",
+        "max",
+        "mia",
+        "mo",
+        "noor",
+        "pim",
+        "rik",
+      ]);
+      await store.saveRoster(
+        {
+          ...renamed,
+          teams: renamed.teams.map((each) => ({ ...each, name: "Support" })),
+        },
+        { type: "system" }
+      );
+      const speakerFor = async (api: SessionApi) => {
+        const brain = await api.brain.read();
+        const source = brain.sources.find(
+          ({ teamIds }) => teamIds?.includes(teamId) === true
+        );
+        const transcript =
+          source === undefined ? null : await api.brain.transcript(source.id);
+        return {
+          team: brain.teams.find(({ id }) => id === teamId)?.name,
+          speakers: [
+            ...new Set(transcript?.turns.map(({ speaker }) => speaker)),
+          ],
+        };
+      };
+      expect({
+        admin: await speakerFor(admin.api),
+        member: await speakerFor(member.api),
+      }).toStrictEqual({
+        admin: { team: "Support", speakers: ["Support"] },
+        member: { team: "Ops", speakers: ["Ops"] },
       });
     });
 
