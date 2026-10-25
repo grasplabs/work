@@ -523,6 +523,85 @@ describe("a document's transcript", () => {
     });
   });
 
+  it("never brings back a term a transcript-only purge took out when a purge that saves a version read the transcript before it", async () => {
+    const { brain } = testHost();
+    const notes = await newCollection(brain, "Notes");
+    const inTranscript = word();
+    const inBoth = word();
+    // `inBoth` is in the text too, so its purge saves a new version that
+    // carries the transcript it read; `inTranscript` is only in the
+    // transcript, so its purge rewrites it where it stands.
+    const call = await save(
+      brain,
+      notes,
+      "call.md",
+      `# Call\n${inBoth} spoke.`,
+      {
+        transcript: meeting(inTranscript, inBoth),
+      }
+    );
+    const admin = writerOf("admin");
+    const purgeOf = async (term: string) => {
+      const input = {
+        type: "content" as const,
+        documentIds: [call.id],
+        terms: [term],
+        reason: "erasure_request" as const,
+      };
+      const plan = await preparePurge(brain, admin, input, noCopies);
+      return await purge(brain, admin, input, plan.token, noCopies);
+    };
+    // The version-saving purge reads, then waits at its save while the
+    // transcript-only purge runs to the end.
+    const batch = brain.db.batch.bind(brain.db);
+    const atSave = Promise.withResolvers<null>();
+    const otherDone = Promise.withResolvers<null>();
+    const spy = vi
+      .spyOn(brain.db, "batch")
+      .mockImplementation(async (statements) => {
+        if (
+          statements.some((statement) =>
+            sqlOf(statement).startsWith('insert into "versions"')
+          )
+        ) {
+          atSave.resolve(null);
+          await otherDone.promise;
+        }
+        return await batch(statements);
+      });
+    let saving: string;
+    let other: Awaited<ReturnType<typeof purgeOf>>;
+    try {
+      const running = outcome(purgeOf(inBoth));
+      await atSave.promise;
+      spy.mockImplementation(async (statements) => await batch(statements));
+      other = await purgeOf(inTranscript);
+      otherDone.resolve(null);
+      saving = await running;
+    } finally {
+      spy.mockRestore();
+    }
+    const afterRace = {
+      inTranscript: await storedHolds(inTranscript),
+      inBoth: await storedHolds(inBoth),
+    };
+    // The one that lost failed as a conflict; run again, it finishes.
+    const again = await purgeOf(inBoth);
+    expect({
+      other: other.stillFound,
+      saving,
+      afterRace,
+      again: again.stillFound,
+      stored: await storedHolds(inTranscript, inBoth),
+    }).toStrictEqual({
+      other: 0,
+      saving: "knowledge.conflict",
+      afterRace: { inTranscript: false, inBoth: true },
+      again: 0,
+      stored: false,
+    });
+  });
+
   it("is recorded by counts and documents only: no event holds a speaker or a word", async () => {
     const { brain, events, reads } = testHost();
     const notes = await newCollection(brain, "Notes");

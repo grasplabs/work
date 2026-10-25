@@ -1550,7 +1550,7 @@ const purgeDocument = async <C>(
     // Kept with the version the purge saves, its terms removed: a save
     // without one would take it away.
     ...(transcript?.version === at
-      ? { purgedTranscript: transcript.redacted }
+      ? { purgedTranscript: transcript.redacted, transcriptRead: transcript.at }
       : {}),
   });
   return counts;

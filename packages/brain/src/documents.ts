@@ -60,9 +60,11 @@ import {
   hasTranscript,
   transcriptDetail,
   transcriptSchema,
+  isTranscriptMoved,
+  transcriptUnmoved,
   transcriptWrites,
 } from "./transcripts.ts";
-import type { Transcript } from "./transcripts.ts";
+import type { ReadAt, Transcript } from "./transcripts.ts";
 
 // Saving a document: its frontmatter is read and checked (and a memory
 // file's size, memory-files.ts), its Markdown split into sections and its
@@ -403,6 +405,12 @@ export interface Write {
    * limits, so it isn't checked against them again.
    */
   purgedTranscript?: Transcript;
+  /**
+   * With `purgedTranscript`: the transcript as the purge read it. The save
+   * fails with `knowledge.conflict` when it is no longer so, as another
+   * purge changed it meanwhile (`transcriptUnmoved`).
+   */
+  transcriptRead?: ReadAt;
 }
 
 /**
@@ -547,6 +555,9 @@ export const writeVersion = async <C>(
       restoredFrom,
       createdAt: now,
     }),
+    ...(write.transcriptRead === undefined
+      ? []
+      : [transcriptUnmoved(db, documentId, write.transcriptRead)]),
     ...transcriptWrites(
       brain,
       by.actor,
@@ -585,7 +596,7 @@ export const writeVersion = async <C>(
     try {
       await auditedBatch(brain.ports, db, [document, ...statements(staged)]);
     } catch (error) {
-      if (isUniqueViolation(error)) {
+      if (isUniqueViolation(error) || isTranscriptMoved(error)) {
         throw conflict(await findByPath(db, collection.id, path));
       }
       throw error;

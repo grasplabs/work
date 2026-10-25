@@ -270,6 +270,31 @@ export const storedFormOf = (
 });
 
 /**
+ * A statement that refuses its batch (NOT NULL) when the document's
+ * transcript is no longer exactly as it was read (`at`): a purge's save of
+ * a new version, which carries the transcript it rewrote, never writes it
+ * over one another purge changed meanwhile, which would put back what that
+ * one took out. The save then fails as a conflict (documents.ts).
+ */
+export const transcriptUnmoved = (
+  db: DrizzleD1Database,
+  documentId: string,
+  at: ReadAt
+) =>
+  db
+    .update(transcripts)
+    .set({
+      turns: sql`CASE WHEN ${transcripts.version} = ${at.version} AND ${transcripts.turns} = ${at.turns} AND ${transcripts.chapters} = ${at.chapters} THEN ${transcripts.turns} ELSE NULL END`,
+    })
+    .where(eq(transcripts.documentId, documentId));
+
+/** Whether `error` is a batch `transcriptUnmoved` refused. */
+export const isTranscriptMoved = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error.message.includes("NOT NULL constraint failed: transcripts.turns") ||
+    isTranscriptMoved(error.cause));
+
+/**
  * Replaces a document's transcript where it stands, only while it is
  * still exactly as it was read (`at`): a content purge's rewrite when no
  * version's text changed but the transcript did. A save, or another
