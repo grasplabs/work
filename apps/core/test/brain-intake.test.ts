@@ -800,7 +800,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     ).not.toContain(orphan);
   });
 
-  it("shows members and admins the team's claims, and Grasp's staff none", async () => {
+  it("shows members, admins and Grasp's staff the team's claims", async () => {
     const ids = await drawnTeam();
     await intake(ids);
     const member = await signedInApi(idp, "user");
@@ -813,7 +813,8 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       member: ["Tickets come in through Zendesk."],
       admin: ["Tickets come in through Zendesk."],
-      staff: [],
+      // Staff read what admins read (Nick, 2026-10-25).
+      staff: ["Tickets come in through Zendesk."],
     });
   });
 
@@ -1335,90 +1336,23 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("gives Grasp's staff only its numbers, and members its words", async () => {
+  it("gives Grasp's staff the drawing as admins read it", async () => {
     const ids = await givenWith(fiveToldReply);
-    const member = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
     const staff = await asStaff();
-    const read = await ticketsDrawingFor(member.api, ids);
-    expect({
-      member: read.steps,
-      staff: await ticketsDrawingFor(staff, ids),
-    }).toStrictEqual({
-      member: ["Open the ticket.", "Send the answer."],
-      staff: {
-        baseline: [],
-        starts: "",
-        steps: [],
-        details: [],
-        minutes: [],
-        waits: [],
-        decides: "",
-        own: "",
-        open: [],
-        people: 6,
-        volumes: [5],
-        takes: 5,
-        wrong: 5,
-      },
-    });
+    await expect(ticketsDrawingFor(staff, ids)).resolves.toStrictEqual(
+      await ticketsDrawingFor(admin.api, ids)
+    );
   });
 });
 
-/** Every string `value` holds, with the key it is under: an array's items under the array's key. */
-const stringsIn = (
-  value: unknown,
-  key = ""
-): { key: string; text: string }[] => {
-  if (typeof value === "string") {
-    return [{ key, text: value }];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((each) => stringsIn(each, key));
-  }
-  return typeof value === "object" && value !== null
-    ? Object.entries(value).flatMap(([name, each]) => stringsIn(each, name))
-    : [];
-};
-
-/**
- * The keys staff may read a string under: ids, dates and the fixed values
- * a count is read by. Never a name, a title, a question, an answer or a
- * word of what anyone said.
- */
-const numbersOnlyKeys = new Set([
-  "id",
-  "sourceId",
-  "teamId",
-  "teamIds",
-  "inviteTeamIds",
-  "date",
-  "kind",
-  "status",
-  "state",
-  "per",
-  "of",
-  "basis",
-  "unit",
-]);
-
 describe("the brain as Grasp's staff read it", { timeout: 120_000 }, () => {
-  it("holds no string but ids, dates and the fixed values its counts are read by, whatever members read", async () => {
+  it("is the brain as an admin reads it: staff are admins, and read what admins read", async () => {
     await givenWith(fiveToldReply);
-    const member = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
     const staff = await asStaff();
-    const worded = (brain: Workspace) =>
-      stringsIn(brain).filter(
-        ({ key, text }) => text !== "" && !numbersOnlyKeys.has(key)
-      );
-    const memberWords = worded(await member.api.brain.read());
-    expect({
-      // Members read the team's name, its claim and the drawing's words.
-      member: [
-        "Ops",
-        "Tickets come in through Zendesk.",
-        "Open the ticket.",
-      ].every((text) => memberWords.some((each) => each.text === text)),
-      staff: worded(await staff.brain.read()),
-    }).toStrictEqual({ member: true, staff: [] });
+    await expect(staff.brain.read()).resolves.toStrictEqual(
+      await admin.api.brain.read()
+    );
   });
 });
