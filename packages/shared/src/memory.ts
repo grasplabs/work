@@ -72,9 +72,22 @@ export interface MemoryFile {
 }
 
 /** The memory for one context, assembled. */
+/** A Brain memory record a context got (GRA-298), without its text. */
+export interface MemoryRecordRef {
+  id: string;
+  revision: number;
+  kind: "fact" | "experience" | "lesson" | "preference";
+  scope: "person" | "session" | "team" | "company";
+}
+
 export interface Memory {
   /** The files it holds, in the order `text` has them. */
   files: MemoryFile[];
+  /**
+   * The Brain's memory records its audience may read (GRA-298), newest
+   * first, after the files in `text`.
+   */
+  records: MemoryRecordRef[];
   /**
    * Every file in its own `<memory>` block, company files first, so the
    * part shared by many contexts comes first and stays the same. Empty

@@ -351,8 +351,22 @@ export const brainMemories = sqliteTable(
     }).notNull(),
     recordedAt: timestamp("recorded_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
+    /**
+     * Whose scope the record is in (GRA-298): its owner's user ID for
+     * `person`, a team's ID for `team`, a chat's ID for `session`, none for
+     * `company`. A read takes the scope keys the host compiled for its
+     * audience; the Brain never takes a scope from a caller.
+     */
+    scopeId: text("scope_id"),
   },
   (table) => [
+    // The records of a scope, newest first: what a turn's memory reads,
+    // one scope key at a time (memories.ts, `memoriesFor`).
+    index("brain_memories_scope_idx").on(
+      table.scope,
+      table.scopeId,
+      table.recordedAt
+    ),
     // A person's records, newest first, of one kind or all, paged by
     // `(recorded_at, id)` (memories.ts): each index ends in the cursor's
     // order, so a page is a range scan. The first also serves a personal

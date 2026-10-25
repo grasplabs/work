@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gt, lt, lte, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -21,6 +21,7 @@ import type {
   MemoryPage,
   MemoryRecord,
 } from "./contract.ts";
+import { inList } from "./db/d1.ts";
 import {
   brainMemories,
   brainReceipts,
@@ -564,7 +565,7 @@ export const remember = async <C>(
       db
         .insert(brainMemories)
         .select(
-          sql`SELECT ${memoryId}, 1, 'person', ${ownerId}, ${request.kind}, ${request.text}, ${JSON.stringify(sourceRefs)}, 'proposed', 'pending', ${now.getTime()}, ${now.getTime()} WHERE ${receiptStored(receiptId)}`
+          sql`SELECT ${memoryId}, 1, 'person', ${ownerId}, ${request.kind}, ${request.text}, ${JSON.stringify(sourceRefs)}, 'proposed', 'pending', ${now.getTime()}, ${now.getTime()}, ${ownerId} WHERE ${receiptStored(receiptId)}`
         ),
       outboxedWhere(
         brain,
@@ -769,4 +770,81 @@ export const memoriesList = async <C>(
         ? await writeCursor(brain, scope, last)
         : null,
   };
+};
+
+/**
+ * Who a read of memory serves (GRA-298), as the host compiles it from the
+ * requester, the context and its output audience: the scopes it may read,
+ * each by key. The Brain applies it as given and widens nothing: a person's
+ * records only for the owners named, a team's only for the teams named,
+ * the company's only when `company` holds, a session's only for the
+ * sessions named.
+ */
+export interface MemoryAudience {
+  owners: readonly string[];
+  teams: readonly string[];
+  company: boolean;
+  sessions: readonly string[];
+}
+
+/** Most records a turn's memory takes, and most characters of them. */
+export const turnMemoryLimits = { records: 20, chars: 4000 } as const;
+
+/**
+ * The records `audience` may read, newest first, within `limits`: the
+ * accepted ones of its scopes, and an owner's own proposed records, which
+ * they wrote themselves. Retired records never.
+ */
+export const memoriesFor = async <C>(
+  { db }: Brain<C>,
+  audience: MemoryAudience,
+  limits: { records: number; chars: number } = turnMemoryLimits
+): Promise<MemoryRecord[]> => {
+  const scopes = [
+    audience.owners.length === 0
+      ? undefined
+      : and(
+          eq(brainMemories.scope, "person"),
+          inList(brainMemories.scopeId, audience.owners)
+        ),
+    audience.teams.length === 0
+      ? undefined
+      : and(
+          eq(brainMemories.scope, "team"),
+          inList(brainMemories.scopeId, audience.teams),
+          eq(brainMemories.state, "accepted")
+        ),
+    audience.company
+      ? and(
+          eq(brainMemories.scope, "company"),
+          eq(brainMemories.state, "accepted")
+        )
+      : undefined,
+    audience.sessions.length === 0
+      ? undefined
+      : and(
+          eq(brainMemories.scope, "session"),
+          inList(brainMemories.scopeId, audience.sessions),
+          eq(brainMemories.state, "accepted")
+        ),
+  ].filter((scope) => scope !== undefined);
+  if (scopes.length === 0) {
+    return [];
+  }
+  const rows = await db
+    .select()
+    .from(brainMemories)
+    .where(and(or(...scopes), ne(brainMemories.state, "retired")))
+    .orderBy(desc(brainMemories.recordedAt), desc(brainMemories.id))
+    .limit(limits.records);
+  const kept: MemoryRecord[] = [];
+  let chars = 0;
+  for (const row of rows) {
+    // One too long for what is left is passed over; older ones may fit.
+    if (chars + row.statement.length <= limits.chars) {
+      chars += row.statement.length;
+      kept.push(recordOf(row));
+    }
+  }
+  return kept;
 };
