@@ -245,29 +245,15 @@ const askedOf = (table: string, terms: readonly string[]): string =>
   );
 
 /**
- * One pass's matches, each with its score and the score of the section's
- * own headings and text alone, lower first: minus the weight of every
- * column each of the query's words is in. Never BM25: its weights count a
- * word over every row of the index, sections of collections the reader
- * can't read too, so the order of a reader's own results would tell them
- * how often a word is in those (GRA-1083). A row's score is its own words
- * alone: each lookup finds the rows holding a word, and no count over
- * other rows reaches it.
+ * One pass's matches: the rows holding the query's words as the pass asks
+ * for them, unscored. Only the matches a reader may read are scored
+ * (`scoreSql`), so a narrow search never scores sections of collections it
+ * doesn't search, nor sections that don't hold the whole query.
  */
-const matchesSql = ({ table, pass, match, terms, short }: Pass): SQL => {
+const matchesSql = ({ table, pass, match, short }: Pass): SQL => {
   const name = sql.identifier(table);
-  return sql`SELECT matched.rowid AS row_id, ${pass} AS pass,
-      -coalesce(scored.score, 0) AS score,
-      -coalesce(scored.own, 0) AS own
+  return sql`SELECT matched.rowid AS row_id, ${pass} AS pass
     FROM ${name} AS matched
-    LEFT JOIN (
-      SELECT ${name}.rowid AS id,
-        sum(json_extract(asked.value, '$[1]')) AS score,
-        sum(json_extract(asked.value, '$[2]')) AS own
-      FROM json_each(${askedOf(table, terms)}) AS asked, ${name}
-      WHERE ${name} MATCH json_extract(asked.value, '$[0]')
-      GROUP BY ${name}.rowid
-    ) AS scored ON scored.id = matched.rowid
     WHERE matched.${name} MATCH ${match}
     ${
       short === undefined
@@ -276,6 +262,37 @@ const matchesSql = ({ table, pass, match, terms, short }: Pass): SQL => {
             SELECT rowid FROM search_words WHERE search_words MATCH ${short}
           )`
     }`;
+};
+
+/** Which of `askedOf`'s weights a score sums: the row's, or its own headings and text alone. */
+const weightAt = { score: 1, own: 2 } as const;
+
+/**
+ * The score of the row `found.row_id` in the pass `found.pass` found it
+ * in, lower first: minus the weight of every column each of the query's
+ * words is in (`weight`: the whole row's, or its own headings and text
+ * alone). Never BM25: its weights count a word over every row of the
+ * index, sections of collections the reader can't read too, so the order
+ * of a reader's own results would tell them how often a word is in those
+ * (GRA-1083). A row's score is its own words alone: each lookup asks
+ * whether this one row holds a word in a column, and no count over other
+ * rows reaches it.
+ */
+const scoreSql = (
+  passes: readonly Pass[],
+  weight: keyof typeof weightAt
+): SQL => {
+  const at = sql.raw(`'$[${weightAt[weight]}]'`);
+  const cases = passes.map(({ table, pass, terms }) => {
+    const name = sql.identifier(table);
+    return sql`WHEN ${pass} THEN (
+      SELECT coalesce(sum(json_extract(asked.value, ${at})), 0)
+      FROM json_each(${askedOf(table, terms)}) AS asked, ${name}
+      WHERE ${name}.rowid = found.row_id
+        AND ${name} MATCH json_extract(asked.value, '$[0]')
+    )`;
+  });
+  return sql`-(CASE found.pass ${sql.join(cases, sql` `)} ELSE 0 END)`;
 };
 
 /**
@@ -432,15 +449,22 @@ const nearestCollections = async (
   const rows = await db.all(sql`
     WITH matches AS MATERIALIZED (
       ${sql.join(passes.map(matchesSql), sql` UNION ALL `)}
+    ),
+    found AS MATERIALIZED (
+      SELECT matches.row_id, min(matches.pass) AS pass,
+        collections.id AS collection_id
+      FROM matches
+      JOIN search_rows ON search_rows.id = matches.row_id
+      JOIN documents ON documents.id = search_rows.document_id
+      JOIN collections ON collections.id = documents.collection_id
+      WHERE ${allowed.documents()}
+      GROUP BY matches.row_id
     )
-    SELECT collections.id AS collectionId, min(matches.score) AS score
-    FROM matches
-    JOIN search_rows ON search_rows.id = matches.row_id
-    JOIN documents ON documents.id = search_rows.document_id
-    JOIN collections ON collections.id = documents.collection_id
-    WHERE ${allowed.documents()}
-    GROUP BY collections.id
-    ORDER BY score, collections.id
+    SELECT found.collection_id AS collectionId,
+      min(${scoreSql(passes, "score")}) AS score
+    FROM found
+    GROUP BY found.collection_id
+    ORDER BY score, found.collection_id
     LIMIT ${nearestCollectionsMax}
   `);
   return z
@@ -630,8 +654,8 @@ export const searchSections = async <C>(
   const rows = await db.all(sql`
     WITH matches AS (${sql.join(passes.map(matchesSql), sql` UNION ALL `)}),
     readable AS (
-      SELECT matches.row_id, matches.pass, matches.own, matches.score AS coverage,
-        matches.score * ${freshness} / ${lengthNorm} AS rank,
+      SELECT matches.row_id, matches.pass,
+        ${freshness} AS freshness, ${lengthNorm} AS length_norm,
         search_rows.document_id, search_rows.position,
         collections.id AS collection_id, collections.sensitive,
         row_number() OVER (PARTITION BY matches.row_id ORDER BY matches.pass) AS nth
@@ -656,6 +680,16 @@ export const searchSections = async <C>(
       WHERE nth = 1 AND (pass < ${typoPass}
         OR NOT EXISTS (SELECT 1 FROM readable WHERE pass < ${typoPass}))
     ),
+    -- Only now scored: the matches of the whole query the reader may read,
+    -- in what they searched.
+    scored AS (
+      SELECT found.*, ${scoreSql(passes, "score")} AS coverage,
+        ${scoreSql(passes, "own")} AS own
+      FROM found
+    ),
+    weighed AS (
+      SELECT *, coverage * freshness / length_norm AS rank FROM scored
+    ),
     ranked AS (
       SELECT *,
         row_number() OVER (
@@ -664,7 +698,7 @@ export const searchSections = async <C>(
         first_value(pass) OVER document AS document_pass,
         first_value(rank) OVER document AS document_rank,
         first_value(coverage) OVER document AS document_coverage
-      FROM found
+      FROM weighed
       WINDOW document AS (PARTITION BY document_id ORDER BY pass, coverage, rank)
     ),
     top AS (
