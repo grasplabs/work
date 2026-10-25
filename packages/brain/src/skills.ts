@@ -28,6 +28,7 @@ import {
 import { getDocument } from "./documents.ts";
 import { parseBaseFields, parseFrontmatter } from "./frontmatter.ts";
 import { collectionIdSchema, documentIdSchema } from "./ids.ts";
+import type { CollectionId } from "./ids.ts";
 import type { Provenance } from "./knowledge.ts";
 import { readPayload } from "./payloads.ts";
 import { asBrainError } from "./recall.ts";
@@ -53,7 +54,9 @@ import { asBrainError } from "./recall.ts";
 //   skill's own collection, or the collection it names, never by name
 //   across collections; a name twice there is ambiguous, never "the one
 //   the caller reads". `replaces` reaches a skill in the same collection,
-//   or, from a collection only admins write, a shipped skill.
+//   or, from a collection only admins write, a shipped skill. A skill
+//   there with a shipped skill's name takes its place without naming it:
+//   it is the client's adapted copy, which can't name itself.
 // - A missing prerequisite or dependency: each must be accepted and usable
 //   by the caller (a prerequisite: its own capabilities, prerequisites and
 //   dependencies in turn, never through a cycle), or that one
@@ -126,7 +129,12 @@ const manifestOf = (path: string, text: string): Parsed => {
 /**
  * Whether `text` at `path` is a skill's, by its own frontmatter: checked
  * as leniently as a purge reads it (`parseBaseFields`), so a skill whose
- * manifest a later release reads more narrowly is still one.
+ * manifest a later release reads more narrowly is still one. A version
+ * without a `type` is typed by its file name (`SKILL.md`), as every skill
+ * is that doesn't say it: the document's path is its every version's, as
+ * a save never changes it (documents.ts `writeVersion`). Should documents
+ * ever move, the path a version was saved at must be kept with it, and
+ * read here.
  */
 const isSkillText = (path: string, text: string): boolean => {
   try {
@@ -157,15 +165,22 @@ const manifestAt = async <C>(
 
 /**
  * The selectable skills `reader` may read, at their current versions, in a
- * fixed order: those in collections the host vouches for; undefined past
- * `skillsReadMax`.
+ * fixed order: those in collections the host vouches for, and of those
+ * only the ones in `within` when the caller is bound to some (none reads
+ * nothing); undefined past `skillsReadMax`.
  */
 const selectableSkills = async <C>(
   brain: Brain<C>,
-  reader: C
+  reader: C,
+  within: readonly CollectionId[] | undefined
 ): Promise<{ candidates: Candidate[]; read: number } | undefined> => {
   const { db } = brain;
+  if (within?.length === 0) {
+    return { candidates: [], read: 0 };
+  }
   const allowed = await allowedFor(brain.ports, reader);
+  const bound =
+    within === undefined ? undefined : inList(collections.id, within);
   // The collections holding skills the reader may read, vouched for first,
   // so only theirs are scanned: a collection anyone may fill with skills
   // never uses up the cap below and so never stops a selection.
@@ -178,7 +193,7 @@ const selectableSkills = async <C>(
     })
     .from(documents)
     .innerJoin(collections, eq(collections.id, documents.collectionId))
-    .where(and(eq(documents.type, "skill"), allowed.documents()))
+    .where(and(eq(documents.type, "skill"), allowed.documents(), bound))
     .limit(skillsScanMax + 1);
   if (held.length > skillsScanMax) {
     return undefined;
@@ -442,18 +457,30 @@ const mayReplace = (by: Candidate, target: Candidate): boolean =>
 
 /**
  * The skills `by` takes the place of: for each name in its `replaces`, the
- * one selectable skill of that name it may replace (`mayReplace`). A name
- * that is no skill, or more than one, replaces nothing: which one is meant
- * is ambiguous, and a replacement never settles an ambiguity.
+ * one selectable skill of that name it may replace (`mayReplace`); and,
+ * for an admins' skill, the one shipped skill of its own name, which it is
+ * the client's adapted copy of (and can't name itself). A name that is no
+ * skill, or more than one, replaces nothing: which one is meant is
+ * ambiguous, and a replacement never settles an ambiguity.
  */
-const replacedBy = (by: Candidate, all: readonly Candidate[]): Candidate[] =>
-  by.manifest.replaces.flatMap((name) => {
-    const named = all.filter(
-      (target) =>
-        target !== by && target.ref.name === name && mayReplace(by, target)
+const replacedBy = (by: Candidate, all: readonly Candidate[]): Candidate[] => {
+  const named = (name: string, may: (target: Candidate) => boolean) => {
+    const found = all.filter(
+      (target) => target !== by && target.ref.name === name && may(target)
     );
-    return named.length === 1 ? named : [];
-  });
+    return found.length === 1 ? found : [];
+  };
+  const copied =
+    by.authority === "admins"
+      ? named(by.ref.name, (target) => target.authority === "shipped")
+      : [];
+  return [
+    ...by.manifest.replaces.flatMap((name) =>
+      named(name, (target) => mayReplace(by, target))
+    ),
+    ...copied,
+  ];
+};
 
 /**
  * Each of the skills `relevant` to the task, with why it was or wasn't
@@ -526,13 +553,19 @@ const resultOf = (
  * version read, or an explicit no-skill result; recorded either way, with
  * where what it weighed came from (`provenance`), as a recall's sources,
  * for a host that keeps them with what the caller does next. Refused as
- * the Brain refuses a recall (`brain.denied` for a caller the host doesn't
- * let use the Brain, `brain.invalid` for a malformed task).
+ * the Brain refuses a recall (`brain.denied` for a caller the
+ * host doesn't let use the Brain, `brain.invalid` for a malformed task).
  */
 export const selectSkillWithSources = async <C>(
   brain: Brain<C>,
   reader: C,
-  input: unknown
+  input: unknown,
+  /**
+   * The only collections it may weigh skills of, for a caller bound to
+   * some, as a recall's `within`: an App's knowledge resource passes those
+   * it binds that its person may read (none weighs nothing).
+   */
+  within?: readonly CollectionId[]
 ): Promise<{ selection: SkillSelection; provenance: Provenance }> => {
   try {
     const { task } = brainErrors.parse(
@@ -543,7 +576,7 @@ export const selectSkillWithSources = async <C>(
     await brain.ports.recall.require(reader);
     const traits = new Set(task.traits);
     const held = new Set(await brain.ports.skills.capabilities(reader));
-    const selectable = await selectableSkills(brain, reader);
+    const selectable = await selectableSkills(brain, reader, within);
     const all = selectable?.candidates ?? [];
     const relevant = all.filter(({ manifest }) =>
       manifest.tasks.includes(task.type)
@@ -592,7 +625,7 @@ export const selectSkillWithSources = async <C>(
   }
 };
 
-/** `selectSkillWithSources`'s selection alone. */
+/** `selectSkillWithSources`'s selection, for a caller bound to no collections. */
 export const selectSkill = async <C>(
   brain: Brain<C>,
   reader: C,
@@ -612,7 +645,12 @@ export const selectSkill = async <C>(
 export const readSkillWithSources = async <C>(
   brain: Brain<C>,
   reader: C,
-  input: unknown
+  input: unknown,
+  /**
+   * The only collections it may read from, for a caller bound to some, as
+   * `selectSkillWithSources` takes them: a skill elsewhere isn't found.
+   */
+  within?: readonly CollectionId[]
 ): Promise<{ read: SkillRead; provenance: Provenance }> => {
   try {
     const { documentId, version } = brainErrors.parse(
@@ -621,6 +659,21 @@ export const readSkillWithSources = async <C>(
       input
     );
     await brain.ports.recall.require(reader);
+    if (within !== undefined) {
+      // Located before it is read, so a skill outside them is never read,
+      // nor recorded as read: not found, as one the reader can't see.
+      const located = await brain.db
+        .select({ collectionId: documents.collectionId })
+        .from(documents)
+        .where(eq(documents.id, documentId))
+        .get();
+      if (
+        located === undefined ||
+        !within.some((id) => id === located.collectionId)
+      ) {
+        throw brainErrors.create("brain.not_found");
+      }
+    }
     const read = await getDocument(brain, reader, documentId, version);
     // A skill at the pinned version itself, whatever the document is now:
     // a later version of another type leaves the pin readable, and an
@@ -647,7 +700,7 @@ export const readSkillWithSources = async <C>(
   }
 };
 
-/** `readSkillWithSources`'s read alone. */
+/** `readSkillWithSources`'s read, for a caller bound to no collections. */
 export const readSkill = async <C>(
   brain: Brain<C>,
   reader: C,

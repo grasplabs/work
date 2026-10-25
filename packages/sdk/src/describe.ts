@@ -340,6 +340,33 @@ const isMethodCalled = (ancestors: Ancestor[]): boolean => {
   );
 };
 
+/** The Brain's skill calls a run makes: `brain(env.NAME).skills.<name>(…)`. */
+const brainSkillCalls: ReadonlySet<string> = new Set(["select", "read"]);
+
+/**
+ * Whether `ancestors`, ending at `brain(env.NAME)`, call one of the Brain
+ * facade's methods a run has where it is written: `.recall(…)`, or
+ * `.skills.select(…)` or `.skills.read(…)`.
+ */
+const isBrainCall = (ancestors: Ancestor[]): boolean => {
+  const member = ancestors.at(-1)?.node;
+  if (member?.type !== "MemberExpression" || member.computed) {
+    return false;
+  }
+  if (nameOf(member.property) === "recall") {
+    return isMethodCalled(ancestors);
+  }
+  const method = ancestors.at(-2)?.node;
+  return (
+    nameOf(member.property) === "skills" &&
+    isObjectOfMember(ancestors.at(-1)) &&
+    method?.type === "MemberExpression" &&
+    !method.computed &&
+    brainSkillCalls.has(nameOf(method.property) ?? "") &&
+    isMethodCalled(ancestors.slice(0, -1))
+  );
+};
+
 /**
  * The binding a use of `env` calls, from the use's `ancestors`: `NAME` in
  * `env.NAME.method(…)`, `APP` in `appFunctions(env).query(…)` (or
@@ -367,13 +394,10 @@ const envCallOf = (
     return undefined;
   }
   if (isStubArgument(bindings, ancestors.at(-2), "brain")) {
-    // `brain(env.NAME).recall(…)`: the Brain's binding by its name, a
-    // recall its only call.
-    const member = ancestors.at(-3)?.node;
-    return !parent.node.computed &&
-      isMethodCalled(ancestors.slice(0, -2)) &&
-      member?.type === "MemberExpression" &&
-      nameOf(member.property) === "recall"
+    // `brain(env.NAME).recall(…)`, `.skills.select(…)` or
+    // `.skills.read(…)`: the Brain's binding by its name, those its only
+    // calls.
+    return !parent.node.computed && isBrainCall(ancestors.slice(0, -2))
       ? nameOf(parent.node.property)
       : undefined;
   }

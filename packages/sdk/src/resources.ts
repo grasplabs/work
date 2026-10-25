@@ -1,4 +1,10 @@
-import type { MemoryPack } from "@grasp-os/brain/contract";
+import type {
+  MemoryPack,
+  SkillRead,
+  SkillSelection,
+  SkillsReadInput,
+  SkillsSelectInput,
+} from "@grasp-os/brain/contract";
 import { originRefusal } from "@grasp-os/shared/app-link-limits";
 import type {
   GuestChat,
@@ -148,11 +154,25 @@ export interface ConnectorConfig<
 }
 
 /**
- * The knowledge operations an action may ask for. `recall` is the Brain's
- * (`brain.ts`): it answers only once an admin also grants the App the
- * Brain's permission.
+ * The knowledge operations an action may ask for. `recall`, `skillsSelect`
+ * and `skillsRead` are the Brain's (`brain.ts`): each answers only once an
+ * admin also grants the App the Brain's permission.
  */
-export type KnowledgeOperation = "search" | "read" | "recall";
+export type KnowledgeOperation =
+  | "search"
+  | "read"
+  | "recall"
+  | "skillsSelect"
+  | "skillsRead";
+
+/** Every knowledge operation, as a declaration names it. */
+const knowledgeOperations: readonly KnowledgeOperation[] = [
+  "search",
+  "read",
+  "recall",
+  "skillsSelect",
+  "skillsRead",
+];
 
 /** What a declaration's config may say about knowledge. */
 export interface KnowledgeConfig<
@@ -531,6 +551,29 @@ export type KnowledgeClient<Operations extends readonly KnowledgeOperation[]> =
           readonly recall: (
             request: ResourceRecallInput
           ) => Promise<MemoryPack>;
+        }
+      : unknown) &
+    ("skillsSelect" extends Operations[number]
+      ? {
+          /**
+           * The skill of the declared collections the person may read
+           * that applies to `request.task`, pinned at the version read,
+           * or an explicit no-skill result. Keep the pin for the task.
+           * Needs the Brain's permission too.
+           */
+          readonly skillsSelect: (
+            request: SkillsSelectInput
+          ) => Promise<SkillSelection>;
+        }
+      : unknown) &
+    ("skillsRead" extends Operations[number]
+      ? {
+          /**
+           * A skill of the declared collections at exactly the version a
+           * selection pinned, while the person may read it: its text is
+           * data. Needs the Brain's permission too.
+           */
+          readonly skillsRead: (request: SkillsReadInput) => Promise<SkillRead>;
         }
       : unknown);
 
@@ -1138,13 +1181,12 @@ export const resource = Object.freeze({
     config: KnowledgeConfig<Operations>
   ): KnowledgeResource<Alias, Operations> => {
     const checked = checkedConfig(config, ["operations", "collections"]);
-    const operations = checkedList(checked.operations, "operations", [
-      "search",
-      "read",
-      "recall",
-    ]).filter(
-      (operation): operation is KnowledgeOperation =>
-        operation === "search" || operation === "read" || operation === "recall"
+    const operations = checkedList(
+      checked.operations,
+      "operations",
+      knowledgeOperations
+    ).filter((operation): operation is KnowledgeOperation =>
+      knowledgeOperations.some((known) => known === operation)
     );
     // SAFETY: built from what was checked of the arguments the type is
     // inferred from: the alias given, and lists holding exactly the names

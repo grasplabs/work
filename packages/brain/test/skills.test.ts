@@ -4,8 +4,15 @@ import type { CollectionRow } from "../src/collections.ts";
 import { brainErrors } from "../src/contract.ts";
 import type { SkillSelection } from "../src/contract.ts";
 import { writeVersion } from "../src/documents.ts";
+import { collectionIdSchema } from "../src/ids.ts";
 import { knowledgeErrors } from "../src/knowledge.ts";
-import { readSkill, selectSkill, skillsReadMax } from "../src/skills.ts";
+import {
+  readSkill,
+  readSkillWithSources,
+  selectSkill,
+  selectSkillWithSources,
+  skillsReadMax,
+} from "../src/skills.ts";
 import type { Caller } from "./host.ts";
 import { newCollection, testHost, writerOf } from "./host.ts";
 
@@ -54,6 +61,18 @@ const summary = (selection: SkillSelection) => ({
   considered: Object.fromEntries(
     selection.considered.map(({ skill, outcome }) => [skill.name, outcome])
   ),
+});
+
+/** Where a selection's skill came from, or why none, with where each considered one is. */
+const where = (selection: SkillSelection) => ({
+  result:
+    selection.result.kind === "skill"
+      ? selection.result.skill.collectionId
+      : selection.result.reason,
+  considered: selection.considered.map((each) => [
+    each.skill.collectionId,
+    each.outcome,
+  ]),
 });
 
 /** The code `promise` refused with, or "ok". */
@@ -555,6 +574,87 @@ describe("who can make a skill selectable", () => {
     });
   });
 
+  it("lets an admins' copy of a shipped skill, under its name, take its place, and a team's never", async () => {
+    const shipped = await newCollection(brain, "Shipped skills", "shipped");
+    const company = await newCollection(brain, "Company skills");
+    const team = await newCollection(brain, "Team skills", "team");
+    await saved(shipped, "onboarding", "tasks: [onboard]");
+    await saved(team, "onboarding", "tasks: [onboard]\nstatus: accepted");
+    const teammate: Caller = { userId: "ann", reads: [shipped.id, team.id] };
+    const byTeam = await selectSkill(brain, teammate, {
+      task: { type: "onboard" },
+    });
+    // The company's adapted copy: the same name, which it can't name in
+    // `replaces`.
+    await saved(company, "onboarding", "tasks: [onboard]");
+    const everyone: Caller = {
+      userId: "bo",
+      reads: [shipped.id, company.id, team.id],
+    };
+
+    const byCompany = await selectSkill(brain, everyone, {
+      task: { type: "onboard" },
+    });
+
+    expect([where(byTeam), where(byCompany)]).toStrictEqual([
+      { result: shipped.id, considered: [[shipped.id, "selected"]] },
+      {
+        result: company.id,
+        considered: [
+          [company.id, "selected"],
+          [shipped.id, "replaced"],
+        ].toSorted(([a = ""], [b = ""]) => a.localeCompare(b)),
+      },
+    ]);
+  });
+
+  it("weighs and reads only skills in the collections a bound caller is bound to, and records no read outside them", async () => {
+    const bound = await newCollection(brain, "Bound skills");
+    const other = await newCollection(brain, "Other skills");
+    await saved(bound, "triage", "tasks: [triage]");
+    const elsewhere = await saved(other, "refund", "tasks: [refund]");
+    const caller: Caller = { userId: "cy", reads: [bound.id, other.id] };
+    const select = async (type: string, within: string[]) => {
+      const { selection, provenance } = await selectSkillWithSources(
+        brain,
+        caller,
+        { task: { type } },
+        within.map((id) => collectionIdSchema.parse(id))
+      );
+      return {
+        result:
+          selection.result.kind === "skill"
+            ? selection.result.skill.name
+            : selection.result.reason,
+        from: provenance.collectionIds,
+      };
+    };
+    const readsBefore = reads.length;
+    const outside = await outcome(
+      readSkillWithSources(
+        brain,
+        caller,
+        { documentId: elsewhere.id, version: 1 },
+        [collectionIdSchema.parse(bound.id)]
+      )
+    );
+    const readsAfterOutside = reads.length;
+
+    expect({
+      triage: await select("triage", [bound.id]),
+      refund: await select("refund", [bound.id]),
+      none: await select("triage", []),
+      outside,
+      recordedOutside: readsAfterOutside - readsBefore,
+    }).toStrictEqual({
+      triage: { result: "triage", from: [bound.id] },
+      refund: { result: "no_match", from: [bound.id] },
+      none: { result: "no_match", from: [] },
+      outside: "brain.not_found",
+      recordedOutside: 0,
+    });
+  });
+
   it("refuses a teammate's skill standing in for a company skill's dependency or prerequisite", async () => {
     const company = await newCollection(brain, "Company skills");
     const hidden = await newCollection(brain, "Admins' skills");
@@ -770,12 +870,14 @@ describe("who can make a skill selectable", () => {
           "review: ambiguous",
         ],
       },
+      // The company's own `base` is the shipped one's adapted copy and takes
+      // its place; `base-ours` still can't say which `base` it means.
       base: {
         result: "ambiguous",
         considered: [
           "base-ours: ambiguous",
           "base: ambiguous",
-          "base: ambiguous",
+          "base: replaced",
         ],
       },
       close: {
