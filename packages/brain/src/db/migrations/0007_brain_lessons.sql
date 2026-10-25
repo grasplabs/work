@@ -1,7 +1,15 @@
+CREATE TABLE `brain_consolidation_due` (
+	`scope_key` text PRIMARY KEY NOT NULL,
+	`scope` text NOT NULL,
+	`scope_id` text NOT NULL,
+	`since` integer NOT NULL,
+	`touched_at` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `brain_consolidation_due_since_idx` ON `brain_consolidation_due` (`since`);--> statement-breakpoint
 CREATE TABLE `brain_consolidation_marks` (
 	`scope_key` text PRIMARY KEY NOT NULL,
-	`recorded_at` integer NOT NULL,
-	`episode_id` text NOT NULL,
+	`seq` integer NOT NULL,
 	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
@@ -45,4 +53,12 @@ CREATE TABLE `brain_lessons` (
 	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `brain_lessons_group_idx` ON `brain_lessons` (`scope`,`scope_id`,`group_key`);
+CREATE UNIQUE INDEX `brain_lessons_group_idx` ON `brain_lessons` (`scope`,`scope_id`,`group_key`);--> statement-breakpoint
+CREATE TABLE `brain_sequences` (
+	`name` text PRIMARY KEY NOT NULL,
+	`value` integer NOT NULL
+);
+--> statement-breakpoint
+ALTER TABLE `brain_episodes` ADD `seq` integer;--> statement-breakpoint
+CREATE INDEX `brain_episodes_person_seq_idx` ON `brain_episodes` (`scope`,`owner_id`,`seq`);--> statement-breakpoint
+CREATE INDEX `brain_episodes_session_seq_idx` ON `brain_episodes` (`scope`,`audience`,`seq`);

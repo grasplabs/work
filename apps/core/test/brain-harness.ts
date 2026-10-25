@@ -343,10 +343,11 @@ const rowText = (row: unknown): string =>
  * calls and reads are recorded and drained, sign-in sessions as they are
  * checked and refreshed, signing keys as they are made when first needed,
  * SQLite's sequence counters, usage signals as they are computed, and how
- * far the Brain's background consolidation read each scope's episodes (a
- * watermark of IDs and times, moved by core's own job as a trial's turns
- * are captured; the lessons it writes stay watched). Not something a task
- * could ask to change.
+ * far the Brain's background consolidation read each scope's episodes,
+ * which scopes it is due in, and the counter that numbers captured events
+ * (IDs, times and counts, moved as a trial's turns are captured and by
+ * core's own job; the lessons it writes stay watched). Not something a
+ * task could ask to change.
  */
 const bookkeeping = new Set([
   "core.audit_outbox",
@@ -360,6 +361,8 @@ const bookkeeping = new Set([
   "core.improvement_signal_computations",
   "core.knowledge_signal_computations",
   "knowledge.brain_consolidation_marks",
+  "knowledge.brain_consolidation_due",
+  "knowledge.brain_sequences",
 ]);
 
 /**

@@ -486,6 +486,14 @@ const knowledgeDb: D1State = {
       `${brain}lessons.ts`,
       "How far consolidation read each scope's episodes."
     ),
+    brain_consolidation_due: exported(
+      `${brain}lessons.ts`,
+      "Scopes whose consolidation is due."
+    ),
+    brain_sequences: exported(
+      `${brain}outcomes.ts`,
+      "Counters numbering what the Brain records, in order."
+    ),
     brain_forgotten_people: exported(
       `${brain}outcomes.ts`,
       "Who a personal purge forgot, and when: late captures stay forgotten."

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, lt, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
@@ -7,6 +7,7 @@ import type { Brain } from "./brain.ts";
 import { brainErrors } from "./contract.ts";
 import { inList } from "./db/d1.ts";
 import {
+  brainConsolidationDue,
   brainConsolidationMarks,
   brainEpisodes,
   brainForgottenPeople,
@@ -18,7 +19,8 @@ import { toHex } from "./encoding.ts";
 import type { IndexStep, StepConfig } from "./indexing.ts";
 import type { Json } from "./json.ts";
 import { canonicalJson } from "./json.ts";
-import { lessonMinFailures } from "./lesson-orphans.ts";
+import { lessonMinFailures, scopeKeyOf } from "./lesson-orphans.ts";
+import type { ConsolidationScope } from "./lesson-orphans.ts";
 import { executionRefSchema } from "./outcomes.ts";
 
 // Lesson candidates (GRA-301; the Brain design's "Keep episodes and lessons
@@ -60,16 +62,8 @@ export const consolidationLimits = {
 /** The Brain's own, as its events name it. */
 const system: Json = { type: "system" };
 
-/** A scope consolidation reads, as episodes name it. */
-export interface ConsolidationScope {
-  scope: "person" | "session";
-  /** The owner's user ID for `person`, the audience's ID for `session`. */
-  scopeId: string;
-}
-
-/** A scope's key: its marks and its jobs are named by it. */
-export const scopeKeyOf = ({ scope, scopeId }: ConsolidationScope): string =>
-  `${scope}:${scopeId}`;
+export { scopeKeyOf } from "./lesson-orphans.ts";
+export type { ConsolidationScope } from "./lesson-orphans.ts";
 
 /** The episodes of `scope`, as a condition. */
 const inScope = ({ scope, scopeId }: ConsolidationScope): SQL | undefined =>
@@ -80,47 +74,25 @@ const inScope = ({ scope, scopeId }: ConsolidationScope): SQL | undefined =>
         eq(brainEpisodes.audience, scopeId)
       );
 
-/** The scope an episode is in. */
-const scopeOfEpisode = (row: {
-  scope: string;
-  ownerId: string;
-  audience: string | null;
-}): ConsolidationScope | undefined => {
-  if (row.scope === "person") {
-    return { scope: "person", scopeId: row.ownerId };
-  }
-  if (row.scope === "session" && row.audience !== null) {
-    return { scope: "session", scopeId: row.audience };
-  }
-  return undefined;
-};
-
-/** Where a scope's consolidation got to: none before its first job. */
-type Mark = { recordedAt: Date; episodeId: string } | undefined;
-
-const markOf = async <C>({ db }: Brain<C>, scopeKey: string): Promise<Mark> => {
+/**
+ * Where a scope's consolidation got to: the `seq` of the last episode it
+ * read, in the order episodes were recorded (outcomes.ts); 0 before its
+ * first job.
+ */
+const markOf = async <C>(
+  { db }: Brain<C>,
+  scopeKey: string
+): Promise<number> => {
   const row = await db
-    .select({
-      recordedAt: brainConsolidationMarks.recordedAt,
-      episodeId: brainConsolidationMarks.episodeId,
-    })
+    .select({ seq: brainConsolidationMarks.seq })
     .from(brainConsolidationMarks)
     .where(eq(brainConsolidationMarks.scopeKey, scopeKey))
     .get();
-  return row;
+  return row?.seq ?? 0;
 };
 
 /** Episodes recorded after `mark`, as a condition. */
-const afterMark = (mark: Mark): SQL | undefined =>
-  mark === undefined
-    ? undefined
-    : or(
-        gt(brainEpisodes.recordedAt, mark.recordedAt),
-        and(
-          eq(brainEpisodes.recordedAt, mark.recordedAt),
-          gt(brainEpisodes.id, mark.episodeId)
-        )
-      );
+const afterMark = (mark: number): SQL => gt(brainEpisodes.seq, mark);
 
 /**
  * How many of `scope`'s episodes consolidation hasn't read yet, counted up
@@ -141,8 +113,10 @@ export const consolidationBacklog = async <C>(
 };
 
 /**
- * Scopes with episodes consolidation hasn't read, recorded before
- * `olderThan`, at most `limit`: what its host's clock catches up on.
+ * Scopes whose consolidation has been due since before `olderThan`, at
+ * most `limit`, longest due first: what its host's clock catches up on.
+ * Read from the scopes marked due (outcomes.ts, lesson-orphans.ts), so an
+ * idle sweep reads no history.
  */
 export const scopesBehind = async <C>(
   { db }: Brain<C>,
@@ -150,44 +124,21 @@ export const scopesBehind = async <C>(
   limit: number
 ): Promise<ConsolidationScope[]> => {
   const rows = await db
-    .selectDistinct({
-      scope: brainEpisodes.scope,
-      ownerId: brainEpisodes.ownerId,
-      audience: brainEpisodes.audience,
+    .select({
+      scope: brainConsolidationDue.scope,
+      scopeId: brainConsolidationDue.scopeId,
     })
-    .from(brainEpisodes)
-    .leftJoin(
-      brainConsolidationMarks,
-      eq(
-        brainConsolidationMarks.scopeKey,
-        sql`${brainEpisodes.scope} || ':' || (CASE WHEN ${brainEpisodes.scope} = 'person' THEN ${brainEpisodes.ownerId} ELSE ${brainEpisodes.audience} END)`
-      )
-    )
-    .where(
-      and(
-        sql`${brainEpisodes.recordedAt} < ${olderThan.getTime()}`,
-        or(
-          sql`${brainConsolidationMarks.scopeKey} IS NULL`,
-          gt(brainEpisodes.recordedAt, brainConsolidationMarks.recordedAt),
-          and(
-            eq(brainEpisodes.recordedAt, brainConsolidationMarks.recordedAt),
-            gt(brainEpisodes.id, brainConsolidationMarks.episodeId)
-          )
-        )
-      )
-    )
-    .limit(limit * 4);
-  const scopes = new Map<string, ConsolidationScope>();
-  for (const row of rows) {
-    const scope = scopeOfEpisode(row);
-    if (scope !== undefined && scopes.size < limit) {
-      scopes.set(scopeKeyOf(scope), scope);
-    }
-  }
-  return [...scopes.values()];
+    .from(brainConsolidationDue)
+    .where(lt(brainConsolidationDue.since, olderThan))
+    .orderBy(asc(brainConsolidationDue.since))
+    .limit(limit);
+  return rows;
 };
 
 const versionRefsSchema = z.array(executionRefSchema);
+
+/** Version lists of one task type a group read looks through, at most. */
+const versionListsMax = 200;
 
 /** What a group of episodes is about: a task type, on these versions. */
 const groupKeyOf = (taskType: string, versionRefs: string): string => {
@@ -230,19 +181,35 @@ const contentOf = async <C>(
   groupKey: string,
   taskType: string
 ): Promise<LessonContent | undefined> => {
-  const rows = await db
-    .select({
-      id: brainEpisodes.id,
-      execution: brainEpisodes.execution,
-      versionRefs: brainEpisodes.versionRefs,
-    })
+  // The group first, then its newest: the version lists this task ran on
+  // in this scope (few), those that are this group's, and only then the
+  // newest of its episodes, so other versions' episodes never crowd it out.
+  const lists = await db
+    .selectDistinct({ versionRefs: brainEpisodes.versionRefs })
     .from(brainEpisodes)
     .where(and(inScope(scope), eq(brainEpisodes.taskType, taskType)))
-    .orderBy(desc(brainEpisodes.occurredAt), desc(brainEpisodes.id))
-    .limit(consolidationLimits.episodesPerGroup * 4);
-  const group = rows
-    .filter((row) => groupKeyOf(taskType, row.versionRefs) === groupKey)
-    .slice(0, consolidationLimits.episodesPerGroup);
+    .limit(versionListsMax);
+  const ours = lists
+    .map(({ versionRefs }) => versionRefs)
+    .filter((versionRefs) => groupKeyOf(taskType, versionRefs) === groupKey);
+  const group =
+    ours.length === 0
+      ? []
+      : await db
+          .select({
+            id: brainEpisodes.id,
+            execution: brainEpisodes.execution,
+          })
+          .from(brainEpisodes)
+          .where(
+            and(
+              inScope(scope),
+              eq(brainEpisodes.taskType, taskType),
+              inList(brainEpisodes.versionRefs, ours)
+            )
+          )
+          .orderBy(desc(brainEpisodes.occurredAt), desc(brainEpisodes.id))
+          .limit(consolidationLimits.episodesPerGroup);
   const supporting = group
     .filter(({ execution }) => execution === "failed")
     .map(({ id }) => id)
@@ -492,8 +459,26 @@ const applyPatch = async <C>(
       ),
   ] as const;
   await auditedBatch(brain.ports, db, statements);
-  const after = await lessonAt(brain, patch.lessonId);
-  return after?.revision === revision;
+  // This patch's own version, not one another writer put at the same
+  // revision: a retirement that lost the race is a conflict, never success.
+  const written = await db
+    .select({ patchKey: brainLessonVersions.patchKey })
+    .from(brainLessonVersions)
+    .innerJoin(
+      brainLessons,
+      and(
+        eq(brainLessons.id, brainLessonVersions.lessonId),
+        eq(brainLessons.revision, brainLessonVersions.revision)
+      )
+    )
+    .where(
+      and(
+        eq(brainLessonVersions.lessonId, patch.lessonId),
+        eq(brainLessonVersions.revision, revision)
+      )
+    )
+    .get();
+  return written?.patchKey === patchKey;
 };
 
 /** Whether two contents say the same, with the same evidence. */
@@ -547,7 +532,9 @@ const consolidateGroup = async <C>(
       !(
         current?.state === "candidate" && sameContent(current.content, content)
       ) &&
-      (current !== undefined || mayOpen)
+      // Opening one, or reopening a retired one, counts against the
+      // scope's open candidates; a patch to an open one doesn't.
+      (current?.state === "candidate" || mayOpen)
     ) {
       patch = {
         lessonId,
@@ -599,11 +586,11 @@ export const consolidate = async <C>(
       id: brainEpisodes.id,
       taskType: brainEpisodes.taskType,
       versionRefs: brainEpisodes.versionRefs,
-      recordedAt: brainEpisodes.recordedAt,
+      seq: brainEpisodes.seq,
     })
     .from(brainEpisodes)
     .where(and(inScope(scope), afterMark(mark)))
-    .orderBy(asc(brainEpisodes.recordedAt), asc(brainEpisodes.id))
+    .orderBy(asc(brainEpisodes.seq))
     .limit(consolidationLimits.episodesPerJob);
   // The scope's open candidates, so one whose evidence was erased is
   // retired even when nothing new arrived in its group.
@@ -632,7 +619,7 @@ export const consolidate = async <C>(
       await consolidateGroup(brain, scope, groupKey, taskType, mayOpen, since)
     ) {
       patched += 1;
-      if (existed === undefined) {
+      if (existed?.state !== "candidate") {
         opened += 1;
       }
     }
@@ -641,10 +628,13 @@ export const consolidate = async <C>(
   // the last episode whose group was brought up to date, so a job that
   // ran out of patches leaves the rest for the next.
   let last: (typeof fresh)[number] | undefined;
+  // Whether it brought everything due in the scope up to date.
+  let finished = fresh.length < consolidationLimits.episodesPerJob;
   for (const episode of fresh) {
     const groupKey = groupKeyOf(episode.taskType, episode.versionRefs);
     if (!done.has(groupKey)) {
       if (patched >= consolidationLimits.patchesPerJob) {
+        finished = false;
         break;
       }
       // oxlint-disable-next-line no-await-in-loop -- one group at a time, bounded
@@ -654,6 +644,7 @@ export const consolidate = async <C>(
   }
   for (const { groupKey, applicability } of open) {
     if (patched >= consolidationLimits.patchesPerJob) {
+      finished = false;
       break;
     }
     if (!done.has(groupKey)) {
@@ -664,31 +655,35 @@ export const consolidate = async <C>(
       await run(groupKey, taskType);
     }
   }
-  if (last !== undefined) {
+  if (last?.seq !== undefined && last.seq !== null) {
     const now = brain.ports.clock();
     // Not for a person a purge forgot while this job ran: nothing of them
     // is kept, not even where it read to.
     await db
       .insert(brainConsolidationMarks)
       .select(
-        sql`SELECT ${scopeKey}, ${last.recordedAt.getTime()}, ${last.id}, ${now.getTime()} WHERE ${notForgotten(scope, since)}`
+        sql`SELECT ${scopeKey}, ${last.seq}, ${now.getTime()} WHERE ${notForgotten(scope, since)}`
       )
       .onConflictDoUpdate({
         target: brainConsolidationMarks.scopeKey,
         set: {
-          recordedAt: sql`excluded.recorded_at`,
-          episodeId: sql`excluded.episode_id`,
+          seq: sql`excluded.seq`,
           updatedAt: sql`excluded.updated_at`,
         },
         // Only forward: a job cut short and made again never moves it back.
-        setWhere: or(
-          gt(sql`excluded.recorded_at`, brainConsolidationMarks.recordedAt),
-          and(
-            eq(sql`excluded.recorded_at`, brainConsolidationMarks.recordedAt),
-            gt(sql`excluded.episode_id`, brainConsolidationMarks.episodeId)
-          )
-        ),
+        setWhere: gt(sql`excluded.seq`, brainConsolidationMarks.seq),
       });
+  }
+  // Up to date: no longer due, unless something touched it since it began.
+  if (finished) {
+    await db.delete(brainConsolidationDue).where(
+      and(
+        eq(brainConsolidationDue.scopeKey, scopeKey),
+        lte(brainConsolidationDue.touchedAt, since),
+        // And no episode arrived that it didn't read.
+        sql`NOT EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${and(inScope(scope), afterMark(last?.seq ?? mark))})`
+      )
+    );
   }
   return { read: fresh.length, patched };
 };
@@ -877,8 +872,8 @@ const consolidationInputSchema = z.strictObject({
 
 /**
  * The job that consolidates `scope` from where it is now: named by the
- * scope and its watermark, so starting it again before it moved is the
- * same job, and one after starts the next.
+ * scope, its watermark and what is due in it, so starting it again before
+ * anything changed is the same job, and any new work starts the next.
  */
 export const consolidationJob = async <C>(
   brain: Brain<C>,
@@ -886,9 +881,28 @@ export const consolidationJob = async <C>(
 ): Promise<{ id: string; input: Json }> => {
   const scopeKey = scopeKeyOf(scope);
   const mark = await markOf(brain, scopeKey);
+  // What there is to do now: the newest episode not read yet, and when the
+  // scope was last marked due. Work that arrives after a job finished, or
+  // after a purge cleared its watermark, is a new job, never the old one.
+  const [newest] = await brain.db
+    .select({ seq: sql<number | null>`max(${brainEpisodes.seq})` })
+    .from(brainEpisodes)
+    .where(and(inScope(scope), afterMark(mark)));
+  const due = await brain.db
+    .select({ touchedAt: brainConsolidationDue.touchedAt })
+    .from(brainConsolidationDue)
+    .where(eq(brainConsolidationDue.scopeKey, scopeKey))
+    .get();
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(canonicalJson([scopeKey, mark?.episodeId ?? null]))
+    new TextEncoder().encode(
+      canonicalJson([
+        scopeKey,
+        mark,
+        newest?.seq ?? null,
+        due?.touchedAt.getTime() ?? null,
+      ])
+    )
   );
   return {
     id: `consolidation-${toHex(new Uint8Array(digest)).slice(0, 32)}`,

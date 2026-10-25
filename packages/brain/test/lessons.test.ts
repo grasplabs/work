@@ -8,7 +8,9 @@ import {
   consolidationLimits,
   lessonsOf,
   retireLesson,
+  consolidationJob,
   scopeKeyOf,
+  scopesBehind,
 } from "../src/lessons.ts";
 import type { ConsolidationScope, Lesson } from "../src/lessons.ts";
 import { forgetPerson } from "../src/memories.ts";
@@ -488,6 +490,243 @@ describe("consolidating episodes into lesson candidates", () => {
       state: "retired",
       retiredBy: "evidence",
       revision: 2,
+    });
+  });
+
+  it("names a job by the work it has to do, so work after a finished job or a purge starts a new one", async () => {
+    const { brain } = testHost();
+    const ann = `ann-${crypto.randomUUID()}`;
+    const scope = person(ann);
+    await recorded(brain, [
+      run(ann, "failed"),
+      run(ann, "failed"),
+      run(ann, "failed"),
+    ]);
+    const first = await consolidationJob(brain, scope);
+    await consolidate(brain, scope);
+    const finished = await consolidationJob(brain, scope);
+    await brain.db.batch(forgetPerson(brain.db, ann, brain.ports.clock()));
+    // Work after the purge, by a person active again.
+    await recorded(brain, [
+      run(ann, "failed", {
+        occurredAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+    ]);
+    const afterPurge = await consolidationJob(brain, scope);
+
+    expect({
+      finishedIsNew: finished.id !== first.id,
+      afterPurgeIsNew:
+        afterPurge.id !== first.id && afterPurge.id !== finished.id,
+    }).toStrictEqual({ finishedIsNew: true, afterPurgeIsNew: true });
+  });
+
+  it("reads a lesson's group before limiting it, so other versions' runs never crowd it out", async () => {
+    const { brain } = testHost();
+    const ann = `ann-${crypto.randomUUID()}`;
+    const scope = person(ann);
+    await recorded(brain, [
+      run(ann, "failed"),
+      run(ann, "failed"),
+      run(ann, "failed"),
+    ]);
+    // Many newer runs of the same task on another version.
+    await recorded(
+      brain,
+      Array.from({ length: 400 }, () =>
+        run(ann, "completed", {
+          versionRefs: [{ kind: "app", id: "invoices", version: "4" }],
+        })
+      )
+    );
+
+    await consolidate(brain, scope);
+    const lessons = await lessonsOf(brain, scope);
+    const v3 = lessons.find(
+      ({ versions }) =>
+        versions
+          .at(-1)
+          ?.content.applicability.versions.includes("app:invoices@3") === true
+    );
+
+    expect(v3?.versions.at(-1)?.content.supporting.length).toBe(3);
+  });
+
+  it("answers a retirement that lost its race to a job as a conflict, the lesson as the job left it", async () => {
+    const { brain } = testHost();
+    const ann = `ann-${crypto.randomUUID()}`;
+    const scope = person(ann);
+    await recorded(brain, [
+      run(ann, "failed"),
+      run(ann, "failed"),
+      run(ann, "failed"),
+    ]);
+    await consolidate(brain, scope);
+    await recorded(brain, [run(ann, "failed")]);
+    const [lesson] = await lessonsOf(brain, scope);
+    // The job lands between the retirement's read and its write.
+    let raced = false;
+    const racing = new Proxy(env.BRAIN, {
+      get: (target, property) => {
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (!raced) {
+              raced = true;
+              await consolidate(brain, scope);
+            }
+            return await target.batch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    const answer = await outcome(
+      retireLesson(
+        createBrain(racing, brain.ports),
+        { userId: ann, reads: [] },
+        { lessonId: lesson?.id ?? "", expectedRevision: 1 }
+      )
+    );
+    const [after] = await lessonsOf(brain, scope);
+
+    expect({
+      answer,
+      state: after?.state,
+      revision: after?.revision,
+    }).toStrictEqual({
+      answer: "brain.revision_conflict",
+      state: "candidate",
+      revision: 2,
+    });
+  });
+
+  it("counts a reopened lesson against the scope's open candidates", async () => {
+    const { brain } = testHost();
+    const ann = `ann-${crypto.randomUUID()}`;
+    const scope = person(ann);
+    const reopening = [
+      run(ann, "failed"),
+      run(ann, "failed"),
+      run(ann, "failed"),
+    ];
+    await recorded(brain, reopening);
+    await consolidate(brain, scope);
+    // Retired by its evidence going.
+    await eraseOutcomes(
+      brain,
+      reopening.map(({ evidenceId }) => evidenceId)
+    );
+    // The scope fills up with open candidates.
+    await recorded(
+      brain,
+      Array.from({ length: consolidationLimits.openPerScope }, (_, n) =>
+        Array.from({ length: 3 }, () =>
+          run(ann, "failed", { taskType: `workflow:app/full-${n}` })
+        )
+      ).flat()
+    );
+    for (let job = 0; job < 4; job += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one job after another
+      await consolidate(brain, scope);
+    }
+    // New failures of the retired lesson's group.
+    await recorded(brain, [
+      run(ann, "failed"),
+      run(ann, "failed"),
+      run(ann, "failed"),
+    ]);
+    await consolidate(brain, scope);
+    const lessons = await lessonsOf(brain, scope);
+
+    expect(lessons.filter(({ state }) => state === "candidate")).toHaveLength(
+      consolidationLimits.openPerScope
+    );
+  });
+
+  it("reads an episode recorded late, whatever its clock said, past the watermark", async () => {
+    const { brain } = testHost();
+    const ann = `ann-${crypto.randomUUID()}`;
+    const scope = person(ann);
+    await recorded(brain, [run(ann, "failed"), run(ann, "failed")]);
+    await consolidate(brain, scope);
+    // Recorded after the job, by a host whose clock ran behind.
+    const behind = createBrain(env.BRAIN, {
+      ...brain.ports,
+      clock: () => new Date(Date.now() - 24 * 60 * 60 * 1000),
+    });
+    await recordOutcome(behind, run(ann, "failed"));
+
+    const job = await consolidate(brain, scope);
+    const [lesson] = await lessonsOf(brain, scope);
+
+    expect({
+      job,
+      supporting: lesson?.versions.at(-1)?.content.supporting.length,
+    }).toStrictEqual({
+      job: { read: 1, patched: 1 },
+      supporting: 3,
+    });
+  });
+
+  it("keeps the links an erasure leaves in the revision that retires a lesson", async () => {
+    const { brain } = testHost();
+    const ann = `ann-${crypto.randomUUID()}`;
+    const scope = person(ann);
+    const failures = [
+      run(ann, "failed"),
+      run(ann, "failed"),
+      run(ann, "failed"),
+    ];
+    await recorded(brain, failures);
+    await consolidate(brain, scope);
+
+    await eraseOutcomes(brain, [failures[0]?.evidenceId ?? ""]);
+    const [lesson] = await lessonsOf(brain, scope);
+    const retired = lesson?.versions.find(({ revision }) => revision === 2);
+
+    expect({
+      state: lesson?.state,
+      kept: retired?.evidence.map(({ episodeId }) => episodeId).toSorted(),
+    }).toStrictEqual({
+      state: "retired",
+      kept: failures
+        .slice(1)
+        .map(({ eventId }) => eventId)
+        .toSorted(),
+    });
+  });
+
+  it("marks a scope due at once when an erasure leaves an open lesson with what it rests on changed, and sweeps only scopes due", async () => {
+    const { brain } = testHost();
+    const ann = `ann-${crypto.randomUUID()}`;
+    const scope = person(ann);
+    const failures = Array.from({ length: 4 }, () => run(ann, "failed"));
+    await recorded(brain, failures);
+    await consolidate(brain, scope);
+    const keyOf = (scopes: ConsolidationScope[]) =>
+      scopes.some((each) => each.scopeId === ann);
+    const idle = keyOf(await scopesBehind(brain, new Date(), 1000));
+
+    await eraseOutcomes(brain, [failures[0]?.evidenceId ?? ""]);
+    const due = keyOf(await scopesBehind(brain, new Date(), 1000));
+    await consolidate(brain, scope);
+    const [lesson] = await lessonsOf(brain, scope);
+    const refreshed = keyOf(await scopesBehind(brain, new Date(), 1000));
+
+    expect({
+      idle,
+      due,
+      refreshed,
+      text: lesson?.versions.at(-1)?.content.instruction,
+    }).toStrictEqual({
+      idle: false,
+      due: true,
+      refreshed: false,
+      text: "workflow:invoices/tidy failed 3 of its last 3 finished runs on app:invoices@3.",
     });
   });
 });

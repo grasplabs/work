@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "112cfd91-17fb-4aed-8349-22146fddff75",
+  "id": "bf9dfb43-2d6c-4f28-80e7-0289d80565d7",
   "prevId": "f2eb37e9-957e-46e8-b490-df6af67ed996",
   "tables": {
     "audit_outbox": {
@@ -126,6 +126,59 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "brain_consolidation_due": {
+      "name": "brain_consolidation_due",
+      "columns": {
+        "scope_key": {
+          "name": "scope_key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "scope_id": {
+          "name": "scope_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "since": {
+          "name": "since",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "touched_at": {
+          "name": "touched_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "brain_consolidation_due_since_idx": {
+          "name": "brain_consolidation_due_since_idx",
+          "columns": [
+            "since"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "brain_consolidation_marks": {
       "name": "brain_consolidation_marks",
       "columns": {
@@ -136,16 +189,9 @@
           "notNull": true,
           "autoincrement": false
         },
-        "recorded_at": {
-          "name": "recorded_at",
+        "seq": {
+          "name": "seq",
           "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "episode_id": {
-          "name": "episode_id",
-          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -402,6 +448,13 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -410,6 +463,24 @@
           "columns": [
             "owner_id",
             "occurred_at"
+          ],
+          "isUnique": false
+        },
+        "brain_episodes_person_seq_idx": {
+          "name": "brain_episodes_person_seq_idx",
+          "columns": [
+            "scope",
+            "owner_id",
+            "seq"
+          ],
+          "isUnique": false
+        },
+        "brain_episodes_session_seq_idx": {
+          "name": "brain_episodes_session_seq_idx",
+          "columns": [
+            "scope",
+            "audience",
+            "seq"
           ],
           "isUnique": false
         },
@@ -1421,6 +1492,30 @@
           "isUnique": false
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "brain_sequences": {
+      "name": "brain_sequences",
+      "columns": {
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "value": {
+          "name": "value",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

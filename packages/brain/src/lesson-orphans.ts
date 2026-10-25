@@ -3,6 +3,7 @@ import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import {
+  brainConsolidationDue,
   brainEpisodes,
   brainLessonEvidence,
   brainLessons,
@@ -45,6 +46,14 @@ export const retiringOrphans = (
         sql`SELECT ${brainLessons.id}, ${brainLessons.revision} + 1, ${brainLessons.revision}, ${brainLessonVersions.content}, 'erased:' || ${brainLessons.id} || '@' || (${brainLessons.revision} + 1), ${now.getTime()} FROM ${brainLessons} JOIN ${brainLessonVersions} ON ${brainLessonVersions.lessonId} = ${brainLessons.id} AND ${brainLessonVersions.revision} = ${brainLessons.revision} WHERE ${orphaned}`
       )
       .onConflictDoNothing(),
+    // The links it keeps: its evidence that this erasure leaves, carried
+    // into the retired revision, so what it rested on stays inspectable.
+    db
+      .insert(brainLessonEvidence)
+      .select(
+        sql`SELECT ${brainLessonEvidence.lessonId}, ${brainLessonEvidence.revision} + 1, ${brainLessonEvidence.episodeId}, ${brainLessonEvidence.role} FROM ${brainLessonEvidence} JOIN ${brainLessons} ON ${atRevision} JOIN ${brainEpisodes} ON ${brainEpisodes.id} = ${brainLessonEvidence.episodeId} WHERE ${brainLessons.state} = 'candidate' AND EXISTS (SELECT 1 FROM ${brainLessonVersions} WHERE ${brainLessonVersions.lessonId} = ${brainLessons.id} AND ${brainLessonVersions.revision} = ${brainLessons.revision} + 1 AND ${brainLessonVersions.patchKey} = 'erased:' || ${brainLessons.id} || '@' || (${brainLessons.revision} + 1)) AND NOT (${erased})`
+      )
+      .onConflictDoNothing(),
     db
       .update(brainLessons)
       .set({
@@ -54,5 +63,28 @@ export const retiringOrphans = (
         updatedAt: now,
       })
       .where(orphaned),
+    // One left open, with enough support but some of it erased: its text
+    // and status still count what went, so its scope's consolidation is
+    // due at once, to write it again from what is left.
+    db
+      .insert(brainConsolidationDue)
+      .select(
+        sql`SELECT DISTINCT ${brainLessons.scope} || ':' || ${brainLessons.scopeId}, ${brainLessons.scope}, ${brainLessons.scopeId}, 0, ${now.getTime()} FROM ${brainLessons} WHERE ${brainLessons.state} = 'candidate' AND EXISTS (SELECT 1 FROM ${brainLessonEvidence} JOIN ${brainEpisodes} ON ${brainEpisodes.id} = ${brainLessonEvidence.episodeId} WHERE ${atRevision} AND ${erased})`
+      )
+      .onConflictDoUpdate({
+        target: brainConsolidationDue.scopeKey,
+        set: { since: sql`0`, touchedAt: sql`excluded.touched_at` },
+      }),
   ] as const;
 };
+
+/** A scope consolidation reads, as episodes name it. */
+export interface ConsolidationScope {
+  scope: "person" | "session";
+  /** The owner's user ID for `person`, the audience's ID for `session`. */
+  scopeId: string;
+}
+
+/** A scope's key: its marks, its due marker and its jobs are named by it. */
+export const scopeKeyOf = ({ scope, scopeId }: ConsolidationScope): string =>
+  `${scope}:${scopeId}`;

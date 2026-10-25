@@ -535,10 +535,29 @@ export const brainEpisodes = sqliteTable(
      * a personal purge took out (../outcomes.ts).
      */
     delivery: text().notNull(),
+    /**
+     * Its place in the order events were recorded, from one counter moved
+     * in the batch that records it (`brain_sequences`): what consolidation
+     * reads in, so an event recorded late is never behind its watermark
+     * (../lessons.ts). None for events recorded before it was kept.
+     */
+    seq: integer(),
   },
   (table) => [
     // A personal purge's delete by owner, and a person's events by time.
     index("brain_episodes_owner_idx").on(table.ownerId, table.occurredAt),
+    // A scope's events in recorded order, past a watermark: a person's,
+    // and a shared session's (../lessons.ts).
+    index("brain_episodes_person_seq_idx").on(
+      table.scope,
+      table.ownerId,
+      table.seq
+    ),
+    index("brain_episodes_session_seq_idx").on(
+      table.scope,
+      table.audience,
+      table.seq
+    ),
     // Erasing the events of an execution record (`eraseOutcomes`).
     index("brain_episodes_evidence_idx").on(table.evidenceId),
   ]
@@ -698,11 +717,37 @@ export const brainConsolidationMarks = sqliteTable(
   {
     /** `<scope>:<scopeId>`. */
     scopeKey: text("scope_key").primaryKey(),
-    recordedAt: timestamp("recorded_at").notNull(),
-    episodeId: text("episode_id").notNull(),
+    /** The last event read, by its `seq`. */
+    seq: integer().notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   }
 );
+
+/**
+ * Scopes with consolidation due: an event recorded in them, or an erasure
+ * that changed what one of their lessons rests on. What the host's clock
+ * sweeps, a bounded few at a time, instead of all history; a job that read
+ * everything clears its scope's mark if nothing touched it since.
+ */
+export const brainConsolidationDue = sqliteTable(
+  "brain_consolidation_due",
+  {
+    scopeKey: text("scope_key").primaryKey(),
+    scope: text({ enum: ["person", "session"] }).notNull(),
+    scopeId: text("scope_id").notNull(),
+    /** Since when it is due: 0 for at once (an erasure). */
+    since: timestamp("since").notNull(),
+    /** When it was last touched: a job clears it only if not since. */
+    touchedAt: timestamp("touched_at").notNull(),
+  },
+  (table) => [index("brain_consolidation_due_since_idx").on(table.since)]
+);
+
+/** Counters the Brain moves in the batch of what they number. */
+export const brainSequences = sqliteTable("brain_sequences", {
+  name: text().primaryKey(),
+  value: integer().notNull(),
+});
 
 /**
  * How far each host boundary's deliveries reached: the highest capture
