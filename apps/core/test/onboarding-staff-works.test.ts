@@ -217,9 +217,12 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     const staff = await asStaff();
 
     const reads: StaffWorks[] = [];
-    const events = await auditedDuring(async () => {
-      reads.push(await staff.onboardingStaff.works());
-    });
+    const events = await auditedDuring(
+      async () => {
+        reads.push(await staff.onboardingStaff.works());
+      },
+      { staffAccesses: true }
+    );
     const works = reads[0]?.works ?? [];
     const work = works.find(({ id }) => id === booking);
     // Every string staff get of a drawing, whatever its name: never a word
@@ -279,7 +282,8 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
         wrong: { people: null, value: null },
       },
       rules: STARTING_ORG_RULES,
-      audited: [["onboarding.works.read", "staff", "organization"]],
+      // On record as a staff look (staff-audit.ts), naming no one.
+      audited: [["staff.accessed", "staff", undefined]],
       named: false,
     });
   });

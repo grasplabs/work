@@ -38,6 +38,7 @@ import { errorResponse } from "./errors.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { auditStaffRoute } from "./staff-audit.ts";
 
 // Reading the audit log (threat model section 13, R16): admins search it,
 // export it and verify its chain. Admins see all of it, so an export holds
@@ -432,6 +433,10 @@ export const auditExportResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "audit.export", {
+    query: new URL(request.url).search,
+  });
   const { searchParams } = new URL(request.url);
   const filter = Object.fromEntries(
     [...searchParams].filter(([name]) => name !== "format")

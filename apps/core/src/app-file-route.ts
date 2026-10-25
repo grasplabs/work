@@ -54,6 +54,7 @@ import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { delivering, leasedBuild, personRefusal } from "./screen-trust.ts";
 import { admitted } from "./screens-rpc.ts";
+import { auditStaffRoute } from "./staff-audit.ts";
 
 // Core's file channel (spec 10.7.5): how a running App's screen, through
 // its page, moves the bytes of its App's files, which never travel in a
@@ -826,6 +827,11 @@ export const appFileResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "app.files", {
+    app: route.app,
+    resource: route.resource,
+  });
   // Someone other than the person the frame is for, before anything is
   // counted or read.
   const refusal = personRefusal(request.headers, person.userId);
