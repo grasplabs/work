@@ -50,9 +50,13 @@ const chatsOf = async (userId: string) =>
 /** The answers posted in `conversation`: each message's whole activity, as JSON. */
 const answersIn = async (conversation: string): Promise<string[]> => {
   const { activities } = await reached(conversation);
-  return activities
-    .filter(({ type }) => type === "message")
-    .map((activity) => JSON.stringify(activity));
+  return (
+    activities
+      .filter(({ type }) => type === "message")
+      .map((activity) => JSON.stringify(activity))
+      // Not the card offering their own Microsoft 365 (connect-own.ts).
+      .filter((activity) => !activity.includes("/connect-microsoft"))
+  );
 };
 
 describe("a member's question", setUpTime, () => {
@@ -91,14 +95,25 @@ describe("a member's question", setUpTime, () => {
 
     const chats = await chatsOf(userId);
     expect(chats).toMatchObject([{ title: "Microsoft Teams", via: "teams" }]);
-    const [answer] = await answersIn(teams.conversation);
-    expect(answer).toContain("Leave lasts sixteen weeks");
-    expect(answer).toContain("1. Parental leave");
-    expect(answer).toContain(
-      `${clientOrigin}/knowledge/${collectionId}?doc=${saved.id}`
-    );
-    // Labelled as made by AI, as Teams shows it.
-    expect(answer).toContain("AIGeneratedContent");
+    // The answer, streamed in its own message, then its sources.
+    const answers = await answersIn(teams.conversation);
+    const answer = answers.join("\n");
+    expect({
+      answered: answer.includes("Leave lasts sixteen weeks"),
+      noteLinks: answer.includes("grasp:note"),
+      source: answer.includes("1. Parental leave"),
+      sourceLink: answer.includes(
+        `${clientOrigin}/knowledge/${collectionId}?doc=${saved.id}`
+      ),
+      // Labelled as made by AI, as Teams shows it.
+      aiLabel: answer.includes("AIGeneratedContent"),
+    }).toStrictEqual({
+      answered: true,
+      noteLinks: false,
+      source: true,
+      sourceLink: true,
+      aiLabel: true,
+    });
   });
 
   it("goes on in the same chat, and another person's stays apart", async () => {

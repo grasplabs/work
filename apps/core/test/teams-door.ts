@@ -185,6 +185,8 @@ const reachedSchema = z.object({
       activity: z
         .object({ type: z.string(), text: z.string().optional() })
         .loose(),
+      id: z.string().optional(),
+      editOf: z.string().optional(),
     })
   ),
   asked: z.array(z.string()),
@@ -203,6 +205,8 @@ export const reached = async (conversation: string) => {
     .map(({ activity }) => activity);
   return {
     activities,
+    /** Each post with its id, and each edit with the id it replaced. */
+    sent: posted.filter((each) => each.conversation === conversation),
     lines: activities
       .filter(({ type }) => type === "message")
       .map(({ text }) => text),

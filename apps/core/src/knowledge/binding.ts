@@ -17,6 +17,7 @@ import { forSandbox } from "../bindings.ts";
 import type { WorkContext } from "../restricted.ts";
 import type { Reader } from "./access.ts";
 import { backlinks, getDocument, history, listDocuments } from "./documents.ts";
+import { brainOf } from "./ports.ts";
 import { recall } from "./recall.ts";
 import { search } from "./search.ts";
 import { follow, read } from "./tools.ts";
@@ -90,34 +91,40 @@ export const collectionReads = (
     listDocuments: async (options) =>
       await asDelegate(
         async (reader) =>
-          await listDocuments(env, reader, collectionId, options)
+          await listDocuments(brainOf(env), reader, collectionId, options)
       ),
     getDocument: async (documentId, version) =>
       await asDelegate(
-        async (reader) => await getDocument(env, reader, documentId, version)
+        async (reader) =>
+          await getDocument(brainOf(env), reader, documentId, version)
       ),
     history: async (documentId, options) =>
       await asDelegate(
-        async (reader) => await history(env, reader, documentId, options)
+        async (reader) =>
+          await history(brainOf(env), reader, documentId, options)
       ),
     backlinks: async (documentId, options) =>
       await asDelegate(
-        async (reader) => await backlinks(env, reader, documentId, options)
+        async (reader) =>
+          await backlinks(brainOf(env), reader, documentId, options)
       ),
     search: async (query, options) =>
       await asDelegate(
         async (reader) =>
-          await search(env, reader, query, options, collectionId)
+          await search(brainOf(env), reader, query, options, collectionId)
       ),
     read: async (documentId, options) =>
       await asDelegate(
-        async (reader) => await read(env, reader, documentId, options)
+        async (reader) => await read(brainOf(env), reader, documentId, options)
       ),
     follow: async (documentId) =>
-      await asDelegate(async (reader) => await follow(env, reader, documentId)),
+      await asDelegate(
+        async (reader) => await follow(brainOf(env), reader, documentId)
+      ),
     recall: async (input) =>
       await asDelegate(
-        async (reader) => await recall(env, reader, input, collectionId)
+        async (reader) =>
+          await recall(brainOf(env), reader, input, collectionId)
       ),
   };
 };

@@ -18,8 +18,19 @@ export const botConnectorFake = (bot: {
   const loginHost = "login.microsoftonline.com";
   const botConnectorHost = "smba.trafficmanager.net";
   const issued = new Set<string>();
-  /** Each conversation's activities, as their bodies. */
-  const posted: { conversation: string; activity: unknown }[] = [];
+  /**
+   * Each conversation's activities, as their bodies, in order: each post
+   * with the id the Bot Connector gave it, each edit with the id of the
+   * activity it replaced (`editOf`).
+   */
+  const posted: {
+    conversation: string;
+    activity: unknown;
+    id?: string;
+    editOf?: string;
+  }[] = [];
+  /** Conversations where Teams refuses a streamed message. */
+  const unstreamed = new Set<string>();
   /** Every roster read, as `<conversation> <user id>`. */
   const asked: string[] = [];
   /** The roster: `<conversation> <user id>` to what Teams says of them. */
@@ -31,6 +42,8 @@ export const botConnectorFake = (bot: {
     /\/v3\/conversations\/(?<conversation>[^/]+)\/members\/(?<member>[^/]+)$/u;
   const activitiesPath =
     /\/v3\/conversations\/(?<conversation>[^/]+)\/activities(?:\/[^/]+)?$/u;
+  const editPath =
+    /\/v3\/conversations\/(?<conversation>[^/]+)\/activities\/(?<activity>[^/]+)$/u;
 
   const token = async (request: Request): Promise<Response | undefined> => {
     const form = new URLSearchParams(await request.clone().text());
@@ -53,6 +66,35 @@ export const botConnectorFake = (bot: {
     });
   };
 
+  /**
+   * Takes a post in `conversation`, unless the bot was taken out of it
+   * (`uninstall`) or it is a streamed message where Teams refuses them
+   * (`refuseStreams`).
+   */
+  const post = (conversation: string, body: unknown): Response => {
+    if (uninstalled.has(conversation)) {
+      return Response.json(
+        {
+          error: {
+            code: "BotNotInConversationRoster",
+            message: "The bot is not part of the conversation roster.",
+          },
+        },
+        { status: 403 }
+      );
+    }
+    const streamed = JSON.stringify(body).includes('"streamType":"streaming"');
+    if (streamed && unstreamed.has(conversation)) {
+      return Response.json(
+        { error: { code: "ContentStreamNotAllowed" } },
+        { status: 403 }
+      );
+    }
+    const id = `activity-${posted.length + 1}`;
+    posted.push({ conversation, activity: body, id });
+    return Response.json({ id }, { status: 201 });
+  };
+
   const botConnector = async (request: Request, url: URL) => {
     const bearer = (request.headers.get("authorization") ?? "").replace(
       /^Bearer /u,
@@ -70,30 +112,21 @@ export const botConnectorFake = (bot: {
         : Response.json({ error: { code: "MemberNotFound" } }, { status: 404 });
     }
     const activity = activitiesPath.exec(url.pathname)?.groups;
-    if (
-      request.method === "POST" &&
-      activity !== undefined &&
-      uninstalled.has(decodeURIComponent(activity.conversation ?? ""))
-    ) {
-      return Response.json(
-        {
-          error: {
-            code: "BotNotInConversationRoster",
-            message: "The bot is not part of the conversation roster.",
-          },
-        },
-        { status: 403 }
+    if (request.method === "POST" && activity !== undefined) {
+      return post(
+        decodeURIComponent(activity.conversation ?? ""),
+        await request.json()
       );
     }
-    if (request.method === "POST" && activity !== undefined) {
+    const edited = editPath.exec(url.pathname)?.groups;
+    if (request.method === "PUT" && edited !== undefined) {
+      const editOf = decodeURIComponent(edited.activity ?? "");
       posted.push({
-        conversation: decodeURIComponent(activity.conversation ?? ""),
+        conversation: decodeURIComponent(edited.conversation ?? ""),
         activity: await request.json(),
+        editOf,
       });
-      return Response.json(
-        { id: `activity-${posted.length}` },
-        { status: 201 }
-      );
+      return Response.json({ id: editOf });
     }
     return Response.json({ error: { code: "NotFound" } }, { status: 404 });
   };
@@ -101,6 +134,10 @@ export const botConnectorFake = (bot: {
   return {
     posted,
     asked,
+    /** Teams refuses streamed messages in `conversation` from now on. */
+    refuseStreams: (conversation: string) => {
+      unstreamed.add(conversation);
+    },
     /** Removes the bot from `conversation`, as uninstalling its app does. */
     uninstall: (conversation: string) => {
       uninstalled.add(conversation);
