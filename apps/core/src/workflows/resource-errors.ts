@@ -92,6 +92,9 @@ const neverCaught: ReadonlySet<string> = new Set([
   "workflow.failed_after_effect",
   "connect.outcome_unknown",
   "connect.outcome_unknown_unresolved",
+  // A test run's wait past what a test run may wait: production waits on,
+  // so a catch taking it would report a path a run never takes.
+  "workflow.candidate_wait_limit",
 ]);
 
 /** The validation failures of a task's own data, not a contract's. */
