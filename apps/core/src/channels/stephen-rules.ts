@@ -38,6 +38,12 @@ export interface HeldWriteTrace {
   said: string;
   /** What the chat read: each text value of what its reads returned. */
   read: readonly string[];
+  /**
+   * The addresses the person sends from, in lower case: their own
+   * account's on the write's connection, and the shared mailboxes pointed
+   * at them. A write's own mailbox is no recipient: it reaches nobody else.
+   */
+  senders?: readonly string[];
 }
 
 /** An email address, wherever it stands in a value. */
@@ -132,7 +138,7 @@ export const textsOf = (value: unknown): string[] => {
 export const heldWriteRefusal = (
   input: unknown,
   inputs: readonly string[] | null,
-  { said, read }: HeldWriteTrace
+  { said, read, senders = [] }: HeldWriteTrace
 ): HeldWriteRefusal | undefined => {
   if (inputs === null) {
     return "agent.write_unchecked";
@@ -159,6 +165,7 @@ export const heldWriteRefusal = (
     return [...value.matchAll(emailAddress)].some(([found]) => {
       const address = found.toLowerCase();
       return (
+        !senders.includes(address) &&
         !holdsToken(saidLower, address) &&
         (whole || !holdsToken(readLower, address))
       );
