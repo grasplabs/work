@@ -828,7 +828,10 @@ export const appFileResponse = async (
     );
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "app.files", [route.app]);
+  await auditStaffRoute(env, person, "app.files", {
+    app: route.app,
+    resource: route.resource,
+  });
   // Someone other than the person the frame is for, before anything is
   // counted or read.
   const refusal = personRefusal(request.headers, person.userId);

@@ -10,6 +10,7 @@ import { signedInSession } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { admitted } from "./screens-rpc.ts";
+import { auditStaffRoute } from "./staff-audit.ts";
 
 // `POST /api/app-tokens/<app>`: the person's own session gets a token for
 // one App of theirs, for a portable host to call its functions with
@@ -57,6 +58,8 @@ export const appTokenResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, session.person, "app.token", { app });
   try {
     const id = await admitted(env, session.person, app);
     const issued = await issueAppToken(env, session, id);

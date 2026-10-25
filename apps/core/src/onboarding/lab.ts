@@ -231,7 +231,7 @@ export const labResponse = async (
     );
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "onboarding.lab", []);
+  await auditStaffRoute(env, person, "onboarding.lab");
   if (!person.staff) {
     return errorResponse(
       403,

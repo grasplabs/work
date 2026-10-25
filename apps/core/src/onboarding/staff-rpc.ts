@@ -55,7 +55,6 @@ import { z } from "zod";
 
 import { snapshotOf } from "../admin-snapshot.ts";
 import { appendAuditEvent } from "../audit-outbox.ts";
-import { organizationId } from "../auth/auth.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -292,13 +291,7 @@ export class OnboardingStaffRpc
       const snapshot = adminSnapshotSchema.parse(
         await snapshotOf(this.#env, new Date().toISOString())
       );
-      // It names people: on record before it is read.
-      await appendAuditEvent(this.#env, {
-        actor: actorOf(person),
-        action: "onboarding.interviews.read",
-        target: { type: "organization", id: organizationId },
-        detail: {},
-      });
+      // On record as a staff look by the session check (staff-audit.ts).
       return snapshot;
     });
   }
@@ -403,13 +396,7 @@ export class OnboardingStaffRpc
     return await withPerson(this.#check, async (person) => {
       requireStaff(person);
       const organization = await onboardingStore(this.#env).staffOrganization();
-      // It names people: on record before it is read.
-      await appendAuditEvent(this.#env, {
-        actor: actorOf(person),
-        action: "onboarding.organization.read",
-        target: { type: "organization", id: organizationId },
-        detail: {},
-      });
+      // On record as a staff look by the session check (staff-audit.ts).
       return organization;
     });
   }
@@ -435,13 +422,7 @@ export class OnboardingStaffRpc
   async works(): Promise<StaffWorks> {
     return await withPerson(this.#check, async (person) => {
       requireStaff(person);
-      // What people agreed to, by name: on record before it is read.
-      await appendAuditEvent(this.#env, {
-        actor: actorOf(person),
-        action: "onboarding.works.read",
-        target: { type: "organization", id: organizationId },
-        detail: {},
-      });
+      // On record as a staff look by the session check (staff-audit.ts).
       // Only what the schema names leaves core.
       return staffWorksSchema.parse(
         await onboardingStore(this.#env).staffWorks()

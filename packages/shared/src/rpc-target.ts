@@ -55,6 +55,11 @@ export interface TargetCall {
   target: object;
   method: string;
   args: readonly unknown[];
+  /**
+   * The names its method's source gives its parameters, in order (`input`
+   * for one destructured): what each argument is, never what it holds.
+   */
+  params: readonly string[];
 }
 
 /**
@@ -65,24 +70,71 @@ export interface TargetCall {
  */
 export type CallHook = (call: TargetCall, run: () => unknown) => unknown;
 
+const parameterName = /^(?:\.\.\.)?(?<name>[A-Za-z_$][\w$]*)/u;
+const openers = new Set(["(", "[", "{"]);
+const closers = new Set([")", "]", "}"]);
+
+/**
+ * The names `method`'s source gives its parameters, in order: a
+ * destructured or otherwise unnamed one is `input`. Read from its
+ * parameter list, split at the commas outside any brackets.
+ */
+export const paramNamesOf = (
+  method: (...args: unknown[]) => unknown
+): string[] => {
+  const source = Function.prototype.toString.call(method);
+  const start = source.indexOf("(");
+  if (start === -1) {
+    return [];
+  }
+  const parts: string[] = [];
+  let depth = 0;
+  let part = "";
+  for (const character of source.slice(start + 1)) {
+    if (depth === 0 && character === ")") {
+      break;
+    }
+    if (depth === 0 && character === ",") {
+      parts.push(part);
+      part = "";
+      continue;
+    }
+    if (openers.has(character)) {
+      depth += 1;
+    } else if (closers.has(character)) {
+      depth -= 1;
+    }
+    part += character;
+  }
+  parts.push(part);
+  return parts
+    .map((each) => each.trim())
+    .filter((each) => each !== "")
+    .map((each) => parameterName.exec(each)?.groups?.name ?? "input");
+};
+
 /** `method`, refusing arguments past `bounds` before it runs. */
 const bounded = (
   name: string,
   method: (...args: unknown[]) => unknown,
   bounds: ValueBounds,
   around: CallHook | undefined
-): ((...args: unknown[]) => unknown) =>
+): ((...args: unknown[]) => unknown) => {
+  const params = around === undefined ? [] : paramNamesOf(method);
   // A method, so it's called with the target as `this`, as Cap'n Web
   // calls it, and keeps the name it had.
-  ({
-    [name](this: object, ...args: unknown[]): unknown {
-      holdWithin(args, bounds);
-      const run = (): unknown => Reflect.apply(method, this, args);
-      return around === undefined
-        ? run()
-        : around({ target: this, method: name, args }, run);
-    },
-  })[name] ?? method;
+  return (
+    {
+      [name](this: object, ...args: unknown[]): unknown {
+        holdWithin(args, bounds);
+        const run = (): unknown => Reflect.apply(method, this, args);
+        return around === undefined
+          ? run()
+          : around({ target: this, method: name, args, params }, run);
+      },
+    }[name] ?? method
+  );
+};
 
 /** Whether a prototype's property is a method. */
 const isMethod = (value: unknown): value is (...args: unknown[]) => unknown =>

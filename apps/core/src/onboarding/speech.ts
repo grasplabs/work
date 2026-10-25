@@ -208,7 +208,7 @@ const forAdmin = async (
     return refused(401, authErrors.create("auth.unauthenticated"), requestId);
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "onboarding.speech", []);
+  await auditStaffRoute(env, person, "onboarding.speech");
   if (!isAdmin(person.role)) {
     return refused(403, roleErrors.create("role.forbidden"), requestId);
   }

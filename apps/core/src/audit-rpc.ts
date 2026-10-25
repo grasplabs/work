@@ -434,7 +434,9 @@ export const auditExportResponse = async (
     );
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "audit.export", []);
+  await auditStaffRoute(env, person, "audit.export", {
+    query: new URL(request.url).search,
+  });
   const { searchParams } = new URL(request.url);
   const filter = Object.fromEntries(
     [...searchParams].filter(([name]) => name !== "format")

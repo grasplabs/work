@@ -851,7 +851,7 @@ export const originalResponse = async (
     );
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "uploads.original", [uploadId]);
+  await auditStaffRoute(env, person, "uploads.original", { uploadId });
   const knowledge = drizzle(env.KNOWLEDGE);
   const reader = { type: "person", person } as const;
   const ready = await drizzle(env.DB)

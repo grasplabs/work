@@ -559,10 +559,11 @@ describe("blueprints", { timeout: 60_000 }, () => {
       listed: listed.some(({ app }) => app === source),
     }).toStrictEqual({ create: "app.blueprint_not_found", listed: false });
     expect(
-      [...events, ...unmarked]
-        // Grasp staff's attempts are on record as theirs (staff-audit.ts).
-        .filter(({ action }) => action !== "staff.accessed")
-        .map(({ actor, action, detail }) => ({ actor, action, detail }))
+      [...events, ...unmarked].map(({ actor, action, detail }) => ({
+        actor,
+        action,
+        detail,
+      }))
     ).toStrictEqual([
       {
         actor: { type: "person", userId: builder.userId },

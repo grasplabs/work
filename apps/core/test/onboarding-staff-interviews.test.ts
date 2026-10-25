@@ -151,9 +151,12 @@ describe("the interviews in Grasp's onboarding area", () => {
     const staff = await asStaff();
 
     const reads: AdminSnapshot[] = [];
-    const events = await auditedDuring(async () => {
-      reads.push(await staff.onboardingStaff.interviews());
-    });
+    const events = await auditedDuring(
+      async () => {
+        reads.push(await staff.onboardingStaff.interviews());
+      },
+      { staffAccesses: true }
+    );
     const links = reads[0]?.links ?? [];
     const stateOf = (person: string) =>
       links.find((link) => link.person === person)?.state;
@@ -171,7 +174,8 @@ describe("the interviews in Grasp's onboarding area", () => {
       states: ["completed", "invited", "waiting"],
       oli: [4, "claire", true],
       words: false,
-      audited: [["onboarding.interviews.read", "staff", "organization"]],
+      // On record as a staff look (staff-audit.ts), naming no one.
+      audited: [["staff.accessed", "staff", undefined]],
     });
   });
 

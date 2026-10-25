@@ -279,7 +279,10 @@ export const appLinkResponse = async (
     );
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "app.link", []);
+  await auditStaffRoute(env, person, `app.link.${route.kind}`, {
+    app: route.app,
+    resource: route.resource,
+  });
   const refusal = personRefusal(request.headers, person.userId);
   if (refusal !== undefined) {
     log.info("app_link.person_refused", { requestId, reason: refusal.code });

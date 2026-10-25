@@ -130,12 +130,9 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#sessions = new SessionsRpc(env, full, sessionId);
     this.#channelAccounts = new ChannelAccountsRpc(env, full);
     this.#notifications = new NotificationsRpc(env, full);
-    // The onboarding records each of staff's looks and changes in its own
-    // words already (onboarding/), so its namespaces ask the connection's
-    // check itself: one entry per look, not two.
-    this.#onboarding = new OnboardingRpc(env, connectionCheck);
-    this.#onboardingStaff = new OnboardingStaffRpc(env, connectionCheck);
-    this.#onboardingGate = new OnboardingGateRpc(env, connectionCheck);
+    this.#onboarding = new OnboardingRpc(env, check);
+    this.#onboardingStaff = new OnboardingStaffRpc(env, check);
+    this.#onboardingGate = new OnboardingGateRpc(env, check);
   }
 
   get sessions(): SessionsRpc {

@@ -747,7 +747,7 @@ export const appFunctionResponse = async (
     );
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "app.functions", [app]);
+  await auditStaffRoute(env, person, "app.functions", { app });
   const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;
@@ -864,6 +864,9 @@ export const portableFunctionResponse = async (
     }
     return refused(401, authErrors.create("auth.unauthenticated"), requestId);
   }
+  // A staff member's call from a portable host is in the client's audit
+  // log too (staff-audit.ts).
+  await auditStaffRoute(env, checked.person, "app.functions.portable", { app });
   return withCors(
     await boundedCall(
       request,
@@ -927,7 +930,7 @@ const admitCall = async (
     );
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "app.functions.stream", [app]);
+  await auditStaffRoute(env, person, "app.functions.stream", { app });
   const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;

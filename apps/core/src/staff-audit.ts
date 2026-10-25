@@ -21,14 +21,24 @@ import type { SessionCheck } from "./session-check.ts";
 //   (`auditStaffRoute`).
 //
 // An entry names what was viewed, never what it holds: the surface
-// (namespace and method, or route), how many arguments it took, and the
-// identifiers among them, which only strings of an identifier's shape
-// count as, so a search's terms or a document's text never do. It is
-// stored in core's outbox before the call goes on: one that can't be
-// stored fails the call, so no view goes unrecorded. The same view
-// (surface and identifiers) on one connection is written once per
+// (namespace and method, or route), how many arguments it took, the
+// platform IDs among them (UUIDs, bare or after one of our short prefixes,
+// as `ent_<uuid>`), and the kind of every other argument, by the name the
+// method gives it (`query`, `input.path`). So a search's terms, a name or
+// a secret never reach the log, whatever their shape. It is stored in
+// core's outbox before the call goes on: one that can't be stored fails
+// the call, so no view goes unrecorded. The same view on one connection
+// (surface, and a hash of all its arguments) is written once per
 // `repeatWindowMs`, so a page asking again and again doesn't flood the
-// log; anything else is always an entry of its own.
+// log; a view of anything else, or the same surface asked something else,
+// is always an entry of its own. A check outside any call (a push of a
+// live query, a timer) is the call it was started in, which the call
+// context carries on, so each subscription keeps a key of its own.
+//
+// Two methods of the onboarding name what staff looked at by its random
+// link ID rather than the person's (`selfAudited`): the person's ID would
+// tell the company who was interviewed. They write that entry themselves
+// (onboarding/staff-rpc.ts), and no other.
 
 /** How long one connection's same view is one entry. */
 export const repeatWindowMs = 5 * 60_000;
@@ -36,9 +46,21 @@ export const repeatWindowMs = 5 * 60_000;
 /** The most identifiers one entry names. */
 const idsPerEntry = 20;
 
-/** A UUID, or a prefixed ID (`ent_…`): an identifier's shape, never text. */
-const idShape =
-  /^(?:[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}|[a-z][a-z\d]{1,15}_[\w-]{6,64})$/iu;
+/** The most characters of kinds one entry names. */
+const kindsMaxLength = 256;
+
+/** A platform ID: a UUID, bare or after one of our short prefixes. */
+const platformId =
+  /^(?:[a-z]{2,8}_)?[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/u;
+
+/**
+ * The surfaces that record each staff look themselves, by an ID that
+ * names no one (see the header): no second entry.
+ */
+const selfAudited: ReadonlySet<string> = new Set([
+  "onboardingStaff.interview",
+  "onboardingStaff.link",
+]);
 
 /** A target's name as a surface's: `KnowledgeRpc` is `knowledge`. */
 const namespaceOf = (target: object): string => {
@@ -46,37 +68,55 @@ const namespaceOf = (target: object): string => {
   return `${name.charAt(0).toLowerCase()}${name.slice(1)}`;
 };
 
+/** What a call's arguments name: platform IDs, and the kinds of the rest. */
+export interface Named {
+  ids: string[];
+  kinds: string[];
+}
+
 /**
- * The identifiers among `values`, and one level into each object or list
- * they are: strings of an identifier's shape only.
+ * What `args`, named `names`, name: each argument a platform ID is, or
+ * holds one level in (an object's members, a list's items), by its value;
+ * every other one by its kind, its name (`query`, `input.path`). Nothing
+ * else of what they hold.
  */
-export const idsOf = (values: readonly unknown[]): string[] => {
-  const found = new Set<string>();
-  const take = (value: unknown): void => {
-    if (typeof value === "string" && idShape.test(value)) {
-      found.add(value);
+export const namedBy = (
+  args: readonly unknown[],
+  names: readonly string[]
+): Named => {
+  const ids = new Set<string>();
+  const kinds = new Set<string>();
+  const take = (value: unknown, kind: string): void => {
+    if (typeof value === "string" && platformId.test(value)) {
+      ids.add(value);
+    } else if (value !== undefined && value !== null) {
+      kinds.add(kind);
     }
   };
-  for (const value of values) {
-    take(value);
+  for (const [index, value] of args.entries()) {
+    const name = names[index] ?? `arg${index}`;
     if (Array.isArray(value)) {
       for (const item of value) {
-        take(item);
+        take(item, name);
       }
     } else if (typeof value === "object" && value !== null) {
-      for (const item of Object.values(value)) {
-        take(item);
+      for (const [key, item] of Object.entries(value)) {
+        take(item, `${name}.${key}`);
       }
+    } else {
+      take(value, name);
     }
   }
-  return [...found].toSorted().slice(0, idsPerEntry);
+  return {
+    ids: [...ids].toSorted().slice(0, idsPerEntry),
+    kinds: [...kinds].toSorted(),
+  };
 };
 
 /** What a staff member viewed or did: where, and of what. */
-export interface StaffView {
+export interface StaffView extends Named {
   /** `namespace.method`, or a route's name. */
   surface: string;
-  ids: readonly string[];
   /** How many arguments the call took. */
   args: number;
 }
@@ -89,7 +129,7 @@ export interface StaffView {
 export const recordStaffView = async (
   env: Env,
   person: Pick<Identity, "userId" | "staff">,
-  { surface, ids, args }: StaffView
+  { surface, ids, kinds, args }: StaffView
 ): Promise<void> => {
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
@@ -97,15 +137,41 @@ export const recordStaffView = async (
       actor: actorOf(person),
       action: "staff.accessed",
       provenance: [...ids],
-      detail: { surface, args, ids: ids.length },
+      detail: {
+        surface,
+        args,
+        ids: ids.length,
+        kinds: kinds.join(",").slice(0, kindsMaxLength),
+      },
     }),
   ]);
 };
 
 /**
+ * A hash of `args`, for telling one view from another without keeping
+ * what they hold; a value JSON can't take (a stub) makes every call its
+ * own.
+ */
+const argsHash = async (args: readonly unknown[]): Promise<string> => {
+  let text: string;
+  try {
+    text = JSON.stringify(args) ?? "";
+  } catch {
+    return crypto.randomUUID();
+  }
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(text)
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+};
+
+/**
  * `check`, writing an entry for each view of a staff member's: what the
- * call running now is (call-context.ts), once per `repeatWindowMs` for the same
- * view on this connection. A person who isn't staff writes none.
+ * call running now is (call-context.ts), once per `repeatWindowMs` for the
+ * same view on this connection. A person who isn't staff writes none.
  */
 export const staffAudited = (env: Env, check: SessionCheck): SessionCheck => {
   const written = new Map<string, number>();
@@ -116,19 +182,23 @@ export const staffAudited = (env: Env, check: SessionCheck): SessionCheck => {
         return person;
       }
       const call = currentCall();
-      const view: StaffView =
+      const surface =
         call === undefined
-          ? { surface: "session", ids: [], args: 0 }
-          : {
-              surface: `${namespaceOf(call.target)}.${call.method}`,
-              ids: idsOf(call.args),
-              args: call.args.length,
-            };
-      const key = `${view.surface}\u0000${view.ids.join(",")}`;
+          ? "session"
+          : `${namespaceOf(call.target)}.${call.method}`;
+      if (selfAudited.has(surface)) {
+        return person;
+      }
+      const args = call?.args ?? [];
+      const key = `${surface}\u0000${await argsHash(args)}`;
       const now = Date.now();
       const last = written.get(key);
       if (last === undefined || now - last >= repeatWindowMs) {
-        await recordStaffView(env, person, view);
+        await recordStaffView(env, person, {
+          surface,
+          args: args.length,
+          ...namedBy(args, call?.params ?? []),
+        });
         written.set(key, now);
       }
       return person;
@@ -143,19 +213,20 @@ export const staffAudited = (env: Env, check: SessionCheck): SessionCheck => {
 
 /**
  * Writes the entry of a route's view by `person`, if staff: `route` names
- * it, `ids` what it served.
+ * it, `parts` what it was asked for, by name.
  */
 export const auditStaffRoute = async (
   env: Env,
   person: Pick<Identity, "userId" | "staff">,
   route: string,
-  ids: readonly string[]
+  parts: Readonly<Record<string, unknown>> = {}
 ): Promise<void> => {
   if (person.staff) {
+    const names = Object.keys(parts);
     await recordStaffView(env, person, {
       surface: route,
-      ids: idsOf(ids),
-      args: ids.length,
+      args: names.length,
+      ...namedBy(Object.values(parts), names),
     });
   }
 };

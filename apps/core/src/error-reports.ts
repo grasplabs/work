@@ -88,7 +88,7 @@ export const errorReportResponse = async (
     );
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "error.report", []);
+  await auditStaffRoute(env, person, "error.report");
   if (!withinLimit(person.userId)) {
     const response = errorResponse(
       429,
