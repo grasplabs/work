@@ -349,7 +349,7 @@ describe(
         [{ from: "person", text: "Honestly Lea never answers her mail." }]
       );
       await answering([ticketsReply(ids)], async () => await store.drawNext());
-      await store.intakeNext();
+      await intake(ids);
       // Nick (GRA-529): members and admins see only what five or more
       // people said, put together, and staff only numbers. Nothing core
       // holds is that yet, so the source has no turns for anyone: only how
