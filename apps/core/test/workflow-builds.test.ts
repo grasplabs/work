@@ -306,14 +306,10 @@ describe("JSON workflow builds", () => {
             },
           },
           {
-            stop: {
-              raise: {
-                error: {
-                  type: "urn:grasp:error:test.stopped",
-                  status: 400,
-                  title: "Stopped.",
-                },
-              },
+            // Retries come with GRA-278's durable retry timers.
+            guard: {
+              try: [{ attempt: { set: { status: "trying" } } }],
+              catch: { retry: { limit: { attempt: { count: 2 } } } },
             },
           },
           { finish: { set: { status: "done" } } },
@@ -331,7 +327,11 @@ describe("JSON workflow builds", () => {
         taskId: "check",
         feature: "timeout:do",
       },
-      { pointer: "/do/1/stop", taskId: "stop", feature: "raise" },
+      {
+        pointer: "/do/1/guard/catch/retry",
+        taskId: "guard",
+        feature: "catch.retry",
+      },
     ]);
     // Nothing generated, nothing sealed: the export is the definition alone.
     const { files } = await workflowSource(env, by, workflow.id, 1);

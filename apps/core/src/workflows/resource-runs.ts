@@ -11,6 +11,7 @@ import type {
   WorkflowResourceRun,
   WorkflowRunStatus,
 } from "@grasp-os/shared/workflow-resources";
+import { workflowErrors } from "@grasp-os/shared/workflows";
 import { encode } from "@grasp-os/workerflow/codec";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { namedError } from "@grasp-os/workerflow/errors";
@@ -64,6 +65,7 @@ import { childEndType } from "./event-envelopes.ts";
 import type { ChildEnd } from "./event-envelopes.ts";
 import {
   countedStep,
+  forIsolate,
   fromIsolate,
   settle,
   stepLimitOf,
@@ -993,7 +995,12 @@ export const runActivation = async (
   }
   // The refusal that caught the isolate asking for what generated code
   // never does: the run fails with it, whatever the code made of it.
-  const failed = tampered ?? (result.ok ? undefined : result.error);
+  // Ended well past a failure no catch took: its code went on past it.
+  const untaken =
+    result.ok && host.failureUntaken
+      ? forIsolate(workflowErrors.create("workflow.invalid"))
+      : undefined;
+  const failed = tampered ?? untaken ?? (result.ok ? undefined : result.error);
   if (failed !== undefined) {
     throw namedError(failed.name, failed.message, failed.code);
   }
