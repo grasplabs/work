@@ -356,6 +356,27 @@ describe("who can make a skill selectable", () => {
     });
   });
 
+  it("lets no team collection full of skills stop a company skill being selected", async () => {
+    const company = await newCollection(brain, "Company skills");
+    const team = await newCollection(brain, "Team skills", "team");
+    await saved(company, "invoices", "tasks: [invoice]");
+    // More skill documents than any cap: none counts, as none is vouched for.
+    for (let index = 0; index <= 1000; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one save at a time
+      await saved(team, `filler-${index}`, "tasks: [invoice]");
+    }
+    const teammate: Caller = { userId: "ann", reads: [company.id, team.id] };
+
+    const selection = await selectSkill(brain, teammate, {
+      task: { type: "invoice" },
+    });
+
+    expect(summary(selection)).toStrictEqual({
+      result: "invoices",
+      considered: { invoices: "selected" },
+    });
+  });
+
   it("refuses a teammate's skill taking the company's place through replaces", async () => {
     const company = await newCollection(brain, "Company skills");
     const team = await newCollection(brain, "Team skills", "team");

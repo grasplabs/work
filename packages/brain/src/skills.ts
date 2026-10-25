@@ -18,6 +18,7 @@ import type {
   SkillReference,
   SkillSelection,
 } from "./contract.ts";
+import { inList } from "./db/d1.ts";
 import {
   brainPayloads,
   collections,
@@ -77,7 +78,7 @@ export const skillSelectionPolicyVersion = "rules@2";
 /** Most selectable skills one selection reads; more selects none. */
 export const skillsReadMax = 100;
 
-/** Most readable skill documents it looks at, selectable or not; more selects none. */
+/** Most collections holding readable skills it asks about; more selects none. */
 const skillsScanMax = 1000;
 
 /** A selectable skill, as a selection reads it. */
@@ -143,18 +144,36 @@ const selectableSkills = async <C>(
 ): Promise<{ candidates: Candidate[]; read: number } | undefined> => {
   const { db } = brain;
   const allowed = await allowedFor(brain.ports, reader);
-  const rows = await db
+  // The collections holding skills the reader may read, vouched for first,
+  // so only theirs are scanned: a collection anyone may fill with skills
+  // never uses up the cap below and so never stops a selection.
+  const held = await db
+    .selectDistinct({
+      id: collections.id,
+      access: collections.access,
+      owner: collections.owner,
+      source: collections.source,
+    })
+    .from(documents)
+    .innerJoin(collections, eq(collections.id, documents.collectionId))
+    .where(and(eq(documents.type, "skill"), allowed.documents()))
+    .limit(skillsScanMax + 1);
+  if (held.length > skillsScanMax) {
+    return undefined;
+  }
+  const authorities = await brain.ports.skills.authorityOf(held);
+  const vouchedIds = Object.keys(authorities).filter((id) =>
+    held.some((collection) => collection.id === id)
+  );
+  if (vouchedIds.length === 0) {
+    return { candidates: [], read: 0 };
+  }
+  const vouched = await db
     .select({
       id: documents.id,
       path: documents.path,
       version: documents.currentVersion,
-      collection: {
-        id: collections.id,
-        access: collections.access,
-        owner: collections.owner,
-        source: collections.source,
-        sensitive: collections.sensitive,
-      },
+      collection: { id: collections.id, sensitive: collections.sensitive },
       payload: { key: brainPayloads.key, sha256: brainPayloads.sha256 },
     })
     .from(documents)
@@ -167,20 +186,15 @@ const selectableSkills = async <C>(
       )
     )
     .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
-    .where(and(eq(documents.type, "skill"), allowed.documents()))
+    .where(
+      and(
+        eq(documents.type, "skill"),
+        allowed.documents(),
+        inList(collections.id, vouchedIds)
+      )
+    )
     .orderBy(asc(collections.id), asc(documents.path))
-    .limit(skillsScanMax + 1);
-  if (rows.length > skillsScanMax) {
-    return undefined;
-  }
-  const authorities = await brain.ports.skills.authorityOf([
-    ...new Map(
-      rows.map(({ collection }) => [collection.id, collection])
-    ).values(),
-  ]);
-  const vouched = rows.filter(({ collection }) =>
-    Object.hasOwn(authorities, collection.id)
-  );
+    .limit(skillsReadMax + 1);
   if (vouched.length > skillsReadMax) {
     return undefined;
   }
