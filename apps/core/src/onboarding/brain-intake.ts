@@ -15,18 +15,23 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
+
+import type { TeamClaim } from "./team-claims.ts";
 
 // What the onboarding learned, as the brain's records (GRA-367): each
-// team as a team record, one source for all its interviews, the facts its
-// people agreed to as statements, and each piece of work as a workflow
+// team as a team record, one source for all its interviews, what five or
+// more of its people said, put together, as statements (GRA-1084,
+// team-claims.ts), and each piece of work as a workflow
 // with every drawing a new version. Decided in GRA-359: nothing in them
 // points at one person. So:
 //
 // - No source per person: one per team, served live by the brain
 //   (brain-rpc.ts) with how many people it rests on, never who.
-// - A statement is an agreed fact as the record says it, never their
-//   words (`text`) or quote; never the lead's, whose role alone says who
-//   they are; and a name on the staff list in it is taken out.
+// - A statement is a claim of the team's that five or more of its people
+//   made, never one person's fact, nor their words (`text`) or quote;
+//   never resting on the lead, whose role alone says who they are; and a
+//   name on the staff list in it is taken out.
 // - A drawing keeps no `from` and no `told`: its numbers are ranges over
 //   everyone who gave one, and how many did, never whose.
 // - A team reaches the brain only once `minTeamShown` (five) of its people
@@ -62,7 +67,7 @@ export const intakeIds = {
 };
 
 /** The brain's statement kind for each fact tag that is one; the rest are the drawing's. */
-const statementKinds: Partial<Record<FactTag, StatementKind>> = {
+export const statementKinds: Partial<Record<FactTag, StatementKind>> = {
   system: "tool",
   workaround: "tool",
   ai: "tool",
@@ -78,7 +83,7 @@ export interface TeamIntake {
   team: { id: string; name: string };
   /** Everyone on the staff list, by name: no record says one. */
   names: string[];
-  /** The facts each person who told their own work agreed to: never the lead. */
+  /** The facts each person who told their own work agreed to, never the lead's: what its claims are put together from. */
   tellers: { person: string; facts: { tag: FactTag; record: string }[] }[];
   /** Its pieces of work as drawn, each with who it rests on besides the people it was drawn from. */
   works: {
@@ -118,7 +123,9 @@ const escaped = (text: string): string =>
  * name, as a whole word, becomes "someone". A word that is also a name
  * ("Mark") goes too: better a word lost than a name kept.
  */
-const withoutNames = (names: readonly string[]): ((text: string) => string) => {
+export const withoutNames = (
+  names: readonly string[]
+): ((text: string) => string) => {
   const words = [
     ...new Set(
       names.flatMap((name) =>
@@ -264,13 +271,16 @@ const recordOf = (record: BrainRecordInput): BrainRecord[] => {
 };
 
 /**
- * What a team gives the brain: its team record, its statements and its
- * drawn workflows, each drawing a version of its own, all naming the one
- * source of its interviews. The same team, fact or drawing is the same
- * id, so giving it again keeps nothing twice; a new drawing is a new
- * version. The team was found in the staff list (`rosterSource`).
+ * What a team gives the brain: its team record, its claims (`claims`, each
+ * resting on five or more people) as statements, and its drawn workflows,
+ * each drawing a version of its own, all naming the one source of its
+ * interviews. The same team, claim or drawing is the same id, so giving
+ * it again keeps nothing twice; a new drawing is a new version. The team was found in the staff list (`rosterSource`).
  */
-export const intakeOf = async (intake: TeamIntake): Promise<Intake> => {
+export const intakeOf = async (
+  intake: TeamIntake,
+  claims: readonly TeamClaim[]
+): Promise<Intake> => {
   const clean = withoutNames(intake.names);
   const teamId = intakeIds.team(intake.team.id);
   const sourceId = await intakeIds.interviews(intake.team.id);
@@ -281,35 +291,35 @@ export const intakeOf = async (intake: TeamIntake): Promise<Intake> => {
     sourceId: rosterSource,
   });
   const rests: Rest[] = [];
-  const kept = new Set<string>();
-  for (const { person, facts } of intake.tellers) {
-    for (const { tag, record } of facts) {
-      const kind = statementKinds[tag];
-      const text = clean(record).trim();
-      if (kind === undefined || text === "") {
-        continue;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- a hash each, in order
-      const id = await intakeIds.statement(intake.team.id, kind, text);
-      if (!kept.has(id)) {
-        const statement = recordOf({
-          type: "statement",
-          id,
-          kind,
-          text,
-          sourceId,
-          teamIds: [teamId],
-          toolIds: [],
-        });
-        records.push(...statement);
-        if (statement.length > 0) {
-          kept.add(id);
-        }
-      }
-      if (kept.has(id)) {
-        rests.push({ record: id, type: "statement", person });
-      }
+  // Only what five or more of its people said, put together
+  // (team-claims.ts): never one person's fact as a statement of its own.
+  for (const claim of claims) {
+    const text = clean(claim.text).trim();
+    if (text === "" || claim.people.length < minTeamShown) {
+      continue;
     }
+    // oxlint-disable-next-line no-await-in-loop -- a hash each, in order
+    const id = await intakeIds.statement(intake.team.id, claim.kind, text);
+    const statement = recordOf({
+      type: "statement",
+      id,
+      kind: claim.kind,
+      text,
+      sourceId,
+      teamIds: [teamId],
+      toolIds: [],
+    });
+    if (statement.length === 0 || records.some((each) => each.id === id)) {
+      continue;
+    }
+    records.push(...statement);
+    rests.push(
+      ...claim.people.map((person) => ({
+        record: id,
+        type: "statement" as const,
+        person,
+      }))
+    );
   }
   for (const work of intake.works) {
     // oxlint-disable-next-line no-await-in-loop -- a hash each, in order

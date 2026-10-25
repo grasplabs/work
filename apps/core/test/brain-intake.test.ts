@@ -7,15 +7,19 @@ import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
-import { answering } from "./interview-link.ts";
+import { answering, onLink } from "./interview-link.ts";
 import {
   agree,
   fact,
+  intake,
   kept,
   mapped,
+  openLink,
   team,
   ticketsReply,
   told,
+  zendeskClaim,
+  zendeskSaid,
 } from "./onboarding-team.ts";
 import type { Ids } from "./onboarding-team.ts";
 import {
@@ -140,7 +144,7 @@ describe(
       await mapped(ids);
       await told(ids);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
-      const gave = await store.intakeNext();
+      const { gave } = await intake();
       const member = await signedInApi(idp, "user");
       const brain = await member.api.brain.read();
       const records = await kept(ids);
@@ -159,21 +163,12 @@ describe(
           who: null,
         },
         sources: 1,
+        // The five who said tickets come in through Zendesk, put together;
+        // what one of them said alone stays out.
         statements: [
-          { kind: "tool", text: "Tickets arrive in Zendesk.", source: true },
           {
-            kind: "handover",
-            text: "Someone hands billing questions to someone.",
-            source: true,
-          },
-          {
-            kind: "wish",
-            text: "Would like the customer number filled in for them.",
-            source: true,
-          },
-          {
-            kind: "blocker",
-            text: "A ticket waits days for the customer's reply.",
+            kind: "tool",
+            text: "Tickets come in through Zendesk.",
             source: true,
           },
         ],
@@ -218,7 +213,7 @@ describe(
       await mapped(ids);
       await told(ids);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
-      await store.intakeNext();
+      await intake();
       const before = await kept(ids);
       // Mia adds something and agrees again: tickets are drawn once more.
       await agree(
@@ -239,7 +234,9 @@ describe(
         async () => await store.drawNext()
       );
       // Given again with nothing new, nothing is kept twice.
-      const again = [await store.intakeNext(), await store.intakeNext()];
+      const first = await intake();
+      const second = await intake();
+      const again = [first.gave, second.gave];
       const after = await kept(ids);
       const member = await signedInApi(idp, "user");
       const brain = await member.api.brain.read();
@@ -276,23 +273,14 @@ describe(
         drawings: ["Send the answer.", "Close the ticket."],
         baseline: "Close the ticket.",
         rests: {
-          max: [
-            "statement",
-            "statement",
-            "workflow",
-            "workflowVersion",
-            "workflowVersion",
-          ],
-          mia: [
-            "statement",
-            "statement",
-            "workflow",
-            "workflowVersion",
-            "workflowVersion",
-          ],
+          // The claim rests on the five who made it, the drawings on whom
+          // they were drawn from.
+          max: ["statement", "workflow", "workflowVersion", "workflowVersion"],
+          mia: ["statement", "workflow", "workflowVersion", "workflowVersion"],
+          // The lead named the work, and was the drawing's context; the
+          // work rests on whom it was drawn from too.
           lea: ["workflow", "workflowVersion", "workflowVersion"],
-          // Noor told a step only: the drawings rest on her, no statement.
-          noor: ["workflow", "workflowVersion", "workflowVersion"],
+          noor: ["statement", "workflow", "workflowVersion", "workflowVersion"],
         },
       });
     });
@@ -332,7 +320,8 @@ describe(
         early: `brain:${ids.team}`,
         waiting: 0,
         late: `brain:${ids.team}`,
-        types: ["statement", "team", "workflow", "workflowVersion"],
+        // Nothing five of them said alike: no statement.
+        types: ["team", "workflow", "workflowVersion"],
       });
     });
 
@@ -438,3 +427,203 @@ describe(
     );
   }
 );
+
+/** The team's statements as `api` reads them in the brain: their words, sorted. */
+const statementsFor = async (
+  api: { brain: { read: () => Promise<Workspace> } },
+  ids: Ids
+): Promise<string[]> => {
+  const brain = await api.brain.read();
+  return brain.statements
+    .filter(({ teamIds }) => teamIds.includes(`team-${ids.team}`))
+    .map(({ text }) => text)
+    .toSorted();
+};
+
+/** Grasp's staff, signed in to the client's core. */
+const asStaff = async () => {
+  const session = await signedIn(idp, "grasp-staff", staffPerson());
+  const { core } = await openRpc(session);
+  return await core.authenticate();
+};
+
+/** Draws the team's tickets again, as someone agreed anew. */
+const drawTickets = async (ids: Ids) => {
+  await answering(
+    [ticketsReply(ids)],
+    async () => await onboardingStore(env).drawNext()
+  );
+};
+
+/** A team through the onboarding, its tickets drawn, waiting for the brain. */
+const drawnTeam = async () => {
+  const ids = await team();
+  await mapped(ids);
+  await told(ids);
+  await drawTickets(ids);
+  return ids;
+};
+
+// What a team said reaches the brain only put together, as claims five or
+// more of its people made (GRA-1084, src/onboarding/team-claims.ts), and
+// Grasp's staff read none of it. The ways it can fail, tried here:
+//
+// - A claim resting on fewer than five people, on one person cited five
+//   times, on facts that don't exist or on facts of another kind.
+// - A name, a person's id or their title reaching the model or the brain.
+// - A claim kept once fewer than five of the people behind it still
+//   agree, or kept after the team's claims were put together anew.
+// - No model: a person's fact written as a statement of its own instead.
+// - Staff reading what the company's people said.
+describe("what a team said, put together", { timeout: 120_000 }, () => {
+  it("keeps only claims five or more distinct people made, of facts of their kind, without a name, and shows the model no one", async () => {
+    const ids = await drawnTeam();
+    const [, ...fourOfThem] = zendeskSaid;
+    const { requests } = await intake([
+      zendeskClaim,
+      // Four people: Mia, Mo, Noor and Pim, but not Max's words alone.
+      {
+        kind: "tool",
+        text: "Zendesk sends the tickets on.",
+        cites: ["Tickets arrive in Zendesk.", ...fourOfThem.slice(0, 1)],
+      },
+      // One person cited five times.
+      {
+        kind: "tool",
+        text: "Someone answers in Zendesk.",
+        cites: ["F1", "F1", "F1", "F1", "F1"],
+      },
+      // Facts that don't exist, with three that do.
+      {
+        kind: "tool",
+        text: "Ghosts use Zendesk.",
+        cites: ["Tickets arrive in Zendesk.", "F90", "F91", "F92"],
+      },
+      // Facts of another kind.
+      {
+        kind: "handover",
+        text: "Tickets are handed over in Zendesk.",
+        cites: zendeskSaid,
+      },
+      // No statement kind at all.
+      { kind: "goal", text: "Everyone wants Zendesk.", cites: zendeskSaid },
+      // Five people, in words that name two of them.
+      {
+        kind: "tool",
+        text: "Max and Noor Nijs keep the tickets in Zendesk.",
+        cites: zendeskSaid,
+      },
+    ]);
+    const member = await signedInApi(idp, "user");
+    const prompt = JSON.stringify(requests.map(({ body }) => body));
+    const records = await kept(ids);
+    expect({
+      statements: await statementsFor(member.api, ids),
+      calls: requests.length,
+      shown: {
+        people: prompt.includes("Person 5") && !prompt.includes("Person 6"),
+        ids: Object.values(ids).filter((id) => prompt.includes(id)),
+        names: ["Max", "Mia", "Noor", "Nijs", "Lea"].filter((name) =>
+          prompt.includes(name)
+        ),
+        titles: ["Agent", "Team lead"].filter((title) =>
+          prompt.includes(`(${title})`)
+        ),
+        // Kinds fewer than five spoke to aren't shown at all.
+        alone: ["billing", "customer number", "customer's reply"].filter(
+          (words) => prompt.includes(words)
+        ),
+      },
+      named: namedIn(records, ids),
+    }).toStrictEqual({
+      statements: [
+        "Someone and someone someone keep the tickets in Zendesk.",
+        "Tickets come in through Zendesk.",
+      ],
+      calls: 1,
+      shown: { people: true, ids: [], names: [], titles: [], alone: [] },
+      named: { ids: [], names: [], words: false, lead: false },
+    });
+  });
+
+  it("shows members and admins the team's claims, and Grasp's staff none", async () => {
+    const ids = await drawnTeam();
+    await intake();
+    const member = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const staff = await asStaff();
+    expect({
+      member: await statementsFor(member.api, ids),
+      admin: await statementsFor(admin.api, ids),
+      staff: await statementsFor(staff, ids),
+    }).toStrictEqual({
+      member: ["Tickets come in through Zendesk."],
+      admin: ["Tickets come in through Zendesk."],
+      staff: [],
+    });
+  });
+
+  it("takes a claim out once fewer than five of the people behind it still agree", async () => {
+    const ids = await drawnTeam();
+    await intake();
+    const member = await signedInApi(idp, "user");
+    const before = await statementsFor(member.api, ids);
+    await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+    await onboardingStore(env).purgeBrain();
+    expect({
+      before,
+      after: await statementsFor(member.api, ids),
+      restsOn: await onboardingStore(env).sentFor(ids.max),
+    }).toStrictEqual({
+      before: ["Tickets come in through Zendesk."],
+      after: [],
+      restsOn: [],
+    });
+  });
+
+  it("keeps only the claims put together last: an earlier one, reworded or no longer made, goes", async () => {
+    const ids = await drawnTeam();
+    await intake();
+    const member = await signedInApi(idp, "user");
+    const first = await statementsFor(member.api, ids);
+    // Rik, behind none of it, agrees again, and the claims are put
+    // together anew, in other words: everyone behind the first still
+    // agrees, so only putting them together again takes it out.
+    await agree(
+      ids.rik,
+      [
+        fact("r1", "step", "Checks the queue at noon."),
+        fact("r2", "step", "Closes the ticket once answered."),
+      ],
+      1
+    );
+    await drawTickets(ids);
+    await intake([{ ...zendeskClaim, text: "Zendesk is the ticket inbox." }]);
+    const reworded = await statementsFor(member.api, ids);
+    await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")], 2);
+    await drawTickets(ids);
+    await intake([]);
+    const none = await statementsFor(member.api, ids);
+    expect({ first, reworded, none }).toStrictEqual({
+      first: ["Tickets come in through Zendesk."],
+      reworded: ["Zendesk is the ticket inbox."],
+      none: [],
+    });
+  });
+
+  it("writes nothing while no model can put the claims together, never a person's fact on its own", async () => {
+    const ids = await drawnTeam();
+    // No gateway: no model the deployment allows. A team an earlier test
+    // left due fails first, as this one does.
+    let gave: string | null = null;
+    for (let round = 0; round < 5 && gave !== `brain:${ids.team}`; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+      gave = await onboardingStore(env).intakeNext();
+    }
+    const records = await kept(ids);
+    expect({
+      gave,
+      records: records.map(({ type }) => type),
+    }).toStrictEqual({ gave: `brain:${ids.team}`, records: [] });
+  });
+});

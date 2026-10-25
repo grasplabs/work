@@ -188,6 +188,7 @@ import type { InterviewState, TeamCount } from "./rules.ts";
 import { anyLanguage, spokenKeysOf } from "./spoken-lines.ts";
 import type { SaidIn } from "./spoken-lines.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
+import { teamClaims } from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
 import { drawnWorkSchema, drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
@@ -4985,11 +4986,34 @@ export class Onboarding extends DurableObject<Env> {
     const began = this.#interviewsOf(
       this.#roster()?.people.map(({ id }) => id) ?? []
     );
-    const { records, rests } = await intakeOf(intake);
+    // What five or more of its people said, put together (GRA-1084):
+    // never one person's fact. A failing model throws, and the intake is
+    // tried again, with nothing written.
+    const claims = await teamClaims(this.env, intake, (took) => {
+      this.meter(took, at);
+    });
+    const { records, rests } = await intakeOf(intake, claims);
     await keepOnboardingRecords(this.env, records, {
       sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
       teams: new Set([intakeIds.team(teamId)]),
     });
+    // The team's claims are these now: any statement given before that
+    // isn't one of them goes, so no earlier one outlives what it was put
+    // together from. Read before the new rests are noted, and taken out
+    // after: until it is, the team stays due, so a failure is tried again.
+    const current = new Set(records.map(({ id }) => id));
+    const stale = [
+      ...new Set(
+        this.#db
+          .select({ record: brainSent.record })
+          .from(brainSent)
+          .where(
+            and(eq(brainSent.team, teamId), eq(brainSent.type, "statement"))
+          )
+          .all()
+          .flatMap(({ record }) => (current.has(record) ? [] : [record]))
+      ),
+    ];
     const gone = this.ctx.storage.transactionSync(() => {
       // Whose interview went meanwhile, though they began anew: what rests
       // on it rests on someone gone (`gonePrefix`), and is taken out.
@@ -5013,9 +5037,18 @@ export class Onboarding extends DurableObject<Env> {
         .set({ sentAt: sql`coalesce(${brainTeams.sentAt}, ${at})` })
         .where(eq(brainTeams.team, teamId))
         .run();
-      this.#brainSettled(teamId, dueAt);
+      if (stale.length === 0) {
+        this.#brainSettled(teamId, dueAt);
+      }
       return since.size > 0;
     });
+    if (stale.length > 0) {
+      await purgeOnboardingRecords(this.env, stale);
+      this.ctx.storage.transactionSync(() => {
+        this.#db.delete(brainSent).where(inList(brainSent.record, stale)).run();
+        this.#brainSettled(teamId, dueAt);
+      });
+    }
     // Someone it rests on deleted their interview while it was given: what
     // landed of it is taken out again at once, or by the alarm.
     if (gone) {
@@ -5045,8 +5078,9 @@ export class Onboarding extends DurableObject<Env> {
    * (`brain_sent`), now that some interviews are gone (their agreement no
    * longer counts, `#agreedAt`):
    *
-   * - a statement once nobody it rests on is left: someone else who agreed
-   *   to the same keeps it;
+   * - a statement once fewer than `minTeamShown` of the people it rests on
+   *   are left: a claim is the team's only while five or more make it
+   *   (GRA-1084);
    * - a drawing once anyone it rests on is gone: their numbers and words
    *   are in it, and what is left is drawn again without them;
    * - a workflow once nobody it rests on is left, or none of its drawings;
@@ -5096,6 +5130,8 @@ export class Onboarding extends DurableObject<Env> {
       if (
         emptied.has(team) ||
         left.length === 0 ||
+        // A claim rests on five or more people, or isn't the team's.
+        (type === "statement" && left.length < minTeamShown) ||
         (type === "workflowVersion" && left.length < on.length) ||
         (unmapped.has(team) &&
           (type === "workflow" || type === "workflowVersion"))
