@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { brainErrors } from "../src/contract.ts";
 import {
+  eraseOutcome,
   eraseOutcomes,
   outcomeCursors,
   outcomesFor,
@@ -19,7 +20,8 @@ import { testHost } from "./host.ts";
 //    or a late delivery moves its source's cursor back.
 // 2. Evaluation, test or learning-job work is kept as experience, so a
 //    learning job could feed on its own output.
-// 3. An erased execution record leaves its events behind.
+// 3. An erased execution record, or an event taken back on its own, is
+//    left behind, or comes back with a delivery from before.
 // 4. An event carries more than identifiers: a field the host never meant.
 // 5. A shared session's event reaches someone outside its audience: one
 //    who was never in it, or one the host no longer counts in it.
@@ -162,6 +164,44 @@ describe("task outcomes", () => {
       kept: [expect.objectContaining({ evidenceId: kept.evidenceId })],
       // Its recording, then its erasure, each once.
       audited: ["knowledge.episode.recorded", "knowledge.episode.erased"],
+    });
+  });
+
+  it("keep one event taken back on its own, delivered before or after, and nothing else of its record", async () => {
+    const { brain } = testHost();
+    const recorded = settled();
+    // Taken back before its delivery from before landed.
+    const early = settled();
+    // Another event of the same execution record.
+    const sibling = settled({
+      eventId: `${recorded.eventId}:retry`,
+      evidenceId: recorded.evidenceId,
+      evidenceRefs: recorded.evidenceRefs,
+    });
+    await recordOutcome(brain, recorded);
+
+    const erased = [
+      await eraseOutcome(brain, recorded.eventId),
+      await eraseOutcome(brain, early.eventId),
+    ];
+    // Each delivered again, as after a lost reply or still on its way.
+    const again = [
+      await recordOutcome(brain, recorded),
+      await recordOutcome(brain, early),
+      await recordOutcome(brain, sibling),
+    ];
+    const ofRecord = await outcomesOf(brain, recorded.evidenceId);
+
+    expect({
+      erased,
+      recordedAgain: again.map(({ recorded: made }) => made),
+      ofRecord: ofRecord.map(({ eventId }) => eventId),
+      early: await outcomesOf(brain, early.evidenceId),
+    }).toStrictEqual({
+      erased: [true, false],
+      recordedAgain: [false, false, true],
+      ofRecord: [sibling.eventId],
+      early: [],
     });
   });
 

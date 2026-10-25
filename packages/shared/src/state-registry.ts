@@ -447,7 +447,7 @@ const knowledgeDb: D1State = {
     ),
     brain_erased_evidence: exported(
       `${brain}outcomes.ts`,
-      "Execution records whose events were erased: late captures stay erased."
+      "Execution records whose events were erased, and single events taken back: late captures stay erased."
     ),
     brain_forgotten_people: exported(
       `${brain}outcomes.ts`,

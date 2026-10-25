@@ -132,6 +132,14 @@ export interface OutcomeReceipt {
   recorded: boolean;
 }
 
+/**
+ * The key an event taken back on its own (`eraseOutcome`) is remembered
+ * by in `brain_erased_evidence`, beside the execution records erased
+ * whole. The host's run and chat IDs never start with `episode:`, and a
+ * clash could only keep an event from being recorded, never record one.
+ */
+const erasedEventKey = (eventId: string): string => `episode:${eventId}`;
+
 /** The system, as the Brain's own events name it. */
 const system: Json = { type: "system" };
 
@@ -157,9 +165,10 @@ export const recordOutcome = async <C>(
   // the purge is never learned from again, however late it arrives.
   const forgotten = (userId: SQL | string) =>
     sql`EXISTS (SELECT 1 FROM ${brainForgottenPeople} WHERE ${brainForgottenPeople.userId} = ${userId} AND ${brainForgottenPeople.forgottenAt} >= ${occurredAt.getTime()})`;
-  // Its record erased (a run's details past retention, a chat deleted):
-  // never recorded after, however late a delivery lands.
-  const erased = sql`EXISTS (SELECT 1 FROM ${brainErasedEvidence} WHERE ${brainErasedEvidence.evidenceId} = ${outcome.evidenceId})`;
+  // Its record erased (a run's details past retention, a chat deleted), or
+  // the event itself taken back (`eraseOutcome`): never recorded after,
+  // however late a delivery lands.
+  const erased = sql`EXISTS (SELECT 1 FROM ${brainErasedEvidence} WHERE ${brainErasedEvidence.evidenceId} IN (${outcome.evidenceId}, ${erasedEventKey(outcome.eventId)}))`;
   const isNew = sql`NOT EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${brainEpisodes.id} = ${outcome.eventId}) AND NOT ${forgotten(outcome.ownerId)} AND NOT ${erased}`;
   const [, inserted] = await auditedBatch(brain.ports, db, [
     // Before the insert, on its condition: recorded only if it is new.
@@ -345,16 +354,19 @@ const eraseWhere = async <C>(
       .delete(brainEpisodes)
       .where(eq(column, target.id))
       .returning({ id: brainEpisodes.id }),
-    // An execution record's erasure is remembered, so a delivery whose
-    // reply was lost, landing after it, records nothing (`recordOutcome`).
-    ...(column === brainEpisodes.evidenceId
-      ? [
-          db
-            .insert(brainErasedEvidence)
-            .values({ evidenceId: target.id, erasedAt: brain.ports.clock() })
-            .onConflictDoNothing(),
-        ]
-      : []),
+    // The erasure is remembered, an execution record's or one event's, so
+    // a delivery whose reply was lost, or one still on its way, landing
+    // after it records nothing (`recordOutcome`).
+    db
+      .insert(brainErasedEvidence)
+      .values({
+        evidenceId:
+          column === brainEpisodes.evidenceId
+            ? target.id
+            : erasedEventKey(target.id),
+        erasedAt: brain.ports.clock(),
+      })
+      .onConflictDoNothing(),
   ]);
   return deleted.length;
 };
@@ -383,6 +395,8 @@ export const eraseOutcomes = async <C>(
 /**
  * Erases the one event `eventId`: a host that recorded it as its person
  * lost the right to it takes it back, and nothing else of its record.
+ * Remembered, whether or not the event was there yet, so a delivery of it
+ * from before, landing after, records nothing.
  */
 export const eraseOutcome = async <C>(
   brain: Brain<C>,

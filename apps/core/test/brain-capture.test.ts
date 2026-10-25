@@ -380,6 +380,45 @@ describe("a workflow run's outcome", () => {
     });
   });
 
+  it("stays taken back when another delivery found it ineligible while one from before was recorded and its reply lost", async () => {
+    const { builder, app } = await newApp(true);
+    const run = await runningRun(app, builder.userId);
+    const admin = await signedInApi(idp, "admin");
+    // The first delivery's check passes. Before its record lands, its
+    // person is removed and another drain finds the intent ineligible,
+    // takes the event back (none yet) and removes the intent. Then the
+    // first delivery's record lands and its reply is lost: no intent is
+    // left to take the event back later.
+    let lost = false;
+    const racing = lostReply(
+      async () => {
+        await admin.api.members.remove(builder.userId);
+        await runCron();
+      },
+      () => {
+        lost = true;
+      }
+    );
+
+    await completed(run, { ...env, KNOWLEDGE: racing });
+    await vi.waitFor(
+      () => {
+        expect(lost).toBeTruthy();
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+    await runCron();
+
+    expect({
+      events: await eventsOf(run),
+      intent: await runIntent(run),
+      recorded: await audited(
+        "knowledge.episode.recorded",
+        `workflow.run:${run}`
+      ),
+    }).toStrictEqual({ events: [], intent: null, recorded: 0 });
+  });
+
   it("isn't recorded again after a personal purge erased it, when its delivery is made again", async () => {
     const { builder, app } = await newApp(true);
     const run = await runningRun(app, builder.userId);
