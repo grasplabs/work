@@ -692,7 +692,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       withReferences,
       screen ?? screens[0],
       null,
-      id
+      id,
+      "preview"
     );
     // A preview reads no real data, so no approval decides it; its
     // frame still runs exactly this build and nothing else.

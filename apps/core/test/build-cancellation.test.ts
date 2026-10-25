@@ -73,7 +73,7 @@ describe("a build given up on", { timeout: 60_000 }, () => {
             files: freshServer(),
             bindings: {},
           },
-          lost()
+          { profile: "production", signal: lost() }
         )
     );
     expect(watched).toStrictEqual({
@@ -233,26 +233,39 @@ describe("a build given up on", { timeout: 60_000 }, () => {
   it("starts no compile for a screen's references when it is given up on during their cache read", async () => {
     const giveUp = new AbortController();
     const touched: string[] = [];
-    const { FILES: files } = env;
+    const { FILES: files, DB: db } = env;
     env.FILES = new Proxy(files, {
       get: (target, property) => {
         const value: unknown = Reflect.get(target, property);
         if (typeof property === "string" && typeof value === "function") {
           return async (...args: unknown[]): Promise<unknown> => {
             touched.push(property);
-            const answer: unknown = await Reflect.apply(value, target, args);
-            // Its lease lost while the references' manifest was read.
-            if (
-              property === "get" &&
-              typeof args[0] === "string" &&
-              args[0].startsWith("inspections/")
-            ) {
-              giveUp.abort(lostLease);
-            }
-            return answer;
+            return await Reflect.apply(value, target, args);
           };
         }
         return value;
+      },
+    });
+    // Its lease lost while the references' manifest was read from the
+    // cache: its receipt, in core's database (build-cache.ts).
+    env.DB = new Proxy(db, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "prepare" && typeof value === "function") {
+          return (query: string): unknown => {
+            if (
+              query.includes("build_receipts") &&
+              query.startsWith("select")
+            ) {
+              touched.push("receipt");
+              giveUp.abort(lostLease);
+            }
+            return Reflect.apply(value, target, [query]);
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
       },
     });
     const app = appIdSchema.parse(crypto.randomUUID());
@@ -270,17 +283,18 @@ describe("a build given up on", { timeout: 60_000 }, () => {
           "screens/desk.tsx":
             'import { references } from "#grasp";\nexport default () => String(references);\n',
         },
-        giveUp.signal
+        { signal: giveUp.signal }
       );
       outcome = "ran to its end";
     } catch (error) {
       outcome = error instanceof Error ? error.message : String(error);
     } finally {
       env.FILES = files;
+      env.DB = db;
     }
     expect({
       outcome,
-      read: touched.includes("get"),
+      read: touched.includes("receipt"),
       compiled: touched.includes("put"),
     }).toStrictEqual({
       outcome: lostLease.message,
