@@ -3,12 +3,14 @@ import { describe, expect, it } from "vite-plus/test";
 import { staffDrawingOf } from "../../src/admin/org-record.ts";
 import type { DrawnWork, Told } from "../../src/admin/org-record.ts";
 
-// A drawing as Grasp's staff get it (GRA-1079): which parts each person
-// told, and its numbers as totals only. From the security review of #1208,
-// each way staff could recover one named person's numbers, tried here:
-// a number only one person of a big team gave, a step only one person told,
-// and the ends of a range, each one person's. A number shows only once at
-// least 5 people gave it, as a median; a team of one shows its own.
+// A drawing as Grasp's staff get it (GRA-1079, GRA-1084): numbers only,
+// never anything anyone said; its steps and cases by position, how many
+// people each rests on, and its numbers as totals only. From the security
+// reviews of #1208, each way staff could recover one named person's
+// numbers or words, tried here: a number only one person of a big team
+// gave, a step's minutes only one gave, the ends of a range, and a number
+// in the model's text. A number shows only once at least 5 people gave it,
+// as a median; a team of one shows its own.
 
 /** What someone told: the first step, and `more`. */
 const told = (more: Partial<Told> = {}): Told => ({
@@ -88,51 +90,72 @@ const people = (
   );
 
 describe("a drawing as staff get it", () => {
-  it("holds back a number only one of a team of eight gave, and never says who gave it", () => {
+  it("holds back a number only one of a team of eight gave, and says nothing by person", () => {
     const tellers = people(8, (index) =>
       index === 3 ? { volume: [40, 90], takes: [2, 6, 20], wrong: 3 } : {}
     );
     const staff = staffDrawingOf(drawing(tellers), 8);
-    // Every person's entry reads the same as far as numbers go.
-    const shapes = new Set(
-      Object.values(staff.told).map((each) => JSON.stringify(each))
-    );
 
     expect({
       totals: staff.totals,
-      shapes: shapes.size,
-      named: Object.keys(staff.told["person-3"] ?? {}).filter((key) =>
-        ["volume", "volumeOf", "takes", "wrong"].includes(key)
-      ),
+      keys: Object.keys(staff).toSorted(),
+      heard: staff.heard,
     }).toStrictEqual({
+      // Neither a value nor how many fewer than 5.
       totals: {
-        volume: { people: 1, value: null },
-        takes: { people: 1, value: null },
-        wrong: { people: 1, value: null },
+        volume: { people: null, value: null },
+        takes: { people: null, value: null },
+        wrong: { people: null, value: null },
       },
-      shapes: 1,
-      named: [],
+      keys: ["at", "differently", "heard", "per", "steps", "totals", "unit"],
+      heard: 8,
     });
   });
 
-  it("holds back the minutes of a step only one person told, and of a case fewer than five told", () => {
-    // Six tell the first step; only one the second, and one the case.
-    const tellers = people(6, (index) =>
-      index === 0 ? { steps: [0, 1], differently: [0] } : {}
-    );
+  it("holds back a step's minutes six told but only one gave, and a case's share only one gave", () => {
+    // All six tell the step and the case; only one gives minutes or a share.
+    const tellers = people(6, (index) => ({
+      steps: [0, 1],
+      differently: [0],
+      ...(index === 2
+        ? {
+            stepMinutes: [{ step: 1, minutes: [4, 7, 30] }],
+            caseShares: [{ case: 0, outOfTen: 3 }],
+          }
+        : {}),
+    }));
     const staff = staffDrawingOf(drawing(tellers), 6);
 
     expect({
-      minutes: staff.steps.map(({ minutes }) => minutes),
-      outOfTen: staff.differently.map(({ outOfTen }) => outOfTen),
+      steps: staff.steps,
+      differently: staff.differently,
     }).toStrictEqual({
-      // The first step rests on six: its normal minutes, never the ends.
-      minutes: [
-        { people: 6, value: 5 },
-        { people: 1, value: null },
+      // How many told each step; the step-level minutes the model summed
+      // up never reach staff.
+      steps: [
+        { people: 6, minutes: { people: 0, value: null } },
+        { people: 6, minutes: { people: null, value: null } },
       ],
-      outOfTen: [{ people: 1, value: null }],
+      differently: [{ after: 0, outOfTen: { people: null, value: null } }],
     });
+  });
+
+  it("shows no step minutes right after one person's interview, and their median once five gave them", () => {
+    const giving = (count: number) =>
+      people(8, (index) =>
+        index < count
+          ? { stepMinutes: [{ step: 0, minutes: [1, 10 + index, 60] }] }
+          : {}
+      );
+    const after = (count: number) =>
+      staffDrawingOf(drawing(giving(count)), 8).steps[0]?.minutes;
+
+    expect([1, 4, 5].map(after)).toStrictEqual([
+      { people: null, value: null },
+      { people: null, value: null },
+      // The median of 10 to 14, never the quickest or the longest anyone said.
+      { people: 5, value: 12 },
+    ]);
   });
 
   it("shows the median of five or more, never the lowest or the highest, so no end is one person's", () => {
@@ -163,6 +186,41 @@ describe("a drawing as staff get it", () => {
       },
       ends: [],
     });
+  });
+
+  it("never lets anything anyone said reach staff, a number in the model's text included", () => {
+    const drawn = drawing(people(6));
+    const staff = staffDrawingOf(
+      {
+        ...drawn,
+        starts: "About 40 orders come in a week.",
+        decides: "Lisa checks whether the shop pays on time.",
+        open: ["Who approves an order over 5,000 euros?"],
+        differently: [
+          {
+            when: "the shop is new (2 to 3 in 10)",
+            does: "Ask Finance, 1.5 days.",
+            outOfTen: 2,
+            after: 0,
+          },
+        ],
+      },
+      6
+    );
+    // Every string staff get: when it was drawn, and what its numbers count in.
+    const strings: string[] = [];
+    const collect = (value: unknown): void => {
+      if (typeof value === "string") {
+        strings.push(value);
+      } else if (typeof value === "object" && value !== null) {
+        for (const each of Object.values(value)) {
+          collect(each);
+        }
+      }
+    };
+    collect(staff);
+
+    expect(strings).toStrictEqual([drawn.at, "week", "minutes"]);
   });
 
   it("shows the numbers of a team of one, with one person, as the Brain does", () => {

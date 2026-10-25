@@ -1035,6 +1035,10 @@ msgstr "{people, plural, one {Todas las personas de tu directorio: # persona. Pr
 msgid "{people, plural, one {From # person.} other {From # people.}}"
 msgstr "{people, plural, one {De # persona.} other {De # personas.}}"
 
+#: src/onboarding/work-canvas.tsx
+msgid "{people, plural, one {Told by # person} other {Told by # people}}"
+msgstr "{people, plural, one {Contado por # persona} other {Contado por # personas}}"
+
 #: src/onboarding/work-record.tsx
 msgid "{people} of {talked}"
 msgstr "{people} de {talked}"
@@ -1590,6 +1594,10 @@ msgstr "De 50 a 99 usuarios"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "A .txt, .vtt, .srt or .docx file, or pasted text."
 msgstr "Un archivo .txt, .vtt, .srt o .docx, o texto pegado."
+
+#: src/onboarding/work-canvas.tsx
+msgid "A case off the usual way"
+msgstr "Un caso fuera de lo habitual"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
@@ -11622,10 +11630,6 @@ msgstr "Empieza el {starts}"
 msgid "Starts the day the company tells its team."
 msgstr "Empieza el día en que la empresa informa a su equipo."
 
-#: src/onboarding/work-canvas.tsx
-msgid "Starts when: {starts}"
-msgstr "Empieza cuando: {starts}"
-
 #: src/policies/findings-table.tsx
 msgctxt "column: what a rule does to an app"
 msgid "State"
@@ -11687,10 +11691,16 @@ msgctxt "kind of fact"
 msgid "Step"
 msgstr "Paso"
 
+#. placeholder {0}: index + 1
+#: src/onboarding/work-record.tsx
+msgid "Step {0}"
+msgstr "Paso {0}"
+
 #: src/onboarding/setup-frame.tsx
 msgid "Step {n}"
 msgstr "Paso {n}"
 
+#: src/onboarding/work-canvas.tsx
 #: src/onboarding/work-record.tsx
 msgid "Step {number}"
 msgstr "Paso {number}"
@@ -13544,10 +13554,6 @@ msgstr "Tokens escritos"
 msgid "Told it"
 msgstr "Lo contó"
 
-#: src/onboarding/work-canvas.tsx
-msgid "Told two ways"
-msgstr "Contado de dos formas"
-
 #: src/onboarding/send-plan-form.tsx
 msgid "Tomorrow"
 msgstr "Mañana"
@@ -14647,10 +14653,6 @@ msgctxt "column: when an interview was held"
 msgid "When"
 msgstr "Cuándo"
 
-#: src/onboarding/work-canvas.tsx
-msgid "When {when}"
-msgstr "Cuando {when}"
-
 #: src/routes/_shell.settings.notifications.tsx
 msgid "When a payment fails or the card is about to run out, so you can fix it in time."
 msgstr "Cuando un pago falla o la tarjeta está a punto de caducar, para que puedas solucionarlo a tiempo."
@@ -14714,7 +14716,6 @@ msgid "When to stop"
 msgstr "Cuándo parar"
 
 #: src/interview/words.ts
-#: src/onboarding/work-record.tsx
 msgid "Where"
 msgstr "Dónde"
 
@@ -14817,7 +14818,6 @@ msgid "While Stephen talks to your team: how far the interviews are, team by tea
 msgstr "Mientras Stephen habla con tu equipo: cómo van las entrevistas, equipo por equipo, y el enlace propio de cada persona para enviar."
 
 #: src/inbox/item-detail.tsx
-#: src/onboarding/work-record.tsx
 #: src/settings/person-limits.tsx
 msgid "Who"
 msgstr "Quién"

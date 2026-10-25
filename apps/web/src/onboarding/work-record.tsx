@@ -5,7 +5,10 @@ import type {
   StepWay,
   WorkRecord as RecordOfWork,
 } from "@grasp-os/shared/admin/onboarding-admin-record";
-import type { StaffDrawing } from "@grasp-os/shared/admin/org-record";
+import type {
+  DrawnNumber,
+  StaffDrawing,
+} from "@grasp-os/shared/admin/org-record";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
@@ -244,22 +247,19 @@ const MissingList = ({
   );
 };
 
-/** One step, as the interviews have it: who told it and how, the other way it is told, and who does it and where. */
+/** One step, as the interviews have it: how many told it, and, of a sample's made-up people, who and how. */
 const StepEvidence = ({
   record,
   index,
-  drawn,
 }: {
   record: RecordOfWork;
   index: number;
-  drawn: StaffDrawing | null;
 }) => {
   const { t } = useLingui();
   const step = record.steps[index];
   if (step === undefined) {
     return null;
   }
-  const detail = drawn?.steps[index];
   const toldAs: Record<StepWay, string> = {
     main: t`Told it`,
     other: t`Another way`,
@@ -270,7 +270,7 @@ const StepEvidence = ({
   return (
     <>
       <div className="flex flex-col gap-2">
-        <p>{step.text}</p>
+        <p>{step.text === "" ? t`Step ${index + 1}` : step.text}</p>
         <p
           className={
             step.enough ? "text-muted-foreground" : "text-status-attention"
@@ -280,22 +280,6 @@ const StepEvidence = ({
             ? t`${people} told it: enough for it to count.`
             : t`${people} of the ${needed} needed told it.`}
         </p>
-        {detail === undefined ? null : (
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
-            {detail.who === "" ? null : (
-              <>
-                <dt className="text-muted-foreground">{t`Who`}</dt>
-                <dd>{detail.who}</dd>
-              </>
-            )}
-            {detail.tool === "" ? null : (
-              <>
-                <dt className="text-muted-foreground">{t`Where`}</dt>
-                <dd>{detail.tool}</dd>
-              </>
-            )}
-          </dl>
-        )}
       </div>
       {step.other === null ? null : (
         <div className="flex flex-col gap-1">
@@ -314,32 +298,35 @@ const StepEvidence = ({
           )}
         </div>
       )}
-      <div className="flex flex-col gap-1">
-        <span className="font-medium">{t`Who said what`}</span>
-        {record.interviews.length === 0 ? (
-          <p className="text-muted-foreground">{t`Nobody yet.`}</p>
-        ) : (
-          <ul className="flex flex-col">
-            {record.interviews.map((interview, at) => {
-              const way = step.ways[at] ?? "none";
-              return (
-                <li
-                  className="flex items-center gap-2.5 border-b py-1.5 last:border-b-0"
-                  key={interview.id}
-                >
-                  <WayDot way={way} />
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate">{interview.person.name}</span>
-                    <span className="text-muted-foreground text-xs">
-                      {toldAs[way]}
+      {/* Who told what shows only of a sample's made-up people: a real organization's staff see how many, never who (GRA-1084). */}
+      {record.byPerson ? (
+        <div className="flex flex-col gap-1">
+          <span className="font-medium">{t`Who said what`}</span>
+          {record.interviews.length === 0 ? (
+            <p className="text-muted-foreground">{t`Nobody yet.`}</p>
+          ) : (
+            <ul className="flex flex-col">
+              {record.interviews.map((interview, at) => {
+                const way = step.ways[at] ?? "none";
+                return (
+                  <li
+                    className="flex items-center gap-2.5 border-b py-1.5 last:border-b-0"
+                    key={interview.id}
+                  >
+                    <WayDot way={way} />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate">{interview.person.name}</span>
+                      <span className="text-muted-foreground text-xs">
+                        {toldAs[way]}
+                      </span>
                     </span>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      ) : null}
     </>
   );
 };
@@ -395,8 +382,8 @@ const NumberRow = ({
 };
 
 /** How many people a shown number rests on; none for one held back. */
-const restsOn = (number: { people: number; value: unknown }): number =>
-  number.value === null ? 0 : number.people;
+const restsOn = (number: DrawnNumber<unknown>): number =>
+  number.value === null ? 0 : (number.people ?? 0);
 
 /**
  * The numbers as staff see them (GRA-1079): the median over everyone who gave one, once at least
@@ -409,7 +396,7 @@ const Numbers = ({ record }: { record: RecordOfWork }) => {
   const fewer = t`Fewer than 5 people gave it.`;
   // What a number reads as: nothing when nobody gave it, `fewer` below the threshold.
   const shown = <Value,>(
-    number: { people: number; value: Value | null },
+    number: DrawnNumber<Value>,
     text: (value: Value) => string
   ): string | null => {
     if (number.people === 0) {
@@ -568,7 +555,7 @@ const StepsTold = ({ record }: { record: RecordOfWork }) => {
                         each.enough ? undefined : "text-muted-foreground"
                       }
                     >
-                      {each.text}
+                      {each.text === "" ? t`Step ${number}` : each.text}
                     </span>
                     {each.documented ? (
                       <span className="text-muted-foreground text-xs">
@@ -578,7 +565,8 @@ const StepsTold = ({ record }: { record: RecordOfWork }) => {
                   </span>
                 </span>
                 <span className="flex flex-wrap gap-1 pl-7 sm:pl-0">
-                  {each.ways.map((way, at) => (
+                  {/* Who told it shows only of a sample's made-up people (GRA-1084). */}
+                  {(record.byPerson ? each.ways : []).map((way, at) => (
                     <WayDot key={record.interviews[at]?.id ?? at} way={way} />
                   ))}
                 </span>
@@ -912,7 +900,7 @@ const Today = ({
                 <ErrorText>{failure}</ErrorText>
               </>
             ) : (
-              <StepEvidence drawn={drawn} index={open} record={record} />
+              <StepEvidence index={open} record={record} />
             )}
           </div>
         </aside>
@@ -934,7 +922,7 @@ export const WorkRecord = ({
   /** Someone agreed to more since it was drawn: it is drawn again soon. */
   stale: boolean;
 }) => {
-  const missing = missingOf(record, drawn?.open ?? []);
+  const missing = missingOf(record);
   // One column of its own: the area's column is only as tall as the
   // window, and a card that clips its content would shrink to nothing in it.
   return (

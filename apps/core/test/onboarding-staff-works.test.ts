@@ -212,7 +212,7 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     expect(new Set(refused)).toStrictEqual(new Set(["onboarding.staff_only"]));
   });
 
-  it("shows staff each piece of work with its numbers as totals only, who told which parts, and its open questions, and every read is on record", async () => {
+  it("shows staff each piece of work as numbers only, never anything anyone said, its numbers as totals over enough people, and every read is on record", async () => {
     const { ids, booking, filing } = await drawn();
     const staff = await asStaff();
 
@@ -222,28 +222,19 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     });
     const works = reads[0]?.works ?? [];
     const work = works.find(({ id }) => id === booking);
-    // The names each person's entry carries: never one of a number of theirs,
-    // nor whether they gave one.
-    const names = (person: string) =>
-      Object.keys(work?.drawn?.told[person] ?? {}).filter((name) =>
-        ["volume", "volumeOf", "takes", "wrong", "example"].includes(name)
-      );
-    // Every value a person's entry carries, whatever its name: a number of
-    // theirs would show here as a number outside `steps`, `waits`,
-    // `differently` and `way.step`, which are positions in the drawing.
-    const ownValues = Object.values(work?.drawn?.told ?? {}).flatMap(
-      ({
-        steps: _steps,
-        waits: _waits,
-        differently: _differently,
-        way,
-        ...rest
-      }) =>
-        Object.entries({ ...rest, way: way?.other ?? null }).filter(
-          ([key, value]) =>
-            !(key === "out" || typeof value === "boolean" || value === null)
-        )
-    );
+    // Every string staff get of a drawing, whatever its name: never a word
+    // anyone said, only when it was drawn and what its numbers count in.
+    const strings: string[] = [];
+    const collect = (value: unknown): void => {
+      if (typeof value === "string") {
+        strings.push(value);
+      } else if (typeof value === "object" && value !== null) {
+        for (const each of Object.values(value)) {
+          collect(each);
+        }
+      }
+    };
+    collect(work?.drawn);
     const text = JSON.stringify(events);
     expect({
       works: works
@@ -254,12 +245,11 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
           doers,
           drawing === null,
         ]),
-      max: names(ids.max),
-      mia: names(ids.mia),
-      minutes: work?.drawn?.steps.map(({ minutes }) => minutes),
-      ownValues,
+      strings: strings.slice(1),
+      keys: Object.keys(work?.drawn ?? {}).toSorted(),
+      heard: work?.drawn?.heard,
+      steps: work?.drawn?.steps,
       totals: work?.drawn?.totals,
-      open: work?.drawn?.open,
       rules: reads[0]?.rules,
       audited: events.map(({ action, actor, target }) => [
         action,
@@ -272,22 +262,21 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
         [booking, ["invoice", "invoices"], [ids.max, ids.mia, ids.noor], false],
         [filing, ["receipt", "receipts"], [ids.noor], true],
       ],
-      // Only that they shared an example, if they did.
-      max: ["example"],
-      mia: ["example"],
-      // Nobody gave a step's minutes here.
-      minutes: [
-        { people: 0, value: null },
-        { people: 0, value: null },
+      // Nothing anyone said: past when it was drawn, only its units.
+      strings: ["week", "minutes"],
+      keys: ["at", "differently", "heard", "per", "steps", "totals", "unit"],
+      heard: 2,
+      // How many told each step; nobody gave a step's minutes here.
+      steps: [
+        { people: 2, minutes: { people: 0, value: null } },
+        { people: 2, minutes: { people: 0, value: null } },
       ],
-      ownValues: [],
-      // Fewer than 5 gave each number: how many, never a value (GRA-1079).
+      // Fewer than 5 gave each number: neither how many nor a value (GRA-1079).
       totals: {
-        volume: { people: 2, value: null },
-        takes: { people: 1, value: null },
-        wrong: { people: 1, value: null },
+        volume: { people: null, value: null },
+        takes: { people: null, value: null },
+        wrong: { people: null, value: null },
       },
-      open: ["Who approves an invoice over 5,000 euros?"],
       rules: STARTING_ORG_RULES,
       audited: [["onboarding.works.read", "staff", "organization"]],
       named: false,
@@ -361,15 +350,14 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     expect({
       before,
       result,
-      steps: works
-        .find(({ id }) => id === booking)
-        ?.drawn?.steps.map(({ text }) => text),
+      // Drawn again: one step now, which staff see by its place alone.
+      steps: works.find(({ id }) => id === booking)?.drawn?.steps.length,
       nothing: await outcome(staff.onboardingStaff.drawWorkAgain(filing)),
       unknown: await outcome(staff.onboardingStaff.drawWorkAgain("nothing")),
     }).toStrictEqual({
       before: null,
       result: [`work:${booking}`, null],
-      steps: ["Open the invoice in Exact."],
+      steps: 1,
       nothing: "onboarding.nothing_to_draw",
       unknown: "onboarding.no_work",
     });

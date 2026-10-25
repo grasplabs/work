@@ -69,6 +69,11 @@ export interface WorkRecord {
   evidence: WorkEvidence;
   /** The interviews it rests on, in the order they came in. */
   interviews: Interview[];
+  /**
+   * Whether who told what shows, person by person: only a sample's made-up people. A real
+   * organization's staff see how many, never who (GRA-1084).
+   */
+  byPerson: boolean;
   /** People who do the work and have not talked. */
   toAsk: number;
   /** How many people have to describe a step before it counts. */
@@ -109,11 +114,8 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
   }
   const { org, state } = view;
   const work: Work = evidence.work;
-  // At a real organization, everyone who told about it counts, whatever they were asked about.
-  const about = (interview: Interview) =>
-    org.real
-      ? org.real.told.has(`${interview.person.id}/${id}`)
-      : interview.work?.id === id;
+  // Who was asked about it: staff never learn who told what (GRA-1084).
+  const about = (interview: Interview) => interview.work?.id === id;
   const interviews = view.interviews
     .filter((interview) => interview.approved && about(interview))
     .toSorted((a, b) => a.day - b.day);
@@ -151,13 +153,16 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
   return {
     evidence,
     interviews,
+    byPerson: !org.real,
     toAsk: evidence.doers - evidence.approved,
     needed,
     starts: { text: work.starts, people: said("start") },
     steps: work.steps.map((text, index) => {
       const ways = tellings.map((each) => wayOf(each.kept, index));
       const otherWay = ways.filter((way) => way === "other").length;
-      const people = ways.filter((way) => way !== "none").length;
+      // A real organization's count is its drawing's: who told it is never staff's.
+      const people =
+        work.stepPeople?.[index] ?? ways.filter((way) => way !== "none").length;
       const documented = (work.documented ?? []).includes(index);
       return {
         text,

@@ -66,13 +66,15 @@ export const missingOf = (
     if (record.wrong.people === 0) {
       missing.push({ kind: "number", which: "wrong" });
     }
-    if (record.starts.people === 0) {
+    // What was said around the steps is a sample's alone: a real organization's staff get
+    // nothing anyone said (GRA-1084), so nothing of it is missing to them.
+    if (record.byPerson && record.starts.people === 0) {
       missing.push({ kind: "around", which: "starts" });
     }
-    if (record.right.people === 0) {
+    if (record.byPerson && record.right.people === 0) {
       missing.push({ kind: "around", which: "right" });
     }
-    if (record.next.people === 0) {
+    if (record.byPerson && record.next.people === 0) {
       missing.push({ kind: "around", which: "next" });
     }
   }

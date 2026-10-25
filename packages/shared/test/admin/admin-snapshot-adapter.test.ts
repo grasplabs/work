@@ -980,9 +980,7 @@ describe("an organization from core's admin snapshot", () => {
     });
     const view = adminViewOf(org, state, "2026-10-14");
     const record = recordOf(view, "orders");
-    const missing = record
-      ? missingOf(record, orders.drawn?.open).map(({ kind }) => kind)
-      : [];
+    const missing = record ? missingOf(record).map(({ kind }) => kind) : [];
 
     expect({
       unknown: view.unknown.works,
@@ -1002,11 +1000,13 @@ describe("an organization from core's admin snapshot", () => {
       rules,
       // Two of three talked: not known by the rules, but counted by hand.
       evidence: [["orders", 2, "complete", true]],
-      // Fewer than 5 gave them: how many, and no value (GRA-1079).
-      volume: { people: 2, value: null },
-      wrong: { people: 1, value: null },
-      heardFrom: ["lisa", "tom"],
-      missing: ["people", "around", "around", "question"],
+      // Fewer than 5 gave them: neither how many nor a value (GRA-1079).
+      volume: { people: null, value: null },
+      wrong: { people: null, value: null },
+      // Who told it, what was said around the steps and what the next
+      // interviews should ask are what people said: never staff's (GRA-1084).
+      heardFrom: [],
+      missing: ["people"],
     });
   });
 });

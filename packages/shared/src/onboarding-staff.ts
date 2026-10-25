@@ -328,10 +328,9 @@ export const orgRulesSchema = z.strictObject({
 }) satisfies z.ZodType<OrgRules>;
 
 /**
- * Every piece of work as staff see it: as each team's map holds it, with
- * its drawing (which parts each person told in `drawn.told`, its numbers
- * as totals over everyone in `drawn.totals`, never one person's, and what
- * the next interviews still need to ask in `drawn.open`), this
+ * Every piece of work as staff see it: as each team's map holds it, with its drawing as numbers
+ * only, never anything anyone said (GRA-1084): its steps and cases by position with how many
+ * people each rests on, and its numbers as medians over at least 5 people (GRA-1079); this
  * organization's rules, and the pieces Grasp counts as known by hand.
  */
 export interface StaffWorks {

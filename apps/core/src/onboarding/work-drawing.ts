@@ -81,6 +81,9 @@ const drawSchema = z.object({
         why: z.string().optional(),
         because: z.string().optional(),
         minutes: z.array(z.number()).optional(),
+        minutes_by: z
+          .array(z.object({ person: z.string(), minutes: z.array(z.number()) }))
+          .optional(),
         documented: z.boolean().optional(),
       })
     )
@@ -92,6 +95,9 @@ const drawSchema = z.object({
         text: z.string(),
         detail: z.string().optional(),
         out_of_ten: z.number().optional(),
+        out_of_ten_by: z
+          .array(z.object({ person: z.string(), out_of_ten: z.number() }))
+          .optional(),
         after: z.number().optional(),
         by: by.optional(),
       })
@@ -119,8 +125,8 @@ const drawSystem = `You are Grasp's analyst. Stephen, Grasp's AI interviewer, in
 
 Answer in JSON with these fields:
 - starts: what starts one, in one sentence; empty when nobody said. starts_by: the ids of who said it.
-- steps: the steps in order, from start to done. Each: text, one action as an instruction ("Open the ticket in Zendesk."); who, the role that does it, never a name ("Customer service agent"); tool, the system, screen, file or sheet, or empty; by, the ids of who told this step; other, when some told this step another way, that way as an instruction, else empty; other_by, who told it that way; why, empty when it goes one way, else "condition" (it depends on the case), "place" (it depends on the office or person) or "conflict" (nobody could say why); because, for condition or place what it depends on, else empty; minutes, how long this step takes, as three numbers in this order: the quickest, a normal one and the longest anyone said, -1 for one nobody said, or an empty list when nobody said any; documented, true when a shared document describes this step too.
-- notes: everything else that was said, one each. kind is one of: "wait" (where it sits still, and for what), "differently" (a case off the normal path: text is when it happens, in a few words starting lower case and without a full stop, "the client number is missing"; detail is what is done then, as an instruction; out_of_ten how many out of ten, or -1 when nobody said; after the position of the step after which it happens, from 0), "decides" (what they look at to decide), "own" (a list, sheet or tool of their own), "ai" (an AI tool some use for it), "right" (what done right looks like), "ask" (when they stop and ask someone), "next" (who gets it after them: when that is one of the company's other teams, that team's name exactly as it is given, then what it does with it; otherwise a role), "term" (a word of their own: text is the word, detail its meaning). Fields a kind does not use are empty, or -1 for numbers. by: the ids of who said it.
+- steps: the steps in order, from start to done. Each: text, one action as an instruction ("Open the ticket in Zendesk."); who, the role that does it, never a name ("Customer service agent"); tool, the system, screen, file or sheet, or empty; by, the ids of who told this step; other, when some told this step another way, that way as an instruction, else empty; other_by, who told it that way; why, empty when it goes one way, else "condition" (it depends on the case), "place" (it depends on the office or person) or "conflict" (nobody could say why); because, for condition or place what it depends on, else empty; minutes, how long this step takes, as three numbers in this order: the quickest, a normal one and the longest anyone said, -1 for one nobody said, or an empty list when nobody said any; minutes_by, each person's own minutes for this step, one entry per person who gave any, never combined: person, their id, and minutes, three numbers as for minutes; documented, true when a shared document describes this step too.
+- notes: everything else that was said, one each. kind is one of: "wait" (where it sits still, and for what), "differently" (a case off the normal path: text is when it happens, in a few words starting lower case and without a full stop, "the client number is missing"; detail is what is done then, as an instruction; out_of_ten how many out of ten, or -1 when nobody said; out_of_ten_by, each person's own out of ten for this case, one entry per person who gave one: person, their id, and out_of_ten; after the position of the step after which it happens, from 0), "decides" (what they look at to decide), "own" (a list, sheet or tool of their own), "ai" (an AI tool some use for it), "right" (what done right looks like), "ask" (when they stop and ask someone), "next" (who gets it after them: when that is one of the company's other teams, that team's name exactly as it is given, then what it does with it; otherwise a role), "term" (a word of their own: text is the word, detail its meaning). Fields a kind does not use are empty, or -1 for numbers. by: the ids of who said it.
 - numbers: each person's own numbers, one entry per person who gave any, never averaged or combined. quiet: how many they do in a quiet week or month, or in a normal one when they gave no quiet one; busy: how many in a busy one; each -1 when not said. of: whose count quiet and busy are, "me" when they said it is their own, "team" when they said it is the whole team's, "unknown" when they did not say. per: "week" or "month". minutes: how long one whole one takes them in minutes of work, as three numbers in this order: the quickest, a normal one and the longest, -1 for one they did not say ("a normal one takes 12 minutes" is [-1, 12, -1]), or an empty list when they said none. wrong: how many out of ten come in wrong or incomplete, -1 when not said.
 - open: what the next interview should ask because nobody could say it yet, one short question each, at most five.
 
@@ -128,7 +134,8 @@ Rules:
 - Only what was said. Never a step, a tool, a number or a reason nobody gave. No improvements, no opinions.
 - Only what is about this piece of work. Someone asked about it may tell about other work of theirs as well: leave that out.
 - A note only for what someone said is there. When nobody said anything about a kind, there is no note of that kind: never "no AI tool is used" because nobody mentioned one.
-- One note per case, never one per person: when people gave different numbers for the same case, out_of_ten is the lowest, and the text ends with the range they gave ("(2 to 3 in 10)").
+- One note per case, never one per person: when people gave different numbers for the same case, out_of_ten is the lowest, and each person's own is in out_of_ten_by.
+- No text field holds a number: no digits and no number words for how many, how long or how often, in any text, detail, question or name of a step. Numbers go only in the number fields.
 - A step told by one person counts; a step told by several is one step.
 - People who tell a step differently are never merged: keep the way most told it as the step, and the other way in "other".
 - Convert hours to minutes; days count as work only when they said it is work, not waiting.`;
@@ -321,6 +328,22 @@ export const drawnOf = (
       example,
       term: term === undefined ? false : mine(term.by),
       out: [],
+      // Their own minutes for each step, and share of each case, as they
+      // gave them: staff see them only as medians over enough people.
+      stepMinutes: steps.flatMap(({ step }, index) => {
+        const given = (step.minutes_by ?? []).find(
+          (each) => lineOf(each.person, 40) === person
+        );
+        const minutes = timesOf(given?.minutes);
+        return minutes === null ? [] : [{ step: index, minutes }];
+      }),
+      caseShares: differently.flatMap((each, index) => {
+        const given = (each.out_of_ten_by ?? []).find(
+          (own) => lineOf(own.person, 40) === person
+        );
+        const outOfTen = countOf(given?.out_of_ten, 10);
+        return outOfTen === null ? [] : [{ case: index, outOfTen }];
+      }),
     };
   }
   const lastStep = Math.max(steps.length - 1, 0);
@@ -477,6 +500,12 @@ export const drawnWorkSchema = z.object({
       example: z.string().nullable(),
       term: z.boolean(),
       out: z.array(z.string()),
+      stepMinutes: z
+        .array(z.object({ step: z.number(), minutes: triple }))
+        .optional(),
+      caseShares: z
+        .array(z.object({ case: z.number(), outOfTen: z.number() }))
+        .optional(),
     })
   ),
   open: z.array(z.string()),
@@ -484,61 +513,32 @@ export const drawnWorkSchema = z.object({
 
 /** A number staff see (`DrawnNumber`): how many people, and its value only past the threshold. */
 const shownSchema = <Value extends z.ZodType>(value: Value) =>
-  z.object({ people: z.number(), value: value.nullable() });
+  z.object({ people: z.number().nullable(), value: value.nullable() });
 
 /**
- * A drawing as staff read it (`StaffDrawing`, GRA-1079): which parts each
- * person told, never their numbers nor whether they gave one, and its
- * numbers as medians over at least 5 people. The schema names no field of
- * one person's numbers, so a value that slipped into a drawing is stripped
- * on its way out rather than sent.
+ * A drawing as staff read it (`StaffDrawing`, GRA-1079, GRA-1084): numbers
+ * only, never anything anyone said. Its steps and cases by position with
+ * how many people each rests on, and its numbers as medians over at least
+ * 5 people. The schema names no text of the drawing and nothing by person,
+ * so whatever slipped into one is stripped on its way out rather than sent.
  */
-const staffDrawingSchema = drawnWorkSchema
-  .omit({ told: true, steps: true, differently: true })
-  .extend({
-    steps: z.array(
-      z.object({
-        text: z.string(),
-        who: z.string(),
-        tool: z.string(),
-        minutes: shownSchema(z.number()),
-        documented: z.boolean(),
-      })
-    ),
-    differently: z.array(
-      z.object({
-        when: z.string(),
-        does: z.string(),
-        outOfTen: shownSchema(z.number()),
-        after: z.number(),
-      })
-    ),
-    told: z.record(
-      z.string(),
-      z.object({
-        start: z.boolean(),
-        steps: z.array(z.number()),
-        end: z.boolean(),
-        way: z.object({ step: z.number(), other: z.boolean() }).nullable(),
-        waits: z.array(z.number()),
-        differently: z.array(z.number()),
-        decides: z.boolean(),
-        own: z.boolean(),
-        ai: z.boolean(),
-        right: z.boolean(),
-        ask: z.boolean(),
-        next: z.boolean(),
-        example: z.boolean(),
-        term: z.boolean(),
-        out: z.array(z.string()),
-      })
-    ),
-    totals: z.object({
-      volume: shownSchema(z.object({ quiet: z.number(), busy: z.number() })),
-      takes: shownSchema(z.number()),
-      wrong: shownSchema(z.number()),
-    }),
-  }) satisfies z.ZodType<StaffDrawing>;
+const staffDrawingSchema = z.object({
+  at: z.string(),
+  heard: z.number(),
+  per: z.enum(["week", "month"]),
+  unit: z.enum(["minutes", "hours"]),
+  steps: z.array(
+    z.object({ people: z.number(), minutes: shownSchema(z.number()) })
+  ),
+  differently: z.array(
+    z.object({ after: z.number(), outOfTen: shownSchema(z.number()) })
+  ),
+  totals: z.object({
+    volume: shownSchema(z.object({ quiet: z.number(), busy: z.number() })),
+    takes: shownSchema(z.number()),
+    wrong: shownSchema(z.number()),
+  }),
+}) satisfies z.ZodType<StaffDrawing>;
 
 /**
  * Every piece of work as staff read it (`StaffWorks`), checked on its way

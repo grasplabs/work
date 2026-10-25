@@ -643,7 +643,7 @@ const personHours = (
         [volume.value.quiet, volume.value.busy],
         takes.value
       ),
-      said: Math.min(volume.people, takes.people),
+      said: Math.min(volume.people ?? 0, takes.people ?? 0),
     };
   }
   const own = view.interviews.flatMap((interview) => {

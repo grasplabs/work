@@ -548,9 +548,14 @@ export interface Told {
   example: string | null;
   term: boolean;
   out: string[];
+  /** Their own minutes for each step they gave them for, by step: quickest, normal, longest. */
+  stepMinutes?: { step: number; minutes: [number, number, number] }[];
+  /** Their own share out of ten of each case off the normal path they gave one for, by case. */
+  caseShares?: { case: number; outOfTen: number }[];
 }
 
-// Staff see a drawing's numbers as totals only, never one person's (GRA-1079). From the threat
+// Staff see a drawing's numbers only, never what anyone said (GRA-1084), and the numbers as totals
+// only, never one person's (GRA-1079). From the threat
 // model and its security review: a total over a few people, beside who told what, gives one
 // person's number away (one person's flag and a total over one; a step only one person told; the
 // ends of a range, each one person's). So a number shows only once at least `MIN_GROUP` (5)
@@ -559,9 +564,9 @@ export interface Told {
 // it, and the Brain does the same.
 
 /**
- * Which parts of a piece of work one person told, as staff see it: which steps, and yes or no for
- * the parts with no number. Never a number of theirs, nor whether they gave one: how many gave
- * each number is in the drawing's `DrawnTotals`.
+ * Which parts of a piece of work one person told: which steps, and yes or no for the parts with
+ * no number. The admin's sample organizations count their made-up people's by it, and core its
+ * own known-count; a real organization's staff never get it (GRA-1084).
  */
 export interface ToldParts {
   start: boolean;
@@ -584,11 +589,12 @@ export interface ToldParts {
 }
 
 /**
- * A number staff see: how many people it rests on, and its value only when that is at least
- * `MIN_GROUP`, or the whole team is one person; otherwise none, and staff read "fewer than 5".
+ * A number staff see: how many people it rests on, and its value, once that is at least
+ * `MIN_GROUP` or the whole team is one person. Under that, neither: staff read "fewer than 5",
+ * and not how many fewer. None gave it: no people, and no value.
  */
 export interface DrawnNumber<Value> {
-  people: number;
+  people: number | null;
   value: Value | null;
 }
 
@@ -602,22 +608,31 @@ export interface DrawnTotals {
   wrong: DrawnNumber<number>;
 }
 
-/** A step as staff see it: its minutes for a normal one only when the step rests on enough people. */
-export type StaffStep = Omit<DrawnStep, "minutes"> & {
+/**
+ * A step as staff see it: only where it is, how many people told it, and the median of the minutes
+ * people gave for a normal one, once enough gave them. Never what anyone said it is.
+ */
+export interface StaffStep {
+  people: number;
   minutes: DrawnNumber<number>;
-};
+}
 
-/** A drawing as staff get it: who told which parts, and its numbers as totals only. */
-export type StaffDrawing = Omit<DrawnWork, "told" | "steps" | "differently"> & {
+/**
+ * A drawing as staff get it (GRA-1079, GRA-1084): numbers only, never anything anyone said. Its
+ * steps and cases by position, how many people each rests on, and its numbers as medians over
+ * at least 5 people. No text of the drawing, and nothing by person.
+ */
+export interface StaffDrawing {
+  /** When it was drawn, and from how many people's interviews. */
+  at: string;
+  heard: number;
+  per: DrawnWork["per"];
+  unit: DrawnWork["unit"];
   steps: StaffStep[];
-  /** A case off the normal path, with how many out of ten as `DrawnNumber`. */
-  differently: (Omit<DrawnWork["differently"][number], "outOfTen"> & {
-    outOfTen: DrawnNumber<number>;
-  })[];
-  /** Which parts each person told, by person. */
-  told: Record<string, ToldParts>;
+  /** Each case off the normal path: the step it follows, and how many out of ten. */
+  differently: { after: number; outOfTen: DrawnNumber<number> }[];
   totals: DrawnTotals;
-};
+}
 
 /** The facts of numbers, which a person's `ToldParts` never names. */
 const numberFacts = new Set(["volume", "takes", "wrong"]);
@@ -656,10 +671,14 @@ export const shownNumber = <Value>(
   people: number,
   team: number,
   value: () => Value
-): DrawnNumber<Value> => ({
-  people,
-  value: people >= MIN_GROUP || (team === 1 && people === 1) ? value() : null,
-});
+): DrawnNumber<Value> => {
+  if (people === 0) {
+    return { people: 0, value: null };
+  }
+  return people >= MIN_GROUP || (team === 1 && people === 1)
+    ? { people, value: value() }
+    : { people: null, value: null };
+};
 
 /** The numbers someone gave, as far as `totalsOf` reads them. */
 export type GivenNumbers = Pick<Told, "volume" | "takes" | "wrong" | "out">;
@@ -696,40 +715,43 @@ export const totalsOf = (
 };
 
 /**
- * A drawing as staff get it (`StaffDrawing`), of a piece of work `team` people do: which parts
- * each person told, and its numbers as totals over enough people, never one person's.
+ * A drawing as staff get it (`StaffDrawing`), of a piece of work `team` people do: its steps and
+ * cases by position with how many people each rests on, and its numbers as medians over enough
+ * people (`DrawnNumber`). Not one of its texts, and nothing by person.
  */
 export const staffDrawingOf = (
-  { told, steps, differently, ...drawn }: DrawnWork,
+  { told, steps, differently, at, per, unit }: DrawnWork,
   team: number
 ): StaffDrawing => {
   const tellers = Object.values(told);
-  const tellingStep = (index: number) =>
-    tellers.filter((each) => each.steps.includes(index)).length;
-  const tellingCase = (index: number) =>
-    tellers.filter((each) => each.differently.includes(index)).length;
+  // Each step's normal minutes and each case's share, from the people who gave them.
+  const minutesOf = (index: number): number[] =>
+    tellers.flatMap((each) =>
+      (each.stepMinutes ?? []).flatMap(({ step, minutes }) =>
+        step === index ? [minutes[1]] : []
+      )
+    );
+  const sharesOf = (index: number): number[] =>
+    tellers.flatMap((each) =>
+      (each.caseShares ?? []).flatMap((share) =>
+        share.case === index ? [share.outOfTen] : []
+      )
+    );
+  const shownOf = (values: readonly number[]): DrawnNumber<number> =>
+    shownNumber(values.length, team, () => medianOf(values));
   return {
-    ...drawn,
-    steps: steps.map(({ minutes, ...step }, index) => {
-      const normal = minutes?.[1];
-      return {
-        ...step,
-        minutes:
-          normal === undefined
-            ? { people: 0, value: null }
-            : shownNumber(tellingStep(index), team, () => normal),
-      };
-    }),
-    differently: differently.map(({ outOfTen, ...each }, index) => ({
-      ...each,
-      outOfTen:
-        outOfTen === null
-          ? { people: 0, value: null }
-          : shownNumber(tellingCase(index), team, () => outOfTen),
+    at,
+    heard: tellers.length,
+    per,
+    unit,
+    steps: steps.map((_, index) => ({
+      people: tellers.filter((each) => each.steps.includes(index)).length,
+      minutes: shownOf(minutesOf(index)),
     })),
-    told: Object.fromEntries(
-      Object.entries(told).map(([person, each]) => [person, toldPartsOf(each)])
-    ),
+    differently: differently.map(({ after }, index) => ({
+      after,
+      outOfTen: shownOf(sharesOf(index)),
+    })),
     totals: totalsOf(tellers, team),
   };
 };

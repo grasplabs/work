@@ -95,6 +95,11 @@ export interface Work {
    * one person's. A sample organization's are added up from its made-up people (`Telling.numbers`).
    */
   totals?: DrawnTotals;
+  /**
+   * A real organization's: how many people told each step, by position, as its drawing counts
+   * them; staff never learn who (GRA-1084). A sample's are counted from its made-up people.
+   */
+  stepPeople?: number[];
   /** What right looks like. */
   right: string;
   /** When to stop and ask, from "when". */

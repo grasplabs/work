@@ -112,13 +112,16 @@ describe("the record of a piece of work", () => {
     );
     // Some shown, some held back: the samples have teams both sides of 5.
     expect(numbers.some(({ value }) => value !== null)).toBeTruthy();
-    expect(
-      numbers.some(({ value, people }) => value === null && people > 0)
-    ).toBeTruthy();
-    for (const { people, value, talked, team } of numbers) {
-      expect(people).toBeLessThanOrEqual(talked);
-      expect(value !== null).toBe(people >= 5 || (team === 1 && people === 1));
-    }
+    // Held back: neither how many nor a value.
+    expect(numbers.some(({ people }) => people === null)).toBeTruthy();
+    // Each held back with neither, or shown past the threshold, never more people than talked.
+    const wrongly = numbers.filter(({ people, value, talked, team }) =>
+      people === null
+        ? value !== null
+        : people > talked ||
+          (value !== null) !== (people >= 5 || (team === 1 && people === 1))
+    );
+    expect(wrongly).toStrictEqual([]);
     // Nobody talked: nothing is known, and nothing is put in its place.
     const unheard = records.filter((record) => record.interviews.length === 0);
     expect(unheard.length).toBeGreaterThan(0);

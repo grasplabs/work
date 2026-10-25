@@ -11,7 +11,7 @@ import { seededCalls } from "./seeded-calls.ts";
 
 // Grasp's staff see each piece of work as drawn from the interviews
 // (GRA-377), end to end: from the area's sidebar to a drawn piece of
-// work, with its numbers as totals only (GRA-1079) and its open questions. The
+// work, as numbers only (GRA-1084), its numbers as totals only (GRA-1079). The
 // local stack can't hold interviews (their links go out by email) or draw
 // work (it reaches no model), so core's answers to those two calls are
 // seeded on the page's connection, as core's own tests draw them
@@ -178,7 +178,7 @@ const works: StaffWorks = {
   counted: [],
 };
 
-test("staff see a drawn piece of work, its numbers as totals only, and its open questions", async ({
+test("staff see a drawn piece of work as numbers only, never what anyone said, its numbers as totals only", async ({
   page,
   cspViolations,
 }) => {
@@ -199,22 +199,17 @@ test("staff see a drawn piece of work, its numbers as totals only, and its open 
   ).toContainText("0 of 1 workflows known");
   await page.getByRole("link", { name: "Open Taking orders" }).click();
 
-  // The canvas as it runs today, with the case off the usual way.
+  // The canvas as it runs today: each step by its place and how many told
+  // it, never what anyone said it is (GRA-1084).
   const today = page.getByRole("region", { name: "As it runs today" });
   await expect(
     today.getByRole("list", { name: "The steps" }).getByRole("button")
-  ).toHaveText([
-    /Write the order down in the order sheet\..*Excel/u,
-    /Send the order to the bakery\./u,
-  ]);
-  await expect(today).toContainText("When the shop is new");
-  // What is still missing ends with what the next interviews should ask.
+  ).toHaveText([/Step 1.*Told by 2 people/u, /Step 2.*Told by 2 people/u]);
+  await expect(today).not.toContainText("Write the order down");
+  await expect(today).not.toContainText("When the shop is new");
   await expect(
     today.getByRole("list", { name: "Still missing" }).getByRole("listitem")
-  ).toContainText([
-    /1 person who does it has not talked/u,
-    /Who takes an order when Sales is out\?/u,
-  ]);
+  ).toContainText([/1 person who does it has not talked/u]);
 
   // Totals over everyone who said, never one person's numbers (GRA-1079).
   await expect(
@@ -224,10 +219,8 @@ test("staff see a drawn piece of work, its numbers as totals only, and its open 
     page.getByText("Fewer than 5 people gave it.").first()
   ).toBeVisible();
 
-  // A step opens who told it.
-  await today
-    .getByRole("button", { name: /Send the order to the bakery/u })
-    .click();
+  // A step opens how many told it.
+  await today.getByRole("button", { name: /Step 2/u }).click();
   await expect(
     page.getByRole("complementary", { name: "Who told this step" })
   ).toContainText("2 of the 3 needed told it.");

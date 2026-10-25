@@ -382,7 +382,7 @@ describe("a real organization as the admin reads it", () => {
     });
   });
 
-  it("names the work as a title, with who does it, the apps it is done in and the team it goes to", () => {
+  it("names the work as a title, with who does it, but never the apps or the team people said it goes to", () => {
     const chart = organizationOf(view);
     const service = chart.teams.find(
       (team) => team.view.team.id === "t-service"
@@ -393,14 +393,12 @@ describe("a real organization as the admin reads it", () => {
     expect(
       service?.works[0]?.doers.map((each) => each.person.id)
     ).toStrictEqual(["lisa", "tim"]);
-    expect(service?.tools).toStrictEqual([
-      { name: "Excel", works: 1 },
-      { name: "Zendesk", works: 1 },
-    ]);
-    expect(service?.to.map((each) => each.to)).toStrictEqual(["t-mortgage"]);
-    expect(
-      chart.teams.find((team) => team.view.team.id === "t-mortgage")?.from
-    ).toHaveLength(1);
+    // The apps its steps are done in and who gets it next are what people
+    // said: not staff's (GRA-1084).
+    expect({
+      tools: service?.tools,
+      to: service?.to.map((each) => each.to),
+    }).toStrictEqual({ tools: [], to: [] });
   });
 
   it("asks Grasp for the first conversation until Stephen has read it, without holding up its steps", () => {
