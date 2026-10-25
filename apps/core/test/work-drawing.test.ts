@@ -562,6 +562,47 @@ describe("the work as drawn", () => {
     });
   });
 
+  it("keeps each person's own minutes of a step and share of a case, apart from any text", () => {
+    const drawn = drawnOf(
+      {
+        steps: [
+          step("Look it up.", {
+            minutes: [2, 4, 9],
+            minutes_by: [
+              { person: "lisa", minutes: [2, 4, 9] },
+              { person: "nobody-asked", minutes: [1, 1, 1] },
+            ],
+          }),
+        ],
+        notes: [
+          {
+            kind: "differently",
+            text: "the client number is missing",
+            detail: "Ask Finance.",
+            out_of_ten: 2,
+            out_of_ten_by: [{ person: "tim", out_of_ten: 2 }],
+            by: ["tim"],
+          },
+        ],
+      },
+      tellers,
+      "2026-10-22T00:00:00.000Z"
+    );
+
+    expect({
+      lisa: drawn.told.lisa?.stepMinutes,
+      tim: drawn.told.tim?.caseShares,
+      bram: [drawn.told.bram?.stepMinutes, drawn.told.bram?.caseShares],
+      // The case's text holds no number of anyone's.
+      when: drawn.differently.map(({ when }) => when),
+    }).toStrictEqual({
+      lisa: [{ step: 0, minutes: [2, 4, 9] }],
+      tim: [{ case: 0, outOfTen: 2 }],
+      bram: [[], []],
+      when: ["the client number is missing"],
+    });
+  });
+
   it("holds when the model leaves everything out", () => {
     const bare = drawnOf({}, tellers, "2026-10-22T00:00:00.000Z");
     expect({

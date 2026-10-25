@@ -544,6 +544,10 @@ export interface Told {
   example: string | null;
   term: boolean;
   out: string[];
+  /** Their own minutes for each step they gave them for, by step: quickest, normal, longest. */
+  stepMinutes?: { step: number; minutes: [number, number, number] }[];
+  /** Their own share out of ten of each case off the normal path they gave one for, by case. */
+  caseShares?: { case: number; outOfTen: number }[];
 }
 
 /** A step as drawn: one instruction, who does it, where, and how long people said one takes. */
