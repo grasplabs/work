@@ -56,8 +56,7 @@ import { asBrainError } from "./recall.ts";
 //   or, from a collection only admins write, a shipped skill.
 // - A missing prerequisite or dependency: each must be accepted and usable
 //   by the caller (a prerequisite: its own capabilities, prerequisites and
-//   dependencies in turn, through a chain at most
-//   `skillPrerequisiteDepthMax` deep and never a cycle), or that one
+//   dependencies in turn, never through a cycle), or that one
 //   skill, with that name and accepted, at exactly the version named (a
 //   dependency), or the skill isn't selected, with why.
 // - Forcing a skill: applicability is exact (the task's type in `tasks`,
@@ -65,7 +64,8 @@ import { asBrainError } from "./recall.ts";
 //   applies to nothing; two that apply, with nothing saying which, select
 //   none. No similarity, no order, no model.
 // - A partial view: past `skillsReadMax` selectable skills a selection
-//   reads none, rather than choose from some and miss an ambiguity.
+//   reads none, rather than choose from some and miss an ambiguity; past
+//   `skillsVisitMax` visits through prerequisites, it selects none.
 // - A pin changing under a run: the selection pins the version it read;
 //   `readSkill` returns exactly that version, retired or superseded since,
 //   while the caller may still read it.
@@ -78,8 +78,11 @@ import { asBrainError } from "./recall.ts";
 /** The rules a selection follows: exact matching over manifests. */
 export const skillSelectionPolicyVersion = "rules@2";
 
-/** Most prerequisites deep a skill's chain of them goes; deeper is never usable. */
-const skillPrerequisiteDepthMax = 8;
+/**
+ * Most skills one selection visits, through prerequisites too, each
+ * worked out once; past it the selection selects none (`incomplete`).
+ */
+const skillsVisitMax = 256;
 
 /** Most selectable skills one selection reads; more selects none. */
 export const skillsReadMax = 100;
@@ -322,41 +325,30 @@ const pinOf = async <C>(
     : undefined;
 };
 
+/** Why a skill can't be used, or the pins of its dependencies. */
+type Usable = { blocked: SkillOutcome } | { pins: SkillRef[] };
+
 /**
- * Why `candidate` can't be used by a caller holding `held`, or the pins of
- * its dependencies: a capability it requires they lack, a prerequisite
- * that isn't usable in turn, by these same rules, or a dependency that
- * doesn't resolve. `via` is the chain of prerequisites that led here: one
- * that leads back into it (a cycle), or deeper than
- * `skillPrerequisiteDepthMax`, is never usable.
+ * One selection's walk through skills and their prerequisites: each
+ * skill's usability, worked out once (`known`; a skill still being worked
+ * out is a cycle back into it, never usable), and how many skills it has
+ * visited, at most `skillsVisitMax`; past that it stops (`exceeded`) and
+ * the selection selects none.
  */
-const usableOf = async <C>(
+interface Walk {
+  known: Map<Candidate, Usable>;
+  visited: number;
+  exceeded: boolean;
+}
+
+/** The pins of `candidate`'s dependencies, looked up once each, or that one is missing. */
+const pinsOf = async <C>(
   brain: Brain<C>,
   candidate: Candidate,
-  held: ReadonlySet<string>,
-  all: readonly Candidate[],
-  via: readonly Candidate[]
-): Promise<{ blocked: SkillOutcome } | { pins: SkillRef[] }> => {
-  const { manifest } = candidate;
-  if (!allIn(manifest.requires, held)) {
-    return { blocked: "missing_capability" };
-  }
-  const chain = [...via, candidate];
-  for (const reference of manifest.prerequisites) {
-    const found = resolved(candidate, referenceOf(reference), all);
-    const usable =
-      found !== undefined &&
-      found.manifest.status === "accepted" &&
-      !chain.includes(found) &&
-      chain.length <= skillPrerequisiteDepthMax &&
-      // oxlint-disable-next-line no-await-in-loop -- in order, bounded by depth and the manifest
-      "pins" in (await usableOf(brain, found, held, all, chain));
-    if (!usable) {
-      return { blocked: "prerequisite_missing" };
-    }
-  }
+  all: readonly Candidate[]
+): Promise<Usable> => {
   const pins: SkillRef[] = [];
-  for (const dependency of manifest.dependencies) {
+  for (const dependency of candidate.manifest.dependencies) {
     // oxlint-disable-next-line no-await-in-loop -- a few, bounded by the manifest
     const pin = await pinOf(brain, candidate, dependency, all);
     if (pin === undefined) {
@@ -365,6 +357,57 @@ const usableOf = async <C>(
     pins.push(pin.ref);
   }
   return { pins };
+};
+
+/**
+ * Why `candidate` can't be used by a caller holding `held`, or the pins of
+ * its dependencies: a capability it requires they lack, a prerequisite
+ * that isn't usable in turn, by these same rules, or a dependency that
+ * doesn't resolve. Each skill is worked out once a selection (`walk`), its
+ * dependencies looked up once; one that leads back into itself (a cycle)
+ * is never usable.
+ */
+const usableOf = async <C>(
+  brain: Brain<C>,
+  candidate: Candidate,
+  held: ReadonlySet<string>,
+  all: readonly Candidate[],
+  walk: Walk
+): Promise<Usable> => {
+  walk.visited += 1;
+  if (walk.visited > skillsVisitMax) {
+    walk.exceeded = true;
+    return { blocked: "prerequisite_missing" };
+  }
+  const known = walk.known.get(candidate);
+  if (known !== undefined) {
+    return known;
+  }
+  // Until worked out: a prerequisite that leads back here finds it unusable.
+  walk.known.set(candidate, { blocked: "prerequisite_missing" });
+  const { manifest } = candidate;
+  let usable: Usable | undefined = allIn(manifest.requires, held)
+    ? undefined
+    : { blocked: "missing_capability" };
+  for (const reference of manifest.prerequisites) {
+    if (usable !== undefined) {
+      break;
+    }
+    const found = resolved(candidate, referenceOf(reference), all);
+    const ready =
+      found !== undefined &&
+      found.manifest.status === "accepted" &&
+      // oxlint-disable-next-line no-await-in-loop -- in order, bounded by `skillsVisitMax`
+      "pins" in (await usableOf(brain, found, held, all, walk));
+    if (!ready) {
+      usable = { blocked: "prerequisite_missing" };
+    }
+  }
+  usable ??= await pinsOf(brain, candidate, all);
+  if (!walk.exceeded) {
+    walk.known.set(candidate, usable);
+  }
+  return usable;
 };
 
 /**
@@ -377,8 +420,9 @@ const checkedOf = async <C>(
   candidate: Candidate,
   traits: ReadonlySet<string>,
   held: ReadonlySet<string>,
-  all: readonly Candidate[]
-): Promise<{ blocked: SkillOutcome } | { pins: SkillRef[] }> => {
+  all: readonly Candidate[],
+  walk: Walk
+): Promise<Usable> => {
   const { manifest } = candidate;
   if (manifest.status === "retired") {
     return { blocked: "retired" };
@@ -389,7 +433,7 @@ const checkedOf = async <C>(
   if (!allIn(manifest.when, traits)) {
     return { blocked: "precondition_unmet" };
   }
-  return await usableOf(brain, candidate, held, all, []);
+  return await usableOf(brain, candidate, held, all, walk);
 };
 
 /** Whether `by` may take `target`'s place: in its own collection, or an admins' skill a shipped one. */
@@ -411,12 +455,14 @@ const outcomesOf = async <C>(
 ): Promise<{
   outcomes: Map<Candidate, SkillOutcome>;
   left: { candidate: Candidate; pins: SkillRef[] }[];
+  exceeded: boolean;
 }> => {
   const outcomes = new Map<Candidate, SkillOutcome>();
   const applicable: { candidate: Candidate; pins: SkillRef[] }[] = [];
+  const walk: Walk = { known: new Map(), visited: 0, exceeded: false };
   for (const candidate of relevant) {
     // oxlint-disable-next-line no-await-in-loop -- in order, bounded by skillsReadMax
-    const checked = await checkedOf(brain, candidate, traits, held, all);
+    const checked = await checkedOf(brain, candidate, traits, held, all, walk);
     if ("blocked" in checked) {
       outcomes.set(candidate, checked.blocked);
     } else {
@@ -439,7 +485,7 @@ const outcomesOf = async <C>(
   for (const { candidate } of left) {
     outcomes.set(candidate, left.length === 1 ? "selected" : "ambiguous");
   }
-  return { outcomes, left };
+  return { outcomes, left, exceeded: walk.exceeded };
 };
 
 /** The selection's result: the one skill left, pinned, or why none. */
@@ -486,14 +532,14 @@ export const selectSkillWithSources = async <C>(
     const relevant = all.filter(({ manifest }) =>
       manifest.tasks.includes(task.type)
     );
-    const { outcomes, left } = await outcomesOf(
+    const { outcomes, left, exceeded } = await outcomesOf(
       brain,
       relevant,
       all,
       traits,
       held
     );
-    const result = resultOf(selectable === undefined, left);
+    const result = resultOf(selectable === undefined || exceeded, left);
     // Recorded with its result and counts, as the host records a read: the
     // empty, ambiguous and no-skill ones too.
     const provenance = await brain.ports.onRead(

@@ -512,6 +512,42 @@ describe("who can make a skill selectable", () => {
     });
   });
 
+  it("works out each prerequisite once a selection, and selects none past its bound of skills visited", async () => {
+    const company = await newCollection(brain, "Company skills");
+    // Each needs every one of the (up to 16) before it: as a tree of
+    // chains, far more than any bound; worked out once each, a few hundred.
+    const chain = async (prefix: string, length: number) => {
+      for (let index = 0; index < length; index += 1) {
+        const before = Array.from(
+          { length: Math.min(index, 16) },
+          (_, back) => `${prefix}-${index - back - 1}`
+        );
+        // oxlint-disable-next-line no-await-in-loop -- one save at a time
+        await saved(
+          company,
+          `${prefix}-${index}`,
+          `tasks: [${prefix}-${index}]${before.length === 0 ? "" : `\nprerequisites: [${before.join(", ")}]`}`
+        );
+      }
+    };
+    await chain("small", 12);
+    await chain("dense", 40);
+    const caller: Caller = { userId: "ann", reads: [company.id] };
+
+    const small = await selectSkill(brain, caller, {
+      task: { type: "small-11" },
+    });
+    const dense = await selectSkill(brain, caller, {
+      task: { type: "dense-39" },
+    });
+
+    expect(
+      [small.result, dense.result].map((result) =>
+        result.kind === "skill" ? result.skill.name : result.reason
+      )
+    ).toStrictEqual(["small-11", "incomplete"]);
+  });
+
   it("refuses a teammate's skill standing in for a company skill's dependency or prerequisite", async () => {
     const company = await newCollection(brain, "Company skills");
     const hidden = await newCollection(brain, "Admins' skills");
