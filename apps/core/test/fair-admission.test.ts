@@ -1147,25 +1147,43 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       resource: app,
     };
 
+    const queuedStepMs = 40_000;
     const result = await withShares(
-      { workflowClientAttempts: 2, workflowQueuedStepMs: 40_000 },
+      { workflowClientAttempts: 2, workflowQueuedStepMs: queuedStepMs },
       async () => {
         await admit(holder, "holder");
         const stop = endingEverySecond(holderRun.id);
         try {
           const run = await builder.api.workflows.start(app, "work");
+          // Its first round, once its activation asked for a share: a
+          // busy runner can take seconds to build and start it, which no
+          // round's time is about.
+          await vi.waitFor(
+            async () => {
+              await expect(loadWakesOf(run.id)).resolves.not.toHaveLength(0);
+            },
+            { timeout: queuedStepMs, interval: 200 }
+          );
           // Its third round: when it wakes to, then when its summary says
           // it asks again. Read in that order: the round's refusal wrote
           // the summary's before the round began, so a summary read
-          // earlier could still show the round before.
-          const { retryAt, wakesAt } = await eventually2(async () => {
-            const wakes = await loadWakesOf(run.id);
-            expect(wakes).toHaveLength(3);
-            const summary = await builder.api.screens
-              .frame(app, "")
-              .summary(run.id);
-            return { retryAt: summary.queued?.retryAt, wakesAt: wakes.at(-1) };
-          });
+          // earlier could still show the round before. It begins fifteen
+          // seconds after the first, and before the step's time queued
+          // ends its wait, whatever a busy runner holds its wakes back by.
+          const { retryAt, wakesAt } = await vi.waitFor(
+            async () => {
+              const wakes = await loadWakesOf(run.id);
+              expect(wakes).toHaveLength(3);
+              const summary = await builder.api.screens
+                .frame(app, "")
+                .summary(run.id);
+              return {
+                retryAt: summary.queued?.retryAt,
+                wakesAt: wakes.at(-1),
+              };
+            },
+            { timeout: queuedStepMs, interval: 200 }
+          );
           await finished(run.id, 60_000);
           return {
             failed: await failedWith(run.id),
