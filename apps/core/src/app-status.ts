@@ -245,7 +245,11 @@ export const changeStatus = async (
       db,
       eq(apps.id, found.id),
       null,
-      found.status === "published" ? storedEvent(event.id) : sql`0`
+      // Everyone of a published App may lose it; an archived App's
+      // builders lose its use too, a draft's included.
+      found.status === "published" || to === "archived"
+        ? storedEvent(event.id)
+        : sql`0`
     ),
   ]);
   if (changed === undefined) {
