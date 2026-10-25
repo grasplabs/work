@@ -655,7 +655,10 @@ const enterTen = async (host: Awaited<ReturnType<typeof hostOf>>) =>
     const items = await attempt.items({ input: { who: "Ada" } });
     return {
       ok: true,
-      value: { output: { who: "Ada" }, items: items.ok ? items.value : [] },
+      value: {
+        output: { who: "Ada" },
+        items: items.ok ? items.value.items : [],
+      },
     };
   });
 

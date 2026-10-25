@@ -5344,7 +5344,9 @@ export class ResourceRunHost
       record.output !== null ||
       Object.keys(record).length !== 2
     ) {
-      this.#refuse(`Task "${task.id}" records the branch its scope settled on.`);
+      this.#refuse(
+        `Task "${task.id}" records the branch its scope settled on.`
+      );
     }
   }
 
