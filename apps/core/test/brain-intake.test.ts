@@ -865,20 +865,28 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     await drawTickets(ids);
     // The brain can't take records out while the claims are put together
     // anew: every try of this intake fails to.
-    // Drizzle binds what it prepares, so the batch is known by what was
-    // prepared just before it: the brain's records deleted.
+    // The brain's records deleted, known by what was prepared: drizzle
+    // binds a statement before the batch, so the bound copy is marked too.
     const prepare = env.DB.prepare.bind(env.DB);
     const batch = env.DB.batch.bind(env.DB);
-    let deleting = false;
+    const deletes = new WeakSet<D1PreparedStatement>();
     const prepared = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
-      deleting ||= query.startsWith('delete from "brain_records"');
-      return prepare(query);
+      const statement = prepare(query);
+      if (query.startsWith('delete from "brain_records"')) {
+        deletes.add(statement);
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...values) => {
+          const bound = bind(...values);
+          deletes.add(bound);
+          return bound;
+        };
+      }
+      return statement;
     });
     const spy = vi
       .spyOn(env.DB, "batch")
       .mockImplementation(async (statements) => {
-        if (deleting) {
-          deleting = false;
+        if (statements.some((statement) => deletes.has(statement))) {
           throw new Error("The brain can't be reached.");
         }
         return await batch(statements);
@@ -916,20 +924,28 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     // batch that writes it lands, and its answer is lost.
     const prepare = env.DB.prepare.bind(env.DB);
     const batch = env.DB.batch.bind(env.DB);
-    // Drizzle binds what it prepares, so the batch is known by what was
-    // prepared just before it: the brain's records written.
-    let writing = false;
+    // The brain's records written, known by what was prepared: drizzle
+    // binds a statement before the batch, so the bound copy is marked too.
+    const writes = new WeakSet<D1PreparedStatement>();
     let failed = 0;
     const prepared = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
-      writing ||= query.startsWith('insert into "brain_records"');
-      return prepare(query);
+      const statement = prepare(query);
+      if (query.startsWith('insert into "brain_records"')) {
+        writes.add(statement);
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...values) => {
+          const bound = bind(...values);
+          writes.add(bound);
+          return bound;
+        };
+      }
+      return statement;
     });
     const spy = vi
       .spyOn(env.DB, "batch")
       .mockImplementation(async (statements) => {
         const results = await batch(statements);
-        if (writing) {
-          writing = false;
+        if (statements.some((statement) => writes.has(statement))) {
           failed += 1;
           throw new Error("Lost on the way back.");
         }
