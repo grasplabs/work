@@ -420,6 +420,14 @@ const knowledgeDb: D1State = {
       "Empty between batches."
     ),
     brain_memories: exported(`${brain}memories.ts`, brainPending),
+    brain_memory_rows: cache(
+      `${brain}memories.ts`,
+      "Memory search projection."
+    ),
+    brain_memory_words: cache(
+      `${brain}memories.ts`,
+      "Memory search projection."
+    ),
     brain_receipts: transient(
       `${brain}memories.ts`,
       "Command receipts for retries, swept a day after the command."
