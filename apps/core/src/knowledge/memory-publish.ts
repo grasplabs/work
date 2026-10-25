@@ -192,12 +192,18 @@ const collectionsOf = async (env: Env, ids: readonly string[]) => {
       .from(collectionTeams)
       .where(inList(collectionTeams.collectionId, ids)),
   ]);
-  return rows.map((row) => ({
-    ...row,
-    teamIds: shares
-      .filter(({ collectionId }) => collectionId === row.id)
-      .map(({ teamId }) => teamId),
-  }));
+  // Each collection's teams, grouped once: a read of every collection
+  // (`readableByEveryoneOf`) costs one pass over the shares, not one each.
+  const teamsBy = new Map<string, string[]>();
+  for (const { collectionId, teamId } of shares) {
+    const sharedWith = teamsBy.get(collectionId);
+    if (sharedWith === undefined) {
+      teamsBy.set(collectionId, [teamId]);
+    } else {
+      sharedWith.push(teamId);
+    }
+  }
+  return rows.map((row) => ({ ...row, teamIds: teamsBy.get(row.id) ?? [] }));
 };
 
 /** Those of `ids` everyone in the company reads, none of them sensitive. */
