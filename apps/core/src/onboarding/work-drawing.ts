@@ -9,6 +9,7 @@ import {
   STARTING_ORG_RULES,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
+import { heardAnswers } from "@grasp-os/shared/admin/org-record";
 import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
 import type { SettleChoice } from "@grasp-os/shared/onboarding";
 import { orgRulesSchema } from "@grasp-os/shared/onboarding-staff";
@@ -156,7 +157,7 @@ const promptOf = (brief: WorkBrief): string =>
     "",
     "What each person who does it agreed to:",
     ...brief.tellers.flatMap((teller) => [
-      `## ${teller.person}${teller.title === "" ? "" : ` (${teller.title})`}${teller.about === undefined ? "" : `, asked about ${teller.about}`}${teller.example === null ? "" : `, shared an example: ${teller.example}`}`,
+      `## ${teller.person}${teller.about === undefined ? "" : `, asked about ${teller.about}`}${teller.example === null ? "" : `, shared an example: ${teller.example}`}`,
       ...teller.facts.map(({ tag, record }) => `- (${tag}) ${record}`),
       "",
     ]),
@@ -391,6 +392,36 @@ export const drawnOf = (
       .map((question) => lineOf(question))
       .filter((question) => question !== "")
       .slice(0, 5),
+    // Whose words each one-line answer is: the first note of its kind's.
+    heard: Object.fromEntries(
+      heardAnswers.map((kind) => [kind, idsOf(of(kind)[0]?.by)])
+    ),
+  };
+};
+
+/** A drawing whose people are named by labels, with each label the person it stands for. */
+const peopleOf = (
+  drawn: DrawnWork,
+  people: ReadonlyMap<string | undefined, string>
+): DrawnWork => {
+  const personOf = (label: string): string[] => {
+    const person = people.get(label);
+    return person === undefined ? [] : [person];
+  };
+  return {
+    ...drawn,
+    from: drawn.from.flatMap(personOf),
+    told: Object.fromEntries(
+      Object.entries(drawn.told).flatMap(([label, told]) =>
+        personOf(label).map((person) => [person, told])
+      )
+    ),
+    heard: Object.fromEntries(
+      Object.entries(drawn.heard ?? {}).map(([kind, labels]) => [
+        kind,
+        labels.flatMap(personOf),
+      ])
+    ),
   };
 };
 
@@ -410,6 +441,18 @@ export const drawWork = async (
   if (model === undefined) {
     throw new NoDrawingModelError("No model may draw the work.");
   }
+  // The model knows each person by a neutral label alone (`P2`), never
+  // their id or their title (GRA-1084): it is told what was said, not by
+  // whom. Its answer names them by those labels, read back here.
+  const labels = brief.tellers.map((_, index) => `P${index + 1}`);
+  const labelled: WorkBrief = {
+    ...brief,
+    tellers: brief.tellers.map((teller, index) => ({
+      ...teller,
+      person: labels[index] ?? "",
+      title: "",
+    })),
+  };
   const { output, usage } = await models(env).call({
     model,
     purpose: "onboarding.drawing",
@@ -417,7 +460,7 @@ export const drawWork = async (
     work: { onboarding: true },
     effort: "medium",
     system: drawSystem,
-    input: promptOf(brief),
+    input: promptOf(labelled),
     schema: drawSchema,
     maxTokens: 16_000,
   });
@@ -428,7 +471,10 @@ export const drawWork = async (
     tokensCached: usage.cacheRead,
     tokensOut: usage.outputTokens,
   });
-  return drawnOf(output, brief, new Date().toISOString());
+  return peopleOf(
+    drawnOf(output, labelled, new Date().toISOString()),
+    new Map(brief.tellers.map(({ person }, index) => [labels[index], person]))
+  );
 };
 
 const triple = z.tuple([z.number(), z.number(), z.number()]);
@@ -473,6 +519,7 @@ export const drawnWorkSchema = z.object({
     .nullable(),
   per: z.enum(["week", "month"]),
   unit: z.enum(["minutes", "hours"]),
+  heard: z.partialRecord(z.enum(heardAnswers), z.array(z.string())).optional(),
   told: z.record(
     z.string(),
     z.object({

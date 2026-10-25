@@ -599,7 +599,24 @@ export interface DrawnWork {
   told: Record<string, Told>;
   /** What nobody could say yet: the next interviews ask it. */
   open: string[];
+  /**
+   * Who said each one-line answer as it stands (`decides` to `next`): the
+   * brain shows one only when five or more who aren't the lead did
+   * (GRA-1084). Missing on a drawing from before it was counted.
+   */
+  heard?: Partial<Record<HeardAnswer, string[]>>;
 }
+
+/** The one-line answers of a drawing whose tellers are counted (`DrawnWork.heard`). */
+export const heardAnswers = [
+  "decides",
+  "own",
+  "ai",
+  "right",
+  "ask",
+  "next",
+] as const;
+export type HeardAnswer = (typeof heardAnswers)[number];
 
 /** A piece of recurring work a team does. */
 export interface WorkRecord {
