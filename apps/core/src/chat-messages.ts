@@ -36,7 +36,8 @@ const textOf = (
  */
 const codeOf = (message: AssistantMessage): ChatCode[] =>
   message.content.flatMap((part) => {
-    if (part.type !== "toolCall") {
+    // Reading an API's declaration (`readApi`) runs no code.
+    if (part.type !== "toolCall" || part.name !== "executeCode") {
       return [];
     }
     const { code } = part.arguments;
