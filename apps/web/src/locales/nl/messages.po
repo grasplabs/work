@@ -6790,6 +6790,10 @@ msgid "Job"
 msgstr "Functie"
 
 #: src/activity/audit-words.ts
+msgid "Joined from the directory, writing to Stephen"
+msgstr "Lid geworden via de directory, door Stephen te schrijven"
+
+#: src/activity/audit-words.ts
 msgid "Joined through an invitation"
 msgstr "Is via een uitnodiging lid geworden"
 
@@ -11261,6 +11265,10 @@ msgstr "Getekend"
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in {time}"
 msgstr "Ingelogd op {time}"
+
+#: src/activity/audit-words.ts
+msgid "Signed in for the first time, after joining from the directory"
+msgstr "Voor het eerst ingelogd, na lid te zijn geworden via de directory"
 
 #: src/activity/audit-words.ts
 msgid "Signed in to a connection again"
