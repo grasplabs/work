@@ -1190,6 +1190,13 @@ const telegramResponse = async (
   if (userId === undefined) {
     return new Response(null, { status: 200 });
   }
+  // Settings › Stephen, as for every chat app: whether he answers them in
+  // Telegram at all, asked before anything they wrote is read.
+  const reach = await stephenFor(env, userId, "telegram");
+  if (!reach.reaches) {
+    ctx.waitUntil(sendTelegramLine(env, origin, sent, "notTurnedOn"));
+    return new Response(null, { status: 200 });
+  }
   const chat = new Chat({
     userName: "Stephen",
     adapters: { telegram: telegramAdapter(env) },
@@ -1200,6 +1207,7 @@ const telegramResponse = async (
   return handOn(env, ctx, chat, {
     platform: "telegram",
     userId,
+    acts: reach.acts,
     handoff,
     webhook: async (waitUntil) =>
       await chat.webhooks.telegram(
