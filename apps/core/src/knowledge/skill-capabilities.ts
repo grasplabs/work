@@ -1,5 +1,8 @@
+import type { SkillAuthority, SkillCollection } from "@grasp-os/brain/brain";
 import type { Permission } from "@grasp-os/shared/permissions";
+import { isAdmin } from "@grasp-os/shared/roles";
 
+import { memberRole } from "../auth/identity.ts";
 import { grantedPermissions } from "../permissions.ts";
 import type { Reader } from "./access.ts";
 
@@ -54,3 +57,38 @@ export const skillCapabilities = async (
   reader.type === "person"
     ? []
     : capabilitiesOf(await grantedPermissions(env, reader.authority));
+
+/**
+ * Which of `skillCollections` may hold a selectable skill (GRA-310): the
+ * Grasp skills (`source: "grasp"`, written by the release's sync alone),
+ * and collections only admins write, so a skill's `status: accepted` was
+ * set by an admin. A collection for admins is written by admins (who
+ * alone read it); one for everyone by admins and its owner, so only while
+ * its owner is an admin now. A team's or a person's collection is written
+ * by members, and its skills are never selected.
+ */
+export const skillAuthorities = async (
+  env: Env,
+  skillCollections: readonly SkillCollection[]
+): Promise<Record<string, SkillAuthority>> => {
+  const vouched = await Promise.all(
+    skillCollections.map(
+      async ({
+        id,
+        access,
+        owner,
+        source,
+      }): Promise<[string, SkillAuthority][]> => {
+        if (source === "grasp") {
+          return [[id, "shipped"]];
+        }
+        const byAdmins =
+          access === "admins" ||
+          (access === "everyone" &&
+            isAdmin((await memberRole(env.DB, owner)) ?? "user"));
+        return byAdmins ? [[id, "admins"]] : [];
+      }
+    )
+  );
+  return Object.fromEntries(vouched.flat());
+};

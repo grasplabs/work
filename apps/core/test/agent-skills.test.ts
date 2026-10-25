@@ -1,12 +1,15 @@
+import { selectSkill } from "@grasp-os/brain/skills";
 import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
+import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { brainOf } from "../src/knowledge/ports.ts";
 import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
+import { newTeam, readCollection } from "./knowledge.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // Skills for a chat's code (`env.brain.skillsSelect` / `skillsRead`,
@@ -204,6 +207,55 @@ describe("a chat's skills", setUpTime, () => {
         { result: "none", reason: "no_match" },
       ],
       texts: false,
+    });
+  });
+
+  it("selects only skills in collections admins alone write: never a team's, which its members write", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const team = await newTeam(admin, [admin, member]);
+    const { id: companyId } = await admin.api.knowledge.createCollection({
+      name: `Company skills ${unique()}`,
+      access: "everyone",
+    });
+    const { id: teamId } = await admin.api.knowledge.createCollection({
+      name: `Team skills ${unique()}`,
+      access: "teams",
+      teams: [team],
+    });
+    await admin.api.knowledge.saveDocument({
+      collectionId: companyId,
+      path: "invoices/SKILL.md",
+      text: skillText("invoices", "tasks: [invoice]"),
+      ifVersion: 0,
+    });
+    // A member of the team writes their own, meant to take its place.
+    await member.api.knowledge.saveDocument({
+      collectionId: teamId,
+      path: "invoices-fast/SKILL.md",
+      text: skillText(
+        "invoices-fast",
+        "tasks: [invoice]\nreplaces: [invoices]\nstatus: accepted"
+      ),
+      ifVersion: 0,
+    });
+    const person = await member.api.whoami();
+
+    const selection = await selectSkill(
+      brainOf(env),
+      { type: "person", person },
+      { task: { type: "invoice" } }
+    );
+
+    expect({
+      result: resultOf(selection),
+      considered: selection.considered.map(({ skill, outcome }) => [
+        skill.name,
+        outcome,
+      ]),
+    }).toStrictEqual({
+      result: { skill: "invoices", version: 1 },
+      considered: [["invoices", "selected"]],
     });
   });
 });

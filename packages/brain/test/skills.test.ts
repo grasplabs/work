@@ -201,9 +201,13 @@ describe("selecting a skill", () => {
     await saved(
       skills,
       "close-month",
-      "tasks: [close]\nprerequisites: [reconcile]"
+      `tasks: [close]\nprerequisites: [{ collection: "${extra.id}", name: reconcile }]`
     );
-    await saved(skills, "report", "tasks: [report]\ndependencies: [ledger@2]");
+    await saved(
+      skills,
+      "report",
+      `tasks: [report]\ndependencies: [{ collection: "${extra.id}", name: ledger, version: 2 }]`
+    );
     await saved(
       extra,
       "reconcile",
@@ -333,6 +337,202 @@ describe("selecting a skill", () => {
         texts: false,
       },
     ]);
+  });
+});
+
+describe("who can make a skill selectable", () => {
+  it("never selects a skill in a collection members write, whatever its status says", async () => {
+    const team = await newCollection(brain, "Team skills", "team");
+    await saved(team, "refunds", "tasks: [refund]\nstatus: accepted");
+    const caller: Caller = { userId: "ann", reads: [team.id] };
+
+    const selection = await selectSkill(brain, caller, {
+      task: { type: "refund" },
+    });
+
+    expect(summary(selection)).toStrictEqual({
+      result: "no_match",
+      considered: {},
+    });
+  });
+
+  it("refuses a teammate's skill taking the company's place through replaces", async () => {
+    const company = await newCollection(brain, "Company skills");
+    const team = await newCollection(brain, "Team skills", "team");
+    const other = await newCollection(brain, "Other company skills");
+    await saved(company, "invoice-review", "tasks: [invoice]");
+    await saved(
+      team,
+      "invoice-review-fast",
+      "tasks: [invoice]\nreplaces: [invoice-review]"
+    );
+    await saved(
+      other,
+      "invoice-review-other",
+      "tasks: [audit]\nreplaces: [invoice-review]"
+    );
+    const teammate: Caller = { userId: "ann", reads: [company.id, team.id] };
+    const both: Caller = { userId: "bo", reads: [company.id, other.id] };
+
+    const throughTeam = await selectSkill(brain, teammate, {
+      task: { type: "invoice" },
+    });
+    await saved(
+      other,
+      "invoice-review-other",
+      "tasks: [invoice]\nreplaces: [invoice-review]",
+      1
+    );
+    // An admins' collection replaces only within itself, or a shipped skill.
+    const acrossAdmins = await selectSkill(brain, both, {
+      task: { type: "invoice" },
+    });
+
+    expect([summary(throughTeam), summary(acrossAdmins)]).toStrictEqual([
+      {
+        result: "invoice-review",
+        considered: { "invoice-review": "selected" },
+      },
+      {
+        result: "ambiguous",
+        considered: {
+          "invoice-review": "ambiguous",
+          "invoice-review-other": "ambiguous",
+        },
+      },
+    ]);
+  });
+
+  it("lets a skill in a collection only admins write take a shipped skill's place", async () => {
+    const shipped = await newCollection(brain, "Shipped skills", "shipped");
+    const company = await newCollection(brain, "Company skills");
+    const team = await newCollection(brain, "Team skills", "team");
+    await saved(shipped, "baseline", "tasks: [baseline]");
+    await saved(
+      company,
+      "our-baseline",
+      "tasks: [baseline]\nreplaces: [baseline]"
+    );
+    await saved(
+      team,
+      "team-baseline",
+      "tasks: [baseline]\nreplaces: [baseline]"
+    );
+    const caller: Caller = {
+      userId: "ann",
+      reads: [shipped.id, company.id, team.id],
+    };
+
+    const selection = await selectSkill(brain, caller, {
+      task: { type: "baseline" },
+    });
+
+    expect(summary(selection)).toStrictEqual({
+      result: "our-baseline",
+      considered: { baseline: "replaced", "our-baseline": "selected" },
+    });
+  });
+
+  it("refuses a teammate's skill standing in for a company skill's dependency or prerequisite", async () => {
+    const company = await newCollection(brain, "Company skills");
+    const hidden = await newCollection(brain, "Admins' skills");
+    const team = await newCollection(brain, "Team skills", "team");
+    await saved(
+      company,
+      "report",
+      `tasks: [report]\ndependencies: [{ collection: "${hidden.id}", name: rules, version: 2 }]`
+    );
+    await saved(
+      company,
+      "close-month",
+      "tasks: [close]\nprerequisites: [approve]"
+    );
+    // The rules and the approval the company means live where members
+    // can't read; a teammate writes their own under the same names.
+    await saved(hidden, "rules", "tasks: [rules]");
+    await saved(hidden, "rules", "tasks: [rules]\nacceptance: [suite]", 1);
+    await saved(team, "rules", "tasks: [rules]");
+    await saved(team, "rules", "tasks: [rules]\nacceptance: [mine]", 1);
+    await saved(team, "approve", "tasks: [approve]");
+    const teammate: Caller = { userId: "ann", reads: [company.id, team.id] };
+
+    const report = await selectSkill(brain, teammate, {
+      task: { type: "report" },
+    });
+    const close = await selectSkill(brain, teammate, {
+      task: { type: "close" },
+    });
+
+    expect([summary(report), summary(close)]).toStrictEqual([
+      { result: "no_match", considered: { report: "dependency_missing" } },
+      {
+        result: "no_match",
+        considered: { "close-month": "prerequisite_missing" },
+      },
+    ]);
+  });
+
+  it("pins a dependency at exactly the version named: one that isn't there, renamed or retired at it, is missing", async () => {
+    const skills = await newCollection(brain, "Skills");
+    await saved(skills, "ledger", "tasks: [ledger]");
+    await saved(skills, "ledger", "tasks: [ledger]\nstatus: retired", 1);
+    await saved(skills, "later", "tasks: [later]\ndependencies: [ledger@3]");
+    await saved(
+      skills,
+      "retired-at",
+      "tasks: [retired]\ndependencies: [ledger@2]"
+    );
+    await saved(skills, "exact", "tasks: [exact]\ndependencies: [ledger@1]");
+    const caller: Caller = { userId: "ann", reads: [skills.id] };
+
+    const select = async (type: string) =>
+      summary(await selectSkill(brain, caller, { task: { type } }));
+
+    const later = await select("later");
+    const retiredAt = await select("retired");
+    const exact = await select("exact");
+    expect([later, retiredAt, exact.result]).toStrictEqual([
+      { result: "no_match", considered: { later: "dependency_missing" } },
+      {
+        result: "no_match",
+        considered: { "retired-at": "dependency_missing" },
+      },
+      "exact",
+    ]);
+  });
+
+  it("treats a name twice in a collection as ambiguous, never as whichever is read", async () => {
+    const skills = await newCollection(brain, "Skills");
+    await saved(
+      skills,
+      "close-month",
+      "tasks: [close]\nprerequisites: [approve]"
+    );
+    await writeVersion(brain, writerOf("writer"), {
+      collection: skills,
+      path: "approve/SKILL.md",
+      text: skillText("approve", "tasks: [approve]"),
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
+    await writeVersion(brain, writerOf("writer"), {
+      collection: skills,
+      path: "approve-copy/SKILL.md",
+      text: skillText("approve", "tasks: [approve]"),
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
+    const caller: Caller = { userId: "ann", reads: [skills.id] };
+
+    const selection = await selectSkill(brain, caller, {
+      task: { type: "close" },
+    });
+
+    expect(summary(selection).considered).toStrictEqual({
+      "close-month": "prerequisite_missing",
+    });
   });
 });
 

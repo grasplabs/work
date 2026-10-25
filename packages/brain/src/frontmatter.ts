@@ -43,11 +43,15 @@ const skillSchema = baseSchema
   // When it applies (contract.ts `skillManifestSchema`), checked as it is
   // saved, so a manifest that can't be read never gets in.
   .extend(skillManifestSchema.shape)
+  // By name, in its own collection: itself. (One that names its own
+  // collection explicitly is caught as selection resolves it.)
   .refine(
     ({ name, prerequisites, dependencies, replaces }) =>
       !prerequisites.includes(name) &&
       !replaces.includes(name) &&
-      !dependencies.some((each) => each.split("@")[0] === name),
+      !dependencies.some(
+        (each) => typeof each === "string" && each.split("@")[0] === name
+      ),
     { message: "A skill can't rest on, or take the place of, itself." }
   );
 

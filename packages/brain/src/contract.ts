@@ -572,6 +572,33 @@ export interface SkillRead {
   text: string;
 }
 
+/** A skill's name, as its frontmatter has it. */
+export const skillNameSchema = z
+  .string()
+  .max(64)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
+
+/** Another skill: by name in the same collection, or by collection and name. */
+export const skillReferenceSchema = z.union([
+  skillNameSchema,
+  z.strictObject({ collection: collectionIdSchema, name: skillNameSchema }),
+]);
+export type SkillReference = z.infer<typeof skillReferenceSchema>;
+
+/** Another skill at one exact version: `name@version`, or qualified by collection. */
+export const skillDependencySchema = z.union([
+  z
+    .string()
+    .max(80)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*@[1-9][0-9]{0,8}$/u),
+  z.strictObject({
+    collection: collectionIdSchema,
+    name: skillNameSchema,
+    version: revisionSchema,
+  }),
+]);
+export type SkillDependency = z.infer<typeof skillDependencySchema>;
+
 /**
  * What a skill's frontmatter says of when to use it (the Brain design's
  * skill manifest), all of it exact words the host defines, matched as
@@ -587,20 +614,21 @@ export const skillManifestSchema = z.object({
   unless: z.array(skillTokenSchema).max(32).default([]),
   /** Capabilities the caller must already hold: a skill never grants one. */
   requires: z.array(skillTokenSchema).max(32).default([]),
-  /** Skills, by name, that must be accepted and usable by the caller too. */
-  prerequisites: z.array(skillTokenSchema).max(16).default([]),
-  /** Skills it rests on at exact versions, as `name@version`. */
-  dependencies: z
-    .array(
-      z
-        .string()
-        .max(80)
-        .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*@[1-9][0-9]{0,8}$/u)
-    )
-    .max(16)
-    .default([]),
-  /** Skills, by name, it takes the place of where both apply. */
-  replaces: z.array(skillTokenSchema).max(16).default([]),
+  /**
+   * Skills that must be accepted and usable by the caller too: by name, in
+   * the skill's own collection, or by collection and name.
+   */
+  prerequisites: z.array(skillReferenceSchema).max(16).default([]),
+  /**
+   * Skills it rests on at exact versions: `name@version` in its own
+   * collection, or `{ collection, name, version }`.
+   */
+  dependencies: z.array(skillDependencySchema).max(16).default([]),
+  /**
+   * Skills, by name, it takes the place of where both apply: in its own
+   * collection, or, from a collection only admins write, a shipped skill.
+   */
+  replaces: z.array(skillNameSchema).max(16).default([]),
   /** What checks it does what it says: references the host resolves. */
   acceptance: z.array(z.string().trim().min(1).max(512)).max(16).default([]),
   /** A retired skill is never selected again; pinned reads still work. */

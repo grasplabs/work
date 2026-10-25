@@ -2,7 +2,13 @@ import { env } from "cloudflare:workers";
 
 import type { ReadRecord } from "../src/authorize.ts";
 import { createBrain } from "../src/brain.ts";
-import type { Brain, BrainPorts, IndexJob, LinkJob } from "../src/brain.ts";
+import type {
+  Brain,
+  BrainPorts,
+  IndexJob,
+  LinkJob,
+  SkillAuthority,
+} from "../src/brain.ts";
 import { ensureCollection } from "../src/collections.ts";
 import type { CollectionRow } from "../src/collections.ts";
 import type { Writer } from "../src/documents.ts";
@@ -81,6 +87,24 @@ export const testHost = (
     skills: {
       capabilities: async (caller) =>
         await Promise.resolve(caller.capabilities ?? []),
+      // This host's vouching: a collection made with `source: "grasp"` is
+      // shipped; one for everyone or admins is written by admins alone;
+      // a team's or a person's is written by its members.
+      authorityOf: async (skillCollections) =>
+        await Promise.resolve(
+          Object.fromEntries(
+            skillCollections.flatMap(
+              ({ id, access, source }): [string, SkillAuthority][] => {
+                if (source === "grasp") {
+                  return [[id, "shipped"]];
+                }
+                return access === "everyone" || access === "admins"
+                  ? [[id, "admins"]]
+                  : [];
+              }
+            )
+          )
+        ),
     },
     ownerOf: (caller) => caller.userId,
     mayPublish: async () => {
@@ -159,10 +183,11 @@ export const writerOf = (userId: string): Writer => ({
   userId,
 });
 
-/** A new collection, read by whoever the host's callers say. */
+/** A new collection, read by whoever the host's callers say: one for everyone unless `kind` says otherwise. */
 export const newCollection = async (
   brain: Brain<Caller>,
-  name: string
+  name: string,
+  kind: "everyone" | "team" | "shipped" = "everyone"
 ): Promise<CollectionRow> =>
   await ensureCollection(
     brain,
@@ -171,9 +196,9 @@ export const newCollection = async (
       name,
       description: "",
       owner: "owner",
-      access: "everyone",
+      access: kind === "team" ? "teams" : "everyone",
       sensitive: false,
-      source: "here",
+      source: kind === "shipped" ? "grasp" : "here",
       createdAt: new Date(),
     },
     { type: "person", userId: "owner" }

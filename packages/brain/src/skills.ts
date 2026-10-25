@@ -1,7 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 
 import { allowedFor } from "./authorize.ts";
-import type { Brain } from "./brain.ts";
+import type { Brain, SkillAuthority } from "./brain.ts";
 import {
   brainContractVersion,
   brainErrors,
@@ -10,10 +10,12 @@ import {
   skillsSelectInputSchema,
 } from "./contract.ts";
 import type {
+  SkillDependency,
   SkillManifest,
   SkillOutcome,
   SkillRead,
   SkillRef,
+  SkillReference,
   SkillSelection,
 } from "./contract.ts";
 import {
@@ -42,14 +44,23 @@ import { asBrainError } from "./recall.ts";
 //   port); a skill needing one they lack is never selected. Selection
 //   reads only skills the caller may read (`allowedFor`, inside the SQL),
 //   so it never names, let alone selects, one in a collection they can't.
+// - Someone who can write a collection taking over selection: only skills
+//   in collections the host vouches for (`skills.authorityOf`: core's
+//   shipped skills, and collections only admins write) are selected,
+//   referred to or replaced. A prerequisite or dependency resolves in the
+//   skill's own collection, or the collection it names, never by name
+//   across collections; a name twice there is ambiguous, never "the one
+//   the caller reads". `replaces` reaches a skill in the same collection,
+//   or, from a collection only admins write, a shipped skill.
 // - A missing prerequisite or dependency: each must be accepted and usable
-//   by the caller (a prerequisite) or readable at exactly its version (a
-//   dependency), or the skill isn't selected, with why.
+//   by the caller (a prerequisite), or that one skill, with that name and
+//   accepted, at exactly the version named (a dependency), or the skill
+//   isn't selected, with why.
 // - Forcing a skill: applicability is exact (the task's type in `tasks`,
 //   every `when` trait held, no `unless` trait); a skill without `tasks`
-//   applies to nothing; two that apply, with nothing saying which
-//   (`replaces`), select none. No similarity, no order, no model.
-// - A partial view: past `skillsReadMax` readable skills a selection
+//   applies to nothing; two that apply, with nothing saying which, select
+//   none. No similarity, no order, no model.
+// - A partial view: past `skillsReadMax` selectable skills a selection
 //   reads none, rather than choose from some and miss an ambiguity.
 // - A pin changing under a run: the selection pins the version it read;
 //   `readSkill` returns exactly that version, retired or superseded since,
@@ -57,43 +68,76 @@ import { asBrainError } from "./recall.ts";
 // - Unrecorded selections: every one, a no-skill one too, is recorded by
 //   the host's `onRead` port with its result and counts, never a skill's
 //   text.
+// - Cost: a version's text never changes, so its parsed manifest is kept
+//   by its payload's hash (`manifests`), for this isolate's later calls.
 
 /** The rules a selection follows: exact matching over manifests. */
-export const skillSelectionPolicyVersion = "rules@1";
+export const skillSelectionPolicyVersion = "rules@2";
 
-/** Most readable skills one selection reads; more selects none. */
+/** Most selectable skills one selection reads; more selects none. */
 export const skillsReadMax = 100;
 
-/** A readable skill, as a selection reads it. */
+/** Most readable skill documents it looks at, selectable or not; more selects none. */
+const skillsScanMax = 1000;
+
+/** A selectable skill, as a selection reads it. */
 interface Candidate {
   ref: SkillRef;
   manifest: SkillManifest;
+  /** Why its collection's skills may be selected. */
+  authority: SkillAuthority;
   /** The collection it is in, and whether that one is sensitive. */
   source: { id: string; sensitive: boolean };
 }
 
-/** The skill manifest in `text`'s frontmatter, with its name; none when it doesn't parse as a skill. */
-const manifestOf = (
-  path: string,
-  text: string
-): { name: string; manifest: SkillManifest } | undefined => {
+/** A parsed manifest, with the skill's name; null for text that isn't a skill's. */
+type Parsed = { name: string; manifest: SkillManifest } | null;
+
+/** Most parsed manifests kept: each is small, and a version never changes. */
+const manifestsKept = 1000;
+
+/** Parsed manifests by payload hash and path: a version's text never changes. */
+const manifests = new Map<string, Parsed>();
+
+/** The skill manifest in `text`'s frontmatter, with its name; null when it doesn't parse as a skill. */
+const manifestOf = (path: string, text: string): Parsed => {
   try {
     const { type, frontmatter } = parseFrontmatter(path, text);
     const manifest = skillManifestSchema.safeParse(frontmatter);
     const name: unknown = Reflect.get(frontmatter, "name");
     return type === "skill" && manifest.success && typeof name === "string"
       ? { name, manifest: manifest.data }
-      : undefined;
+      : null;
   } catch {
-    return undefined;
+    return null;
   }
 };
 
+/** The manifest of the payload `payload` at `path`, parsed once per isolate. */
+const manifestAt = async <C>(
+  brain: Brain<C>,
+  path: string,
+  payload: { key: string; sha256: string }
+): Promise<Parsed> => {
+  const key = `${payload.sha256}\u0000${path}`;
+  const kept = manifests.get(key);
+  if (kept !== undefined) {
+    return kept;
+  }
+  const parsed = manifestOf(path, await readPayload(brain, payload));
+  if (manifests.size >= manifestsKept) {
+    manifests.clear();
+  }
+  manifests.set(key, parsed);
+  return parsed;
+};
+
 /**
- * The skills `reader` may read, at their current versions, in a fixed
- * order; undefined past `skillsReadMax`.
+ * The selectable skills `reader` may read, at their current versions, in a
+ * fixed order: those in collections the host vouches for; undefined past
+ * `skillsReadMax`.
  */
-const readableSkills = async <C>(
+const selectableSkills = async <C>(
   brain: Brain<C>,
   reader: C
 ): Promise<{ candidates: Candidate[]; read: number } | undefined> => {
@@ -104,8 +148,13 @@ const readableSkills = async <C>(
       id: documents.id,
       path: documents.path,
       version: documents.currentVersion,
-      collectionId: collections.id,
-      sensitive: collections.sensitive,
+      collection: {
+        id: collections.id,
+        access: collections.access,
+        owner: collections.owner,
+        source: collections.source,
+        sensitive: collections.sensitive,
+      },
       payload: { key: brainPayloads.key, sha256: brainPayloads.sha256 },
     })
     .from(documents)
@@ -120,29 +169,41 @@ const readableSkills = async <C>(
     .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
     .where(and(eq(documents.type, "skill"), allowed.documents()))
     .orderBy(asc(collections.id), asc(documents.path))
-    .limit(skillsReadMax + 1);
-  if (rows.length > skillsReadMax) {
+    .limit(skillsScanMax + 1);
+  if (rows.length > skillsScanMax) {
+    return undefined;
+  }
+  const authorities = await brain.ports.skills.authorityOf([
+    ...new Map(
+      rows.map(({ collection }) => [collection.id, collection])
+    ).values(),
+  ]);
+  const vouched = rows.filter(({ collection }) =>
+    Object.hasOwn(authorities, collection.id)
+  );
+  if (vouched.length > skillsReadMax) {
     return undefined;
   }
   const candidates: Candidate[] = [];
-  for (const row of rows) {
+  for (const row of vouched) {
     // oxlint-disable-next-line no-await-in-loop -- bounded by skillsReadMax, in order
-    const text = await readPayload(brain, row.payload);
-    const parsed = manifestOf(row.path, text);
-    if (parsed !== undefined) {
+    const parsed = await manifestAt(brain, row.path, row.payload);
+    const authority = authorities[row.collection.id];
+    if (parsed !== null && authority !== undefined) {
       candidates.push({
         ref: {
           documentId: documentIdSchema.parse(row.id),
-          collectionId: collectionIdSchema.parse(row.collectionId),
+          collectionId: collectionIdSchema.parse(row.collection.id),
           name: parsed.name,
           version: row.version,
         },
         manifest: parsed.manifest,
-        source: { id: row.collectionId, sensitive: row.sensitive },
+        authority,
+        source: { id: row.collection.id, sensitive: row.collection.sensitive },
       });
     }
   }
-  return { candidates, read: rows.length };
+  return { candidates, read: vouched.length };
 };
 
 /** Whether every one of `needed` is in `held`. */
@@ -150,102 +211,177 @@ const allIn = (needed: readonly string[], held: ReadonlySet<string>) =>
   needed.every((each) => held.has(each));
 
 /**
- * Why `candidate` can't be used for the task, or undefined when it applies,
- * by the rules in order: retired, excluded, a precondition, a capability,
- * a prerequisite, a dependency.
+ * The one selectable skill `reference` names, from `from`: by name in its
+ * own collection, or in the collection named. Undefined when there is
+ * none, or more than one of that name there.
  */
-const blockedBy = (
+const resolved = (
+  from: Candidate,
+  reference: { collection?: string; name: string },
+  all: readonly Candidate[]
+): Candidate | undefined => {
+  const collection = reference.collection ?? from.ref.collectionId;
+  const named = all.filter(
+    ({ ref }) =>
+      ref.collectionId === collection &&
+      ref.name === reference.name &&
+      ref.documentId !== from.ref.documentId
+  );
+  return named.length === 1 ? named[0] : undefined;
+};
+
+/** A reference as `resolved` takes it. */
+const referenceOf = (
+  reference: SkillReference
+): { collection?: string; name: string } =>
+  typeof reference === "string" ? { name: reference } : reference;
+
+/** A dependency as `resolved` takes it, with the version it pins. */
+const dependencyOf = (
+  dependency: SkillDependency
+): { collection?: string; name: string; version: number } => {
+  if (typeof dependency !== "string") {
+    return dependency;
+  }
+  const [name = "", version = "0"] = dependency.split("@");
+  return { name, version: Number(version) };
+};
+
+/** A dependency resolved to the skill and version it pins, or why not. */
+type Pin = { ref: SkillRef } | undefined;
+
+/**
+ * The skill `dependency` of `from` pins, at exactly its version: the one
+ * selectable skill of that name where it says, which has that version,
+ * a skill of that name and accepted at it. Undefined otherwise.
+ */
+const pinOf = async <C>(
+  brain: Brain<C>,
+  from: Candidate,
+  dependency: SkillDependency,
+  all: readonly Candidate[]
+): Promise<Pin> => {
+  const wanted = dependencyOf(dependency);
+  const target = resolved(from, wanted, all);
+  if (target === undefined || wanted.version > target.ref.version) {
+    return undefined;
+  }
+  const row = await brain.db
+    .select({
+      path: documents.path,
+      payload: { key: brainPayloads.key, sha256: brainPayloads.sha256 },
+    })
+    .from(versions)
+    .innerJoin(documents, eq(documents.id, versions.documentId))
+    .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
+    .where(
+      and(
+        eq(versions.documentId, target.ref.documentId),
+        eq(versions.number, wanted.version)
+      )
+    )
+    .get();
+  const atVersion =
+    row === undefined ? null : await manifestAt(brain, row.path, row.payload);
+  return atVersion?.name === wanted.name &&
+    atVersion.manifest.status === "accepted"
+    ? { ref: { ...target.ref, version: wanted.version } }
+    : undefined;
+};
+
+/**
+ * Why `candidate` can't be used for the task, or the pins of its
+ * dependencies when it applies, by the rules in order: retired, excluded,
+ * a precondition, a capability, a prerequisite, a dependency.
+ */
+const checkedOf = async <C>(
+  brain: Brain<C>,
   candidate: Candidate,
   traits: ReadonlySet<string>,
   held: ReadonlySet<string>,
   all: readonly Candidate[]
-): SkillOutcome | undefined => {
+): Promise<{ blocked: SkillOutcome } | { pins: SkillRef[] }> => {
   const { manifest } = candidate;
   if (manifest.status === "retired") {
-    return "retired";
+    return { blocked: "retired" };
   }
   if (manifest.unless.some((trait) => traits.has(trait))) {
-    return "excluded";
+    return { blocked: "excluded" };
   }
   if (!allIn(manifest.when, traits)) {
-    return "precondition_unmet";
+    return { blocked: "precondition_unmet" };
   }
   if (!allIn(manifest.requires, held)) {
-    return "missing_capability";
+    return { blocked: "missing_capability" };
   }
-  // A prerequisite: some other skill of that name, accepted, whose own
-  // requirements the caller meets.
-  const usable = (name: string) =>
-    all.some(
-      ({ ref, manifest: other }) =>
-        ref.name === name &&
-        ref.documentId !== candidate.ref.documentId &&
-        other.status === "accepted" &&
-        allIn(other.requires, held)
-    );
-  if (!manifest.prerequisites.every(usable)) {
-    return "prerequisite_missing";
-  }
-  // A dependency: exactly one readable skill of that name, which has that
-  // version (versions are never changed once written).
-  const pinned = (dependency: string) => {
-    const [name, version] = dependency.split("@");
-    const named = all.filter(({ ref }) => ref.name === name);
+  const usable = manifest.prerequisites.every((reference) => {
+    const found = resolved(candidate, referenceOf(reference), all);
     return (
-      named.length === 1 && (named[0]?.ref.version ?? 0) >= Number(version)
+      found !== undefined &&
+      found.manifest.status === "accepted" &&
+      allIn(found.manifest.requires, held)
     );
-  };
-  if (!manifest.dependencies.every(pinned)) {
-    return "dependency_missing";
+  });
+  if (!usable) {
+    return { blocked: "prerequisite_missing" };
   }
-  return undefined;
+  const pins: SkillRef[] = [];
+  for (const dependency of manifest.dependencies) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, bounded by the manifest
+    const pin = await pinOf(brain, candidate, dependency, all);
+    if (pin === undefined) {
+      return { blocked: "dependency_missing" };
+    }
+    pins.push(pin.ref);
+  }
+  return { pins };
 };
 
-/** The dependencies of `candidate`, pinned at the versions it names. */
-const dependenciesOf = (
-  candidate: Candidate,
-  all: readonly Candidate[]
-): SkillRef[] =>
-  candidate.manifest.dependencies.flatMap((dependency) => {
-    const [name, version] = dependency.split("@");
-    const found = all.find(({ ref }) => ref.name === name);
-    return found === undefined
-      ? []
-      : [{ ...found.ref, version: Number(version) }];
-  });
+/** Whether `by` may take `target`'s place: in its own collection, or an admins' skill a shipped one. */
+const mayReplace = (by: Candidate, target: Candidate): boolean =>
+  by.ref.collectionId === target.ref.collectionId ||
+  (by.authority === "admins" && target.authority === "shipped");
 
 /**
  * Each of the skills `relevant` to the task, with why it was or wasn't
- * selected, and those left applicable once `replaces` is applied: one is
- * selected, more are each ambiguous.
+ * selected, and the one left applicable, with its dependencies' pins, once
+ * `replaces` is applied: one is selected, more are each ambiguous.
  */
-const outcomesOf = (
+const outcomesOf = async <C>(
+  brain: Brain<C>,
   relevant: readonly Candidate[],
   all: readonly Candidate[],
   traits: ReadonlySet<string>,
   held: ReadonlySet<string>
-): { outcomes: Map<Candidate, SkillOutcome>; left: Candidate[] } => {
+): Promise<{
+  outcomes: Map<Candidate, SkillOutcome>;
+  left: { candidate: Candidate; pins: SkillRef[] }[];
+}> => {
   const outcomes = new Map<Candidate, SkillOutcome>();
+  const applicable: { candidate: Candidate; pins: SkillRef[] }[] = [];
   for (const candidate of relevant) {
-    const blocked = blockedBy(candidate, traits, held, all);
-    if (blocked !== undefined) {
-      outcomes.set(candidate, blocked);
+    // oxlint-disable-next-line no-await-in-loop -- in order, bounded by skillsReadMax
+    const checked = await checkedOf(brain, candidate, traits, held, all);
+    if ("blocked" in checked) {
+      outcomes.set(candidate, checked.blocked);
+    } else {
+      applicable.push({ candidate, pins: checked.pins });
     }
   }
-  const applicable = relevant.filter((each) => !outcomes.has(each));
-  // Where both apply, one that another names in `replaces` gives way.
-  const replaced = new Set(
-    applicable.flatMap(({ ref, manifest }) =>
-      manifest.replaces.filter((name) => name !== ref.name)
-    )
-  );
-  for (const candidate of applicable) {
-    if (replaced.has(candidate.ref.name)) {
-      outcomes.set(candidate, "replaced");
+  // Where both apply, one that another may replace, and names, gives way.
+  for (const { candidate: target } of applicable) {
+    const replacedBy = applicable.some(
+      ({ candidate: by }) =>
+        by !== target &&
+        by.manifest.replaces.includes(target.ref.name) &&
+        mayReplace(by, target)
+    );
+    if (replacedBy) {
+      outcomes.set(target, "replaced");
     }
   }
-  const left = applicable.filter((each) => !outcomes.has(each));
-  for (const candidate of left) {
+  const left = applicable.filter(({ candidate }) => !outcomes.has(candidate));
+  for (const { candidate } of left) {
     outcomes.set(candidate, left.length === 1 ? "selected" : "ambiguous");
   }
   return { outcomes, left };
@@ -254,8 +390,7 @@ const outcomesOf = (
 /** The selection's result: the one skill left, pinned, or why none. */
 const resultOf = (
   incomplete: boolean,
-  left: readonly Candidate[],
-  all: readonly Candidate[]
+  left: readonly { candidate: Candidate; pins: SkillRef[] }[]
 ): SkillSelection["result"] => {
   const [chosen] = left;
   if (incomplete) {
@@ -266,11 +401,7 @@ const resultOf = (
   }
   return chosen === undefined
     ? { kind: "none", reason: "no_match" }
-    : {
-        kind: "skill",
-        skill: chosen.ref,
-        dependencies: dependenciesOf(chosen, all),
-      };
+    : { kind: "skill", skill: chosen.candidate.ref, dependencies: chosen.pins };
 };
 
 /**
@@ -293,13 +424,19 @@ export const selectSkill = async <C>(
     await brain.ports.recall.require(reader);
     const traits = new Set(task.traits);
     const held = new Set(await brain.ports.skills.capabilities(reader));
-    const readable = await readableSkills(brain, reader);
-    const all = readable?.candidates ?? [];
+    const selectable = await selectableSkills(brain, reader);
+    const all = selectable?.candidates ?? [];
     const relevant = all.filter(({ manifest }) =>
       manifest.tasks.includes(task.type)
     );
-    const { outcomes, left } = outcomesOf(relevant, all, traits, held);
-    const result = resultOf(readable === undefined, left, all);
+    const { outcomes, left } = await outcomesOf(
+      brain,
+      relevant,
+      all,
+      traits,
+      held
+    );
+    const result = resultOf(selectable === undefined, left);
     // Recorded with its result and counts, as the host records a read: the
     // empty, ambiguous and no-skill ones too.
     await brain.ports.onRead(
@@ -314,7 +451,7 @@ export const selectSkill = async <C>(
           skill: result.kind === "skill" ? result.skill.documentId : null,
           version: result.kind === "skill" ? result.skill.version : null,
           considered: relevant.length,
-          read: readable?.read ?? skillsReadMax + 1,
+          read: selectable?.read ?? skillsReadMax + 1,
         },
       },
       ...all.map(({ source }) => source)
