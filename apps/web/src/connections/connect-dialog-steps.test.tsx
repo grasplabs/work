@@ -32,20 +32,23 @@ const someone = (role: Identity["role"]): Identity => ({
   expiresAt: "2026-12-31T00:00:00.000Z",
 });
 
-const [microsoft] = integrationsOf(
+const entry = (source: "native" | "composio", id: string, name: string) => ({
+  source,
+  id,
+  name,
+  categories: ["Productivity"],
+  toolCount: 2,
+  logo: null,
+  description: null,
+  group: "Other" as const,
+  auth: "managed" as const,
+  offered: true,
+});
+
+const [microsoft, hubspot] = integrationsOf(
   [
-    {
-      source: "native",
-      id: "microsoft",
-      name: "Microsoft 365",
-      categories: ["Productivity"],
-      toolCount: 2,
-      logo: null,
-      description: null,
-      group: "Other",
-      auth: "managed",
-      offered: true,
-    },
+    entry("native", "microsoft", "Microsoft 365"),
+    entry("composio", "hubspot", "HubSpot"),
   ],
   []
 );
@@ -69,12 +72,26 @@ const settled = async (): Promise<void> => {
 /** The dialog open on Microsoft 365, with core's `start` as given. */
 const opened = async (
   identity: Identity,
-  start: () => Promise<{ url: string }>
+  start: () => Promise<{ url: string }>,
+  integration = microsoft
 ): Promise<void> => {
-  if (microsoft === undefined) {
+  if (integration === undefined) {
     throw new Error("No integration");
   }
-  const connections = { start };
+  // A toolkit starts the same way, with its tools to choose from first.
+  const connections = {
+    start,
+    connectToolkit: start,
+    catalogTools: async () =>
+      await Promise.resolve([
+        {
+          name: "HUBSPOT_LIST_CONTACTS",
+          description: null,
+          inputs: [],
+          readOnly: true,
+        },
+      ]),
+  };
   const core = {
     withSession: async <T,>(
       action: (session: { connections: typeof connections }) => Promise<T>
@@ -84,7 +101,7 @@ const opened = async (
     component: () => (
       <ConnectDialog
         identity={identity}
-        integration={microsoft}
+        integration={integration}
         onOpenChange={() => {
           // The test reads the dialog, not it closing.
         }}
@@ -128,6 +145,16 @@ const press = async (
   });
   await settled();
 };
+
+/** What allows the toolkit's one tool: its row's label. */
+const allow = (): HTMLElement | null | undefined =>
+  [...document.querySelectorAll("li")]
+    .find(
+      (each) =>
+        each.textContent?.includes("HUBSPOT_LIST_CONTACTS") &&
+        each.querySelector("li") === null
+    )
+    ?.querySelector<HTMLElement>("label");
 
 /** Where the step titled `title` stands. */
 const stepState = (title: string): string | undefined =>
@@ -221,6 +248,31 @@ describe("the connect dialog's steps", () => {
       waiting: document.body.textContent?.includes("Waiting for"),
       starts: calls,
     }).toStrictEqual({ sentAway: 0, failed: true, waiting: false, starts: 2 });
+  });
+
+  it("offers no retry once every tool of a toolkit is switched off while it waits", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let starts = 0;
+    await opened(
+      someone("admin"),
+      async () => {
+        starts += 1;
+        return await waitingForever();
+      },
+      hubspot
+    );
+    await press(allow());
+    await press(button("Consent and connect"));
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+      await Promise.resolve();
+    });
+    await press(allow());
+    await press(button("Try again"));
+    expect({ disabled: button("Try again")?.disabled, starts }).toStrictEqual({
+      disabled: true,
+      starts: 1,
+    });
   });
 
   it("starts the wait over with each attempt", async () => {

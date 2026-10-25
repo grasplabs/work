@@ -225,9 +225,19 @@ const takingLongMs = 6000;
 
 /**
  * While core starts the sign-in: a spinner row and, once it takes long,
- * a way to try again, as in the prototype (`Waiting`).
+ * a way to try again, as in the prototype (`Waiting`). Trying again is
+ * held to what the step's own button is: with every tool switched off
+ * meanwhile, there is nothing to start.
  */
-const Starting = ({ app, onRetry }: { app: string; onRetry: () => void }) => {
+const Starting = ({
+  app,
+  disabled,
+  onRetry,
+}: {
+  app: string;
+  disabled: boolean;
+  onRetry: () => void;
+}) => {
   const [long, setLong] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -249,7 +259,12 @@ const Starting = ({ app, onRetry }: { app: string; onRetry: () => void }) => {
         <p className="text-muted-foreground">
           <Trans>
             Taking long?{" "}
-            <Button onClick={onRetry} size="xs" variant="link">
+            <Button
+              disabled={disabled}
+              onClick={onRetry}
+              size="xs"
+              variant="link"
+            >
               Try again
             </Button>
           </Trans>
@@ -282,7 +297,7 @@ const Actions = ({
   children: ReactNode;
 }) =>
   busy ? (
-    <Starting app={app} key={attempt} onRetry={onStart} />
+    <Starting app={app} disabled={disabled} key={attempt} onRetry={onStart} />
   ) : (
     <div className="flex items-center gap-2">
       <Button disabled={disabled} onClick={onStart}>
