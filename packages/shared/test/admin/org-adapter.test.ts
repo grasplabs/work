@@ -208,7 +208,7 @@ const snapshot: StaffSnapshot = {
       doers: ["lisa", "tim"],
       share: 0.8,
       from: "lead",
-      drawn: staffDrawingOf(drawn, 2),
+      drawn: staffDrawingOf(drawn),
       stale: false,
     },
   ],

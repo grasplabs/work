@@ -589,7 +589,7 @@ describe("the work as drawn", () => {
       tellers,
       "2026-10-22T00:00:00.000Z"
     );
-    const staff = staffDrawingOf(drawn, 3);
+    const staff = staffDrawingOf(drawn);
 
     expect({
       lisa: drawn.told.lisa?.stepMinutes,

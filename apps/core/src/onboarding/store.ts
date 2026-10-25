@@ -474,9 +474,9 @@ const agreedSchema = z.record(z.string(), z.string());
 const agreedOf = (stored: string): Record<string, string> =>
   agreedSchema.safeParse(JSON.parse(stored)).data ?? {};
 
-/** A drawing of work `team` people do, as staff see it (`staffDrawingOf`): totals only. */
-const staffDrawing = (drawn: DrawnWork | null, team: number) =>
-  drawn === null ? null : staffDrawingOf(drawn, team);
+/** A drawing as staff see it (`staffDrawingOf`): totals only. */
+const staffDrawing = (drawn: DrawnWork | null) =>
+  drawn === null ? null : staffDrawingOf(drawn);
 
 /** A drawing as the store keeps it; null when there is none. */
 const drawingOf = (stored: string | null): DrawnWork | null =>
@@ -2529,10 +2529,7 @@ export class Onboarding extends DurableObject<Env> {
         share: row.share,
         from: "lead",
         // Staff see totals only, never one person's numbers (GRA-1079).
-        drawn: staffDrawing(
-          drawings.get(row.id) ?? null,
-          doersOf(row.doers).length
-        ),
+        drawn: staffDrawing(drawings.get(row.id) ?? null),
         stale: due.has(row.id),
       }));
     const ids = new Set(all.map(({ id }) => id));

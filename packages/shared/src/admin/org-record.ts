@@ -560,8 +560,8 @@ export interface Told {
 // person's number away (one person's flag and a total over one; a step only one person told; the
 // ends of a range, each one person's). So a number shows only once at least `MIN_GROUP` (5)
 // people gave it, as a median, never a lowest or highest; who gave which number is never shown,
-// only how many. A team that is one person shows its number with one person: nothing else hides
-// it, and the Brain does the same.
+// only how many. That holds for a team of one too: its one person's number, or that one person
+// told a step, is theirs (Nick's 5-person floor, GRA-1079).
 
 /**
  * Which parts of a piece of work one person told: which steps, and yes or no for the parts with
@@ -590,7 +590,7 @@ export interface ToldParts {
 
 /**
  * A number staff see: how many people it rests on, and its value, once that is at least
- * `MIN_GROUP` or the whole team is one person. Under that, neither: staff read "fewer than 5",
+ * `MIN_GROUP`, whatever the team's size. Under that, neither: staff read "fewer than 5",
  * and not how many fewer. None gave it: no people, and no value.
  */
 export interface DrawnNumber<Value> {
@@ -667,41 +667,35 @@ const medianOf = (values: readonly number[]): number => {
     : ((sorted[half - 1] ?? 0) + upper) / 2;
 };
 
-/** `value` of `people` as staff may see it (`DrawnNumber`), in a team of `team` people. */
+/** `value` of `people` as staff may see it (`DrawnNumber`). */
 export const shownNumber = <Value>(
   people: number,
-  team: number,
   value: () => Value
 ): DrawnNumber<Value> => {
   if (people === 0) {
     return { people: 0, value: null };
   }
-  return people >= MIN_GROUP || (team === 1 && people === 1)
+  return people >= MIN_GROUP
     ? { people, value: value() }
     : { people: null, value: null };
 };
 
 /**
- * How many people something rests on, as staff may see it in a team of `team` people: none
- * under `MIN_GROUP` but for a team of one, as with its numbers. An exact count diffed across
- * interviews as they come in would say which steps one person told (GRA-1079).
+ * How many people something rests on, as staff may see it: none under `MIN_GROUP`, whatever the
+ * team's size, as with its numbers. An exact count diffed across interviews as they come in would
+ * say which steps one person told (GRA-1079).
  */
-export const shownCount = (count: number, team: number): number | null =>
-  count === 0 || count >= MIN_GROUP || (team === 1 && count === 1)
-    ? count
-    : null;
+export const shownCount = (count: number): number | null =>
+  count === 0 || count >= MIN_GROUP ? count : null;
 
 /** The numbers someone gave, as far as `totalsOf` reads them. */
 export type GivenNumbers = Pick<Told, "volume" | "takes" | "wrong" | "out">;
 
 /**
- * The totals of what everyone in `given` said and left in when it was read back (`DrawnTotals`),
- * in a team of `team` people: a number someone took out again counts for nothing.
+ * The totals of what everyone in `given` said and left in when it was read back (`DrawnTotals`):
+ * a number someone took out again counts for nothing.
  */
-export const totalsOf = (
-  given: readonly GivenNumbers[],
-  team: number
-): DrawnTotals => {
+export const totalsOf = (given: readonly GivenNumbers[]): DrawnTotals => {
   const kept = <Value>(
     fact: string,
     of: (each: GivenNumbers) => Value | null
@@ -714,26 +708,30 @@ export const totalsOf = (
   const takes = kept("takes", (each) => each.takes);
   const wrongs = kept("wrong", (each) => each.wrong);
   return {
-    volume: shownNumber(volumes.length, team, () => ({
+    volume: shownNumber(volumes.length, () => ({
       quiet: medianOf(volumes.map(([quiet]) => quiet)),
       busy: medianOf(volumes.map(([, busy]) => busy)),
     })),
-    takes: shownNumber(takes.length, team, () =>
+    takes: shownNumber(takes.length, () =>
       medianOf(takes.map(([, normal]) => normal))
     ),
-    wrong: shownNumber(wrongs.length, team, () => medianOf(wrongs)),
+    wrong: shownNumber(wrongs.length, () => medianOf(wrongs)),
   };
 };
 
 /**
- * A drawing as staff get it (`StaffDrawing`), of a piece of work `team` people do: its steps and
- * cases by position with how many people each rests on, and its numbers as medians over enough
- * people (`DrawnNumber`). Not one of its texts, and nothing by person.
+ * A drawing as staff get it (`StaffDrawing`): its steps and cases by position with how many
+ * people each rests on, and its numbers as medians over enough people (`DrawnNumber`). Not one
+ * of its texts, and nothing by person.
  */
-export const staffDrawingOf = (
-  { told, steps, differently, at, per, unit }: DrawnWork,
-  team: number
-): StaffDrawing => {
+export const staffDrawingOf = ({
+  told,
+  steps,
+  differently,
+  at,
+  per,
+  unit,
+}: DrawnWork): StaffDrawing => {
   const tellers = Object.values(told);
   // Each step's normal minutes and each case's share, from the people who gave them.
   const minutesOf = (index: number): number[] =>
@@ -749,16 +747,15 @@ export const staffDrawingOf = (
       )
     );
   const shownOf = (values: readonly number[]): DrawnNumber<number> =>
-    shownNumber(values.length, team, () => medianOf(values));
+    shownNumber(values.length, () => medianOf(values));
   return {
     at,
-    heard: shownCount(tellers.length, team),
+    heard: shownCount(tellers.length),
     per,
     unit,
     steps: steps.map((_, index) => ({
       people: shownCount(
-        tellers.filter((each) => each.steps.includes(index)).length,
-        team
+        tellers.filter((each) => each.steps.includes(index)).length
       ),
       minutes: shownOf(minutesOf(index)),
     })),
@@ -766,7 +763,7 @@ export const staffDrawingOf = (
       after,
       outOfTen: shownOf(sharesOf(index)),
     })),
-    totals: totalsOf(tellers, team),
+    totals: totalsOf(tellers),
   };
 };
 

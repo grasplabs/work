@@ -930,47 +930,44 @@ describe("an organization from core's admin snapshot", () => {
       share: 0.6,
       from: "lead",
       stale: false,
-      drawn: staffDrawingOf(
-        {
-          at: "2026-10-14T10:01:00.000Z",
-          from: ["lisa", "tom"],
-          starts: "A shop calls.",
-          steps: [
-            {
-              text: "Write the order down.",
-              who: "Sales",
-              tool: "Excel",
-              minutes: null,
-              documented: false,
-            },
-            {
-              text: "Send it to the bakery.",
-              who: "Sales",
-              tool: "",
-              minutes: null,
-              documented: false,
-            },
-          ],
-          waits: [],
-          differently: [],
-          decides: "",
-          own: "",
-          ai: "",
-          right: "",
-          ask: "",
-          next: "",
-          term: null,
-          differs: null,
-          per: "week",
-          unit: "minutes",
-          told: {
-            lisa: told({ volume: [20, 40], takes: [2, 5, 10] }),
-            tom: told({ volume: [60, 80], wrong: 2 }),
+      drawn: staffDrawingOf({
+        at: "2026-10-14T10:01:00.000Z",
+        from: ["lisa", "tom"],
+        starts: "A shop calls.",
+        steps: [
+          {
+            text: "Write the order down.",
+            who: "Sales",
+            tool: "Excel",
+            minutes: null,
+            documented: false,
           },
-          open: ["Who takes an order when Sales is out?"],
+          {
+            text: "Send it to the bakery.",
+            who: "Sales",
+            tool: "",
+            minutes: null,
+            documented: false,
+          },
+        ],
+        waits: [],
+        differently: [],
+        decides: "",
+        own: "",
+        ai: "",
+        right: "",
+        ask: "",
+        next: "",
+        term: null,
+        differs: null,
+        per: "week",
+        unit: "minutes",
+        told: {
+          lisa: told({ volume: [20, 40], takes: [2, 5, 10] }),
+          tom: told({ volume: [60, 80], wrong: 2 }),
         },
-        3
-      ),
+        open: ["Who takes an order when Sales is out?"],
+      }),
     };
     const rules = { ...STARTING_ORG_RULES, people: 2 };
     const { org, state } = adminOrgOf(both, client, {

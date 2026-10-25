@@ -10,7 +10,7 @@ import type { DrawnWork, Told } from "../../src/admin/org-record.ts";
 // numbers or words, tried here: a number only one person of a big team
 // gave, a step's minutes only one gave, the ends of a range, and a number
 // in the model's text. A number shows only once at least 5 people gave it,
-// as a median; a team of one shows its own.
+// as a median, in a team of one too (Nick's 5-person floor, GRA-1079).
 
 /** What someone told: the first step, and `more`. */
 const told = (more: Partial<Told> = {}): Told => ({
@@ -94,7 +94,7 @@ describe("a drawing as staff get it", () => {
     const tellers = people(8, (index) =>
       index === 3 ? { volume: [40, 90], takes: [2, 6, 20], wrong: 3 } : {}
     );
-    const staff = staffDrawingOf(drawing(tellers), 8);
+    const staff = staffDrawingOf(drawing(tellers));
 
     expect({
       totals: staff.totals,
@@ -117,8 +117,7 @@ describe("a drawing as staff get it", () => {
     // counts across them would say which steps each person told.
     const after = (count: number) => {
       const staff = staffDrawingOf(
-        drawing(people(count, () => ({ steps: [0, 1] }))),
-        8
+        drawing(people(count, () => ({ steps: [0, 1] })))
       );
       return {
         heard: staff.heard,
@@ -145,7 +144,7 @@ describe("a drawing as staff get it", () => {
           }
         : {}),
     }));
-    const staff = staffDrawingOf(drawing(tellers), 6);
+    const staff = staffDrawingOf(drawing(tellers));
 
     expect({
       steps: staff.steps,
@@ -169,7 +168,7 @@ describe("a drawing as staff get it", () => {
           : {}
       );
     const after = (count: number) =>
-      staffDrawingOf(drawing(giving(count)), 8).steps[0]?.minutes;
+      staffDrawingOf(drawing(giving(count))).steps[0]?.minutes;
 
     expect([1, 4, 5].map(after)).toStrictEqual([
       { people: null, value: null },
@@ -186,7 +185,7 @@ describe("a drawing as staff get it", () => {
       takes: [1, normals[index] ?? 0, 90],
       wrong: index,
     }));
-    const { totals } = staffDrawingOf(drawing(tellers), 5);
+    const { totals } = staffDrawingOf(drawing(tellers));
     const shown = [
       totals.volume.value?.quiet,
       totals.volume.value?.busy,
@@ -211,23 +210,20 @@ describe("a drawing as staff get it", () => {
 
   it("never lets anything anyone said reach staff, a number in the model's text included", () => {
     const drawn = drawing(people(6));
-    const staff = staffDrawingOf(
-      {
-        ...drawn,
-        starts: "About 40 orders come in a week.",
-        decides: "Lisa checks whether the shop pays on time.",
-        open: ["Who approves an order over 5,000 euros?"],
-        differently: [
-          {
-            when: "the shop is new (2 to 3 in 10)",
-            does: "Ask Finance, 1.5 days.",
-            outOfTen: 2,
-            after: 0,
-          },
-        ],
-      },
-      6
-    );
+    const staff = staffDrawingOf({
+      ...drawn,
+      starts: "About 40 orders come in a week.",
+      decides: "Lisa checks whether the shop pays on time.",
+      open: ["Who approves an order over 5,000 euros?"],
+      differently: [
+        {
+          when: "the shop is new (2 to 3 in 10)",
+          does: "Ask Finance, 1.5 days.",
+          outOfTen: 2,
+          after: 0,
+        },
+      ],
+    });
     // Every string staff get: when it was drawn, and what its numbers count in.
     const strings: string[] = [];
     const collect = (value: unknown): void => {
@@ -244,16 +240,36 @@ describe("a drawing as staff get it", () => {
     expect(strings).toStrictEqual([drawn.at, "week", "minutes"]);
   });
 
-  it("shows the numbers of a team of one, with one person, as the Brain does", () => {
+  it("holds back a team of one's number and how many told it, as for any team under 5", () => {
     const staff = staffDrawingOf(
-      drawing({ solo: told({ volume: [5, 8], takes: [2, 4, 9], wrong: 1 }) }),
-      1
+      drawing(
+        {
+          solo: told({
+            volume: [5, 8],
+            takes: [2, 4, 9],
+            wrong: 1,
+            stepMinutes: [{ step: 0, minutes: [2, 3, 5] }],
+          }),
+        },
+        null
+      )
     );
 
-    expect(staff.totals).toStrictEqual({
-      volume: { people: 1, value: { quiet: 5, busy: 8 } },
-      takes: { people: 1, value: 4 },
-      wrong: { people: 1, value: 1 },
+    expect({
+      heard: staff.heard,
+      steps: staff.steps,
+      totals: staff.totals,
+    }).toStrictEqual({
+      heard: null,
+      steps: [
+        { people: null, minutes: { people: null, value: null } },
+        { people: 0, minutes: { people: 0, value: null } },
+      ],
+      totals: {
+        volume: { people: null, value: null },
+        takes: { people: null, value: null },
+        wrong: { people: null, value: null },
+      },
     });
   });
 });

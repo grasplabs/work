@@ -143,8 +143,7 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
         takes: telling.numbers?.takes ?? null,
         wrong: telling.numbers?.wrong ?? null,
         out: telling.out,
-      })),
-      evidence.doers
+      }))
     );
   const needed = evidence.everyone
     ? 1
@@ -204,7 +203,7 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
           outOfTen:
             outOfTen === null
               ? null
-              : shownNumber(people, evidence.doers, () => outOfTen).value,
+              : shownNumber(people, () => outOfTen).value,
           people,
         };
       }
