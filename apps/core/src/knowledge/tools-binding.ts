@@ -12,10 +12,11 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import type { WorkContext } from "../restricted.ts";
 import type { Reader } from "./access.ts";
 import { readAsDelegate } from "./binding.ts";
+import { catalog } from "./catalog.ts";
 import { brainOf } from "./ports.ts";
 import { recall } from "./recall.ts";
 import { search } from "./search.ts";
-import { catalog, follow, read } from "./tools.ts";
+import { follow, read } from "./tools.ts";
 
 /**
  * Knowledge as an agent holds it, across every collection it may read:

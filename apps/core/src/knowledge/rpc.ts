@@ -46,6 +46,7 @@ import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
 import { appsErasure } from "./apps-collection.ts";
+import { catalog } from "./catalog.ts";
 import { createCollection, listCollections } from "./collection-rules.ts";
 import { backlinks, getDocument, history, listDocuments } from "./documents.ts";
 import type { Writer } from "./documents.ts";
@@ -63,7 +64,7 @@ import { preparePurge, purge } from "./purge.ts";
 import type { OnErase } from "./purge.ts";
 import { recall } from "./recall.ts";
 import { search } from "./search.ts";
-import { catalog, follow, read } from "./tools.ts";
+import { follow, read } from "./tools.ts";
 import { uploadErasure } from "./uploads.ts";
 
 /** The copies of people's words in core's own tables, as `OnErase` reaches them. */

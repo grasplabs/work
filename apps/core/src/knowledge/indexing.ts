@@ -1,20 +1,20 @@
-import type { AuditActor } from "@grasp-os/shared/audit";
-import { isExpectedCode, isExpectedError } from "@grasp-os/shared/errors";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
-import { log } from "@grasp-os/shared/log";
+import { brainErrors } from "@grasp-os/brain/contract";
+import type { Json } from "@grasp-os/brain/json";
+import { knowledgeErrors } from "@grasp-os/brain/knowledge";
+import { log } from "@grasp-os/brain/log";
 import { and, eq, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { outboxedIfChanged } from "../audit-outbox.ts";
 import {
   brainPayloads,
   documents,
   sections,
   versions,
 } from "../db/knowledge/schema.ts";
+import { outboxedIfChanged } from "./audit.ts";
 import type { Brain } from "./brain.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { splitSections } from "./markdown.ts";
@@ -299,7 +299,7 @@ const refusePurgePending = async <C>(
   brain: Brain<C>,
   db: DrizzleD1Database,
   documentId: string,
-  actor: AuditActor
+  actor: Json
 ): Promise<never> => {
   try {
     const state = await stateOf(db, documentId);
@@ -315,7 +315,7 @@ const refusePurgePending = async <C>(
             sql`coalesce(${documents.indexedVersion}, 0) <> ${documents.currentVersion}`
           )
         ),
-      outboxedIfChanged(db, {
+      outboxedIfChanged(brain, {
         actor,
         action: "knowledge.purge.index_pending",
         target: { type: "document", id: documentId },
@@ -388,7 +388,7 @@ export const requireCurrentIndexed = async <C>(
   brain: Brain<C>,
   db: DrizzleD1Database,
   documentId: string,
-  actor: AuditActor
+  actor: Json
 ): Promise<void> => {
   for (let attempt = 0; attempt < requireAttempts; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- again only after a save
@@ -422,7 +422,7 @@ export const publishInline = async <C>(
   documentId: string,
   version: number,
   found: readonly Section[],
-  purgeBy: AuditActor | undefined
+  purgeBy: Json | undefined
 ): Promise<boolean> => {
   try {
     const published = await publish(db, documentId, version, found);
@@ -444,11 +444,16 @@ export const publishInline = async <C>(
   }
 };
 
+/** Whether `code` is one of the Brain's own codes. */
+const isBrainCode = (code: unknown): code is string =>
+  knowledgeErrors.codeOf({ code }) !== undefined ||
+  brainErrors.codeOf({ code }) !== undefined;
+
 /** The code an error ends indexing with, as the engine keeps its message. */
 const codeOf = (error: unknown): string => {
   const code =
     error instanceof Error ? error.message.split(": ").at(-1) : undefined;
-  return isExpectedCode(code) ? code : "internal.unexpected";
+  return isBrainCode(code) ? code : "internal.unexpected";
 };
 
 /** Runs (or resumes) the indexing of one document version. */
@@ -464,9 +469,9 @@ export const runIndexing = async <C>(
       try {
         await indexVersion(brain, documentId, version);
       } catch (error) {
-        const code = isExpectedError(error)
-          ? error.code
-          : "internal.unexpected";
+        const found =
+          knowledgeErrors.codeOf(error) ?? brainErrors.codeOf(error);
+        const code = found ?? "internal.unexpected";
         await db
           .update(documents)
           .set({
@@ -534,7 +539,7 @@ const exhaust = async <C>(
         )
       )
       .returning({ id: documents.id }),
-    outboxedIfChanged(db, {
+    outboxedIfChanged(brain, {
       actor: { type: "system" },
       action: "knowledge.index_exhausted",
       target: { type: "document", id },

@@ -3,8 +3,8 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { noteListedSkills } from "../src/knowledge/catalog.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
-import { noteListedSkills } from "../src/knowledge/tools.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";

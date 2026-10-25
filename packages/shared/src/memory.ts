@@ -16,17 +16,6 @@ import type { Provenance } from "./knowledge.ts";
 export const memoryFileNames = ["AGENTS.md", "MEMORY.md", "USER.md"] as const;
 export type MemoryFileName = (typeof memoryFileNames)[number];
 
-/**
- * Characters per token, for sizing memory: the usual rough average of
- * English text. A file's size in tokens is its characters over this,
- * rounded up.
- */
-export const memoryCharactersPerToken = 4;
-
-/** A memory file's size in tokens, estimated from its characters. */
-export const memoryTokens = (text: string): number =>
-  Math.ceil(text.length / memoryCharactersPerToken);
-
 /** Each memory file's size limit, in tokens, unless the deployment sets one. */
 export const memoryDefaultLimits: Readonly<Record<MemoryFileName, number>> = {
   "AGENTS.md": 2000,
@@ -127,3 +116,9 @@ export const userMemoryInputSchema = z.strictObject({
   message: z.string().trim().max(500).optional(),
 });
 export type UserMemoryInput = z.input<typeof userMemoryInputSchema>;
+
+// How the Brain counts tokens (@grasp-os/brain/tokens).
+export {
+  charactersPerToken as memoryCharactersPerToken,
+  tokensOf as memoryTokens,
+} from "@grasp-os/brain/tokens";
