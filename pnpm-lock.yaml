@@ -539,6 +539,9 @@ importers:
       '@earendil-works/pi-ai':
         specifier: 'catalog:'
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5))(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(undici@7.29.1)(ws@8.21.3)(zod@4.6.5)
+      '@grasp-os/brain':
+        specifier: workspace:*
+        version: link:../../packages/brain
       '@grasp-os/chat':
         specifier: workspace:*
         version: link:../../packages/chat
@@ -750,6 +753,12 @@ importers:
         specifier: 'catalog:'
         version: 0.3.3(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(esbuild@0.28.2)(happy-dom@21.0.3)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)
 
+  packages/brain:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.5
+
   packages/chat:
     dependencies:
       chat:
@@ -910,6 +919,9 @@ importers:
       '@babel/parser':
         specifier: 'catalog:'
         version: 7.29.9
+      '@grasp-os/brain':
+        specifier: workspace:*
+        version: link:../brain
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../shared
@@ -947,6 +959,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@grasp-os/brain':
+        specifier: workspace:*
+        version: link:../brain
       capnweb:
         specifier: 'catalog:'
         version: 0.12.0

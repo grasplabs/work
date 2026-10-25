@@ -3,14 +3,14 @@ import {
   brainErrors,
   recallDefaults,
   recallInputSchema,
-} from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
 import type {
   BrainSourceRef,
   Coverage,
   MemoryItem,
   MemoryPack,
   RecallBudget,
-} from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
 import { toHex } from "@grasp-os/shared/encoding";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import { knowledgeErrors, searchMaxLimit } from "@grasp-os/shared/knowledge";

@@ -9,7 +9,7 @@ import type {
   ReceiptsGetInput,
   RecallInput,
   RememberInput,
-} from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
 import type {
   BacklinkPage,
   Collection,
