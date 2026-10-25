@@ -2,19 +2,21 @@ import type { DirectoryPeople } from "@grasp-os/shared/directory";
 import { onboardingPeopleMax } from "@grasp-os/shared/onboarding";
 import { describe, expect, it } from "vite-plus/test";
 
-import { consentCode, directoryControlUrl } from "./connect-providers.ts";
+import {
+  companyStep,
+  connectedDirectory,
+  directoryHolds,
+  directoryUser as user,
+} from "./directory.ts";
 import { mockIdp } from "./idp.ts";
-import { acmeTenant } from "./sign-in-config.ts";
 import {
   auditedDuring,
   openRpc,
   outcome,
-  routed,
   signedIn,
   signedInApi,
   staffPerson,
 } from "./sign-in.ts";
-import { testBinding } from "./test-env.ts";
 
 // Who works where from the organization's directory (GRA-369), in core:
 // the admin connects their Microsoft sign-in from the onboarding's
@@ -27,68 +29,6 @@ import { testBinding } from "./test-env.ts";
 // tried in connect's test/directory.test.ts, with Graph and Google faked.
 
 const idp = mockIdp();
-
-const isFetcher = (value: unknown): value is Fetcher =>
-  typeof value === "object" && value !== null && "fetch" in value;
-
-/** Who is in the tenant's directory, from now on, as Graph has them. */
-const directoryHolds = async (
-  users: Record<string, unknown>[]
-): Promise<void> => {
-  const providers = testBinding("CONNECT_PROVIDERS");
-  if (!isFetcher(providers)) {
-    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
-  }
-  await providers.fetch(directoryControlUrl, {
-    method: "POST",
-    body: JSON.stringify({ users }),
-  });
-};
-
-const guid = (): string => crypto.randomUUID();
-
-/** Someone in Entra, as Graph answers the directory's read. */
-const user = (
-  fields: Record<string, unknown> = {}
-): Record<string, unknown> => ({
-  id: guid(),
-  displayName: "Someone",
-  mail: null,
-  department: null,
-  jobTitle: null,
-  accountEnabled: true,
-  userType: "Member",
-  manager: null,
-  ...fields,
-});
-
-/** Where the company step sends the browser back to. */
-const companyStep = "/setup?step=company";
-
-/**
- * An admin who connected the directory from the company step: their API,
- * and where the browser came back to.
- */
-const connected = async () => {
-  const admin = await signedInApi(idp, "admin");
-  const { url } = await admin.api.onboarding.connectDirectory(
-    "microsoft",
-    companyStep
-  );
-  const authorization = new URL(url);
-  const response = await routed(
-    `/api/connections/callback?${new URLSearchParams({
-      code: consentCode(authorization, acmeTenant, `directory-${guid()}`),
-      state: authorization.searchParams.get("state") ?? "",
-    }).toString()}`,
-    { headers: { cookie: admin.session } }
-  );
-  return {
-    admin,
-    authorization,
-    back: new URL(response.headers.get("location") ?? ""),
-  };
-};
 
 const asStaff = async () => {
   const session = await signedIn(idp, "grasp-staff", staffPerson());
@@ -103,7 +43,7 @@ describe("the onboarding's directory", () => {
       directory: await before.api.onboarding.directory(),
       read: await outcome(before.api.onboarding.readDirectory()),
     };
-    const [lead, lisa] = [guid(), guid()];
+    const [lead, lisa] = [crypto.randomUUID(), crypto.randomUUID()];
     await directoryHolds([
       user({
         id: lead,
@@ -122,7 +62,7 @@ describe("the onboarding's directory", () => {
       }),
       user({ displayName: "A guest", userType: "Guest" }),
     ]);
-    const { admin, authorization, back } = await connected();
+    const { admin, authorization, back } = await connectedDirectory(idp);
     const member = await signedInApi(idp, "user");
     const staff = await asStaff();
     let read: DirectoryPeople | undefined;
@@ -204,7 +144,7 @@ describe("the onboarding's directory", () => {
       user({ displayName: `Person ${String(index)}` })
     );
     await directoryHolds(most);
-    const { admin } = await connected();
+    const { admin } = await connectedDirectory(idp);
     const whole = await admin.api.onboarding.readDirectory();
     await directoryHolds([...most, user({ displayName: "One more" })]);
     const tooMany = await outcome(admin.api.onboarding.readDirectory());

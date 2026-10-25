@@ -1,18 +1,19 @@
 /**
  * A client's settings, as staff change them on its page: its ring, its
  * sign-in (its record's `signIn`, which every deploy makes core's
- * `SIGN_IN` from) and its sealed secrets, such as its Teams bot's
- * (src/deploy/sealed-secrets.ts). Each change is audited in the same batch
+ * `SIGN_IN` from), its Teams bot (src/clients/teams-bot.ts) and its sealed
+ * secrets, such as its Teams bot's (src/deploy/sealed-secrets.ts). Each change is audited in the same batch
  * as the change, and only when it changes something.
  *
  * None of it reaches the client's account at once. The ring decides which
- * rollouts reach it; sign-in is set on core, and a sealed secret on
- * connect, by its next deploy. Both also mark the client
+ * rollouts reach it; sign-in is set on core, the bot on connect and core,
+ * and a sealed secret on connect, by its next deploy. Each also marks the
+ * client
  * (`configChangedAt`), so the next rollout deploys it even when it's on
  * the release already (src/rollout/targets.ts).
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
-import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
@@ -33,6 +34,7 @@ import { sealSecret } from "../deploy/sealed-secrets.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { keyedHash } from "../deploy/upload.ts";
 import { currentRun, hasEnded } from "../runners.ts";
+import { teamsBotSchema } from "./teams-bot.ts";
 
 /** Why staff's change to a client's settings was refused, as the page words it. */
 export const settingsErrorCodes = [
@@ -54,6 +56,8 @@ export const settingsErrorCodes = [
   "store_secret_missing",
   /** A secret to seal isn't one: empty, with spaces in it, or too long. */
   "secret_invalid",
+  /** A Teams bot that isn't one: an app id or tenant that isn't a GUID, or no expiry day. */
+  "teams_bot_invalid",
 ] as const;
 export type SettingsErrorCode = (typeof settingsErrorCodes)[number];
 
@@ -398,5 +402,75 @@ export const setSealedSecret = async (
   throw new SettingsError(
     "client_busy",
     `${clientId}'s ${name} kept changing while it was set: try again`
+  );
+};
+
+/**
+ * A Teams bot as the page sends it, checked here rather than by the
+ * server function's validator, so a refusal comes back as its code. Null
+ * takes the bot away.
+ */
+export const teamsBotInputSchema = z.object({
+  clientId: clientIdSchema,
+  bot: z.unknown(),
+});
+
+/**
+ * Sets client `clientId`'s Teams bot (src/clients/teams-bot.ts), or takes
+ * it away with null, as `staff`: audited (`client.teams_bot`, with the
+ * bot's app id, tenant and secret's expiry, none of them secret) and
+ * marking the client (`configChangedAt`) when it changes, so its next
+ * deploy gives its connect and core the bot. Refused as
+ * `teams_bot_invalid` for one that isn't a bot. Returns whether it
+ * changed; whether it does is decided by the write alone, as
+ * `setSignIn`'s is.
+ */
+export const setTeamsBot = async (
+  env: Env,
+  staff: Staff,
+  input: z.input<typeof teamsBotInputSchema>
+): Promise<boolean> => {
+  const db = adminDatabase(env.DB);
+  const { clientId, bot } = teamsBotInputSchema.parse(input);
+  const parsed = bot === null ? null : teamsBotSchema.safeParse(bot);
+  if (parsed !== null && !parsed.success) {
+    throw new SettingsError(
+      "teams_bot_invalid",
+      `That isn't a Teams bot ${clientId} can have`
+    );
+  }
+  await assertClient(db, clientId);
+  const now = new Date();
+  if (parsed === null) {
+    return await actIfChanged(
+      db,
+      staff,
+      db
+        .update(clients)
+        .set({ teamsBot: null, configChangedAt: now, updatedAt: now })
+        .where(and(eq(clients.id, clientId), isNotNull(clients.teamsBot))),
+      { action: "client.teams_bot", clientId, detail: { removed: true } }
+    );
+  }
+  // Its fields in one order, so the same bot is stored, and compared, alike.
+  const { appId, tenantId, secretExpiresOn } = parsed.data;
+  const value = JSON.stringify({ appId, tenantId, secretExpiresOn });
+  return await actIfChanged(
+    db,
+    staff,
+    db
+      .update(clients)
+      .set({ teamsBot: value, configChangedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(clients.id, clientId),
+          or(isNull(clients.teamsBot), ne(clients.teamsBot, value))
+        )
+      ),
+    {
+      action: "client.teams_bot",
+      clientId,
+      detail: { appId, tenantId, secretExpiresOn },
+    }
   );
 };

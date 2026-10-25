@@ -10,8 +10,18 @@ import { signInConfig } from "../auth/config.ts";
 import { citedIn } from "../chat-messages.ts";
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
-import { answerCard, sourcesCard } from "./cards.tsx";
+import { answerCard, heldWritesCard, sourcesCard } from "./cards.tsx";
+import {
+  offerConnectOwn,
+  ownMicrosoftNeed,
+  takeKeptAsk,
+} from "./connect-own.ts";
+import type { Conversation } from "./connect-own.ts";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
+import { checkOf, turnHeldWrites } from "./held.ts";
+import { countAnswered, countSignal } from "./signals.ts";
+import type { ChannelSignal } from "./signals.ts";
+import { teamsAdapter } from "./teams.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
@@ -30,6 +40,11 @@ import type { ChannelLocale } from "./words.ts";
 // fails or is refused ends in one of Stephen's lines, in the language the
 // person wrote in, never in the gateway's words, which name models and
 // budgets the person has no part in.
+//
+// A turn that had writes held (a meeting to put in the calendar, a row to
+// change) shows them after its answer on one card, in the order they run,
+// each with its exact values, and nothing changes until the person
+// presses Confirm on it (cards.tsx `heldWritesCard`, held.ts).
 
 /** How often typing is shown again while the turn runs. */
 const typingEveryMs = 3000;
@@ -60,7 +75,7 @@ const lineFor = (error: unknown): RefusedLine => {
 const rawSchema = z.object({ locale: z.string().max(64).optional() });
 
 /** The language the person's app is set to, if the platform said. */
-const appLocale = (raw: unknown): ChannelLocale => {
+export const appLocale = (raw: unknown): ChannelLocale => {
   const language = rawSchema
     .safeParse(raw)
     .data?.locale?.split("-")[0]
@@ -68,8 +83,40 @@ const appLocale = (raw: unknown): ChannelLocale => {
   return channelLocales.find((each) => each === language) ?? "en";
 };
 
+/** The count a refused or failed turn's line stands for (signals.ts). */
+const signalOfLine: Readonly<Record<RefusedLine, ChannelSignal | null>> = {
+  budget: "over_budget",
+  busy: "busy",
+  failed: "failed",
+  // Someone removed since the door let them in: nothing about Stephen.
+  removed: null,
+};
+
+/**
+ * Posts `content` in `thread`, counting a post the platform didn't take
+ * (`send_failed`), and one it refused as forbidden as the app uninstalled
+ * (`uninstalled`: Teams answers 403 to a bot no longer in the chat, which
+ * its adapter throws as a `PermissionError`). Throws what posting threw.
+ */
+const postIn = async (
+  env: Env,
+  platform: string,
+  thread: Conversation,
+  content: Parameters<Conversation["post"]>[0]
+): Promise<void> => {
+  try {
+    await thread.post(content);
+  } catch (error) {
+    await countSignal(env, platform, "send_failed");
+    if (error instanceof Error && error.name === "PermissionError") {
+      await countSignal(env, platform, "uninstalled");
+    }
+    throw error;
+  }
+};
+
 /** Shows typing in `thread` until the returned function is called. */
-const typingIn = (thread: Thread): (() => void) => {
+const typingIn = (thread: Conversation): (() => void) => {
   const show = async () => {
     try {
       await thread.startTyping();
@@ -188,15 +235,22 @@ const answerOne = async (
     thread,
     afterward,
     shared,
-  }: Pick<
-    ChannelMessage,
-    "platform" | "userId" | "thread" | "afterward" | "shared"
-  >,
+  }: Pick<ChannelMessage, "platform" | "userId" | "afterward" | "shared"> & {
+    thread: Thread | Conversation;
+  },
   text: string,
   locale: ChannelLocale
 ): Promise<void> => {
+  const startedAt = Date.now();
   const stopTyping = typingIn(thread);
-  const streaming = thread.isDM ? streamInto(thread, stopTyping) : undefined;
+  // Streamed only in a direct message the platform's SDK handed over.
+  const streaming =
+    "isDM" in thread && thread.isDM
+      ? streamInto(thread, stopTyping)
+      : undefined;
+  // Held writes are this turn's from here on: connect stamps each when
+  // it holds it, by the same clock.
+  const since = Date.now();
   let asked: Awaited<ReturnType<ReturnType<typeof workspace>["askThrough"]>>;
   try {
     asked = await workspace(env, personalWorkspaceId(userId)).askThrough(
@@ -216,7 +270,11 @@ const answerOne = async (
       line,
       ...errorFields(error),
     });
-    await thread.post(say(line, locale));
+    const signal = signalOfLine[line];
+    if (signal !== null) {
+      await countSignal(env, platform, signal);
+    }
+    await postIn(env, platform, thread, say(line, locale));
     return;
   }
   stopTyping();
@@ -231,13 +289,23 @@ const answerOne = async (
   }
   if (!answered || final === "") {
     log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
-    await thread.post(say("failed", locale));
+    await countSignal(env, platform, "failed");
+    await postIn(env, platform, thread, say("failed", locale));
     return;
+  }
+  // Timed to the answer the person has, as they wait for it: its stream's
+  // last words, or the post of it whole.
+  const timed = async () => {
+    await countAnswered(env, platform, Date.now() - startedAt);
+  };
+  if (streamed) {
+    await timed();
   }
   const origin = signInConfig(env)?.origin;
   if (origin === undefined) {
     if (!streamed) {
-      await thread.post(final);
+      await postIn(env, platform, thread, final);
+      await timed();
     }
     return;
   }
@@ -246,8 +314,43 @@ const answerOne = async (
     url: `${origin}/knowledge/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
   }));
   const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
+  // Without their own Microsoft 365 he answered from what the company
+  // shared alone: once a day, he offers to connect it.
+  const offer = async () => {
+    await offerConnectOwn(env, thread, {
+      userId,
+      platform,
+      question: text,
+      locale,
+    });
+  };
+  // The turn's held writes, on one card after the answer: nothing changes
+  // until the person presses Confirm on it (held.ts).
+  const held = async () => {
+    const writes = await turnHeldWrites(env, userId, chatId, since);
+    if (writes.length === 0) {
+      return;
+    }
+    const check = checkOf(answer.provenance.sources);
+    await thread.post(
+      heldWritesCard({
+        locale,
+        writes,
+        ...(check === undefined ? {} : { check }),
+        openUrl: chatUrl,
+      })
+    );
+  };
   if (!streamed) {
-    await thread.post(answerCard({ locale, text: final, sources, chatUrl }));
+    await postIn(
+      env,
+      platform,
+      thread,
+      answerCard({ locale, text: final, sources, chatUrl })
+    );
+    await timed();
+    await held();
+    await offer();
     return;
   }
   // Under the answer's last words, which Teams gets once this returns.
@@ -255,6 +358,60 @@ const answerOne = async (
     afterward(
       async () => await thread.post(sourcesCard({ locale, sources, chatUrl }))
     );
+  }
+  afterward(held);
+  afterward(offer);
+};
+
+/**
+ * Once `userId` connected their own Microsoft 365 (core's callback): says
+ * so in the conversation they asked in, and answers what they asked again,
+ * now with it. Nothing, if nothing they asked is still kept.
+ */
+export const carryOnAfterConnecting = async (
+  env: Env,
+  userId: string
+): Promise<void> => {
+  // Only once theirs works: a flow for another app carries nothing on.
+  if ((await ownMicrosoftNeed(env, userId)) !== undefined) {
+    return;
+  }
+  const kept = await takeKeptAsk(env, userId);
+  if (kept?.platform !== "teams") {
+    return;
+  }
+  const adapter = teamsAdapter(env);
+  const conversation: Conversation = {
+    id: kept.threadId,
+    post: async (message) => await adapter.postMessage(kept.threadId, message),
+    startTyping: async () => {
+      await adapter.startTyping(kept.threadId);
+    },
+  };
+  // Not a Teams thread the SDK handed over: nothing streams, so what comes
+  // after the answer goes right after it.
+  const later: (() => Promise<unknown>)[] = [];
+  try {
+    await conversation.post(say("connectedOwn", kept.locale));
+    await answerOne(
+      env,
+      {
+        platform: "teams",
+        userId,
+        thread: conversation,
+        afterward: (send) => {
+          later.push(send);
+        },
+      },
+      kept.question,
+      kept.locale
+    );
+    for (const send of later) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
+      await send();
+    }
+  } catch (error) {
+    log.warn("channel.carry_on_failed", errorFields(error));
   }
 };
 

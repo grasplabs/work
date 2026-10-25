@@ -42,11 +42,18 @@ import {
 
 const files = "/drive/v3/files";
 
+/** A file's metadata route: its drive is checked from what it answers. */
+export const fileRoute = {
+  method: "GET",
+  host: apisHost,
+  path: `${files}/{item}`,
+} as const;
+
 /** Lists and searches of one shared drive (in the query, `driveId`). */
 const driveListRoute = { method: "GET", host: apisHost, path: files } as const;
 
 /** A shared drive's ID. */
-const driveSchema = z
+export const driveSchema = z
   .string()
   .min(1)
   .max(256)
@@ -89,6 +96,30 @@ const itemSchema = z.strictObject({
   lastModifiedAt: z.string().nullable(),
   webUrl: z.string().nullable(),
 });
+
+/**
+ * The file `id`'s metadata, only when Google says it is in `drive`, is the
+ * file asked for and isn't trashed: anything else is refused as not found,
+ * before anything of its content is asked for.
+ */
+export const fileIn = async (
+  drive: string,
+  id: string
+): Promise<GoogleFile> => {
+  const file = await googleJson(
+    googleUrl(apisHost, `${files}/${segment(id)}`, {
+      supportsAllDrives: "true",
+      fields: fileFields,
+    }),
+    googleFile
+  );
+  if (file.driveId !== drive || file.id !== id || file.trashed === true) {
+    throw new ToolError("This drive has no such file", {
+      code: "not_found",
+    });
+  }
+  return file;
+};
 
 /** Whether a file has content to read: its own bytes, or an export. */
 const isReadable = (file: GoogleFile): boolean =>
@@ -255,23 +286,12 @@ const readFile = defineTool({
   resource: "drive",
   // A file has no drive in its path: `run` checks it before its content.
   routes: [
-    { method: "GET", host: apisHost, path: `${files}/{item}` },
+    fileRoute,
     { method: "GET", host: apisHost, path: `${files}/{item}/export` },
   ],
   run: async ({ drive, item: id, as }) => {
     const path = `${files}/${segment(id)}`;
-    const file = await googleJson(
-      googleUrl(apisHost, path, {
-        supportsAllDrives: "true",
-        fields: fileFields,
-      }),
-      googleFile
-    );
-    if (file.driveId !== drive || file.id !== id || file.trashed === true) {
-      throw new ToolError("This drive has no such file", {
-        code: "not_found",
-      });
-    }
+    const file = await fileIn(drive, id);
     if (kindOf(file) !== "file") {
       throw new ToolError("This isn't a file with content to read", {
         code: "not_a_file",

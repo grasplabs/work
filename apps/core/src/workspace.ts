@@ -156,7 +156,8 @@ import {
 } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
-import { hasBrainGrant } from "./knowledge/recall-store.ts";
+import { brainOf } from "./knowledge/ports.ts";
+import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { catalog, cited, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
@@ -362,6 +363,7 @@ const throttled = (tell: (text: string) => unknown) => {
 /** A chat platform's chat's title, as people know the platform. */
 const platformTitles: Readonly<Record<string, string>> = {
   teams: "Microsoft Teams",
+  slack: "Slack",
 };
 
 /**
@@ -619,7 +621,12 @@ const interruptedMessage = (): AssistantMessage => ({
 });
 
 /** How a write a chat's agent had held for its person ended. */
-export type HeldOutcome = "confirmed" | "declined" | "unknown" | "failed";
+export type HeldOutcome =
+  | "confirmed"
+  | "declined"
+  | "expired"
+  | "unknown"
+  | "failed";
 
 /** A held write, as its chat's agent knows it: the ID its call answered with. */
 const heldSchema = z.strictObject({
@@ -639,6 +646,8 @@ const heldOutcomes: Record<HeldOutcome, string> = {
     "The person confirmed it and it was carried out. Don't ask for it again.",
   declined:
     "The person declined it: it was not carried out and won't be. Don't ask for it again unless they say so.",
+  expired:
+    "It waited past the end of the company's day without the person confirming it, so it ended and was not carried out. If they still want it, ask for it afresh, with today's values.",
   unknown:
     "The person confirmed it and it was sent, but whether it took effect is unknown: it may have been carried out. It won't be sent again; check the outside system before asking for it again.",
   failed:
@@ -1512,10 +1521,14 @@ export class Workspace extends DurableObject<Env> {
       work,
       undefined,
       async (reader) => {
-        const found = await catalog(this.env, reader);
+        const found = await catalog(brainOf(this.env), reader);
         return {
           ...found,
-          listed: await noteListedSkills(this.env, reader, found.skills),
+          listed: await noteListedSkills(
+            brainOf(this.env),
+            reader,
+            found.skills
+          ),
         };
       }
     );
@@ -2398,7 +2411,7 @@ export class Workspace extends DurableObject<Env> {
       chatAuthority(scope),
       chatContext(scope),
       undefined,
-      async (reader) => await cited(this.env, reader, documentIds)
+      async (reader) => await cited(brainOf(this.env), reader, documentIds)
     );
   }
 

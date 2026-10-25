@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { mayRead } from "../src/knowledge/access.ts";
 import { ensureCollection } from "../src/knowledge/collections.ts";
+import { brainOf } from "../src/knowledge/ports.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -43,7 +44,7 @@ describe("a collection for admins", () => {
     const id = collectionIdSchema.parse(`admins-${crypto.randomUUID()}`);
     // Made by the member back when they were an admin.
     await ensureCollection(
-      env,
+      brainOf(env),
       {
         id,
         name: "For admins",

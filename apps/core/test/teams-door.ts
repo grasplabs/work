@@ -19,6 +19,7 @@ import type { GatewayReply } from "./ai-gateway.ts";
 import {
   botConnectorMembersUrl,
   botConnectorPostedUrl,
+  botConnectorUninstallUrl,
   botFrameworkSharedKeyUrl,
   teamsBot,
 } from "./connect-providers.ts";
@@ -184,6 +185,8 @@ const reachedSchema = z.object({
       activity: z
         .object({ type: z.string(), text: z.string().optional() })
         .loose(),
+      id: z.string().optional(),
+      editOf: z.string().optional(),
     })
   ),
   asked: z.array(z.string()),
@@ -202,11 +205,21 @@ export const reached = async (conversation: string) => {
     .map(({ activity }) => activity);
   return {
     activities,
+    /** Each post with its id, and each edit with the id it replaced. */
+    sent: posted.filter((each) => each.conversation === conversation),
     lines: activities
       .filter(({ type }) => type === "message")
       .map(({ text }) => text),
     asked: asked.filter((key) => key.startsWith(`${conversation} `)),
   };
+};
+
+/** Removes the bot from `person`'s chat, as uninstalling its app does. */
+export const uninstalledFor = async (person: TeamsPerson): Promise<void> => {
+  await providers().fetch(botConnectorUninstallUrl, {
+    method: "POST",
+    body: JSON.stringify({ conversation: person.conversation }),
+  });
 };
 
 /** Sets what Teams' roster says of `person` in their chat. */

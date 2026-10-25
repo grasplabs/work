@@ -6,6 +6,8 @@ import { auditEvents, clients, settings } from "../db/schema.ts";
 import { clientSignInSchema } from "../deploy/core-config.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import { isConfigPending } from "../rollout/targets.ts";
+import { teamsBotOf } from "./teams-bot.ts";
+import type { TeamsBot } from "./teams-bot.ts";
 
 /** A client's settings, as its page shows them. */
 export interface ClientSettingsView {
@@ -18,7 +20,9 @@ export interface ClientSettingsView {
   signIn: ClientSignInRecord | null;
   /** Whether a `SIGN_IN` setting replaces its record's sign-in on deploy. */
   signInOverridden: boolean;
-  /** Whether a change to its sign-in waits for its next deploy. */
+  /** Its own Teams bot (src/clients/teams-bot.ts); null when it has none. */
+  teamsBot: TeamsBot | null;
+  /** Whether a change to its sign-in or bot waits for its next deploy. */
   configPending: boolean;
 }
 
@@ -42,6 +46,7 @@ export const clientSettings = async (
       status: clients.status,
       pinnedReleaseId: clients.pinnedReleaseId,
       signIn: clients.signIn,
+      teamsBot: clients.teamsBot,
       configChangedAt: clients.configChangedAt,
     })
     .from(clients)
@@ -60,6 +65,7 @@ export const clientSettings = async (
     pinnedReleaseId: client.pinnedReleaseId,
     signIn: signIn.success ? signIn.data : null,
     signInOverridden: rows.some(({ key }) => key === "SIGN_IN"),
+    teamsBot: teamsBotOf(client.teamsBot),
     configPending: await isConfigPending(db, clientId, client.configChangedAt),
   };
 };

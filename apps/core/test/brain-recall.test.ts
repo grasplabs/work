@@ -4,6 +4,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { brainOf } from "../src/knowledge/ports.ts";
 import { d1BrainStore } from "../src/knowledge/recall-store.ts";
 import { recall } from "../src/knowledge/recall.ts";
 import { requestGranted } from "./apps.ts";
@@ -41,9 +42,23 @@ const newAgent = () => ({
   agentId: `agent-${unique()}`,
 });
 
-/** A word no other test's documents hold. */
+const rareLetters = "abcdefghijklmnopqrstuvwxyz";
+
+/** Random letters after the "zq" a rare word starts with. */
+const rareWordLength = 16;
+
+/**
+ * A word no other test's document holds, nor comes close to: a recall that
+ * finds nothing tries trigrams with room for one typo (search.ts), so two
+ * rare words sharing two of their three pieces would find each other. A
+ * UUID's letters alone (a to f, often under ten of them) did, about once in
+ * a thousand pairs; 16 letters of 26 leave pieces no other word shares.
+ */
 const rareWord = (): string =>
-  `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+  `zq${Array.from(
+    crypto.getRandomValues(new Uint8Array(rareWordLength)),
+    (byte) => rareLetters.charAt(byte % rareLetters.length)
+  ).join("")}`;
 
 /** A collection of `access` with one document saying `text`. */
 const collectionSaying = async (
@@ -474,7 +489,7 @@ describe("the Brain's recall", setUpTime, () => {
     const word = rareWord();
     await collectionSaying(admin, "everyone", `# Onboarding\n${word}`);
     const person = await admin.api.whoami();
-    const store = d1BrainStore(env);
+    const store = d1BrainStore(brainOf(env));
     let searched = false;
     const slowAccess = {
       ...store,
@@ -491,7 +506,7 @@ describe("the Brain's recall", setUpTime, () => {
     };
     const started = Date.now();
     const pack = await recall(
-      env,
+      brainOf(env),
       { type: "person", person },
       { query: word, budget: { deadlineMs: 200 } },
       undefined,
