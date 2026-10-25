@@ -6,8 +6,10 @@ import type {
   MemoriesRetireInput,
   CommandReceipt,
   MemoriesGetInput,
+  MemoriesLineageInput,
   MemoriesListInput,
   MemoryPack,
+  MemoryLineage,
   MemoryPage,
   MemoryRecord,
   ReceiptsGetInput,
@@ -30,6 +32,7 @@ import {
   receiptsGet,
   remember,
 } from "@grasp-os/brain/memories";
+import { memoriesLineage } from "@grasp-os/brain/memory-lineage";
 import { preparePurge, purge } from "@grasp-os/brain/purge";
 import type { OnErase } from "@grasp-os/brain/purge";
 import { recall } from "@grasp-os/brain/recall";
@@ -227,6 +230,12 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   async memoriesList(input?: MemoriesListInput): Promise<MemoryPage> {
     return await this.#asReader(
       async (reader) => await memoriesList(brainOf(this.#env), reader, input)
+    );
+  }
+
+  async memoriesLineage(input: MemoriesLineageInput): Promise<MemoryLineage> {
+    return await this.#asReader(
+      async (reader) => await memoriesLineage(brainOf(this.#env), reader, input)
     );
   }
 

@@ -36,7 +36,7 @@ import {
   versions,
 } from "./db/schema.ts";
 import { sectionCountOf, versionText } from "./documents.ts";
-import { toHex } from "./encoding.ts";
+import { fromBase64Url, toBase64Url, toHex } from "./encoding.ts";
 import { brainReceiptIdSchema, memoryIdSchema } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
 import type { Json } from "./json.ts";
@@ -343,7 +343,9 @@ const receiptOf = (row: typeof brainReceipts.$inferSelect): CommandReceipt => ({
 });
 
 /** A memory row as the contract has it. */
-const recordOf = (row: typeof brainMemories.$inferSelect): MemoryRecord => ({
+export const recordOf = (
+  row: typeof brainMemories.$inferSelect
+): MemoryRecord => ({
   id: memoryIdSchema.parse(row.id),
   revision: row.revision,
   kind: row.kind,
@@ -649,144 +651,6 @@ export const receiptsGet = async <C>(
 };
 
 /**
- * One of the person's own records; anyone else's is `brain.not_found`.
- */
-export const memoriesGet = async <C>(
-  brain: Brain<C>,
-  reader: C,
-  input: unknown
-): Promise<MemoryRecord> => {
-  const ownerId = brain.ports.ownerOf(reader);
-  const { memoryId } = brainErrors.parse(
-    "brain.invalid",
-    memoriesGetInputSchema,
-    input
-  );
-  const row = await brain.db
-    .select()
-    .from(brainMemories)
-    .where(
-      and(eq(brainMemories.id, memoryId), eq(brainMemories.ownerId, ownerId))
-    )
-    .get();
-  if (row === undefined) {
-    throw brainErrors.create("brain.not_found");
-  }
-  return recordOf(row);
-};
-
-/** Where a page ends: its last record's time and ID, and their seal. */
-const cursorSchema = z.tuple([z.int().min(0), z.string().min(1), z.string()]);
-
-/** Whose walk a cursor is, and of which kind of record (or all). */
-interface CursorScope {
-  caller: string;
-  kind: string | undefined;
-}
-
-/**
- * The seal of a cursor's position for `scope`: a cursor is opaque, and
- * only the person it was written for walks on from it, through the same
- * kind of record.
- */
-const cursorSeal = async <C>(
-  brain: Brain<C>,
-  { caller, kind }: CursorScope,
-  recordedAt: number,
-  id: string
-): Promise<string> =>
-  await keyed(brain, "grasp-os brain list cursor", [
-    caller,
-    kind ?? null,
-    recordedAt,
-    id,
-  ]);
-
-/** A cursor for `scope` after the record `row`. */
-const writeCursor = async <C>(
-  brain: Brain<C>,
-  scope: CursorScope,
-  row: typeof brainMemories.$inferSelect
-): Promise<string> => {
-  const recordedAt = row.recordedAt.getTime();
-  const seal = await cursorSeal(brain, scope, recordedAt, row.id);
-  return btoa(JSON.stringify([recordedAt, row.id, seal]));
-};
-
-/**
- * `cursor` read back, or a refusal for one core didn't write for
- * `scope`.
- */
-const readCursor = async <C>(
-  brain: Brain<C>,
-  scope: CursorScope,
-  cursor: string
-): Promise<{ recordedAt: Date; id: string }> => {
-  let parsed: z.output<typeof cursorSchema>;
-  try {
-    parsed = cursorSchema.parse(JSON.parse(atob(cursor)));
-  } catch {
-    throw brainErrors.create("brain.invalid");
-  }
-  const [recordedAt, id, seal] = parsed;
-  if (seal !== (await cursorSeal(brain, scope, recordedAt, id))) {
-    throw brainErrors.create("brain.invalid");
-  }
-  return { recordedAt: new Date(recordedAt), id };
-};
-
-/**
- * The person's own records, newest first, a bounded page at a time, of
- * one kind if asked: the next page starts after `cursor`.
- */
-export const memoriesList = async <C>(
-  brain: Brain<C>,
-  reader: C,
-  input: unknown = {}
-): Promise<MemoryPage> => {
-  const ownerId = brain.ports.ownerOf(reader);
-  const caller = callerKey(ownerId);
-  const { kind, limit, cursor } = brainErrors.parse(
-    "brain.invalid",
-    memoriesListInputSchema,
-    input
-  );
-  const size = limit ?? defaultPage;
-  const scope = { caller, kind };
-  const after =
-    cursor === undefined ? undefined : await readCursor(brain, scope, cursor);
-  const rows = await brain.db
-    .select()
-    .from(brainMemories)
-    .where(
-      and(
-        eq(brainMemories.ownerId, ownerId),
-        kind === undefined ? undefined : eq(brainMemories.kind, kind),
-        after === undefined
-          ? undefined
-          : or(
-              lt(brainMemories.recordedAt, after.recordedAt),
-              and(
-                eq(brainMemories.recordedAt, after.recordedAt),
-                lt(brainMemories.id, after.id)
-              )
-            )
-      )
-    )
-    .orderBy(desc(brainMemories.recordedAt), desc(brainMemories.id))
-    .limit(size + 1);
-  const page = rows.slice(0, size);
-  const last = page.at(-1);
-  return {
-    records: page.map(recordOf),
-    cursor:
-      rows.length > size && last !== undefined
-        ? await writeCursor(brain, scope, last)
-        : null,
-  };
-};
-
-/**
  * Who a read of memory serves (GRA-298), as the host compiles it from the
  * requester, the context and its output audience: the scopes it may read,
  * each by key. The Brain applies it as given and widens nothing: a person's
@@ -801,16 +665,13 @@ export interface MemoryAudience {
   sessions: readonly string[];
 }
 
-/** Most records a turn's memory takes, and most characters of them. */
-export const turnMemoryLimits = { records: 20, chars: 4000 } as const;
-
 /**
  * What `audience` may read of `brain_memories`, as a condition: the
  * accepted records of its scopes, and an owner's own proposed records,
  * which they wrote themselves. Retired records never. Undefined for an
  * audience that reads none.
  */
-const audienceScope = (audience: MemoryAudience): SQL | undefined => {
+export const audienceScope = (audience: MemoryAudience): SQL | undefined => {
   const scopes = [
     audience.owners.length === 0
       ? undefined
@@ -843,6 +704,287 @@ const audienceScope = (audience: MemoryAudience): SQL | undefined => {
     ? undefined
     : and(or(...scopes), ne(brainMemories.state, "retired"));
 };
+
+/**
+ * One of the person's own records; anyone else's is `brain.not_found`.
+ */
+export const memoriesGet = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<MemoryRecord> => {
+  const ownerId = brain.ports.ownerOf(reader);
+  const { memoryId } = brainErrors.parse(
+    "brain.invalid",
+    memoriesGetInputSchema,
+    input
+  );
+  const row = await brain.db
+    .select()
+    .from(brainMemories)
+    .where(
+      and(eq(brainMemories.id, memoryId), eq(brainMemories.ownerId, ownerId))
+    )
+    .get();
+  if (row === undefined) {
+    throw brainErrors.create("brain.not_found");
+  }
+  return recordOf(row);
+};
+
+/** Where a page ends: its last record's time and ID, and their seal. */
+const cursorSchema = z.tuple([z.int().min(0), z.string().min(1)]);
+
+/** Whose walk a cursor is, and of which kind of record (or all). */
+interface CursorScope {
+  caller: string;
+  kind: string | undefined;
+  /** Whose records the list is of: a cursor for one never pages another. */
+  among: "mine" | "shared";
+}
+
+/** Bytes of a cursor's nonce: AES-GCM's standard 96 bits. */
+const cursorNonceLength = 12;
+
+/**
+ * The key cursors are encrypted with: HKDF-Expand (RFC 5869) of one block
+ * from the deployment's HMAC key for cursors, as an AES-256-GCM key.
+ */
+const cursorKey = async <C>(brain: Brain<C>): Promise<CryptoKey> => {
+  const prk = await brain.ports.keys.hmac("grasp-os brain list cursor", [
+    "sign",
+  ]);
+  const info = new TextEncoder().encode("grasp-os brain list cursor aes-gcm");
+  const okm = await crypto.subtle.sign(
+    "HMAC",
+    prk,
+    new Uint8Array([...info, 1])
+  );
+  return await crypto.subtle.importKey(
+    "raw",
+    new Uint8Array(okm).slice(0, 32),
+    "AES-GCM",
+    false,
+    ["encrypt", "decrypt"]
+  );
+};
+
+/** What a cursor is bound to: whose walk, of which list and kind. */
+const cursorContext = ({ caller, kind, among }: CursorScope): Uint8Array =>
+  new TextEncoder().encode(canonicalJson([caller, kind ?? null, among]));
+
+/**
+ * A cursor for `scope` after the position `row`: encrypted, so it says
+ * nothing of where it points (a shared list's cursor may point past
+ * records the caller can't see), and bound to `scope`, so only the person
+ * it was written for walks on from it, through the same list and kind.
+ */
+const writeCursor = async <C>(
+  brain: Brain<C>,
+  scope: CursorScope,
+  row: { recordedAt: Date; id: string }
+): Promise<string> => {
+  const nonce = crypto.getRandomValues(new Uint8Array(cursorNonceLength));
+  const sealed = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce, additionalData: cursorContext(scope) },
+    await cursorKey(brain),
+    new TextEncoder().encode(JSON.stringify([row.recordedAt.getTime(), row.id]))
+  );
+  return toBase64Url(new Uint8Array([...nonce, ...new Uint8Array(sealed)]));
+};
+
+/**
+ * `cursor` read back, or a refusal for one core didn't write for
+ * `scope`.
+ */
+const readCursor = async <C>(
+  brain: Brain<C>,
+  scope: CursorScope,
+  cursor: string
+): Promise<{ recordedAt: Date; id: string }> => {
+  let position: z.output<typeof cursorSchema>;
+  try {
+    const bytes = fromBase64Url(cursor);
+    const opened = await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: bytes.slice(0, cursorNonceLength),
+        additionalData: cursorContext(scope),
+      },
+      await cursorKey(brain),
+      bytes.slice(cursorNonceLength)
+    );
+    position = cursorSchema.parse(JSON.parse(new TextDecoder().decode(opened)));
+  } catch {
+    throw brainErrors.create("brain.invalid");
+  }
+  const [recordedAt, id] = position;
+  return { recordedAt: new Date(recordedAt), id };
+};
+
+/**
+ * How a shared listing reads: batches of a fixed size, at most so many a
+ * call, whatever its page size, so a call's work never depends on how many
+ * records the host keeps from the caller.
+ */
+const sharedBatch = 100;
+const sharedBatchesMax = 3;
+
+type MemoryRow = typeof brainMemories.$inferSelect;
+
+/** Up to `most` rows `where` admits after `after`, newest first. */
+const rowsAfter = async <C>(
+  { db }: Brain<C>,
+  where: SQL | undefined,
+  after: { recordedAt: Date; id: string } | undefined,
+  most: number
+): Promise<MemoryRow[]> =>
+  await db
+    .select()
+    .from(brainMemories)
+    .where(
+      and(
+        where,
+        after === undefined
+          ? undefined
+          : or(
+              lt(brainMemories.recordedAt, after.recordedAt),
+              and(
+                eq(brainMemories.recordedAt, after.recordedAt),
+                lt(brainMemories.id, after.id)
+              )
+            )
+      )
+    )
+    .orderBy(desc(brainMemories.recordedAt), desc(brainMemories.id))
+    .limit(most);
+
+/**
+ * Of the shared rows `where` admits after `after`, the first `size` + 1
+ * the host keeps for `people`, newest first, read in batches of
+ * {@link sharedBatch}, at most {@link sharedBatchesMax}: and, when those
+ * ran out before that many were kept while rows may remain, the last row
+ * read, kept or not, to go on from.
+ */
+const keptRowsAfter = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  people: readonly string[],
+  where: SQL | undefined,
+  after: { recordedAt: Date; id: string } | undefined,
+  size: number
+): Promise<{
+  kept: MemoryRow[];
+  scannedTo?: { recordedAt: Date; id: string };
+}> => {
+  const kept: MemoryRow[] = [];
+  let position = after;
+  for (let batches = 0; batches < sharedBatchesMax; batches += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each batch starts where the last ended
+    const batch = await rowsAfter(brain, where, position, sharedBatch);
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    const checked = await brain.ports.memories.keep(
+      reader,
+      people,
+      batch.map((row) => ({ ...recordOf(row), ownerId: row.ownerId }))
+    );
+    const ids = new Set<string>(checked.map(({ id }) => id));
+    kept.push(...batch.filter((row) => ids.has(row.id)));
+    const last = batch.at(-1);
+    if (
+      kept.length > size ||
+      last === undefined ||
+      batch.length < sharedBatch
+    ) {
+      return { kept: kept.slice(0, size + 1) };
+    }
+    position = last;
+  }
+  return position === undefined || position === after
+    ? { kept }
+    : { kept, scannedTo: { recordedAt: position.recordedAt, id: position.id } };
+};
+
+/**
+ * The caller's own records, or (`among: "shared"`) others' shared records
+ * their memory audience reads now, newest first, a page at a time. A
+ * shared page holds only records the host keeps; a call reads a bounded
+ * number of rows, so its work doesn't grow with the records kept from the
+ * caller, and a page it couldn't fill in that time comes back short, even
+ * empty, with a cursor to go on from. Cursors are encrypted, so none names
+ * a record the caller can't see; but a short page with a cursor tells how
+ * many records of that stretch the host kept from them: counts only, of
+ * records already in their audience that rest on what they can't read (an
+ * accepted Low of the GRA-298 review; checking cited sources in the query
+ * itself, so the host rarely drops one, is the follow-up).
+ */
+export const memoriesList = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown = {}
+): Promise<MemoryPage> => {
+  const ownerId = brain.ports.ownerOf(reader);
+  const caller = callerKey(ownerId);
+  const { kind, limit, cursor, among } = brainErrors.parse(
+    "brain.invalid",
+    memoriesListInputSchema,
+    input
+  );
+  const size = limit ?? defaultPage;
+  const scope = { caller, kind, among: among ?? "mine" };
+  const after =
+    cursor === undefined ? undefined : await readCursor(brain, scope, cursor);
+  const ofKind = kind === undefined ? undefined : eq(brainMemories.kind, kind);
+  let rows: MemoryRow[];
+  let scannedTo: { recordedAt: Date; id: string } | undefined;
+  if (among === "shared") {
+    // Others' shared records: those the caller's memory audience reads
+    // now, as the host compiles it, re-checked by the host before shown.
+    const { audience, people } = await brain.ports.memories.audienceOf(reader);
+    const shared = audienceScope(audience);
+    const read =
+      shared === undefined
+        ? { kept: [] }
+        : await keptRowsAfter(
+            brain,
+            reader,
+            people,
+            and(shared, ne(brainMemories.ownerId, ownerId), ofKind),
+            after,
+            size
+          );
+    ({ kept: rows, scannedTo } = read);
+  } else {
+    rows = await rowsAfter(
+      brain,
+      and(eq(brainMemories.ownerId, ownerId), ofKind),
+      after,
+      size + 1
+    );
+  }
+  const page = rows.slice(0, size);
+  const last = page.at(-1);
+  // Where the next page starts: after the page's last record when more
+  // follow; after the last row read when the read ran out first, which the
+  // cursor, encrypted, doesn't name.
+  let next: { recordedAt: Date; id: string } | undefined;
+  if (rows.length > size && last !== undefined) {
+    next = last;
+  } else if (scannedTo !== undefined) {
+    next = scannedTo;
+  }
+  return {
+    // What another's record rests on is shown in its lineage, as far as
+    // the reader may see it (memory-lineage.ts), never listed here.
+    records: page.map((row) =>
+      among === "shared" ? { ...recordOf(row), sourceRefs: [] } : recordOf(row)
+    ),
+    cursor: next === undefined ? null : await writeCursor(brain, scope, next),
+  };
+};
+
+/** Most records a turn's memory takes, and most characters of them. */
+export const turnMemoryLimits = { records: 20, chars: 4000 } as const;
 
 /**
  * The records `audience` may read, newest first, within `limits`: the
