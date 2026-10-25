@@ -9,12 +9,7 @@ import {
   STARTING_ORG_RULES,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
-import { toldPartsOf } from "@grasp-os/shared/admin/org-record";
-import type {
-  DrawnWork,
-  StaffDrawing,
-  Told,
-} from "@grasp-os/shared/admin/org-record";
+import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
 import type { SettleChoice } from "@grasp-os/shared/onboarding";
 import { orgRulesSchema } from "@grasp-os/shared/onboarding-staff";
 import type { StaffWorks } from "@grasp-os/shared/onboarding-staff";
@@ -329,7 +324,7 @@ export const drawnOf = (
       term: term === undefined ? false : mine(term.by),
       out: [],
       // Their own minutes for each step, and share of each case, as they
-      // gave them: staff see them only as medians over enough people.
+      // gave them: never in any text (the drawing's rules).
       stepMinutes: steps.flatMap(({ step }, index) => {
         const given = (step.minutes_by ?? []).find(
           (each) => lineOf(each.person, 40) === person
@@ -511,38 +506,6 @@ export const drawnWorkSchema = z.object({
   open: z.array(z.string()),
 }) satisfies z.ZodType<DrawnWork>;
 
-/** A number staff see (`DrawnNumber`): how many people, and its value only past the threshold. */
-const shownSchema = <Value extends z.ZodType>(value: Value) =>
-  z.object({ people: z.number().nullable(), value: value.nullable() });
-
-/**
- * A drawing as staff read it (`StaffDrawing`, GRA-1079, GRA-1084): numbers
- * only, never anything anyone said. Its steps and cases by position with
- * how many people each rests on, and its numbers as medians over at least
- * 5 people. The schema names no text of the drawing and nothing by person,
- * so whatever slipped into one is stripped on its way out rather than sent.
- */
-const staffDrawingSchema = z.object({
-  at: z.string(),
-  heard: z.number().nullable(),
-  per: z.enum(["week", "month"]),
-  unit: z.enum(["minutes", "hours"]),
-  steps: z.array(
-    z.object({
-      people: z.number().nullable(),
-      minutes: shownSchema(z.number()),
-    })
-  ),
-  differently: z.array(
-    z.object({ after: z.number(), outOfTen: shownSchema(z.number()) })
-  ),
-  totals: z.object({
-    volume: shownSchema(z.object({ quiet: z.number(), busy: z.number() })),
-    takes: shownSchema(z.number()),
-    wrong: shownSchema(z.number()),
-  }),
-}) satisfies z.ZodType<StaffDrawing>;
-
 /**
  * Every piece of work as staff read it (`StaffWorks`), checked on its way
  * out: only what the schema names leaves core.
@@ -558,7 +521,7 @@ export const staffWorksSchema = z.object({
       doers: z.array(z.string()),
       share: z.number(),
       from: z.enum(["lead", "grasp"]),
-      drawn: staffDrawingSchema.nullable(),
+      drawn: drawnWorkSchema.nullable(),
       stale: z.boolean(),
     })
   ),
@@ -581,19 +544,7 @@ const heardOf = (drawn: DrawnWork | null, talked: readonly string[]) => {
     if (telling === undefined) {
       continue;
     }
-    // Core's own count, of everything each said, numbers included.
-    const facts = factsSaid(
-      {
-        ...toldPartsOf(telling),
-        out: telling.out,
-        numbers: {
-          volume: telling.volume,
-          takes: telling.takes,
-          wrong: telling.wrong,
-        },
-      },
-      null
-    );
+    const facts = factsSaid(telling, null);
     added.push({
       fresh: facts.filter((fact) => !seen.has(fact)).length,
       all: facts.length,
