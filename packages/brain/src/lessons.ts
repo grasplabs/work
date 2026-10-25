@@ -157,6 +157,12 @@ interface LessonContent {
   evidenceStatus: "supported" | "contested";
   supporting: string[];
   contradicting: string[];
+  /**
+   * How many episodes its text was written from, for content read back
+   * from a version: a patch that carries the text forward keeps it, so
+   * erased episodes still count against it (lesson-reads.ts).
+   */
+  recorded?: number;
 }
 
 /** The ID of the lesson of `scopeKey`'s group `groupKey`: one per group. */
@@ -275,11 +281,12 @@ const omitEpisodes = ({
 const storedOf = ({
   supporting,
   contradicting,
+  recorded,
   ...stored
 }: LessonContent): string =>
   canonicalJson({
     ...stored,
-    episodes: supporting.length + contradicting.length,
+    episodes: recorded ?? supporting.length + contradicting.length,
   });
 
 /** A stored version's content, with the evidence it still has. */
@@ -288,6 +295,7 @@ const contentFrom = (
   evidence: readonly { episodeId: string; role: string }[]
 ): LessonContent => ({
   ...omitEpisodes(storedContentSchema.parse(JSON.parse(stored))),
+  recorded: storedContentSchema.parse(JSON.parse(stored)).episodes,
   supporting: evidence
     .filter(({ role }) => role === "supporting")
     .map(({ episodeId }) => episodeId)

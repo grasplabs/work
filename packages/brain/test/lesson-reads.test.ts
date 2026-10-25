@@ -338,4 +338,54 @@ describe("inspecting lessons", () => {
       attributed: results.length,
     }).toStrictEqual({ own: "owner", shared: "admin", attributed: 2 });
   });
+
+  it("keeps a shared lesson hidden when it is retired for lack of evidence after an erasure", async () => {
+    const { brain } = testHost();
+    const chat = named("chat");
+    const ann = named("ann");
+    const cas = named("cas");
+    const alone = [
+      failed(ann, { id: chat, members: [ann] }),
+      failed(ann, { id: chat, members: [ann] }),
+    ];
+    for (const each of [
+      ...alone,
+      ...Array.from({ length: 4 }, () =>
+        failed(ann, { id: chat, members: [ann, cas] })
+      ),
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await recordOutcome(brain, each);
+    }
+    const scope = { scope: "session" as const, scopeId: chat };
+    await consolidate(brain, scope);
+    await eraseOutcomes(
+      brain,
+      alone.map(({ evidenceId }) => evidenceId)
+    );
+    // A hundred runs that completed: the group's newest hold no failure,
+    // so consolidation retires the lesson, carrying its text forward.
+    for (let n = 0; n < 100; n += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await recordOutcome(brain, {
+        ...failed(ann, { id: chat, members: [ann, cas] }),
+        execution: "completed",
+        result: "unknown",
+      });
+    }
+    await consolidate(brain, scope);
+    const [lesson] = await lessonsOf(brain, scope);
+
+    expect({
+      state: lesson?.state,
+      cas: await listed(brain, as(cas, [chat])),
+      casLineage: await outcome(
+        lessonLineage(brain, as(cas, [chat]), { lessonId: lesson?.id ?? "" })
+      ),
+    }).toStrictEqual({
+      state: "retired",
+      cas: [],
+      casLineage: "brain.not_found",
+    });
+  });
 });
