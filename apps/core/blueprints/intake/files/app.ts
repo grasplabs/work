@@ -35,7 +35,8 @@ import schema from "./schema.ts";
 // workflow may ask once more for an answer that doesn't fit, so each ask
 // gets half, 3,000 tokens. A binding holds the whole bound to what its
 // model can answer, as an action would ask for all of it: 6,000 tokens is
-// the most the default model, Llama 3.3, gives one answer.
+// the most Llama 3.3, with Workers AI's smallest window, gives one answer,
+// so the extractor binds to any of its models.
 export const extractor = resource.model("extractor", {
   maxOutputTokens: 6000,
 });

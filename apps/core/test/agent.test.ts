@@ -321,6 +321,65 @@ describe("chat agent", () => {
     ]);
   });
 
+  it("hands a thinking model its own reasoning back on each later request, at the effort asked, after a restart too", async () => {
+    // DeepSeek's models refuse a request whose earlier assistant messages
+    // lack the reasoning they gave with them.
+    const deepSeek = "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017";
+    const config = { ...gatewayConfig, models: [deepSeek] };
+    const planned = "Work out six times seven in code.";
+    const read = "The code returned 42.";
+    const { stub, chat, gateway } = await newChat(
+      {
+        ...codeStep("export default async () => 6 * 7;"),
+        thinking: { text: planned, tokens: 20 },
+      },
+      { ...says("42."), thinking: { text: read, tokens: 10 } }
+    );
+    await pointAtGateway(stub, gateway, { config });
+    await stub.ask(chat.id, {
+      text: "What is six times seven?",
+      model: deepSeek,
+      effort: "max",
+    });
+    await evictDurableObject(stub);
+    const later = fakeGateway(says("What six times seven is."));
+    await pointAtGateway(stub, later, { config });
+    await stub.ask(chat.id, { text: "What did I ask?", model: deepSeek });
+
+    const requestSchema = z.object({
+      thinking: z.unknown(),
+      reasoning_effort: z.string().optional(),
+      messages: z.array(
+        z.looseObject({
+          role: z.string(),
+          reasoning_content: z.string().optional(),
+        })
+      ),
+    });
+    expect(
+      [...gateway.requests, ...later.requests].map(({ body }) => {
+        const sent = requestSchema.parse(body);
+        return {
+          thinking: sent.thinking,
+          effort: sent.reasoning_effort,
+          reasoning: sent.messages
+            .filter(({ role }) => role === "assistant")
+            .map(({ reasoning_content }) => reasoning_content),
+        };
+      })
+    ).toStrictEqual([
+      { thinking: { type: "enabled" }, effort: "max", reasoning: [] },
+      { thinking: { type: "enabled" }, effort: "max", reasoning: [planned] },
+      // A question that names no effort: medium, which DeepSeek lacks, so
+      // the next level up.
+      {
+        thinking: { type: "enabled" },
+        effort: "high",
+        reasoning: [planned, read],
+      },
+    ]);
+  });
+
   it("audits every model request as the workspace's agent, acting for the chat's person, in the chat", async () => {
     const { id, chat, personId, ask } = await newChat(
       codeStep("export default async () => 1 + 1;"),

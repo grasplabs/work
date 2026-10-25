@@ -45,3 +45,13 @@ export const idpOrigin = `http://localhost:${idpPort}`;
  * its own in `.wrangler/state`.
  */
 export const stateDir = path.join(root, "apps/core/.wrangler/e2e-state");
+
+/**
+ * The models the stack's gateway allows (playwright.config.ts): one that
+ * doesn't think, first, and one that does, so the composer offers how hard
+ * it thinks. Named here, not taken from a new deployment's defaults, so
+ * the tests don't follow them. `--local` reaches no AI Gateway, so a call
+ * to either fails: the chat test (e2e/chat.e2e.ts) shows that failure.
+ */
+export const e2eModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+export const e2eThinkingModel = "workers-ai/@cf/zai-org/glm-5.3-flash";
