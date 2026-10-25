@@ -3420,8 +3420,8 @@ msgstr "Peut {verbs} les données de l’entreprise"
 msgid "Can’t be read"
 msgstr "Illisible"
 
-#: src/chat/brain-questions.tsx
 #: src/chat/answer-markdown.tsx
+#: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
@@ -4314,6 +4314,7 @@ msgstr "Copier le lien"
 #: src/onboarding/interviews-progress.tsx
 msgid "Copy the link for {name}"
 msgstr "Copier le lien de {name}"
+
 #: src/chat/answer-markdown.tsx
 msgid "Copying didn't work"
 msgstr "La copie n’a pas fonctionné"

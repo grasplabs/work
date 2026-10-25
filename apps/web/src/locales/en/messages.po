@@ -3420,8 +3420,8 @@ msgstr "Can {verbs} company data"
 msgid "Can’t be read"
 msgstr "Can’t be read"
 
-#: src/chat/brain-questions.tsx
 #: src/chat/answer-markdown.tsx
+#: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
@@ -4314,6 +4314,7 @@ msgstr "Copy the link"
 #: src/onboarding/interviews-progress.tsx
 msgid "Copy the link for {name}"
 msgstr "Copy the link for {name}"
+
 #: src/chat/answer-markdown.tsx
 msgid "Copying didn't work"
 msgstr "Copying didn't work"
