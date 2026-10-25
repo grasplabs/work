@@ -136,6 +136,15 @@ export const capabilityClaimsSchema = z.strictObject({
    */
   context: workContextSchema.optional(),
   /**
+   * When a side effect connect holds from this call ends unconfirmed, in
+   * milliseconds since the epoch: after it, connect declines it as
+   * expired, and a confirmation runs nothing. Core sets it for a chat on a
+   * chat platform, where a card scrolls away and its values may have moved
+   * on (midnight of the company's day); without it, a held side effect
+   * waits until it is decided. Only the capability says it.
+   */
+  heldUntil: z.int().nonnegative().optional(),
+  /**
    * Only on the capability core signs once a person decided a call that
    * waits for them, from their own session, after checking its permission
    * and context again (`CapabilityDecision`). Connect decides that call
@@ -143,6 +152,19 @@ export const capabilityClaimsSchema = z.strictObject({
    * held call's read with one is refused.
    */
   decision: capabilityDecisionSchema.optional(),
+  /**
+   * Only for a chat's agent: the shared mailboxes its company pointed it
+   * at for the person it acts for, in lower case (core's
+   * shared-mailboxes.ts). Its Microsoft 365 mail calls reach those and its
+   * person's own mailbox, no other; absent is none.
+   */
+  mailboxes: z.array(z.string().min(1).max(254)).max(50).optional(),
+  /**
+   * Only for a chat's agent, on a company app its company pointed it at
+   * within some of its resources (core's app-pointers.ts): its reads there
+   * may name only these. Absent is the whole app.
+   */
+  resources: z.array(identifierSchema).max(50).optional(),
 });
 export type CapabilityClaims = z.infer<typeof capabilityClaimsSchema>;
 
@@ -172,8 +194,14 @@ export interface CapabilityScope extends CapabilityCall {
   origin: z.input<typeof originSchema>;
   /** Where the call is made, for the audit log: signed, not compared. */
   context?: z.input<typeof workContextSchema> | undefined;
+  /** When a side effect held from it ends unconfirmed: signed, not compared. */
+  heldUntil?: number | undefined;
   /** What a person decided of the call: signed, not compared. */
   decision?: CapabilityDecision | undefined;
+  /** Only for a chat's agent: `CapabilityClaims.mailboxes`. */
+  mailboxes?: readonly string[] | undefined;
+  /** Only for a chat's agent: `CapabilityClaims.resources`. */
+  resources?: readonly string[] | undefined;
 }
 
 /** Why connect refuses a call before looking at it any further. */
@@ -233,7 +261,14 @@ export const signCapability = async (
     sensitive: scope.sensitive === true,
     origin: scope.origin,
     ...(scope.context === undefined ? {} : { context: scope.context }),
+    ...(scope.heldUntil === undefined ? {} : { heldUntil: scope.heldUntil }),
     ...(scope.decision === undefined ? {} : { decision: scope.decision }),
+    ...(scope.mailboxes === undefined
+      ? {}
+      : { mailboxes: [...scope.mailboxes] }),
+    ...(scope.resources === undefined
+      ? {}
+      : { resources: [...scope.resources] }),
   };
   capabilityClaimsSchema.parse(claims);
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));

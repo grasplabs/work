@@ -102,6 +102,26 @@ const internet = fakeInternet((_request, url) => {
       ...(next === null ? {} : { nextPageToken: String(next) }),
     });
   }
+  const graphOne = /^\/v1\.0\/users\/(?<id>[^/]+)$/u.exec(url.pathname);
+  if (url.hostname === "graph.microsoft.com" && graphOne !== null) {
+    const found = directories.graph.find(
+      ({ id }) => id === graphOne.groups?.id
+    );
+    if (found !== undefined) {
+      return Response.json(found);
+    }
+  }
+  const googleOne = /^\/admin\/directory\/v1\/users\/(?<id>[^/]+)$/u.exec(
+    url.pathname
+  );
+  if (url.hostname === "admin.googleapis.com" && googleOne !== null) {
+    const found = directories.google.find(
+      ({ id }) => id === googleOne.groups?.id
+    );
+    if (found !== undefined) {
+      return Response.json(found);
+    }
+  }
   return Response.json({ error: { code: "NotFound" } }, { status: 404 });
 });
 
@@ -164,6 +184,9 @@ const connectDirectory = async (
 
 const read = async (connectionId: string, cursor: string | null = null) =>
   await exports.default.readDirectory({ connectionId, cursor });
+
+const lookUp = async (connectionId: string, id: string) =>
+  await exports.default.lookUpInDirectory({ connectionId, id });
 
 const codeOf = async (promise: Promise<unknown>): Promise<string> => {
   try {
@@ -660,5 +683,105 @@ describe("a directory read", () => {
       refused: "directory.inactive",
       garbled: "directory.provider_failed",
     });
+  });
+});
+
+describe("a directory lookup", () => {
+  it("answers the one person with the ID asked, as a read would, and nobody for a guest, a disabled account, or an ID the directory doesn't hold", async () => {
+    const connectionId = await connectDirectory(someone("admin"));
+    const [daan, guest, disabled] = [guid(), guid(), guid()];
+    directories.graph = [
+      graphUser({
+        id: daan,
+        displayName: "Daan Bakker",
+        mail: "Daan@Acme.test",
+        jobTitle: "Team lead",
+      }),
+      graphUser({ id: guest, userType: "Guest" }),
+      graphUser({ id: disabled, accountEnabled: false }),
+    ];
+    const found = await lookUp(connectionId, daan.toUpperCase());
+    const [sent] = internet.sent;
+    expect({
+      found,
+      path: sent?.path.split("?")[0],
+      others: [
+        await lookUp(connectionId, guest),
+        await lookUp(connectionId, disabled),
+        await lookUp(connectionId, guid()),
+      ],
+    }).toStrictEqual({
+      found: {
+        tenant: acmeTenant,
+        person: {
+          id: daan,
+          name: "Daan Bakker",
+          email: "daan@acme.test",
+          department: "",
+          title: "Team lead",
+          manager: null,
+        },
+      },
+      path: `/v1.0/users/${daan}`,
+      others: [
+        { tenant: acmeTenant, person: null },
+        { tenant: acmeTenant, person: null },
+        { tenant: acmeTenant, person: null },
+      ],
+    });
+  });
+
+  it("sends nothing for an ID that isn't the provider's, so none names another endpoint", async () => {
+    const connectionId = await connectDirectory(someone("admin"));
+    const sentBefore = internet.sent.length;
+    const answers = await Promise.all(
+      ["../me/messages", "x') or true", `${guid()}/manager`, "me"].map(
+        async (id) => await lookUp(connectionId, id)
+      )
+    );
+    expect({
+      answers,
+      sent: internet.sent.length - sentBefore,
+    }).toStrictEqual({
+      answers: answers.map(() => ({ tenant: acmeTenant, person: null })),
+      sent: 0,
+    });
+  });
+
+  it("never answers someone else for the ID asked", async () => {
+    const connectionId = await connectDirectory(someone("admin"));
+    const asked = guid();
+    directories.answer = () =>
+      Response.json(graphUser({ displayName: "Mallory" }));
+    const answer = await lookUp(connectionId, asked);
+    directories.answer = undefined;
+    expect(answer).toStrictEqual({ tenant: acmeTenant, person: null });
+  });
+
+  it("looks up Google's directory by Google's user ID", async () => {
+    const connectionId = await connectDirectory(
+      someone("admin"),
+      "google-directory"
+    );
+    const person = googleUser({ name: { fullName: "Lisa Jansen" } });
+    directories.google = [person];
+    const answer = await lookUp(connectionId, String(person.id));
+    expect(answer.person?.name).toBe("Lisa Jansen");
+  });
+
+  it("of a connection of another kind, or one that needs reconnecting, is refused", async () => {
+    const mail = await addConnection({
+      provider: "microsoft",
+      tenant: acmeTenant,
+    });
+    const lapsed = await addConnection({
+      provider: "microsoft-directory",
+      tenant: acmeTenant,
+      status: "needs_reauth",
+    });
+    expect([
+      await codeOf(lookUp(mail, guid())),
+      await codeOf(lookUp(lapsed, guid())),
+    ]).toStrictEqual(["directory.not_found", "directory.inactive"]);
   });
 });

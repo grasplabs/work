@@ -162,6 +162,27 @@
       "when": 1792787275916,
       "tag": "0022_client_sealed_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1792844644456,
+      "tag": "0023_client_teams_bot",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792876385365,
+      "tag": "0024_staff_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792884156264,
+      "tag": "0025_client_watch",
+      "breakpoints": true
     }
   ]
 }
