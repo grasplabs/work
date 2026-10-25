@@ -13,7 +13,6 @@ import type {
   Tool,
   Transcript,
   Vision,
-  Workflow as BrainWorkflow,
   Workspace,
 } from "@grasp-os/shared/brain";
 import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
@@ -86,11 +85,12 @@ import type { SessionCheck } from "./session-check.ts";
 // | candidates,        | signed in, after the onboarding's; a record's counts and |
 // | statements, teams, | stakeholders for an onboarding team join that team, for  |
 // | gaps               | whoever reads it; gaps with what became of them.         |
-// |                    | Statements never for Grasp's staff, who read numbers     |
-// |                    | only; the onboarding's are the team's claims five or     |
-// |                    | more of its people made (GRA-1084)                       |
+// |                    | The onboarding's statements are the team's claims five   |
+// |                    | or more of its people made (GRA-1084)                    |
 // | workflows          | the brain's records, as the onboarding drew them, for    |
-// |                    | everyone signed in; only their numbers for Grasp's staff |
+// |                    | everyone signed in                                       |
+//
+// Grasp's staff read all of it as counts and numbers only (`numbersOnly`).
 // | goals, landscape,  | nothing core can read holds them yet: empty              |
 // | policies           |                                                          |
 //
@@ -768,33 +768,83 @@ const onboardingHeld = async (env: Env): Promise<OnboardingHeld> => {
 };
 
 /**
- * A workflow as Grasp's staff read it (GRA-1084): its name and its
- * drawings' numbers, never a word of what its people told.
+ * The brain as Grasp's staff read it (Nick, 2026-10-25, GRA-1084): counts
+ * and numbers only, on every part, also what no interview gave: no
+ * statement, gap, answer or who answered, no team's or tool's name, no
+ * vision, no candidate, no source's title, and no word of a drawing. What
+ * is left are ids, dates, the fixed values a count is read by (a source's
+ * kind, a drawing's state, a number's unit) and the numbers themselves.
+ * Built field by field, so nothing a part grows later reaches staff
+ * unless it is added here.
  */
-const numbersOnly = (workflow: BrainWorkflow): BrainWorkflow => ({
-  ...workflow,
-  baseline: { steps: [] },
-  ...(workflow.target === undefined ? {} : { target: { steps: [] } }),
-  ...(workflow.drawings === undefined
-    ? {}
-    : {
-        drawings: workflow.drawings.map((drawing) => ({
-          ...drawing,
-          starts: "",
-          steps: [],
-          waits: [],
-          differently: [],
-          decides: "",
-          own: "",
-          ai: "",
-          right: "",
-          ask: "",
-          next: "",
-          term: null,
-          differs: null,
-          open: [],
-        })),
-      }),
+const numbersOnly = (ws: Workspace): Workspace => ({
+  company: { name: "", sector: "", people: ws.company.people },
+  vision: {
+    ambition: "",
+    whyNow: "",
+    inviteTeamIds: ws.vision.inviteTeamIds,
+    budget: [],
+    toolApproval: [],
+    sourceId: ws.vision.sourceId,
+    version: ws.vision.version,
+  },
+  goals: [],
+  teams: ws.teams.map((team) => ({
+    id: team.id,
+    name: "",
+    sourceId: team.sourceId,
+    counts: team.counts.map(({ sourceId, date, people }) => ({
+      sourceId,
+      date,
+      people,
+    })),
+    stakeholders: [],
+  })),
+  tools: [],
+  sources: ws.sources.map((source) => ({
+    id: source.id,
+    kind: source.kind,
+    title: "",
+    date: source.date,
+    ...(source.step === undefined ? {} : { step: source.step }),
+    ...(source.teamIds === undefined ? {} : { teamIds: source.teamIds }),
+  })),
+  statements: [],
+  candidates: [],
+  gaps: [],
+  workflows: ws.workflows.map((workflow) => ({
+    id: workflow.id,
+    name: "",
+    ...(workflow.teamId === undefined ? {} : { teamId: workflow.teamId }),
+    status: workflow.status,
+    baseline: { steps: [] },
+    drawings: (workflow.drawings ?? []).map((drawing) => ({
+      id: drawing.id,
+      sourceId: drawing.sourceId,
+      date: drawing.date,
+      state: drawing.state,
+      people: drawing.people,
+      starts: "",
+      steps: [],
+      waits: [],
+      differently: [],
+      decides: "",
+      own: "",
+      ai: "",
+      right: "",
+      ask: "",
+      next: "",
+      term: null,
+      differs: null,
+      volumes: drawing.volumes,
+      takes: drawing.takes,
+      wrong: drawing.wrong,
+      open: [],
+    })),
+  })),
+  connections: [],
+  landscape: [],
+  policies: [],
 });
 
 /** The brain's workspace, as `person` may read it. */
@@ -839,7 +889,7 @@ export const readBrain = async (
       ? await sourcesForRecords(env, named)
       : onboardingSources(facts).map(({ source }) => source);
 
-  return {
+  const workspace: Workspace = {
     company,
     vision: visionOf(facts),
     goals: [],
@@ -849,18 +899,16 @@ export const readBrain = async (
       records.tools
     ),
     sources: [...sources, ...records.sources, ...transcribed],
-    // Grasp staff read numbers only, never what the company's people
-    // said (GRA-1084): no statement at all, whoever added it.
-    statements: person.staff ? [] : records.statements,
+    statements: records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),
-    workflows: person.staff
-      ? records.workflows.map(numbersOnly)
-      : records.workflows,
+    workflows: records.workflows,
     connections,
     landscape: [],
     policies: [],
   };
+  // Grasp staff read numbers only (GRA-1084).
+  return person.staff ? numbersOnly(workspace) : workspace;
 };
 
 /**

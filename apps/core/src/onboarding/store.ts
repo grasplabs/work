@@ -159,9 +159,16 @@ import {
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
 import { sendMail } from "../mail.ts";
 import { forgetStored } from "../speech-cache.ts";
-import { intakeIds, intakeOf, rosterSource } from "./brain-intake.ts";
+import {
+  intakeIds,
+  intakeOf,
+  rosterSource,
+  withoutNames,
+} from "./brain-intake.ts";
 import type { TeamIntake } from "./brain-intake.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
+import { checkedSupport } from "./drawing-support.ts";
+import type { Support } from "./drawing-support.ts";
 import {
   kickoffBrief,
   storedAnswersSchema,
@@ -186,6 +193,7 @@ import { anyLanguage, spokenKeysOf } from "./spoken-lines.ts";
 import type { SaidIn } from "./spoken-lines.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
 import {
+  checksFor,
   claimChecksMax,
   teamClaims,
   TooManyClaimChecksError,
@@ -5000,10 +5008,26 @@ export class Onboarding extends DurableObject<Env> {
     // What five or more of its people said, put together (GRA-1084):
     // never one person's fact. A failing model throws, and the intake is
     // tried again, with nothing written.
-    const claims = await teamClaims(this.env, intake, (took) => {
+    // One budget of checks for both: past it, nothing is written.
+    const checks = checksFor(this.env, (took) => {
       this.meter(took, at);
     });
-    const { records, rests } = await intakeOf(intake, claims);
+    const claims = await teamClaims(intake, checks);
+    // Who told each part of each drawing, checked, never the drawing
+    // model's word (drawing-support.ts).
+    const clean = withoutNames(intake.names);
+    const factsOf = new Map(
+      intake.tellers.map(({ person, facts }) => [
+        person,
+        facts.map(({ record }) => clean(record)),
+      ])
+    );
+    const supports = new Map<string, Support>();
+    for (const work of intake.works) {
+      // oxlint-disable-next-line no-await-in-loop -- one drawing at a time
+      supports.set(work.id, await checkedSupport(checks, work, factsOf, clean));
+    }
+    const { records, rests } = await intakeOf(intake, claims, supports);
     // The team's claims are these now: any statement given before that
     // isn't one of them goes, so no earlier one outlives what it was put
     // together from. Found both where it is noted whom each rests on and

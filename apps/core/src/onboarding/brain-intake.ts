@@ -1,10 +1,6 @@
 import type { WorkflowState } from "@grasp-os/shared/admin/interviews";
 import { dayOf } from "@grasp-os/shared/admin/org-record";
-import type {
-  DrawnWork,
-  HeardAnswer,
-  Told,
-} from "@grasp-os/shared/admin/org-record";
+import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
 import type { StatementKind } from "@grasp-os/shared/brain";
 import {
   brainRecordSchema,
@@ -21,6 +17,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 import { minTeamShown } from "@grasp-os/shared/onboarding";
 
+import type { Support } from "./drawing-support.ts";
 import type { TeamClaim } from "./team-claims.ts";
 
 // What the onboarding learned, as the brain's records (GRA-367): each
@@ -155,19 +152,15 @@ export const withoutNames = (
   };
 };
 
-/** The lowest and highest of some numbers, and how many there are; none of none. */
-const rangeOf = (
-  values: readonly number[]
-): { low: number; high: number; people: number } | null =>
-  values.length === 0
-    ? null
-    : {
-        low: Math.min(...values),
-        high: Math.max(...values),
-        people: values.length,
-      };
+/** The median of some numbers, the lower of the middle two; none of none. */
+const medianOf = (values: readonly number[]): number | undefined =>
+  values.toSorted((x, y) => x - y)[Math.floor((values.length - 1) / 2)];
 
-/** How often, over everyone who said, by whose count it is. */
+/** A median of some numbers, when five or more gave one: what one of them gave never shows. */
+const shownMedian = (values: readonly number[]): number | null =>
+  values.length >= minTeamShown ? (medianOf(values) ?? null) : null;
+
+/** How often, by whose count it is: a median of quiet and of busy, each over five or more. */
 const volumesOf = (
   told: readonly Told[],
   per: DrawnWork["per"]
@@ -176,14 +169,16 @@ const volumesOf = (
     const said = told.flatMap(({ volume, volumeOf }) =>
       volume !== null && (volumeOf ?? "unknown") === of ? [volume] : []
     );
-    return said.length === 0
+    const low = shownMedian(said.map(([quiet]) => quiet));
+    const high = shownMedian(said.map(([, busy]) => busy));
+    return low === null || high === null
       ? []
       : [
           {
             of,
             per,
-            low: Math.min(...said.map(([low]) => low)),
-            high: Math.max(...said.map(([, high]) => high)),
+            low,
+            high: Math.max(low, high),
             people: said.length,
             basis: "estimated" as const,
           },
@@ -191,18 +186,21 @@ const volumesOf = (
   });
 
 /**
- * A drawing as the brain keeps it (GRA-1084): only what five or more of
- * the people it was drawn from told, the lead not counted, and every text
- * without a name. Each step, wait, case off the normal path, what starts
- * one, a term and a step told another way, by who told it (`told`); each
- * one-line answer by who said it as it stands (`heard`: none on a drawing
- * from before it was noted). Numbers are ranges over everyone who gave
- * one, kept only when five or more did. What the next interviews should
- * ask is never the brain's: it is written from what few said.
+ * A drawing as the brain keeps it (GRA-1084): only the parts five or more
+ * of the people it was drawn from are checked to have told
+ * (drawing-support.ts), in their bare words without a name, and what came
+ * with them (who and with what, what is done in a case, what a term
+ * means, why a step differs) left out. Each number is a median over five
+ * or more who gave it, the lead never among them: a step's minutes and a
+ * case's share over the people the part rests on, how often, how long and
+ * how many come in wrong over the people it was drawn from. What the next
+ * interviews should ask is never the brain's: it is written from what few
+ * said.
  */
 const versionOf = (
   work: TeamIntake["works"][number],
-  clean: (text: string) => string
+  clean: (text: string) => string,
+  support: Support
 ): Omit<WorkflowVersionRecord, "id" | "workflowId" | "sourceId"> => {
   const { drawn } = work;
   const lead = new Set(work.namedBy);
@@ -210,103 +208,118 @@ const versionOf = (
     ([person]) => !lead.has(person)
   );
   const told = tellers.map(([, each]) => each);
-  const enough = (people: Iterable<string>): boolean =>
-    [...new Set(people)].filter((person) => !lead.has(person)).length >=
-    minTeamShown;
-  const toldBy = (said: (each: Told) => boolean): boolean =>
-    enough(tellers.flatMap(([person, each]) => (said(each) ? [person] : [])));
-  const heard = (answer: HeardAnswer, text: string): string =>
-    enough(drawn.heard?.[answer] ?? []) ? clean(text) : "";
-  // The steps five or more told, and where each step of the drawing lands
-  // among them: a case off the path after a step left out follows the
-  // last step kept before it.
-  const kept = drawn.steps.flatMap((step, index) =>
-    toldBy((each) => each.steps.includes(index)) ? [{ step, index }] : []
-  );
+  const toldOf = (people: readonly string[]): Told[] =>
+    tellers.flatMap(([person, each]) =>
+      people.includes(person) ? [each] : []
+    );
+  const shown = (people: readonly string[], text: string): string =>
+    people.length >= minTeamShown ? clean(text) : "";
+  // The steps five or more are checked to have told, and where each step
+  // of the drawing lands among them: a case off the path after a step left
+  // out follows the last step kept before it.
+  const kept = drawn.steps.flatMap((step, index) => {
+    const people = support.steps[index] ?? [];
+    return people.length >= minTeamShown ? [{ step, index, people }] : [];
+  });
   const placeOf = (index: number): number =>
     Math.max(kept.filter((each) => each.index <= index).length - 1, 0);
   const takes = told.flatMap(({ takes: own }) => (own === null ? [] : [own]));
-  const wrong = rangeOf(
+  const wrong = shownMedian(
     told.flatMap(({ wrong: own }) => (own === null ? [] : [own]))
   );
+  const quickest = shownMedian(takes.map(([each]) => each));
+  const longest = shownMedian(takes.map((each) => each[2]));
   const { differs } = drawn;
   const differsKept =
     differs !== null &&
     kept.some(({ index }) => index === differs.step) &&
-    toldBy((each) => each.way?.other === true);
+    support.other.length >= minTeamShown;
   return {
     type: "workflowVersion",
     date: dayOf(drawn.at),
     state: work.state,
     people: drawn.from.length,
-    starts: toldBy((each) => each.start) ? clean(drawn.starts) : "",
-    steps: kept.map(({ step: { text, who, tool, minutes, documented } }) => ({
-      text: clean(text),
-      who: clean(who),
-      tool: clean(tool),
-      minutes:
-        minutes === null
-          ? null
-          : {
-              quickest: minutes[0],
-              normal: minutes[1],
-              longest: minutes[2],
-              basis: "estimated",
-            },
-      documented,
-    })),
-    waits: drawn.waits.flatMap((wait, index) =>
-      toldBy((each) => each.waits.includes(index)) ? [clean(wait)] : []
-    ),
-    differently: drawn.differently.flatMap(
-      ({ when, does, outOfTen, after }, index) =>
-        toldBy((each) => each.differently.includes(index))
-          ? [
-              {
-                when: clean(when),
-                does: clean(does),
-                outOfTen,
-                after: placeOf(after),
+    starts: shown(support.starts, drawn.starts),
+    steps: kept.map(({ step: { text, documented }, index, people }) => {
+      const minutes = shownMedian(
+        toldOf(people).flatMap(({ stepMinutes }) =>
+          (stepMinutes ?? []).flatMap(({ step, minutes: own }) =>
+            step === index ? [own[1]] : []
+          )
+        )
+      );
+      return {
+        text: clean(text),
+        who: "",
+        tool: "",
+        minutes:
+          minutes === null
+            ? null
+            : {
+                quickest: minutes,
+                normal: minutes,
+                longest: minutes,
+                basis: "estimated" as const,
               },
-            ]
-          : []
+        documented,
+      };
+    }),
+    waits: drawn.waits.flatMap((wait, index) =>
+      (support.waits[index] ?? []).length >= minTeamShown ? [clean(wait)] : []
     ),
-    decides: heard("decides", drawn.decides),
-    own: heard("own", drawn.own),
-    ai: heard("ai", drawn.ai),
-    right: heard("right", drawn.right),
-    ask: heard("ask", drawn.ask),
-    next: heard("next", drawn.next),
+    differently: drawn.differently.flatMap(({ when, after }, index) => {
+      const people = support.differently[index] ?? [];
+      if (people.length < minTeamShown) {
+        return [];
+      }
+      const outOfTen = shownMedian(
+        toldOf(people).flatMap(({ caseShares }) =>
+          (caseShares ?? []).flatMap((share) =>
+            share.case === index ? [share.outOfTen] : []
+          )
+        )
+      );
+      return [{ when: clean(when), does: "", outOfTen, after: placeOf(after) }];
+    }),
+    decides: shown(support.answers.decides ?? [], drawn.decides),
+    own: shown(support.answers.own ?? [], drawn.own),
+    ai: shown(support.answers.ai ?? [], drawn.ai),
+    right: shown(support.answers.right ?? [], drawn.right),
+    ask: shown(support.answers.ask ?? [], drawn.ask),
+    next: shown(support.answers.next ?? [], drawn.next),
     term:
-      drawn.term === null || !toldBy((each) => each.term)
+      drawn.term === null || support.term.length < minTeamShown
         ? null
-        : { word: clean(drawn.term.word), meaning: clean(drawn.term.meaning) },
+        : { word: clean(drawn.term.word), meaning: "" },
     differs:
       differs === null || !differsKept
         ? null
         : {
-            ...differs,
             step: placeOf(differs.step),
             other: clean(differs.other),
-            because: clean(differs.because),
+            why: differs.why,
+            because: "",
           },
-    volumes: volumesOf(told, drawn.per).filter(
-      ({ people }) => people >= minTeamShown
-    ),
+    volumes: volumesOf(told, drawn.per),
     takes:
-      takes.length < minTeamShown
+      quickest === null || longest === null
         ? null
         : {
             unit: drawn.unit,
-            quickest: Math.min(...takes.map(([quickest]) => quickest)),
-            longest: Math.max(...takes.map((times) => times[2])),
+            quickest,
+            longest: Math.max(quickest, longest),
             people: takes.length,
             basis: "estimated",
           },
     wrong:
-      wrong === null || wrong.people < minTeamShown
+      wrong === null
         ? null
-        : { ...wrong, basis: "estimated" },
+        : {
+            low: wrong,
+            high: wrong,
+            people: told.filter((each) => each.wrong !== null).length,
+            basis: "estimated",
+          },
     open: [],
   };
 };
@@ -330,7 +343,8 @@ const recordOf = (record: BrainRecordInput): BrainRecord[] => {
  */
 export const intakeOf = async (
   intake: TeamIntake,
-  claims: readonly TeamClaim[]
+  claims: readonly TeamClaim[],
+  supports: ReadonlyMap<string, Support>
 ): Promise<Intake> => {
   const clean = withoutNames(intake.names);
   const teamId = intakeIds.team(intake.team.id);
@@ -390,7 +404,11 @@ export const intakeOf = async (
     if (workflow === undefined) {
       continue;
     }
-    const body = { ...versionOf(work, clean), workflowId, sourceId };
+    const support = supports.get(work.id);
+    if (support === undefined) {
+      continue;
+    }
+    const body = { ...versionOf(work, clean, support), workflowId, sourceId };
     // oxlint-disable-next-line no-await-in-loop -- a hash each, in order
     const id = await ownId("wfv", canonicalJson(body));
     const version = recordOf({ ...body, id });

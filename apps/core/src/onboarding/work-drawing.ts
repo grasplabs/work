@@ -325,7 +325,7 @@ export const drawnOf = (
       term: term === undefined ? false : mine(term.by),
       out: [],
       // Their own minutes for each step, and share of each case, as they
-      // gave them: never in any text (the drawing's rules).
+      // gave them: shown only as medians over enough people.
       stepMinutes: steps.flatMap(({ step }, index) => {
         const given = (step.minutes_by ?? []).find(
           (each) => lineOf(each.person, 40) === person
