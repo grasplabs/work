@@ -130,29 +130,61 @@ const parseModules = async (
   return parsed;
 };
 
-/**
- * The sets of modules read so far, by file: each is read from the static
- * assets once per isolate, as every App imports the same set.
- */
-const modulesRead = new Map<string, Promise<KitModules>>();
+/** The longest a read of platform code from the assets may take. */
+export const platformCodeReadMs = 10_000;
 
-/** A set of modules from the static assets; a failed read isn't kept. */
+/**
+ * Platform code read once per isolate: the compiler's, the package
+ * builder's and the module sets every App imports, by assets binding and
+ * then by what it is and its release's version. It is the release's, so
+ * a build doesn't read 15 to 28 MB of it from the assets again, and many
+ * builds at once don't each hold their own copy in core's 128 MB isolate. Only a read that worked is kept.
+ * Reads running now are shared by the same keys: builds that start
+ * together share one, for as long as a read may take (`sharedRun`), so
+ * one whose request was cancelled holds no other build.
+ */
+const memoiser = <T>() => {
+  const done = new WeakMap<Fetcher, Map<string, T>>();
+  const running = new WeakMap<Fetcher, Map<string, SharedRun<T>>>();
+  return async (
+    assets: Fetcher,
+    key: string,
+    read: () => Promise<T>
+  ): Promise<T> => {
+    const reads = done.get(assets) ?? new Map<string, T>();
+    done.set(assets, reads);
+    const kept = reads.get(key);
+    if (kept !== undefined) {
+      return kept;
+    }
+    const reading = running.get(assets) ?? new Map<string, SharedRun<T>>();
+    running.set(assets, reading);
+    const code = await sharedRun(reading, key, platformCodeReadMs, read);
+    reads.set(key, code);
+    return code;
+  };
+};
+
+/** Loader isolates' code, read once per isolate (`memoiser`). */
+const memoisedWorker = memoiser<WorkerLoaderWorkerCode>();
+
+/** The module sets every App imports, read once per isolate (`memoiser`). */
+const memoisedModules = memoiser<KitModules>();
+
+/**
+ * A set of modules from the static assets: each is read once per isolate,
+ * as every App imports the same set (`memoiser`); a failed read isn't
+ * kept.
+ */
 const readModules = async (
   assets: Fetcher,
   file: string
-): Promise<KitModules> => {
-  let read = modulesRead.get(file);
-  if (read === undefined) {
-    read = parseModules(assets, file);
-    modulesRead.set(file, read);
-  }
-  try {
-    return await read;
-  } catch (error) {
-    modulesRead.delete(file);
-    throw error;
-  }
-};
+): Promise<KitModules> =>
+  await memoisedModules(
+    assets,
+    file,
+    async () => await parseModules(assets, file)
+  );
 
 /** The kit's modules, which every App's modules import: one set per release. */
 export const kitModules = async (assets: Fetcher): Promise<KitModules> =>
@@ -188,44 +220,6 @@ export const isolateSettings = {
   globalOutbound: null,
   limits: { cpuMs: platformLimits.compilerTaskCpuMs, subRequests: 0 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
-
-/** The longest a read of platform code from the assets may take. */
-export const platformCodeReadMs = 10_000;
-
-/**
- * Platform code read once per isolate: the compiler's and the package
- * builder's, by assets binding and then by what it is and its release's
- * version. It is the release's, so a build doesn't read 15 to 28 MB of it
- * from the assets again, and many builds at once don't each hold their
- * own copy in core's 128 MB isolate. Only a read that worked is kept.
- * Reads running now are shared by the same keys: builds that start
- * together share one, for as long as a read may take (`sharedRun`), so
- * one whose request was cancelled holds no other build.
- */
-const memoiser = <T>() => {
-  const done = new WeakMap<Fetcher, Map<string, T>>();
-  const running = new WeakMap<Fetcher, Map<string, SharedRun<T>>>();
-  return async (
-    assets: Fetcher,
-    key: string,
-    read: () => Promise<T>
-  ): Promise<T> => {
-    const reads = done.get(assets) ?? new Map<string, T>();
-    done.set(assets, reads);
-    const kept = reads.get(key);
-    if (kept !== undefined) {
-      return kept;
-    }
-    const reading = running.get(assets) ?? new Map<string, SharedRun<T>>();
-    running.set(assets, reading);
-    const code = await sharedRun(reading, key, platformCodeReadMs, read);
-    reads.set(key, code);
-    return code;
-  };
-};
-
-/** Loader isolates' code, read once per isolate (`memoiser`). */
-const memoisedWorker = memoiser<WorkerLoaderWorkerCode>();
 
 /** The compiler's isolate as a Loader takes it, its code read from the assets. */
 const compilerWorker = async (

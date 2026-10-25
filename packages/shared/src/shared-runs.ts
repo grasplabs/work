@@ -1,5 +1,3 @@
-import { deadline, whenAborted } from "./deadline.ts";
-
 // Work several requests of one isolate share while it runs (a build of
 // the same files, a read of the release's platform code), so it runs once
 // rather than once per request. A request's work belongs to that request:
@@ -30,31 +28,68 @@ export interface SharedRun<T> {
 }
 
 /**
+ * How often a request waiting on another's work looks whether it settled:
+ * soon at first, as most shared work is nearly done when it is asked for,
+ * then less often, never past {@link lookMostMs}.
+ */
+const lookFirstMs = 5;
+const lookMostMs = 100;
+
+/** Waits `ms` on a timer of the calling request's own. */
+const pause = async (ms: number): Promise<void> => {
+  // oxlint-disable-next-line promise/avoid-new -- a timer has no promise form in every runtime this package runs in
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+};
+
+/**
  * What `running` settles with within `ms`, or `elapsed` once `ms` passed
- * first; its rejection, if it rejects first. Its timer goes as soon as
- * either happens.
+ * first; its rejection, if it rejects first.
+ *
+ * `running` is another request's work, and workerd can run a promise's
+ * continuations in the request that settled it. Awaited here, the rest of
+ * this request (an activation of one workflow run, say, sharing another
+ * run's build) would go on in the other's: as one Durable Object, its
+ * storage calls on another object's behalf, which workerd refuses ("Cannot
+ * perform I/O on behalf of a different Durable Object"), and its RPC calls
+ * the other's, whose answers land there. So the work's outcome is only
+ * noted where it settles, and this request goes on from a timer of its
+ * own once it sees it.
  */
 const settledWithin = async <T>(
   running: Promise<T>,
   ms: number
 ): Promise<{ value: T } | "elapsed"> => {
-  const timer = deadline(ms);
-  const elapsed = async (): Promise<"elapsed"> => {
+  const seen: { outcome?: { value: T } | { error: unknown } } = {};
+  // Noted where it settles, run in the request that settles it: nothing
+  // more than that, so nothing of this request's runs there. Not awaited,
+  // for that reason; it never rejects.
+  const note = async (): Promise<void> => {
     try {
-      await whenAborted(timer.signal);
-    } catch {
-      // Its time is up.
+      seen.outcome = { value: await running };
+    } catch (error) {
+      seen.outcome = { error };
     }
-    return "elapsed";
   };
-  try {
-    return await Promise.race([
-      running.then((value) => ({ value })),
-      elapsed(),
-    ]);
-  } finally {
-    timer.clear();
+  void note();
+  const endsAt = Date.now() + ms;
+  let lookMs = lookFirstMs;
+  while (seen.outcome === undefined) {
+    const left = endsAt - Date.now();
+    if (left <= 0) {
+      return "elapsed";
+    }
+    // One look after the other, each on this request's own timer.
+    // oxlint-disable-next-line no-await-in-loop
+    await pause(Math.min(lookMs, left));
+    lookMs = Math.min(lookMs * 2, lookMostMs);
   }
+  const { outcome } = seen;
+  if ("error" in outcome) {
+    throw outcome.error;
+  }
+  return outcome;
 };
 
 /**

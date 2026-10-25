@@ -234,6 +234,32 @@ const whileRefusingStarts = async <T>(
   }, run);
 };
 
+/** How long a read of a cached workflow build takes in `whileBuildReadsSlow`. */
+const slowBuildReadMs = 500;
+
+/**
+ * Runs `run` while every read of a cached workflow build from R2 takes
+ * {@link slowBuildReadMs} more, as on a loaded runner: activations that
+ * need the same build meanwhile share the first one's read.
+ */
+const whileBuildReadsSlow = async <T>(run: () => Promise<T>): Promise<T> => {
+  const files = env.FILES;
+  const get = files.get.bind(files);
+  const slow = vi
+    .spyOn(files, "get")
+    .mockImplementation(async (key: string, options?: R2GetOptions) => {
+      if (key.startsWith("workflow-builds/")) {
+        await scheduler.wait(slowBuildReadMs);
+      }
+      return await get(key, options);
+    });
+  try {
+    return await run();
+  } finally {
+    slow.mockRestore();
+  }
+};
+
 /** A run whose step records a statistics point, then waits a day. */
 const counting = workflowFiles(
   "waits",
@@ -354,7 +380,14 @@ describe("starts core stopped in the middle of", () => {
     const afterOutage = await orphanOf(builder, app, 30 * day);
     const young = await orphanOf(builder, app, 30_000);
 
-    await runCron();
+    // Both activate at once, each in its own run object, and share one
+    // read of their App's build, held until the other asks for it too, and
+    // each goes on to its step.
+    await whileBuildReadsSlow(async () => {
+      await runCron();
+      await stepDone(orphan, "work");
+      await stepDone(afterOutage, "work");
+    });
     await rowSays(orphan, "running");
     await rowSays(afterOutage, "running");
     const youngShown = await builder.api.workflows.status(young);
