@@ -373,10 +373,11 @@ describe("a run's host, against a forged module's fork", () => {
       failedWinner,
     }).toStrictEqual({
       afterSuccess: { left: "ok", laterBranch: "workflow.invalid" },
+      // Settled: its fence cancels a later branch, which runs nothing.
       afterRecord: {
         left: "ok",
         winner: "ok",
-        laterBranch: "workflow.invalid",
+        laterBranch: "workflow.branch_cancelled",
       },
       skipping: "workflow.invalid",
       afterFailure: { leftFailed: true, right: "ok", winner: "ok" },

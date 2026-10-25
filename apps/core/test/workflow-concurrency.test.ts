@@ -1,10 +1,18 @@
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
+import { v } from "@grasp-os/sdk";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import {
+  createWorkflowResource,
+  publishWorkflowVersion,
+} from "../src/workflow-resources.ts";
 import { engineCall } from "../src/workflows/engine-asks.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import type { ScopeFences } from "../src/workflows/resource-host.ts";
+import { holdingFirst } from "./build-holds.ts";
 import { withCpuKills } from "./cpu-kills.ts";
 import {
   builder,
@@ -18,6 +26,7 @@ import {
   startedSteps,
 } from "./json-workflows.ts";
 import { admittedFreely } from "./runs.ts";
+import { unique } from "./sign-in.ts";
 
 // Items and branches at once in JSON workflows (GRA-956): `for` and `fork`
 // tasks of `metadata.grasp.concurrency` 2 to 8, from their threat model:
@@ -884,6 +893,183 @@ describe("a run's host, against a forged module at once", () => {
       settledAgain: { output: null, branch: 1 },
       loser: "workflow.branch_cancelled",
       winner: "ok",
+    });
+  });
+});
+
+/** `acting` as the identity a catalog's writes take. */
+const identityOf = (acting: Awaited<ReturnType<typeof builder>>) => ({
+  ...acting,
+  email: `${acting.userId}@acme.test`,
+  name: "Person",
+  expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+});
+
+/**
+ * A race at once of `admin`'s: a branch that sets its status, and one that
+ * listens for a job's completion through its `events` binding.
+ */
+const raceWithListen = async (admin: Awaited<ReturnType<typeof builder>>) => {
+  const contract = `race-events-${unique()}`;
+  await publishCatalogContract(env, identityOf(admin), {
+    key: contract,
+    kind: "event",
+    events: {
+      "grasp.job.completed": {
+        data: JSON.stringify(v.object({ jobId: v.string() }).descriptor),
+        browser: false,
+      },
+    },
+  });
+  const workflow = await createWorkflowResource(env, admin, `race-${unique()}`);
+  await publishWorkflowVersion(env, admin, workflow.id, {
+    definition: JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name: workflow.name,
+        version: "1.0.0",
+        title: workflow.name,
+        metadata: {
+          grasp: {
+            profile: "grasp-open-workflow/1",
+            params: {},
+            bindings: { events: { kind: "event", contract } },
+          },
+        },
+      },
+      input: { schema: objectSchema({ who: { type: "string" } }) },
+      output: { schema: objectSchema({ status: { type: "string" } }) },
+      do: [
+        {
+          pick: {
+            fork: {
+              branches: [
+                { quick: { set: '${ {status: "quick"} }' } },
+                {
+                  hear: {
+                    listen: {
+                      to: { one: { with: { type: "grasp.job.completed" } } },
+                      read: "data",
+                    },
+                    timeout: { after: { minutes: 5 } },
+                    metadata: { grasp: { binding: "events" } },
+                  },
+                },
+              ],
+              compete: true,
+            },
+            metadata: { grasp: { concurrency: 2 } },
+          },
+        },
+      ],
+    }),
+    basedOn: null,
+  });
+  return workflow;
+};
+
+describe("a run's host, against a forged module's waits at once", () => {
+  it("takes no event for a branch its race settled over, whether its listen comes after the race settled or while it was on its way", async () => {
+    const admin = await builder("admin");
+    const workflow = await raceWithListen(admin);
+    const waited: string[] = [];
+    const settled = new Map<string, number>();
+    const fences: ScopeFences = {
+      settle: (place, branch) => {
+        if (!settled.has(place)) {
+          settled.set(place, branch);
+        }
+        return settled.get(place) ?? branch;
+      },
+      settled: (place) => settled.get(place),
+    };
+    let count = 0;
+    const step: RunStep = {
+      do: async (name, _config, fn) => {
+        count += 1;
+        return await fn({ attempt: 1, idempotencyKey: `key:${name}:${count}` });
+      },
+      sleep: async () => {
+        await Promise.resolve();
+      },
+      sleepUntil: async () => {
+        await Promise.resolve();
+      },
+      waitForEvent: async () => await Promise.reject(new Error("No waits")),
+      // Every wait asked of the engine, which takes an event as it is asked.
+      waitForMatch: async (name) => {
+        waited.push(name);
+        return await Promise.resolve({
+          payload: { type: "grasp.job.completed", data: { jobId: "1" } },
+          timestamp: new Date(),
+        });
+      },
+    };
+    const host = await hostOf(admin, workflow.id, {
+      step,
+      fences,
+      candidate: new Map([
+        [
+          "events",
+          {
+            kind: "event",
+            contractId: "x",
+            fingerprint: "x",
+            answer: undefined,
+          },
+        ],
+      ]),
+    });
+    // The listen's enter step, before the race settled.
+    const entered = await host.do("enter:hear@pick.1", ada, async (attempt) => {
+      const until = await attempt.until({ input: { who: "Ada" } });
+      return until.ok
+        ? {
+            ok: true,
+            value: { output: { who: "Ada" }, until: until.value },
+          }
+        : until;
+    });
+    // On its way: held at its person's check while the race settles.
+    const held = Promise.withResolvers<null>();
+    const { DB: db } = env;
+    env.DB = holdingFirst(db, held.promise, "members", admin.userId);
+    let onItsWay: unknown;
+    let won: unknown;
+    try {
+      const listening = host.listen("task:hear@pick.1");
+      won = codeOf(
+        await host.do("task:pick", ada, async (attempt) => {
+          const branch = await attempt.settle({ branch: 0 });
+          return {
+            ok: true,
+            value: { output: null, branch: branch.ok ? branch.value : null },
+          };
+        })
+      );
+      held.resolve(null);
+      onItsWay = codeOf(await listening);
+    } finally {
+      env.DB = db;
+    }
+    // After it settled, in a later activation: asked again, it waits for
+    // nothing.
+    const later = await hostOf(admin, workflow.id, { step, fences });
+    const afterSettled = codeOf(await later.listen("task:hear@pick.1"));
+
+    expect({
+      entered: codeOf(entered),
+      won,
+      onItsWay,
+      afterSettled,
+      waited,
+    }).toStrictEqual({
+      entered: "ok",
+      won: "ok",
+      onItsWay: "workflow.branch_cancelled",
+      afterSettled: "workflow.branch_cancelled",
+      waited: [],
     });
   });
 });
