@@ -21,7 +21,7 @@ import { newAiCalls } from "./host.ts";
 import type { AiCalls, BusyRefusals } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
 import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
-import { projectResourceRun } from "./resource-runs.ts";
+import { projectResourceRun, settleResourceControls } from "./resource-runs.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
 import { wakeQueueFronts } from "./share-wakes.ts";
 
@@ -686,9 +686,9 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       version: latest.version,
     });
     if (pin?.type === "resource" || pin?.type === "candidate") {
-      // An independent workflow's run, or a test run of its draft: no
-      // cancel or control of it exists yet, so its row follows the
-      // engine's status alone.
+      // An independent workflow's run, or a test run of its draft: its row
+      // follows the engine's status; a screen's controls of an independent
+      // run settle from the engine's own word on them, below.
       // Why it failed, from its own journal: kept on its row, so the code
       // outlives the engine's record of the run.
       const live = this.status();
@@ -704,6 +704,16 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         },
         live?.status === "errored" ? (live.error.code ?? null) : null
       );
+      // A screen's pause or resume of it settles from where the engine has
+      // the run now, and which controls it took, read together here from
+      // its journal, as an App run's do (resource-runs.ts).
+      if (pin.type === "resource") {
+        await settleResourceControls(
+          this.env,
+          latest.instanceId,
+          this.controlState()
+        );
+      }
       // Then what its fenced attempts still hold of the client's shares
       // comes back, as an App run's does: after its row, so a run that
       // ended cancelled has its attempts charged up to their deadlines

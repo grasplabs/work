@@ -35,7 +35,12 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedIfChanged,
+  outboxedWhere,
+} from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import { tellOfferedRunEnd } from "../channels/offered-runs.ts";
 import {
@@ -143,7 +148,7 @@ import { wakingOnSettle } from "./share-wakes.ts";
 //   lowered (generate.ts).
 
 /** The statuses of a run that hasn't ended. */
-const unended: WorkflowRunStatus[] = ["starting", "running"];
+export const unended: WorkflowRunStatus[] = ["starting", "running", "paused"];
 
 /** Where the engine says a run is, as its row has it. */
 const projected: Record<InstanceStatus["status"], WorkflowRunStatus> = {
@@ -152,7 +157,7 @@ const projected: Record<InstanceStatus["status"], WorkflowRunStatus> = {
   waiting: "running",
   waitingForPause: "running",
   rollingBack: "running",
-  paused: "running",
+  paused: "paused",
   complete: "completed",
   errored: "failed",
   terminated: "cancelled",
@@ -234,6 +239,8 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
         ),
         depth: sql<number>`${run.lineage?.depth ?? 0}`.as("depth"),
         stopRequestedAt: sql<null>`NULL`.as("stop_requested"),
+        controlGeneration: sql<number>`0`.as("control_generation"),
+        summaryRevision: sql<number>`0`.as("summary_revision"),
       })
       .from(sql`(SELECT 1)`)
       .where(
@@ -272,7 +279,7 @@ const receiptOf = async (env: Env, id: string) =>
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 /** A run's audit entry of `action`, its pins named. */
-const runEntry = (row: RunRow, action: string): AuditEntry => ({
+export const runEntry = (row: RunRow, action: string): AuditEntry => ({
   actor: { type: "system" },
   action,
   target: { type: "workflow_run", id: row.id },
@@ -294,36 +301,101 @@ const withFailure = (
     ? { ...entry, detail: { ...entry.detail, failureCode } }
     : entry;
 
+/** A screen's control of a run, as its receipt keeps it. */
+export type ResourceControlRow =
+  typeof workflowResourceRunControls.$inferSelect;
+
 /**
- * Settles run `row`'s admitted cancel receipt (a screen's,
- * screen-workflows.ts) by how it ended: `applied` when it was cancelled
- * after the receipt asked its stop, `superseded` when it ended otherwise
- * first (on its own, or by a builder's terminate before the receipt's
- * stop went out). A run that hasn't ended
- * settles none. What the receipt asked of the engine was audited as it
- * asked (`applyCancel`).
+ * Settles `control` of run `run` as `state`, if it is still admitted,
+ * audited as it settles (by the system, naming the person who asked):
+ * while the run hasn't ended, its snapshot moves on with it, in the same
+ * batch, and the run's screens read it again.
+ */
+export const settleControl = async (
+  env: Env,
+  run: RunRow,
+  control: Pick<ResourceControlRow, "id" | "kind" | "principalId">,
+  state: "applied" | "superseded"
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const at = new Date();
+  const settled = sql`EXISTS (SELECT 1 FROM ${workflowResourceRunControls} WHERE ${and(
+    eq(workflowResourceRunControls.id, control.id),
+    eq(workflowResourceRunControls.state, state),
+    eq(workflowResourceRunControls.settledAt, at)
+  )})`;
+  const entry = runEntry(run, `workflow.run.control_${state}`);
+  await auditedBatch(env, db, [
+    db
+      .update(workflowResourceRunControls)
+      .set({ state, settledAt: at })
+      .where(
+        and(
+          eq(workflowResourceRunControls.id, control.id),
+          eq(workflowResourceRunControls.state, "admitted")
+        )
+      ),
+    outboxedWhere(
+      db,
+      {
+        ...entry,
+        detail: {
+          ...entry.detail,
+          control: control.id,
+          kind: control.kind,
+          onBehalfOf: control.principalId,
+        },
+      },
+      settled
+    ),
+    db
+      .update(workflowResourceRuns)
+      .set({
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
+      })
+      .where(
+        and(
+          eq(workflowResourceRuns.id, run.id),
+          inArray(workflowResourceRuns.status, unended),
+          settled
+        )
+      ),
+  ]);
+  await tellQueryFollowers(env, run.id);
+};
+
+/**
+ * Settles run `row`'s admitted controls (a screen's, screen-workflows.ts)
+ * by how it ended: its cancel `applied` when it was cancelled after the
+ * receipt asked its stop, `superseded` when it ended otherwise first (on
+ * its own, or by a builder's terminate before the receipt's stop went
+ * out); a pause or resume still admitted, overtaken by the end. A run
+ * that hasn't ended settles none. What a cancel asked of the engine was
+ * audited as it asked (`applyCancel`).
  */
 const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
   if (unended.includes(row.status)) {
     return;
   }
-  await drizzle(env.DB)
-    .update(workflowResourceRunControls)
-    .set({
-      // Applied only when it was cancelled and this receipt's stop was
-      // asked: one a builder's terminate, say, ended first is superseded.
-      state:
-        row.status === "cancelled"
-          ? sql`CASE WHEN ${workflowResourceRunControls.stopRequestedAt} IS NOT NULL THEN 'applied' ELSE 'superseded' END`
-          : "superseded",
-      settledAt: new Date(),
-    })
+  const admitted = await drizzle(env.DB)
+    .select()
+    .from(workflowResourceRunControls)
     .where(
       and(
         eq(workflowResourceRunControls.runId, row.id),
         eq(workflowResourceRunControls.state, "admitted")
       )
     );
+  for (const control of admitted) {
+    // Applied only when it was cancelled and this receipt's stop was
+    // asked: one a builder's terminate, say, ended first is superseded.
+    const applied =
+      control.kind === "cancel" &&
+      row.status === "cancelled" &&
+      control.stopRequestedAt !== null;
+    // oxlint-disable-next-line no-await-in-loop -- one run's, a few
+    await settleControl(env, row, control, applied ? "applied" : "superseded");
+  }
 };
 
 const endActions: Partial<Record<WorkflowRunStatus, string>> = {
@@ -448,6 +520,7 @@ const startAbandoned = async (
         status: "failed",
         endedAt: now,
         failureCode: "workflow.start_unconfirmed",
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
       })
       .where(
         and(
@@ -531,7 +604,10 @@ const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
   if (live !== undefined) {
     await drizzle(env.DB)
       .update(workflowResourceRuns)
-      .set({ status: "running" })
+      .set({
+        status: "running",
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
+      })
       .where(
         and(
           eq(workflowResourceRuns.id, row.id),
@@ -1199,6 +1275,9 @@ export const projectResourceRun = async (
       .update(workflowResourceRuns)
       .set({
         status,
+        // A screen's snapshot shows the status: another is a revision of
+        // its own (screen-workflows.ts).
+        summaryRevision: sql`CASE WHEN ${workflowResourceRuns.status} = ${status} THEN ${workflowResourceRuns.summaryRevision} ELSE ${workflowResourceRuns.summaryRevision} + 1 END`,
         ...(engine.sequence === undefined
           ? {}
           : { engineSequence: engine.sequence }),
@@ -1224,10 +1303,10 @@ export const projectResourceRun = async (
             withFailure(runEntry(row, action), status, failureCode)
           ),
         ]),
-    // Ended, it waits in the admission queue for nothing more: its places
-    // go now, rather than keep others waiting until they lapse. After the
-    // audit entry, which reads what the row's update changed.
-    ...(ended
+    // Ended or paused, it waits in the admission queue for nothing more:
+    // its places go now, rather than keep others waiting until they lapse.
+    // After the audit entry, which reads what the row's update changed.
+    ...(ended || status === "paused"
       ? [
           runDequeued(
             db,
@@ -1237,7 +1316,7 @@ export const projectResourceRun = async (
         ]
       : []),
   ]);
-  // A screen's cancel of it, settled by how it ended.
+  // A screen's controls of it, settled by how it ended.
   const now = ended ? await runOf(env, id) : undefined;
   if (now !== undefined) {
     await settleCancels(env, now);
@@ -1367,7 +1446,11 @@ const cancelStarting = async (
   const [cancelled] = await auditedBatch(env, db, [
     db
       .update(workflowResourceRuns)
-      .set({ status: "cancelled", endedAt: now })
+      .set({
+        status: "cancelled",
+        endedAt: now,
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
+      })
       .where(
         and(
           eq(workflowResourceRuns.id, row.id),
@@ -1657,6 +1740,107 @@ export const applyCancel = async (
   await settleCancels(env, after);
 };
 
+/** Whether the engine's `live` status is what a control of `kind` asked. */
+const holdsFor = (
+  kind: ResourceControlRow["kind"],
+  live: InstanceStatus
+): boolean =>
+  kind === "pause"
+    ? live.status === "paused"
+    : kind === "resume" &&
+      live.status !== "paused" &&
+      live.status !== "waitingForPause";
+
+/** Where the engine has a run, with the newest control generation it took. */
+export interface ResourceControlState {
+  readonly status: InstanceStatus;
+  readonly fence: number | null;
+}
+
+/**
+ * Settles run `runId`'s admitted pauses and resumes from `state`, the
+ * engine's own word on which controls reached it, read together with its
+ * status, never from a status alone: one of a generation the engine hasn't
+ * taken yet (above `fence`) stays as it is; one of the generation it took
+ * last is applied once the run is where it asked; one older was overtaken
+ * by a newer control, and is superseded. As an App run's are
+ * (controls.ts, `settleFrom`).
+ */
+export const settleResourceControls = async (
+  env: Env,
+  runId: string,
+  state: ResourceControlState | undefined
+): Promise<void> => {
+  const fence = state?.fence ?? null;
+  if (state === undefined || fence === null) {
+    return;
+  }
+  const admitted = await drizzle(env.DB)
+    .select()
+    .from(workflowResourceRunControls)
+    .where(
+      and(
+        eq(workflowResourceRunControls.runId, runId),
+        eq(workflowResourceRunControls.state, "admitted"),
+        inArray(workflowResourceRunControls.kind, ["pause", "resume"])
+      )
+    );
+  const run = admitted.length === 0 ? undefined : await runOf(env, runId);
+  if (run === undefined) {
+    return;
+  }
+  for (const control of admitted) {
+    if (control.generation < fence) {
+      // oxlint-disable-next-line no-await-in-loop -- one run's, a few
+      await settleControl(env, run, control, "superseded");
+    } else if (
+      control.generation === fence &&
+      holdsFor(control.kind, state.status)
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- one run's, a few
+      await settleControl(env, run, control, "applied");
+    }
+  }
+};
+
+/**
+ * Sends an admitted pause or resume (a screen's, screen-workflows.ts) to
+ * the engine with its generation, which the engine takes only if no newer
+ * control reached the run (engine.ts), and settles it from what the
+ * engine then says it took (`settleResourceControls`). One a newer control
+ * overtook in core, or of a run that has ended, is superseded unsent. A
+ * run the engine has no record of yet is still starting: the receipt
+ * stays admitted, and the repair sends it again once it has started. One
+ * whose run the engine has ended is settled by that end's projection.
+ */
+export const applyResourceControl = async (
+  env: Env,
+  control: ResourceControlRow
+): Promise<void> => {
+  if (control.state !== "admitted" || control.kind === "cancel") {
+    return;
+  }
+  const row = await runOf(env, control.runId);
+  if (row === undefined) {
+    return;
+  }
+  if (
+    control.generation < row.controlGeneration ||
+    !unended.includes(row.status)
+  ) {
+    await settleControl(env, row, control, "superseded");
+    return;
+  }
+  const engine = runEngine(env);
+  if ((await engine.status(row.id)) === undefined) {
+    return;
+  }
+  await (control.kind === "pause"
+    ? engine.pause(row.id, control.generation)
+    : engine.resume(row.id, control.generation));
+  await settleResourceControls(env, row.id, await engine.controlState(row.id));
+};
+
 /**
  * How long a screen's cancel stays admitted before the repair first applies
  * it (its `next_at` as written, screen-workflows.ts): the request that
@@ -1668,8 +1852,9 @@ export const cancelRepairAfterMs = 60_000;
 const cancelsPerRepair = 20;
 
 /**
- * Applies again the screen cancels left admitted (their stop failed, or
- * their request ended first), those due first, as the App asked them:
+ * Applies again the screen controls left admitted (a cancel whose stop
+ * failed, a pause or resume the engine hasn't confirmed, or whose request
+ * ended first), those due first, as the App asked them:
  * each claimed by its count and backing off on its own as its stop keeps
  * failing, so one the engine always refuses never crowds out newer ones.
  * Never given up, as an owed termination isn't: its run is left to end.
@@ -1677,13 +1862,7 @@ const cancelsPerRepair = 20;
 const repairAdmittedCancels = async (env: Env, now: Date): Promise<void> => {
   const db = drizzle(env.DB);
   const due = await db
-    .select({
-      id: workflowResourceRunControls.id,
-      runId: workflowResourceRunControls.runId,
-      appId: workflowResourceRunControls.appId,
-      principalId: workflowResourceRunControls.principalId,
-      attempts: workflowResourceRunControls.attempts,
-    })
+    .select()
     .from(workflowResourceRunControls)
     .where(
       and(
@@ -1693,7 +1872,8 @@ const repairAdmittedCancels = async (env: Env, now: Date): Promise<void> => {
     )
     .orderBy(asc(workflowResourceRunControls.nextAt))
     .limit(cancelsPerRepair);
-  for (const { id, runId, appId, principalId, attempts } of due) {
+  for (const control of due) {
+    const { id, runId, appId, principalId, attempts } = control;
     const backoff = Math.min(repairAfterMs * 2 ** attempts, maxStartBackoffMs);
     // oxlint-disable-next-line no-await-in-loop -- one at a time
     const claimed = await db
@@ -1715,10 +1895,13 @@ const repairAdmittedCancels = async (env: Env, now: Date): Promise<void> => {
     }
     try {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
-      await applyCancel(env, { id, appId, principalId }, runId);
+      await (control.kind === "cancel"
+        ? applyCancel(env, { id, appId, principalId }, runId)
+        : applyResourceControl(env, control));
     } catch (error) {
-      log.error("workflow.resource_run_cancel_failed", {
+      log.error("workflow.resource_run_control_failed", {
         runId,
+        kind: control.kind,
         ...errorFields(error),
       });
     }

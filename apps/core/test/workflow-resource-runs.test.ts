@@ -564,6 +564,15 @@ describe("runs of JSON workflows", () => {
   });
 });
 
+/** A first attempt at step `step` of a later activation, held a minute. */
+const laterAttempt = (step: string) => ({
+  key: `capacity:${unique()}`,
+  step,
+  number: 1,
+  generation: 100,
+  deadline: Date.now() + 60_000,
+});
+
 /** A workflow of `by`'s whose run waits an hour before it finishes. */
 const waitingWorkflow = async (by: Acting) =>
   await published(by, (name) =>
@@ -2046,6 +2055,87 @@ describe(
         fencedActivation: "execution.stale_attempt",
         newerActivation: "ok",
         endedRun: "execution.stale_attempt",
+      });
+    });
+
+    it("keeps a resumed run's step waiting for a share while its row still says paused, and queues none of a run still paused", async () => {
+      const by = await builder();
+      const waiting = await waitingWorkflow(by);
+      const { runId: holder } = await start(by, waiting.id);
+      const { runId: resumed } = await start(by, waiting.id);
+      const { runId: paused } = await start(by, waiting.id);
+      const app = crypto.randomUUID();
+      const now = Date.now();
+      // Both paused, as the engine last told core. One was resumed since:
+      // its resume is admitted, the newest control, and the engine runs it
+      // again before core hears of it. The other's pause is the newest.
+      const receipt = (run: string | null, kind: string, generation: number) =>
+        env.DB.prepare(
+          "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, created_at, next_at, generation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).bind(
+          crypto.randomUUID(),
+          run,
+          app,
+          by.userId,
+          "0".repeat(31) + String(generation),
+          kind,
+          kind === "resume" ? "admitted" : "applied",
+          now,
+          now,
+          generation
+        );
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Desk', '', ?, ?)"
+        ).bind(app, by.userId, now),
+        env.DB.prepare(
+          "UPDATE workflow_resource_runs SET status = 'paused', control_generation = 2 WHERE id IN (?, ?)"
+        ).bind(resumed, paused),
+        receipt(resumed, "pause", 1),
+        receipt(resumed, "resume", 2),
+        receipt(paused, "pause", 2),
+      ]);
+      const ownerOf = (run: string | null) => ({
+        run: run ?? "",
+        root: run ?? "",
+        subject: by.userId,
+        resource: `workflow-resource:${waiting.id}`,
+      });
+      const result = await withQuotas(
+        { ...configuredLimits, workflowPersonAttempts: 1 },
+        async () => {
+          // The person's one attempt at once, taken.
+          const held = await admitAttempt(
+            env,
+            ownerOf(holder),
+            laterAttempt("held")
+          );
+          try {
+            return {
+              resumed: await outcome(
+                admitAttempt(env, ownerOf(resumed), laterAttempt("resumed"))
+              ),
+              resumedPlaces: await placesOf(resumed),
+              paused: await outcome(
+                admitAttempt(env, ownerOf(paused), laterAttempt("paused"))
+              ),
+              pausedPlaces: await placesOf(paused),
+            };
+          } finally {
+            await held.settle();
+            await env.DB.prepare(
+              "DELETE FROM workflow_admission_queue WHERE run_id IN (?, ?)"
+            )
+              .bind(resumed, paused)
+              .run();
+          }
+        }
+      );
+      expect(result).toStrictEqual({
+        resumed: "workflow.queued",
+        resumedPlaces: 1,
+        paused: "execution.stale_attempt",
+        pausedPlaces: 0,
       });
     });
 

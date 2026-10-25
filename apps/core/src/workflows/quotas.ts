@@ -527,7 +527,7 @@ const fenceRecorded = (db: DrizzleD1Database, run: string, through: number) =>
         and(
           eq(workflowResourceRuns.id, run),
           lt(workflowResourceRuns.sharesFencedThrough, through),
-          sql`${workflowResourceRuns.status} IN ('starting', 'running')`
+          sql`${workflowResourceRuns.status} IN ('starting', 'running', 'paused')`
         )
       ),
     db
