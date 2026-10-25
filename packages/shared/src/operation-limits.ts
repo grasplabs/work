@@ -129,7 +129,7 @@ export const resourceAliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
  * to as well, so a longer one is refused up front as arguments that don't
  * fit, never deep in Knowledge.
  */
-export const knowledgeSearchMaxLength = 500;
+export { searchQueryMaxLength as knowledgeSearchMaxLength } from "@grasp-os/brain/limits";
 
 // Foreground streaming actions (spec 10.7.6): an action that declares
 // `stream` emits bounded progress snapshots while it runs, each complete,

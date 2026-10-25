@@ -8,8 +8,11 @@ import { defineErrorFamily } from "./errors.ts";
 // runs, and never fetches them itself: every outside call goes through
 // connect. They are public, so nothing here is a client's.
 
-/** The platforms whose signing keys connect fetches. */
-export const channelKeyPlatforms = ["teams"] as const;
+/**
+ * The platforms whose signing keys connect fetches: Microsoft's Bot
+ * Framework for Teams, and Google's for Gmail's Pub/Sub pushes.
+ */
+export const channelKeyPlatforms = ["teams", "gmail"] as const;
 
 export const channelKeyPlatformSchema = z.enum(channelKeyPlatforms);
 export type ChannelKeyPlatform = z.infer<typeof channelKeyPlatformSchema>;

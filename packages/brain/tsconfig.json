@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Web Crypto and the Encoding API: globals in Workers and in Node.
+    "lib": ["es2024", "dom"]
+  },
+  "include": ["src", "test"]
+}

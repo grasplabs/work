@@ -257,6 +257,39 @@ export type AdminAppAsked = z.output<typeof adminAppAskedSchema>;
 const notYetHeld = z.unknown().transform((): null => null);
 
 /** Everything Grasp's admin reads of one client. */
+/**
+ * How Stephen fared in the chat apps over a window (core's
+ * src/channels/signals.ts), every platform together: counts and answer
+ * times only, never who wrote or what, for Grasp's admin to watch
+ * (its src/clients/watch.ts).
+ */
+export const adminStephenSignalsSchema = z.object({
+  /** How long it covers, ending at the snapshot's `now`, in hours. */
+  hours: z.int().positive(),
+  /** Requests the door refused as not from the platform (401). */
+  refused: z.int().nonnegative(),
+  /** Turns answered. */
+  answered: z.int().nonnegative(),
+  /** Turns that ended in Stephen's line for a failure. */
+  failed: z.int().nonnegative(),
+  /** Turns refused for the company's AI budget. */
+  overBudget: z.int().nonnegative(),
+  /** Turns refused as the model or the agent was busy. */
+  busy: z.int().nonnegative(),
+  /** Answers or lines the platform didn't take. */
+  sendFailed: z.int().nonnegative(),
+  /** Of those, the ones the platform refused with 403: the app uninstalled. */
+  uninstalled: z.int().nonnegative(),
+  /**
+   * Answer times, from the person's message to the answer posted, in
+   * milliseconds: the bucket's upper bound the median and the 90th
+   * percentile fall in; null without an answer to time.
+   */
+  p50Ms: z.int().nonnegative().nullable(),
+  p90Ms: z.int().nonnegative().nullable(),
+});
+export type AdminStephenSignals = z.output<typeof adminStephenSignalsSchema>;
+
 export const adminSnapshotSchema = z.object({
   /** Core's clock when it answered: what the admin counts days to. */
   now: isoTime,
@@ -339,5 +372,10 @@ export const adminSnapshotSchema = z.object({
   asked: z.array(adminAppAskedSchema).default([]),
   /** The AI the onboarding used, day by day, oldest first. */
   usage: z.array(adminUsageDaySchema),
+  /**
+   * How Stephen fared in the chat apps over the last day: absent or null
+   * from a core that doesn't count it yet, or couldn't read its counts.
+   */
+  stephen: adminStephenSignalsSchema.nullable().optional(),
 });
 export type AdminSnapshot = z.output<typeof adminSnapshotSchema>;

@@ -41,7 +41,9 @@ import { askInChat, askableConnections } from "./chat-connections.ts";
 import type { AskableConnection, AskedConnection } from "./chat-connections.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { workspace } from "./durable-objects.ts";
+import { endOfCompanyDay } from "./organization.ts";
 import { grantedPermissions } from "./permissions.ts";
+import { mailboxesFor } from "./shared-mailboxes.ts";
 
 // Connections for a chat's code: `await env.connections.call("OUTLOOK",
 // "mail.search", { query })`. The agent's connection permissions, each
@@ -154,6 +156,19 @@ export const connectionGrants = async (
 };
 
 /**
+ * When a write this chat's agent has held ends unconfirmed: in a chat on a
+ * chat platform, such as Teams, at midnight of the company's day, for its
+ * card scrolls away and its days and values may have moved on, so a press
+ * tomorrow never runs yesterday's values (connect declines it as
+ * expired). In Grasp's own app, where the person sees it again, never.
+ */
+const heldWritesEnd = async (
+  env: Env,
+  { via }: Pick<AgentScope, "via">
+): Promise<number | undefined> =>
+  via === undefined || via === "web" ? undefined : await endOfCompanyDay(env);
+
+/**
  * Tells the chat's watchers a write was held, so the person sees it to
  * confirm at once. A failure is logged: the write is held either way, and
  * the page reads it at its next change.
@@ -172,6 +187,27 @@ const heldInChat = async (env: Env, scope: AgentScope): Promise<void> => {
 /** Whether the chat came through a chat platform, not Grasp's own app. */
 const fromChatApp = (scope: AgentScope): boolean =>
   scope.via !== undefined && scope.via !== "web";
+
+/**
+ * The addresses the chat's person sends from through `connectionId`: its
+ * account's, when it is their own personal connection, and the shared
+ * mailboxes pointed at them (shared-mailboxes.ts), in lower case.
+ */
+const sendersOf = async (
+  env: Env,
+  scope: AgentScope,
+  connectionId: string
+): Promise<string[]> => {
+  const [owner] = await env.CONNECT.connectionOwners([connectionId]);
+  const own =
+    owner?.ownerUserId === scope.personId
+      ? [owner.accountEmail, owner.accountName, ...owner.accountAddresses]
+      : [];
+  const pointed = await mailboxesFor(env, scope.personId);
+  return [...own, ...pointed]
+    .filter((address) => address !== null)
+    .map((address) => address.toLowerCase());
+};
 
 /**
  * In a chat that came through a chat platform: what connect goes by for
@@ -200,7 +236,8 @@ const checkedForChatApp = async (
   const refusal = await workspace(env, scope.workspaceId).heldWriteRefusal(
     scope.chatId,
     input,
-    shape.inputs
+    shape.inputs,
+    await sendersOf(env, scope, grant.connection.connectionId)
   );
   if (refusal !== undefined) {
     throw agentErrors.create(refusal);
@@ -362,9 +399,16 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     // recorded here, once; what connect takes, connect records.
     const { grant, request, shape } = await (async () => {
       const named = await this.#grantNamed(connection);
+      const authority = chatAuthority(scope);
       const signed = await signedStubCall(
         this.env,
-        chatAuthority(scope),
+        async () => {
+          const heldUntil = await heldWritesEnd(this.env, scope);
+          return {
+            authority,
+            ...(heldUntil === undefined ? {} : { heldUntil }),
+          };
+        },
         named,
         [action, input]
       );

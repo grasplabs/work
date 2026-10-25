@@ -6,6 +6,7 @@
  * their `b!` prefix). The fake Graph (test/graph-api.ts) serves them per mailbox and drive,
  * so a test can tell whose data an answer holds.
  */
+import { contractDocx } from "./graph-apps.ts";
 
 export const graphOrigin = "https://graph.microsoft.com";
 
@@ -484,6 +485,8 @@ export const itemIds = {
   procedure: "01BYE5RZ6PROCEDUREAAAAAAAAAAAAAAAA",
   /** A file the person may not open: Graph refuses it. */
   locked: "01BYE5RZ3LOCKEDAAAAAAAAAAAAAAAAAA",
+  /** A supplier contract, a Word document (`contractDocx`). */
+  contract: "01BYE5RZ6CONTRACTDOCXAAAAAAAAAAAAA",
 } as const;
 
 /** The procedure's text at each of its versions, by version ID. */
@@ -644,6 +647,20 @@ const driveItem = (drive: string, id: string) => {
         webUrl:
           "https://example.sharepoint.com/sites/Finance/Shared%20Documents/Advice%20procedure.txt",
         file: { mimeType: "text/plain" },
+      };
+    }
+    case itemIds.contract: {
+      return {
+        ...base,
+        id,
+        name: "Supply agreement Northwind.docx",
+        size: contractDocx.byteLength,
+        webUrl:
+          "https://example.sharepoint.com/sites/Finance/Shared%20Documents/Supply%20agreement%20Northwind.docx",
+        file: {
+          mimeType:
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        },
       };
     }
     case itemIds.big: {

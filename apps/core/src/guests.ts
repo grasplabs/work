@@ -110,7 +110,7 @@ import { boundedText, jsonOf } from "./request-body.ts";
 // as that does: a workflow run that read the transcript keeps it as its
 // input and in its steps until the run's own retention is over (30 days
 // after the run ends, or fewer if the deployment says so,
-// workflows/retention.ts), and a record an App saved from it (a Playbook
+// workflows/retention.ts), and a record an App saved from it (a brain
 // source, say) is kept like any record, until it is deleted or purged.
 
 /** How long a turn holds its chat: past the model call's own limit. */
