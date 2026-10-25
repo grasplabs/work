@@ -926,7 +926,7 @@ const bindings = (source: string): string[] | undefined =>
   aiStepCalls(source)?.map(({ name, binding }) => `${name}:${binding}`);
 
 describe(reviewedCalls, () => {
-  it("keeps the model binding each AI step names and which steps are keyed, read or not", () => {
+  it("keeps the model binding each AI step names and which steps are keyed, read or not, whatever the step is called", () => {
     const read = reviewedCalls(
       workflowSource(`${llm("reader")}
   for (const item of input.items) {
@@ -938,6 +938,13 @@ describe(reviewedCalls, () => {
     const unread = reviewedCalls(
       workflowSource(`try { ${llm("reader")} } catch {}`)
     );
+    // Valid step names that an empty object would otherwise inherit.
+    const inherited = reviewedCalls(
+      workflowSource(`try {
+    await step.llm("constructor", { description: "Read", binding: "reader", instructions: "Read", input: "x", schema: {} });
+    await step.llm("toString", { description: "Read", binding: "writer", instructions: "Read", input: "x", schema: {} });
+  } catch {}`)
+    );
 
     expect({
       read: { models: read.models, keyed: read.keyed },
@@ -946,9 +953,15 @@ describe(reviewedCalls, () => {
         models: unread.models,
         keyed: unread.keyed,
       },
+      // As entries: an expected object can't hold `constructor` as data.
+      inherited: Object.entries(inherited.models),
     }).toStrictEqual({
       read: { models: { read: ["reader"] }, keyed: ["each"] },
       unread: { steps: null, models: { read: ["reader"] }, keyed: [] },
+      inherited: [
+        ["constructor", ["reader"]],
+        ["toString", ["writer"]],
+      ],
     });
   });
 });

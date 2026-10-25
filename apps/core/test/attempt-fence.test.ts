@@ -605,6 +605,8 @@ describe(
       const calls: WorkflowCalls = {
         steps: { tidy: ["BRAIN"] },
         kinds: { tidy: "exact" },
+        models: {},
+        keyed: [],
         all: ["BRAIN"],
       };
       return { app, brainGrant, calls };
@@ -675,7 +677,13 @@ describe(
       const { answered } = await cancelledAt(
         app,
         admin.userId,
-        { steps: { tidy: [] }, kinds: { tidy: "exact" }, all: [] },
+        {
+          steps: { tidy: [] },
+          kinds: { tidy: "exact" },
+          models: {},
+          keyed: [],
+          all: [],
+        },
         undefined,
         recallNote
       );

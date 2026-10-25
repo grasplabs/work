@@ -454,6 +454,67 @@ describe("workflow tests", () => {
     });
   });
 
+  it("fail a run that caught a refused step or model call and went on", async () => {
+    const summary = workflow("summary", { params: {} }, async (step) => {
+      let text = "none";
+      try {
+        text = await step.llm("write", {
+          description: "Write",
+          binding: "WRITER",
+          instructions: "Summarise",
+          input: "Invoice INV-7",
+          schema: z.string(),
+        });
+      } catch {
+        // Goes on as if the model had answered.
+      }
+      try {
+        await step.do(
+          "file",
+          { description: "File", key: "k1" },
+          async () => text.length
+        );
+      } catch {
+        // Goes on as if the step had run.
+      }
+      return text;
+    });
+    const tests = workflowTests(summary, [
+      { name: "runs", model: () => "Fine", expect: { output: "Fine" } },
+    ]);
+    const reviewed = {
+      steps: { write: [], file: [] },
+      kinds: { write: "ai", file: "exact" },
+      models: { write: ["WRITER"] },
+      keyed: ["file"],
+      all: [],
+    } as const satisfies WorkflowCalls;
+
+    const held = await runWorkflowTests(tests, reviewed);
+    const anotherModel = await runWorkflowTests(tests, {
+      ...reviewed,
+      models: { write: ["DRAFTER"] },
+    });
+    const unkeyed = await runWorkflowTests(tests, { ...reviewed, keyed: [] });
+
+    expect({
+      held: held.passed,
+      anotherModel: anotherModel.results[0]?.failures,
+      unkeyed: unkeyed.results[0]?.failures,
+    }).toStrictEqual({
+      held: true,
+      // The first refusal fails the run, though the workflow caught it.
+      anotherModel: [
+        expect.stringContaining('it failed: Step "write" asked model WRITER'),
+      ],
+      unkeyed: [
+        expect.stringContaining(
+          'it failed: Step "file:k1" isn\'t one the review'
+        ),
+      ],
+    });
+  });
+
   it("fail for a workflow without tests", async () => {
     const report = await runWorkflowTests(
       workflowTests(invoiceWorkflow(unusedSystems), [])

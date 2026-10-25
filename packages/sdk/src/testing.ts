@@ -331,6 +331,20 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
   // The step whose function runs now, by its engine name, and the first
   // of its calls refused as one its review doesn't show.
   let running: { step: string; refused?: Error } | undefined;
+  // The first refusal of a call, step or model the review doesn't show.
+  // As on the platform (the host's tampering), it ends the run: every
+  // later call, step and model call fails with it at once, and the run
+  // fails with it even if the workflow caught it (`testRun`).
+  let tampered: Error | undefined;
+  const refuse = (error: Error): never => {
+    tampered ??= error;
+    throw error;
+  };
+  const requireUntampered = (): void => {
+    if (tampered !== undefined) {
+      throw tampered;
+    }
+  };
   const { calls } = options;
   const checkCall = (binding: string): void => {
     if (calls === undefined || calls === null) {
@@ -344,11 +358,12 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
     if (running.refused !== undefined) {
       throw running.refused;
     }
+    requireUntampered();
     if (!callReviewed(calls, running.step, binding)) {
       const error = workflowErrors.create("workflow.call_not_reviewed");
       error.message = `Step "${stepNameOf(running.step).name}" called ${binding}, which the review of this version doesn't show it calling: call each binding only in the step's own function, where the review shows it.`;
       running.refused = error;
-      throw error;
+      refuse(error);
     }
   };
 
@@ -356,10 +371,14 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
   // review doesn't show, or under a key when its review shows it written
   // without one.
   const checkStep = (name: string): void => {
-    if (calls !== undefined && calls !== null && !stepReviewed(calls, name)) {
+    if (calls === undefined || calls === null) {
+      return;
+    }
+    requireUntampered();
+    if (!stepReviewed(calls, name)) {
       const error = workflowErrors.create("workflow.step_not_reviewed");
       error.message = `Step "${name}" isn't one the review of this version shows: run steps only as the workflow's function writes them.`;
-      throw error;
+      refuse(error);
     }
   };
   // As the host refuses it (`modelReviewed`): a model call naming another
@@ -369,13 +388,14 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
     if (calls === undefined || calls === null) {
       return;
     }
+    requireUntampered();
     if (!modelReviewed(calls, running?.step ?? step, binding)) {
       const error = workflowErrors.create("workflow.step_not_reviewed");
       error.message = `Step "${step}" asked model ${binding}, which the review of this version doesn't show it asking: ask each AI step's model only as its \`step.llm\` names it.`;
       if (running !== undefined) {
         running.refused = error;
       }
-      throw error;
+      refuse(error);
     }
   };
 
@@ -569,7 +589,14 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
     },
   };
 
-  return { engine, steps, modelRequests, decisions };
+  return {
+    engine,
+    steps,
+    modelRequests,
+    decisions,
+    /** The refusal that ended the run, caught or not, if any. */
+    tampered: (): Error | undefined => tampered,
+  };
 };
 
 /** What a test run or dry run needs besides the workflow. */
@@ -603,7 +630,7 @@ export const testRun = async <Output>(
   definition: WorkflowDefinition<Output>,
   { input, ...options }: TestRunOptions = {}
 ): Promise<TestRun<Output>> => {
-  const { engine, steps } = createTestEngine({
+  const { engine, steps, tampered } = createTestEngine({
     ...options,
     // Last, so no option sets it: `TestRunOptions` has no `sideEffects`,
     // but untyped options (a test file's, sent to core) may.
@@ -622,6 +649,12 @@ export const testRun = async <Output>(
       status: "failed",
       error: error instanceof Error ? error : new Error(String(error)),
     };
+  }
+  // As on the platform: a refusal fails the run, even one the workflow
+  // caught and went on from.
+  const refusal = tampered();
+  if (refusal !== undefined) {
+    outcome = { status: "failed", error: refusal };
   }
   return {
     ...outcome,

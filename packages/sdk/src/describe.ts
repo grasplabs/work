@@ -1730,14 +1730,16 @@ const aiKindsOf = (source: string): WorkflowCalls["kinds"] =>
  * which no release builds.
  */
 const aiModelsOf = (source: string): WorkflowCalls["models"] => {
-  const models: WorkflowCalls["models"] = {};
+  // A Map, not an object: a valid step name such as `constructor` must
+  // not read one of Object.prototype's members as its bindings.
+  const models = new Map<string, string[]>();
   for (const { name, binding } of aiStepCalls(source) ?? []) {
     if (binding !== null) {
       const step = name ?? "$ai";
-      models[step] = [...(models[step] ?? []), binding];
+      models.set(step, [...(models.get(step) ?? []), binding]);
     }
   }
-  return models;
+  return Object.fromEntries(models);
 };
 
 /** The model binding each AI step of `steps` names, by step name. */
