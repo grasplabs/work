@@ -324,7 +324,7 @@ const Person = ({
             }
             variant="outline"
           >
-            <Trans>Read the transcript</Trans>
+            <Trans>See the interview</Trans>
           </Button>
         ) : null}
         {interview === undefined ? null : (
@@ -483,7 +483,7 @@ const PersonRow = ({
         ) : null}
         {view.interviews.some((one) => one.id === each.person.id) ? (
           <Button
-            aria-label={t`Read the transcript of ${name}`}
+            aria-label={t`See the interview of ${name}`}
             render={
               <Link
                 params={{ person: each.person.id }}
@@ -493,7 +493,7 @@ const PersonRow = ({
             size="sm"
             variant="ghost"
           >
-            <Trans context="button: read a transcript">Read</Trans>
+            <Trans context="button: see an interview">See</Trans>
           </Button>
         ) : null}
       </span>

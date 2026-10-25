@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { modelRoles } from "./deployment-config.ts";
+import { interviewProgressSchema } from "./interview-links.ts";
 import { interviewTurnRequestSchema } from "./interview-turn.ts";
 import { modelEfforts } from "./models.ts";
 
@@ -77,6 +78,15 @@ export const labRequestSchema = z.discriminatedUnion("action", [
   }),
   /** Every piece of work drawn again from what its people agreed to, kept nowhere. */
   z.strictObject({ action: z.literal("draw") }),
+  /**
+   * What a practice person said and approved, to score and keep: the lab
+   * played them. Never Grasp's staff on a client's core, who see no word
+   * of an interview (GRA-329): this route is a local stack's alone.
+   */
+  z.strictObject({
+    action: z.literal("interview"),
+    person: z.string().max(nameMax),
+  }),
 ]);
 export type LabRequest = z.output<typeof labRequestSchema>;
 
@@ -120,3 +130,15 @@ export const labDrawingsSchema = z.strictObject({
   ),
 });
 export type LabDrawings = z.output<typeof labDrawingsSchema>;
+
+/** A practice person's interview as the lab scores it; null when they aren't on the roster. */
+export const labInterviewSchema = z.strictObject({
+  interview: z
+    .strictObject({
+      startedAt: z.string().nullable(),
+      completedAt: z.string().nullable(),
+      progress: interviewProgressSchema.nullable(),
+    })
+    .nullable(),
+});
+export type LabInterview = z.output<typeof labInterviewSchema>;

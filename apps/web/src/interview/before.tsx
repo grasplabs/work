@@ -6,8 +6,9 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { LanguageChoice } from "../onboarding/language-choice.tsx";
+import { isRefused, participate } from "./api.ts";
 import { Head, headSizes, pair, useHead } from "./head.tsx";
-import { update, useInterviewer, useProgress } from "./kept.ts";
+import { linkNow, update, useInterviewer, useProgress } from "./kept.ts";
 import { chose, toldWhat } from "./progress.ts";
 import { Quiet, sayAfterMs, SoundCheck } from "./sound-check.tsx";
 import type { AnswerBy } from "./sound-check.tsx";
@@ -26,7 +27,9 @@ import { SpokenText } from "./spoken.tsx";
 // to read in peace, then a check that both can hear each other. Whoever has
 // read what this is before goes straight to the check, with whoever they
 // chose then. There is no button to say no: whoever doesn't want to talk
-// closes the link. Kept plain: no cards or icons, one column.
+// closes the link. Kept plain: no cards or icons, one column. Going on from
+// what this is tells core they agree to take part (GRA-329): nothing they
+// say is heard or read by a model before core kept that.
 
 /** The device's own language is marked already: a press on another switches to it, and nothing more. */
 const keepGoing = (): void => {
@@ -268,12 +271,15 @@ const About = ({
   name,
   kind,
   room,
+  refusal,
   onNext,
   onType,
 }: {
   name: string;
   kind: InterviewKind;
   room: number;
+  /** Why taking part wasn't kept, when it wasn't. */
+  refusal: string | null;
   onNext: () => void;
   onType: () => void;
 }) => {
@@ -332,6 +338,11 @@ const About = ({
           >
             {t`Rather talk with ${otherName}?`}
           </Quiet>
+          {refusal === null ? null : (
+            <p className="text-destructive text-sm" role="alert">
+              {refusal}
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -358,6 +369,21 @@ export const Before = ({
 }) => {
   const progress = useProgress();
   const [asked, setAsked] = useState(progress.told);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  /** Core keeps that they take part, then `then`; or says why not. */
+  const takePart = async (then: () => void): Promise<void> => {
+    const link = linkNow();
+    if (link === null) {
+      return;
+    }
+    const answer = await participate(link.secret, link.key);
+    if (isRefused(answer)) {
+      setRefusal(answer.message);
+      return;
+    }
+    setRefusal(null);
+    then();
+  };
   let screen: Screen = "who";
   if (!asked) {
     screen = "language";
@@ -396,14 +422,19 @@ export const Before = ({
           kind={kind}
           name={name}
           onNext={() => {
-            update(toldWhat);
+            void takePart(() => {
+              update(toldWhat);
+            });
           }}
           onType={() => {
             // Whoever chooses to type here has no use for a sound check, and isn't surprised by a voice.
             stopSpeaking();
             setSound(false);
-            onStart("type");
+            void takePart(() => {
+              onStart("type");
+            });
           }}
+          refusal={refusal}
           room={room}
         />
       );

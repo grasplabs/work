@@ -595,6 +595,22 @@ const onboarding: DurableObjectState = {
     documents: exported(`${core}onboarding/documents.ts`),
     usage: exported(`${core}onboarding/store.ts`),
     interview_texts: exported(`${core}onboarding/store.ts`),
+    participations: exported(
+      `${core}onboarding/store.ts`,
+      "Who agreed to take part in their interview, to which notice, and when they withdrew; a withdrawal stays through a delete or new start, until they leave the roster."
+    ),
+    readbacks: exported(
+      `${core}onboarding/store.ts`,
+      "Receipts of the read-backs people approved."
+    ),
+    forget_lines: transient(
+      `${core}onboarding/store.ts`,
+      "Voice cache keys of interviews that went, until the cache confirms they are gone."
+    ),
+    approvals: exported(
+      `${core}onboarding/store.ts`,
+      "The exact fact revisions each person approved: only these count."
+    ),
     works: exported(`${core}onboarding/store.ts`),
     asked_about: exported(`${core}onboarding/store.ts`),
     drawn_works: exported(`${core}onboarding/store.ts`),

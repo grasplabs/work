@@ -29,8 +29,9 @@ import { log } from "@grasp-os/shared/log";
 //   they are; and a name on the staff list in it is taken out.
 // - A drawing keeps no `from` and no `told`: its numbers are ranges over
 //   everyone who gave one, and how many did, never whose.
-// - A team reaches the brain only once `brainFloor` of its people agreed
-//   (the store holds it back until then).
+// - A team reaches the brain only once `minTeamShown` (five) of its people
+//   agreed, as many as the company's numbers need and the interview's
+//   notice promises (GRA-329); the store holds it back until then.
 //
 // Who each record rests on is kept apart, in the onboarding's own store
 // (`brain_sent`), so deleting an interview can find what it is in
@@ -38,9 +39,6 @@ import { log } from "@grasp-os/shared/log";
 
 /** The staff list, as the source the brain found each team in. */
 export const rosterSource = "src-roster";
-
-/** How many of a team must have agreed before any of it reaches the brain. */
-export const brainFloor = 3;
 
 /** An id the onboarding owns, from what it stands for: the same thing is the same id. */
 const ownId = async (kind: string, ...parts: string[]): Promise<string> => {

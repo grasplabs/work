@@ -14,6 +14,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { transcriptionModel } from "../src/onboarding/transcription.ts";
 import { allEvents, logHead, eventsAfter } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { onLink, participate } from "./interview-link.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
@@ -33,14 +34,16 @@ import {
 // with a final one. The store, the link checks and the audit log are
 // real. The ways it can fail, tried here (GRA-361, C4 and A1):
 //
-// - A socket on a link that isn't one, on another person's link, for
+// - A socket on a link that isn't one, on another person's link, on the
+//   link of someone who didn't agree to take part (GRA-329, T1), for
 //   nobody signed in or a member who isn't an admin, from another site,
 //   or one that sends audio before it says who it is for.
 // - One side closing and the other left open, holding the upstream (and
 //   its bill) or the page's microphone.
 // - Audio kept anywhere: the store, the database, the audit log.
 // - Listening on after the link or the admin no longer may: the person
-//   taken off the list, the onboarding paused, the admin made a member.
+//   taken off the list, the onboarding paused, the person withdrawing
+//   (GRA-329, T5), the admin made a member.
 // - Sockets opened side by side on one link, each hearing a day's budget.
 // - Listening past the deployment's own budgets, or with a model its
 //   allowlist or its rules don't let it use (GRA-1064).
@@ -189,9 +192,10 @@ const relaying = async <T>(
 
 /**
  * An onboarding running since yesterday with two people in Ops, each
- * link out and opened on a device of their own: their secrets and keys.
+ * link out and opened on a device of their own, who agreed to take part
+ * unless `participating` is false: their secrets and keys.
  */
-const openedTwo = async () => {
+const openedTwo = async (participating = true) => {
   const store = onboardingStore(env);
   const ids = [`ada-${unique()}`, `bo-${unique()}`] as const;
   const roster: Roster = {
@@ -224,7 +228,11 @@ const openedTwo = async () => {
         body: JSON.stringify({ action: "session", secret }),
       });
       const { key } = sessionKey.parse(await session.json());
-      return { secret, key: key ?? "" };
+      const device = { secret, key: key ?? "" };
+      if (participating) {
+        await participate(device);
+      }
+      return device;
     })
   );
   if (ada === undefined || bo === undefined) {
@@ -479,6 +487,11 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
   it.each([
     ["a link that isn't one", "unknown", "interview.link_invalid"],
     ["another person's link, on this device", "other", "interview.elsewhere"],
+    [
+      "a link whose person didn't agree to take part",
+      "unagreed",
+      "interview.not_participating",
+    ],
     ["nobody signed in, without a link", "none", "auth.unauthenticated"],
     ["a member who isn't an admin, without a link", "user", "role.forbidden"],
     ["audio before it says whose it is", "audio", "transcription.invalid"],
@@ -486,7 +499,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
   ] as const)(
     "refuses a socket for %s, opening nothing upstream",
     async (_, kind, refusal) => {
-      const { ada, bo } = await openedTwo();
+      const { ada, bo } = await openedTwo(kind !== "unagreed");
       const headers: Record<string, string> = {};
       if (kind === "user") {
         const member = await signedInWithRole(idp, "user");
@@ -508,6 +521,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
           const link = {
             unknown: { secret: randomToken(), key: ada.key },
             other: { secret: bo.secret, key: ada.key },
+            unagreed: ada,
             none: undefined,
             user: undefined,
           }[kind];
@@ -646,6 +660,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
   it.each([
     ["the person is taken off the list", "removed", "interview.link_invalid"],
     ["the onboarding is paused", "paused", "interview.paused"],
+    ["the person withdraws", "withdrawn", "interview.withdrawn"],
     ["the admin is made a member", "demoted", "role.forbidden"],
   ] as const)(
     "stops listening, upstream too, once %s while the socket is open",
@@ -675,6 +690,8 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
           );
         } else if (change === "paused") {
           await store.setPaused(true, by);
+        } else if (change === "withdrawn") {
+          await onLink({ action: "withdraw", ...ada });
         } else {
           await env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?")
             .bind("user", admin?.userId ?? "")

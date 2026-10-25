@@ -18,9 +18,10 @@ import { SettingsError } from "../settings/settings-parts.tsx";
 // three sides, the side in the address: where every team stands and what
 // can be done there, everyone by name, and the interviews one by one. All
 // from the snapshot Grasp's admin reads (core's admin-snapshot.ts), read
-// as the admin reads it, as numbers: what anyone said is only in a
-// transcript, read one at a time, on record (interviews.$person). The
-// company sees none of this: it gets numbers per team.
+// as the admin reads it, as numbers. What anyone said stays with them:
+// nobody at Grasp reads it (GRA-329); one interview opens as where it
+// stands and its numbers, on record (interviews.$person). The company sees
+// none of this: it gets numbers per team.
 
 const tabs = ["teams", "people", "transcripts"] as const;
 type Tab = (typeof tabs)[number];
@@ -29,7 +30,7 @@ const tabTitles: Record<Tab, MessageDescriptor> = {
   teams: msg({ message: "Teams", context: "view of the interviews" }),
   people: msg({ message: "People", context: "view of the interviews" }),
   transcripts: msg({
-    message: "Transcripts",
+    message: "One by one",
     context: "view of the interviews",
   }),
 };
