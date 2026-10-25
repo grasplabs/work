@@ -212,7 +212,7 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     expect(new Set(refused)).toStrictEqual(new Set(["onboarding.staff_only"]));
   });
 
-  it("shows staff each piece of work as numbers only, never anything anyone said, its numbers as totals over enough people, and every read is on record", async () => {
+  it("shows staff each piece of work with each person's numbers apart and its open questions, and every read is on record", async () => {
     const { ids, booking, filing } = await drawn();
     const staff = await asStaff();
 
@@ -225,19 +225,10 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     );
     const works = reads[0]?.works ?? [];
     const work = works.find(({ id }) => id === booking);
-    // Every string staff get of a drawing, whatever its name: never a word
-    // anyone said, only when it was drawn and what its numbers count in.
-    const strings: string[] = [];
-    const collect = (value: unknown): void => {
-      if (typeof value === "string") {
-        strings.push(value);
-      } else if (typeof value === "object" && value !== null) {
-        for (const each of Object.values(value)) {
-          collect(each);
-        }
-      }
+    const numbers = (person: string) => {
+      const told = work?.drawn?.told[person];
+      return [told?.volume, told?.takes, told?.wrong];
     };
-    collect(work?.drawn);
     const text = JSON.stringify(events);
     expect({
       works: works
@@ -248,11 +239,9 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
           doers,
           drawing === null,
         ]),
-      strings: strings.slice(1),
-      keys: Object.keys(work?.drawn ?? {}).toSorted(),
-      heard: work?.drawn?.heard,
-      steps: work?.drawn?.steps,
-      totals: work?.drawn?.totals,
+      max: numbers(ids.max),
+      mia: numbers(ids.mia),
+      open: work?.drawn?.open,
       rules: reads[0]?.rules,
       audited: events.map(({ action, actor, target }) => [
         action,
@@ -265,22 +254,9 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
         [booking, ["invoice", "invoices"], [ids.max, ids.mia, ids.noor], false],
         [filing, ["receipt", "receipts"], [ids.noor], true],
       ],
-      // Nothing anyone said: past when it was drawn, only its units.
-      strings: ["week", "minutes"],
-      keys: ["at", "differently", "heard", "per", "steps", "totals", "unit"],
-      // Two of three talked: under 5, how many isn't staff's, of the work or
-      // of a step (GRA-1079); nobody gave a step's minutes here.
-      heard: null,
-      steps: [
-        { people: null, minutes: { people: 0, value: null } },
-        { people: null, minutes: { people: 0, value: null } },
-      ],
-      // Fewer than 5 gave each number: neither how many nor a value (GRA-1079).
-      totals: {
-        volume: { people: null, value: null },
-        takes: { people: null, value: null },
-        wrong: { people: null, value: null },
-      },
+      max: [[20, 40], [2, 4, 9], null],
+      mia: [[60, 90], null, 1],
+      open: ["Who approves an invoice over 5,000 euros?"],
       rules: STARTING_ORG_RULES,
       // On record as a staff look (staff-audit.ts), naming no one.
       audited: [["staff.accessed", "staff", undefined]],
@@ -355,14 +331,15 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     expect({
       before,
       result,
-      // Drawn again: one step now, which staff see by its place alone.
-      steps: works.find(({ id }) => id === booking)?.drawn?.steps.length,
+      steps: works
+        .find(({ id }) => id === booking)
+        ?.drawn?.steps.map(({ text }) => text),
       nothing: await outcome(staff.onboardingStaff.drawWorkAgain(filing)),
       unknown: await outcome(staff.onboardingStaff.drawWorkAgain("nothing")),
     }).toStrictEqual({
       before: null,
       result: [`work:${booking}`, null],
-      steps: 1,
+      steps: ["Open the invoice in Exact."],
       nothing: "onboarding.nothing_to_draw",
       unknown: "onboarding.no_work",
     });

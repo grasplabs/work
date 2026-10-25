@@ -4,7 +4,7 @@ import type { DocumentReading } from "./document-reading.ts";
 import type { InterviewFact, InterviewLine } from "./interview-turn.ts";
 import { isInterviewer } from "./interviewer.ts";
 import type { Interviewer } from "./interviewer.ts";
-import { MIN_GROUP, PHASES, TAGS } from "./interviews.ts";
+import { PHASES, TAGS } from "./interviews.ts";
 import type { PersonState, Phase } from "./interviews.ts";
 import type { Member, Unknown } from "./onboarding-admin.ts";
 import { present } from "./present.ts";
@@ -522,11 +522,7 @@ export const stateOfInterview = (held: HeldInterview): InterviewState => {
   };
 };
 
-/**
- * What one person said about a piece of work, as positions in the drawn work, with their own
- * numbers: core's drawing keeps it. Staff never get it whole: they get `ToldParts` and the
- * drawing's `DrawnTotals` (`StaffDrawing`).
- */
+/** What one person said about a piece of work, as positions in the drawn work: what the admin's record counts. */
 export interface Told {
   start: boolean;
   steps: number[];
@@ -548,224 +544,7 @@ export interface Told {
   example: string | null;
   term: boolean;
   out: string[];
-  /** Their own minutes for each step they gave them for, by step: quickest, normal, longest. */
-  stepMinutes?: { step: number; minutes: [number, number, number] }[];
-  /** Their own share out of ten of each case off the normal path they gave one for, by case. */
-  caseShares?: { case: number; outOfTen: number }[];
 }
-
-// Staff see a drawing's numbers only, never what anyone said (GRA-1084), and the numbers as totals
-// only, never one person's (GRA-1079). From the threat
-// model and its security review: a total over a few people, beside who told what, gives one
-// person's number away (one person's flag and a total over one; a step only one person told; the
-// ends of a range, each one person's). So a number shows only once at least `MIN_GROUP` (5)
-// people gave it, as a median, never a lowest or highest; who gave which number is never shown,
-// only how many. That holds for a team of one too: its one person's number, or that one person
-// told a step, is theirs (Nick's 5-person floor, GRA-1079).
-
-/**
- * Which parts of a piece of work one person told: which steps, and yes or no for the parts with
- * no number. The admin's sample organizations count their made-up people's by it, and core its
- * own known-count; a real organization's staff never get it (GRA-1084).
- */
-export interface ToldParts {
-  start: boolean;
-  steps: number[];
-  end: boolean;
-  way: { step: number; other: boolean } | null;
-  waits: number[];
-  differently: number[];
-  decides: boolean;
-  own: boolean;
-  ai: boolean;
-  right: boolean;
-  ask: boolean;
-  next: boolean;
-  /** They shared an example. */
-  example: boolean;
-  term: boolean;
-  /** What they took out again at read-back, by fact; numbers' facts never among them. */
-  out: string[];
-}
-
-/**
- * A number staff see: how many people it rests on, and its value, once that is at least
- * `MIN_GROUP`, whatever the team's size. Under that, neither: staff read "fewer than 5",
- * and not how many fewer. None gave it: no people, and no value.
- */
-export interface DrawnNumber<Value> {
-  people: number | null;
-  value: Value | null;
-}
-
-/** A drawing's numbers over everyone who gave them and left them in, as medians (`DrawnNumber`). */
-export interface DrawnTotals {
-  /** How many there are in a quiet and in a busy week or month. */
-  volume: DrawnNumber<{ quiet: number; busy: number }>;
-  /** How long a normal one takes. */
-  takes: DrawnNumber<number>;
-  /** How many out of ten come in wrong. */
-  wrong: DrawnNumber<number>;
-}
-
-/**
- * A step as staff see it: only where it is, how many people told it, and the median of the minutes
- * people gave for a normal one, once enough gave them. Never what anyone said it is.
- */
-export interface StaffStep {
-  /** How many told it: 0, at least `MIN_GROUP`, or none under that (`shownCount`). */
-  people: number | null;
-  minutes: DrawnNumber<number>;
-}
-
-/**
- * A drawing as staff get it (GRA-1079, GRA-1084): numbers only, never anything anyone said. Its
- * steps and cases by position, how many people each rests on, and its numbers as medians over
- * at least 5 people. No text of the drawing, and nothing by person.
- */
-export interface StaffDrawing {
-  /** When it was drawn, and from how many people's interviews (`shownCount`). */
-  at: string;
-  heard: number | null;
-  per: DrawnWork["per"];
-  unit: DrawnWork["unit"];
-  steps: StaffStep[];
-  /** Each case off the normal path: the step it follows, and how many out of ten. */
-  differently: { after: number; outOfTen: DrawnNumber<number> }[];
-  totals: DrawnTotals;
-}
-
-/** The facts of numbers, which a person's `ToldParts` never names. */
-const numberFacts = new Set(["volume", "takes", "wrong"]);
-
-/** Which parts `told` covers, without a number of theirs or whether they gave one (`ToldParts`). */
-export const toldPartsOf = (told: Told): ToldParts => ({
-  start: told.start,
-  steps: [...told.steps],
-  end: told.end,
-  way: told.way === null ? null : { ...told.way },
-  waits: [...told.waits],
-  differently: [...told.differently],
-  decides: told.decides,
-  own: told.own,
-  ai: told.ai,
-  right: told.right,
-  ask: told.ask,
-  next: told.next,
-  example: told.example !== null && told.example !== "",
-  term: told.term,
-  out: told.out.filter((fact) => !numberFacts.has(fact)),
-});
-
-/** The median of some numbers: the middle one, or halfway between the two middle ones. */
-const medianOf = (values: readonly number[]): number => {
-  const sorted = values.toSorted((a, b) => a - b);
-  const half = Math.floor(sorted.length / 2);
-  const upper = sorted[half] ?? 0;
-  return sorted.length % 2 === 1
-    ? upper
-    : ((sorted[half - 1] ?? 0) + upper) / 2;
-};
-
-/** `value` of `people` as staff may see it (`DrawnNumber`). */
-export const shownNumber = <Value>(
-  people: number,
-  value: () => Value
-): DrawnNumber<Value> => {
-  if (people === 0) {
-    return { people: 0, value: null };
-  }
-  return people >= MIN_GROUP
-    ? { people, value: value() }
-    : { people: null, value: null };
-};
-
-/**
- * How many people something rests on, as staff may see it: none under `MIN_GROUP`, whatever the
- * team's size, as with its numbers. An exact count diffed across interviews as they come in would
- * say which steps one person told (GRA-1079).
- */
-export const shownCount = (count: number): number | null =>
-  count === 0 || count >= MIN_GROUP ? count : null;
-
-/** The numbers someone gave, as far as `totalsOf` reads them. */
-export type GivenNumbers = Pick<Told, "volume" | "takes" | "wrong" | "out">;
-
-/**
- * The totals of what everyone in `given` said and left in when it was read back (`DrawnTotals`):
- * a number someone took out again counts for nothing.
- */
-export const totalsOf = (given: readonly GivenNumbers[]): DrawnTotals => {
-  const kept = <Value>(
-    fact: string,
-    of: (each: GivenNumbers) => Value | null
-  ): Value[] =>
-    given.flatMap((each) => {
-      const value = of(each);
-      return value === null || each.out.includes(fact) ? [] : [value];
-    });
-  const volumes = kept("volume", (each) => each.volume);
-  const takes = kept("takes", (each) => each.takes);
-  const wrongs = kept("wrong", (each) => each.wrong);
-  return {
-    volume: shownNumber(volumes.length, () => ({
-      quiet: medianOf(volumes.map(([quiet]) => quiet)),
-      busy: medianOf(volumes.map(([, busy]) => busy)),
-    })),
-    takes: shownNumber(takes.length, () =>
-      medianOf(takes.map(([, normal]) => normal))
-    ),
-    wrong: shownNumber(wrongs.length, () => medianOf(wrongs)),
-  };
-};
-
-/**
- * A drawing as staff get it (`StaffDrawing`): its steps and cases by position with how many
- * people each rests on, and its numbers as medians over enough people (`DrawnNumber`). Not one
- * of its texts, and nothing by person.
- */
-export const staffDrawingOf = ({
-  told,
-  steps,
-  differently,
-  at,
-  per,
-  unit,
-}: DrawnWork): StaffDrawing => {
-  const tellers = Object.values(told);
-  // Each step's normal minutes and each case's share, from the people who gave them.
-  const minutesOf = (index: number): number[] =>
-    tellers.flatMap((each) =>
-      (each.stepMinutes ?? []).flatMap(({ step, minutes }) =>
-        step === index ? [minutes[1]] : []
-      )
-    );
-  const sharesOf = (index: number): number[] =>
-    tellers.flatMap((each) =>
-      (each.caseShares ?? []).flatMap((share) =>
-        share.case === index ? [share.outOfTen] : []
-      )
-    );
-  const shownOf = (values: readonly number[]): DrawnNumber<number> =>
-    shownNumber(values.length, () => medianOf(values));
-  return {
-    at,
-    heard: shownCount(tellers.length),
-    per,
-    unit,
-    steps: steps.map((_, index) => ({
-      people: shownCount(
-        tellers.filter((each) => each.steps.includes(index)).length
-      ),
-      minutes: shownOf(minutesOf(index)),
-    })),
-    differently: differently.map(({ after }, index) => ({
-      after,
-      outOfTen: shownOf(sharesOf(index)),
-    })),
-    totals: totalsOf(tellers),
-  };
-};
 
 /** A step as drawn: one instruction, who does it, where, and how long people said one takes. */
 export interface DrawnStep {
@@ -834,8 +613,7 @@ export interface WorkRecord {
   share: number;
   /** Named by the lead in their interview, or added by Grasp. */
   from: "lead" | "grasp";
-  /** Its drawing, as staff get it: totals only. */
-  drawn: StaffDrawing | null;
+  drawn: DrawnWork | null;
   /** Agreed facts came in since it was drawn. */
   stale: boolean;
 }

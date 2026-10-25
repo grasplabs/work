@@ -5,10 +5,7 @@ import type {
   StepWay,
   WorkRecord as RecordOfWork,
 } from "@grasp-os/shared/admin/onboarding-admin-record";
-import type {
-  DrawnNumber,
-  StaffDrawing,
-} from "@grasp-os/shared/admin/org-record";
+import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
@@ -164,11 +161,7 @@ const MissingList = ({
       const number = each.step + 1;
       const { people, needed } = each;
       return {
-        // Under 5 at a real organization, how many isn't staff's (GRA-1079).
-        text:
-          people === null
-            ? t`Step ${number}: fewer than 5 people told it so far`
-            : t`Step ${number}: ${people} of ${needed} needed told it`,
+        text: t`Step ${number}: ${people} of ${needed} needed told it`,
         sub: each.text,
         action: (
           <Button
@@ -251,19 +244,22 @@ const MissingList = ({
   );
 };
 
-/** One step, as the interviews have it: how many told it, and, of a sample's made-up people, who and how. */
+/** One step, as the interviews have it: who told it and how, the other way it is told, and who does it and where. */
 const StepEvidence = ({
   record,
   index,
+  drawn,
 }: {
   record: RecordOfWork;
   index: number;
+  drawn: DrawnWork | null;
 }) => {
   const { t } = useLingui();
   const step = record.steps[index];
   if (step === undefined) {
     return null;
   }
+  const detail = drawn?.steps[index];
   const toldAs: Record<StepWay, string> = {
     main: t`Told it`,
     other: t`Another way`,
@@ -271,24 +267,35 @@ const StepEvidence = ({
   };
   const { people } = step;
   const { needed } = record;
-  // How many told it, in words: fewer than 5 at a real organization, never how many (GRA-1079).
-  let told = t`Fewer than 5 people told it so far.`;
-  if (people !== null) {
-    told = step.enough
-      ? t`${people} told it: enough for it to count.`
-      : t`${people} of the ${needed} needed told it.`;
-  }
   return (
     <>
       <div className="flex flex-col gap-2">
-        <p>{step.text === "" ? t`Step ${index + 1}` : step.text}</p>
+        <p>{step.text}</p>
         <p
           className={
             step.enough ? "text-muted-foreground" : "text-status-attention"
           }
         >
-          {told}
+          {step.enough
+            ? t`${people} told it: enough for it to count.`
+            : t`${people} of the ${needed} needed told it.`}
         </p>
+        {detail === undefined ? null : (
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
+            {detail.who === "" ? null : (
+              <>
+                <dt className="text-muted-foreground">{t`Who`}</dt>
+                <dd>{detail.who}</dd>
+              </>
+            )}
+            {detail.tool === "" ? null : (
+              <>
+                <dt className="text-muted-foreground">{t`Where`}</dt>
+                <dd>{detail.tool}</dd>
+              </>
+            )}
+          </dl>
+        )}
       </div>
       {step.other === null ? null : (
         <div className="flex flex-col gap-1">
@@ -307,35 +314,32 @@ const StepEvidence = ({
           )}
         </div>
       )}
-      {/* Who told what shows only of a sample's made-up people: a real organization's staff see how many, never who (GRA-1084). */}
-      {record.byPerson ? (
-        <div className="flex flex-col gap-1">
-          <span className="font-medium">{t`Who said what`}</span>
-          {record.interviews.length === 0 ? (
-            <p className="text-muted-foreground">{t`Nobody yet.`}</p>
-          ) : (
-            <ul className="flex flex-col">
-              {record.interviews.map((interview, at) => {
-                const way = step.ways[at] ?? "none";
-                return (
-                  <li
-                    className="flex items-center gap-2.5 border-b py-1.5 last:border-b-0"
-                    key={interview.id}
-                  >
-                    <WayDot way={way} />
-                    <span className="flex min-w-0 flex-col">
-                      <span className="truncate">{interview.person.name}</span>
-                      <span className="text-muted-foreground text-xs">
-                        {toldAs[way]}
-                      </span>
+      <div className="flex flex-col gap-1">
+        <span className="font-medium">{t`Who said what`}</span>
+        {record.interviews.length === 0 ? (
+          <p className="text-muted-foreground">{t`Nobody yet.`}</p>
+        ) : (
+          <ul className="flex flex-col">
+            {record.interviews.map((interview, at) => {
+              const way = step.ways[at] ?? "none";
+              return (
+                <li
+                  className="flex items-center gap-2.5 border-b py-1.5 last:border-b-0"
+                  key={interview.id}
+                >
+                  <WayDot way={way} />
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate">{interview.person.name}</span>
+                    <span className="text-muted-foreground text-xs">
+                      {toldAs[way]}
                     </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      ) : null}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </>
   );
 };
@@ -390,51 +394,174 @@ const NumberRow = ({
   );
 };
 
-/** How many people a shown number rests on; none for one held back. */
-const restsOn = (number: DrawnNumber<unknown>): number =>
-  number.value === null ? 0 : (number.people ?? 0);
-
-/**
- * The numbers as staff see them (GRA-1079): the median over everyone who gave one, once at least
- * 5 people did; fewer, and only that shows. Never a lowest or a highest, never one person's own.
- */
-const Numbers = ({ record }: { record: RecordOfWork }) => {
+/** One person's own numbers, as they gave them: never another's, never averaged. */
+const OwnNumbers = ({
+  name,
+  told,
+  per,
+  unit,
+}: {
+  name: string;
+  told: Told;
+  per: DrawnWork["per"];
+  unit: DrawnWork["unit"];
+}) => {
   const { t } = useLingui();
+  const unknown = t`Not said`;
+  let volume = unknown;
+  if (told.volume !== null) {
+    const [quiet, busy] = told.volume;
+    // Whose count it is, as they said: their own, the whole team's, or not said.
+    const said =
+      per === "month"
+        ? {
+            me: t`${quiet} to ${busy} a month, their own`,
+            team: t`${quiet} to ${busy} a month, for the whole team`,
+            unknown: t`${quiet} to ${busy} a month`,
+          }
+        : {
+            me: t`${quiet} to ${busy} a week, their own`,
+            team: t`${quiet} to ${busy} a week, for the whole team`,
+            unknown: t`${quiet} to ${busy} a week`,
+          };
+    volume = said[told.volumeOf ?? "unknown"];
+  }
+  let takes = unknown;
+  if (told.takes !== null) {
+    const [quickest, normal, longest] = told.takes;
+    takes =
+      unit === "hours"
+        ? t`${normal} hours, ${quickest} to ${longest}`
+        : t`${normal} minutes, ${quickest} to ${longest}`;
+  }
+  const wrongCount = told.wrong;
+  const wrong = wrongCount === null ? unknown : t`${wrongCount} in 10`;
+  return (
+    <tr className="border-t">
+      <th className="px-5 py-2.5 text-left font-normal" scope="row">
+        {name}
+      </th>
+      <td
+        className={cn(
+          "px-3 py-2.5",
+          told.volume === null && "text-muted-foreground"
+        )}
+      >
+        {volume}
+      </td>
+      <td
+        className={cn(
+          "px-3 py-2.5",
+          told.takes === null && "text-muted-foreground"
+        )}
+      >
+        {takes}
+      </td>
+      <td
+        className={cn(
+          "px-5 py-2.5",
+          wrongCount === null && "text-muted-foreground"
+        )}
+      >
+        {wrong}
+      </td>
+    </tr>
+  );
+};
+
+/** The numbers: the range people gave, never an average, and each person's own beside it. */
+const Numbers = ({
+  record,
+  drawn,
+}: {
+  record: RecordOfWork;
+  drawn: DrawnWork | null;
+}) => {
+  const { t } = useLingui();
+  // A range as people gave it: one number when the ends meet.
+  const span = (low: number, high: number) =>
+    low === high ? String(low) : t`${low} to ${high}`;
   const { volume, takes, wrong } = record;
   const { per, unit } = record.evidence.work;
-  const fewer = t`Fewer than 5 people gave it.`;
-  // What a number reads as: nothing when nobody gave it, `fewer` below the threshold.
-  const shown = <Value,>(
-    number: DrawnNumber<Value>,
-    text: (value: Value) => string
-  ): string | null => {
-    if (number.people === 0) {
-      return null;
-    }
-    return number.value === null ? fewer : text(number.value);
-  };
+  let howMany: string | null = null;
+  if (volume !== null) {
+    const quiet = span(...volume.quiet);
+    const busy = span(...volume.busy);
+    howMany =
+      per === "month"
+        ? t`${quiet} in a quiet month, ${busy} in a busy one.`
+        : t`${quiet} in a quiet week, ${busy} in a busy one.`;
+  }
+  let howLong: string | null = null;
+  if (takes !== null) {
+    const normal = span(...takes.normal);
+    const { least, most } = takes;
+    howLong =
+      unit === "hours"
+        ? t`A normal one takes ${normal} hours. The quickest took ${least}, the longest ${most}.`
+        : t`A normal one takes ${normal} minutes. The quickest took ${least}, the longest ${most}.`;
+  }
+  const outOfTen = wrong === null ? "" : span(...wrong.outOfTen);
+  const own = record.interviews.flatMap((interview) => {
+    const told = drawn?.told[interview.person.id];
+    return told === undefined ||
+      (told.volume === null && told.takes === null && told.wrong === null)
+      ? []
+      : [{ id: interview.person.id, name: interview.person.name, told }];
+  });
   return (
     <SettingsSection
-      description={t`The middle of what people gave once at least 5 did, never an average of a few or one person's own.`}
+      description={t`Always the range people gave, never an average, and each person's own.`}
       title={t`The numbers`}
     >
-      <NumberRow label={t`How many`} people={restsOn(volume)}>
-        {shown(volume, ({ quiet, busy }) =>
-          per === "month"
-            ? t`About ${quiet} in a quiet month, ${busy} in a busy one.`
-            : t`About ${quiet} in a quiet week, ${busy} in a busy one.`
-        )}
+      <NumberRow label={t`How many`} people={volume?.people ?? 0}>
+        {howMany}
       </NumberRow>
-      <NumberRow label={t`How long`} people={restsOn(takes)}>
-        {shown(takes, (normal) =>
-          unit === "hours"
-            ? t`A normal one takes about ${normal} hours.`
-            : t`A normal one takes about ${normal} minutes.`
-        )}
+      <NumberRow label={t`How long`} people={takes?.people ?? 0}>
+        {howLong}
       </NumberRow>
-      <NumberRow label={t`How often it comes in wrong`} people={restsOn(wrong)}>
-        {shown(wrong, (outOfTen) => t`About ${outOfTen} in 10.`)}
+      <NumberRow
+        label={t`How often it comes in wrong`}
+        people={wrong?.people ?? 0}
+      >
+        {wrong === null ? null : t`${outOfTen} in 10.`}
       </NumberRow>
+      {own.length === 0 || drawn === null ? null : (
+        <div className="overflow-x-auto border-t">
+          <table
+            aria-label={t`Each person's numbers`}
+            className="w-full text-sm"
+          >
+            <thead className="text-muted-foreground text-xs">
+              <tr>
+                <th className="px-5 py-2 text-left font-normal" scope="col">
+                  {t`Who`}
+                </th>
+                <th className="px-3 py-2 text-left font-normal" scope="col">
+                  {t`How many`}
+                </th>
+                <th className="px-3 py-2 text-left font-normal" scope="col">
+                  {t`How long`}
+                </th>
+                <th className="px-5 py-2 text-left font-normal" scope="col">
+                  {t`Wrong`}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {own.map((each) => (
+                <OwnNumbers
+                  key={each.id}
+                  name={each.name}
+                  per={drawn.per}
+                  told={each.told}
+                  unit={drawn.unit}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </SettingsSection>
   );
 };
@@ -524,33 +651,10 @@ const Around = ({ record }: { record: RecordOfWork }) => {
   );
 };
 
-/** How many told a step, of how many it was heard from: never a count under 5 at a real organization. */
-const ToldCount = ({
-  people,
-  talked,
-}: {
-  people: number | null;
-  talked: number | null;
-}) => {
+/** Who told which step, and how: a dot per person, in the order they talked. */
+const StepsTold = ({ record }: { record: RecordOfWork }) => {
   const { t } = useLingui();
-  if (people === null) {
-    return t`Fewer than 5`;
-  }
-  return talked === null ? t`${people} people` : t`${people} of ${talked}`;
-};
-
-/**
- * Who told which step, and how: a dot per person, in the order they talked. `talked` is how many
- * it was heard from: a real organization's as its drawing counts them, none under 5 (GRA-1079).
- */
-const StepsTold = ({
-  record,
-  talked,
-}: {
-  record: RecordOfWork;
-  talked: number | null;
-}) => {
-  const { t } = useLingui();
+  const talked = record.interviews.length;
   const { needed } = record;
   return (
     <SettingsSection
@@ -587,7 +691,7 @@ const StepsTold = ({
                         each.enough ? undefined : "text-muted-foreground"
                       }
                     >
-                      {each.text === "" ? t`Step ${number}` : each.text}
+                      {each.text}
                     </span>
                     {each.documented ? (
                       <span className="text-muted-foreground text-xs">
@@ -597,13 +701,12 @@ const StepsTold = ({
                   </span>
                 </span>
                 <span className="flex flex-wrap gap-1 pl-7 sm:pl-0">
-                  {/* Who told it shows only of a sample's made-up people (GRA-1084). */}
-                  {(record.byPerson ? each.ways : []).map((way, at) => (
+                  {each.ways.map((way, at) => (
                     <WayDot key={record.interviews[at]?.id ?? at} way={way} />
                   ))}
                 </span>
                 <span className="text-muted-foreground pl-7 tabular-nums sm:pl-0 sm:text-right">
-                  <ToldCount people={people} talked={talked} />
+                  {t`${people} of ${talked}`}
                 </span>
               </div>
               {each.other === null ? null : (
@@ -631,31 +734,13 @@ const StepsTold = ({
   );
 };
 
-/** How many a real organization's piece of work was heard from, as its drawing counts them. */
-const HeardCount = ({ heard }: { heard: number | null | undefined }) => {
-  const { t } = useLingui();
-  if (heard === undefined || heard === 0) {
-    return t`Nobody yet.`;
-  }
-  if (heard === null) {
-    return t`Fewer than 5 people so far.`;
-  }
-  return plural(heard, {
-    one: "# person so far.",
-    other: "# people so far.",
-  });
-};
-
 /** Who it was heard from, each with where their interview stands a click away. */
 const HeardFrom = ({
   view,
   record,
-  heard,
 }: {
   view: OrgView;
   record: RecordOfWork;
-  /** A real organization's: how many its drawing rests on, none under 5; null before it is drawn. */
-  heard: number | null | undefined;
 }) => {
   const { t } = useLingui();
   const { toAsk } = record;
@@ -671,16 +756,9 @@ const HeardFrom = ({
       }
       title={t`Heard from`}
     >
-      {/* Who it was heard from shows only of a sample's made-up people: a real organization's staff see how many, never who (GRA-1084). */}
-      {record.byPerson ? null : (
-        <p className="text-muted-foreground border-t px-5 py-4">
-          <HeardCount heard={heard} />
-        </p>
-      )}
-      {record.byPerson && record.interviews.length === 0 ? (
+      {record.interviews.length === 0 ? (
         <p className="text-muted-foreground border-t px-5 py-4">{t`Nobody yet.`}</p>
-      ) : null}
-      {record.byPerson && record.interviews.length > 0 ? (
+      ) : (
         <ul className="flex flex-col">
           {record.interviews.map((interview) => {
             const { name } = interview.person;
@@ -719,7 +797,7 @@ const HeardFrom = ({
             );
           })}
         </ul>
-      ) : null}
+      )}
     </SettingsSection>
   );
 };
@@ -878,7 +956,7 @@ const Today = ({
 }: {
   view: OrgView;
   record: RecordOfWork;
-  drawn: StaffDrawing | null;
+  drawn: DrawnWork | null;
   missing: Missing[];
 }) => {
   const { t } = useLingui();
@@ -957,7 +1035,7 @@ const Today = ({
                 <ErrorText>{failure}</ErrorText>
               </>
             ) : (
-              <StepEvidence index={open} record={record} />
+              <StepEvidence drawn={drawn} index={open} record={record} />
             )}
           </div>
         </aside>
@@ -975,15 +1053,11 @@ export const WorkRecord = ({
   view: OrgView;
   record: RecordOfWork;
   /** As drawn from the interviews; null before it is. */
-  drawn: StaffDrawing | null;
+  drawn: DrawnWork | null;
   /** Someone agreed to more since it was drawn: it is drawn again soon. */
   stale: boolean;
 }) => {
-  const missing = missingOf(record);
-  // A sample's record rests on its made-up people's interviews; a real organization's on its
-  // drawing, as numbers only: who told it is never staff's (GRA-1084).
-  const heard = record.byPerson ? record.interviews.length : drawn?.heard;
-  const told = record.byPerson ? record.interviews.length > 0 : drawn !== null;
+  const missing = missingOf(record, drawn?.open ?? []);
   // One column of its own: the area's column is only as tall as the
   // window, and a card that clips its content would shrink to nothing in it.
   return (
@@ -991,21 +1065,16 @@ export const WorkRecord = ({
       <Actions record={record} stale={stale} />
       <Header lacking={missing.length} record={record} view={view} />
       <Today drawn={drawn} missing={missing} record={record} view={view} />
-      {told ? (
+      {record.interviews.length === 0 ? null : (
         <>
-          <StepsTold record={record} talked={heard ?? null} />
-          {/* What goes around the steps is what people said: a real organization's staff see none of it. */}
-          {record.byPerson ? (
-            <div className="grid items-start gap-6 xl:grid-cols-2">
-              <Around record={record} />
-              <Numbers record={record} />
-            </div>
-          ) : (
-            <Numbers record={record} />
-          )}
+          <StepsTold record={record} />
+          <div className="grid items-start gap-6 xl:grid-cols-2">
+            <Around record={record} />
+            <Numbers drawn={drawn} record={record} />
+          </div>
         </>
-      ) : null}
-      <HeardFrom heard={heard} record={record} view={view} />
+      )}
+      <HeardFrom record={record} view={view} />
     </div>
   );
 };

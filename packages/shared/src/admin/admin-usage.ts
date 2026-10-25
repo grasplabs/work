@@ -609,79 +609,41 @@ const tellingAbout = (
   return interview.work?.id === id ? interview.telling : null;
 };
 
-/** The hours one of `work` takes a week, from how many there are and how long a normal one takes. */
-const hoursOf = (
-  work: Work,
-  [quiet, busy]: readonly [number, number],
-  normal: number
-): number => {
-  const items =
-    (quiet + busy) / 2 / (work.per === "month" ? WEEKS_PER_MONTH : 1);
-  return (items * normal * (work.unit === "hours" ? 60 : 1)) / 60;
-};
-
-/**
- * The hours a week one person spends on `work`, and how many people that rests on. At a real
- * organization from its drawing's totals, never one person's numbers: the medians, once enough
- * people gave them. In a sample, averaged over its made-up people who gave both.
- */
-const personHours = (
-  view: OrgView,
-  work: Work
-): { hours: number | null; said: number } => {
-  const { org } = view;
-  if (org.real) {
-    const volume = work.totals?.volume;
-    const takes = work.totals?.takes;
-    // Shown only once enough people gave both (`DrawnNumber`): none otherwise.
-    if (!volume || !takes || volume.value === null || takes.value === null) {
-      return { hours: null, said: 0 };
-    }
-    return {
-      hours: hoursOf(
-        work,
-        [volume.value.quiet, volume.value.busy],
-        takes.value
-      ),
-      said: Math.min(volume.people ?? 0, takes.people ?? 0),
-    };
-  }
-  const own = view.interviews.flatMap((interview) => {
-    const telling = interview.approved
-      ? tellingAbout(org, interview, work.id)
-      : null;
-    const numbers = telling?.numbers;
-    if (
-      !numbers?.volume ||
-      !numbers.takes ||
-      telling?.out.includes("volume") === true ||
-      telling?.out.includes("takes") === true
-    ) {
-      return [];
-    }
-    return [hoursOf(work, numbers.volume, numbers.takes[1])];
-  });
-  return {
-    hours:
-      own.length === 0
-        ? null
-        : own.reduce((sum, each) => sum + each, 0) / own.length,
-    said: own.length,
-  };
-};
-
 /**
  * The hours in each piece of work, from what the people who do it said: how many they handle a
- * week and how long a normal one takes, counted for everyone who does the work (`personHours`).
- * Once Grasp is open, what the workflows free of that.
+ * week and how long a normal one takes, averaged over the ones who gave both and counted for
+ * everyone who does the work. Once Grasp is open, what the workflows free of that.
  */
 export const valueOf = (view: OrgView, day: string): Value => {
   const { org } = view;
   const open = isOpen(view);
   const works = view.works.map((evidence): WorkHours => {
     const { work } = evidence;
-    const each = personHours(view, work);
-    const hours = each.hours === null ? null : each.hours * evidence.doers;
+    const own = view.interviews.flatMap((interview) => {
+      const telling = interview.approved
+        ? tellingAbout(org, interview, work.id)
+        : null;
+      if (
+        !telling?.volume ||
+        !telling.takes ||
+        telling.out.includes("volume") ||
+        telling.out.includes("takes")
+      ) {
+        return [];
+      }
+      const items =
+        (telling.volume[0] + telling.volume[1]) /
+        2 /
+        (work.per === "month" ? WEEKS_PER_MONTH : 1);
+      return [
+        (items * telling.takes[1] * (work.unit === "hours" ? 60 : 1)) / 60,
+      ];
+    });
+    const hours =
+      own.length === 0
+        ? null
+        : (own.reduce((sum, each) => sum + each, 0) / own.length) *
+          evidence.doers;
     const run = open ? (org.running?.[work.id] ?? null) : null;
     const live =
       run?.stage === "live" && run.since !== undefined && run.since <= day;
@@ -689,7 +651,7 @@ export const valueOf = (view: OrgView, day: string): Value => {
     return {
       evidence,
       hours,
-      said: each.said,
+      said: own.length,
       run,
       live,
       freed: live && hours !== null ? hours * share : 0,

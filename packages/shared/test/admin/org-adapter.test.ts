@@ -14,11 +14,7 @@ import {
   stephenOf,
 } from "../../src/admin/onboarding-admin-record.ts";
 import { meteredOf, orgOfSnapshot } from "../../src/admin/org-adapter.ts";
-import {
-  NEW_CLIENT,
-  NOTHING_SAID,
-  staffDrawingOf,
-} from "../../src/admin/org-record.ts";
+import { NEW_CLIENT, NOTHING_SAID } from "../../src/admin/org-record.ts";
 import type {
   DrawnWork,
   HeldInterview,
@@ -208,7 +204,7 @@ const snapshot: StaffSnapshot = {
       doers: ["lisa", "tim"],
       share: 0.8,
       from: "lead",
-      drawn: staffDrawingOf(drawn),
+      drawn,
       stale: false,
     },
   ],
@@ -382,7 +378,7 @@ describe("a real organization as the admin reads it", () => {
     });
   });
 
-  it("names the work as a title, with who does it, but never the apps or the team people said it goes to", () => {
+  it("names the work as a title, with who does it, the apps it is done in and the team it goes to", () => {
     const chart = organizationOf(view);
     const service = chart.teams.find(
       (team) => team.view.team.id === "t-service"
@@ -393,12 +389,14 @@ describe("a real organization as the admin reads it", () => {
     expect(
       service?.works[0]?.doers.map((each) => each.person.id)
     ).toStrictEqual(["lisa", "tim"]);
-    // The apps its steps are done in and who gets it next are what people
-    // said: not staff's (GRA-1084).
-    expect({
-      tools: service?.tools,
-      to: service?.to.map((each) => each.to),
-    }).toStrictEqual({ tools: [], to: [] });
+    expect(service?.tools).toStrictEqual([
+      { name: "Excel", works: 1 },
+      { name: "Zendesk", works: 1 },
+    ]);
+    expect(service?.to.map((each) => each.to)).toStrictEqual(["t-mortgage"]);
+    expect(
+      chart.teams.find((team) => team.view.team.id === "t-mortgage")?.from
+    ).toHaveLength(1);
   });
 
   it("asks Grasp for the first conversation until Stephen has read it, without holding up its steps", () => {
@@ -446,7 +444,7 @@ describe("a real organization as the admin reads it", () => {
     }).toStrictEqual({ facts: 5, out: 1, approved: 0.8 });
   });
 
-  it("counts no hours of a piece of work from fewer than 5 people's numbers, whoever told about it", () => {
+  it("counts the hours of a piece of work from everyone who told about it, whatever they were asked about", () => {
     const people = snapshot.roster?.people ?? [];
     // Lisa was asked about no work of her own, and told about handling tickets.
     const elsewhere = orgOfSnapshot({
@@ -462,11 +460,10 @@ describe("a real organization as the admin reads it", () => {
     const tickets = valueOf(seen, "2026-10-06").works.find(
       (each) => each.evidence.work.id === "w-tickets"
     );
-    // Lisa alone gave numbers: her hours would be hers (GRA-1079).
     expect({
       said: tickets?.said,
       known: tickets?.hours !== null,
-    }).toStrictEqual({ said: 0, known: false });
+    }).toStrictEqual({ said: 1, known: true });
   });
 
   it("keeps the links of a six-week plan open past two weeks, and counts who finishes later", () => {
