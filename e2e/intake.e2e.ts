@@ -64,8 +64,8 @@ const intakeFor = async (admin: Person): Promise<string> => {
     }
     // The model its reading goes through: the `extractor` of the `extract`
     // workflow the copy got (the one it asked to start), approved as an
-    // admin approves it on the workflow's page, for the deployment's first
-    // model. The local stack reaches no model, so the reading's model call
+    // admin approves it on the workflow's page, for the stack's first model
+    // (e2e/stack.ts). The local stack reaches no model, so the reading's model call
     // fails. Core's tests read notes with a scripted model
     // (apps/core/test/intake.test.ts).
     const extract = created.permissions.find(
