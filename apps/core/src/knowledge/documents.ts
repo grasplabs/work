@@ -24,7 +24,6 @@ import type {
 } from "@grasp-os/shared/knowledge";
 import { and, asc, desc, eq, gt, lt, ne } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
@@ -38,10 +37,10 @@ import {
   links,
   versions,
 } from "../db/knowledge/schema.ts";
-import type { Reader } from "./access.ts";
 import { auditedBatch } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Allowed } from "./authorize.ts";
+import type { Brain } from "./brain.ts";
 import { readableCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import {
@@ -61,7 +60,6 @@ import {
   stagePayload,
 } from "./payloads.ts";
 import type { StagedPayload } from "./payloads.ts";
-import { portsOf } from "./ports.ts";
 
 // Saving a document: its frontmatter is read and checked (and a memory
 // file's size, memory-files.ts), its Markdown split into sections and its
@@ -303,8 +301,8 @@ const toVersionSummary = (row: {
  * The text of `document`'s version `number`, read from its payload, or
  * undefined when there's no such version.
  */
-export const versionText = async (
-  env: Env,
+export const versionText = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   documentId: string,
   number: number
@@ -317,7 +315,7 @@ export const versionText = async (
       and(eq(versions.documentId, documentId), eq(versions.number, number))
     )
     .get();
-  return ref === undefined ? undefined : await readPayload(env, ref);
+  return ref === undefined ? undefined : await readPayload(brain, ref);
 };
 
 const conflict = (existing: DocumentRow | undefined) =>
@@ -334,15 +332,15 @@ const conflict = (existing: DocumentRow | undefined) =>
  * its type. A purge's text (`purge`) is checked for the fields every type
  * has only (`parseBaseFields`), whatever its type says.
  */
-export const checkedText = async (
-  env: Env,
+export const checkedText = async <C>(
+  brain: Brain<C>,
   collection: CollectionRow,
   path: string,
   text: string,
   sync = false,
   purge = false
 ): Promise<Prepared> => {
-  await portsOf(env).onWrite({ collection, path, text, sync });
+  await brain.ports.onWrite({ collection, path, text, sync });
   return prepare(path, text, purge);
 };
 
@@ -396,14 +394,14 @@ export interface Write {
  * `row`, just saved, once its sections are published (`publishInline`):
  * marked indexed when search holds them, queued otherwise.
  */
-const published = async (
-  env: Env,
+const published = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   row: DocumentRow,
   found: readonly Section[],
   purgeBy: AuditActor | undefined
 ): Promise<DocumentRow> =>
-  (await publishInline(env, db, row.id, row.currentVersion, found, purgeBy))
+  (await publishInline(brain, db, row.id, row.currentVersion, found, purgeBy))
     ? { ...row, indexedVersion: row.currentVersion, indexState: "indexed" }
     : row;
 
@@ -412,20 +410,20 @@ const published = async (
  * payload collected between its staging and the batch refuses the batch
  * (`isUncommitted`): the text is stored again, once.
  */
-const stagedAndSent = async (
-  env: Env,
+const stagedAndSent = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   collectionId: string,
   text: string,
   send: (staged: StagedPayload) => Promise<void>
 ): Promise<void> => {
   try {
-    await send(await stagePayload(env, db, collectionId, text));
+    await send(await stagePayload(brain, db, collectionId, text));
   } catch (error) {
     if (!isUncommitted(error)) {
       throw error;
     }
-    await send(await stagePayload(env, db, collectionId, text));
+    await send(await stagePayload(brain, db, collectionId, text));
   }
 };
 
@@ -449,17 +447,17 @@ const savedRow = (
  * (0: it doesn't exist yet). Throws `knowledge.conflict`, with the version
  * it is at, and writes nothing otherwise.
  */
-export const writeVersion = async (
-  env: Env,
+export const writeVersion = async <C>(
+  brain: Brain<C>,
   by: Writer,
   write: Write
 ): Promise<DocumentSummary> => {
   const { collection, path, text, ifVersion, message, restoredFrom } = write;
   const { also = [], sync = false } = write;
-  const db = drizzle(env.KNOWLEDGE);
+  const { db } = brain;
   const existing = await findByPath(db, collection.id, path);
   const prepared = await checkedText(
-    env,
+    brain,
     collection,
     path,
     text,
@@ -469,7 +467,7 @@ export const writeVersion = async (
   if ((existing?.currentVersion ?? 0) !== ifVersion) {
     throw conflict(existing);
   }
-  const now = portsOf(env).clock();
+  const now = brain.ports.clock();
   const number = ifVersion + 1;
   const documentId = existing?.id ?? crypto.randomUUID();
   const changes = {
@@ -550,7 +548,7 @@ export const writeVersion = async (
   const send = async (staged: StagedPayload): Promise<void> => {
     await write.lastCheck?.();
     try {
-      await auditedBatch(portsOf(env), db, [document, ...statements(staged)]);
+      await auditedBatch(brain.ports, db, [document, ...statements(staged)]);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw conflict(await findByPath(db, collection.id, path));
@@ -561,11 +559,11 @@ export const writeVersion = async (
   // Checked before the text is stored too: a write it refuses never
   // uploads it.
   await write.lastCheck?.();
-  await stagedAndSent(env, db, collection.id, text, send);
+  await stagedAndSent(brain, db, collection.id, text, send);
   // Saved: search has it once published, here or by its indexing run.
   return toSummary(
     await published(
-      env,
+      brain,
       db,
       row,
       prepared.sections,
@@ -599,9 +597,9 @@ export const readableDocument = async (
 };
 
 /** A document with its current version, or with `version`. */
-export const getDocument = async (
-  env: Env,
-  reader: Reader,
+export const getDocument = async <C>(
+  brain: Brain<C>,
+  reader: C,
   documentId: unknown,
   version?: unknown
 ): Promise<DocumentRead> => {
@@ -609,8 +607,8 @@ export const getDocument = async (
     version === undefined
       ? undefined
       : knowledgeErrors.parse("knowledge.invalid", versionInputSchema, version);
-  const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(portsOf(env), reader);
+  const { db } = brain;
+  const allowed = await allowedFor(brain.ports, reader);
   const id = documentIdSchema.safeParse(documentId);
   // The version's payload is found in the same query as the access check,
   // so it is never read from a collection that stopped being readable in
@@ -643,7 +641,7 @@ export const getDocument = async (
   // Recorded before a missing version is refused: that a version isn't
   // there says something of the document too, so a sensitive one
   // restricts the reader either way.
-  const provenance = await portsOf(env).onRead(
+  const provenance = await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",
@@ -655,7 +653,7 @@ export const getDocument = async (
   if (row === null || payload === null) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
-  const text = await readPayload(env, payload);
+  const text = await readPayload(brain, payload);
   const read: Version = {
     ...toVersionSummary({ ...row, sha256: payload.sha256 }),
     text,
@@ -664,9 +662,9 @@ export const getDocument = async (
 };
 
 /** A page of a collection's documents, in path order. */
-export const listDocuments = async (
-  env: Env,
-  reader: Reader,
+export const listDocuments = async <C>(
+  brain: Brain<C>,
+  reader: C,
   collectionId: unknown,
   options?: unknown
 ): Promise<DocumentPage> => {
@@ -675,8 +673,8 @@ export const listDocuments = async (
     listDocumentsOptionsSchema,
     options
   );
-  const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(portsOf(env), reader);
+  const { db } = brain;
+  const allowed = await allowedFor(brain.ports, reader);
   const collection = await readableCollection(
     db,
     allowed.collections,
@@ -695,7 +693,7 @@ export const listDocuments = async (
     )
     .orderBy(asc(documents.path))
     .limit(limit);
-  const provenance = await portsOf(env).onRead(
+  const provenance = await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",
@@ -711,9 +709,9 @@ export const listDocuments = async (
 };
 
 /** A page of a document's versions, newest first, without their text. */
-export const history = async (
-  env: Env,
-  reader: Reader,
+export const history = async <C>(
+  brain: Brain<C>,
+  reader: C,
   documentId: unknown,
   options?: unknown
 ): Promise<HistoryPage> => {
@@ -722,8 +720,8 @@ export const history = async (
     historyOptionsSchema,
     options
   );
-  const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(portsOf(env), reader);
+  const { db } = brain;
+  const allowed = await allowedFor(brain.ports, reader);
   const { document, collection } = await readableDocument(
     db,
     allowed,
@@ -744,7 +742,7 @@ export const history = async (
     )
     .orderBy(desc(versions.number))
     .limit(limit);
-  const provenance = await portsOf(env).onRead(
+  const provenance = await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",
@@ -803,9 +801,9 @@ export const backlinkRows = async (
 };
 
 /** A page of the documents that link to this one (`backlinkRows`). */
-export const backlinks = async (
-  env: Env,
-  reader: Reader,
+export const backlinks = async <C>(
+  brain: Brain<C>,
+  reader: C,
   documentId: unknown,
   options?: unknown
 ): Promise<BacklinkPage> => {
@@ -814,15 +812,15 @@ export const backlinks = async (
     listDocumentsOptionsSchema,
     options
   );
-  const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(portsOf(env), reader);
+  const { db } = brain;
+  const allowed = await allowedFor(brain.ports, reader);
   const { document, collection } = await readableDocument(
     db,
     allowed,
     documentId
   );
   const found = await backlinkRows(db, allowed, document, page);
-  const provenance = await portsOf(env).onRead(
+  const provenance = await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",

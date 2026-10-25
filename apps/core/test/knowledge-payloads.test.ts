@@ -10,6 +10,7 @@ import { readableCollection } from "../src/knowledge/collections.ts";
 import { writeVersion } from "../src/knowledge/documents.ts";
 import { pendingGraceMs } from "../src/knowledge/payloads.ts";
 import { personWriter } from "../src/knowledge/person-writes.ts";
+import { brainOf } from "../src/knowledge/ports.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
@@ -322,7 +323,7 @@ describe("storing versions' texts", () => {
       collectionId
     );
     const outcome = await settled(
-      writeVersion(env, personWriter(identity), {
+      writeVersion(brainOf(env), personWriter(identity), {
         collection,
         path: "refused.md",
         text,

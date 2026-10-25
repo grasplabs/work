@@ -12,6 +12,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import type { WorkContext } from "../restricted.ts";
 import type { Reader } from "./access.ts";
 import { readAsDelegate } from "./binding.ts";
+import { brainOf } from "./ports.ts";
 import { recall } from "./recall.ts";
 import { search } from "./search.ts";
 import { catalog, follow, read } from "./tools.ts";
@@ -35,32 +36,33 @@ export class KnowledgeBinding
 
   async catalog(): Promise<KnowledgeCatalog> {
     return await this.#asDelegate(
-      async (reader) => await catalog(this.env, reader)
+      async (reader) => await catalog(brainOf(this.env), reader)
     );
   }
 
   async search(query: unknown, options?: unknown): Promise<SearchResults> {
     return await this.#asDelegate(
-      async (reader) => await search(this.env, reader, query, options)
+      async (reader) => await search(brainOf(this.env), reader, query, options)
     );
   }
 
   async read(documentId: unknown, options?: unknown): Promise<KnowledgeRead> {
     return await this.#asDelegate(
-      async (reader) => await read(this.env, reader, documentId, options)
+      async (reader) =>
+        await read(brainOf(this.env), reader, documentId, options)
     );
   }
 
   /** The Brain's recall, across every collection the agent may read. */
   async recall(input: unknown): Promise<MemoryPack> {
     return await this.#asDelegate(
-      async (reader) => await recall(this.env, reader, input)
+      async (reader) => await recall(brainOf(this.env), reader, input)
     );
   }
 
   async follow(documentId: unknown): Promise<FollowResult> {
     return await this.#asDelegate(
-      async (reader) => await follow(this.env, reader, documentId)
+      async (reader) => await follow(brainOf(this.env), reader, documentId)
     );
   }
 }
