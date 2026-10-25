@@ -53,6 +53,7 @@ const revocationControls: ReadonlySet<string> = new Set([
 
 /** The controls that change stored state mid-trial. */
 const changingControls: ReadonlySet<string> = new Set([
+  "changesCapture",
   "changesChat",
   "changesChatTitle",
   "changesCore",
@@ -134,6 +135,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
     }).toStrictEqual({
       passed: false,
       violations: [
+        "changesCapture",
         "changesChat",
         "changesChatTitle",
         "changesCore",

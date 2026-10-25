@@ -96,6 +96,14 @@ import type { TurnContext, TurnResult } from "./agent.ts";
 import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
+import {
+  drainCaptures,
+  eraseCaptured,
+  turnEventId,
+  turnOutcome,
+  turnSource,
+} from "./brain-capture.ts";
+import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
 import { buildDequeued } from "./build-admission.ts";
 import { BuildJobRecords } from "./build-job-records.ts";
 import type {
@@ -132,6 +140,7 @@ import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/workspace/migrations/migrations.js";
 import {
   auditOutbox,
+  brainCaptureIntents,
   chatAttachments,
   chatCodeRuns,
   chatDraftFiles,
@@ -551,6 +560,9 @@ const maxWatchers = 50;
  * log is out of reach: at first, and at most, doubling in between.
  */
 const auditRetryMs = { first: 5000, most: 15 * 60 * 1000 };
+
+/** How long the alarm waits before delivering turns' outcomes again. */
+const captureRetryMs = 60 * 1000;
 
 /** How often a check waiting for a preview reads its reports again. */
 const previewPollMs = 100;
@@ -1129,6 +1141,99 @@ export class Workspace extends DurableObject<Env> {
     await this.#alarmBy(Date.now() + retryMs);
   }
 
+  /**
+   * Settles a turn whose messages are all kept: its capture intent (none
+   * in a chat in restricted mode) and the end of its mark as under way
+   * (`turnKeyPrefix`), in one transaction. A turn is then either cut short,
+   * its mark left for `#closeInterruptedTurns`, or settled with its
+   * intent: never kept without either. The intent is delivered soon, the
+   * alarm set first so a delivery cut short is tried again
+   * (brain-capture.ts).
+   */
+  #captureTurn(facts: TurnFacts): void {
+    const chatId = chatIdSchema.parse(facts.chatId);
+    const eligible = this.isChatRestricted(chatId) === false;
+    this.ctx.storage.transactionSync(() => {
+      if (eligible) {
+        this.#db
+          .insert(brainCaptureIntents)
+          .values({
+            eventId: turnEventId(facts),
+            evidenceId: chatId,
+            facts: JSON.stringify(facts),
+            createdAt: new Date(),
+          })
+          .onConflictDoNothing({ target: brainCaptureIntents.eventId })
+          .run();
+      }
+      this.ctx.storage.kv.delete(`${turnKeyPrefix}${chatId}`);
+    });
+    if (eligible) {
+      this.ctx.waitUntil(this.#captureSoon());
+    }
+  }
+
+  async #captureSoon(): Promise<void> {
+    await this.#alarmBy(Date.now() + captureRetryMs);
+    await this.#deliverCaptures();
+  }
+
+  /** Delivers the turns' pending intents; the alarm tries again if any are left. */
+  async #deliverCaptures(): Promise<void> {
+    if (await drainCaptures(this.env, this.#captures())) {
+      await this.#alarmBy(Date.now() + captureRetryMs);
+    }
+  }
+
+  /** This object's store of its turns' capture intents (brain-capture.ts). */
+  #captures(): CaptureStore {
+    const db = this.#db;
+    return {
+      source: turnSource(this.ctx.id.name ?? this.ctx.id.toString()),
+      pending: async (limit) =>
+        await Promise.resolve(
+          db
+            .select({
+              seq: brainCaptureIntents.seq,
+              eventId: brainCaptureIntents.eventId,
+              evidenceId: brainCaptureIntents.evidenceId,
+              facts: brainCaptureIntents.facts,
+              attempts: brainCaptureIntents.attempts,
+            })
+            .from(brainCaptureIntents)
+            .where(eq(brainCaptureIntents.state, "pending"))
+            .orderBy(
+              asc(brainCaptureIntents.attempts),
+              asc(brainCaptureIntents.seq)
+            )
+            .limit(limit)
+            .all()
+        ),
+      settled: async (seq) => {
+        db.delete(brainCaptureIntents)
+          .where(eq(brainCaptureIntents.seq, seq))
+          .run();
+        await Promise.resolve();
+      },
+      failed: async (seq, code, dead) => {
+        db.update(brainCaptureIntents)
+          .set({
+            attempts: sql`${brainCaptureIntents.attempts} + 1`,
+            lastError: code,
+            ...(dead ? { state: "dead" as const } : {}),
+          })
+          .where(eq(brainCaptureIntents.seq, seq))
+          .run();
+        await Promise.resolve();
+      },
+      outcomeOf: async ({ facts }) =>
+        await turnOutcome(this.env, facts, (chatId) => {
+          const id = chatIdSchema.safeParse(chatId);
+          return id.success && this.isChatRestricted(id.data) === false;
+        }),
+    };
+  }
+
   /** Sets the alarm to go at `time` at the latest, never later than it was. */
   async #alarmBy(time: number): Promise<void> {
     const set = await this.ctx.storage.getAlarm();
@@ -1324,7 +1429,8 @@ export class Workspace extends DurableObject<Env> {
       // A chat others share reads for all of them, as they were last
       // kept: one whose audience isn't kept reads nothing, so takes no turn.
       const shared = chat.thread !== null;
-      if (shared && (await audienceOf(this.env, work)) === undefined) {
+      const audience = shared ? await audienceOf(this.env, work) : undefined;
+      if (shared && audience === undefined) {
         throw permissionErrors.create("permission.context_invalid");
       }
       // Before the model is admitted: what memory reads is a source too.
@@ -1403,6 +1509,18 @@ export class Workspace extends DurableObject<Env> {
           this.#changed(chat.id);
           textSoFar?.(partialOf(partial).text);
         },
+      });
+      // Settled: its outcome's capture for the Brain (brain-capture.ts).
+      this.#captureTurn({
+        chatId: chat.id,
+        turnId: live.id,
+        personId,
+        agentId,
+        audience: audience === undefined ? null : [...audience.members],
+        outcome: result.outcome,
+        answerId: answer ?? null,
+        model: model.model.id,
+        occurredAt: new Date().toISOString(),
       });
       return {
         ...result,
@@ -1495,6 +1613,7 @@ export class Workspace extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     // Audit events the log didn't take yet go first: a turn may run long.
     await this.#drainAudit();
+    await this.#deliverCaptures();
     while (this.#sent.size > 0) {
       // oxlint-disable-next-line no-await-in-loop -- until none is left, as more may start
       await Promise.all(this.#sent);
@@ -3120,9 +3239,16 @@ export class Workspace extends DurableObject<Env> {
         .from(chatDrafts)
         .where(eq(chatDrafts.chatId, id))
         .all();
+      // What the Brain captured of its turns goes before it does: should
+      // that fail, the chat stays (brain-capture.ts).
+      await eraseCaptured(this.env, [id]);
       // Their rows go with it below.
       this.ctx.storage.transactionSync(() => {
         this.#jobs.deleteChat(id);
+        this.#db
+          .delete(brainCaptureIntents)
+          .where(eq(brainCaptureIntents.evidenceId, id))
+          .run();
         this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
         this.#db.delete(chatSources).where(eq(chatSources.chatId, id)).run();
         this.#db

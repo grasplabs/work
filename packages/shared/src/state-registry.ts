@@ -288,6 +288,10 @@ const coreDb: D1State = {
     resource_templates: exported(`${core}resource-bindings.ts`),
     app_resource_bindings: exported(`${core}resource-bindings.ts`),
     workflow_runs: exported(`${core}workflows/runs.ts`),
+    brain_capture_intents: transient(
+      `${core}brain-capture.ts`,
+      "Settled runs' outcomes still owed to the Brain, and those it gave up on."
+    ),
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
     workflow_admission_queue: transient(`${core}workflows/admission.ts`),
@@ -432,6 +436,23 @@ const knowledgeDb: D1State = {
       `${brain}memories.ts`,
       "Command receipts for retries, swept a day after the command."
     ),
+    brain_episodes: exported(`${brain}outcomes.ts`, brainPending),
+    brain_episode_members: exported(
+      `${brain}outcomes.ts`,
+      "Who each shared session's event is for."
+    ),
+    brain_capture_cursors: exported(
+      `${brain}outcomes.ts`,
+      "How far each host boundary's task outcomes reached."
+    ),
+    brain_erased_evidence: exported(
+      `${brain}outcomes.ts`,
+      "Execution records whose events were erased: late captures stay erased."
+    ),
+    brain_forgotten_people: exported(
+      `${brain}outcomes.ts`,
+      "Who a personal purge forgot, and when: late captures stay forgotten."
+    ),
     audit_outbox: transient(
       `${brain}audit.ts`,
       "Drained into core's audit log (src/audit-outbox.ts)."
@@ -498,6 +519,10 @@ const workspaces: DurableObjectState = {
     chat_draft_version_files: exported(`${core}draft-versions.ts`),
     chat_draft_contents: exported(`${core}draft-versions.ts`),
     audit_outbox: exported(`${core}workspace.ts`),
+    brain_capture_intents: transient(
+      `${core}workspace.ts`,
+      "Settled turns' outcomes still owed to the Brain, and those it gave up on."
+    ),
     chat_attachments: exported(`${core}workspace.ts`),
     chat_code_runs: exported(`${core}workspace.ts`),
     chat_tool_events: exported(`${core}workspace.ts`),

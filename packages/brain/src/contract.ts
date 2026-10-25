@@ -28,9 +28,9 @@ import { searchQueryMaxLength } from "./limits.ts";
 //
 // Interview and privacy operations, and the learning and maintenance
 // capabilities, are GRA-294's, behind GRA-327. The one host-only entry
-// is named, never callable here: `BrainRuntimeApi.recordOutcome`, which
-// records verified execution outcomes and has no SDK or tool form, so a
-// model can't manufacture one by writing "success".
+// isn't here: `recordOutcome` (outcomes.ts) records settled execution
+// outcomes and has no SDK or tool form, so a model can't manufacture one
+// by writing "success".
 
 /** This contract's version: what a pack and a receipt say they follow. */
 export const brainContractVersion = 1;

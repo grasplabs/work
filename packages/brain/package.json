@@ -22,6 +22,7 @@
     "./markdown": "./src/markdown.ts",
     "./memories": "./src/memories.ts",
     "./migrations/journal": "./src/db/migrations/meta/_journal.json",
+    "./outcomes": "./src/outcomes.ts",
     "./payloads": "./src/payloads.ts",
     "./purge": "./src/purge.ts",
     "./recall": "./src/recall.ts",
