@@ -36,12 +36,13 @@ import { nearestCollectionsMax, nearestDetail } from "./search-detail.ts";
 // that finds it: whole words first, then trigrams; and only when neither
 // finds anything, trigrams with room for one typo. Within a pass sections
 // rank by which of the query's words each holds, weighed by where (title,
-// then description, headings and text), shorter sections first for the
-// same words, then by freshness (`matchesSql`). Every word of a search
-// must match (AND): a search narrows as it gets longer. A recall asks a
+// then description, headings and text), and by length, as BM25 weighs
+// length: a short section's words count for more than a long one's, so a
+// short section with fewer of the words can come before a long one with
+// more; then by freshness (`matchesSql`). Every word of a search must
+// match (AND): a search narrows as it gets longer. A recall asks a
 // question in its person's words, which no section holds all of, so any
-// of its words matches (OR), and the sections that hold more of them come
-// first.
+// of its words matches (OR).
 //
 // Never BM25 (GRA-1083): its weights count a word over every row of the
 // index, sections of collections the reader can't read too, so the order
@@ -615,7 +616,10 @@ export const searchSections = async <C>(
   // A section's words count for less the longer it is past a fixed length,
   // as BM25 normalizes for length, but by a constant (`referenceLength`),
   // never the index's average: that would count the length of sections
-  // the reader can't read.
+  // the reader can't read. As in BM25, this can put a short section with
+  // fewer of the words before a long one with more: ranking the words
+  // first, length only between equals, lost a fifth of the evidence at
+  // scale on the Brain baseline (GRA-1083's numbers).
   const lengthNorm = sql`(${sql.raw(String(1 - lengthWeight))} + ${sql.raw(String(lengthWeight))} * (
     SELECT length(sections.text) FROM sections
     WHERE sections.document_id = search_rows.document_id
