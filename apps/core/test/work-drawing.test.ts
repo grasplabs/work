@@ -323,7 +323,11 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       drew: drew[1],
       models: requests.map(modelOf),
       sent: {
-        max: sent.includes(`## ${ids.max} (Agent)`),
+        // Each teller by a neutral label, never their id or title (GRA-1084).
+        max:
+          sent.includes("## P1") &&
+          !sent.includes(ids.max) &&
+          !sent.includes("(Agent)"),
         // A file named in the conversation was never read back or
         // approved: it doesn't leave the store (GRA-329).
         example: sent.includes("ticket-4411.pdf"),
@@ -421,9 +425,10 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
     const works = await store.teamWorks(ids.team);
     expect({
       result,
-      teller: sent.includes(
-        `## ${ids.lea} (Team lead), asked about the work of the whole team`
-      ),
+      teller:
+        sent.includes("## P1, asked about the work of the whole team") &&
+        !sent.includes(ids.lea) &&
+        !sent.includes("(Team lead)"),
       context: sent.includes("for context only"),
       drawn: works.map(
         ({ drawn }) => drawn?.steps.map(({ text }) => text) ?? null
