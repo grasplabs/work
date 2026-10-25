@@ -14,7 +14,13 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { assignWork, mapOf } from "../src/onboarding/team-map.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import { answering, careful, modelOf } from "./interview-link.ts";
+import {
+  answering,
+  approveAgreed,
+  careful,
+  modelOf,
+  participate,
+} from "./interview-link.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // A team's map (src/onboarding/team-map.ts and the store's drawing): once
@@ -129,6 +135,7 @@ const agree = async (
     body: JSON.stringify({ action: "save", ...link, version, progress }),
   });
   const saved: InterviewSaved = await response.json();
+  await approveAgreed(link, facts);
   return saved.version;
 };
 
@@ -200,6 +207,7 @@ describe("a team's map", { timeout: 60_000 }, () => {
     );
     const opened = await store.releaseDue();
     const max = await openLink(ids.max);
+    await participate(max);
     const context = await store.turnContext(
       await sha256Hex(max.secret),
       await sha256Hex(max.key)

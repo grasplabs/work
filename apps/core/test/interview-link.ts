@@ -1,6 +1,11 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
+import {
+  factRevision,
+  interviewApiPath,
+  participationNotice,
+} from "@grasp-os/shared/interview-links";
+import type { InterviewFact } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
@@ -41,12 +46,72 @@ export const codeOf = async (response: Response) => {
 };
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
+/** A link as the page holds it: its secret and the device's key. */
+export interface Device {
+  secret: string;
+  key: string;
+}
+
+/** One of the link's calls, as the page makes it. */
+export const onLink = async (body: unknown): Promise<Response> =>
+  await routed(interviewApiPath, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+/** They agree to take part, to the notice as it is now (or `notice`). */
+export const participate = async (
+  device: Device,
+  notice: number = participationNotice.version
+): Promise<Response> =>
+  await onLink({ action: "participate", ...device, notice });
+
+/** Each fact not taken out, at its revision as it stands: what approving it names. */
+export const revisionsOf = async (
+  facts: readonly InterviewFact[]
+): Promise<{ id: string; revision: string }[]> =>
+  await Promise.all(
+    facts
+      .filter(({ out }) => out !== true)
+      .map(async (fact) => ({
+        id: fact.id,
+        revision: await factRevision(fact),
+      }))
+  );
+
+/** They approve `facts` as they stand: each at its revision. */
+export const approve = async (
+  device: Device,
+  facts: readonly InterviewFact[]
+): Promise<Response> =>
+  await onLink({
+    action: "approve",
+    ...device,
+    facts: await revisionsOf(facts),
+  });
+
+/**
+ * What a page does once someone agreed to the read-back: takes part, if it
+ * didn't yet, and approves the facts it marked agreed, as they stand.
+ */
+export const approveAgreed = async (
+  device: Device,
+  facts: readonly InterviewFact[]
+): Promise<void> => {
+  await participate(device);
+  const agreed = facts.filter(({ agreed: yes }) => yes === true);
+  if (agreed.length > 0) {
+    await approve(device, agreed);
+  }
+};
+
 /**
  * A fresh onboarding running since yesterday, with one person in Ops (no
- * lead) whose link is out, opened on a device: their secret and key, and
- * who they are.
+ * lead) whose link is out, opened on a device, and who agreed to take part
+ * unless `participating` is false: their secret and key, and who they are.
  */
-export const openedFor = async () => {
+export const openedFor = async ({ participating = true } = {}) => {
   const store = onboardingStore(env);
   const person = `oli-${unique()}`;
   const roster: Roster = {
@@ -79,7 +144,11 @@ export const openedFor = async () => {
     body: JSON.stringify({ action: "session", secret }),
   });
   const { key } = sessionKey.parse(await session.json());
-  return { link: { secret, key: key ?? "" }, person };
+  const device = { secret, key: key ?? "" };
+  if (participating) {
+    await participate(device);
+  }
+  return { link: device, person };
 };
 
 /** The same, as the page holds it: the link's secret and the device's key. */

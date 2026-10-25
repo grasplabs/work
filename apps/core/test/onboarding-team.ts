@@ -12,7 +12,7 @@ import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import { answering } from "./interview-link.ts";
+import { answering, approveAgreed } from "./interview-link.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // A team on its way through the onboarding into the brain, as the tests
@@ -120,7 +120,8 @@ export const fact = (
 });
 
 /**
- * Saves someone's interview as agreed to, with `facts`, after `lines`;
+ * Saves someone's interview as agreed to, with `facts`, after `lines`, and
+ * approves on their link those of them marked agreed, as they stand;
  * returns the new version.
  */
 export const agree = async (
@@ -149,6 +150,7 @@ export const agree = async (
     body: JSON.stringify({ action: "save", ...link, version, progress }),
   });
   const saved: InterviewSaved = await response.json();
+  await approveAgreed(link, facts);
   return saved.version;
 };
 

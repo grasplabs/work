@@ -26,6 +26,7 @@ import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
+  approveAgreed,
   careful,
   countedFor,
   gatewayConfig,
@@ -122,7 +123,7 @@ const agreedFact = (
   record: string
 ): InterviewFact => ({ id, tag, text: record, record, agreed: true });
 
-/** Opens someone's link on a device and saves their interview as agreed to, with `facts`. */
+/** Opens someone's link on a device and saves their interview as agreed to, with `facts`, approved. */
 const agree = async (person: string, facts: InterviewFact[]): Promise<void> => {
   const link = await onboardingStore(env).linkOf(person);
   const secret = link?.split("#")[1] ?? "";
@@ -150,6 +151,7 @@ const agree = async (person: string, facts: InterviewFact[]): Promise<void> => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "save", secret, key, version: 0, progress }),
   });
+  await approveAgreed({ secret, key }, facts);
 };
 
 /** What the careful model answers for the team's map: entering orders, Karin's. */

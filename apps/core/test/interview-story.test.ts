@@ -1,8 +1,10 @@
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
+  InterviewApproval,
   InterviewFact,
   InterviewProgress,
   InterviewSaved,
+  InterviewSession,
 } from "@grasp-os/shared/interview-links";
 import { interviewStoryPath } from "@grasp-os/shared/interview-story";
 import type { StorySentence } from "@grasp-os/shared/interview-story";
@@ -14,12 +16,16 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import {
   answering,
+  approve,
   codeOf,
   countedFor,
   modelOf,
+  onLink,
   opened,
   openedFor,
+  participate,
   quick,
+  revisionsOf,
 } from "./interview-link.ts";
 import { routed } from "./sign-in.ts";
 
@@ -31,9 +37,16 @@ import { routed } from "./sign-in.ts";
 //
 // - A story that says more than the lines, or other things: it is no story,
 //   and the page reads the lines as they stand.
-// - A link that isn't open, or a device that isn't the link's, getting one.
+// - A link that isn't open, a device that isn't the link's, or someone who
+//   didn't agree to take part (GRA-329, T1) getting one.
 // - A fact counting before its person agreed to it, or one they added after
 //   counting before they agreed to that too.
+// - From the threat model of read-back approval (GRA-329): the page's own
+//   `agreed` counting for anything (T2); an edit, or a fact taken out,
+//   keeping its approval (T2); an approval sent twice, or its answer lost,
+//   making two receipts or drawing again (T3, T7); an approval of a
+//   revision no longer kept counting (T3, T8); and what was approved
+//   counting after they withdraw (T5).
 
 const lines = [
   { id: "f1", text: "You weigh the parcel." },
@@ -180,6 +193,23 @@ describe(
         sent: 0,
       });
     });
+
+    it("is refused to someone who didn't agree to take part, or withdrew, with nothing sent", async () => {
+      const { link } = await openedFor({ participating: false });
+      const { requests, result } = await answering([], async () => {
+        const before = await codeOf(await tell(link));
+        await participate(link);
+        await onLink({ action: "withdraw", ...link });
+        return [before, await codeOf(await tell(link))];
+      });
+      expect({ result, sent: requests.length }).toStrictEqual({
+        result: [
+          [403, "interview.not_participating"],
+          [410, "interview.withdrawn"],
+        ],
+        sent: 0,
+      });
+    });
   }
 );
 
@@ -250,7 +280,8 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
     );
     const changed = fact("f2", "Write the weight on the parcel.");
 
-    // They agree: the interview is completed, and what they agreed to is drawn.
+    // They agree: the interview is completed, and what they approved, as
+    // it stands, is drawn.
     version = await save(
       link,
       version,
@@ -259,6 +290,7 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
         { ...changed, agreed: true },
       ])
     );
+    await approve(link, [weigh, changed]);
     const agreed = await drawingOf(person);
     const first = await store.drawInput(person);
     await store.drawn(person, first?.agreedAt ?? "");
@@ -280,6 +312,7 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
       version,
       progressOf("completed", [...kept, { ...belt, agreed: true }])
     );
+    await approve(link, [weigh, changed, belt]);
     const added = await drawingOf(person);
 
     expect({ reading, changing, agreed, drawn, adding, added }).toStrictEqual({
@@ -316,13 +349,9 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
 
   it("is nothing once they delete their interview", async () => {
     const { link, person } = await openedFor();
-    await save(
-      link,
-      0,
-      progressOf("completed", [
-        fact("f1", "Weigh the parcel.", { agreed: true }),
-      ])
-    );
+    const weigh = fact("f1", "Weigh the parcel.", { agreed: true });
+    await save(link, 0, progressOf("completed", [weigh]));
+    await approve(link, [weigh]);
     const before = await drawingOf(person);
     await routed(interviewApiPath, {
       method: "POST",
@@ -332,6 +361,188 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
     expect({ before, after: await drawingOf(person) }).toStrictEqual({
       before: { due: true, records: ["Weigh the parcel."] },
       after: { due: false, records: [] },
+    });
+  });
+
+  it("is never what the page says it agreed to: only what they approved, at the revision it stands at", async () => {
+    const { link, person } = await openedFor();
+    const weigh = fact("f1", "Weigh the parcel.");
+    const label = fact("f2", "Write the weight on the label.");
+
+    // The page says both are agreed to, without approving: nothing counts,
+    // and reading it back says so.
+    let version = await save(
+      link,
+      0,
+      progressOf("completed", [
+        { ...weigh, agreed: true },
+        { ...label, agreed: true },
+      ])
+    );
+    const flagged = await drawingOf(person);
+    const shown = async () => {
+      const session = await onLink({ action: "session", ...link });
+      const { progress }: InterviewSession = await session.json();
+      return progress?.facts.map(({ id, agreed }) => [id, agreed ?? false]);
+    };
+    const flaggedShown = await shown();
+
+    // They approve both, as they stand.
+    await approve(link, [weigh, label]);
+    const approved = await drawingOf(person);
+    const approvedShown = await shown();
+
+    // A line changed after, still marked agreed by the page: it counts no
+    // more, until they approve it as it is now.
+    const changed = fact("f2", "Write the weight on the parcel.");
+    version = await save(
+      link,
+      version,
+      progressOf("completed", [
+        { ...weigh, agreed: true },
+        { ...changed, agreed: true },
+      ])
+    );
+    const edited = await drawingOf(person);
+    const editedShown = await shown();
+    await approve(link, [weigh, changed]);
+    const reapproved = await drawingOf(person);
+
+    // A line taken out counts no more either.
+    await save(
+      link,
+      version,
+      progressOf("completed", [
+        { ...weigh, agreed: true },
+        { ...changed, agreed: true, out: true },
+      ])
+    );
+    const takenOut = await drawingOf(person);
+
+    expect({
+      flagged,
+      flaggedShown,
+      approved,
+      approvedShown,
+      edited,
+      editedShown,
+      reapproved,
+      takenOut,
+    }).toStrictEqual({
+      flagged: { due: false, records: [] },
+      flaggedShown: [
+        ["f1", false],
+        ["f2", false],
+      ],
+      approved: {
+        due: true,
+        records: ["Weigh the parcel.", "Write the weight on the label."],
+      },
+      approvedShown: [
+        ["f1", true],
+        ["f2", true],
+      ],
+      edited: { due: true, records: ["Weigh the parcel."] },
+      editedShown: [
+        ["f1", true],
+        ["f2", false],
+      ],
+      reapproved: {
+        due: true,
+        records: ["Weigh the parcel.", "Write the weight on the parcel."],
+      },
+      takenOut: { due: true, records: ["Weigh the parcel."] },
+    });
+  });
+
+  it("answers one receipt however often the same approval comes, and draws nothing again for it", async () => {
+    const { link, person } = await openedFor();
+    const store = onboardingStore(env);
+    const weigh = fact("f1", "Weigh the parcel.");
+    await save(link, 0, progressOf("completed", [weigh]));
+
+    const first = await approve(link, [weigh]);
+    const firstBody: InterviewApproval = await first.json();
+    const input = await store.drawInput(person);
+    await store.drawn(person, input?.agreedAt ?? "");
+    // The answer was lost: the page asks again, the same.
+    const again = await approve(link, [weigh]);
+    const againBody: InterviewApproval = await again.json();
+
+    expect({
+      first: first.status,
+      again: again.status,
+      same: JSON.stringify(againBody) === JSON.stringify(firstBody),
+      receipt: firstBody.approved
+        ? /^rb-[0-9a-f]{32}$/u.test(firstBody.receipt)
+        : false,
+      drawing: await drawingOf(person),
+    }).toStrictEqual({
+      first: 200,
+      again: 200,
+      same: true,
+      receipt: true,
+      drawing: { due: false, records: ["Weigh the parcel."] },
+    });
+  });
+
+  it("refuses an approval of what isn't kept, or of nothing that was written down, answering the copy kept", async () => {
+    const { link, person } = await openedFor();
+    const label = fact("f2", "Write the weight on the label.");
+    const changed = fact("f2", "Write the weight on the parcel.");
+    const version = await save(link, 0, progressOf("completed", [label]));
+    // Another tab saved the change meanwhile; this one approves what it read.
+    await save(link, version, progressOf("completed", [changed]));
+
+    const stale = await approve(link, [label]);
+    const staleBody: InterviewApproval = await stale.json();
+    const unknown = await onLink({
+      action: "approve",
+      ...link,
+      facts: await revisionsOf([fact("f9", "Never written down.")]),
+    });
+
+    expect({
+      stale: stale.status,
+      kept: staleBody.approved
+        ? null
+        : staleBody.progress?.facts.map(({ record, agreed }) => [
+            record,
+            agreed ?? false,
+          ]),
+      unknown: unknown.status,
+      drawing: await drawingOf(person),
+    }).toStrictEqual({
+      stale: 409,
+      kept: [["Write the weight on the parcel.", false]],
+      unknown: 409,
+      drawing: { due: false, records: [] },
+    });
+  });
+
+  it("is nothing once they withdraw, and they approve nothing more", async () => {
+    const { link, person } = await openedFor();
+    const weigh = fact("f1", "Weigh the parcel.");
+    await save(link, 0, progressOf("completed", [weigh]));
+    await approve(link, [weigh]);
+    const before = await drawingOf(person);
+
+    const withdrawn = await onLink({ action: "withdraw", ...link });
+    const again = await onLink({ action: "withdraw", ...link });
+    const [first, second] = [await withdrawn.json(), await again.json()];
+
+    expect({
+      before,
+      withdrawn: withdrawn.status,
+      same: JSON.stringify(first) === JSON.stringify(second),
+      after: await drawingOf(person),
+      approve: await codeOf(await approve(link, [weigh])),
+    }).toStrictEqual({
+      before: { due: true, records: ["Weigh the parcel."] },
+      withdrawn: 200,
+      same: true,
+      after: { due: false, records: [] },
+      approve: [410, "interview.withdrawn"],
     });
   });
 });

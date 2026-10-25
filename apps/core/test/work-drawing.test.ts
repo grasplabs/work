@@ -16,7 +16,13 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { drawnOf, knownOf } from "../src/onboarding/work-drawing.ts";
 import type { RawDrawing } from "../src/onboarding/work-drawing.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import { answering, careful, modelOf } from "./interview-link.ts";
+import {
+  answering,
+  approveAgreed,
+  careful,
+  modelOf,
+  participate,
+} from "./interview-link.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // Each piece of work drawn from what its people agreed to
@@ -141,6 +147,7 @@ const agree = async (
     body: JSON.stringify({ action: "save", ...link, version, progress }),
   });
   const saved: InterviewSaved = await response.json();
+  await approveAgreed(link, facts);
   return saved.version;
 };
 
@@ -287,6 +294,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       fact("o1", "step", "Mo looks the customer up in Salesforce."),
     ]);
     const noor = await openLink(ids.noor);
+    await participate(noor);
     const contextOf = async () => {
       const context = await store.turnContext(
         await sha256Hex(noor.secret),

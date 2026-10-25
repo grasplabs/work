@@ -18,7 +18,7 @@ import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
 import type { Answer, GatewayReply } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, gatewayConfig } from "./interview-link.ts";
+import { answering, approveAgreed, gatewayConfig } from "./interview-link.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
@@ -208,6 +208,7 @@ const agree = async (person: string, facts: InterviewFact[]) => {
     body: JSON.stringify({ action: "save", ...link, version: 0, progress }),
   });
   const saved: InterviewSaved = await response.json();
+  await approveAgreed(link, facts);
   return saved.version;
 };
 
