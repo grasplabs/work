@@ -5,20 +5,24 @@
  * its people and teams, what it knows in Knowledge, Lisa's own Microsoft
  * 365 account and the company's, each granted to the person's agent as
  * Settings › Stephen would (her mailbox; the register workbook alone), and
- * Graph's side of them in core's fake Graph (stephen-graph-fake.ts). Then
- * it asks each case of fixtures/stephen-cases.ts in a new chat, as the
- * Teams door does: through the real Workspace object, Knowledge, the agent's
- * code, connect, the permissions, the model gateway and the ledger, with
- * only the model provider swapped (stephen-stub.ts in CI).
+ * Graph's side of them in core's fake Graph (stephen-graph-fake.ts). On
+ * Google Workspace (GRA-756) the same: Lisa's own Google account and the
+ * company's (her mailbox and calendar, her team's shared drive; the
+ * register's drive alone), and Google's side in core's fake Google
+ * (stephen-google-fake.ts). Then it asks each case of
+ * fixtures/stephen-cases.ts in a new chat, as the Teams door does: through
+ * the real Workspace object, Knowledge, the agent's code, connect, the
+ * permissions, the model gateway and the ledger, with only the model
+ * provider swapped (stephen-stub.ts in CI).
  *
  * Each case is observed at the boundaries it crosses: the connector calls
- * connect audited, what reached Graph, the changes held on the person's
- * card, what reached the model, Stephen's words and the documents they
- * cite, its time and its charged cost. Every hard rule (stephen-rules.ts)
- * is checked on every case; the case's own checks and a judge, asked
- * through the same gateway, say how good it was. The report gives the hard
- * rules, quality and speed, and the run's identity pins what the numbers
- * depend on.
+ * connect audited, what reached Graph or Google, the changes held on the
+ * person's card, what reached the model, Stephen's words and the
+ * documents they cite, its time and its charged cost. Every hard rule
+ * (stephen-rules.ts) is checked on every case; the case's own checks and a
+ * judge, asked through the same gateway, say how good it was. The report
+ * gives the hard rules, quality and speed, and the run's identity pins
+ * what the numbers depend on.
  */
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { CompanyToolClass } from "@grasp-os/shared/connect";
@@ -42,8 +46,15 @@ import { brainBudgetDay, brainBudgetMonth, charged } from "./brain-harness.ts";
 import type { BrainModelSetup } from "./brain-harness.ts";
 import { percentile } from "./brain-scoring.ts";
 import { transcriptOf } from "./brain-stub-model.ts";
-import { consentCode, stephenGraphUrl } from "./connect-providers.ts";
-import { stephenCases, stephenSuiteVersion } from "./fixtures/stephen-cases.ts";
+import {
+  consentCode,
+  stephenGoogleUrl,
+  stephenGraphUrl,
+} from "./connect-providers.ts";
+import {
+  stephenCasesOn,
+  stephenSuiteVersion,
+} from "./fixtures/stephen-cases.ts";
 import type {
   StephenCase,
   StephenContext,
@@ -53,6 +64,11 @@ import {
   budgetRows,
   crmNote,
   crmTools,
+  gmailMessages,
+  googleBudget,
+  googleEvents,
+  googleRegister,
+  googleTeamDrive,
   graphTable,
   grantedCollections,
   leaveRows,
@@ -61,6 +77,7 @@ import {
   lisaFiles,
   lisaMessages,
   registerRows,
+  sheetRows,
   stephenBudget,
   stephenClock,
   stephenCollections,
@@ -73,12 +90,13 @@ import {
 import type {
   StephenClock,
   StephenPersona,
+  StephenSuite,
   StephenTeam,
 } from "./fixtures/stephen-world.ts";
 import type { Idp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
-import { acmeTenant } from "./sign-in-config.ts";
+import { acmeTenant, signInConfig } from "./sign-in-config.ts";
 import { callAuth, routed, signedInApi } from "./sign-in.ts";
 import { brokenRules, stephenRuleNames } from "./stephen-rules.ts";
 import type { StephenRuleName } from "./stephen-rules.ts";
@@ -91,7 +109,7 @@ import type {
 import { connectDb, testBinding } from "./test-env.ts";
 
 /** Bumped with any change to how the harness runs or measures a case. */
-export const stephenHarnessVersion = "1";
+export const stephenHarnessVersion = "2";
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
@@ -118,17 +136,38 @@ export const registerActions = [
   "excel.updateRow",
 ];
 
+/**
+ * What Lisa's agent may do in her own Gmail and Google Calendar: no send,
+ * no labels.
+ */
+export const googleActions = [
+  "calendar.list",
+  "calendar.get",
+  "calendar.create",
+  "mail.list",
+  "mail.get",
+  "mail.createDraft",
+];
+
+/** What her agent may do in her team's shared drive: read it. */
+export const teamDriveActions = ["files.list", "files.search", "files.read"];
+
+/** What her agent may do in the register's drive on Google: read its sheets. */
+export const googleRegisterActions = ["sheets.read"];
+
 export interface StephenCompany {
+  /** The suite Noordkade runs on. */
+  suite: StephenSuite;
   admin: Person;
   people: Record<StephenPersona, Person>;
-  /** Lisa's mailbox, as Graph and the connector name it. */
+  /** Lisa's mailbox, as Graph or Gmail and the connector name it. */
   mailbox: string;
   /** Each collection's ID, by key. */
   collections: Map<string, string>;
   /** Each team's ID, by key. */
   teams: Map<StephenTeam, string>;
   /** The connections Lisa's agent is granted: her own, and the company's. */
-  connections: { outlook: string; company: string };
+  connections: { own: string; company: string };
   /** Each persona's Workspace object and the agent its grants are for. */
   places: Record<
     StephenPersona,
@@ -149,25 +188,29 @@ const providers = (): Fetcher => {
   return fetcher;
 };
 
-/** Sets part of the fake Graph's Noordkade. */
-const setGraph = async (body: unknown): Promise<void> => {
-  await providers().fetch(stephenGraphUrl, {
+/** Where the suite's fake Noordkade is set and read. */
+const controlOf = (suite: StephenSuite): string =>
+  suite === "google" ? stephenGoogleUrl : stephenGraphUrl;
+
+/** Sets part of the fake Graph's or Google's Noordkade. */
+const setApp = async (suite: StephenSuite, body: unknown): Promise<void> => {
+  await providers().fetch(controlOf(suite), {
     method: "POST",
     body: JSON.stringify(body),
   });
 };
 
-const graphSeenSchema = z.object({
+const appSeenSchema = z.object({
   reads: z.array(z.string()),
   writes: z.array(
     z.object({ method: z.string(), path: z.string(), body: z.string() })
   ),
 });
 
-/** What has reached the fake Graph's Noordkade so far. */
-const graphSeen = async () => {
-  const response = await providers().fetch(stephenGraphUrl);
-  return graphSeenSchema.parse(await response.json());
+/** What has reached the fake Graph's or Google's Noordkade so far. */
+export const appSeen = async (suite: StephenSuite) => {
+  const response = await providers().fetch(controlOf(suite));
+  return appSeenSchema.parse(await response.json());
 };
 
 /**
@@ -177,6 +220,27 @@ const graphSeen = async () => {
  */
 const everyRight =
   "openid profile email offline_access User.Read MailboxSettings.Read Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send Mail.Send.Shared Calendars.ReadWrite Calendars.Read.Shared Files.ReadWrite.All Sites.ReadWrite.All Tasks.ReadWrite Notes.ReadWrite";
+
+/**
+ * What Google grants the eval's Google connections: every right a class
+ * may ask of Google, so turning a class on asks no one to connect again.
+ * `gmail.modify` among them can send: under it, only the class keeps
+ * Stephen from sending (stephen-eval-google.test.ts).
+ */
+export const everyGoogleRight = [
+  "openid",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.compose",
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/calendar.events.readonly",
+  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/drive.file",
+].join(" ");
 
 /**
  * The company's CRM, a HubSpot connection through Composio whose admin
@@ -230,19 +294,31 @@ const crmConnection = async (): Promise<string> => {
   return id;
 };
 
-/** A Microsoft 365 account `person` connects at `scope`, as `subject`. */
-const connectMicrosoft = async (
+/**
+ * A Microsoft 365 or Google Workspace account `person` connects at
+ * `scope`, as `subject`, granted every right.
+ */
+const connectSuite = async (
+  suite: StephenSuite,
   person: Person,
   scope: "personal" | "shared",
   subject: string
 ): Promise<string> => {
   const { url } = await person.api.connections.start({
-    provider: "microsoft",
+    provider: suite,
     scope,
   });
   const authorization = new URL(url);
   const query = new URLSearchParams({
-    code: consentCode(authorization, acmeTenant, subject, everyRight),
+    code:
+      suite === "google"
+        ? consentCode(
+            authorization,
+            signInConfig.google.hostedDomain,
+            subject,
+            everyGoogleRight
+          )
+        : consentCode(authorization, acmeTenant, subject, everyRight),
     state: authorization.searchParams.get("state") ?? "",
   });
   await routed(`/api/connections/callback?${query.toString()}`, {
@@ -291,10 +367,118 @@ export const grantCollection = async (
   );
 };
 
-/** Sets Noordkade up, as its people and admin would, at `clock`'s day. */
+/** Puts the register, the budget and the files on Graph: Lisa's OneDrive, and Excel's workbooks. */
+const setMicrosoftFiles = async (clock: StephenClock): Promise<void> => {
+  await setApp("microsoft", { drive: lisaDrive, files: lisaFiles });
+  const { drive, workbook, table, leaveTable, columns } = stephenRegister;
+  await setApp(
+    "microsoft",
+    graphTable(`${drive}/${workbook}/${table}`, columns, registerRows(clock))
+  );
+  await setApp(
+    "microsoft",
+    graphTable(
+      `${drive}/${workbook}/${leaveTable}`,
+      ["Who", "From", "Note"],
+      leaveRows(clock)
+    )
+  );
+  await setApp(
+    "microsoft",
+    graphTable(
+      `${drive}/${stephenBudget.workbook}/${stephenBudget.table}`,
+      ["Line", "What", "Amount"],
+      budgetRows
+    )
+  );
+};
+
+/**
+ * Puts them on Google: her team's shared drive, and the register and the
+ * budget as Google spreadsheets in shared drives of their own.
+ */
+const setGoogleFiles = async (clock: StephenClock): Promise<void> => {
+  await setApp("google", { drive: googleTeamDrive, files: lisaFiles });
+  const { drive, spreadsheet, name, sheet, leaveSheet } = googleRegister;
+  await setApp("google", {
+    drive,
+    spreadsheet,
+    name,
+    sheets: [
+      {
+        title: sheet,
+        rows: sheetRows(stephenRegister.columns, registerRows(clock)),
+      },
+      {
+        title: leaveSheet,
+        rows: sheetRows(["Who", "From", "Note"], leaveRows(clock)),
+      },
+    ],
+  });
+  await setApp("google", {
+    ...googleBudget,
+    sheets: [
+      {
+        title: googleBudget.sheet,
+        rows: sheetRows(["Line", "What", "Amount"], budgetRows),
+      },
+    ],
+  });
+};
+
+/**
+ * Grants Lisa's agent her own account and the company's, as Settings ›
+ * Stephen would: on Microsoft 365 her Outlook, her OneDrive and the
+ * register workbook; on Google her Gmail and calendar, her team's drive
+ * and the register's drive.
+ */
+const grantLisa = async (
+  company: Pick<StephenCompany, "suite" | "admin" | "mailbox" | "connections">,
+  agentId: string
+): Promise<void> => {
+  const { suite, admin, mailbox, connections } = company;
+  const grant = async (
+    connectionId: string,
+    resource: string,
+    actions: string[],
+    binding: string
+  ) => {
+    await granted(admin, {
+      subject: { type: "agent", agentId },
+      object: { type: "connection", connectionId, resource },
+      actions,
+      binding,
+    });
+  };
+  if (suite === "google") {
+    await grant(connections.own, mailbox, googleActions, "GOOGLE");
+    await grant(
+      connections.company,
+      googleRegister.drive,
+      googleRegisterActions,
+      "REGISTER"
+    );
+    await grant(connections.own, googleTeamDrive, teamDriveActions, "DRIVE");
+    return;
+  }
+  await grant(connections.own, mailbox, outlookActions, "OUTLOOK");
+  await grant(
+    connections.company,
+    stephenRegister.workbook,
+    registerActions,
+    "REGISTER"
+  );
+  await grant(connections.own, lisaDrive, oneDriveActions, "ONEDRIVE");
+};
+
+/**
+ * Sets Noordkade up, as its people and admin would, at `clock`'s day, on
+ * Microsoft 365 or Google Workspace.
+ */
 export const setUpStephenCompany = async (
   idp: Idp,
-  clock: StephenClock = stephenClock()
+  clock: StephenClock = stephenClock(),
+  suite: StephenSuite = "microsoft"
 ): Promise<StephenCompany> => {
   const admin = await signedInApi(idp, "admin");
   const people: Record<StephenPersona, Person> = {
@@ -336,40 +520,36 @@ export const setUpStephenCompany = async (
       ifVersion: 0,
     });
   }
-  // Lisa's own Microsoft 365 account, and the company's.
-  const lisaSubject = String(people.lisa.person.oid);
+  // Lisa's own account, and the company's. She signs in with Entra, so
+  // her own Google account is hers by its address: her sign-in's.
+  const lisaSubject =
+    suite === "google"
+      ? String(people.lisa.person.email).replace(/@.*$/u, "")
+      : String(people.lisa.person.oid);
   const mailbox = `${lisaSubject}@acme.test`;
-  const outlook = await connectMicrosoft(people.lisa, "personal", lisaSubject);
-  const company = await connectMicrosoft(
+  const own = await connectSuite(suite, people.lisa, "personal", lisaSubject);
+  const company = await connectSuite(
+    suite,
     admin,
     "shared",
     `noordkade-operations-${crypto.randomUUID()}`
   );
-  await setGraph({
-    mailbox,
-    events: lisaEvents(clock, mailbox),
-    messages: lisaMessages(clock, mailbox),
-  });
-  await setGraph({ drive: lisaDrive, files: lisaFiles });
+  await setApp(
+    suite,
+    suite === "google"
+      ? {
+          mailbox,
+          events: googleEvents(clock, mailbox),
+          messages: gmailMessages(clock, mailbox),
+        }
+      : {
+          mailbox,
+          events: lisaEvents(clock, mailbox),
+          messages: lisaMessages(clock, mailbox),
+        }
+  );
+  await (suite === "google" ? setGoogleFiles(clock) : setMicrosoftFiles(clock));
   const crm = await crmConnection();
-  const { drive, workbook, table, leaveTable, columns } = stephenRegister;
-  await setGraph(
-    graphTable(`${drive}/${workbook}/${table}`, columns, registerRows(clock))
-  );
-  await setGraph(
-    graphTable(
-      `${drive}/${workbook}/${leaveTable}`,
-      ["Who", "From", "Note"],
-      leaveRows(clock)
-    )
-  );
-  await setGraph(
-    graphTable(
-      `${drive}/${stephenBudget.workbook}/${stephenBudget.table}`,
-      ["Line", "What", "Amount"],
-      budgetRows
-    )
-  );
   const placed = new Map<StephenPersona, StephenCompany["places"]["lisa"]>();
   for (const persona of stephenPersonas) {
     const person = people[persona];
@@ -379,7 +559,7 @@ export const setUpStephenCompany = async (
     await person.api.knowledge.saveDocument({
       collectionId: personal,
       path: "USER.md",
-      text: stephenMemory(persona, mailbox),
+      text: stephenMemory(persona, mailbox, suite),
       ifVersion: 0,
     });
     const id = workspaceIdSchema.parse(crypto.randomUUID());
@@ -406,24 +586,8 @@ export const setUpStephenCompany = async (
     });
   }
   const lisa = places.lisa.agentId;
-  await granted(admin, {
-    subject: { type: "agent", agentId: lisa },
-    object: { type: "connection", connectionId: outlook, resource: mailbox },
-    actions: outlookActions,
-    binding: "OUTLOOK",
-  });
-  await granted(admin, {
-    subject: { type: "agent", agentId: lisa },
-    object: { type: "connection", connectionId: company, resource: workbook },
-    actions: registerActions,
-    binding: "REGISTER",
-  });
-  await granted(admin, {
-    subject: { type: "agent", agentId: lisa },
-    object: { type: "connection", connectionId: outlook, resource: lisaDrive },
-    actions: oneDriveActions,
-    binding: "ONEDRIVE",
-  });
+  const connections = { own, company };
+  await grantLisa({ suite, admin, mailbox, connections }, lisa);
   await granted(admin, {
     subject: { type: "agent", agentId: lisa },
     object: { type: "connection", connectionId: crm },
@@ -438,12 +602,13 @@ export const setUpStephenCompany = async (
     audience: { who: "teams", teams: customerService },
   });
   return {
+    suite,
     admin,
     people,
     mailbox,
     collections,
     teams,
-    connections: { outlook, company },
+    connections,
     places,
     clock,
   };
@@ -457,19 +622,20 @@ export interface StephenBreak {
   plan?: StephenPlan;
   /**
    * What the harness does mid-turn that no turn can do itself, the
-   * platform refusing it: a write reaching Graph past the hold.
+   * platform refusing it: a write reaching Graph or Google past the hold.
    */
-  sabotage?: { method: string; path: string; body: unknown };
+  sabotage?: { method: string; url: string; body: unknown };
   /**
    * An admin's mistake made first, which the platform otherwise stops a
    * turn short of: HR's collection granted to the person's agent and the
-   * person put in HR's team, or Lisa's agent granted more of her Outlook,
-   * under a binding of its own, with the class of those actions turned on
-   * for her team. It stays for the rest of the run.
+   * person put in HR's team, or Lisa's agent granted more of her own
+   * mailbox, under a binding of its own, with the class of those actions
+   * turned on for her team unless it names none. It stays for the rest of
+   * the run.
    */
   mistake?:
     | { collection: string; team: StephenTeam }
-    | { binding: string; actions: string[]; toolClass: CompanyToolClass };
+    | { binding: string; actions: string[]; toolClass?: CompanyToolClass };
 }
 
 /** Makes `breaker`'s mistake, for the person `persona`. */
@@ -498,12 +664,15 @@ const makeMistake = async (
     subject: { type: "agent", agentId },
     object: {
       type: "connection",
-      connectionId: company.connections.outlook,
+      connectionId: company.connections.own,
       resource: company.mailbox,
     },
     actions: mistake.actions,
     binding: mistake.binding,
   });
+  if (mistake.toolClass === undefined) {
+    return;
+  }
   await company.admin.api.connections.setToolClass(mistake.toolClass, {
     who: "teams",
     teams: [held(company.teams, stephenPeople[persona].team)],
@@ -534,6 +703,8 @@ export interface StephenReport {
   identity: {
     suiteVersion: string;
     harnessVersion: string;
+    /** The suite Noordkade ran on. */
+    suite: StephenSuite;
     cases: number;
     casesDigest: string;
     model: string;
@@ -646,9 +817,11 @@ const observeCase = async (
   const person = company.people[item.persona];
   const place = company.places[item.persona];
   const { gateway, setTurn } = provider;
+  const { suite } = company;
   const context: StephenContext = {
     clock: company.clock,
     mailbox: company.mailbox,
+    suite,
   };
   await pointAt(place.stub, gateway);
   if (breaker?.mistake !== undefined) {
@@ -660,10 +833,12 @@ const observeCase = async (
     place.agentId
   );
   if (item.failFirstCalendarRead === true) {
-    await setGraph({ failNext: "calendarView" });
+    await setApp(suite, {
+      failNext: suite === "google" ? "events" : "calendarView",
+    });
   }
   const head = await logHead();
-  const graphBefore = await graphSeen();
+  const appBefore = await appSeen(suite);
   const firstRequest = gateway.requests.length;
   const spentBefore = await charged();
   setTurn({
@@ -682,11 +857,8 @@ const observeCase = async (
       model: setup.model,
     });
     if (breaker?.sabotage !== undefined) {
-      const { method, path, body } = breaker.sabotage;
-      await providers().fetch(`https://graph.microsoft.com${path}`, {
-        method,
-        body: JSON.stringify(body),
-      });
+      const { method, url, body } = breaker.sabotage;
+      await providers().fetch(url, { method, body: JSON.stringify(body) });
     }
     const reply = await asked;
     ({ answer } = reply);
@@ -700,7 +872,7 @@ const observeCase = async (
   const latencyMs = performance.now() - started;
   setTurn({ phase: "idle" });
   const costMicros = (await charged()) - spentBefore;
-  const graphAfter = await graphSeen();
+  const appAfter = await appSeen(suite);
   const { events } = await eventsAfterWithHead(head);
   const pending = await person.api.pendingActions.list();
   return {
@@ -708,8 +880,8 @@ const observeCase = async (
       answer,
       ...(failure === undefined ? {} : { error: failure }),
       calls: callsOf(events, chat.id),
-      graphReads: graphAfter.reads.slice(graphBefore.reads.length),
-      graphWrites: graphAfter.writes.slice(graphBefore.writes.length),
+      appReads: appAfter.reads.slice(appBefore.reads.length),
+      appWrites: appAfter.writes.slice(appBefore.writes.length),
       held: pending
         .filter(
           ({ context: where }) =>
@@ -832,7 +1004,7 @@ export const reportOf = (
 };
 
 export interface StephenRunOptions {
-  /** The cases to run: every case unless given. */
+  /** The cases to run: every case on the company's suite unless given. */
   cases?: readonly StephenCase[];
   /** Cases built to break a hard rule, run after the cases. */
   breakers?: readonly StephenBreak[];
@@ -866,7 +1038,7 @@ const casesDigest = async (cases: readonly StephenCase[]): Promise<string> =>
 export const runStephenEval = async (
   company: StephenCompany,
   {
-    cases = stephenCases,
+    cases = stephenCasesOn(company.suite),
     breakers = [],
     respond = stephenStub,
     providerName = stephenStubModel,
@@ -876,7 +1048,9 @@ export const runStephenEval = async (
   }: StephenRunOptions = {}
 ): Promise<StephenReport> => {
   const provider = providerOf(respond, modelSetup);
-  const byId = new Map(stephenCases.map((item) => [item.id, item]));
+  const byId = new Map(
+    stephenCasesOn(company.suite).map((item) => [item.id, item])
+  );
   const planned = [
     ...cases.map((item) => ({ item, breaker: undefined })),
     ...breakers.map((breaker) => ({
@@ -930,6 +1104,7 @@ export const runStephenEval = async (
   return reportOf(scores, {
     suiteVersion: stephenSuiteVersion,
     harnessVersion: stephenHarnessVersion,
+    suite: company.suite,
     cases: cases.length,
     casesDigest: await casesDigest(cases),
     model: modelSetup.model,
