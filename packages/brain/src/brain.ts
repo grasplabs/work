@@ -129,6 +129,13 @@ export interface BrainPorts<C> {
       reader: C
     ) => Promise<{ audience: MemoryAudience; people: readonly string[] }>;
     /**
+     * The collections every one of `people` may read now, as the host
+     * decides it (GRA-1085): a memory record resting on any other is left
+     * out of a shared read in the query itself (memories.ts,
+     * `citesReadable`), before `keep` checks what is found again.
+     */
+    readableBy: (reader: C, people: readonly string[]) => Promise<string[]>;
+    /**
      * Of `records`, found for `people`, those the host keeps now, in the
      * same order: each with who published it, when that isn't the reader
      * (null when it is), and the collections it rests on, each sensitive

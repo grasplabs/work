@@ -30,6 +30,7 @@ import type {
 import { inList } from "./db/d1.ts";
 import {
   brainMemories,
+  brainMemoryCites,
   brainReceipts,
   collections,
   documents,
@@ -109,6 +110,80 @@ const sweepBudgetMs = 5000;
 const callerKey = (userId: string): string => canonicalJson(["person", userId]);
 
 const refsSchema = z.array(brainSourceRefSchema);
+
+/** How far a record's lineage is followed: as far as publishing checks it. */
+const citesDepth = 8;
+
+/** Stands for a lineage deeper than `citesDepth`: no collection is it. */
+const citesTooDeep = "lineage:too-deep";
+
+/**
+ * The collections a record citing `refs` rests on (`brain_memory_cites`):
+ * those of the documents it cites, and of the documents the records it
+ * cites cite, and so on to `citesDepth`, past which it rests on
+ * `citesTooDeep`, so no reader is held to have read all of it.
+ */
+const citedCollectionsOf = async (
+  db: DrizzleD1Database,
+  refs: readonly BrainSourceRef[]
+): Promise<string[]> => {
+  const found = new Set<string>();
+  const seen = new Set<string>();
+  let current: readonly BrainSourceRef[] = refs;
+  for (let depth = 0; ; depth += 1) {
+    const next: string[] = [];
+    for (const ref of current) {
+      if (ref.kind === "document") {
+        found.add(ref.collectionId);
+      } else if (!seen.has(ref.memoryId)) {
+        seen.add(ref.memoryId);
+        next.push(ref.memoryId);
+      }
+    }
+    if (next.length === 0) {
+      return [...found];
+    }
+    if (depth >= citesDepth) {
+      found.add(citesTooDeep);
+      return [...found];
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one level of the lineage at a time
+    const rows = await db
+      .select({ sourceRefs: brainMemories.sourceRefs })
+      .from(brainMemories)
+      .where(inList(brainMemories.id, next));
+    current = rows.flatMap(({ sourceRefs }) =>
+      refsSchema.parse(JSON.parse(sourceRefs))
+    );
+  }
+};
+
+/**
+ * The statement that writes what record `memoryId` rests on
+ * (`citedCollectionsOf`), in the batch that writes the record, after it:
+ * only once the record is there.
+ */
+const citesWrite = (
+  db: DrizzleD1Database,
+  memoryId: string,
+  cited: readonly string[]
+) =>
+  db
+    .insert(brainMemoryCites)
+    .select(
+      sql`SELECT ${memoryId}, cited.value FROM json_each(${JSON.stringify(cited)}) AS cited WHERE EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${brainMemories.id} = ${memoryId})`
+    )
+    .onConflictDoNothing();
+
+/**
+ * That a record rests on nothing but `readable` (`brain_memory_cites`), as
+ * a condition of a query of `brain_memories`: the collections everyone
+ * reading may read now, which the host names (`memories.readableBy`). A
+ * record resting on any other is never fetched, so it shapes no page,
+ * cursor or rank (GRA-1085).
+ */
+export const citesReadable = (readable: readonly string[]): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${brainMemoryCites} WHERE ${brainMemoryCites.memoryId} = ${brainMemories.id} AND ${brainMemoryCites.collectionId} NOT IN (SELECT value FROM json_each(${JSON.stringify(readable)})))`;
 
 /**
  * The statements that delete `userId`'s records and receipts, and the
@@ -564,6 +639,7 @@ export const remember = async <C>(
   // After the replay, so a retry of a kept command still answers.
   await requireWithinBound(brain, caller, now);
   await requireCitable(brain, reader, ownerId, sourceRefs);
+  const cited = await citedCollectionsOf(brain.db, sourceRefs);
   const { db } = brain;
   const receiptId = crypto.randomUUID();
   const memoryId = crypto.randomUUID();
@@ -598,6 +674,8 @@ export const remember = async <C>(
         ),
       // Its linking intent (entities.ts), with it or not at all.
       memoryLinkIntentWhere(db, memoryId, 1, now, receiptStored(receiptId)),
+      // What it rests on, with it (GRA-1085).
+      citesWrite(db, memoryId, cited),
       outboxedWhere(
         brain,
         {
@@ -927,11 +1005,10 @@ const keptRowsAfter = async <C>(
  * number of rows, so its work doesn't grow with the records kept from the
  * caller, and a page it couldn't fill in that time comes back short, even
  * empty, with a cursor to go on from. Cursors are encrypted, so none names
- * a record the caller can't see; but a short page with a cursor tells how
- * many records of that stretch the host kept from them: counts only, of
- * records already in their audience that rest on what they can't read (an
- * accepted Low of the GRA-298 review; checking cited sources in the query
- * itself, so the host rarely drops one, is the follow-up).
+ * a record the caller can't see. A record resting on a collection someone
+ * reading can't read is left out in the query itself (`citesReadable`,
+ * GRA-1085), so it fills no page and moves no cursor; `keep` drops one
+ * only when access changed between the two reads.
  */
 export const memoriesList = async <C>(
   brain: Brain<C>,
@@ -957,6 +1034,13 @@ export const memoriesList = async <C>(
     // now, as the host compiles it, re-checked by the host before shown.
     const { audience, people } = await brain.ports.memories.audienceOf(reader);
     const shared = audienceScope(audience);
+    // Only records resting on what everyone reading may read, in the
+    // query itself: one kept from them is never read, so it shapes no
+    // page or cursor (GRA-1085); `keep` checks what is found again.
+    const readable =
+      shared === undefined
+        ? []
+        : await brain.ports.memories.readableBy(reader, people);
     const read =
       shared === undefined
         ? { kept: [] }
@@ -964,7 +1048,12 @@ export const memoriesList = async <C>(
             brain,
             reader,
             people,
-            and(shared, ne(brainMemories.ownerId, ownerId), ofKind),
+            and(
+              shared,
+              ne(brainMemories.ownerId, ownerId),
+              ofKind,
+              citesReadable(readable)
+            ),
             after,
             size
           );
@@ -1047,9 +1136,19 @@ export const searchMemories = async <C>(
   { db }: Brain<C>,
   audience: MemoryAudience,
   query: string,
-  limit: number
+  limit: number,
+  /**
+   * The collections everyone reading may read (`citesReadable`): a record
+   * resting on any other is never ranked or counted. None given, none is
+   * held to it.
+   */
+  readable?: readonly string[]
 ): Promise<(MemoryRecord & { ownerId: string })[]> => {
-  const scope = audienceScope(audience);
+  const audienceWhere = audienceScope(audience);
+  const scope =
+    audienceWhere === undefined || readable === undefined
+      ? audienceWhere
+      : and(audienceWhere, citesReadable(readable));
   const terms = termsOf(query);
   if (scope === undefined || terms.length === 0 || limit <= 0) {
     return [];
@@ -1242,6 +1341,7 @@ export const memoriesPublish = async <C>(
     sourceRefs
   );
   await requireCitable(brain, reader, ownerId, sourceRefs);
+  const cited = await citedCollectionsOf(brain.db, sourceRefs);
   const { db } = brain;
   const memoryId = crypto.randomUUID();
   const receipt = await storeCommand(brain, {
@@ -1261,6 +1361,7 @@ export const memoriesPublish = async <C>(
           sql`SELECT ${memoryId}, 1, ${request.scope}, ${ownerId}, ${request.kind}, ${request.text}, ${JSON.stringify(sourceRefs)}, 'accepted', 'pending', ${now.getTime()}, ${now.getTime()}, ${scopeId} WHERE ${stored}`
         ),
       memoryLinkIntentWhere(db, memoryId, 1, now, stored),
+      citesWrite(db, memoryId, cited),
       outboxedWhere(
         brain,
         {
@@ -1364,6 +1465,9 @@ export const memoriesProposeChange = async <C>(
   }
   await requireWithinBound(brain, caller, now);
   await requireCitable(brain, reader, ownerId, request.sourceRefs ?? []);
+  // What it rests on: what it cites, and the record it corrects with all
+  // that rests on.
+  const cited = await citedCollectionsOf(brain.db, sourceRefs);
   const memoryId = crypto.randomUUID();
   const live = ownLive(request.memoryId, ownerId, expectedRevision);
   const receipt = await storeCommand(brain, {
@@ -1391,6 +1495,7 @@ export const memoriesProposeChange = async <C>(
         request.memoryId,
         sql`EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${live}) AND ${stored}`
       ),
+      citesWrite(db, memoryId, cited),
       db
         .update(brainMemories)
         .set({ state: "retired", updatedAt: now })

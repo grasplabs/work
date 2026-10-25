@@ -95,6 +95,8 @@ export const testHost = (
           },
           people: [caller.userId],
         }),
+      // What the caller reads, as the collections everyone reading may.
+      readableBy: async (caller) => await Promise.resolve([...caller.reads]),
       keep: async (caller, _people, records) =>
         await Promise.resolve(
           records.map((record) => ({
