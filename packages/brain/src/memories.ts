@@ -343,7 +343,9 @@ const receiptOf = (row: typeof brainReceipts.$inferSelect): CommandReceipt => ({
 });
 
 /** A memory row as the contract has it. */
-const recordOf = (row: typeof brainMemories.$inferSelect): MemoryRecord => ({
+export const recordOf = (
+  row: typeof brainMemories.$inferSelect
+): MemoryRecord => ({
   id: memoryIdSchema.parse(row.id),
   revision: row.revision,
   kind: row.kind,
@@ -649,6 +651,61 @@ export const receiptsGet = async <C>(
 };
 
 /**
+ * Who a read of memory serves (GRA-298), as the host compiles it from the
+ * requester, the context and its output audience: the scopes it may read,
+ * each by key. The Brain applies it as given and widens nothing: a person's
+ * records only for the owners named, a team's only for the teams named,
+ * the company's only when `company` holds, a session's only for the
+ * sessions named.
+ */
+export interface MemoryAudience {
+  owners: readonly string[];
+  teams: readonly string[];
+  company: boolean;
+  sessions: readonly string[];
+}
+
+/**
+ * What `audience` may read of `brain_memories`, as a condition: the
+ * accepted records of its scopes, and an owner's own proposed records,
+ * which they wrote themselves. Retired records never. Undefined for an
+ * audience that reads none.
+ */
+export const audienceScope = (audience: MemoryAudience): SQL | undefined => {
+  const scopes = [
+    audience.owners.length === 0
+      ? undefined
+      : and(
+          eq(brainMemories.scope, "person"),
+          inList(brainMemories.scopeId, audience.owners)
+        ),
+    audience.teams.length === 0
+      ? undefined
+      : and(
+          eq(brainMemories.scope, "team"),
+          inList(brainMemories.scopeId, audience.teams),
+          eq(brainMemories.state, "accepted")
+        ),
+    audience.company
+      ? and(
+          eq(brainMemories.scope, "company"),
+          eq(brainMemories.state, "accepted")
+        )
+      : undefined,
+    audience.sessions.length === 0
+      ? undefined
+      : and(
+          eq(brainMemories.scope, "session"),
+          inList(brainMemories.scopeId, audience.sessions),
+          eq(brainMemories.state, "accepted")
+        ),
+  ].filter((scope) => scope !== undefined);
+  return scopes.length === 0
+    ? undefined
+    : and(or(...scopes), ne(brainMemories.state, "retired"));
+};
+
+/**
  * One of the person's own records; anyone else's is `brain.not_found`.
  */
 export const memoriesGet = async <C>(
@@ -682,6 +739,8 @@ const cursorSchema = z.tuple([z.int().min(0), z.string().min(1), z.string()]);
 interface CursorScope {
   caller: string;
   kind: string | undefined;
+  /** Whose records the list is of: a cursor for one never pages another. */
+  among: "mine" | "shared";
 }
 
 /**
@@ -691,13 +750,14 @@ interface CursorScope {
  */
 const cursorSeal = async <C>(
   brain: Brain<C>,
-  { caller, kind }: CursorScope,
+  { caller, kind, among }: CursorScope,
   recordedAt: number,
   id: string
 ): Promise<string> =>
   await keyed(brain, "grasp-os brain list cursor", [
     caller,
     kind ?? null,
+    among,
     recordedAt,
     id,
   ]);
@@ -746,13 +806,26 @@ export const memoriesList = async <C>(
 ): Promise<MemoryPage> => {
   const ownerId = brain.ports.ownerOf(reader);
   const caller = callerKey(ownerId);
-  const { kind, limit, cursor } = brainErrors.parse(
+  const { kind, limit, cursor, among } = brainErrors.parse(
     "brain.invalid",
     memoriesListInputSchema,
     input
   );
   const size = limit ?? defaultPage;
-  const scope = { caller, kind };
+  const scope = { caller, kind, among: among ?? "mine" };
+  // Others' shared records: those the caller's memory audience reads now,
+  // as the host compiles it, re-checked by the host before they're shown.
+  const readers =
+    among === "shared"
+      ? await brain.ports.memories.audienceOf(reader)
+      : undefined;
+  const whose =
+    readers === undefined
+      ? eq(brainMemories.ownerId, ownerId)
+      : and(
+          audienceScope(readers.audience) ?? sql`0`,
+          ne(brainMemories.ownerId, ownerId)
+        );
   const after =
     cursor === undefined ? undefined : await readCursor(brain, scope, cursor);
   const rows = await brain.db
@@ -760,7 +833,7 @@ export const memoriesList = async <C>(
     .from(brainMemories)
     .where(
       and(
-        eq(brainMemories.ownerId, ownerId),
+        whose,
         kind === undefined ? undefined : eq(brainMemories.kind, kind),
         after === undefined
           ? undefined
@@ -777,8 +850,25 @@ export const memoriesList = async <C>(
     .limit(size + 1);
   const page = rows.slice(0, size);
   const last = page.at(-1);
+  const checked =
+    readers === undefined
+      ? undefined
+      : await brain.ports.memories.keep(
+          reader,
+          readers.people,
+          page.map((row) => ({ ...recordOf(row), ownerId: row.ownerId }))
+        );
+  // What another's record rests on is shown in its lineage, as far as the
+  // reader may see it (memory-lineage.ts), never listed here.
+  const kept =
+    checked === undefined
+      ? page.map(recordOf)
+      : checked.map(({ by: _by, cites: _cites, ...record }) => ({
+          ...record,
+          sourceRefs: [],
+        }));
   return {
-    records: page.map(recordOf),
+    records: kept,
     cursor:
       rows.length > size && last !== undefined
         ? await writeCursor(brain, scope, last)
@@ -786,63 +876,8 @@ export const memoriesList = async <C>(
   };
 };
 
-/**
- * Who a read of memory serves (GRA-298), as the host compiles it from the
- * requester, the context and its output audience: the scopes it may read,
- * each by key. The Brain applies it as given and widens nothing: a person's
- * records only for the owners named, a team's only for the teams named,
- * the company's only when `company` holds, a session's only for the
- * sessions named.
- */
-export interface MemoryAudience {
-  owners: readonly string[];
-  teams: readonly string[];
-  company: boolean;
-  sessions: readonly string[];
-}
-
 /** Most records a turn's memory takes, and most characters of them. */
 export const turnMemoryLimits = { records: 20, chars: 4000 } as const;
-
-/**
- * What `audience` may read of `brain_memories`, as a condition: the
- * accepted records of its scopes, and an owner's own proposed records,
- * which they wrote themselves. Retired records never. Undefined for an
- * audience that reads none.
- */
-const audienceScope = (audience: MemoryAudience): SQL | undefined => {
-  const scopes = [
-    audience.owners.length === 0
-      ? undefined
-      : and(
-          eq(brainMemories.scope, "person"),
-          inList(brainMemories.scopeId, audience.owners)
-        ),
-    audience.teams.length === 0
-      ? undefined
-      : and(
-          eq(brainMemories.scope, "team"),
-          inList(brainMemories.scopeId, audience.teams),
-          eq(brainMemories.state, "accepted")
-        ),
-    audience.company
-      ? and(
-          eq(brainMemories.scope, "company"),
-          eq(brainMemories.state, "accepted")
-        )
-      : undefined,
-    audience.sessions.length === 0
-      ? undefined
-      : and(
-          eq(brainMemories.scope, "session"),
-          inList(brainMemories.scopeId, audience.sessions),
-          eq(brainMemories.state, "accepted")
-        ),
-  ].filter((scope) => scope !== undefined);
-  return scopes.length === 0
-    ? undefined
-    : and(or(...scopes), ne(brainMemories.state, "retired"));
-};
 
 /**
  * The records `audience` may read, newest first, within `limits`: the

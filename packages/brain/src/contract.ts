@@ -359,6 +359,11 @@ export const memoriesPageMax = 100;
 
 export const memoriesListInputSchema = z.strictObject({
   kind: memoryKindSchema.optional(),
+  /**
+   * Whose records: the caller's own (the default), or the shared records
+   * of others that the caller's memory audience reads now (GRA-298).
+   */
+  among: z.enum(["mine", "shared"]).optional(),
   limit: z.int().min(1).max(memoriesPageMax).optional(),
   cursor: z.string().max(512).optional(),
 });
@@ -370,6 +375,57 @@ export const memoryPageSchema = z.strictObject({
   cursor: z.string().nullable(),
 });
 export type MemoryPage = z.infer<typeof memoryPageSchema>;
+
+/** A record as an inspection shows it (GRA-298). */
+export const shownMemorySchema = memoryRecordSchema.extend({
+  /** Who published it, as the host names them; null for the reader's own. */
+  by: z.string().nullable(),
+});
+export type ShownMemory = z.infer<typeof shownMemorySchema>;
+
+export const memoriesLineageInputSchema = z.strictObject({
+  memoryId: memoryIdSchema,
+});
+export type MemoriesLineageInput = z.input<typeof memoriesLineageInputSchema>;
+
+/**
+ * One thing a record rests on, as the reader may see it now: a record it
+ * cites, at the revision cited, or a document version, with where the
+ * document is and its version now. What the reader can't see isn't here
+ * at all.
+ */
+export const lineageNodeSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("memory"),
+    /** The record that cites it. */
+    citedBy: memoryIdSchema,
+    citedRevision: revisionSchema,
+    record: shownMemorySchema,
+  }),
+  z.strictObject({
+    kind: z.literal("document"),
+    citedBy: memoryIdSchema,
+    documentId: documentIdSchema,
+    collectionId: collectionIdSchema,
+    version: revisionSchema,
+    section: z.int().min(0).optional(),
+    title: z.string(),
+    path: z.string(),
+    currentVersion: revisionSchema,
+  }),
+]);
+export type LineageNode = z.infer<typeof lineageNodeSchema>;
+
+/**
+ * A record's lineage (GRA-298): the record, what it rests on as far as
+ * the reader may follow it, and the correction that superseded it.
+ */
+export const memoryLineageSchema = z.strictObject({
+  record: shownMemorySchema,
+  restsOn: z.array(lineageNodeSchema),
+  supersededBy: shownMemorySchema.nullable(),
+});
+export type MemoryLineage = z.infer<typeof memoryLineageSchema>;
 
 /** A correction of a memory record, against the revision it was read at. */
 export const memoriesProposeChangeInputSchema = z.strictObject({
@@ -425,6 +481,7 @@ export const brainOperationSchema = z.enum([
   "receipts.get",
   "memories.get",
   "memories.list",
+  "memories.lineage",
   "memories.proposeChange",
   "memories.publish",
   "memories.retire",
@@ -437,6 +494,7 @@ export const brainOperations = {
   "receipts.get": "query",
   "memories.get": "query",
   "memories.list": "query",
+  "memories.lineage": "query",
   "memories.proposeChange": "mutation",
   "memories.publish": "mutation",
   "memories.retire": "mutation",
