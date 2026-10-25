@@ -69,18 +69,22 @@ const callWaitMs = 3000;
 
 /**
  * Every method of `target` and of every target its getters hand out, by
- * path, each as a call with no arguments: what a browser can call.
+ * path, with how many parameters it declares: what a browser can call.
  */
 const targetMethods = (
   target: object,
   path: string,
   seen = new Set<object>()
-): { name: string; call: () => unknown }[] => {
+): { name: string; call: (...args: unknown[]) => unknown; arity: number }[] => {
   if (seen.has(target)) {
     return [];
   }
   seen.add(target);
-  const found: { name: string; call: () => unknown }[] = [];
+  const found: {
+    name: string;
+    call: (...args: unknown[]) => unknown;
+    arity: number;
+  }[] = [];
   for (
     let prototype: object | null = Reflect.getPrototypeOf(target);
     prototype !== null && prototype !== CoreRpcTarget.prototype;
@@ -101,11 +105,12 @@ const targetMethods = (
         const method: unknown = property.value;
         found.push({
           name,
-          call: (): unknown => {
+          arity: typeof method === "function" ? Math.max(method.length, 1) : 0,
+          call: (...args: unknown[]): unknown => {
             if (typeof method !== "function") {
               return undefined;
             }
-            const answer: unknown = Reflect.apply(method, target, []);
+            const answer: unknown = Reflect.apply(method, target, args);
             return answer;
           },
         });
@@ -516,29 +521,42 @@ describe("Grasp staff's views, audited", () => {
     );
     const calls = targetMethods(api, "session");
     const unaudited: string[] = [];
-    for (const { name, call } of calls) {
+    const naming: string[] = [];
+    let onboarding = 0;
+    for (const { name, call, arity } of calls) {
+      // The onboarding's methods take the roster's people by ID: each is
+      // called with an ID in every place, which its entry must never name.
+      const id = crypto.randomUUID();
+      const isOnboarding = name.startsWith("session.onboarding");
+      onboarding += isOnboarding ? 1 : 0;
+      const args = isOnboarding ? Array.from({ length: arity }, () => id) : [];
       // oxlint-disable-next-line no-await-in-loop -- one call, then its entry
       const events = await auditedDuring(
         async () => {
           await Promise.race([
-            outcome(Promise.resolve().then(call)),
+            outcome(Promise.resolve().then(() => call(...args))),
             scheduler.wait(callWaitMs),
           ]);
         },
         { staffAccesses: true }
       );
       const method = name.split(".").at(-1) ?? "";
+      const views = staffViews(events);
       if (
-        !staffViews(events).some(({ detail }) =>
+        !views.some(({ detail }) =>
           String(detail.surface).endsWith(`.${method}`)
         )
       ) {
         unaudited.push(name);
       }
+      if (isOnboarding && JSON.stringify(views).includes(id)) {
+        naming.push(name);
+      }
     }
 
     expect(calls.length).toBeGreaterThan(100);
-    expect(unaudited).toStrictEqual([]);
+    expect(onboarding).toBeGreaterThan(30);
+    expect({ unaudited, naming }).toStrictEqual({ unaudited: [], naming: [] });
   });
 
   it("write an entry for a call of every method of a target a call hands out: a screen's frame", async () => {
