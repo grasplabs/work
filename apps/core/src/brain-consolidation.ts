@@ -70,7 +70,15 @@ export const reconcileConsolidation = async (env: Env): Promise<void> => {
     scopesPerSweep
   );
   for (const scope of behind) {
-    // oxlint-disable-next-line no-await-in-loop -- a bounded few, in turn
-    await start(env, scope);
+    // One scope's failure is its own: the rest still start.
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a bounded few, in turn
+      await start(env, scope);
+    } catch (error) {
+      log.warn("brain.consolidation.reconcile_failed", {
+        scope: scope.scope,
+        ...errorFields(error),
+      });
+    }
   }
 };
