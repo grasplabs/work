@@ -305,6 +305,9 @@ const outcomeSchema = z.union([
   z.object({ ok: z.literal(false), message: z.string() }),
 ]);
 
+/** The most JSON one workflow's model answers in a fixture hold. */
+const maxFixtureAnswers = 256 * 1024;
+
 /** A fixture as `tests/fixtures/<name>.json` declares it. */
 const fixtureSchema = z
   .strictObject({
@@ -345,6 +348,13 @@ const fixtureSchema = z
             .optional(),
           models: z
             .record(z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u), z.json())
+            // Kept with each run the test starts: well within a row.
+            .refine(
+              (models) => JSON.stringify(models).length <= maxFixtureAnswers,
+              {
+                message: `A workflow's model answers are at most ${maxFixtureAnswers / 1024} KiB of JSON.`,
+              }
+            )
             .optional(),
           operations: z
             .record(

@@ -387,11 +387,31 @@ describe(
         wrongShape: await endedIn(
           await requestsApp(tasks, { models: { summary: { words: 3 } } })
         ),
+        // A model no binding could be approved for, as the real call
+        // refuses one its binding doesn't name.
+        otherModel: await endedIn(
+          await requestsApp(
+            [
+              {
+                summarize: {
+                  ...summarize.summarize,
+                  with: {
+                    ...summarize.summarize.with,
+                    model: "nobody/no-model",
+                  },
+                },
+              },
+              tasks[1],
+            ],
+            { models: { summary: { line: "Hi" } } }
+          )
+        ),
         asked: gateway.requests.length,
       }).toMatchObject({
         unfixtured: { status: "failed", code: "workflow.test_unfixtured" },
         otherBinding: { status: "failed", code: "workflow.test_unfixtured" },
         wrongShape: { status: "failed", code: "workflow.call_invalid" },
+        otherModel: { status: "failed", code: "workflow.call_invalid" },
         asked: 0,
       });
     });

@@ -14,6 +14,7 @@ import {
   appTestRuns,
   businessStores,
 } from "../db/core/schema.ts";
+import { gatewaySettings } from "../models.ts";
 import { callOperation } from "../operations.ts";
 import { hostedRelease } from "../release-runner.ts";
 import { consumerFailure, fenced, servedIn } from "../store-operations.ts";
@@ -69,7 +70,9 @@ import type { BuiltCall, Effect } from "./resource-calls.ts";
 //   mutation of the release under test (`servedIn`), whose argument and
 //   return shapes are exactly the binding's contract's, as an approval's
 //   must be (`operationServesContract`). Anything else is
-//   `workflow.call_denied`.
+//   `workflow.call_denied`. Whether it reads or writes isn't pinned: that
+//   is the admin's approval's to say (`operationKind`), which a test's run
+//   has none of, and a write reaches only the test's own store.
 // - It runs with more than a member's rights: as the run's fixture
 //   principal, a member of the App, never a builder, as a workflow's store
 //   call runs (store-operations.ts), with no resources bound.
@@ -227,7 +230,8 @@ const fixtureOperation = async (
     {
       principal: run.principal,
       consumer,
-      writer: consumer,
+      // The workflow's version, as a real workflow's store call names it.
+      writer: { resourceId: run.workflowId, resourceVersion: run.version },
       store: fenced(store, effect.requireHolds),
       requestId: crypto.randomUUID(),
       deadline: effect.deadline,
@@ -267,6 +271,19 @@ export const fixtureCall = async (
   if (call.name === "grasp.model") {
     await bindingOf(env, run, call.binding, "model");
     requireModelRequest(call);
+    // A test's run holds no approval, so no binding's target model to
+    // hold an explicit model to, as a real call does (resource-calls.ts).
+    // It is held to what any binding could be approved for: a model the
+    // deployment allows (workflow-bindings.ts).
+    if (
+      call.model !== undefined &&
+      (typeof call.model !== "string" ||
+        !gatewaySettings(env).models.includes(call.model))
+    ) {
+      throw workflowResourceErrors.create("workflow.call_invalid", {
+        issues: ["model: The deployment doesn't allow it."],
+      });
+    }
     const answer = ownOf(
       answersSchema.parse(JSON.parse(record.models)),
       call.binding
