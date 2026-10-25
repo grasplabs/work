@@ -836,9 +836,33 @@ const numbersOnly = (ws: Workspace): Workspace => ({
       next: "",
       term: null,
       differs: null,
-      volumes: drawing.volumes,
-      takes: drawing.takes,
-      wrong: drawing.wrong,
+      volumes: drawing.volumes.map(({ of, per, low, high, people, basis }) => ({
+        of,
+        per,
+        low,
+        high,
+        people,
+        basis,
+      })),
+      takes:
+        drawing.takes === null
+          ? null
+          : {
+              unit: drawing.takes.unit,
+              quickest: drawing.takes.quickest,
+              longest: drawing.takes.longest,
+              people: drawing.takes.people,
+              basis: drawing.takes.basis,
+            },
+      wrong:
+        drawing.wrong === null
+          ? null
+          : {
+              low: drawing.wrong.low,
+              high: drawing.wrong.high,
+              people: drawing.wrong.people,
+              basis: drawing.wrong.basis,
+            },
       open: [],
     })),
   })),

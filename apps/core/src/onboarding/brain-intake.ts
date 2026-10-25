@@ -18,6 +18,7 @@ import { log } from "@grasp-os/shared/log";
 import { minTeamShown } from "@grasp-os/shared/onboarding";
 
 import type { Support } from "./drawing-support.ts";
+import { plainPart } from "./plain-text.ts";
 import type { TeamClaim } from "./team-claims.ts";
 
 // What the onboarding learned, as the brain's records (GRA-367): each
@@ -207,26 +208,31 @@ const versionOf = (
   const tellers = Object.entries(drawn.told).filter(
     ([person]) => !lead.has(person)
   );
-  const told = tellers.map(([, each]) => each);
   const toldOf = (people: readonly string[]): Told[] =>
     tellers.flatMap(([person, each]) =>
       people.includes(person) ? [each] : []
     );
+  // A part's words as checked: the claim's allowlist, or nothing.
+  const words = (text: string): string => plainPart(clean(text)) ?? "";
   const shown = (people: readonly string[], text: string): string =>
-    people.length >= minTeamShown ? clean(text) : "";
+    people.length >= minTeamShown ? words(text) : "";
+  const { numbers } = support;
   // The steps five or more are checked to have told, and where each step
   // of the drawing lands among them: a case off the path after a step left
   // out follows the last step kept before it.
-  const kept = drawn.steps.flatMap((step, index) => {
-    const people = support.steps[index] ?? [];
-    return people.length >= minTeamShown ? [{ step, index, people }] : [];
-  });
+  const kept = drawn.steps.flatMap((step, index) =>
+    (support.steps[index] ?? []).length >= minTeamShown ? [{ step, index }] : []
+  );
   const placeOf = (index: number): number =>
     Math.max(kept.filter((each) => each.index <= index).length - 1, 0);
-  const takes = told.flatMap(({ takes: own }) => (own === null ? [] : [own]));
-  const wrong = shownMedian(
-    told.flatMap(({ wrong: own }) => (own === null ? [] : [own]))
+  // Each number only from the people checked to have given it.
+  const takes = toldOf(numbers.takes).flatMap(({ takes: own }) =>
+    own === null ? [] : [own]
   );
+  const wrongs = toldOf(numbers.wrong).flatMap(({ wrong: own }) =>
+    own === null ? [] : [own]
+  );
+  const wrong = shownMedian(wrongs);
   const quickest = shownMedian(takes.map(([each]) => each));
   const longest = shownMedian(takes.map((each) => each[2]));
   const { differs } = drawn;
@@ -240,16 +246,16 @@ const versionOf = (
     state: work.state,
     people: drawn.from.length,
     starts: shown(support.starts, drawn.starts),
-    steps: kept.map(({ step: { text, documented }, index, people }) => {
+    steps: kept.map(({ step: { text, documented }, index }) => {
       const minutes = shownMedian(
-        toldOf(people).flatMap(({ stepMinutes }) =>
+        toldOf(numbers.stepMinutes[index] ?? []).flatMap(({ stepMinutes }) =>
           (stepMinutes ?? []).flatMap(({ step, minutes: own }) =>
             step === index ? [own[1]] : []
           )
         )
       );
       return {
-        text: clean(text),
+        text: words(text),
         who: "",
         tool: "",
         minutes:
@@ -265,21 +271,20 @@ const versionOf = (
       };
     }),
     waits: drawn.waits.flatMap((wait, index) =>
-      (support.waits[index] ?? []).length >= minTeamShown ? [clean(wait)] : []
+      (support.waits[index] ?? []).length >= minTeamShown ? [words(wait)] : []
     ),
     differently: drawn.differently.flatMap(({ when, after }, index) => {
-      const people = support.differently[index] ?? [];
-      if (people.length < minTeamShown) {
+      if ((support.differently[index] ?? []).length < minTeamShown) {
         return [];
       }
       const outOfTen = shownMedian(
-        toldOf(people).flatMap(({ caseShares }) =>
+        toldOf(numbers.caseShares[index] ?? []).flatMap(({ caseShares }) =>
           (caseShares ?? []).flatMap((share) =>
             share.case === index ? [share.outOfTen] : []
           )
         )
       );
-      return [{ when: clean(when), does: "", outOfTen, after: placeOf(after) }];
+      return [{ when: words(when), does: "", outOfTen, after: placeOf(after) }];
     }),
     decides: shown(support.answers.decides ?? [], drawn.decides),
     own: shown(support.answers.own ?? [], drawn.own),
@@ -290,17 +295,17 @@ const versionOf = (
     term:
       drawn.term === null || support.term.length < minTeamShown
         ? null
-        : { word: clean(drawn.term.word), meaning: "" },
+        : { word: words(drawn.term.word), meaning: "" },
     differs:
       differs === null || !differsKept
         ? null
         : {
             step: placeOf(differs.step),
-            other: clean(differs.other),
+            other: words(differs.other),
             why: differs.why,
             because: "",
           },
-    volumes: volumesOf(told, drawn.per),
+    volumes: volumesOf(toldOf(numbers.volume), drawn.per),
     takes:
       quickest === null || longest === null
         ? null
@@ -317,7 +322,7 @@ const versionOf = (
         : {
             low: wrong,
             high: wrong,
-            people: told.filter((each) => each.wrong !== null).length,
+            people: wrongs.length,
             basis: "estimated",
           },
     open: [],

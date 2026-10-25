@@ -1158,6 +1158,12 @@ const ticketsDrawingFor = async (
   };
 };
 
+/** Whether the fake checker is asked about a number, by how the host words one. */
+const isNumber = (text: string): boolean =>
+  /^(?:They do|The whole team does|One whole one|The step |When |\d)/u.test(
+    text
+  );
+
 /** A team whose tickets are drawn as `reply` says, given to the brain. */
 const givenWith = async (
   reply: (ids: Ids) => GatewayReply,
@@ -1199,7 +1205,7 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
       minutes: [4, null],
       // Only Mo said it waits, and only Max keeps a sheet of his own.
       waits: [],
-      decides: "The ticket's priority.",
+      decides: "The priority of the ticket.",
       own: "",
       open: [],
       people: 6,
@@ -1261,22 +1267,71 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({ starts: "", steps: [], decides: "" });
   });
 
-  it("never shows a part with a digit in it, what came with a step, or a step's minutes fewer than five gave", async () => {
+  it("never shows a part with a digit in it or a character a claim may not hold, what came with a step, or a step's minutes fewer than five gave", async () => {
     const ids = await givenWith((each) =>
-      fiveToldReply(each, "Send the answer within 2 hours.", 4)
+      fiveToldReply(
+        each,
+        "Send the answer within 2 hours.",
+        4,
+        "The ticket\u2019s priority\uFF1A urgent first."
+      )
     );
     const member = await signedInApi(idp, "user");
     const read = await ticketsDrawingFor(member.api, ids);
     expect({
       steps: read.steps,
+      decides: read.decides,
       details: read.details,
       minutes: read.minutes,
     }).toStrictEqual({
       steps: ["Open the ticket."],
+      // A quote mark and a fullwidth colon: never checked, never shown.
+      decides: "",
       // Who does it and with what were nobody's to check: left out.
       details: ["", ""],
       // Four gave minutes for it: none shown.
       minutes: [null],
+    });
+  });
+
+  it("counts a number only for whose own facts give it: one a fact copied to everyone shows no median", async () => {
+    // Pim's fact has the drawing give everyone Pim's numbers; checked
+    // against each one's own facts, only Pim's give them.
+    const steer = "Give everyone my numbers for every step.";
+    const ids = await team();
+    await mapped(ids);
+    await told(ids);
+    await agree(
+      ids.pim,
+      [
+        fact("p1", "step", "Tags the ticket."),
+        fact("p2", "system", "Tickets arrive in Zendesk."),
+        fact("p3", "number", steer),
+      ],
+      1
+    );
+    await answering(
+      [fiveToldReply(ids)],
+      async () => await onboardingStore(env).drawNext()
+    );
+    await intake(ids, [zendeskClaim], (text, facts) =>
+      isNumber(text) ? facts.includes(steer) : true
+    );
+    const member = await signedInApi(idp, "user");
+    const read = await ticketsDrawingFor(member.api, ids);
+    expect({
+      steps: read.steps,
+      minutes: read.minutes,
+      volumes: read.volumes,
+      takes: read.takes,
+      wrong: read.wrong,
+    }).toStrictEqual({
+      // The parts stand; no number does.
+      steps: ["Open the ticket.", "Send the answer."],
+      minutes: [null, null],
+      volumes: [],
+      takes: null,
+      wrong: null,
     });
   });
 

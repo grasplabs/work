@@ -251,7 +251,8 @@ export const ticketsReply = (
 export const fiveToldReply = (
   ids: Ids,
   last = "Send the answer.",
-  minutesFrom = 5
+  minutesFrom = 5,
+  decides = "The priority of the ticket."
 ): GatewayReply => {
   const five = [ids.max, ids.mia, ids.mo, ids.noor, ids.pim];
   return {
@@ -281,7 +282,7 @@ export const fiveToldReply = (
       ],
       notes: [
         { kind: "wait", text: "Waits for the customer's reply.", by: [ids.mo] },
-        { kind: "decides", text: "The ticket's priority.", by: five },
+        { kind: "decides", text: decides, by: five },
         { kind: "own", text: "A sheet of open tickets.", by: [ids.max] },
       ],
       numbers: five.map((person, index) => ({
@@ -420,8 +421,15 @@ const shownSchema = z.array(
 );
 const checkSchema = z.object({ claim: z.string(), fact: z.string() });
 const partSchema = z.object({ part: z.string(), facts: z.array(z.string()) });
+const numberSchema = z.object({
+  number: z.string(),
+  facts: z.array(z.string()),
+});
 
-/** Whether a person's facts say a part of a drawing, as the fake checker answers: a plain one agrees. */
+/**
+ * Whether a person's facts say a part of a drawing, or give a number the
+ * drawing says is theirs, as the fake checker answers: a plain one agrees.
+ */
 export type PartJudge = (part: string, facts: readonly string[]) => boolean;
 
 /** The fake checker's answer for parts, unless a test gives one: yes. */
@@ -464,11 +472,14 @@ const claimsOrCheck =
     const data = dataOf(request, "data");
     const check = checkSchema.safeParse(data);
     const ofPart = partSchema.safeParse(data);
+    const ofNumber = numberSchema.safeParse(data);
     let answer: boolean | "fails" | undefined;
     if (check.success) {
       answer = says(check.data.claim, check.data.fact);
     } else if (ofPart.success) {
       answer = part(ofPart.data.part, ofPart.data.facts);
+    } else if (ofNumber.success) {
+      answer = part(ofNumber.data.number, ofNumber.data.facts);
     }
     if (answer === "fails") {
       return { status: 400, errorType: "invalid_request_error" };

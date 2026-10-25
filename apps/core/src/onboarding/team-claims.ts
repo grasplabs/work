@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { gatewaySettings, modelForRole, models } from "../models.ts";
 import { statementKinds, withoutNames } from "./brain-intake.ts";
+import { allowed, hidden, terminal } from "./plain-text.ts";
 import type { Took } from "./store.ts";
 import { NoDrawingModelError } from "./team-map.ts";
 
@@ -153,34 +154,6 @@ const promptOf = (facts: readonly Labelled[]): string => {
 
 /** Longest a claim may be: one short sentence. */
 export const claimCharsMax = 240;
-
-// A claim is held to a strict allowlist, after the single-script
-// restriction of Unicode's UTS #39, narrowed to what our clients'
-// languages (English, Dutch, German, French, Spanish) write: once
-// normalized (NFKC, then NFC), only A to Z and a to z, the letters of
-// Latin-1 Supplement (U+00C0 to U+00FF, not × and ÷) and of Latin
-// Extended-A (U+0100 to U+017F, not the dotless ı, which reads as an i),
-// ASCII digits, ASCII spaces, commas and hyphens, and one full stop,
-// exclamation or question mark at its end, with no space before it. A
-// mark left after NFC, or any default-ignorable code point, refuses it:
-// nothing can hide in a claim five people visibly support, nor read as
-// something else.
-
-/** The letters a claim may hold. */
-const letters = /^[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u017F]$/u;
-/** A letter in those ranges that reads as another. */
-const lookalike = "\u0131";
-/** What a claim may hold besides its letters. */
-const asciiAllowed = /^[0-9 ,-]$/u;
-/** What a claim ends with. */
-const terminal = /^[.!?]$/u;
-/** A mark NFC left on its own, or a code point that shows nothing. */
-const hidden = /[\p{M}\p{Default_Ignorable_Code_Point}]/u;
-
-/** Whether `character` may be in a claim, before its end. */
-const allowed = (character: string): boolean =>
-  asciiAllowed.test(character) ||
-  (letters.test(character) && character !== lookalike);
 
 const sentences = new Intl.Segmenter("und", { granularity: "sentence" });
 
