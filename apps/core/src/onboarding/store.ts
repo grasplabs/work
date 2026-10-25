@@ -5048,16 +5048,37 @@ export class Onboarding extends DurableObject<Env> {
     // happens after (`#toPurge`). Each earlier claim is noted as resting
     // on nobody left (`gonePrefix`), to be taken out at once or by the
     // alarm until it is, however the intake itself ends.
-    this.ctx.storage.transactionSync(() => {
+    const changed = this.ctx.storage.transactionSync(() => {
+      // One rule for whom a record rests on (GRA-1084): someone counts only
+      // while what they approved is still exactly what the claims and
+      // drawings were made from, read in this transaction against when the
+      // intake began (`#goneSince`). Anyone whose approval changed since is
+      // noted as gone, and the team stays due for another intake. A gone
+      // mark is never cleared here.
+      const since = new Set(this.#goneSince(began));
       // A claim rests on exactly the people behind it now: whoever it
       // rested on before and doesn't now no longer counts towards the five
-      // it needs.
-      this.#db.delete(brainSent).where(inList(brainSent.record, claimed)).run();
+      // it needs. Who is gone stays gone.
+      this.#db
+        .delete(brainSent)
+        .where(
+          and(
+            inList(brainSent.record, claimed),
+            not(like(brainSent.person, `${gonePrefix}%`))
+          )
+        )
+        .run();
       // One row a record: within SQLite's bound parameters.
       for (const rest of rests) {
         this.#db
           .insert(brainSent)
-          .values({ ...rest, team: teamId })
+          .values({
+            ...rest,
+            person: since.has(rest.person)
+              ? `${gonePrefix}${rest.person}`
+              : rest.person,
+            team: teamId,
+          })
           .onConflictDoNothing()
           .run();
       }
@@ -5083,6 +5104,7 @@ export class Onboarding extends DurableObject<Env> {
           .onConflictDoNothing()
           .run();
       }
+      return since.size > 0;
     });
     await keepOnboardingRecords(this.env, records, {
       sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
@@ -5108,7 +5130,7 @@ export class Onboarding extends DurableObject<Env> {
         .where(eq(brainTeams.team, teamId))
         .run();
       this.#brainSettled(teamId, dueAt);
-      return since.length > 0 || stale.length > 0;
+      return changed || since.length > 0 || stale.length > 0;
     });
     // Someone it rests on deleted their interview while it was given, or a
     // claim it gave before isn't the team's now: taken out again at once,

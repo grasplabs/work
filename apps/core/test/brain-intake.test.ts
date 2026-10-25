@@ -1,5 +1,9 @@
 import type { Workspace } from "@grasp-os/shared/brain";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
+import type {
+  InterviewFact,
+  InterviewProgress,
+} from "@grasp-os/shared/interview-links";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -13,6 +17,7 @@ import { mockIdp } from "./idp.ts";
 import { answering, answeringWith, onLink } from "./interview-link.ts";
 import {
   agree,
+  claimsReply,
   fact,
   intake,
   kept,
@@ -969,6 +974,95 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       failed: true,
       landed: ["Tickets come in through Zendesk."],
       after: [],
+    });
+  });
+
+  it("never counts someone who took back what they approved while the claims were put together, even when the intake fails after writing them", async () => {
+    const ids = await drawnTeam();
+    // While the model puts the claims together, Max changes a line he had
+    // approved, and doesn't approve it again: it no longer counts.
+    let changed = false;
+    const changeMax = async () => {
+      const link = await openLink(ids.max);
+      const facts: InterviewFact[] = [
+        fact("m1", "step", "Opens the ticket in Zendesk."),
+        fact("m2", "system", "Tickets arrive in Freshdesk."),
+        fact("m3", "handoff", "Max hands billing questions to Noor."),
+      ];
+      const progress: InterviewProgress = {
+        person: "completed",
+        told: true,
+        mode: "type",
+        lines: [{ from: "stephen", text: "What starts one?" }],
+        facts,
+        phase: "readback",
+        wants: "end",
+        startedAt: Date.now(),
+        confirmed: facts.length,
+        adding: false,
+        addedAt: 0,
+      };
+      await onLink({ action: "save", ...link, version: 1, progress });
+      changed = true;
+    };
+    const reply = claimsReply([zendeskClaim]);
+    // The batch that writes the claim lands, and its answer is lost: known
+    // by the statement drizzle binds with it.
+    const prepare = env.DB.prepare.bind(env.DB);
+    const batch = env.DB.batch.bind(env.DB);
+    const writes = new WeakSet<D1PreparedStatement>();
+    let written = 0;
+    const prepared = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
+      const statement = prepare(query);
+      if (query.startsWith('insert into "brain_records"')) {
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...values) => {
+          const bound = bind(...values);
+          if (values.includes("statement")) {
+            writes.add(bound);
+          }
+          return bound;
+        };
+      }
+      return statement;
+    });
+    const spy = vi
+      .spyOn(env.DB, "batch")
+      .mockImplementation(async (statements) => {
+        const results = await batch(statements);
+        if (statements.some((statement) => writes.has(statement))) {
+          written += 1;
+          throw new Error("Lost on the way back.");
+        }
+        return results;
+      });
+    try {
+      await answeringWith(
+        async (requests) => {
+          if (!changed) {
+            await changeMax();
+          }
+          return reply(requests);
+        },
+        async () => await onboardingStore(env).intakeNext()
+      );
+    } finally {
+      spy.mockRestore();
+      prepared.mockRestore();
+    }
+    // The alarm, now or already: four are behind it.
+    await onboardingStore(env).purgeBrain();
+    const member = await signedInApi(idp, "user");
+    expect({
+      changed,
+      written,
+      after: await statementsFor(member.api, ids),
+      restsOn: await onboardingStore(env).sentFor(ids.max),
+    }).toStrictEqual({
+      changed: true,
+      written: 1,
+      after: [],
+      restsOn: [],
     });
   });
 

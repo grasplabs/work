@@ -163,7 +163,9 @@ export const modelOf = ({ body }: GatewayRequest): unknown =>
 
 /** What `run` returns while the gateway answers each request as `respond` says, from those so far. */
 export const answeringWith = async <T>(
-  respond: (requests: readonly GatewayRequest[]) => GatewayReply | undefined,
+  respond: (
+    requests: readonly GatewayRequest[]
+  ) => GatewayReply | undefined | Promise<GatewayReply | undefined>,
   run: () => Promise<T>
 ) => {
   const before = env.MODEL_GATEWAY;
