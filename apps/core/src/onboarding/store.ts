@@ -143,6 +143,7 @@ import {
   readbacks,
   teamCounts,
   teams,
+  checkedDifferences,
   settledWorks,
   usage,
   voiceUse,
@@ -2214,6 +2215,16 @@ export class Onboarding extends DurableObject<Env> {
     known: number;
   } {
     const settled = this.#settled();
+    const checked = new Map(
+      this.#db
+        .select()
+        .from(checkedDifferences)
+        .all()
+        .map(({ work, drawnAt }) => [work, drawnAt])
+    );
+    const clean = withoutNames(
+      this.#roster()?.people.map(({ name }) => name) ?? []
+    );
     const differences: Difference[] = [];
     let mapped = 0;
     let all = 0;
@@ -2222,6 +2233,9 @@ export class Onboarding extends DurableObject<Env> {
       if (team.off) {
         continue;
       }
+      // A team whose interviews the brain doesn't hold shows no
+      // difference: too few told their own work (GRA-1084).
+      const heard = this.#tellers(team.id).length >= minTeamShown;
       for (const work of this.teamWorks(team.id)) {
         all += 1;
         if (
@@ -2236,13 +2250,20 @@ export class Onboarding extends DurableObject<Env> {
         }
         mapped += 1;
         const { differs } = drawn;
-        if (differs?.why === "conflict") {
+        // Shown only when the brain's intake checked five or more people
+        // behind each way, in this drawing, and without a name in either
+        // (GRA-1084): never one person's way of doing it.
+        if (
+          differs?.why === "conflict" &&
+          heard &&
+          checked.get(work.id) === drawn.at
+        ) {
           differences.push({
             work: work.id,
             name: work.local === "" ? work.name : work.local,
             team: team.name,
-            way: drawn.steps[differs.step]?.text ?? "",
-            other: differs.other,
+            way: clean(drawn.steps[differs.step]?.text ?? ""),
+            other: clean(differs.other),
             holds: settled.get(work.id) ?? null,
           });
         }
@@ -5173,6 +5194,32 @@ export class Onboarding extends DurableObject<Env> {
         .set({ sentAt: sql`coalesce(${brainTeams.sentAt}, ${at})` })
         .where(eq(brainTeams.team, teamId))
         .run();
+      // Which differences the review may show: those whose two ways five
+      // or more were checked to tell, each, in the drawing as it stands.
+      for (const work of intake.works) {
+        const support = supports.get(work.id);
+        const { differs } = work.drawn;
+        const checked =
+          support !== undefined &&
+          differs !== null &&
+          (support.steps[differs.step] ?? []).length >= minTeamShown &&
+          support.other.length >= minTeamShown;
+        if (checked) {
+          this.#db
+            .insert(checkedDifferences)
+            .values({ work: work.id, drawnAt: work.drawn.at, at })
+            .onConflictDoUpdate({
+              target: checkedDifferences.work,
+              set: { drawnAt: work.drawn.at, at },
+            })
+            .run();
+        } else {
+          this.#db
+            .delete(checkedDifferences)
+            .where(eq(checkedDifferences.work, work.id))
+            .run();
+        }
+      }
       this.#brainSettled(teamId, dueAt);
       return changed || since.length > 0 || stale.length > 0;
     });

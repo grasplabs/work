@@ -405,6 +405,18 @@ export const settledWorks = sqliteTable("settled_works", {
 });
 
 /**
+ * The pieces of work whose step told two ways the brain's intake checked
+ * five or more people behind, each way (GRA-1084, drawing-support.ts),
+ * and the drawing it checked: the review shows that difference only while
+ * that drawing stands. Goes with the piece of work.
+ */
+export const checkedDifferences = sqliteTable("checked_differences", {
+  work: text().primaryKey(),
+  drawnAt: text("drawn_at").notNull(),
+  at: text().notNull(),
+});
+
+/**
  * The pieces of work Grasp counts as known by hand, before the rules say
  * so: when, and by which staff member. Goes with the piece of work.
  */
