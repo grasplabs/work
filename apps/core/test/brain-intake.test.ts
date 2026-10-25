@@ -865,13 +865,20 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     await drawTickets(ids);
     // The brain can't take records out while the claims are put together
     // anew: every try of this intake fails to.
+    // Drizzle binds what it prepares, so the batch is known by what was
+    // prepared just before it: the brain's records deleted.
+    const prepare = env.DB.prepare.bind(env.DB);
     const batch = env.DB.batch.bind(env.DB);
+    let deleting = false;
+    const prepared = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
+      deleting ||= query.startsWith('delete from "brain_records"');
+      return prepare(query);
+    });
     const spy = vi
       .spyOn(env.DB, "batch")
       .mockImplementation(async (statements) => {
-        if (
-          new Error("where").stack?.includes("purgeOnboardingRecords") === true
-        ) {
+        if (deleting) {
+          deleting = false;
           throw new Error("The brain can't be reached.");
         }
         return await batch(statements);
@@ -883,6 +890,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       ]));
     } finally {
       spy.mockRestore();
+      prepared.mockRestore();
     }
     const member = await signedInApi(idp, "user");
     const stuck = await statementsFor(member.api, ids);
