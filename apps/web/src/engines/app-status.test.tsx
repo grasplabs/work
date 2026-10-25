@@ -48,6 +48,8 @@ const fakeApps = (
     name: "Invoices",
     description: "",
     owner: "user-1",
+    responsible: "user-1",
+    audience: null,
     blueprint: null,
     currentVersion,
     pendingVersion: null,
