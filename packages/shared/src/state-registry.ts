@@ -241,6 +241,7 @@ const coreDb: D1State = {
       `${core}channels/signals.ts`,
       "Hourly counts of how Stephen fared in the chat apps, kept a week for the admin's watch."
     ),
+    chat_audiences: exported(`${core}knowledge/access.ts`),
     invitations: exported(auth),
     teams: exported(auth),
     team_members: exported(auth),

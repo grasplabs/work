@@ -1002,6 +1002,13 @@
       "when": 1792884956576,
       "tag": "0142_app_pointers",
       "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "6",
+      "when": 1792889027388,
+      "tag": "0143_chat_audiences",
+      "breakpoints": true
     }
   ]
 }

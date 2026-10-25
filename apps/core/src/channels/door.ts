@@ -21,10 +21,13 @@
  *   they are dropped, with one line a minute to say so.
  * - Someone writing who isn't one of the client's people: who writes is
  *   only ever the platform's verified id (who.ts), never a name, an email
- *   or a phone number. Group chats and channels, other companies, guests,
- *   removed people and people Grasp doesn't know each get one line, in
- *   the language their app is set to, and nothing they wrote is read.
- *   The lines go out through connect like every send.
+ *   or a phone number. Other companies, guests, removed people and people
+ *   Grasp doesn't know each get one line, in the language their app is set
+ *   to, and nothing they wrote is read. The lines go out through connect
+ *   like every send.
+ * - Talk in a group chat or channel that isn't for Stephen: only a message
+ *   that @mentions the bot is taken; the rest is dropped unread, uncounted
+ *   and unanswered.
  * - Someone Settings › Stephen doesn't let reach him, here or at all
  *   (`stephenFor`), is told so in one line, and nothing they wrote is read.
  * - One of the client's own people Grasp hasn't seen yet whom the
@@ -42,10 +45,14 @@
  *   and answered with their next message once they have signed in.
  *   Nobody from outside the tenant is ever sent the link.
  *
- * Only a member's message in their own private chat with the bot reaches
- * the Chat SDK, with who they are, and its conversation is kept
- * (`channel_conversations`) so a later message, and the answer, find it.
- * It is answered in the person's own chat for the platform (answer.ts).
+ * Only a member's message reaches the Chat SDK, with who they are: in their
+ * own private chat with the bot, whose conversation is kept
+ * (`channel_conversations`) so a later message, and the answer, find it;
+ * or one that @mentions the bot in a group chat or channel, with who is
+ * in it, read from the platform's roster then (`audienceIn`). It is
+ * answered in the person's own chat for the platform, or their one chat
+ * for that group or channel thread, whose agent reads only what everyone
+ * in it may (answer.ts, knowledge/access.ts).
  *
  * Slack (slack.ts) comes in the same way, by its own signature and ids:
  * its people are known only by the Slack account they linked to Grasp, and
@@ -75,6 +82,8 @@ import { memberFromDirectory } from "../auth/directory-members.ts";
 import { channelConversations } from "../db/core/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import { errorResponse } from "../errors.ts";
+import { audienceMaxMembers } from "../knowledge/access.ts";
+import type { Audience } from "../knowledge/access.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { stephenFor } from "../stephen-reach.ts";
 import { offerChannelLink } from "./accounts.ts";
@@ -92,7 +101,7 @@ import {
   whatsAppSetUp,
   whatsAppSubscription,
 } from "./whatsapp.ts";
-import { inDirectory, writerOf } from "./who.ts";
+import { inDirectory, teamsMembers, writerOf } from "./who.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
@@ -206,6 +215,14 @@ const activitySchema = z.object({
     id: z.string().min(1).max(1024),
     conversationType: z.enum(["personal", "groupChat", "channel"]),
   }),
+  entities: z
+    .array(
+      z.looseObject({
+        type: z.string().optional(),
+        mentioned: z.object({ id: z.string().optional() }).optional(),
+      })
+    )
+    .optional(),
 });
 type Activity = z.infer<typeof activitySchema>;
 
@@ -214,6 +231,13 @@ const localeOf = (locale: string | undefined): ChannelLocale => {
   const language = locale?.split("-")[0]?.toLowerCase();
   return channelLocales.find((each) => each === language) ?? "en";
 };
+
+/** Where a member asked in a chat others share, as the door hands it on. */
+export interface SharedPlace {
+  kind: "group" | "channel";
+  /** Who is in it, as the platform's roster says now. */
+  audience: Audience;
+}
 
 /** A member's message, as the door hands it on. */
 export interface ChannelMessage {
@@ -232,6 +256,8 @@ export interface ChannelMessage {
    * message, to be answered first: once, within the hour.
    */
   kept?: string;
+  /** Where they asked, when it was a group chat or channel. */
+  shared?: SharedPlace;
   /**
    * Sends `send` once the platform has the reply as it stands: on Teams,
    * after a streamed answer's last words, which Microsoft's SDK sends only
@@ -347,6 +373,70 @@ const newcomer = async (
   return offered ? { line: "signIn" } : {};
 };
 
+/**
+ * Whether `activity` @mentions the client's bot, as Teams marks a mention:
+ * by the bot's id, alone or after its `28:` prefix.
+ */
+const mentionsBot = (env: Env, activity: Activity): boolean =>
+  (activity.entities ?? []).some(
+    ({ type, mentioned }) =>
+      type === "mention" &&
+      mentioned?.id !== undefined &&
+      env.TEAMS_BOT_ID !== undefined &&
+      env.TEAMS_BOT_ID !== "" &&
+      (mentioned.id === env.TEAMS_BOT_ID ||
+        mentioned.id.endsWith(`:${env.TEAMS_BOT_ID}`))
+  );
+
+/**
+ * Who is in the group chat or channel `activity` came from, read from the
+ * conversation's roster (a channel's: its team's, or a private channel's
+ * own): its members Grasp knows as the organization's active people, and
+ * whether anyone else is in it, a guest, another tenant's, someone Grasp
+ * hasn't seen, or anyone at all when the roster can't be read or is too
+ * large. Whoever is not named narrows what the answer reads to nothing.
+ */
+const audienceIn = async (
+  env: Env,
+  adapter: ConnectedTeamsAdapter,
+  activity: Activity
+): Promise<Audience> => {
+  const nobody = { members: [], outsiders: true };
+  // A channel thread's conversation is the channel's, with `;messageid=`.
+  const [conversationId = activity.conversation.id] =
+    activity.conversation.id.split(";");
+  let roster: Awaited<ReturnType<ConnectedTeamsAdapter["rosterOf"]>>;
+  try {
+    roster = await adapter.rosterOf(
+      activity.serviceUrl,
+      conversationId,
+      audienceMaxMembers
+    );
+  } catch (error) {
+    log.warn("channel.roster_unread", {
+      platform: "teams",
+      ...errorFields(error),
+    });
+    return nobody;
+  }
+  if (roster === undefined) {
+    return nobody;
+  }
+  const tenant = signInConfig(env)?.entra?.tenantId;
+  const ours = roster.flatMap(({ aadObjectId, tenantId, userRole }) =>
+    aadObjectId !== undefined && tenantId === tenant && userRole !== "guest"
+      ? [aadObjectId]
+      : []
+  );
+  const known = await teamsMembers(env, ours);
+  return {
+    members: [...new Set(known.values())],
+    outsiders:
+      roster.length === 0 ||
+      roster.some(({ aadObjectId }) => !known.has(aadObjectId ?? "")),
+  };
+};
+
 /** What a member asked before Grasp knew them, if it is still kept: taken once. */
 const keptQuestion = async (
   state: StateAdapter,
@@ -417,9 +507,15 @@ const gate = async (
   userId?: string;
   acts?: boolean;
   kept?: string;
+  shared?: SharedPlace;
 }> => {
   // A message without an id can't be told from its resends: dropped.
   if (activity.id === undefined) {
+    return {};
+  }
+  const { conversationType } = activity.conversation;
+  // In a group chat or channel, only what is said to Stephen is his.
+  if (conversationType !== "personal" && !mentionsBot(env, activity)) {
     return {};
   }
   const first = await state.setIfNotExists(
@@ -436,9 +532,6 @@ const gate = async (
   if (!messages.take(`teams:${sender}`)) {
     log.info("channel.limited", { platform: "teams" });
     return told.take(`teams:${sender}`) ? { line: "tooFast" } : {};
-  }
-  if (activity.conversation.conversationType !== "personal") {
-    return { line: "privateOnly" };
   }
   if (activity.from.aadObjectId === undefined) {
     return { line: "otherCompany" };
@@ -460,10 +553,17 @@ const gate = async (
       if (!reach.reaches) {
         return { line: "notTurnedOn" };
       }
+      const kept = await keptQuestion(state, oid);
+      if (conversationType === "personal") {
+        return { userId: writer.userId, acts: reach.acts, kept };
+      }
+      const kind = conversationType === "groupChat" ? "group" : "channel";
+      const audience = await audienceIn(env, adapter, activity);
       return {
         userId: writer.userId,
         acts: reach.acts,
-        kept: await keptQuestion(state, oid),
+        kept,
+        shared: { kind, audience },
       };
     }
     case "removed": {
@@ -1008,7 +1108,7 @@ export const channelResponse = async (
   const activity = parsed.data;
   const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
   const adapter = teamsAdapter(env, teamsKeys);
-  const { line, userId, acts, kept } = await gate(
+  const { line, userId, acts, kept, shared } = await gate(
     env,
     state,
     adapter,
@@ -1051,6 +1151,23 @@ export const channelResponse = async (
   // their own private chat (press.ts).
   chat.onAction([confirmAction, cancelAction], async (event) => {
     await pressCard(env, { platform, userId, event, state });
+  });
+  // A group chat's or channel's: only ever one that @mentioned the bot,
+  // which the door let through with who is in it.
+  chat.onNewMention(async (thread, message) => {
+    if (shared === undefined || thread.isDM) {
+      return;
+    }
+    await takeOn({
+      platform,
+      userId,
+      thread,
+      message,
+      acts: acts ?? false,
+      kept,
+      shared,
+      afterward,
+    });
   });
   // Answered at once: the platform gives up on a webhook long before an
   // answer is ready, and sends it again. The message is handled after,

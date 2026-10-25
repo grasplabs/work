@@ -31,7 +31,10 @@ export const botConnectorFake = (bot: {
   }[] = [];
   /** Conversations where Teams refuses a streamed message. */
   const unstreamed = new Set<string>();
-  /** Every roster read, as `<conversation> <user id>`. */
+  /**
+   * Every roster read, as `<conversation> <user id>`, or `<conversation> *`
+   * for a page of the whole roster.
+   */
   const asked: string[] = [];
   /** The roster: `<conversation> <user id>` to what Teams says of them. */
   const members: Record<string, unknown> = {};
@@ -40,6 +43,10 @@ export const botConnectorFake = (bot: {
 
   const membersPath =
     /\/v3\/conversations\/(?<conversation>[^/]+)\/members\/(?<member>[^/]+)$/u;
+  const rosterPath =
+    /\/v3\/conversations\/(?<conversation>[^/]+)\/pagedMembers$/u;
+  /** Members a roster page holds here: small, so tests page through. */
+  const rosterPageSize = 2;
   const activitiesPath =
     /\/v3\/conversations\/(?<conversation>[^/]+)\/activities(?:\/[^/]+)?$/u;
   const editPath =
@@ -95,6 +102,43 @@ export const botConnectorFake = (bot: {
     return Response.json({ id }, { status: 201 });
   };
 
+  /** One page of `conversation`'s whole roster, from the token `url` names. */
+  const rosterPage = (conversation: string, url: URL): Response => {
+    asked.push(`${conversation} *`);
+    const everyone = Object.entries(members)
+      .filter(([key]) => key.startsWith(`${conversation} `))
+      .map(([, member]) => member);
+    const from = Number(url.searchParams.get("continuationToken") ?? "0");
+    const to = from + rosterPageSize;
+    return Response.json({
+      members: everyone.slice(from, to),
+      ...(to < everyone.length ? { continuationToken: String(to) } : {}),
+    });
+  };
+
+  /** An edit in `conversation` of the activity `editOf`. */
+  const edit = (
+    conversation: string,
+    editOf: string,
+    body: unknown
+  ): Response => {
+    posted.push({ conversation, activity: body, editOf });
+    return Response.json({ id: editOf });
+  };
+
+  /** One member of a conversation, by `<conversation> <user id>`. */
+  const memberOf = (key: string): Response => {
+    asked.push(key);
+    return Object.hasOwn(members, key)
+      ? Response.json(members[key])
+      : Response.json({ error: { code: "MemberNotFound" } }, { status: 404 });
+  };
+
+  /** A path's part, as it named it. */
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- the fake runs as its own script, from this function's source alone
+  const decoded = (part: string | undefined): string =>
+    decodeURIComponent(part ?? "");
+
   const botConnector = async (request: Request, url: URL) => {
     const bearer = (request.headers.get("authorization") ?? "").replace(
       /^Bearer /u,
@@ -105,28 +149,25 @@ export const botConnectorFake = (bot: {
     }
     const member = membersPath.exec(url.pathname)?.groups;
     if (request.method === "GET" && member !== undefined) {
-      const key = `${decodeURIComponent(member.conversation ?? "")} ${decodeURIComponent(member.member ?? "")}`;
-      asked.push(key);
-      return Object.hasOwn(members, key)
-        ? Response.json(members[key])
-        : Response.json({ error: { code: "MemberNotFound" } }, { status: 404 });
+      return memberOf(
+        `${decoded(member.conversation)} ${decoded(member.member)}`
+      );
+    }
+    const roster = rosterPath.exec(url.pathname)?.groups;
+    if (request.method === "GET" && roster !== undefined) {
+      return rosterPage(decoded(roster.conversation), url);
     }
     const activity = activitiesPath.exec(url.pathname)?.groups;
     if (request.method === "POST" && activity !== undefined) {
-      return post(
-        decodeURIComponent(activity.conversation ?? ""),
-        await request.json()
-      );
+      return post(decoded(activity.conversation), await request.json());
     }
     const edited = editPath.exec(url.pathname)?.groups;
     if (request.method === "PUT" && edited !== undefined) {
-      const editOf = decodeURIComponent(edited.activity ?? "");
-      posted.push({
-        conversation: decodeURIComponent(edited.conversation ?? ""),
-        activity: await request.json(),
-        editOf,
-      });
-      return Response.json({ id: editOf });
+      return edit(
+        decoded(edited.conversation),
+        decoded(edited.activity),
+        await request.json()
+      );
     }
     return Response.json({ error: { code: "NotFound" } }, { status: 404 });
   };
