@@ -1,5 +1,3 @@
-import type { MemoryPack } from "@grasp-os/brain/contract";
-import { recall } from "@grasp-os/brain/recall";
 import { search } from "@grasp-os/brain/search";
 import { follow, read } from "@grasp-os/brain/tools";
 import type {
@@ -51,13 +49,6 @@ export class KnowledgeBinding
     return await this.#asDelegate(
       async (reader) =>
         await read(brainOf(this.env), reader, documentId, options)
-    );
-  }
-
-  /** The Brain's recall, across every collection the agent may read. */
-  async recall(input: unknown): Promise<MemoryPack> {
-    return await this.#asDelegate(
-      async (reader) => await recall(brainOf(this.env), reader, input)
     );
   }
 

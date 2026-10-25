@@ -1056,27 +1056,45 @@ describe("a chat's Knowledge", setUpTime, () => {
       text: `# Plan\n${word}`,
       ifVersion: 0,
     });
+    // Readable by the person, holding the word, but never granted.
+    const { id: ungranted } = await admin.knowledge.createCollection({
+      name: `Ungranted ${unique()}`,
+      access: "everyone",
+    });
+    await admin.knowledge.saveDocument({
+      collectionId: ungranted,
+      path: "plan.md",
+      text: `# Plan\n${word}`,
+      ifVersion: 0,
+    });
+    const asked = (collectionIds?: string[]) =>
+      `outcome(env.brain.recall(${JSON.stringify({ query: word, ...(collectionIds === undefined ? {} : { filters: { collectionIds } }) })}))`;
     const recallStep = codeStep(
-      `export default async (self, env) => { const outcome = async (asked) => { try { const pack = await asked; return pack.items.length; } catch (error) { return error.code ?? String(error); } }; return [await outcome(env.brain.recall({ query: ${JSON.stringify(word)} })), await outcome(env.brain.recall({ query: ${JSON.stringify(word)}, filters: { collectionIds: [${JSON.stringify(handbook)}] } }))]; };`
+      `export default async (self, env) => { const outcome = async (pending) => { try { const pack = await pending; return pack.items.length; } catch (error) { return error.code ?? String(error); } }; return [await ${asked()}, await ${asked([handbook])}, await ${asked([ungranted])}, await ${asked([teamOnly])}]; };`
     );
     const { stub, chat, ask, agent } = await chatOf(
       person.userId,
       recallStep,
       says("Nothing."),
       recallStep,
-      says("Still nothing.")
+      says("Still nothing."),
+      recallStep,
+      says("Refused.")
     );
     await grantRead(admin, agent, handbook);
     await grantRead(admin, agent, teamOnly);
     // Without the Brain permission: refused.
     const before = await ask("What is the plan?");
-    await requestGranted(idp, admin, {
+    const brainGrant = await requestGranted(idp, admin, {
       subject: agent,
       object: { type: "platform" },
       actions: ["brain"],
       binding: "BRAIN",
     });
     const after = await ask("What is the plan, now?");
+    // Revoked: refused again, from the next call.
+    await admin.api.permissions.revoke(brainGrant);
+    await ask("And now?");
     const results = await codeResults(stub, chat.id);
     expect({
       results: results.map(({ text }) => text),
@@ -1084,11 +1102,14 @@ describe("a chat's Knowledge", setUpTime, () => {
       after: after.provenance,
     }).toStrictEqual({
       results: [
-        'Returned:\n["brain.denied","brain.denied"]',
+        'Returned:\n["brain.denied","brain.denied","brain.denied","brain.denied"]',
         // Once granted, the turn recalls for the question first: never
         // from the plan its person can't read.
         expect.not.stringContaining(word),
-        "Returned:\n[0,0]",
+        // Never wider than its grants, nor than what its person may read:
+        // naming either is refused as not found.
+        'Returned:\n[0,0,"brain.not_found","brain.not_found"]',
+        'Returned:\n["brain.denied","brain.denied","brain.denied","brain.denied"]',
       ],
       before: { sources: [], restricted: false },
       // The word is only in a collection the person can't read; the
