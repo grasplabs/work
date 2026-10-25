@@ -461,6 +461,57 @@ describe("who can make a skill selectable", () => {
     });
   });
 
+  it("counts a prerequisite only once it is usable in turn: its own dependencies resolve, and no chain of them loops", async () => {
+    const company = await newCollection(brain, "Company skills");
+    await saved(
+      company,
+      "close-month",
+      "tasks: [close]\nprerequisites: [reconcile]"
+    );
+    await saved(
+      company,
+      "reconcile",
+      "tasks: [reconcile]\ndependencies: [ledger@2]"
+    );
+    await saved(company, "ledger", "tasks: [ledger]");
+    // Two that each need the other first.
+    await saved(
+      company,
+      "open-books",
+      "tasks: [open]\nprerequisites: [check-books]"
+    );
+    await saved(
+      company,
+      "check-books",
+      "tasks: [check]\nprerequisites: [open-books]"
+    );
+    const caller: Caller = { userId: "ann", reads: [company.id] };
+    const select = async (type: string) =>
+      summary(await selectSkill(brain, caller, { task: { type } }));
+    const withoutLedger = await select("close");
+    const loop = await select("open");
+    await saved(company, "ledger", "tasks: [ledger]\nacceptance: [suite]", 1);
+
+    expect({
+      withoutLedger,
+      loop,
+      withLedger: await select("close"),
+    }).toStrictEqual({
+      withoutLedger: {
+        result: "no_match",
+        considered: { "close-month": "prerequisite_missing" },
+      },
+      loop: {
+        result: "no_match",
+        considered: { "open-books": "prerequisite_missing" },
+      },
+      withLedger: {
+        result: "close-month",
+        considered: { "close-month": "selected" },
+      },
+    });
+  });
+
   it("refuses a teammate's skill standing in for a company skill's dependency or prerequisite", async () => {
     const company = await newCollection(brain, "Company skills");
     const hidden = await newCollection(brain, "Admins' skills");

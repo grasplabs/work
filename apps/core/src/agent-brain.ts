@@ -4,7 +4,10 @@ import type {
   SkillSelection,
 } from "@grasp-os/brain/contract";
 import { recallWithSources } from "@grasp-os/brain/recall";
-import { readSkill, selectSkill } from "@grasp-os/brain/skills";
+import {
+  readSkillWithSources,
+  selectSkillWithSources,
+} from "@grasp-os/brain/skills";
 import type { BrainBinding } from "@grasp-os/sdk/brain";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
@@ -78,6 +81,14 @@ interface AgentGap {
   about: string[];
 }
 
+/** What a skill call read, as `#delegated` records it, and what it hands over. */
+interface Delegated<T> {
+  value: T;
+  /** The collections it read from, and the documents it hands over. */
+  sources: { collections: readonly string[]; documents: readonly string[] };
+  detail: Record<string, string | number>;
+}
+
 /** The brain, as a chat's code reads it. */
 export class BrainAgentApi
   extends WorkerEntrypoint<Env, AgentScope>
@@ -134,13 +145,19 @@ export class BrainAgentApi
    * no-skill result: read as the chat's delegate, as a recall is, so it
    * weighs only skills the agent was granted that the person may read, and
    * requires only capabilities the agent holds now. The Brain records the
-   * selection; the chat records the call.
+   * selection; the chat records the call, and the collections it weighed,
+   * as a recall's sources.
    */
   async skillsSelect(input: unknown): Promise<SkillSelection> {
     return await this.#delegated("brain.skills.select", async (reader) => {
-      const selection = await selectSkill(brainOf(this.env), reader, input);
+      const { selection, provenance } = await selectSkillWithSources(
+        brainOf(this.env),
+        reader,
+        input
+      );
       return {
         value: selection,
+        sources: { collections: provenance.collectionIds, documents: [] },
         detail: {
           result: selection.result.kind,
           considered: selection.considered.length,
@@ -149,27 +166,43 @@ export class BrainAgentApi
     });
   }
 
-  /** A pinned skill at exactly its version, while the agent may still read it. */
+  /**
+   * A pinned skill at exactly its version, while the agent may still read
+   * it, its collection recorded with the chat as a recall's sources are:
+   * the chat's later model requests are judged by it (a sensitive one's
+   * data rule), and its result is withheld once the agent may no longer
+   * read it.
+   */
   async skillsRead(input: unknown): Promise<SkillRead> {
     return await this.#delegated("brain.skills.read", async (reader) => {
-      const read = await readSkill(brainOf(this.env), reader, input);
-      return { value: read, detail: { version: read.skill.version } };
+      const { read, provenance } = await readSkillWithSources(
+        brainOf(this.env),
+        reader,
+        input
+      );
+      return {
+        value: read,
+        sources: {
+          collections: provenance.collectionIds,
+          documents: [read.skill.documentId],
+        },
+        detail: { version: read.skill.version },
+      };
     });
   }
 
   /**
-   * `read` as the chat's delegate, after the run's check, with the call
-   * recorded with the chat as every call of its code is, refused or not.
+   * `read` as the chat's delegate, after the run's check, with what it read
+   * from recorded with the chat (`recordSources`) before it is handed over,
+   * and the call recorded as every call of its code is, refused or not.
    */
   async #delegated<T>(
     method: string,
-    read: (
-      reader: Reader
-    ) => Promise<{ value: T; detail: Record<string, string | number> }>
+    read: (reader: Reader) => Promise<Delegated<T>>
   ): Promise<T> {
     const scope = this.ctx.props;
     await requireOpenRun(this.env, scope, method);
-    let done: { value: T; detail: Record<string, string | number> };
+    let done: Delegated<T>;
     try {
       done = await readAsDelegate(
         this.env,
@@ -177,6 +210,12 @@ export class BrainAgentApi
         chatContext(scope),
         undefined,
         read
+      );
+      await recordSources(
+        this.env,
+        scope,
+        done.sources.collections,
+        done.sources.documents
       );
     } catch (error) {
       await recordToolCall(this.env, scope, { method }, endedBy(error));

@@ -28,6 +28,7 @@ import {
 import { getDocument } from "./documents.ts";
 import { parseBaseFields, parseFrontmatter } from "./frontmatter.ts";
 import { collectionIdSchema, documentIdSchema } from "./ids.ts";
+import type { Provenance } from "./knowledge.ts";
 import { readPayload } from "./payloads.ts";
 import { asBrainError } from "./recall.ts";
 
@@ -54,9 +55,11 @@ import { asBrainError } from "./recall.ts";
 //   the caller reads". `replaces` reaches a skill in the same collection,
 //   or, from a collection only admins write, a shipped skill.
 // - A missing prerequisite or dependency: each must be accepted and usable
-//   by the caller (a prerequisite), or that one skill, with that name and
-//   accepted, at exactly the version named (a dependency), or the skill
-//   isn't selected, with why.
+//   by the caller (a prerequisite: its own capabilities, prerequisites and
+//   dependencies in turn, through a chain at most
+//   `skillPrerequisiteDepthMax` deep and never a cycle), or that one
+//   skill, with that name and accepted, at exactly the version named (a
+//   dependency), or the skill isn't selected, with why.
 // - Forcing a skill: applicability is exact (the task's type in `tasks`,
 //   every `when` trait held, no `unless` trait); a skill without `tasks`
 //   applies to nothing; two that apply, with nothing saying which, select
@@ -74,6 +77,9 @@ import { asBrainError } from "./recall.ts";
 
 /** The rules a selection follows: exact matching over manifests. */
 export const skillSelectionPolicyVersion = "rules@2";
+
+/** Most prerequisites deep a skill's chain of them goes; deeper is never usable. */
+const skillPrerequisiteDepthMax = 8;
 
 /** Most selectable skills one selection reads; more selects none. */
 export const skillsReadMax = 100;
@@ -317,6 +323,51 @@ const pinOf = async <C>(
 };
 
 /**
+ * Why `candidate` can't be used by a caller holding `held`, or the pins of
+ * its dependencies: a capability it requires they lack, a prerequisite
+ * that isn't usable in turn, by these same rules, or a dependency that
+ * doesn't resolve. `via` is the chain of prerequisites that led here: one
+ * that leads back into it (a cycle), or deeper than
+ * `skillPrerequisiteDepthMax`, is never usable.
+ */
+const usableOf = async <C>(
+  brain: Brain<C>,
+  candidate: Candidate,
+  held: ReadonlySet<string>,
+  all: readonly Candidate[],
+  via: readonly Candidate[]
+): Promise<{ blocked: SkillOutcome } | { pins: SkillRef[] }> => {
+  const { manifest } = candidate;
+  if (!allIn(manifest.requires, held)) {
+    return { blocked: "missing_capability" };
+  }
+  const chain = [...via, candidate];
+  for (const reference of manifest.prerequisites) {
+    const found = resolved(candidate, referenceOf(reference), all);
+    const usable =
+      found !== undefined &&
+      found.manifest.status === "accepted" &&
+      !chain.includes(found) &&
+      chain.length <= skillPrerequisiteDepthMax &&
+      // oxlint-disable-next-line no-await-in-loop -- in order, bounded by depth and the manifest
+      "pins" in (await usableOf(brain, found, held, all, chain));
+    if (!usable) {
+      return { blocked: "prerequisite_missing" };
+    }
+  }
+  const pins: SkillRef[] = [];
+  for (const dependency of manifest.dependencies) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, bounded by the manifest
+    const pin = await pinOf(brain, candidate, dependency, all);
+    if (pin === undefined) {
+      return { blocked: "dependency_missing" };
+    }
+    pins.push(pin.ref);
+  }
+  return { pins };
+};
+
+/**
  * Why `candidate` can't be used for the task, or the pins of its
  * dependencies when it applies, by the rules in order: retired, excluded,
  * a precondition, a capability, a prerequisite, a dependency.
@@ -338,30 +389,7 @@ const checkedOf = async <C>(
   if (!allIn(manifest.when, traits)) {
     return { blocked: "precondition_unmet" };
   }
-  if (!allIn(manifest.requires, held)) {
-    return { blocked: "missing_capability" };
-  }
-  const usable = manifest.prerequisites.every((reference) => {
-    const found = resolved(candidate, referenceOf(reference), all);
-    return (
-      found !== undefined &&
-      found.manifest.status === "accepted" &&
-      allIn(found.manifest.requires, held)
-    );
-  });
-  if (!usable) {
-    return { blocked: "prerequisite_missing" };
-  }
-  const pins: SkillRef[] = [];
-  for (const dependency of manifest.dependencies) {
-    // oxlint-disable-next-line no-await-in-loop -- a few, bounded by the manifest
-    const pin = await pinOf(brain, candidate, dependency, all);
-    if (pin === undefined) {
-      return { blocked: "dependency_missing" };
-    }
-    pins.push(pin.ref);
-  }
-  return { pins };
+  return await usableOf(brain, candidate, held, all, []);
 };
 
 /** Whether `by` may take `target`'s place: in its own collection, or an admins' skill a shipped one. */
@@ -433,15 +461,17 @@ const resultOf = (
 
 /**
  * The applicable skill for `input`'s task, for `reader`, pinned at the
- * version read, or an explicit no-skill result; recorded either way.
- * Refused as the Brain refuses a recall (`brain.denied` for a caller the
- * host doesn't let use the Brain, `brain.invalid` for a malformed task).
+ * version read, or an explicit no-skill result; recorded either way, with
+ * where what it weighed came from (`provenance`), as a recall's sources,
+ * for a host that keeps them with what the caller does next. Refused as
+ * the Brain refuses a recall (`brain.denied` for a caller the host doesn't
+ * let use the Brain, `brain.invalid` for a malformed task).
  */
-export const selectSkill = async <C>(
+export const selectSkillWithSources = async <C>(
   brain: Brain<C>,
   reader: C,
   input: unknown
-): Promise<SkillSelection> => {
+): Promise<{ selection: SkillSelection; provenance: Provenance }> => {
   try {
     const { task } = brainErrors.parse(
       "brain.invalid",
@@ -466,7 +496,7 @@ export const selectSkill = async <C>(
     const result = resultOf(selectable === undefined, left);
     // Recorded with its result and counts, as the host records a read: the
     // empty, ambiguous and no-skill ones too.
-    await brain.ports.onRead(
+    const provenance = await brain.ports.onRead(
       reader,
       {
         action: "knowledge.skill.select",
@@ -483,7 +513,7 @@ export const selectSkill = async <C>(
       },
       ...all.map(({ source }) => source)
     );
-    return {
+    const selection: SkillSelection = {
       id: crypto.randomUUID(),
       contractVersion: brainContractVersion,
       selectionPolicyVersion: skillSelectionPolicyVersion,
@@ -494,22 +524,34 @@ export const selectSkill = async <C>(
       }),
       createdAt: brain.ports.clock().toISOString(),
     };
+    return { selection, provenance };
   } catch (error) {
     throw asBrainError(brain, error);
   }
+};
+
+/** `selectSkillWithSources`'s selection alone. */
+export const selectSkill = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<SkillSelection> => {
+  const { selection } = await selectSkillWithSources(brain, reader, input);
+  return selection;
 };
 
 /**
  * The skill `input` pins, at exactly that version, for `reader`, while
  * they may still read it: retired or superseded since, it is the same
  * text. `brain.not_found` for a document that isn't a skill, a version
- * that isn't there, or one they can't read now.
+ * that isn't there, or one they can't read now. With where it came from
+ * (`provenance`), as any read's.
  */
-export const readSkill = async <C>(
+export const readSkillWithSources = async <C>(
   brain: Brain<C>,
   reader: C,
   input: unknown
-): Promise<SkillRead> => {
+): Promise<{ read: SkillRead; provenance: Provenance }> => {
   try {
     const { documentId, version } = brainErrors.parse(
       "brain.invalid",
@@ -526,16 +568,29 @@ export const readSkill = async <C>(
     }
     const parsed = manifestOf(read.path, read.version.text);
     return {
-      skill: {
-        documentId: read.id,
-        collectionId: read.collectionId,
-        name: parsed?.name ?? read.title,
-        version: read.version.number,
+      read: {
+        skill: {
+          documentId: read.id,
+          collectionId: read.collectionId,
+          name: parsed?.name ?? read.title,
+          version: read.version.number,
+        },
+        manifest: parsed?.manifest ?? null,
+        text: read.version.text,
       },
-      manifest: parsed?.manifest ?? null,
-      text: read.version.text,
+      provenance: read.provenance,
     };
   } catch (error) {
     throw asBrainError(brain, error);
   }
+};
+
+/** `readSkillWithSources`'s read alone. */
+export const readSkill = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<SkillRead> => {
+  const { read } = await readSkillWithSources(brain, reader, input);
+  return read;
 };

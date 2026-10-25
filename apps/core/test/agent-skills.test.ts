@@ -6,9 +6,16 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { withheldResult } from "../src/agent.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { capabilitiesOf } from "../src/knowledge/skill-capabilities.ts";
-import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  personalChatsOf,
+  says,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -26,7 +33,10 @@ import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 //   capability core names can't be required at all;
 // - retiring a skill leaves it selectable, or changes what a pinned read
 //   returns; a pinned read outlives the agent's read of the collection;
-// - a selection goes unrecorded, or its record carries a skill's text.
+// - a selection goes unrecorded, or its record carries a skill's text;
+// - a skill's text stays in the chat's later requests once the agent may
+//   no longer read it, because the chat didn't keep where it came from
+//   (the same record judges a sensitive one by the client's data rule).
 
 const idp = mockIdp();
 
@@ -348,5 +358,63 @@ describe("a chat's skills", setUpTime, () => {
         (name) => !skillCapabilitySchema.safeParse(name).success
       ),
     }).toStrictEqual({ count: 4, rejected: [] });
+  });
+
+  it("keeps what a skill read rests on with the chat: once the agent may no longer read its collection, the read is withheld from every later request", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const { id: collectionId } = await admin.api.knowledge.createCollection({
+      name: `Skills ${unique()}`,
+      access: "everyone",
+    });
+    const secret = `zq${crypto.randomUUID().replaceAll("-", "")}`;
+    const skill = await admin.api.knowledge.saveDocument({
+      collectionId,
+      path: "payroll/SKILL.md",
+      text: skillText("payroll", "tasks: [payroll]").replace(
+        "Check the order first",
+        `Use code ${secret}`
+      ),
+      ifVersion: 0,
+    });
+    const { gateway, ask, agent } = await chatOf(
+      person.userId,
+      calling(
+        `env.brain.skillsRead({ documentId: "${skill.id}", version: 1 }).then(({ text }) => text)`
+      ),
+      says("Read."),
+      says("Hello again."),
+      says("Still here.")
+    );
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const grant = await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, collectionId)
+    );
+
+    // Words no section holds: the turn's own recall finds nothing to quote.
+    await ask("Zebras?");
+    await ask("Giraffes?");
+    const before = gateway.requests.length;
+    await admin.api.permissions.revoke(grant);
+    await ask("Okapis?");
+
+    const sent = gateway.requests.map(({ body }) => JSON.stringify(body));
+    expect({
+      whileReadable: sent.slice(0, before).at(-1)?.includes(secret),
+      afterRevoking: sent.slice(before).map((body) => ({
+        secret: body.includes(secret),
+        withheld: body.includes(withheldResult),
+      })),
+    }).toStrictEqual({
+      whileReadable: true,
+      afterRevoking: [{ secret: false, withheld: true }],
+    });
   });
 });
