@@ -272,13 +272,13 @@ export const StepEvidence = ({
     const given = drawn?.told[person]?.stepMinutes?.find(
       (each) => each.step === index
     );
-    if (given === undefined || drawn === null) {
+    if (given === undefined) {
       return null;
     }
+    // Always minutes, as a step's own time is (the drawing converts hours
+    // to minutes), whatever unit the work's whole is counted in.
     const [quickest, normal, longest] = given.minutes;
-    return drawn.unit === "hours"
-      ? t`${normal} hours, ${quickest} to ${longest}`
-      : t`${normal} minutes, ${quickest} to ${longest}`;
+    return t`${normal} minutes, ${quickest} to ${longest}`;
   };
   return (
     <>

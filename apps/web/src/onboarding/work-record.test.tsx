@@ -221,4 +221,28 @@ describe("a piece of work as staff read it", () => {
       listed: [true, true, true],
     });
   });
+
+  it("gives a step's own minutes in minutes, though the work's whole is counted in hours", () => {
+    const inHours =
+      drawn === null ? null : { ...drawn, unit: "hours" as const };
+    const hours = workViewOf({
+      snapshot,
+      works: {
+        ...works,
+        works: works.works.map((work) => ({ ...work, drawn: inHours })),
+      },
+    });
+    const ofHours = recordOf(hours, "orders");
+    if (ofHours === null) {
+      throw new Error("The work has a record");
+    }
+    const step = textOf(
+      <StepEvidence drawn={inHours} index={0} record={ofHours} />
+    );
+
+    expect({
+      minutes: step.includes("Their own: 4 minutes, 2 to 9"),
+      hours: step.includes("hours"),
+    }).toStrictEqual({ minutes: true, hours: false });
+  });
 });
