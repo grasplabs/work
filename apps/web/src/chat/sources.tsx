@@ -143,21 +143,22 @@ export const AnswerSources = ({
       current = false;
     };
   }, [core, chatId, messageId]);
-  if (cited.length === 0) {
-    return <MessageActions>{children}</MessageActions>;
-  }
+  // The same elements before and after core answers, so the actions keep
+  // their focus and state (Copied) while the trigger joins them.
   return (
     <Collapsible>
       <MessageActions>
         {children}
-        <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
-          <BookOpenIcon data-icon="inline-start" />
-          <Plural
-            one="Based on # source"
-            other="Based on # sources"
-            value={cited.length}
-          />
-        </CollapsibleTrigger>
+        {cited.length === 0 ? null : (
+          <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
+            <BookOpenIcon data-icon="inline-start" />
+            <Plural
+              one="Based on # source"
+              other="Based on # sources"
+              value={cited.length}
+            />
+          </CollapsibleTrigger>
+        )}
       </MessageActions>
       <CollapsibleContent>
         <ol

@@ -26,17 +26,32 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
 
-/** Answer `messageId` of chat `chatId`, which core says cites `cited`. */
+/** Lets the page's work after a core answer run. */
+const settled = async (): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 0);
+    await promise;
+  });
+};
+
+/**
+ * Answer `messageId` of chat `chatId`, which core says cites `cited`,
+ * once `answered` settles (at once without it).
+ */
 const shown = async (
   chatId: string,
   messageId: number,
-  cited: Record<string, ChatCitedDocument[]>
+  cited: Record<string, ChatCitedDocument[]>,
+  answered: Promise<unknown> = Promise.resolve()
 ) => {
   const asked: string[] = [];
   const chats = {
     cited: async (chat: string, message: number) => {
       asked.push(`${chat}/${message}`);
-      await Promise.resolve();
+      await answered;
       return cited[`${chat}/${message}`] ?? [];
     },
   };
@@ -76,13 +91,7 @@ const shown = async (
     );
     await router.load();
   });
-  await act(async () => {
-    const { promise, resolve } = Promise.withResolvers<boolean>();
-    setTimeout(() => {
-      resolve(true);
-    }, 0);
-    await promise;
-  });
+  await settled();
   return { router, asked };
 };
 
@@ -157,6 +166,30 @@ describe(AnswerSources, () => {
       ],
       at: "/knowledge/handbook",
       search: { doc: "leave" },
+    });
+  });
+
+  it("keeps the focus on an action while core's answer adds the sources beside it", async () => {
+    const answered = Promise.withResolvers<boolean>();
+    await shown("chat", 9, { "chat/9": [plan] }, answered.promise);
+    const copy = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Copy"
+    );
+    copy?.focus();
+    const before = {
+      buttons: buttons(),
+      focused: document.activeElement === copy,
+    };
+
+    answered.resolve(true);
+    await settled();
+
+    expect({
+      before,
+      after: { buttons: buttons(), focused: document.activeElement === copy },
+    }).toStrictEqual({
+      before: { buttons: ["Copy"], focused: true },
+      after: { buttons: ["Copy", "Based on 1 source"], focused: true },
     });
   });
 
