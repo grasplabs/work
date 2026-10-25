@@ -1,6 +1,7 @@
 /**
  * Microsoft Graph for Stephen's eval (stephen-eval.test.ts): a person's
- * Outlook calendar and mail, and a company's Excel workbooks, as the
+ * Outlook calendar and mail, their OneDrive's files, and a company's Excel
+ * workbooks, as the
  * Microsoft 365 connector's reads ask for them, in the shapes Graph's v1.0
  * reference documents. Calendar times come back in UTC, as the connector
  * asks for them (`Prefer: outlook.timezone="UTC"`), and a day in a workbook
@@ -29,11 +30,22 @@ export const stephenGraphFake = () => {
     values: unknown[][];
     numberFormat: string[][];
   }
+  /** A file of a drive: its name, type and text. */
+  interface File {
+    id: string;
+    name: string;
+    mimeType: string;
+    text: string;
+  }
   const worlds = new Map<string, World>();
+  const drives = new Map<string, File[]>();
   const tables = new Map<string, Table>();
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: core's tests embed this function's source
   const listOf = (value: unknown): unknown[] =>
     Array.isArray(value) ? value.map((item: unknown) => item) : [];
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: core's tests embed this function's source
+  const textOf = (value: unknown): string =>
+    typeof value === "string" ? value : "";
   const recordsOf = (value: unknown): Record<string, unknown>[] =>
     listOf(value).flatMap((item) =>
       typeof item === "object" && item !== null
@@ -97,7 +109,8 @@ export const stephenGraphFake = () => {
           .filter(
             (event) => timeOf(event.start) < to && timeOf(event.end) > from
           )
-          .toSorted((one, other) => timeOf(one.start) - timeOf(other.start)),
+          .toSorted((one, other) => timeOf(one.start) - timeOf(other.start))
+          .map(summaryOf),
       });
     }
     if (method === "GET" && collection === "events" && id !== undefined) {
@@ -126,6 +139,44 @@ export const stephenGraphFake = () => {
     return notFound();
   };
 
+  const driveAnswer = (
+    drive: string,
+    files: readonly File[],
+    rest: string[]
+  ): Response => {
+    const itemOf = ({ id, name, mimeType, text }: File) => ({
+      id,
+      name,
+      size: new TextEncoder().encode(text).byteLength,
+      file: { mimeType },
+      parentReference: { driveId: drive, id: "root" },
+    });
+    const [where, what, more] = rest;
+    // root/children, or root/search(q='...'): every file, or those named.
+    if (where === "root" && what !== undefined) {
+      const query = /^search\(q='(?<query>.*)'\)$/u.exec(what)?.groups?.query;
+      const found =
+        query === undefined
+          ? files
+          : files.filter((file) =>
+              query
+                .toLowerCase()
+                .split(/\s+/u)
+                .some((word) =>
+                  `${file.name} ${file.text}`.toLowerCase().includes(word)
+                )
+            );
+      return Response.json({ value: found.map(itemOf) });
+    }
+    const file = files.find(({ id }) => where === "items" && id === what);
+    if (file === undefined) {
+      return notFound();
+    }
+    return more === "content"
+      ? new Response(file.text, { headers: { "content-type": file.mimeType } })
+      : Response.json(itemOf(file));
+  };
+
   const tableAnswer = (table: Table, range: string | undefined): Response => {
     if (range === "headerRowRange") {
       return Response.json({ values: [table.columns] });
@@ -141,8 +192,9 @@ export const stephenGraphFake = () => {
 
   return {
     /**
-     * POST `{ mailbox, events, messages }` to set a mailbox's world, or
-     * `{ table: "drive/item/name", columns, values, numberFormat }` to set
+     * POST `{ mailbox, events, messages }` to set a mailbox's world,
+     * `{ drive, files }` a drive's files (each `{ id, name, mimeType,
+     * text }`), `{ table: "drive/item/name", columns, values, numberFormat }`
      * a workbook's table, or `{ failNext }`; GET reads what reached them.
      */
     control: async (request: Request): Promise<Response> => {
@@ -150,7 +202,7 @@ export const stephenGraphFake = () => {
         return Response.json({ reads, writes });
       }
       const set: Record<string, unknown> = await request.json();
-      const { failNext: failing, mailbox, table } = set;
+      const { failNext: failing, mailbox, table, drive } = set;
       if (typeof failing === "string") {
         failNext = failing;
       }
@@ -159,6 +211,17 @@ export const stephenGraphFake = () => {
           events: recordsOf(set.events),
           messages: recordsOf(set.messages),
         });
+      }
+      if (typeof drive === "string") {
+        drives.set(
+          drive,
+          recordsOf(set.files).map((file) => ({
+            id: textOf(file.id),
+            name: textOf(file.name),
+            mimeType: textOf(file.mimeType),
+            text: textOf(file.text),
+          }))
+        );
       }
       if (typeof table === "string") {
         tables.set(table, {
@@ -189,6 +252,11 @@ export const stephenGraphFake = () => {
         }
         answer = () =>
           mailboxAnswer(world, request.method, parts.slice(4), url);
+      } else if (kind === "drives" && drives.has(parts[3] ?? "")) {
+        // /v1.0/drives/{drive}/root/... or /v1.0/drives/{drive}/items/{item}[/content]
+        const drive = parts[3] ?? "";
+        const files = drives.get(drive) ?? [];
+        answer = () => driveAnswer(drive, files, parts.slice(4));
       } else if (kind === "drives" && parts[7] === "tables") {
         // /v1.0/drives/{drive}/items/{item}/workbook/tables/{name}/{range}
         const table = tables.get(`${parts[3]}/${parts[5]}/${parts[8]}`);
