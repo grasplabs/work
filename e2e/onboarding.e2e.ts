@@ -222,21 +222,28 @@ test("staff open someone's interview and see where it stands, never a word of it
   );
 
   // The look is in the audit log, by the staff member, once the log has
-  // taken it from core's outbox.
+  // taken it from core's outbox: a staff access of the interview, naming
+  // the kind of what was asked and never the person (GRA-1087).
   const reader = apiOf(staff);
   try {
     await expect
       .poll(async () => {
         const { records } = await reader.api.audit.search({
-          action: "onboarding.interview.read",
+          action: "staff.accessed",
           from: since,
         });
-        return records.map(({ event }) => [
-          event?.actor.type,
-          event?.target?.type,
-        ]);
+        const looks = records.filter(
+          ({ event }) => event?.detail.surface === "onboardingStaff.interview"
+        );
+        return {
+          looked: looks.length > 0,
+          actors: [...new Set(looks.map(({ event }) => event?.actor.type))],
+          named: looks.some(
+            ({ event }) => event?.provenance.includes(lea) === true
+          ),
+        };
       })
-      .toStrictEqual([["staff", "interview"]]);
+      .toStrictEqual({ looked: true, actors: ["staff"], named: false });
   } finally {
     reader.core[Symbol.dispose]();
   }

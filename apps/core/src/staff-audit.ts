@@ -28,17 +28,18 @@ import type { SessionCheck } from "./session-check.ts";
 // a secret never reach the log, whatever their shape. It is stored in
 // core's outbox before the call goes on: one that can't be stored fails
 // the call, so no view goes unrecorded. The same view on one connection
-// (surface, and a hash of all its arguments) is written once per
+// (surface, the target it was asked of, and a hash of all its arguments)
+// is written once per
 // `repeatWindowMs`, so a page asking again and again doesn't flood the
 // log; a view of anything else, or the same surface asked something else,
 // is always an entry of its own. A check outside any call (a push of a
 // live query, a timer) is the call it was started in, which the call
 // context carries on, so each subscription keeps a key of its own.
 //
-// Two methods of the onboarding take a person's ID that would tell the
-// company who was interviewed (`kindsOnly`): their entries name the kinds
-// of their arguments alone, never an ID, written before anything of the
-// look, as every entry is.
+// The onboarding's methods take the roster's people by ID, which would
+// tell the company who was interviewed (`kindsOnly`): its entries name the
+// kinds of their arguments alone, never an ID, written before anything of
+// the look, as every entry is.
 
 /** How long one connection's same view is one entry. */
 export const repeatWindowMs = 5 * 60_000;
@@ -54,13 +55,30 @@ const platformId =
   /^(?:[a-z]{2,8}_)?[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/u;
 
 /**
- * The surfaces whose IDs would name an interviewee (see the header): their
- * entries name kinds alone.
+ * Whether `surface`'s IDs could name an interviewee (see the header): the
+ * onboarding's methods take the roster's people by ID (a look, a new
+ * start, a reminder, a deletion), so none of the onboarding's entries name
+ * an ID, only kinds.
  */
-const kindsOnly: ReadonlySet<string> = new Set([
-  "onboardingStaff.interview",
-  "onboardingStaff.link",
-]);
+const kindsOnly = (surface: string): boolean =>
+  surface.startsWith("onboarding");
+
+/** The most views one connection remembers, for telling repeats apart. */
+const rememberedMax = 1000;
+
+/** Each target's own key: two Apps' frames are never one view. */
+const targetKeys = new WeakMap<object, string>();
+
+/** `target`'s own key, made the first time it is asked. */
+const targetKeyOf = (target: object): string => {
+  const known = targetKeys.get(target);
+  if (known !== undefined) {
+    return known;
+  }
+  const made = crypto.randomUUID();
+  targetKeys.set(target, made);
+  return made;
+};
 
 /**
  * A target's name as a surface's: `KnowledgeRpc` is `knowledge`. Read from
@@ -181,7 +199,45 @@ const argsHash = async (args: readonly unknown[]): Promise<string> => {
  * same view on this connection. A person who isn't staff writes none.
  */
 export const staffAudited = (env: Env, check: SessionCheck): SessionCheck => {
+  /** When each view was last written, oldest first. */
   const written = new Map<string, number>();
+  /** The writes under way, by view: a repeat meanwhile waits for its own. */
+  const writing = new Map<string, Promise<void>>();
+  /** Forgets views past the window, and the oldest past `rememberedMax`. */
+  const prune = (now: number): void => {
+    for (const [key, at] of written) {
+      if (now - at < repeatWindowMs && written.size <= rememberedMax) {
+        break;
+      }
+      written.delete(key);
+    }
+  };
+  /** Writes `view` once for `key`, however many ask at once. */
+  const writeOnce = async (
+    key: string,
+    write: () => Promise<void>
+  ): Promise<void> => {
+    const under = writing.get(key);
+    if (under !== undefined) {
+      await under;
+      return;
+    }
+    const now = Date.now();
+    const last = written.get(key);
+    if (last !== undefined && now - last < repeatWindowMs) {
+      return;
+    }
+    const pending = write();
+    writing.set(key, pending);
+    try {
+      await pending;
+      written.delete(key);
+      written.set(key, now);
+      prune(now);
+    } finally {
+      writing.delete(key);
+    }
+  };
   return Object.assign(
     async (): Promise<Identity> => {
       const person = await check();
@@ -194,19 +250,18 @@ export const staffAudited = (env: Env, check: SessionCheck): SessionCheck => {
           ? "session"
           : `${namespaceOf(call.target)}.${call.method}`;
       const args = call?.args ?? [];
-      const key = `${surface}\u0000${await argsHash(args)}`;
-      const now = Date.now();
-      const last = written.get(key);
-      if (last === undefined || now - last >= repeatWindowMs) {
+      // The target too: the same method of two Apps' frames is two views.
+      const target = call === undefined ? "" : targetKeyOf(call.target);
+      const key = `${surface}\u0000${target}\u0000${await argsHash(args)}`;
+      await writeOnce(key, async () => {
         const named = namedBy(args, call?.params ?? []);
         await recordStaffView(env, person, {
           surface,
           args: args.length,
           kinds: named.kinds,
-          ids: kindsOnly.has(surface) ? [] : named.ids,
+          ids: kindsOnly(surface) ? [] : named.ids,
         });
-        written.set(key, now);
-      }
+      });
       return person;
     },
     {

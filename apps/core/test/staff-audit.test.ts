@@ -396,6 +396,94 @@ describe("Grasp staff's views, audited", () => {
     });
   });
 
+  it("never name a roster person's ID on any of the onboarding's methods, only kinds", async () => {
+    const { api } = await staffOn();
+    await api.whoami();
+    const person = crypto.randomUUID();
+
+    const events = await auditedDuring(
+      async () => {
+        await outcome(api.onboardingStaff.newStart(person));
+        await outcome(api.onboardingStaff.sendMailAgain(person));
+        await outcome(api.onboardingStaff.remind([person]));
+        await outcome(api.onboardingStaff.deleteInterview(person));
+        await outcome(api.onboardingStaff.interview(person));
+      },
+      { staffAccesses: true }
+    );
+    const views = staffViews(events);
+
+    expect({
+      surfaces: views.map(({ detail }) => detail.surface),
+      named: JSON.stringify(views).includes(person),
+    }).toStrictEqual({
+      surfaces: [
+        "onboardingStaff.newStart",
+        "onboardingStaff.sendMailAgain",
+        "onboardingStaff.remind",
+        "onboardingStaff.deleteInterview",
+        "onboardingStaff.interview",
+      ],
+      named: false,
+    });
+  });
+
+  it("write the same view asked at once only once, and the same method of two targets apart", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { noteId } = await collectionWithNote(admin.api, {
+      name: "Parallel",
+      access: "everyone",
+    });
+    const { api } = await staffOn();
+    await api.whoami();
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const staff = await whoami(session);
+    const check = staffAudited(env, async () => await Promise.resolve(staff));
+    const frames = [crypto.randomUUID(), crypto.randomUUID()].map(
+      (app) =>
+        new ScreenFrameRpc({
+          env,
+          check,
+          userId: staff.userId,
+          app: appIdSchema.parse(app),
+          build: undefined,
+          stillOpen: () => async () => await Promise.resolve(false),
+          // SAFETY: never reached: the Apps don't exist, so no call goes
+          // past its check to follow a query or read a standing.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          queries: {} as never,
+          runSubscriptions: new Set(),
+          // SAFETY: never reached either, as for `queries`.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          standingNow: async () => await Promise.resolve({} as never),
+        })
+    );
+
+    const events = await auditedDuring(
+      async () => {
+        await Promise.all(
+          Array.from(
+            { length: 5 },
+            async () => await api.knowledge.getDocument(noteId)
+          )
+        );
+        for (const frame of frames) {
+          // oxlint-disable-next-line no-await-in-loop -- one frame, then the other
+          await outcome(frame.delivery());
+        }
+      },
+      { staffAccesses: true }
+    );
+
+    expect(
+      staffViews(events).map(({ detail }) => detail.surface)
+    ).toStrictEqual([
+      "knowledge.getDocument",
+      "screenFrame.delivery",
+      "screenFrame.delivery",
+    ]);
+  });
+
   it("write no staff entry for an admin who isn't staff", async () => {
     const admin = await signedInApi(idp, "admin");
     const { noteId } = await collectionWithNote(admin.api, {
