@@ -65,6 +65,16 @@ import { recordEvents } from "./audit.ts";
 // (`TELEGRAM_BOT_TOKEN`); files, webhooks, chat members and updates are
 // refused, and the real token never goes back to core.
 //
+// Gmail: Stephen's own mailbox, which people email (`GMAIL_MAILBOX`), and
+// nobody else's. Only Gmail's API (`https://gmail.googleapis.com`), under
+// that mailbox alone, and of it only what the adapter needs: reading the
+// mailbox's profile, labels, history, messages and threads, sending a
+// reply, and keeping its Pub/Sub watch (`gmailCalls`). Each must carry
+// the placeholder as its bearer token; connect swaps in an access token it
+// takes from Google with the mailbox's refresh token, cached as the
+// bots' are. Neither ever goes back to core, and core can't reach Google's
+// token endpoint: it isn't on the list.
+//
 // The token is cached in this isolate until shortly before it expires,
 // keyed by the bot's app, tenant and a hash of its secret, so rotating the
 // secret takes a new token at once. Only the token is cached, never a
@@ -192,6 +202,36 @@ const telegramMethods: ReadonlyMap<string, { write: boolean }> = new Map([
   ["getMe", { write: false }],
 ]);
 
+/** Gmail's API, where the adapter reads and sends Stephen's own mail. */
+const gmailHost = "gmail.googleapis.com";
+
+/** Where Google issues the mailbox's access token: reached by connect alone. */
+const googleTokenUrl = "https://oauth2.googleapis.com/token";
+
+/**
+ * The Gmail calls an adapter may make, under `/gmail/v1/users/<mailbox>/`,
+ * by method, each with whether it changes something: reads take a query,
+ * writes don't.
+ */
+const gmailCalls: readonly {
+  method: "GET" | "POST";
+  path: RegExp;
+  write: boolean;
+}[] = [
+  {
+    method: "GET",
+    path: /^(?:profile|labels|history|messages)$/u,
+    write: false,
+  },
+  {
+    method: "GET",
+    path: /^(?:messages|threads)\/(?!send$)[\w-]{1,128}$/u,
+    write: false,
+  },
+  { method: "POST", path: /^messages\/send$/u, write: true },
+  { method: "POST", path: /^(?:watch|stop)$/u, write: true },
+];
+
 /** Methods that change something at the platform, recorded. */
 const writeMethods: ReadonlySet<string> = new Set(["POST", "PUT", "DELETE"]);
 
@@ -290,6 +330,7 @@ const statedOf = (
       url.hostname === slackHost ||
       url.hostname === whatsAppHost ||
       url.hostname === telegramHost ||
+      url.hostname === gmailHost ||
       botConnectorHosts.has(url.hostname))
       ? url.hostname
       : "other",
@@ -973,6 +1014,218 @@ const slackFetch = async (
   return await passedBack(response);
 };
 
+/** Stephen's mailbox and the OAuth client connect reads it with, if set up. */
+interface GmailAccount {
+  mailbox: string;
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+}
+
+const gmailAccountOf = (env: Env): GmailAccount | undefined => {
+  const {
+    GMAIL_MAILBOX: mailbox,
+    GMAIL_CLIENT_ID: clientId,
+    GMAIL_CLIENT_SECRET: clientSecret,
+    GMAIL_REFRESH_TOKEN: refreshToken,
+  } = env;
+  if (
+    mailbox === undefined ||
+    mailbox === "" ||
+    clientId === undefined ||
+    clientId === "" ||
+    clientSecret === undefined ||
+    clientSecret === "" ||
+    refreshToken === undefined ||
+    refreshToken === ""
+  ) {
+    return undefined;
+  }
+  return { mailbox, clientId, clientSecret, refreshToken };
+};
+
+/** The cache key of the mailbox's token: its client and refresh token's hash. */
+const gmailTokenKey = async (account: GmailAccount): Promise<string> =>
+  `gmail\n${account.clientId}\n${await sha256Hex(account.refreshToken)}`;
+
+/** The mailbox's access token: cached, or taken from Google with its refresh token. */
+const gmailToken = async (
+  account: GmailAccount
+): Promise<string | undefined> => {
+  const key = await gmailTokenKey(account);
+  const cached = tokens.get(key);
+  if (cached !== undefined && cached.expiresAt - tokenMarginMs > Date.now()) {
+    return cached.value;
+  }
+  tokens.delete(key);
+  let response: Response;
+  try {
+    response = await fetch(googleTokenUrl, {
+      method: "POST",
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: account.clientId,
+        client_secret: account.clientSecret,
+        refresh_token: account.refreshToken,
+      }),
+      redirect: "manual",
+      signal: AbortSignal.timeout(requestTimeoutMs),
+    });
+  } catch {
+    log.warn("channel.token_failed", { platform: "gmail" });
+    return undefined;
+  }
+  const answer = tokenAnswerSchema.safeParse(
+    response.ok ? await response.json().catch(() => null) : null
+  );
+  if (!answer.success) {
+    if (!response.bodyUsed) {
+      await response.body?.cancel().catch((error: unknown) => {
+        log.warn("channel.cancel_failed", errorFields(error));
+      });
+    }
+    log.warn("channel.token_failed", {
+      platform: "gmail",
+      status: response.status,
+    });
+    return undefined;
+  }
+  const token = {
+    value: answer.data.access_token,
+    expiresAt: Date.now() + answer.data.expires_in * 1000,
+  };
+  tokens.set(key, token);
+  return token.value;
+};
+
+/**
+ * Why a Gmail request is refused, or the account it is for, whether it
+ * changes something, and its body: only Gmail's API over HTTPS, under
+ * Stephen's own mailbox, one of the calls an adapter may make
+ * (`gmailCalls`), with the placeholder as its token, within the size
+ * limit, and only while the mailbox is set up.
+ */
+const checkedGmailRequest = async (
+  env: Env,
+  request: Request,
+  url: URL
+): Promise<
+  | { refused: RefusedReason }
+  | { account: GmailAccount; write: boolean; body: Uint8Array | undefined }
+> => {
+  if (
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.port !== "" ||
+    url.hostname !== gmailHost
+  ) {
+    return { refused: "host" };
+  }
+  const account = gmailAccountOf(env);
+  if (account === undefined) {
+    return { refused: "unconfigured" };
+  }
+  const prefix = `/gmail/v1/users/${encodeURIComponent(account.mailbox)}/`;
+  if (!url.pathname.startsWith(prefix)) {
+    return { refused: "path" };
+  }
+  const call = gmailCalls.find(
+    ({ method, path }) =>
+      method === request.method && path.test(url.pathname.slice(prefix.length))
+  );
+  if (call === undefined) {
+    return gmailCalls.some(({ path }) =>
+      path.test(url.pathname.slice(prefix.length))
+    )
+      ? { refused: "method" }
+      : { refused: "path" };
+  }
+  if (call.write && url.search !== "") {
+    return { refused: "path" };
+  }
+  if (
+    request.headers.get("authorization") !==
+    `Bearer ${channelCredentialPlaceholder}`
+  ) {
+    return { refused: "credential" };
+  }
+  if (request.method === "GET") {
+    return { account, write: false, body: undefined };
+  }
+  const body = await readCapped(request.body, maxChannelRequestBytes);
+  return body === undefined
+    ? { refused: "too_large" }
+    : { account, write: call.write, body };
+};
+
+/**
+ * A Gmail request: one of the calls an adapter may make on Stephen's own
+ * mailbox, sent on with its access token, or refused (`checkedGmailRequest`).
+ */
+const gmailFetch = async (
+  env: Env,
+  request: Request,
+  url: URL
+): Promise<Response> => {
+  const platform = "gmail";
+  const stated = statedOf(request.method, url);
+  const checked = await checkedGmailRequest(env, request, url);
+  if ("refused" in checked) {
+    return await refuse(env, platform, checked.refused, stated);
+  }
+  const { account, write, body } = checked;
+  const token = await gmailToken(account);
+  if (token === undefined) {
+    if (write) {
+      await record(env, { platform, outcome: "failed", ...stated });
+    }
+    return failed();
+  }
+  const headers = new Headers({ authorization: `Bearer ${token}` });
+  for (const name of forwardedHeaders) {
+    const value = request.headers.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: request.method,
+      headers,
+      ...(body === undefined ? {} : { body }),
+      redirect: "manual",
+      signal: AbortSignal.timeout(requestTimeoutMs),
+    });
+  } catch {
+    log.warn("channel.failed", { platform, ...stated });
+    if (write) {
+      await record(env, { platform, outcome: "failed", ...stated });
+    }
+    return failed();
+  }
+  const { status } = response;
+  log.info("channel.request", { platform, ...stated, status });
+  if (status === 401) {
+    // A token Google no longer takes: the next request takes a new one.
+    tokens.delete(await gmailTokenKey(account));
+  }
+  if (write) {
+    await record(env, {
+      platform,
+      outcome: response.ok ? "ok" : "failed",
+      ...stated,
+      status,
+    });
+  }
+  if (status >= 300 && status < 400 && status !== 304) {
+    await response.body?.cancel();
+    return failed();
+  }
+  return await passedBack(response);
+};
+
 /**
  * Why a WhatsApp request is refused, or the client's token and its body:
  * only the Cloud API's messages endpoint of the client's own number, over
@@ -1241,6 +1494,9 @@ export const channelFetch = async (
     }
     case "telegram": {
       return await telegramFetch(env, request, url);
+    }
+    case "gmail": {
+      return await gmailFetch(env, request, url);
     }
     case "teams": {
       return await teamsFetch(env, request, url);
