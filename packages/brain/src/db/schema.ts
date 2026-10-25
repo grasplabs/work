@@ -508,23 +508,25 @@ export const brainEpisodeMembers = sqliteTable(
 );
 
 /**
- * The people a personal purge forgot, and when: a capture of their work
- * from before then, delivered again after a lost reply or a restart, is
- * never recorded again, and never makes them a member again
- * (../outcomes.ts). Their user ID alone, kept for as long as a capture
- * from before could still arrive: the erasure's own record.
- */
-/**
  * The host's execution records whose events were erased with them (a
- * run's details past retention, a deleted chat): a capture resting on one,
- * delivered after a lost reply, is never recorded (../outcomes.ts). Their
- * IDs alone, kept as the erasure's own record.
+ * run's details past retention, a deleted chat), and single events taken
+ * back on their own, keyed `episode:<event ID>`: a capture resting on one,
+ * or that event delivered again, after a lost reply or still on its way,
+ * is never recorded (../outcomes.ts). Their IDs alone, kept as the
+ * erasure's own record.
  */
 export const brainErasedEvidence = sqliteTable("brain_erased_evidence", {
   evidenceId: text("evidence_id").primaryKey(),
   erasedAt: timestamp("erased_at").notNull(),
 });
 
+/**
+ * The people a personal purge forgot, and when: a capture of their work
+ * from before then, delivered again after a lost reply or a restart, is
+ * never recorded again, and never makes them a member again
+ * (../outcomes.ts). Their user ID alone, kept for as long as a capture
+ * from before could still arrive: the erasure's own record.
+ */
 export const brainForgottenPeople = sqliteTable("brain_forgotten_people", {
   userId: text("user_id").primaryKey(),
   forgottenAt: timestamp("forgotten_at").notNull(),
