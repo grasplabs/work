@@ -2879,6 +2879,8 @@ const lowerOneStep = (
   } else {
     lowerCall(emitter, item, stages, place, sealed);
   }
+};
+
 /**
  * The statements of a `fork` task: one call of the SDK's fork, with each
  * branch a function of its own flow and data (its scope,
