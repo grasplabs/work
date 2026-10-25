@@ -10,6 +10,7 @@ import { audiencesOf, noteProvenance, readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { authorize } from "./app-entries.ts";
 import { extractEntities } from "./entities.ts";
+import { wordLesson } from "./lesson-wording.ts";
 import {
   keepRecalledMemories,
   readableByEveryoneOf,
@@ -53,6 +54,7 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
   mayRetire: async (reader, record) => {
     await mayRetire(reader, record);
   },
+  wordLesson: async (facts) => await wordLesson(env, facts),
   memories: {
     audienceOf: async (reader) => await recallMemoryAudience(env, reader),
     readableBy: async (_reader, people) =>

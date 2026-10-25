@@ -673,6 +673,15 @@ export const brainLessonVersions = sqliteTable(
     content: text().notNull(),
     patchKey: text("patch_key").notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * A model's wording of it for a person (../lessons.ts): beside its text
+     * of record, never instead of it; shown under the same rule.
+     */
+    wording: text(),
+    /** Whether its wording was written, or refused (budget) or failed. */
+    wordingState: text("wording_state", {
+      enum: ["written", "refused", "failed"],
+    }),
   },
   (table) => [
     primaryKey({ columns: [table.lessonId, table.revision] }),

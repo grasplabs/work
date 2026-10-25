@@ -3,7 +3,7 @@ import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { auditedBatch, outboxedWhere } from "./audit.ts";
-import type { Brain } from "./brain.ts";
+import type { Brain, LessonFacts } from "./brain.ts";
 import { brainErrors } from "./contract.ts";
 import { inList } from "./db/d1.ts";
 import {
@@ -456,7 +456,7 @@ const applyPatch = async <C>(
     db
       .insert(brainLessonVersions)
       .select(
-        sql`SELECT ${patch.lessonId}, ${revision}, ${patch.base === 0 ? null : patch.base}, ${content}, ${patchKey}, ${now.getTime()} WHERE ${atBase}`
+        sql`SELECT ${patch.lessonId}, ${revision}, ${patch.base === 0 ? null : patch.base}, ${content}, ${patchKey}, ${now.getTime()}, NULL, NULL WHERE ${atBase}`
       )
       .onConflictDoNothing(),
     db
@@ -733,6 +733,123 @@ export const consolidate = async <C>(
   return { read: fresh.length, patched };
 };
 
+/** Lessons one job asks a model to word, at most. */
+export const wordingsPerJob = 5;
+
+/** The longest wording kept, in characters. */
+export const wordingMaxLength = 500;
+
+/** Control characters, which a wording never keeps. */
+// oxlint-disable-next-line no-control-regex -- control characters on purpose
+const controlCharacters = /[\u0000-\u001F\u007F]+/gu;
+
+/** A model's answer as a lesson keeps it: one line of text, capped. */
+const wordingOf = (answer: string): string =>
+  answer.replaceAll(controlCharacters, " ").trim().slice(0, wordingMaxLength);
+
+/**
+ * Asks the host to word `scope`'s open lessons whose current revision has
+ * no wording yet, at most {@link wordingsPerJob}: each from what the lesson
+ * holds alone, never a task's content or anyone's identity. The wording is
+ * kept beside the lesson's text, never instead of it; a revision is worded
+ * once (a job made again finds it worded and asks nothing), and a refusal
+ * or failure is kept too, leaving the text as it is. Returns how many it
+ * worded.
+ */
+export const wordLessons = async <C>(
+  brain: Brain<C>,
+  scope: ConsolidationScope
+): Promise<number> => {
+  const { db } = brain;
+  const unworded = await db
+    .select({
+      lessonId: brainLessons.id,
+      revision: brainLessons.revision,
+      applicability: brainLessons.applicability,
+      instruction: brainLessons.instruction,
+      evidenceStatus: brainLessons.evidenceStatus,
+    })
+    .from(brainLessons)
+    .innerJoin(
+      brainLessonVersions,
+      and(
+        eq(brainLessonVersions.lessonId, brainLessons.id),
+        eq(brainLessonVersions.revision, brainLessons.revision)
+      )
+    )
+    .where(
+      and(
+        eq(brainLessons.scope, scope.scope),
+        eq(brainLessons.scopeId, scope.scopeId),
+        eq(brainLessons.state, "candidate"),
+        sql`${brainLessonVersions.wordingState} IS NULL`
+      )
+    )
+    .orderBy(asc(brainLessons.updatedAt), asc(brainLessons.id))
+    .limit(wordingsPerJob);
+  let worded = 0;
+  for (const lesson of unworded) {
+    // oxlint-disable-next-line no-await-in-loop -- one bounded call at a time
+    const counts = await db
+      .select({ role: brainLessonEvidence.role, count: count() })
+      .from(brainLessonEvidence)
+      .where(
+        and(
+          eq(brainLessonEvidence.lessonId, lesson.lessonId),
+          eq(brainLessonEvidence.revision, lesson.revision)
+        )
+      )
+      .groupBy(brainLessonEvidence.role);
+    const { taskType, versions } = z
+      .object({ taskType: z.string(), versions: z.array(z.string()) })
+      .parse(JSON.parse(lesson.applicability));
+    const facts: LessonFacts = {
+      taskType,
+      versions,
+      failures: counts.find(({ role }) => role === "supporting")?.count ?? 0,
+      completions:
+        counts.find(({ role }) => role === "contradicting")?.count ?? 0,
+      evidenceStatus: lesson.evidenceStatus,
+      instruction: lesson.instruction,
+    };
+    let written: {
+      wording: string | null;
+      state: "written" | "refused" | "failed";
+    };
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const wording = wordingOf(await brain.ports.wordLesson(facts));
+      written =
+        wording === ""
+          ? { wording: null, state: "failed" }
+          : { wording, state: "written" };
+    } catch (error) {
+      written = {
+        wording: null,
+        state:
+          brainErrors.codeOf(error) === "brain.budget_exceeded"
+            ? "refused"
+            : "failed",
+      };
+    }
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await db
+      .update(brainLessonVersions)
+      .set({ wording: written.wording, wordingState: written.state })
+      .where(
+        and(
+          eq(brainLessonVersions.lessonId, lesson.lessonId),
+          eq(brainLessonVersions.revision, lesson.revision),
+          sql`${brainLessonVersions.wordingState} IS NULL`
+        )
+      );
+    if (written.state === "written") {
+      worded += 1;
+    }
+  }
+  return worded;
+};
+
 /** A lesson as its host inspects it: every version, with its evidence. */
 export interface Lesson {
   id: string;
@@ -1007,5 +1124,10 @@ export const runConsolidation = async <C>(
   await step.do("consolidate", consolidationConfig, async () => {
     const result = await consolidate(brain, scope);
     return { ...result };
+  });
+  // Its own step: a wording that fails or is refused never undoes a patch.
+  await step.do("word", consolidationConfig, async () => {
+    const worded = await wordLessons(brain, scope);
+    return { worded };
   });
 };

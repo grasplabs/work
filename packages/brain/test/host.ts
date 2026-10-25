@@ -6,11 +6,14 @@ import type {
   Brain,
   BrainPorts,
   IndexJob,
+  LessonFacts,
   LinkJob,
   SkillAuthority,
 } from "../src/brain.ts";
 import { ensureCollection } from "../src/collections.ts";
 import type { CollectionRow } from "../src/collections.ts";
+import { brainErrors } from "../src/contract.ts";
+import type { BrainErrorCode } from "../src/contract.ts";
 import type { Writer } from "../src/documents.ts";
 import type { BrainEvent } from "../src/events.ts";
 import { collectionIdSchema } from "../src/ids.ts";
@@ -47,16 +50,24 @@ export const testHost = (
   extract: (text: string) => Promise<unknown> = async () => {
     await Promise.resolve();
     throw new Error("No model in this test");
-  }
+  },
+  /**
+   * How the host words lessons: what it answers, or the refusal it
+   * throws instead.
+   */
+  wording: { answer?: string; refuse?: BrainErrorCode } = {}
 ): {
   brain: Brain<Caller>;
   reads: { caller: string; record: ReadRecord }[];
   events: BrainEvent[];
   started: StartedJob[];
+  /** What each lesson wording was asked from, in order. */
+  worded: LessonFacts[];
 } => {
   const reads: { caller: string; record: ReadRecord }[] = [];
   const events: BrainEvent[] = [];
   const started: StartedJob[] = [];
+  const worded: LessonFacts[] = [];
   const ports: BrainPorts<Caller> = {
     authorize: async (caller) =>
       await Promise.resolve({
@@ -112,6 +123,15 @@ export const testHost = (
     },
     mayRetire: async () => {
       await Promise.resolve();
+    },
+    wordLesson: async (facts) => {
+      worded.push(facts);
+      if (wording.refuse !== undefined) {
+        throw brainErrors.create(wording.refuse);
+      }
+      return await Promise.resolve(
+        wording.answer ?? `In short: ${facts.instruction}`
+      );
     },
     memories: {
       // A caller's own records, read by them alone.
@@ -174,7 +194,13 @@ export const testHost = (
     },
     clock: () => new Date(),
   };
-  return { brain: createBrain(env.BRAIN, ports), reads, events, started };
+  return {
+    brain: createBrain(env.BRAIN, ports),
+    reads,
+    events,
+    started,
+    worded,
+  };
 };
 
 /** A person writing as themselves. */

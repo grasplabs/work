@@ -15445,6 +15445,11 @@ msgstr "Writes a model may steer: {target}"
 msgid "Writing"
 msgstr "Writing"
 
+#. placeholder {0}: version.wording
+#: src/brain/lessons-view.tsx
+msgid "Written by a model: {0}"
+msgstr "Written by a model: {0}"
+
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Written down"
 msgstr "Written down"

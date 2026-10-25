@@ -43,7 +43,7 @@ export const retiringOrphans = (
     db
       .insert(brainLessonVersions)
       .select(
-        sql`SELECT ${brainLessons.id}, ${brainLessons.revision} + 1, ${brainLessons.revision}, ${brainLessonVersions.content}, 'erased:' || ${brainLessons.id} || '@' || (${brainLessons.revision} + 1), ${now.getTime()} FROM ${brainLessons} JOIN ${brainLessonVersions} ON ${brainLessonVersions.lessonId} = ${brainLessons.id} AND ${brainLessonVersions.revision} = ${brainLessons.revision} WHERE ${orphaned}`
+        sql`SELECT ${brainLessons.id}, ${brainLessons.revision} + 1, ${brainLessons.revision}, ${brainLessonVersions.content}, 'erased:' || ${brainLessons.id} || '@' || (${brainLessons.revision} + 1), ${now.getTime()}, ${brainLessonVersions.wording}, ${brainLessonVersions.wordingState} FROM ${brainLessons} JOIN ${brainLessonVersions} ON ${brainLessonVersions.lessonId} = ${brainLessons.id} AND ${brainLessonVersions.revision} = ${brainLessons.revision} WHERE ${orphaned}`
       )
       .onConflictDoNothing(),
     // The links it keeps: its evidence that this erasure leaves, carried
