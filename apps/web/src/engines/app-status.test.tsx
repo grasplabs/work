@@ -101,8 +101,7 @@ const opened = async (
   });
   // The bar as a page has it: the domain as its loader read it last.
   const DomainBar = () => {
-    // Of any router: this test's own tree, not the app's registered one,
-    // whose types are too deep to instantiate here.
+    // This test's own router, never the app's registered route tree.
     const loaded: unknown = useRouterState<AnyRouter>({
       select: ({ matches }) => matches.at(0)?.loaderData,
     });
