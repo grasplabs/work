@@ -1,6 +1,8 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import type { ZipAttributes } from "fflate";
 
+import { decoded } from "./text.ts";
+
 // The smallest Word document (.docx, Office Open XML) Word opens: the text
 // as plain paragraphs, and, when the call carries one, its effect key as a
 // custom document property, `GraspEffect`. Word keeps custom properties
@@ -102,4 +104,72 @@ export const effectKeyOf = (bytes: Uint8Array): string | undefined => {
   return custom === undefined
     ? undefined
     : effectProperty.exec(strFromU8(custom))?.[1];
+};
+
+/** The largest main document part read back as text. */
+const maxDocumentBytes = 16 * 1024 * 1024;
+
+/** A paragraph, a run's text, a tab or a line break, in document order. */
+const documentParts =
+  /<w:p(?:\s[^>]*)?\/?>|<\/w:p>|<w:t(?:\s[^>]*)?>(?<text>[^<]*)<\/w:t>|<w:tab\/>|<w:(?:br|cr)(?:\s[^>]*)?\/>/gu;
+
+/** XML's five named entities. */
+const xmlEntities: Readonly<Record<string, string>> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
+
+/**
+ * A Word document's text: one line per paragraph, its tabs and line breaks
+ * kept, everything else (tables' cells, footnotes' marks, fields) as the
+ * runs of text they hold. Undefined for anything that isn't a .docx.
+ */
+export const textOf = (bytes: Uint8Array): string | undefined => {
+  let main: Uint8Array | undefined;
+  try {
+    main = unzipSync(bytes, {
+      filter: ({ name, originalSize }) =>
+        name === "word/document.xml" && originalSize <= maxDocumentBytes,
+    })["word/document.xml"];
+  } catch {
+    return undefined;
+  }
+  if (main === undefined) {
+    return undefined;
+  }
+  const xml = strFromU8(main);
+  const body = xml.slice(Math.max(xml.indexOf("<w:body"), 0));
+  const lines: string[] = [];
+  let line: string | undefined;
+  for (const { 0: part, groups } of body.matchAll(documentParts)) {
+    const text = groups?.text;
+    if (part === "</w:p>") {
+      lines.push(line ?? "");
+      line = undefined;
+    } else if (part.startsWith("<w:p")) {
+      // A paragraph inside another's open one (a text box's) starts a
+      // line of its own.
+      if (line !== undefined && line !== "") {
+        lines.push(line);
+      }
+      const empty = part.endsWith("/>");
+      if (empty) {
+        lines.push("");
+      }
+      line = empty ? undefined : "";
+    } else if (part === "<w:tab/>") {
+      line = `${line ?? ""}\t`;
+    } else if (text === undefined) {
+      line = `${line ?? ""}\n`;
+    } else {
+      line = `${line ?? ""}${decoded(text, xmlEntities)}`;
+    }
+  }
+  if (line !== undefined && line !== "") {
+    lines.push(line);
+  }
+  return lines.join("\n");
 };

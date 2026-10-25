@@ -4,7 +4,6 @@ import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import type { Thread } from "chat";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -26,6 +25,7 @@ import {
 } from "../workflow-resources.ts";
 import { acceptedInput, pinned, startWorkflow } from "../workflow-starts.ts";
 import { startOfferCard } from "./cards.tsx";
+import type { Conversation } from "./connect-own.ts";
 import type { ChannelLocale, LineName } from "./words.ts";
 
 // Workflows people start by asking Stephen in a chat app. A workflow's
@@ -232,7 +232,7 @@ export const offerStart = async (
  */
 export const postOffers = async (
   env: Env,
-  thread: Pick<Thread, "post">,
+  thread: Pick<Conversation, "post">,
   { chatId, userId }: { chatId: string; userId: string },
   locale: ChannelLocale
 ): Promise<void> => {

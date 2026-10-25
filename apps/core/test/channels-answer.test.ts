@@ -50,9 +50,13 @@ const chatsOf = async (userId: string) =>
 /** The answers posted in `conversation`: each message's whole activity, as JSON. */
 const answersIn = async (conversation: string): Promise<string[]> => {
   const { activities } = await reached(conversation);
-  return activities
-    .filter(({ type }) => type === "message")
-    .map((activity) => JSON.stringify(activity));
+  return (
+    activities
+      .filter(({ type }) => type === "message")
+      .map((activity) => JSON.stringify(activity))
+      // Not the card offering their own Microsoft 365 (connect-own.ts).
+      .filter((activity) => !activity.includes("/connect-microsoft"))
+  );
 };
 
 describe("a member's question", setUpTime, () => {

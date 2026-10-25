@@ -14,6 +14,8 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
   rollout_running:
     "Another rollout is running or waiting for approval: finish or cancel it first.",
   not_waiting: "It isn't waiting for approval or a retry.",
+  ring_checks_missing:
+    "Before the next ring: run Stephen's eval on this release, and send the five demo messages in real Teams on this ring. Tick both once they passed.",
   not_running: "Its run isn't going, so there's nothing to pause.",
   not_paused: "It isn't paused.",
   unknown_client: "There's no such client.",

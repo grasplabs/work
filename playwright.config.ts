@@ -228,8 +228,8 @@ export default defineConfig({
       },
       port: corePort,
       reuseExistingServer: false,
-      // It builds the frontend and bundles core before it answers: close
-      // to two minutes on CI's runners, so 120 s left some runs refused
+      // Building the frontend and starting wrangler takes about 120 s on a
+      // CI runner, so a runner a few seconds slower missed a 120 s limit
       // before any test ran.
       timeout: 240_000,
     },

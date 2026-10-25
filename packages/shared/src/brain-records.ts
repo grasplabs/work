@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
 
-// The Playbook's records as core keeps them (core's brain-records.ts), and
+// The brain's records as core keeps them (core's brain-records.ts), and
 // what `brain.addRecords` takes: where a fact came from (`source`), the
 // tools a team uses (`tool`), processes that might be worth fixing
 // (`candidate`), what was said about them (`statement`), the teams it

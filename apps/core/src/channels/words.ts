@@ -87,6 +87,41 @@ const lines = {
     es: "Iniciar sesión",
   },
 
+  // A member's own Microsoft 365 (connect-own.ts): one card to connect it,
+  // and a line once they have.
+
+  /** A member without their own Microsoft 365 connected, above the button. */
+  connectOwn: {
+    en: "I can also read and prepare things in your own Outlook, calendar and files. Connect your Microsoft 365 once, and I'll carry on with what you asked.",
+    nl: "Ik kan ook dingen lezen en voorbereiden in je eigen Outlook, agenda en bestanden. Koppel je Microsoft 365 één keer, dan ga ik verder met wat je vroeg.",
+    de: "Ich kann auch in Ihrem eigenen Outlook, Kalender und Ihren Dateien lesen und Dinge vorbereiten. Verbinden Sie Ihr Microsoft 365 einmal, dann mache ich mit Ihrer Frage weiter.",
+    fr: "Je peux aussi lire et préparer des choses dans votre propre Outlook, votre agenda et vos fichiers. Connectez votre Microsoft 365 une fois, et je reprendrai votre demande.",
+    es: "También puedo leer y preparar cosas en tu propio Outlook, tu calendario y tus archivos. Conecta tu Microsoft 365 una vez y seguiré con lo que me pediste.",
+  },
+  /** A member whose Microsoft 365 needs a new sign-in, above the button. */
+  reconnectOwn: {
+    en: "Your Microsoft 365 needs a new sign-in before I can use your Outlook, calendar and files again. Sign in once, and I'll carry on with what you asked.",
+    nl: "Je Microsoft 365 heeft een nieuwe aanmelding nodig voordat ik je Outlook, agenda en bestanden weer kan gebruiken. Meld je één keer aan, dan ga ik verder met wat je vroeg.",
+    de: "Ihr Microsoft 365 braucht eine neue Anmeldung, bevor ich Ihr Outlook, Ihren Kalender und Ihre Dateien wieder nutzen kann. Melden Sie sich einmal an, dann mache ich mit Ihrer Frage weiter.",
+    fr: "Votre Microsoft 365 demande une nouvelle connexion avant que je puisse de nouveau utiliser votre Outlook, votre agenda et vos fichiers. Connectez-vous une fois, et je reprendrai votre demande.",
+    es: "Tu Microsoft 365 necesita un nuevo inicio de sesión antes de que pueda volver a usar tu Outlook, tu calendario y tus archivos. Inicia sesión una vez y seguiré con lo que me pediste.",
+  },
+  connectOwnButton: {
+    en: "Connect Microsoft 365",
+    nl: "Microsoft 365 koppelen",
+    de: "Microsoft 365 verbinden",
+    fr: "Connecter Microsoft 365",
+    es: "Conectar Microsoft 365",
+  },
+  /** Once they connected it, before he carries on. */
+  connectedOwn: {
+    en: "Your Microsoft 365 is connected. I'll carry on with what you asked.",
+    nl: "Je Microsoft 365 is gekoppeld. Ik ga verder met wat je vroeg.",
+    de: "Ihr Microsoft 365 ist verbunden. Ich mache mit Ihrer Frage weiter.",
+    fr: "Votre Microsoft 365 est connecté. Je reprends votre demande.",
+    es: "Tu Microsoft 365 está conectado. Sigo con lo que me pediste.",
+  },
+
   // A turn that can't be answered.
 
   /** Over the per-person limit on incoming messages. */
