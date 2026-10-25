@@ -20,7 +20,11 @@ import type { AppRecord } from "./bundled-connectors.ts";
 import { hibobAccount, hibobCredential } from "./hibob.ts";
 import { idTokenClaims, lookupAccount } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
-import { classesOnByDefault, microsoftRights } from "./provider-rights.ts";
+import {
+  classesOnByDefault,
+  googleRights,
+  microsoftRights,
+} from "./provider-rights.ts";
 
 // The providers people connect accounts from, as config records: one
 // generic OAuth flow (src/oauth.ts) runs them all, and one API-key sign-in
@@ -333,22 +337,11 @@ const google: OAuthProviderConfig = {
   authorizationEndpoint: () => "https://accounts.google.com/o/oauth2/v2/auth",
   tokenEndpoint: () => "https://oauth2.googleapis.com/token",
   revocationEndpoint: "https://oauth2.googleapis.com/revoke",
-  // What the Google Workspace connector needs: Gmail (read, label, draft,
-  // send), calendar events (putting one in the person's own calendar) and
-  // which calendar is theirs, and Drive, read-only but for the drafts it
-  // makes in the person's own Drive (`drive.file`: only its own files). A
-  // connection granted before the connector wrote events is marked for
-  // reconnecting on its first refused write (tokens.ts `markIfGrantLacks`).
-  scopes: [
-    "openid",
-    "email",
-    "profile",
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-    "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/drive.file",
-  ],
+  // Those of the classes on by default; a consent asks those of the classes
+  // the company turned on (`rightsFor`, GRA-756). A connection granted
+  // before the connector wrote events is marked for reconnecting on its
+  // first refused write (tokens.ts `markIfGrantLacks`).
+  scopes: googleRights(classesOnByDefault),
   scopeSeparator: " ",
   authorizationParams: (tenant) => ({
     access_type: "offline",
