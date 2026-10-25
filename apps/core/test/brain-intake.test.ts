@@ -7,7 +7,7 @@ import type {
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { intakeIds } from "../src/onboarding/brain-intake.ts";
@@ -485,6 +485,14 @@ const drawnTeam = async () => {
 // - No model: a person's fact written as a statement of its own instead.
 // - Staff reading what the company's people said.
 describe("what a team said, put together", { timeout: 120_000 }, () => {
+  // The test gives the brain each team itself, step by step, with a model
+  // faked: the store's own alarm, which has none, would try first.
+  beforeEach(async () => {
+    await runInDurableObject(onboardingStore(env), (instance) => {
+      vi.spyOn(instance, "alarm").mockResolvedValue();
+    });
+  });
+
   it("keeps only claims five or more distinct people made, of facts of their kind, without a name, and shows the model no one", async () => {
     const ids = await drawnTeam();
     const [, ...fourOfThem] = zendeskSaid;
