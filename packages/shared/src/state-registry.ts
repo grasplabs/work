@@ -237,6 +237,10 @@ const coreDb: D1State = {
       "Links a chat sent, good for 15 minutes: the chat sends a new one."
     ),
     channel_conversations: exported(`${core}channels/door.ts`),
+    chat_workflow_offers: transient(
+      `${core}channels/workflow-offers.ts`,
+      "Starts Stephen offered on a card, good for a day, and where to tell their runs' ends: a run that ends after a move is told in Grasp only."
+    ),
     channel_signals: transient(
       `${core}channels/signals.ts`,
       "Hourly counts of how Stephen fared in the chat apps, kept a week for the admin's watch."

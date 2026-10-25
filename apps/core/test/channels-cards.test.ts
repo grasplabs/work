@@ -493,7 +493,11 @@ describe("Stephen's cards in Teams", () => {
 });
 
 /** Values for every line's room, the same in each language. */
-const values = { count: 3, where: "Sales register.xlsx" };
+const values = {
+  count: 3,
+  where: "Sales register.xlsx",
+  workflow: "Weekly report",
+};
 
 /** Block Kit's limits, as Slack documents them for a message's blocks. */
 const slackLimits = {

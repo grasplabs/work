@@ -97,7 +97,12 @@ import { boundedText, jsonOf } from "../request-body.ts";
 import { stephenFor } from "../stephen-reach.ts";
 import { offerChannelLink } from "./accounts.ts";
 import { answerInChat } from "./answer.ts";
-import { cancelAction, confirmAction, signInCard } from "./cards.tsx";
+import {
+  cancelAction,
+  confirmAction,
+  signInCard,
+  startAction,
+} from "./cards.tsx";
 import {
   gmailAdapter,
   gmailSetUp,
@@ -125,6 +130,8 @@ import {
 import { inDirectory, teamsMembers, writerOf } from "./who.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
+import { pressOffer } from "./workflow-offers.ts";
+import type { PressLine } from "./workflow-offers.ts";
 
 /**
  * Every platform's adapter, keyed by the platform's name, checking
@@ -269,6 +276,28 @@ export interface SharedPlace {
   /** Who is in it, as the platform's roster says now. */
   audience: Audience;
 }
+
+/** What Stephen says of a press on Start, in `locale`. */
+const pressSaid = (
+  said: PressLine,
+  locale: ChannelLocale,
+  workflow = ""
+): string => {
+  switch (said) {
+    case "started":
+    case "startRefused": {
+      return say(said, locale, { workflow });
+    }
+    case "startGone":
+    case "notYours":
+    case "alreadyAnswered": {
+      return say(said, locale);
+    }
+    default: {
+      return said satisfies never;
+    }
+  }
+};
 
 /** A member's message, as the door hands it on. */
 export interface ChannelMessage {
@@ -1514,6 +1543,22 @@ export const channelResponse = async (
   // their own private chat (press.ts).
   chat.onAction([confirmAction, cancelAction], async (event) => {
     await pressCard(env, { platform, userId, event, state });
+  });
+  // A press on Start, on a card offering a workflow: the member who
+  // pressed it, as the door verified them, starts it, if it is theirs.
+  chat.onAction(startAction, async (event) => {
+    if (event.thread === null) {
+      return;
+    }
+    const locale = localeOf(activity.locale);
+    const pressed = await pressOffer(env, {
+      offerId: event.value ?? "",
+      userId,
+      platform,
+      threadId: event.threadId,
+      locale,
+    });
+    await event.thread.post(pressSaid(pressed.line, locale, pressed.workflow));
   });
   // A group chat's or channel's: only ever one that @mentioned the bot,
   // which the door let through with who is in it.

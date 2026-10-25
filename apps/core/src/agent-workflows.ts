@@ -9,6 +9,8 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
 import { asPerson } from "./agent-person.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
+import { askableFor, offerStart } from "./channels/workflow-offers.ts";
+import type { AskableWorkflow } from "./channels/workflow-offers.ts";
 import { appHost } from "./durable-objects.ts";
 import { listAllRuns, workflowOverview } from "./workflows/overview.ts";
 import { runStatus } from "./workflows/runs.ts";
@@ -25,6 +27,14 @@ import { runStatus } from "./workflows/runs.ts";
 // Only a chat its person started to fix a failed run gets that run's
 // report, attached with the App's sources and restricted mode
 // (run-fixes.ts).
+//
+// In a chat app's chat, the agent may also offer to start a workflow whose
+// owner lets people ask for it (`askable`, `offer`): it lists those the
+// person could start themselves and puts one, with its values, on a card;
+// only the person's press starts it, as them (channels/workflow-offers.ts).
+// The owner's choice to open it to asking is what lets the agent see it:
+// no permission of the agent's reaches further, and nothing it offers runs
+// without the press.
 
 /**
  * Whether the agent may read the runs of App `app`'s workflows: those of
@@ -151,6 +161,46 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
     });
   }
 
+  /**
+   * The workflows the person could start whose owners let people ask
+   * Stephen for them, with the input each takes.
+   */
+  async askable(): Promise<AskableWorkflow[]> {
+    return await asPerson(this.env, this.ctx.props, {
+      allowed: () => true,
+      method: "workflows.askable",
+      read: async (person) => {
+        const { via } = this.ctx.props;
+        // Offered only on a chat app's card: elsewhere there is none.
+        return via === undefined || via === "web"
+          ? []
+          : await askableFor(this.env, person);
+      },
+      detail: (listed) => ({ workflows: listed.length }),
+    });
+  }
+
+  /**
+   * Offers to start workflow `workflow` with `input`, on a card under the
+   * answer, which the person presses to start it as them.
+   */
+  async offer(
+    workflow: unknown,
+    input: unknown
+  ): Promise<{ offer: string; workflow: string; version: number }> {
+    return await asPerson(this.env, this.ctx.props, {
+      allowed: () => true,
+      action: "write",
+      method: "workflows.offer",
+      read: async (person) =>
+        await offerStart(this.env, this.ctx.props, person, workflow, input),
+      detail: (offered) => ({
+        workflow: offered.workflow,
+        version: offered.version,
+      }),
+    });
+  }
+
   /** One run, as it is now. */
   async status(run: unknown): Promise<AgentRun> {
     return await asPerson(this.env, this.ctx.props, {
@@ -212,6 +262,22 @@ workflows: {
   runs(app: string, workflow: string): Promise<WorkflowRun[]>;
   /** One run, as it is now. */
   status(run: string): Promise<WorkflowRun>;
+  /**
+   * Workflows the person may ask you to start for them: those they could
+   * start themselves whose owners allow asking, each at the version a start
+   * runs, with the JSON Schema its input must match. Only in a chat app
+   * (Microsoft Teams); empty or refused elsewhere.
+   */
+  askable(): Promise<{ id: string; name: string; version: number; input: unknown }[]>;
+  /**
+   * Offers to start one of \`askable()\`'s workflows with \`input\`: a card
+   * under your answer shows the person its values and a Start button. Nothing
+   * starts until they press it; then it runs as them, and they are told here
+   * when it ends. Offer only what they asked for, with values from what they
+   * said; say in your answer that the card is there. At most 10 values,
+   * shown whole. Refused in a chat that read restricted data.
+   */
+  offer(workflow: string, input: unknown): Promise<{ offer: string; workflow: string; version: number }>;
 };`;
 
 /** `env.workflows`. */

@@ -24,6 +24,7 @@ import type { ChannelSignal } from "./signals.ts";
 import { teamsAdapter } from "./teams.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
+import { postOffers } from "./workflow-offers.ts";
 
 // A member's message answered by the organization's agent, in the
 // person's own chat for that platform in their own Workspace (`via`, the
@@ -293,6 +294,10 @@ const answerOne = async (
     await postIn(env, platform, thread, say("failed", locale));
     return;
   }
+  // The starts the turn offered, each on its card, under the answer.
+  const offers = async () => {
+    await postOffers(env, thread, { chatId, userId }, locale);
+  };
   // Timed to the answer the person has, as they wait for it: its stream's
   // last words, or the post of it whole.
   const timed = async () => {
@@ -306,7 +311,10 @@ const answerOne = async (
     if (!streamed) {
       await postIn(env, platform, thread, final);
       await timed();
+      await offers();
+      return;
     }
+    afterward(offers);
     return;
   }
   const sources = answer.cited.map(({ title, collectionId, documentId }) => ({
@@ -350,6 +358,7 @@ const answerOne = async (
     );
     await timed();
     await held();
+    await offers();
     await offer();
     return;
   }
@@ -360,6 +369,7 @@ const answerOne = async (
     );
   }
   afterward(held);
+  afterward(offers);
   afterward(offer);
 };
 

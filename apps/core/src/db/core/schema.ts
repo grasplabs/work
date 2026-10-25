@@ -304,6 +304,51 @@ export const channelConversations = sqliteTable(
     index("channel_conversations_user_id_idx").on(table.userId),
   ]
 );
+/**
+ * A workflow Stephen offered to start, on a card in a person's chat app:
+ * the workflow, the exact version and input the card shows, and, once the
+ * person pressed Start, where they pressed it and the start it made, so
+ * the run's end is told there once (`toldAt`). Good for a day unpressed
+ * (`expiresAt`). Kept by channels/workflow-offers.ts.
+ */
+export const chatWorkflowOffers = sqliteTable(
+  "chat_workflow_offers",
+  {
+    id: text().primaryKey(),
+    /** The person it is offered to, whom the start acts for. */
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The chat whose turn offered it, and its Workspace object. */
+    workspaceId: text("workspace_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    /** Its name when offered, as the card shows it. */
+    workflowName: text("workflow_name").notNull(),
+    version: integer().notNull(),
+    /** Its input, as the version's contract took it: canonical JSON. */
+    input: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    /** When its card was posted: each is posted once. */
+    postedAt: timestamp("posted_at"),
+    /** Where the person pressed Start, by the Chat SDK's names. */
+    platform: text(),
+    threadId: text("thread_id"),
+    locale: text(),
+    pressedAt: timestamp("pressed_at"),
+    /** The start's receipt and its run, once it started. */
+    startId: text("start_id"),
+    runId: text("run_id"),
+    /** When the run's end was told where it was pressed. */
+    toldAt: timestamp("told_at"),
+  },
+  (table) => [
+    index("chat_workflow_offers_chat_idx").on(table.chatId),
+    index("chat_workflow_offers_run_idx").on(table.runId),
+    index("chat_workflow_offers_user_idx").on(table.userId),
+  ]
+);
 
 /**
  * How Stephen fared in the chat apps, counted by the hour
@@ -3311,6 +3356,13 @@ export const workflowResources = sqliteTable(
      */
     nameReleasedAt: timestamp("name_released_at"),
     nameReleasedBy: text("name_released_by"),
+    /**
+     * Its owner lets people ask Stephen to start it in a chat app: he may
+     * offer it on a card to anyone who could start it themselves, and the
+     * press starts it as them (channels/workflow-offers.ts). Off until the
+     * owner turns it on.
+     */
+    askable: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     // Listing reads a person's own workflows by owner (`listWorkflowResources`).

@@ -1009,6 +1009,13 @@
       "when": 1792889027388,
       "tag": "0143_chat_audiences",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "6",
+      "when": 1792894262835,
+      "tag": "0144_chat_workflow_offers",
+      "breakpoints": true
     }
   ]
 }
