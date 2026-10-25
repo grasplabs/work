@@ -273,13 +273,14 @@ export const stillOpen = (decisions: DecisionColumns, now: Date): SQL =>
 
 /**
  * That the independent run `id` names goes on, as a condition: it hasn't
- * ended, and no cancel of it was admitted (screen-workflows.ts), which
- * the engine applies later, the run showing as running until then.
+ * ended, paused or not (a paused run takes a timely answer, which it reads
+ * once resumed), and no cancel of it was admitted (screen-workflows.ts),
+ * which the engine applies later, the run showing as running until then.
  */
 const resourceRunGoesOn = (id: SQL | SQLiteColumn | string): SQL => sql`EXISTS (
   SELECT 1 FROM ${workflowResourceRuns}
   WHERE ${workflowResourceRuns.id} = ${id}
-    AND ${workflowResourceRuns.status} IN ('starting', 'running')
+    AND ${workflowResourceRuns.status} IN ('starting', 'running', 'paused')
     AND ${workflowResourceRuns.endedAt} IS NULL
     AND NOT EXISTS (SELECT 1 FROM workflow_resource_run_controls AS control
       WHERE control.run_id = ${workflowResourceRuns.id}

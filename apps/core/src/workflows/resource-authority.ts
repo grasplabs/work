@@ -248,7 +248,7 @@ const invokerSql = (run: CallingRun): SQL => {
           ON held.subject_type = 'workflow'
             AND held.subject_id = parent_run.workflow_resource_id
         WHERE parent_run.id = ${invoker.id}
-          AND parent_run.status IN ('starting', 'running')
+          AND parent_run.status IN ('starting', 'running', 'paused')
           AND held.object_type = 'workflow' AND held.object_id = ${run.workflowId}
           AND held.resource IS NULL
           AND held.status = 'active'

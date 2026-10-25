@@ -815,7 +815,7 @@ const ruleOf = async (
             WHERE parent_run.id = ${parent.runId}
               AND parent_run.workflow_resource_id = ${parent.workflowId}
               AND parent_run.principal_id = ${parent.principal}
-              AND parent_run.status IN ('starting', 'running'))
+              AND parent_run.status IN ('starting', 'running', 'paused'))
           AND ${grantSql(
             allowingPermissionSql(
               { type: "workflow", workflowId: parentWorkflow.data },
