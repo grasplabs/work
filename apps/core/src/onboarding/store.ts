@@ -816,6 +816,13 @@ export class Onboarding extends DurableObject<Env> {
     migrateOnWake(ctx, migrations);
     // The one row everything else updates, there before anything asks.
     this.#db.insert(onboarding).values({ id: 1 }).onConflictDoNothing().run();
+    // Woken with work due and no alarm set (a migration made a team due,
+    // say, on an onboarding long finished): the alarm is set for it.
+    void ctx.blockConcurrencyWhile(async () => {
+      if ((await ctx.storage.getAlarm()) === null) {
+        await this.#armDrawing();
+      }
+    });
   }
 
   /** The onboarding as its admin sees it. */
@@ -5013,9 +5020,10 @@ export class Onboarding extends DurableObject<Env> {
     // The team's claims are these now: any statement given before that
     // isn't one of them goes, so no earlier one outlives what it was put
     // together from. Found both where it is noted whom each rests on and
-    // in the brain itself, so one given with no note of it goes too. Read
-    // before the new rests are noted, and taken out after: until it is,
-    // the team stays due, so a failure is tried again.
+    // in the brain itself, so one given with no note of it goes too. Each
+    // is noted as resting on nobody left (`gonePrefix`), in the same
+    // transaction as the new rests: taken out at once, or by the alarm
+    // (`#toPurge`) until it is, however the intake itself ends.
     const current = new Set(records.map(({ id }) => id));
     const given = await onboardingStatementsOf(
       this.env,
@@ -5068,20 +5076,34 @@ export class Onboarding extends DurableObject<Env> {
         .set({ sentAt: sql`coalesce(${brainTeams.sentAt}, ${at})` })
         .where(eq(brainTeams.team, teamId))
         .run();
-      if (stale.length === 0) {
-        this.#brainSettled(teamId, dueAt);
+      for (const record of stale) {
+        this.#db
+          .update(brainSent)
+          .set({ person: sql`${gonePrefix} || ${brainSent.person}` })
+          .where(
+            and(
+              eq(brainSent.record, record),
+              not(like(brainSent.person, `${gonePrefix}%`))
+            )
+          )
+          .run();
+        this.#db
+          .insert(brainSent)
+          .values({
+            record,
+            type: "statement",
+            team: teamId,
+            person: `${gonePrefix}${record}`,
+          })
+          .onConflictDoNothing()
+          .run();
       }
-      return since.size > 0;
+      this.#brainSettled(teamId, dueAt);
+      return since.size > 0 || stale.length > 0;
     });
-    if (stale.length > 0) {
-      await purgeOnboardingRecords(this.env, stale);
-      this.ctx.storage.transactionSync(() => {
-        this.#db.delete(brainSent).where(inList(brainSent.record, stale)).run();
-        this.#brainSettled(teamId, dueAt);
-      });
-    }
-    // Someone it rests on deleted their interview while it was given: what
-    // landed of it is taken out again at once, or by the alarm.
+    // Someone it rests on deleted their interview while it was given, or a
+    // claim it gave before isn't the team's now: taken out again at once,
+    // or by the alarm.
     if (gone) {
       try {
         await this.#purgeNow();
@@ -5089,6 +5111,7 @@ export class Onboarding extends DurableObject<Env> {
         log.error("onboarding.purge_failed", {
           error: error instanceof Error ? error.name : "unknown",
         });
+        await this.#armDrawing();
       }
     }
   }

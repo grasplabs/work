@@ -1,8 +1,9 @@
 import type { Workspace } from "@grasp-os/shared/brain";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import type { SessionApi } from "@grasp-os/shared/rpc";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { intakeIds } from "../src/onboarding/brain-intake.ts";
@@ -847,6 +848,100 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       first: ["Tickets come in through Zendesk."],
       reworded: ["Zendesk is the ticket inbox."],
       none: [],
+    });
+  });
+
+  it("takes an earlier claim out by the alarm when taking it out fails as the claims are put together anew", async () => {
+    const ids = await drawnTeam();
+    await intake(ids);
+    await agree(
+      ids.rik,
+      [
+        fact("r1", "step", "Checks the queue at noon."),
+        fact("r2", "step", "Closes the ticket once answered."),
+      ],
+      1
+    );
+    await drawTickets(ids);
+    // The brain can't take records out while the claims are put together
+    // anew: every try of this intake fails to.
+    const batch = env.DB.batch.bind(env.DB);
+    const spy = vi
+      .spyOn(env.DB, "batch")
+      .mockImplementation(async (statements) => {
+        if (
+          new Error("where").stack?.includes("purgeOnboardingRecords") === true
+        ) {
+          throw new Error("The brain can't be reached.");
+        }
+        return await batch(statements);
+      });
+    let given: string | null;
+    try {
+      ({ gave: given } = await intake(ids, [
+        { ...zendeskClaim, text: "Zendesk is the ticket inbox." },
+      ]));
+    } finally {
+      spy.mockRestore();
+    }
+    const member = await signedInApi(idp, "user");
+    const stuck = await statementsFor(member.api, ids);
+    // The intake is done; the alarm, once the brain answers again.
+    const after = await onboardingStore(env).intakeNext();
+    await onboardingStore(env).purgeBrain();
+    expect({
+      given,
+      stuck,
+      after,
+      statements: await statementsFor(member.api, ids),
+    }).toStrictEqual({
+      given: `brain:${ids.team}`,
+      stuck: [
+        "Tickets come in through Zendesk.",
+        "Zendesk is the ticket inbox.",
+      ],
+      after: null,
+      statements: ["Zendesk is the ticket inbox."],
+    });
+  });
+
+  it("sets the alarm when it wakes with a team due and none set, as a finished onboarding after the hard cut's migrations is", async () => {
+    const ids = await drawnTeam();
+    await intake(ids);
+    // As the migrations leave a finished onboarding: the team due again,
+    // its statements gone, and no alarm.
+    await runInDurableObject(onboardingStore(env), async (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE brain_teams SET due_at = ? WHERE team = ?",
+        new Date().toISOString(),
+        ids.team
+      );
+      await state.storage.deleteAlarm();
+    });
+    await env.DB.prepare(
+      "DELETE FROM brain_records WHERE type = 'statement' AND id LIKE 'onb-st-%'"
+    ).run();
+    // The store starts again, as it does after a deploy.
+    await runInDurableObject(onboardingStore(env), (_instance, state) => {
+      try {
+        state.abort("A new version.");
+      } catch {
+        // Aborting throws in the code that asked for it.
+      }
+    }).catch(() => {});
+    const alarm = await runInDurableObject(
+      onboardingStore(env),
+      async (_instance, state) => await state.storage.getAlarm()
+    );
+    // The alarm gives the team to the brain again.
+    await intake(ids);
+    const member = await signedInApi(idp, "user");
+    expect({
+      armed: alarm !== null,
+      statements: await statementsFor(member.api, ids),
+    }).toStrictEqual({
+      armed: true,
+      statements: ["Tickets come in through Zendesk."],
     });
   });
 
