@@ -1,5 +1,6 @@
-import type { ModelEfforts } from "@grasp-os/shared/models";
 // @vitest-environment happy-dom
+import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
+import type { ModelEfforts } from "@grasp-os/shared/models";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -27,11 +28,15 @@ import { useAsk } from "./use-ask.ts";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
-const plain = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-const thinker = "anthropic/claude-sonnet-5";
-const models = [plain, thinker];
+// A new deployment's models, as core offers them, first the default, with
+// the efforts core's catalogue gives each; then one that doesn't think,
+// from a provider without a mark.
+const [chatDefault, lowCost] = defaultGatewayModels;
+const plain = "openai/gpt-4.1-mini";
+const models = [...defaultGatewayModels, plain];
 const efforts: Record<string, ModelEfforts> = {
-  [thinker]: { levels: ["low", "high", "max"], default: "high" },
+  [chatDefault]: { levels: ["high", "max"], default: "high" },
+  [lowCost]: { levels: ["low", "high", "max"], default: "high" },
 };
 
 let root: Root | undefined;
@@ -166,37 +171,52 @@ describe("the model picker", () => {
     document.body.replaceChildren();
   });
 
-  it("picks a model, and how hard it thinks for one that does", async () => {
+  it("opens on the default model at its default effort", async () => {
     await opened("user");
-    // The default doesn't think: the control names it alone.
     expect(control().getAttribute("aria-label")).toBe(
-      "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
+      "Model: deepseek-v4.1-flash-1017, thinking high. Change model or thinking"
     );
     await press(control());
-    // Pressed, and no bar for it.
     expect([
-      modelLine("llama-3.3").getAttribute("aria-pressed"),
-      document.querySelector('input[type="range"]'),
-    ]).toStrictEqual(["true", null]);
-
-    // One that thinks: the picker stays open on its bar, at its default.
-    await press(modelLine("claude-sonnet-5"));
-    expect(modelLine("claude-sonnet-5").getAttribute("aria-pressed")).toBe(
-      "true"
-    );
+      modelLine("deepseek-v4.1-flash").getAttribute("aria-pressed"),
+      modelLine("deepseek-v4.1-flash").textContent?.includes("Default"),
+      thinkingBar().getAttribute("aria-valuetext"),
+    ]).toStrictEqual(["true", true, "High"]);
+    // DeepSeek takes nothing under high.
+    await key(thinkingBar(), "ArrowLeft");
     expect(thinkingBar().getAttribute("aria-valuetext")).toBe("High");
-
     await key(thinkingBar(), "ArrowRight");
     expect(thinkingBar().getAttribute("aria-valuetext")).toBe("Max");
+  });
+
+  it("offers each model its own efforts, and no bar for one that doesn't think", async () => {
+    await opened("user");
+    await press(control());
+    await key(thinkingBar(), "ArrowRight");
+    // The low-cost model: the picker stays open on its bar, which keeps max
+    // (GLM takes it too) and goes down to low, which DeepSeek doesn't take.
+    await press(modelLine("glm-5.3-flash"));
+    expect(thinkingBar().getAttribute("aria-valuetext")).toBe("Max");
+    await key(thinkingBar(), "ArrowLeft");
+    await key(thinkingBar(), "ArrowLeft");
+    expect(thinkingBar().getAttribute("aria-valuetext")).toBe("Low");
+
+    await press(modelLine("gpt-4.1-mini"));
+    expect([
+      document.querySelector('input[type="range"]'),
+      control().getAttribute("aria-label"),
+    ]).toStrictEqual([null, "Model: gpt-4.1-mini. Change model"]);
   });
 
   it("keeps the model and effort picked for the person, and opens on them again", async () => {
     await opened("user");
     await press(control());
-    await press(modelLine("claude-sonnet-5"));
-    await key(thinkingBar(), "ArrowRight");
+    await press(modelLine("glm-5.3-flash"));
+    // High, as DeepSeek was at, which GLM takes too.
+    expect(thinkingBar().getAttribute("aria-valuetext")).toBe("High");
+    await key(thinkingBar(), "ArrowLeft");
     const chosen =
-      "Model: claude-sonnet-5, thinking max. Change model or thinking";
+      "Model: glm-5.3-flash, thinking low. Change model or thinking";
     expect(control().getAttribute("aria-label")).toBe(chosen);
 
     act(() => {

@@ -5,7 +5,10 @@ import { BotIcon } from "lucide-react";
 // (`provider/model`, as the model gateway names it), drawn in the text's
 // own colour so it follows the theme. The marks are Simple Icons' (CC0,
 // simpleicons.org): Claude's for Anthropic, Cloudflare's for Workers AI.
-// A provider without one there, such as OpenAI, shows a plain bot.
+// The mark is the provider that serves the model, not who made it, so the
+// models Workers AI runs (a new deployment's DeepSeek and GLM) share
+// Cloudflare's. A provider without one there, such as OpenAI, shows a
+// plain bot.
 
 /** The SVG path of each provider's mark, on a 24 by 24 grid. */
 const marks: Readonly<Record<string, string>> = {
