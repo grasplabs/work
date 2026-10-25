@@ -432,7 +432,15 @@ export const brainMemoryCites = sqliteTable(
       .references(() => brainMemories.id, { onDelete: "cascade" }),
     collectionId: text("collection_id").notNull(),
   },
-  (table) => [primaryKey({ columns: [table.memoryId, table.collectionId] })]
+  (table) => [
+    primaryKey({ columns: [table.memoryId, table.collectionId] }),
+    // The records resting on a collection, covering `citesReadable`'s check
+    // from the collection's side.
+    index("brain_memory_cites_collection_idx").on(
+      table.collectionId,
+      table.memoryId
+    ),
+  ]
 );
 
 /**
