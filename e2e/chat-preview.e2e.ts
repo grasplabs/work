@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+
+import { canonicalJson } from "@grasp-os/shared/json";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
 
@@ -44,10 +47,15 @@ const namespacesSchema = {
   },
 };
 
+/** The SHA-256 of `text`'s UTF-8 bytes, as hex, as core hashes them. */
+const sha256 = (text: string): string =>
+  createHash("sha256").update(text, "utf-8").digest("hex");
+
 /**
  * Writes a draft of `app` over `base`, with `files`, into `chatId` in
  * `userId`'s Workspace object (core's chats-rpc.ts names it), as its
- * agent's first write does.
+ * agent's first write does: the draft, and its version 1 as core's
+ * draft-versions.ts keeps it.
  */
 const writeDraft = async (
   userId: string,
@@ -65,6 +73,10 @@ const writeDraft = async (
   if (workspaces === undefined) {
     throw new Error("The dev server has no Workspace objects");
   }
+  const hashes = Object.fromEntries(
+    Object.entries(files).map(([path, content]) => [path, sha256(content)])
+  );
+  const now = Date.now();
   const written = await fetch(
     new URL(
       `workers/durable_objects/namespaces/${encodeURIComponent(workspaces.id)}/query`,
@@ -78,11 +90,29 @@ const writeDraft = async (
         queries: [
           {
             sql: "INSERT INTO chat_drafts (chat_id, app_id, base, revision, updated_at) VALUES (?, ?, ?, 1, ?)",
-            params: [chatId, app, base, Date.now()],
+            params: [chatId, app, base, now],
           },
           ...Object.entries(files).map(([path, content]) => ({
             sql: "INSERT INTO chat_draft_files (chat_id, app_id, path, content) VALUES (?, ?, ?, ?)",
             params: [chatId, app, path, content],
+          })),
+          {
+            sql: "INSERT INTO chat_draft_versions (chat_id, app_id, number, revision, base, content_hash, created_at) VALUES (?, ?, 1, 1, ?, ?, ?)",
+            params: [
+              chatId,
+              app,
+              base,
+              sha256(canonicalJson({ base, files: hashes })),
+              now,
+            ],
+          },
+          ...Object.entries(files).map(([path, content]) => ({
+            sql: "INSERT INTO chat_draft_contents (chat_id, app_id, sha256, content) VALUES (?, ?, ?, ?)",
+            params: [chatId, app, hashes[path], content],
+          })),
+          ...Object.entries(hashes).map(([path, hash]) => ({
+            sql: "INSERT INTO chat_draft_version_files (chat_id, app_id, number, path, sha256) VALUES (?, ?, 1, ?, ?)",
+            params: [chatId, app, path, hash],
           })),
         ],
       }),
@@ -247,9 +277,7 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     await expect(
       thread.getByText("The domains this chat builds didn't load.")
     ).toHaveCount(0);
-    await expect(studio).toContainText(
-      "1 file changed in this chat, not proposed yet"
-    );
+    await expect(studio).toContainText("Version 1 of 1");
     await expect(
       page.getByRole("button", { name: "Expand the chats" })
     ).toBeVisible();
