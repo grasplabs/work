@@ -159,21 +159,24 @@ const promptOf = (facts: readonly Labelled[]): string => {
 export const claimCharsMax = 240;
 
 // A claim is held to a strict allowlist, after the single-script
-// restriction of Unicode's UTS #39: once normalized (NFKC, then NFC), only
-// Latin letters in Lu or Ll (precomposed, so English, Dutch, German,
-// French and Spanish all fit, and no modifier letter or letter that looks
-// like punctuation), ASCII digits, ASCII spaces, commas and hyphens, and
-// one full stop, exclamation or question mark at its end. A mark left
-// after NFC, or any default-ignorable code point, refuses it: nothing can
-// hide in a claim five people visibly support.
+// restriction of Unicode's UTS #39, narrowed to what our clients'
+// languages (English, Dutch, German, French, Spanish) write: once
+// normalized (NFKC, then NFC), only A to Z and a to z, the letters of
+// Latin-1 Supplement (U+00C0 to U+00FF, not × and ÷) and of Latin
+// Extended-A (U+0100 to U+017F, not the dotless ı, which reads as an i),
+// ASCII digits, ASCII spaces, commas and hyphens, and one full stop,
+// exclamation or question mark at its end, with no space before it. A
+// mark left after NFC, or any default-ignorable code point, refuses it:
+// nothing can hide in a claim five people visibly support, nor read as
+// something else.
 
-/** A Latin letter: the claim's one script. */
-const latin = /^\p{Script=Latin}$/u;
-/** An upper or lower case letter: no modifier letter (Lm), and no other letter (Lo). */
-const cased = /^[\p{Lu}\p{Ll}]$/u;
+/** The letters a claim may hold. */
+const letters = /^[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u017F]$/u;
+/** A letter in those ranges that reads as another. */
+const lookalike = "\u0131";
 /** What a claim may hold besides its letters. */
 const asciiAllowed = /^[0-9 ,-]$/u;
-/** What a claim may end with. */
+/** What a claim ends with. */
 const terminal = /^[.!?]$/u;
 /** A mark NFC left on its own, or a code point that shows nothing. */
 const hidden = /[\p{M}\p{Default_Ignorable_Code_Point}]/u;
@@ -181,7 +184,7 @@ const hidden = /[\p{M}\p{Default_Ignorable_Code_Point}]/u;
 /** Whether `character` may be in a claim, before its end. */
 const allowed = (character: string): boolean =>
   asciiAllowed.test(character) ||
-  (latin.test(character) && cased.test(character));
+  (letters.test(character) && character !== lookalike);
 
 const sentences = new Intl.Segmenter("und", { granularity: "sentence" });
 
@@ -189,7 +192,7 @@ const sentences = new Intl.Segmenter("und", { granularity: "sentence" });
  * A claim's words, when they are a claim: one sentence (by
  * `Intl.Segmenter`) of at most `claimCharsMax` characters, every one of
  * them allowed, starting with a letter or digit, with no two spaces
- * together. The first model writes them, and a fact may steer it: whatever
+ * together, ending in its full stop, exclamation or question mark. The first model writes them, and a fact may steer it: whatever
  * isn't a plain sentence is never checked, nor kept.
  */
 const claimOf = (value: string): string | null => {
@@ -200,9 +203,11 @@ const claimOf = (value: string): string | null => {
   // oxlint-disable-next-line typescript/no-misused-spread -- whole code points, as Unicode's properties name them
   const characters = [...line];
   const last = characters.at(-1) ?? "";
-  const body = terminal.test(last) ? characters.slice(0, -1) : characters;
+  const body = characters.slice(0, -1);
   const [first = ""] = body;
-  return body.length > 0 &&
+  return terminal.test(last) &&
+    body.length > 0 &&
+    body.at(-1) !== " " &&
     first !== " " &&
     first !== "," &&
     first !== "-" &&
