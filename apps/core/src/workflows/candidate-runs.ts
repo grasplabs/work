@@ -127,11 +127,14 @@ const candidatesPerSweep = 100;
 /** How long one sweep goes on removing test runs, batch after batch. */
 const sweepBudgetMs = 20_000;
 
+/** A test run's statuses: a test run is never paused. */
+type CandidateStatus = Exclude<WorkflowRunStatus, "paused">;
+
 /** A test run's statuses that haven't ended. */
-const unended: WorkflowRunStatus[] = ["starting", "running"];
+const unended: CandidateStatus[] = ["starting", "running"];
 
 /** Where the engine says a run is, as a test run's row has it. */
-const projected: Record<InstanceStatus["status"], WorkflowRunStatus> = {
+const projected: Record<InstanceStatus["status"], CandidateStatus> = {
   queued: "running",
   running: "running",
   waiting: "running",
@@ -184,7 +187,7 @@ const endEntry = (
 const failedByCore = async (
   env: Env,
   run: { id: string; workflowResourceId: string },
-  from: WorkflowRunStatus,
+  from: CandidateStatus,
   failureCode: string,
   at: Date
 ): Promise<void> => {
@@ -671,7 +674,7 @@ export const terminateCandidateRun = async (
     await runEngine(env).terminate(before.id);
     return before;
   }
-  if (!unended.includes(before.status)) {
+  if (before.status !== "starting" && before.status !== "running") {
     return before;
   }
   await runEngine(env).terminate(before.id);

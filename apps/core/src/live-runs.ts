@@ -35,7 +35,11 @@ export const liveRuns = async (
       .where(
         and(
           inList(workflowResourceRuns.id, runIds),
-          inArray(workflowResourceRuns.status, ["starting", "running"])
+          inArray(workflowResourceRuns.status, [
+            "starting",
+            "running",
+            "paused",
+          ])
         )
       ),
   ]);

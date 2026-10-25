@@ -520,6 +520,24 @@ describe("rolling back", () => {
     });
   });
 
+  it("takes no fence from a pause it ignores while rolling back", async () => {
+    const id = newId();
+    const undoCharge = hold(id, "undo-charge");
+    await workflow("compensated").create({ id, params: { fail: true } });
+    await undoCharge.held;
+    const object = runObject("compensated", id);
+
+    const paused = await object.pause({ fence: 5 });
+    const state = await object.controlState();
+    undoCharge.release();
+
+    expect({ paused, fence: state?.fence }).toStrictEqual({
+      paused: "ignored",
+      fence: null,
+    });
+    await over(id);
+  });
+
   it("resumes where it was when another activation takes over: no rollback that succeeded runs again, nor any step", async () => {
     const id = newId();
     const undoCharge = hold(id, "undo-charge");

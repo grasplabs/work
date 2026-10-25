@@ -186,6 +186,7 @@ export interface WorkflowQueryCaller {
 const publicStatus = {
   starting: "queued",
   running: "running",
+  paused: "paused",
   completed: "completed",
   failed: "failed",
   cancelled: "cancelled",
@@ -199,7 +200,7 @@ const rowStatuses: Readonly<Record<string, readonly string[]>> = {
   failed: ["failed"],
   cancelled: ["cancelled"],
   waiting: [],
-  paused: [],
+  paused: ["paused"],
   compensating: [],
 };
 

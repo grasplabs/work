@@ -152,6 +152,12 @@ export interface CallingRun {
    * (`workflow.candidate_unfixtured`).
    */
   readonly candidate?: ReadonlyMap<string, CandidateBinding>;
+  /**
+   * Whether its row says it is paused: nothing of it runs then, the
+   * engine's say, but what a person does for it (confirming a call it
+   * holds) waits for its resume (pending-actions.ts).
+   */
+  readonly paused?: boolean;
 }
 
 /** A binding of a test run's checkpoint, and the answer its start gave it. */
@@ -242,7 +248,7 @@ const invokerSql = (run: CallingRun): SQL => {
           ON held.subject_type = 'workflow'
             AND held.subject_id = parent_run.workflow_resource_id
         WHERE parent_run.id = ${invoker.id}
-          AND parent_run.status IN ('starting', 'running')
+          AND parent_run.status IN ('starting', 'running', 'paused')
           AND held.object_type = 'workflow' AND held.object_id = ${run.workflowId}
           AND held.resource IS NULL
           AND held.status = 'active'
@@ -307,7 +313,11 @@ export const requireCallAuthority = async (
  * Run `runId` of workflow `workflowId` as its calls know it, from its row
  * and its start's receipt; `undefined` when there is no such run, or it
  * has ended. Every host of a run (resource-runs.ts) and every App call of
- * one builds it here.
+ * one builds it here. A paused run is one that hasn't ended: whether
+ * anything of it runs is the engine's to say, which runs nothing of a
+ * paused run, and its row follows the engine late. Read `paused` as
+ * refusing, a run resumed would fail its next activation, and the calls
+ * it makes, until its row heard of the resume.
  */
 export const callingRunOf = async (
   env: Env,
@@ -343,7 +353,9 @@ export const callingRunOf = async (
   if (
     row === undefined ||
     row.workflowId !== workflowId ||
-    (row.status !== "starting" && row.status !== "running")
+    (row.status !== "starting" &&
+      row.status !== "running" &&
+      row.status !== "paused")
   ) {
     return undefined;
   }
@@ -362,6 +374,7 @@ export const callingRunOf = async (
     bindings: frozenBindingsOf(row.bindings),
     workflows: frozenWorkflowsOf(row.bindings),
     restricted: row.restricted,
+    paused: row.status === "paused",
   };
 };
 

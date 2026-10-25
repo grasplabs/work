@@ -573,10 +573,16 @@ export const nextTurn = (pool: Pool, scope: AdmissionScope, now: number): SQL =>
  * (`workflow_resource_runs`, whose cancel ends it at once), or a test run
  * of its draft (`workflow_candidate_runs`): their steps' attempts take the
  * same shares and wait in the same queue.
+ *
+ * An independent run whose row still says `paused` goes too once its
+ * newest control is a resume a screen asked for (screen-workflows.ts): the
+ * engine may run it again before core hears that it did, and its steps
+ * then wait for a share as a running run's do. A run whose newest control
+ * is its pause takes no place, nor gets one back.
  */
 const runRowOf = (run: string): SQL =>
   sql`(SELECT ${workflowRuns.id} AS id, (${workflowRuns.status} IN ('starting', 'running') AND ${workflowRuns.cancelRequestedAt} IS NULL) AS active FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run}
-    UNION ALL SELECT ${workflowResourceRuns.id}, ${workflowResourceRuns.status} IN ('starting', 'running') FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run}
+    UNION ALL SELECT ${workflowResourceRuns.id}, (${workflowResourceRuns.status} IN ('starting', 'running') OR (${workflowResourceRuns.status} = 'paused' AND EXISTS (SELECT 1 FROM workflow_resource_run_controls AS control WHERE control.run_id = ${workflowResourceRuns.id} AND control.kind = 'resume' AND control.state <> 'superseded' AND control.generation = ${workflowResourceRuns.controlGeneration}))) FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run}
     UNION ALL SELECT ${workflowCandidateRuns.id}, ${workflowCandidateRuns.status} IN ('starting', 'running') FROM ${workflowCandidateRuns} WHERE ${workflowCandidateRuns.id} = ${run}) AS run`;
 
 /**

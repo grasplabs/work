@@ -44,6 +44,7 @@ import {
   revokePermission,
 } from "../src/permissions.ts";
 import {
+  answerWorkflowCommand,
   failureOf,
   readWorkflowRequest,
   readWorkflowWatch,
@@ -56,6 +57,7 @@ import {
   repairResourceTerminations,
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
+import { tellQueryFollowers } from "../src/workflows/run-changes.ts";
 import { published } from "./apps.ts";
 import { hostOrigin } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
@@ -505,20 +507,18 @@ const failureShown = (error: { code: string | null; message: string }) => {
   return { code, message };
 };
 
-/**
- * Where in its lifecycle a run's revision says it is: 1 queued, 2 queued
- * with a cancel asked, 3 running, 4 running with a cancel asked, 5 ended,
- * whatever policy generation it is under.
- */
-const stageOf = (revision: number | undefined): number | undefined =>
-  revision === undefined ? undefined : ((revision - 1) % 5) + 1;
+/** The status a push shows, or its refusal's code. */
+const shownOf = (pushed: unknown): unknown =>
+  typeof pushed === "string"
+    ? pushed
+    : z.object({ status: z.string() }).safeParse(pushed).data?.status;
 
-/** A cancel receipt with its revision as the stage it names. */
+/** A control's receipt, without its revision. */
 const staged = (receipt: unknown) => {
-  const read = z
+  const { kind, state } = z
     .object({ kind: z.string(), state: z.string(), revision: z.number() })
     .parse(receipt);
-  return { ...read, revision: stageOf(read.revision) };
+  return { kind, state };
 };
 
 /** A fresh command key, as the SDK makes one. */
@@ -589,7 +589,6 @@ describe(
           workflowVersion: handle.workflowVersion,
         },
         shown: {
-          revision: stageOf(shown.revision),
           output: shown.value?.output,
           control: shown.value?.control,
           waits: shown.value?.waits,
@@ -598,7 +597,6 @@ describe(
         again: first,
         handle: { workflowId: fixture.workflow, workflowVersion: 1 },
         shown: {
-          revision: 5,
           output: { status: "Hello, Ada" },
           control: {
             canPause: false,
@@ -611,7 +609,7 @@ describe(
       });
     });
 
-    it("cancels a run with a receipt answered again under its key, and refuses its pause", async () => {
+    it("cancels a run with a receipt answered again under its key", async () => {
       const { builder, app, reference } = await requestsApp("PT1H");
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
@@ -626,11 +624,6 @@ describe(
         );
       }, settles);
       const running = channel.peekRun(read, handle.runId).value?.control;
-      const pause = await refusalOf(
-        channel.control(read, handle.runId, "pause", () => {
-          // Never recovering.
-        })
-      );
       // The cancel, then sent again under its key, as its resend.
       const cancel = JSON.stringify({
         workflow: wireOf(reference),
@@ -650,38 +643,854 @@ describe(
 
       expect({
         running,
-        pause,
         receipt: staged(receipt),
         resent: staged(resent),
         // The receipt names the very revision that shows the run ended.
         settles:
           z.object({ revision: z.number() }).parse(receipt).revision ===
           ended.revision,
-        ended: {
-          revision: stageOf(ended.revision),
-          control: ended.value?.control,
-        },
+        ended: ended.value?.control,
       }).toStrictEqual({
         running: {
-          canPause: false,
+          canPause: true,
           canResume: false,
           canCancel: true,
           pendingControl: null,
         },
-        pause: "workflow.control_refused",
-        receipt: { kind: "cancel", state: "applied", revision: 5 },
-        resent: { kind: "cancel", state: "applied", revision: 5 },
+        receipt: { kind: "cancel", state: "applied" },
+        resent: { kind: "cancel", state: "applied" },
         settles: true,
         ended: {
-          revision: 5,
+          canPause: false,
+          canResume: false,
+          canCancel: false,
+          pendingControl: null,
+        },
+      });
+    });
+
+    it("pauses and resumes a run, each receipt answered again under its key and audited under the App's screen for the person", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "running"
+        );
+      }, settles);
+      const commandOf = (command: "pause" | "resume") =>
+        JSON.stringify({
+          workflow: wireOf(reference),
+          command,
+          runId: handle.runId,
+          idempotencyKey: keyOf(),
+        });
+      const pauseCommand = commandOf("pause");
+      let paused = channel.peekRun(read, handle.runId);
+      let pauseAgain: unknown;
+      let resumed: unknown;
+      let resumedAgain: unknown;
+      const events = await auditedDuring(async () => {
+        await called(builder, app, lease, pauseCommand);
+        await vi.waitFor(() => {
+          expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+            "paused"
+          );
+        }, settles);
+        paused = channel.peekRun(read, handle.runId);
+        // Sent again under its key, as a lost answer's resend: the same.
+        pauseAgain = outcomeOf(await called(builder, app, lease, pauseCommand));
+        resumed = outcomeOf(
+          await called(builder, app, lease, commandOf("resume"))
+        );
+        await vi.waitFor(() => {
+          expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+            "running"
+          );
+        }, settles);
+        // A resume of a run already running: applied as it is written.
+        resumedAgain = outcomeOf(
+          await called(builder, app, lease, commandOf("resume"))
+        );
+      });
+      const running = channel.peekRun(read, handle.runId);
+      stopRun();
+
+      expect({
+        paused: paused.value?.control,
+        pauseAgain: staged(pauseAgain),
+        resumed: staged(resumed),
+        resumedAgain: staged(resumedAgain),
+        running: running.value?.control,
+        later: running.revision > paused.revision,
+        audited: events
+          .filter(({ target }) => target?.id === handle.runId)
+          .map(({ action, actor, detail }) => ({
+            action,
+            actor: actor.type,
+            kind: detail.kind,
+            already: detail.already,
+            onBehalfOf: detail.onBehalfOf,
+          })),
+      }).toStrictEqual({
+        paused: {
+          canPause: false,
+          canResume: true,
+          canCancel: true,
+          pendingControl: null,
+        },
+        pauseAgain: { kind: "pause", state: "applied" },
+        resumed: { kind: "resume", state: "applied" },
+        resumedAgain: { kind: "resume", state: "applied" },
+        running: {
+          canPause: true,
+          canResume: false,
+          canCancel: true,
+          pendingControl: null,
+        },
+        later: true,
+        // Each asked, under the App's screen for the person, and each
+        // settled, by the system; the resume already done, asked only.
+        audited: [
+          {
+            action: "workflow.run.pause_requested",
+            actor: "app",
+            kind: undefined,
+            already: undefined,
+            onBehalfOf: builder.userId,
+          },
+          {
+            action: "workflow.run.control_applied",
+            actor: "system",
+            kind: "pause",
+            already: undefined,
+            onBehalfOf: builder.userId,
+          },
+          {
+            action: "workflow.run.resume_requested",
+            actor: "app",
+            kind: undefined,
+            already: undefined,
+            onBehalfOf: builder.userId,
+          },
+          {
+            action: "workflow.run.control_applied",
+            actor: "system",
+            kind: "resume",
+            already: undefined,
+            onBehalfOf: builder.userId,
+          },
+          {
+            action: "workflow.run.resume_requested",
+            actor: "app",
+            kind: undefined,
+            already: true,
+            onBehalfOf: builder.userId,
+          },
+        ],
+      });
+    });
+
+    it("keeps a stalled pause applying until a snapshot settles it, refuses a resume meanwhile, and lets a cancel supersede it", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "running"
+        );
+      }, settles);
+      const asked = async (command: "pause" | "resume" | "cancel") =>
+        outcomeOf(
+          await called(
+            builder,
+            app,
+            lease,
+            JSON.stringify({
+              workflow: wireOf(reference),
+              command,
+              runId: handle.runId,
+              idempotencyKey: keyOf(),
+            })
+          )
+        );
+      // A pause admitted a while ago, whose request ended before it asked
+      // the engine: stalled, as the repair would find it.
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE workflow_resource_runs SET control_generation = control_generation + 1, summary_revision = summary_revision + 1 WHERE id = ?"
+        ).bind(handle.runId),
+        env.DB.prepare(
+          "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, generation, created_at, next_at) SELECT ?, id, ?, ?, ?, 'pause', 'admitted', control_generation, ?, ? FROM workflow_resource_runs WHERE id = ?"
+        ).bind(
+          crypto.randomUUID(),
+          app,
+          builder.userId,
+          keyOf(),
+          Date.now() - 120_000,
+          Date.now() + 3_600_000,
+          handle.runId
+        ),
+      ]);
+      await tellQueryFollowers(env, handle.runId);
+      await vi.waitFor(() => {
+        expect(
+          channel.peekRun(read, handle.runId).value?.control.pendingControl
+        ).toStrictEqual({ kind: "pause", stage: "applying" });
+      }, settles);
+      const applying = channel.peekRun(read, handle.runId).value;
+      let resume: unknown;
+      const refusedEvents = await auditedDuring(async () => {
+        resume = await refusalOf(
+          channel.control(read, handle.runId, "resume", () => {
+            // Never recovering.
+          })
+        );
+      });
+      const cancelled = await asked("cancel");
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "cancelled"
+        );
+      }, settles);
+      stopRun();
+      const receipts = await env.DB.prepare(
+        "SELECT kind, state FROM workflow_resource_run_controls WHERE run_id = ? ORDER BY generation"
+      )
+        .bind(handle.runId)
+        .all<{ kind: string; state: string }>();
+
+      expect({
+        applying: { status: applying?.status, control: applying?.control },
+        resume,
+        refused: refusedEvents
+          .filter(({ target }) => target?.id === handle.runId)
+          .map(({ action, detail }) => ({
+            action,
+            kind: detail.kind,
+            code: detail.code,
+          })),
+        cancelled: staged(cancelled),
+        receipts: receipts.results,
+      }).toStrictEqual({
+        applying: {
+          status: "running",
           control: {
             canPause: false,
             canResume: false,
-            canCancel: false,
-            pendingControl: null,
+            canCancel: true,
+            pendingControl: { kind: "pause", stage: "applying" },
           },
         },
+        resume: "workflow.control_conflict",
+        refused: [
+          {
+            action: "workflow.run.control_refused",
+            kind: "resume",
+            code: "workflow.control_conflict",
+          },
+        ],
+        cancelled: { kind: "cancel", state: "applied" },
+        receipts: [
+          { kind: "pause", state: "superseded" },
+          { kind: "cancel", state: "applied" },
+        ],
       });
+    });
+
+    it("joins a pause still applying when asked again under another key, applying the one receipt", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "running"
+        );
+      }, settles);
+      const asked = async (command: "pause" | "resume" | "cancel") =>
+        outcomeOf(
+          await called(
+            builder,
+            app,
+            lease,
+            JSON.stringify({
+              workflow: wireOf(reference),
+              command,
+              runId: handle.runId,
+              idempotencyKey: keyOf(),
+            })
+          )
+        );
+      // A pause admitted a while ago, whose request ended before it asked
+      // the engine: stalled, as the repair would find it.
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE workflow_resource_runs SET control_generation = control_generation + 1, summary_revision = summary_revision + 1 WHERE id = ?"
+        ).bind(handle.runId),
+        env.DB.prepare(
+          "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, generation, created_at, next_at) SELECT ?, id, ?, ?, ?, 'pause', 'admitted', control_generation, ?, ? FROM workflow_resource_runs WHERE id = ?"
+        ).bind(
+          crypto.randomUUID(),
+          app,
+          builder.userId,
+          keyOf(),
+          Date.now() - 120_000,
+          Date.now() + 3_600_000,
+          handle.runId
+        ),
+      ]);
+      await tellQueryFollowers(env, handle.runId);
+      await vi.waitFor(() => {
+        expect(
+          channel.peekRun(read, handle.runId).value?.control.pendingControl
+        ).toStrictEqual({ kind: "pause", stage: "applying" });
+      }, settles);
+      const joined = await asked("pause");
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "paused"
+        );
+      }, settles);
+      stopRun();
+      const receipts = await env.DB.prepare(
+        "SELECT kind, state FROM workflow_resource_run_controls WHERE run_id = ?"
+      )
+        .bind(handle.runId)
+        .all<{ kind: string; state: string }>();
+
+      expect({
+        joined: staged(joined),
+        receipts: receipts.results,
+      }).toStrictEqual({
+        joined: { kind: "pause", state: "applied" },
+        receipts: [{ kind: "pause", state: "applied" }],
+      });
+    });
+
+    it("answers a retry of a pause that joined another that pause's receipt, never undoing a resume admitted since", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      const statusIs = async (status: string): Promise<void> => {
+        await vi.waitFor(() => {
+          expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+            status
+          );
+        }, settles);
+      };
+      await statusIs("running");
+      const asked = async (command: "pause" | "resume", key: string) =>
+        outcomeOf(
+          await called(
+            builder,
+            app,
+            lease,
+            JSON.stringify({
+              workflow: wireOf(reference),
+              command,
+              runId: handle.runId,
+              idempotencyKey: key,
+            })
+          )
+        );
+      // Pause A, admitted a while ago and not yet sent: stalled.
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE workflow_resource_runs SET control_generation = control_generation + 1, summary_revision = summary_revision + 1 WHERE id = ?"
+        ).bind(handle.runId),
+        env.DB.prepare(
+          "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, generation, created_at, next_at) SELECT ?, id, ?, ?, ?, 'pause', 'admitted', control_generation, ?, ? FROM workflow_resource_runs WHERE id = ?"
+        ).bind(
+          crypto.randomUUID(),
+          app,
+          builder.userId,
+          keyOf(),
+          Date.now() - 120_000,
+          Date.now() + 3_600_000,
+          handle.runId
+        ),
+      ]);
+      await tellQueryFollowers(env, handle.runId);
+      await vi.waitFor(() => {
+        expect(
+          channel.peekRun(read, handle.runId).value?.control.pendingControl
+        ).toStrictEqual({ kind: "pause", stage: "applying" });
+      }, settles);
+
+      // Pause B joins A, which settles; B's answer is lost. Another
+      // screen resumes the run; then B is sent again under its key.
+      const keyB = keyOf();
+      const joined = await asked("pause", keyB);
+      await statusIs("paused");
+      const resumed = await asked("resume", keyOf());
+      await statusIs("running");
+      const retried = await asked("pause", keyB);
+      stopRun();
+      const receipts = await env.DB.prepare(
+        "SELECT kind, state FROM workflow_resource_run_controls WHERE run_id = ? ORDER BY generation"
+      )
+        .bind(handle.runId)
+        .all<{ kind: string; state: string }>();
+
+      expect({
+        joined: staged(joined),
+        resumed: staged(resumed),
+        retried: staged(retried),
+        receipts: receipts.results,
+      }).toStrictEqual({
+        joined: { kind: "pause", state: "applied" },
+        resumed: { kind: "resume", state: "applied" },
+        retried: { kind: "pause", state: "applied" },
+        receipts: [
+          { kind: "pause", state: "applied" },
+          { kind: "resume", state: "applied" },
+        ],
+      });
+    });
+
+    it("supersedes a stalled pause a newer control overtook, never sending it", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "running"
+        );
+      }, settles);
+      // A pause admitted, then a newer control's generation taken after it.
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, generation, created_at, next_at) SELECT ?, id, ?, ?, ?, 'pause', 'admitted', control_generation + 1, ?, ? FROM workflow_resource_runs WHERE id = ?"
+        ).bind(
+          crypto.randomUUID(),
+          app,
+          builder.userId,
+          keyOf(),
+          Date.now() - 120_000,
+          Date.now() - 60_000,
+          handle.runId
+        ),
+        env.DB.prepare(
+          "UPDATE workflow_resource_runs SET control_generation = control_generation + 2, summary_revision = summary_revision + 1 WHERE id = ?"
+        ).bind(handle.runId),
+      ]);
+      await repairResourceTerminations(env, new Date());
+      await vi.waitFor(async () => {
+        await expect(
+          env.DB.prepare(
+            "SELECT state FROM workflow_resource_run_controls WHERE run_id = ?"
+          )
+            .bind(handle.runId)
+            .first<string>("state")
+        ).resolves.toBe("superseded");
+      }, settles);
+      // Asked of the run's engine again: still running, never paused.
+      await tellQueryFollowers(env, handle.runId);
+      await vi.waitFor(() => {
+        expect(
+          channel.peekRun(read, handle.runId).value?.control.pendingControl
+        ).toBeNull();
+      }, settles);
+      const shown = channel.peekRun(read, handle.runId).value?.status;
+      stopRun();
+      expect(shown).toBe("running");
+    });
+
+    it("lets a cancel that lost its write to a pause admitted at once win all the same", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "running"
+        );
+      }, settles);
+      // Just before the cancel's write, a pause's: its receipt stalled, and
+      // the run's generation taken.
+      let raced = false;
+      const racing: Env = {
+        ...env,
+        DB: new Proxy(env.DB, {
+          get: (target, property) => {
+            const value: unknown = Reflect.get(target, property);
+            if (property === "batch" && typeof value === "function") {
+              return async (statements: D1PreparedStatement[]) => {
+                if (!raced) {
+                  raced = true;
+                  await target.batch([
+                    target
+                      .prepare(
+                        "UPDATE workflow_resource_runs SET control_generation = control_generation + 1, summary_revision = summary_revision + 1 WHERE id = ?"
+                      )
+                      .bind(handle.runId),
+                    target
+                      .prepare(
+                        "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, generation, created_at, next_at) SELECT ?, id, ?, ?, ?, 'pause', 'admitted', control_generation, ?, ? FROM workflow_resource_runs WHERE id = ?"
+                      )
+                      .bind(
+                        crypto.randomUUID(),
+                        app,
+                        builder.userId,
+                        keyOf(),
+                        Date.now(),
+                        Date.now() + 3_600_000,
+                        handle.runId
+                      ),
+                  ]);
+                }
+                const answer: unknown = await Reflect.apply(value, target, [
+                  statements,
+                ]);
+                return answer;
+              };
+            }
+            return typeof value === "function"
+              ? (...args: unknown[]): unknown =>
+                  Reflect.apply(value, target, args)
+              : value;
+          },
+        }),
+      };
+      const command = readWorkflowRequest(
+        JSON.stringify({
+          workflow: wireOf(reference),
+          command: "cancel",
+          runId: handle.runId,
+          idempotencyKey: keyOf(),
+        })
+      );
+      if (!("command" in command)) {
+        throw new Error("Not a command");
+      }
+      const { value } = await answerWorkflowCommand(
+        racing,
+        builder.acting,
+        app,
+        command
+      );
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "cancelled"
+        );
+      }, settles);
+      stopRun();
+      const receipts = await env.DB.prepare(
+        "SELECT kind, state FROM workflow_resource_run_controls WHERE run_id = ? ORDER BY generation"
+      )
+        .bind(handle.runId)
+        .all<{ kind: string; state: string }>();
+
+      expect({
+        raced,
+        cancel: staged(value),
+        receipts: receipts.results,
+      }).toStrictEqual({
+        raced: true,
+        cancel: { kind: "cancel", state: "applied" },
+        receipts: [
+          { kind: "pause", state: "superseded" },
+          { kind: "cancel", state: "applied" },
+        ],
+      });
+    });
+
+    it("never applies a resume at once over a pause that reached the engine while the resume was being decided", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "running"
+        );
+      }, settles);
+      // A pause admitted, not yet sent: due at the repair.
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE workflow_resource_runs SET control_generation = control_generation + 1, summary_revision = summary_revision + 1 WHERE id = ?"
+        ).bind(handle.runId),
+        env.DB.prepare(
+          "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, generation, created_at, next_at) SELECT ?, id, ?, ?, ?, 'pause', 'admitted', control_generation, ?, ? FROM workflow_resource_runs WHERE id = ?"
+        ).bind(
+          crypto.randomUUID(),
+          app,
+          builder.userId,
+          keyOf(),
+          Date.now() - 120_000,
+          Date.now() - 60_000,
+          handle.runId
+        ),
+      ]);
+      // The resume reads the engine's status; right after, the pause
+      // reaches the engine and settles.
+      let raced = false;
+      const racingStub = <T extends object>(stub: T): T =>
+        new Proxy(stub, {
+          get: (target, property) => {
+            const value: unknown = Reflect.get(target, property);
+            if (property === "status" && typeof value === "function") {
+              return async (...args: unknown[]) => {
+                const status: unknown = await Reflect.apply(
+                  value,
+                  target,
+                  args
+                );
+                if (!raced) {
+                  raced = true;
+                  await repairResourceTerminations(env, new Date());
+                }
+                return status;
+              };
+            }
+            return typeof value === "function"
+              ? (...args: unknown[]): unknown =>
+                  Reflect.apply(value, target, args)
+              : value;
+          },
+        });
+      type Runs = Env["WORKFLOW_RUNS"];
+      const racingRuns = (namespace: Runs): Runs =>
+        new Proxy(namespace, {
+          get: (target, property) => {
+            if (property === "jurisdiction") {
+              return (jurisdiction: DurableObjectJurisdiction) =>
+                racingRuns(target.jurisdiction(jurisdiction));
+            }
+            if (property === "get") {
+              return (id: DurableObjectId) => racingStub(target.get(id));
+            }
+            const value: unknown = Reflect.get(target, property);
+            return typeof value === "function"
+              ? (...args: unknown[]): unknown =>
+                  Reflect.apply(value, target, args)
+              : value;
+          },
+        });
+      const racing: Env = {
+        ...env,
+        WORKFLOW_RUNS: racingRuns(env.WORKFLOW_RUNS),
+      };
+      const command = readWorkflowRequest(
+        JSON.stringify({
+          workflow: wireOf(reference),
+          command: "resume",
+          runId: handle.runId,
+          idempotencyKey: keyOf(),
+        })
+      );
+      if (!("command" in command)) {
+        throw new Error("Not a command");
+      }
+      const resume = await refusalOf(
+        answerWorkflowCommand(racing, builder.acting, app, command)
+      );
+      await tellQueryFollowers(env, handle.runId);
+      await vi.waitFor(() => {
+        const shown = channel.peekRun(read, handle.runId).value;
+        expect(shown?.status).toBe("paused");
+        expect(shown?.control.pendingControl).toBeNull();
+      }, settles);
+      stopRun();
+      const receipts = await env.DB.prepare(
+        "SELECT kind, state FROM workflow_resource_run_controls WHERE run_id = ? ORDER BY generation"
+      )
+        .bind(handle.runId)
+        .all<{ kind: string; state: string }>();
+
+      // Refused while the pause was still unresolved as it was decided,
+      // to be asked again; never answered as done with the run paused.
+      expect({ raced, resume, receipts: receipts.results }).toStrictEqual({
+        raced: true,
+        resume: "workflow.control_conflict",
+        receipts: [{ kind: "pause", state: "applied" }],
+      });
+    });
+
+    it("writes one receipt and one audit event for two overlapping requests under one key of a pause the run is already past", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "running"
+        );
+      }, settles);
+      const pauseOf = (key: string) => {
+        const command = readWorkflowRequest(
+          JSON.stringify({
+            workflow: wireOf(reference),
+            command: "pause",
+            runId: handle.runId,
+            idempotencyKey: key,
+          })
+        );
+        if (!("command" in command)) {
+          throw new Error("Not a command");
+        }
+        return command;
+      };
+      await answerWorkflowCommand(env, builder.acting, app, pauseOf(keyOf()));
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "paused"
+        );
+      }, settles);
+      // The same pause, sent twice: the second runs whole just before the
+      // first writes, both having found the run paused and no receipt.
+      const retried = pauseOf(keyOf());
+      let twin: unknown;
+      const racing: Env = {
+        ...env,
+        DB: new Proxy(env.DB, {
+          get: (target, property) => {
+            const value: unknown = Reflect.get(target, property);
+            if (property === "batch" && typeof value === "function") {
+              return async (statements: D1PreparedStatement[]) => {
+                if (twin === undefined) {
+                  ({ value: twin } = await answerWorkflowCommand(
+                    env,
+                    builder.acting,
+                    app,
+                    retried
+                  ));
+                }
+                const answer: unknown = await Reflect.apply(value, target, [
+                  statements,
+                ]);
+                return answer;
+              };
+            }
+            return typeof value === "function"
+              ? (...args: unknown[]): unknown =>
+                  Reflect.apply(value, target, args)
+              : value;
+          },
+        }),
+      };
+      let first: unknown;
+      const events = await auditedDuring(async () => {
+        ({ value: first } = await answerWorkflowCommand(
+          racing,
+          builder.acting,
+          app,
+          retried
+        ));
+      });
+      stopRun();
+      const receipts = await env.DB.prepare(
+        "SELECT kind, state FROM workflow_resource_run_controls WHERE run_id = ? AND key = ?"
+      )
+        .bind(handle.runId, retried.idempotencyKey)
+        .all<{ kind: string; state: string }>();
+
+      expect({
+        first: staged(first),
+        twin: staged(twin),
+        receipts: receipts.results,
+        audited: events
+          .filter(({ target }) => target?.id === handle.runId)
+          .map(({ action, detail }) => ({ action, already: detail.already })),
+      }).toStrictEqual({
+        first: { kind: "pause", state: "applied" },
+        twin: { kind: "pause", state: "applied" },
+        receipts: [{ kind: "pause", state: "applied" }],
+        audited: [{ action: "workflow.run.pause_requested", already: true }],
+      });
+    });
+
+    it("applies a stalled pause at the next repair, the run's snapshot moving on from applying to paused", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "running"
+        );
+      }, settles);
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE workflow_resource_runs SET control_generation = control_generation + 1, summary_revision = summary_revision + 1 WHERE id = ?"
+        ).bind(handle.runId),
+        env.DB.prepare(
+          "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, generation, created_at, next_at) SELECT ?, id, ?, ?, ?, 'pause', 'admitted', control_generation, ?, ? FROM workflow_resource_runs WHERE id = ?"
+        ).bind(
+          crypto.randomUUID(),
+          app,
+          builder.userId,
+          keyOf(),
+          Date.now() - 120_000,
+          Date.now() - 60_000,
+          handle.runId
+        ),
+      ]);
+      await tellQueryFollowers(env, handle.runId);
+      await vi.waitFor(() => {
+        expect(
+          channel.peekRun(read, handle.runId).value?.control.pendingControl
+        ).toStrictEqual({ kind: "pause", stage: "applying" });
+      }, settles);
+      const applying = channel.peekRun(read, handle.runId);
+      await repairResourceTerminations(env, new Date());
+      await vi.waitFor(() => {
+        const shown = channel.peekRun(read, handle.runId).value;
+        expect(shown?.status).toBe("paused");
+        expect(shown?.control.pendingControl).toBeNull();
+      }, settles);
+      const paused = channel.peekRun(read, handle.runId);
+      stopRun();
+
+      expect({
+        later: paused.revision > applying.revision,
+        state: await env.DB.prepare(
+          "SELECT state FROM workflow_resource_run_controls WHERE run_id = ?"
+        )
+          .bind(handle.runId)
+          .first<string>("state"),
+      }).toStrictEqual({ later: true, state: "applied" });
     });
 
     it("refuses a cancel of a run that completed", async () => {
@@ -1030,7 +1839,7 @@ describe(
       };
       const first = await following(builder, app, lease, watch);
       await vi.waitFor(() => {
-        expect(stageOf(first.received.at(-1)?.revision)).toBe(3);
+        expect(shownOf(first.received.at(-1)?.outcome)).toBe("running");
       }, settles);
       // The same run on the same connection: one reading, shared.
       const second = await following(builder, app, lease, watch);
@@ -1066,7 +1875,7 @@ describe(
           .object({ canRun: z.boolean() })
           .safeParse(binding.received.at(-1)?.outcome).data?.canRun;
       await vi.waitFor(() => {
-        expect(stageOf(first.received.at(-1)?.revision)).toBe(3);
+        expect(shownOf(first.received.at(-1)?.outcome)).toBe("running");
         expect(canRun()).toBeTruthy();
       }, settles);
       // Rebound away: the screen is told at once, nothing else needed.
@@ -1104,15 +1913,20 @@ describe(
         // What it showed in turn, each read again as the binding changed,
         // from the run running on (it may first have shown it queued).
         first: first.received
-          .map(({ revision, outcome: shown }) =>
-            typeof shown === "string" ? shown : stageOf(revision)
-          )
-          .filter((shown) => shown !== 1)
+          .map(({ outcome: shown }) => shownOf(shown))
+          .filter((shown) => shown !== "queued")
           .filter((shown, at, all) => at === 0 || shown !== all[at - 1]),
-        second: second.received.map(({ revision }) => stageOf(revision)),
+        // Shown again at the revision it had before it was refused.
+        sameRevision: new Set(
+          [...first.received, ...second.received]
+            .filter(({ outcome: shown }) => shownOf(shown) === "running")
+            .map(({ revision }) => revision)
+        ).size,
+        second: second.received.map(({ outcome: shown }) => shownOf(shown)),
       }).toStrictEqual({
-        first: [3, "workflow.run_unavailable", 3],
-        second: [3],
+        first: ["running", "workflow.run_unavailable", "running"],
+        sameRevision: 1,
+        second: ["running"],
       });
     });
 
@@ -1129,7 +1943,7 @@ describe(
       };
       const first = await following(builder, app, lease, watch);
       await vi.waitFor(() => {
-        expect(stageOf(first.received.at(-1)?.revision)).toBe(5);
+        expect(shownOf(first.received.at(-1)?.outcome)).toBe("completed");
       }, settles);
       // Its details removed, as the retention sweep removes them.
       await env.DB.prepare(
@@ -1216,7 +2030,7 @@ describe(
         before: {
           revision: before.revision,
           control: {
-            canPause: false,
+            canPause: true,
             canResume: false,
             canCancel: true,
             pendingControl: null,
@@ -1313,7 +2127,10 @@ describe(
         await vi.waitFor(() => {
           const last = watched.received.at(-1);
           expect(
-            typeof last?.outcome === "string" || stageOf(last?.revision) === 5
+            typeof last?.outcome === "string" ||
+              ["completed", "failed", "cancelled"].includes(
+                String(shownOf(last?.outcome))
+              )
           ).toBeTruthy();
         }, settles);
         await watched.subscription.release();
@@ -1646,8 +2463,8 @@ describe(
       }).toStrictEqual({
         same: outcomeOf(one),
         cancels: [
-          { kind: "cancel", state: "applied", revision: 5 },
-          { kind: "cancel", state: "applied", revision: 5 },
+          { kind: "cancel", state: "applied" },
+          { kind: "cancel", state: "applied" },
         ],
         receipts: ["applied"],
         reopened: false,
