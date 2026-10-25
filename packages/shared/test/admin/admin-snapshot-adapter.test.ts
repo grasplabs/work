@@ -12,6 +12,7 @@ import { adminViewOf, portfolioOf } from "../../src/admin/admin-view.ts";
 import { recordOf } from "../../src/admin/onboarding-admin-record.ts";
 import { STARTING_ORG_RULES } from "../../src/admin/onboarding-admin.ts";
 import { orgOfSnapshot } from "../../src/admin/org-adapter.ts";
+import { staffDrawingOf } from "../../src/admin/org-record.ts";
 import type { Told, WorkRecord } from "../../src/admin/org-record.ts";
 
 const client = {
@@ -901,7 +902,7 @@ describe("an organization from core's admin snapshot", () => {
     );
   });
 
-  it("shows staff a drawn piece of work with each person's numbers apart, its open questions, under the organization's rules", () => {
+  it("shows staff a drawn piece of work with its numbers as totals, its open questions, under the organization's rules", () => {
     // Tom finished too, and both told about taking orders.
     const both = adminSnapshotSchema.parse({
       ...answer,
@@ -929,7 +930,7 @@ describe("an organization from core's admin snapshot", () => {
       share: 0.6,
       from: "lead",
       stale: false,
-      drawn: {
+      drawn: staffDrawingOf({
         at: "2026-10-14T10:01:00.000Z",
         from: ["lisa", "tom"],
         starts: "A shop calls.",
@@ -966,7 +967,7 @@ describe("an organization from core's admin snapshot", () => {
           tom: told({ volume: [60, 80], wrong: 2 }),
         },
         open: ["Who takes an order when Sales is out?"],
-      },
+      }),
     };
     const rules = { ...STARTING_ORG_RULES, people: 2 };
     const { org, state } = adminOrgOf(both, client, {
@@ -976,9 +977,7 @@ describe("an organization from core's admin snapshot", () => {
     });
     const view = adminViewOf(org, state, "2026-10-14");
     const record = recordOf(view, "orders");
-    const missing = record
-      ? missingOf(record, orders.drawn?.open).map(({ kind }) => kind)
-      : [];
+    const missing = record ? missingOf(record).map(({ kind }) => kind) : [];
 
     expect({
       unknown: view.unknown.works,
@@ -998,11 +997,13 @@ describe("an organization from core's admin snapshot", () => {
       rules,
       // Two of three talked: not known by the rules, but counted by hand.
       evidence: [["orders", 2, "complete", true]],
-      // The lowest and the highest anyone said, never an average.
-      volume: { quiet: [20, 60], busy: [40, 80], people: 2 },
-      wrong: { outOfTen: [2, 2], people: 1 },
-      heardFrom: ["lisa", "tom"],
-      missing: ["people", "around", "around", "question"],
+      // Fewer than 5 gave them: neither how many nor a value (GRA-1079).
+      volume: { people: null, value: null },
+      wrong: { people: null, value: null },
+      // Who told it, what was said around the steps and what the next
+      // interviews should ask are what people said: never staff's (GRA-1084).
+      heardFrom: [],
+      missing: ["people"],
     });
   });
 });

@@ -1,3 +1,4 @@
+import { staffDrawingOf } from "@grasp-os/shared/admin/org-record";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
@@ -559,6 +560,50 @@ describe("the work as drawn", () => {
       unit: "hours",
       takes: [2.5, 4, 8],
       told: ["lisa", "tim", "bram"],
+    });
+  });
+
+  it("keeps each person's own minutes of a step and share of a case, which staff see only as a median of five or more", () => {
+    const drawn = drawnOf(
+      {
+        steps: [
+          step("Look it up.", {
+            minutes: [2, 4, 9],
+            minutes_by: [
+              { person: "lisa", minutes: [2, 4, 9] },
+              { person: "nobody-asked", minutes: [1, 1, 1] },
+            ],
+          }),
+        ],
+        notes: [
+          {
+            kind: "differently",
+            text: "the client number is missing",
+            detail: "Ask Finance.",
+            out_of_ten: 2,
+            out_of_ten_by: [{ person: "tim", out_of_ten: 2 }],
+            by: ["tim"],
+          },
+        ],
+      },
+      tellers,
+      "2026-10-22T00:00:00.000Z"
+    );
+    const staff = staffDrawingOf(drawn);
+
+    expect({
+      lisa: drawn.told.lisa?.stepMinutes,
+      tim: drawn.told.tim?.caseShares,
+      bram: [drawn.told.bram?.stepMinutes, drawn.told.bram?.caseShares],
+      minutes: staff.steps.map(({ minutes }) => minutes),
+      shares: staff.differently.map(({ outOfTen }) => outOfTen),
+    }).toStrictEqual({
+      lisa: [{ step: 0, minutes: [2, 4, 9] }],
+      tim: [{ case: 0, outOfTen: 2 }],
+      bram: [[], []],
+      // Three tell the step, one gave its minutes: nothing shows.
+      minutes: [{ people: null, value: null }],
+      shares: [{ people: null, value: null }],
     });
   });
 

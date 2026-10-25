@@ -20,6 +20,7 @@ import type {
 } from "./interviews.ts";
 import { DEFAULT_THRESHOLD, LISTEN_DAYS, WEIGHTS } from "./onboarding.ts";
 import type { DirectoryTeam } from "./onboarding.ts";
+import type { DrawnTotals, Told, ToldParts } from "./org-record.ts";
 import { present } from "./present.ts";
 
 /**
@@ -89,6 +90,17 @@ export interface Work {
   unit?: "hours";
   /** How many out of ten come in wrong. */
   wrong: number;
+  /**
+   * A real organization's numbers as its drawing totals them: over everyone who gave them, never
+   * one person's. A sample organization's are added up from its made-up people (`Telling.numbers`).
+   */
+  totals?: DrawnTotals;
+  /**
+   * A real organization's: how many people told each step, by position, as its drawing counts
+   * them, none under 5 (`shownCount`); staff never learn who (GRA-1084). A sample's are counted
+   * from its made-up people.
+   */
+  stepPeople?: (number | null)[];
   /** What right looks like. */
   right: string;
   /** When to stop and ask, from "when". */
@@ -1170,40 +1182,23 @@ const FIELDS: [RecordField, (telling: Telling) => boolean][] = [
   ["exceptions", (telling) => telling.differently.length > 0],
   ["decisions", (telling) => telling.decides],
   ["workarounds", (telling) => telling.own || telling.ai],
-  ["volume", (telling) => telling.volume !== null],
-  ["time", (telling) => telling.takes !== null],
-  ["rework", (telling) => telling.wrong !== null],
+  ["volume", (telling) => (telling.numbers?.volume ?? null) !== null],
+  ["time", (telling) => (telling.numbers?.takes ?? null) !== null],
+  ["rework", (telling) => (telling.numbers?.wrong ?? null) !== null],
   ["result", (telling) => telling.right || telling.ask],
-  ["cases", (telling) => telling.example !== null],
+  ["cases", (telling) => telling.example],
   ["terms", (telling) => telling.term],
   ["next", (telling) => telling.next],
 ];
 
-/** What one person said about their work: which parts of it, in their own numbers. */
-export interface Telling {
-  start: boolean;
-  /** The steps they described, by position. */
-  steps: number[];
-  /** They described the last step: what counts as finished. */
-  end: boolean;
-  /** The step people describe two ways, when they described it: as most do, or the other way. */
-  way: { step: number; other: boolean } | null;
-  waits: number[];
-  differently: number[];
-  decides: boolean;
-  own: boolean;
-  ai: boolean;
-  volume: [number, number] | null;
-  takes: [number, number, number] | null;
-  wrong: number | null;
-  right: boolean;
-  ask: boolean;
-  next: boolean;
-  /** The file they shared as an example, by name. */
-  example: string | null;
-  term: boolean;
-  /** What they took out again when it was read back, by fact. */
-  out: string[];
+/**
+ * What one person said about their work: which parts of it (`ToldParts`). A real organization's
+ * people carry no numbers of their own here, nor whether they gave one: staff see numbers only
+ * as totals over enough people, the drawing's (`Work.totals`). The made-up people of a sample
+ * organization carry theirs (`numbers`), from which its totals are added up the same way.
+ */
+export interface Telling extends ToldParts {
+  numbers?: Pick<Told, "volume" | "takes" | "wrong">;
 }
 
 /** The parts of an interview in which each thing is said: an interview that stopped has only what came before. */
@@ -1245,13 +1240,10 @@ export const NOTHING_TOLD: Telling = {
   decides: false,
   own: false,
   ai: false,
-  volume: null,
-  takes: null,
-  wrong: null,
   right: false,
   ask: false,
   next: false,
-  example: null,
+  example: false,
   term: false,
   out: [],
 };
@@ -1280,21 +1272,28 @@ export const factsSaid = (
     ...(telling.decides ? ["decides"] : []),
     ...(telling.own ? ["own"] : []),
     ...(telling.ai ? ["ai"] : []),
-    ...(telling.volume ? ["volume"] : []),
-    ...(telling.takes ? ["takes"] : []),
-    ...(telling.wrong === null ? [] : ["wrong"]),
+    ...((telling.numbers?.volume ?? null) === null ? [] : ["volume"]),
+    ...((telling.numbers?.takes ?? null) === null ? [] : ["takes"]),
+    ...((telling.numbers?.wrong ?? null) === null ? [] : ["wrong"]),
     ...(telling.right ? ["right"] : []),
     ...(telling.ask ? ["ask"] : []),
-    ...(present(telling.example) ? ["example"] : []),
+    ...(telling.example ? ["example"] : []),
   ];
   return all.filter((fact) => saidBefore(fact, stoppedAt));
+};
+
+/** Three numbers, lowest first. */
+const inOrder = (a: number, b: number, c: number): [number, number, number] => {
+  const [low = a, middle = b, high = c] = [a, b, c].toSorted(
+    (left, right) => left - right
+  );
+  return [low, middle, high];
 };
 
 const jitter = (value: number, key: string, spread = 0.2) =>
   Math.max(1, Math.round(value * (1 - spread + unit(key) * spread * 2)));
 
 /** What `person` says about `work`: most of it, never all, and their own version of the numbers. */
-// oxlint-disable-next-line complexity -- ported as the prototype has it, one part of a telling after another; the sample's numbers come from it
 export const tellingOf = (org: Org, person: Person, work: Work): Telling => {
   if (org.real) {
     return org.real.told.get(`${person.id}/${work.id}`) ?? NOTHING_TOLD;
@@ -1313,6 +1312,30 @@ export const tellingOf = (org: Org, person: Person, work: Work): Telling => {
       .indexOf(person) %
       3 ===
     1;
+  // Their own version of the numbers: around the work's, a busy week never quieter than a quiet
+  // one, and the longest never shorter than a normal one.
+  const volume: [number, number] | null = says("volume", 0.95)
+    ? [
+        jitter(work.volume[0], `${key}/quiet`),
+        jitter(work.volume[1], `${key}/busy`),
+      ]
+    : null;
+  if (volume) {
+    volume[1] = Math.max(volume[1], volume[0]);
+  }
+  const takes = says("takes", 0.9)
+    ? inOrder(
+        jitter(work.takes[0], `${key}/least`),
+        jitter(work.takes[1], `${key}/normal`),
+        jitter(work.takes[2], `${key}/most`)
+      )
+    : null;
+  const wrong = says("wrong", 0.7)
+    ? Math.min(
+        9,
+        Math.max(0, work.wrong + Math.round(unit(`${key}/wrongs`) * 2 - 1))
+      )
+    : null;
   const telling: Telling = {
     start: says("start", 0.95),
     steps,
@@ -1330,47 +1353,14 @@ export const tellingOf = (org: Org, person: Person, work: Work): Telling => {
     decides: work.decides !== undefined && says("decides", 0.6),
     own: work.own !== undefined && says("own", 0.55),
     ai: work.ai !== undefined && says("ai", 0.3),
-    volume: says("volume", 0.95)
-      ? [
-          jitter(work.volume[0], `${key}/quiet`),
-          jitter(work.volume[1], `${key}/busy`),
-        ]
-      : null,
-    takes: says("takes", 0.9)
-      ? [
-          jitter(work.takes[0], `${key}/least`),
-          jitter(work.takes[1], `${key}/normal`),
-          jitter(work.takes[2], `${key}/most`),
-        ]
-      : null,
-    wrong: says("wrong", 0.7)
-      ? Math.min(
-          9,
-          Math.max(0, work.wrong + Math.round(unit(`${key}/wrongs`) * 2 - 1))
-        )
-      : null,
     right: says("right", 0.86),
     ask: work.ask !== undefined && says("ask", 0.7),
     next: says("next", 0.9),
-    example: says("example", 0.3)
-      ? `${work.item[0].replaceAll(" ", "-")}-${100 + Math.floor(unit(`${key}/file`) * 900)}.${says("pdf", 0.5) ? "pdf" : "png"}`
-      : null,
+    example: says("example", 0.3),
     term: work.term !== undefined && says("term", 0.35),
     out: [],
+    numbers: { volume, takes, wrong },
   };
-  // A busy week is never quieter than a quiet one, and the longest never shorter than a normal one.
-  if (telling.volume) {
-    telling.volume[1] = Math.max(telling.volume[1], telling.volume[0]);
-  }
-  if (telling.takes) {
-    // SAFETY: three numbers sorted are three numbers.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    telling.takes = telling.takes.toSorted((a, b) => a - b) as [
-      number,
-      number,
-      number,
-    ];
-  }
   // Now and then someone takes a line out again when it is read back.
   const said = factsSaid(telling, null);
   const taken = said[Math.floor(unit(`${key}/outs`) * said.length)];
@@ -1565,9 +1555,9 @@ export const interviewsAt = (
     const unsaid = telling
       ? (
           [
-            ["volume", telling.volume === null],
-            ["takes", telling.takes === null],
-            ["wrong", telling.wrong === null],
+            ["volume", (telling.numbers?.volume ?? null) === null],
+            ["takes", (telling.numbers?.takes ?? null) === null],
+            ["wrong", (telling.numbers?.wrong ?? null) === null],
             ["next", !telling.next],
           ] as const
         ).filter(([part, open]) => open && saidBefore(part, stoppedAt)).length

@@ -9,7 +9,14 @@ import type { WorkRecord } from "./onboarding-admin-record.ts";
 export type Missing =
   | { kind: "difference"; step: number; text: string }
   | { kind: "people"; count: number }
-  | { kind: "step"; step: number; text: string; people: number; needed: number }
+  | {
+      kind: "step";
+      step: number;
+      text: string;
+      /** None when fewer than 5 told it at a real organization. */
+      people: number | null;
+      needed: number;
+    }
   /** More steps than fit a list that too few people described: how many, of how many, and how many people a step needs. */
   | { kind: "steps"; count: number; of: number; needed: number }
   | { kind: "number"; which: "volume" | "takes" | "wrong" }
@@ -57,22 +64,24 @@ export const missingOf = (
         });
       }
     }
-    if (!record.volume) {
+    if (record.volume.people === 0) {
       missing.push({ kind: "number", which: "volume" });
     }
-    if (!record.takes) {
+    if (record.takes.people === 0) {
       missing.push({ kind: "number", which: "takes" });
     }
-    if (!record.wrong) {
+    if (record.wrong.people === 0) {
       missing.push({ kind: "number", which: "wrong" });
     }
-    if (record.starts.people === 0) {
+    // What was said around the steps is a sample's alone: a real organization's staff get
+    // nothing anyone said (GRA-1084), so nothing of it is missing to them.
+    if (record.byPerson && record.starts.people === 0) {
       missing.push({ kind: "around", which: "starts" });
     }
-    if (record.right.people === 0) {
+    if (record.byPerson && record.right.people === 0) {
       missing.push({ kind: "around", which: "right" });
     }
-    if (record.next.people === 0) {
+    if (record.byPerson && record.next.people === 0) {
       missing.push({ kind: "around", which: "next" });
     }
   }

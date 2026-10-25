@@ -19,10 +19,11 @@ import type {
   OrgTeam,
   OrgView,
   PlatformPart,
-  Telling,
   Work,
   WorkEvidence,
 } from "./onboarding-admin.ts";
+import { shownNumber, totalsOf } from "./org-record.ts";
+import type { DrawnTotals } from "./org-record.ts";
 import { present } from "./present.ts";
 
 /**
@@ -35,10 +36,6 @@ import { present } from "./present.ts";
 const bare = (sentence: string) => sentence.replace(/[.!?]$/u, "");
 const lower = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 const upper = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
-const range = (values: number[]): [number, number] => [
-  Math.min(...values),
-  Math.max(...values),
-];
 
 /** Something said about a piece of work, with how many of the people who talked said it. */
 export interface Said {
@@ -50,7 +47,9 @@ export interface Said {
 export type StepWay = "main" | "other" | "none";
 
 /** One step of a piece of work, as the interviews have it. */
-export interface StepRecord extends Said {
+export interface StepRecord extends Omit<Said, "people"> {
+  /** How many told it; none when fewer than 5 did at a real organization (`shownCount`). */
+  people: number | null;
   /** How each interview told it, in the order of `interviews`. */
   ways: StepWay[];
   /** A document or a log describes it too. */
@@ -72,6 +71,11 @@ export interface WorkRecord {
   evidence: WorkEvidence;
   /** The interviews it rests on, in the order they came in. */
   interviews: Interview[];
+  /**
+   * Whether who told what shows, person by person: only a sample's made-up people. A real
+   * organization's staff see how many, never who (GRA-1084).
+   */
+  byPerson: boolean;
   /** People who do the work and have not talked. */
   toAsk: number;
   /** How many people have to describe a step before it counts. */
@@ -84,21 +88,10 @@ export interface WorkRecord {
   decides: Said | null;
   own: Said | null;
   ai: Said | null;
-  /** How many there are in a quiet and in a busy week or month: the lowest and the highest anyone said. */
-  volume: {
-    quiet: [number, number];
-    busy: [number, number];
-    people: number;
-  } | null;
-  /** How long one takes: the quickest and the longest anyone named, and what they call normal. */
-  takes: {
-    least: number;
-    most: number;
-    normal: [number, number];
-    people: number;
-  } | null;
-  /** How many out of ten come in wrong. */
-  wrong: { outOfTen: [number, number]; people: number } | null;
+  /** The numbers as totals over enough people, never one person's (`DrawnTotals`). */
+  volume: DrawnTotals["volume"];
+  takes: DrawnTotals["takes"];
+  wrong: DrawnTotals["wrong"];
   right: Said;
   ask: Said | null;
   next: Said;
@@ -123,11 +116,8 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
   }
   const { org, state } = view;
   const work: Work = evidence.work;
-  // At a real organization, everyone who told about it counts, whatever they were asked about.
-  const about = (interview: Interview) =>
-    org.real
-      ? org.real.told.has(`${interview.person.id}/${id}`)
-      : interview.work?.id === id;
+  // Who was asked about it: staff never learn who told what (GRA-1084).
+  const about = (interview: Interview) => interview.work?.id === id;
   const interviews = view.interviews
     .filter((interview) => interview.approved && about(interview))
     .toSorted((a, b) => a.day - b.day);
@@ -143,43 +133,50 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
   });
   const said = (fact: string) =>
     tellings.filter((each) => each.kept.has(fact)).length;
-  // What each of them gave for a number, for the ones who gave it and left it in.
-  const numbers = <Value>(
-    fact: string,
-    of: (telling: Telling) => Value | null
-  ): Value[] =>
-    tellings.flatMap((each) => {
-      const value = each.kept.has(fact) ? of(each.telling) : null;
-      return value === null ? [] : [value];
-    });
+  // The numbers as totals over the ones who gave them and left them in, never one person's: a
+  // real organization's as its drawing totals them, a sample's from its made-up people.
+  const totals =
+    work.totals ??
+    totalsOf(
+      tellings.map(({ telling }) => ({
+        volume: telling.numbers?.volume ?? null,
+        takes: telling.numbers?.takes ?? null,
+        wrong: telling.numbers?.wrong ?? null,
+        out: telling.out,
+      }))
+    );
   const needed = evidence.everyone
     ? 1
     : Math.max(1, Math.min(state.rules.people, evidence.doers));
   const { differs } = work;
-  const volumes = numbers("volume", (telling) => telling.volume);
-  const times = numbers("takes", (telling) => telling.takes);
-  const wrongs = numbers("wrong", (telling) => telling.wrong);
   const one = (text: string | undefined, fact: string): Said | null =>
     text === undefined ? null : { text, people: said(fact) };
   return {
     evidence,
     interviews,
+    byPerson: !org.real,
     toAsk: evidence.doers - evidence.approved,
     needed,
     starts: { text: work.starts, people: said("start") },
     steps: work.steps.map((text, index) => {
       const ways = tellings.map((each) => wayOf(each.kept, index));
       const otherWay = ways.filter((way) => way === "other").length;
-      const people = ways.filter((way) => way !== "none").length;
+      // A real organization's count is its drawing's, none under 5: who told it is never staff's.
+      const people =
+        work.stepPeople === undefined
+          ? ways.filter((way) => way !== "none").length
+          : (work.stepPeople[index] ?? null);
       const documented = (work.documented ?? []).includes(index);
       return {
         text,
         people,
         ways,
         documented,
+        // Not known to count while fewer than 5 told it at a real organization.
         enough:
-          people >= needed ||
-          (people >= 1 && people >= needed - 1 && documented),
+          people !== null &&
+          (people >= needed ||
+            (people >= 1 && people >= needed - 1 && documented)),
         other:
           differs && differs.step === index && otherWay > 0
             ? {
@@ -198,36 +195,25 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
       people: said(`wait:${index}`),
     })),
     differently: (work.differently ?? []).map(
-      ([when, then, outOfTen], index) => ({
-        text: `If ${when}, ${lower(bare(then))}.`,
-        outOfTen,
-        people: said(`differently:${index}`),
-      })
+      ([when, then, outOfTen], index) => {
+        const people = said(`differently:${index}`);
+        return {
+          text: `If ${when}, ${lower(bare(then))}.`,
+          // Shown only once enough people told it (`shownNumber`).
+          outOfTen:
+            outOfTen === null
+              ? null
+              : shownNumber(people, () => outOfTen).value,
+          people,
+        };
+      }
     ),
     decides: one(work.decides, "decides"),
     own: one(work.own, "own"),
     ai: one(work.ai, "ai"),
-    volume:
-      volumes.length === 0
-        ? null
-        : {
-            quiet: range(volumes.map((each) => each[0])),
-            busy: range(volumes.map((each) => each[1])),
-            people: volumes.length,
-          },
-    takes:
-      times.length === 0
-        ? null
-        : {
-            least: Math.min(...times.map((each) => each[0])),
-            most: Math.max(...times.map((each) => each[2])),
-            normal: range(times.map((each) => each[1])),
-            people: times.length,
-          },
-    wrong:
-      wrongs.length === 0
-        ? null
-        : { outOfTen: range(wrongs), people: wrongs.length },
+    volume: totals.volume,
+    takes: totals.takes,
+    wrong: totals.wrong,
     right: { text: work.right, people: said("right") },
     ask:
       work.ask === undefined
