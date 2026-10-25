@@ -5,6 +5,7 @@ import { lessonLineage } from "../src/lesson-reads.ts";
 import {
   consolidate,
   lessonsOf,
+  runConsolidation,
   wordingMaxLength,
   wordingsPerJob,
   wordLessons,
@@ -113,6 +114,20 @@ describe("wording lessons", () => {
     });
   });
 
+  it("keeps no control or format characters in a wording", async () => {
+    // A right-to-left override, a zero-width joiner and a C1 next-line.
+    const answer = "Invoices \u202Ekept\u200D failing\u0085 lately.";
+    const { brain } = testHost(undefined, { answer });
+    const ann = named("ann");
+    await lessonFor(brain, ann);
+    const [lesson] = await lessonsOf(brain, { scope: "person", scopeId: ann });
+
+    await wordLessons(brain, { scope: "person", scopeId: ann });
+    const kept = await stored(lesson?.id ?? "");
+
+    expect(kept?.wording).toBe("Invoices  kept  failing  lately.");
+  });
+
   it("words a revision once, however often the job is made again", async () => {
     const { brain, worded } = testHost();
     const ann = named("ann");
@@ -165,6 +180,34 @@ describe("wording lessons", () => {
     expect({ first, second, asked: worded.length }).toStrictEqual({
       first: wordingsPerJob,
       second: 2,
+      asked: wordingsPerJob + 2,
+    });
+  });
+
+  it("words every lesson a job patched, a bounded pass at a time", async () => {
+    const { brain, worded } = testHost();
+    const ann = named("ann");
+    for (let n = 0; n < wordingsPerJob + 2; n += 1) {
+      for (let m = 0; m < 3; m += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await recordOutcome(brain, failed(ann, `workflow:app/job-${n}`));
+      }
+    }
+    const steps: string[] = [];
+
+    await runConsolidation(
+      brain,
+      { scope: "person", scopeId: ann },
+      {
+        do: async (name, _config, fn) => {
+          steps.push(name);
+          return await fn();
+        },
+      }
+    );
+
+    expect({ steps, asked: worded.length }).toStrictEqual({
+      steps: ["consolidate", "word-0", "word-1"],
       asked: wordingsPerJob + 2,
     });
   });

@@ -733,15 +733,27 @@ export const consolidate = async <C>(
   return { read: fresh.length, patched };
 };
 
-/** Lessons one job asks a model to word, at most. */
+/** Lessons one wording pass asks a model to word, at most. */
 export const wordingsPerJob = 5;
+
+/**
+ * Wording passes one consolidation job makes, at most: as many as it can
+ * patch lessons (`patchesPerJob`), so a job words what it patched.
+ */
+export const wordingPassesPerJob = Math.ceil(
+  consolidationLimits.patchesPerJob / wordingsPerJob
+);
 
 /** The longest wording kept, in characters. */
 export const wordingMaxLength = 500;
 
-/** Control characters, which a wording never keeps. */
+/**
+ * Control characters (C0, DEL and C1) and Unicode format characters (such
+ * as bidirectional overrides and zero-width joiners), which a wording never
+ * keeps: it shows as the plain text it reads as.
+ */
 // oxlint-disable-next-line no-control-regex -- control characters on purpose
-const controlCharacters = /[\u0000-\u001F\u007F]+/gu;
+const controlCharacters = /[\u0000-\u001F\u007F-\u009F\p{Cf}]+/gu;
 
 /** A model's answer as a lesson keeps it: one line of text, capped. */
 const wordingOf = (answer: string): string =>
@@ -1125,9 +1137,21 @@ export const runConsolidation = async <C>(
     const result = await consolidate(brain, scope);
     return { ...result };
   });
-  // Its own step: a wording that fails or is refused never undoes a patch.
-  await step.do("word", consolidationConfig, async () => {
-    const worded = await wordLessons(brain, scope);
-    return { worded };
-  });
+  // Its own steps: a wording that fails or is refused never undoes a
+  // patch. A bounded pass at a time, until one finds fewer to word than it
+  // may (none left, or the budget spent), at most as many as it patched.
+  for (let pass = 0; pass < wordingPassesPerJob; pass += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one bounded pass after another
+    const worded = await step.do(
+      `word-${pass}`,
+      consolidationConfig,
+      async () => ({
+        worded: await wordLessons(brain, scope),
+      })
+    );
+    const done = z.object({ worded: z.int() }).safeParse(worded);
+    if (!done.success || done.data.worded < wordingsPerJob) {
+      break;
+    }
+  }
 };
