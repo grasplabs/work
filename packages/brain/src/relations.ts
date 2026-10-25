@@ -1,11 +1,10 @@
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import { z } from "zod";
 
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
-import { brainErrors } from "./contract.ts";
-import type { BrainSourceRef } from "./contract.ts";
+import { brainErrors, relationsGetInputSchema } from "./contract.ts";
+import type { RelationView } from "./contract.ts";
 import {
   brainAssertions,
   brainLinkJobs,
@@ -13,6 +12,7 @@ import {
   collections,
   documents,
 } from "./db/schema.ts";
+import { requireBrainRead } from "./entities.ts";
 import { collectionIdSchema, documentIdSchema, memoryIdSchema } from "./ids.ts";
 import { citesReadable } from "./memory-cites.ts";
 
@@ -45,44 +45,7 @@ import { citesReadable } from "./memory-cites.ts";
 /** The most relations one read returns, and reads of each kind of source. */
 const readRowsMax = 200;
 
-const isoDate = /^\d{4}-\d{2}-\d{2}$/u;
-
-const relationsInputSchema = z.strictObject({
-  /** The entity whose relations, as subject or object. */
-  entityId: z.string().min(1).max(256),
-  /** Only this relation (`owns`), folded as relations are. */
-  predicate: z.string().min(1).max(40).optional(),
-  /** Those that hold on this date (ISO); every one without it. */
-  at: z.string().regex(isoDate).optional(),
-  /** What the Brain had read by this moment (ISO); now without it. */
-  knownAt: z.iso.datetime({ offset: true }).optional(),
-});
-
-/** One end of a relation: its entity, and the name its source gives it. */
-export interface RelationEnd {
-  entityId: string;
-  name: string;
-}
-
-/** A relation as a reader sees it, with the passage that states it. */
-export interface RelationView {
-  subject: RelationEnd;
-  predicate: string;
-  object: RelationEnd;
-  validFrom: string | null;
-  validTo: string | null;
-  state: "observed";
-  /**
-   * Another readable source relates the entity asked about the same way to
-   * a different entity, for an overlapping time.
-   */
-  conflicting: boolean;
-  /** When the Brain read it, and when a later version replaced it. */
-  recordedAt: string;
-  supersededAt: string | null;
-  evidence: string;
-  sourceRef: BrainSourceRef;
-}
+export type { RelationView } from "./contract.ts";
 
 /** Whether two validity intervals share a day; open ends reach forever. */
 const overlaps = (
@@ -125,9 +88,10 @@ export const relationsFor = async <C>(
 ): Promise<RelationView[]> => {
   const { entityId, predicate, at, knownAt } = brainErrors.parse(
     "brain.invalid",
-    relationsInputSchema,
+    relationsGetInputSchema,
     input
   );
+  await requireBrainRead(brain, reader);
   const { db } = brain;
   const allowed = await allowedFor(brain.ports, reader);
   let owner: string | undefined;

@@ -192,7 +192,9 @@ describe("entity linking", () => {
         label,
         sources,
       })),
-      sources: await entitySources(host.brain, reader, found[0]?.id ?? ""),
+      sources: await entitySources(host.brain, reader, {
+        entityId: found[0]?.id ?? "-",
+      }),
     }).toStrictEqual({
       before: { sources: 1, linked: 0, pending: 1, failed: 0, partial: 0 },
       after: { sources: 1, linked: 1, pending: 0, failed: 0, partial: 0 },
@@ -269,7 +271,7 @@ describe("entity linking", () => {
     const found = await entitiesFor(host.brain, reader);
     const kinds = await Promise.all(
       found.map(async ({ id }) => {
-        const refs = await entitySources(host.brain, reader, id);
+        const refs = await entitySources(host.brain, reader, { entityId: id });
         return refs.map(({ kind }) => kind);
       })
     );
@@ -320,7 +322,9 @@ describe("entity linking", () => {
       label: after?.label,
       names: after?.names,
       others,
-      sources: await entitySources(host.brain, reader, after?.id ?? ""),
+      sources: await entitySources(host.brain, reader, {
+        entityId: after?.id ?? "-",
+      }),
     }).toStrictEqual({
       same: true,
       label: "Anna de Vries",
@@ -411,7 +415,9 @@ describe("entity linking", () => {
     gate.resolve(null);
     await late;
     const found = await entitiesFor(host.brain, reader);
-    const held = await entitySources(host.brain, reader, found[0]?.id ?? "");
+    const held = await entitySources(host.brain, reader, {
+      entityId: found[0]?.id ?? "-",
+    });
 
     expect({
       labels: found.map(({ label }) => label),

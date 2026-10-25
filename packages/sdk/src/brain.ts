@@ -2,19 +2,26 @@ import {
   brainErrors,
   changeOptionsSchema,
   commandOptionsSchema,
+  entitiesListInputSchema,
+  entitySourcesInputSchema,
   memoriesGetInputSchema,
   memoriesListInputSchema,
   memoriesProposeChangeInputSchema,
   receiptsGetInputSchema,
   recallInputSchema,
+  relationsGetInputSchema,
   rememberInputSchema,
   skillsReadInputSchema,
   skillsSelectInputSchema,
 } from "@grasp-os/brain/contract";
 import type {
+  BrainSourceRef,
   ChangeOptions,
   CommandOptions,
   CommandReceipt,
+  EntitiesListInput,
+  EntitySourcesInput,
+  EntitySummary,
   MemoriesGetInput,
   MemoriesListInput,
   MemoriesProposeChangeInput,
@@ -23,6 +30,8 @@ import type {
   MemoryRecord,
   ReceiptsGetInput,
   RecallInput,
+  RelationsGetInput,
+  RelationView,
   RememberInput,
   SkillRead,
   SkillSelection,
@@ -37,11 +46,16 @@ export type {
   CommandOptions,
   CommandReceipt,
   Coverage,
+  EntitiesListInput,
+  EntitySourcesInput,
+  EntitySummary,
   MemoryItem,
   MemoryPack,
   MemoryPage,
   MemoryRecord,
   RecallInput,
+  RelationsGetInput,
+  RelationView,
   RememberInput,
   SkillRead,
   SkillRef,
@@ -78,6 +92,9 @@ export interface BrainBinding {
   ) => Promise<CommandReceipt>;
   skillsSelect?: (input: SkillsSelectInput) => Promise<SkillSelection>;
   skillsRead?: (input: SkillsReadInput) => Promise<SkillRead>;
+  entitiesList?: (input: EntitiesListInput) => Promise<EntitySummary[]>;
+  entitySources?: (input: EntitySourcesInput) => Promise<BrainSourceRef[]>;
+  relationsGet?: (input: RelationsGetInput) => Promise<RelationView[]>;
 }
 
 /** The Brain, as a caller uses it. */
@@ -110,6 +127,23 @@ export interface Brain {
     select: (input: SkillsSelectInput) => Promise<SkillSelection>;
     /** A pinned skill, at exactly its version. */
     read: (input: SkillsReadInput) => Promise<SkillRead>;
+  };
+  entities: {
+    /**
+     * The entities readable sources mention, by a name's start: at least
+     * two characters for a caller that isn't a person.
+     */
+    list: (input: EntitiesListInput) => Promise<EntitySummary[]>;
+    /** The readable sources that mention one entity, at their versions. */
+    sources: (input: EntitySourcesInput) => Promise<BrainSourceRef[]>;
+  };
+  relations: {
+    /**
+     * What readable sources say about one entity, each with its passage:
+     * on a date (`at`), as known at a moment (`knownAt`). Observed, never
+     * an accepted fact; conflicting ones both come back.
+     */
+    get: (input: RelationsGetInput) => Promise<RelationView[]>;
   };
 }
 
@@ -196,5 +230,27 @@ export const brain = (binding: BrainBinding): Brain => ({
       ),
     read: async (input) =>
       await call(binding, "skillsRead", checked(skillsReadInputSchema, input)),
+  },
+  entities: {
+    list: async (input) =>
+      await call(
+        binding,
+        "entitiesList",
+        checked(entitiesListInputSchema, input)
+      ),
+    sources: async (input) =>
+      await call(
+        binding,
+        "entitySources",
+        checked(entitySourcesInputSchema, input)
+      ),
+  },
+  relations: {
+    get: async (input) =>
+      await call(
+        binding,
+        "relationsGet",
+        checked(relationsGetInputSchema, input)
+      ),
   },
 });

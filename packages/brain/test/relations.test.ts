@@ -1,9 +1,11 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { brainErrors } from "../src/contract.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
   entitiesFor,
+  entitySources,
   runLinking,
   settleMs,
   sweepLinking,
@@ -30,6 +32,16 @@ import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 
 /** A word no other test's text has. */
 const word = () => `w${crypto.randomUUID().replaceAll("-", "").slice(0, 10)}`;
+
+/** What `promise` came to: "ok", or the Brain's code it was refused with. */
+const code = async (promise: Promise<unknown>): Promise<string> => {
+  try {
+    await promise;
+    return "ok";
+  } catch (error) {
+    return brainErrors.codeOf(error) ?? String(error);
+  }
+};
 
 /** A step that runs once, as a run without retries would. */
 const once: IndexStep = { do: async (_name, _config, fn) => await fn() };
@@ -452,6 +464,65 @@ describe("typed relations", () => {
     });
 
     expect(found?.evidence).toBe(said);
+  });
+
+  it("refuse a caller the host doesn't let read the Brain, and list no caller that isn't a person every name", async () => {
+    const host = testHost();
+    const collection = await newCollection(host.brain, "Desk");
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    const { recall } = host.brain.ports;
+    const refused = {
+      ...host,
+      brain: {
+        ...host.brain,
+        ports: {
+          ...host.brain.ports,
+          recall: {
+            ...recall,
+            require: async () => {
+              await Promise.resolve();
+              throw new Error("no brain grant");
+            },
+            isRefusal: () => true,
+          },
+        },
+      },
+    };
+    const agent = {
+      ...host,
+      brain: {
+        ...host.brain,
+        ports: {
+          ...host.brain.ports,
+          ownerOf: (): string => {
+            throw brainErrors.create("brain.denied");
+          },
+        },
+      },
+    };
+    const id = crypto.randomUUID();
+
+    expect({
+      relations: await code(
+        relationsFor(refused.brain, reader, { entityId: id })
+      ),
+      entities: await code(entitiesFor(refused.brain, reader, { query: "An" })),
+      sources: await code(
+        entitySources(refused.brain, reader, { entityId: id })
+      ),
+      everyName: await code(entitiesFor(agent.brain, reader, {})),
+      oneLetter: await code(entitiesFor(agent.brain, reader, { query: "a" })),
+      byStart: await code(entitiesFor(agent.brain, reader, { query: "an" })),
+      person: await code(entitiesFor(host.brain, reader, {})),
+    }).toStrictEqual({
+      relations: "brain.denied",
+      entities: "brain.denied",
+      sources: "brain.denied",
+      everyName: "brain.invalid",
+      oneLetter: "brain.invalid",
+      byStart: "ok",
+      person: "ok",
+    });
   });
 });
 

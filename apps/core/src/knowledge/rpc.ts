@@ -1,6 +1,12 @@
 import type {
+  BrainSourceRef,
   ChangeOptions,
   CommandOptions,
+  EntitiesListInput,
+  EntitySourcesInput,
+  EntitySummary,
+  RelationsGetInput,
+  RelationView,
   MemoriesProposeChangeInput,
   MemoriesPublishInput,
   MemoriesRetireInput,
@@ -25,6 +31,7 @@ import {
   listDocuments,
 } from "@grasp-os/brain/documents";
 import type { Writer } from "@grasp-os/brain/documents";
+import { entitiesFor, entitySources } from "@grasp-os/brain/entities";
 import {
   lessonLineage,
   lessonsFor,
@@ -43,6 +50,7 @@ import { memoriesLineage } from "@grasp-os/brain/memory-lineage";
 import { preparePurge, purge } from "@grasp-os/brain/purge";
 import type { OnErase } from "@grasp-os/brain/purge";
 import { recall } from "@grasp-os/brain/recall";
+import { relationsFor } from "@grasp-os/brain/relations";
 import { search } from "@grasp-os/brain/search";
 import { follow, read } from "@grasp-os/brain/tools";
 import type {
@@ -343,6 +351,24 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   async recall(input: RecallInput): Promise<MemoryPack> {
     return await this.#asReader(
       async (reader) => await recall(brainOf(this.#env), reader, input)
+    );
+  }
+
+  async entities(input?: EntitiesListInput): Promise<EntitySummary[]> {
+    return await this.#asReader(
+      async (reader) => await entitiesFor(brainOf(this.#env), reader, input)
+    );
+  }
+
+  async entitySources(input: EntitySourcesInput): Promise<BrainSourceRef[]> {
+    return await this.#asReader(
+      async (reader) => await entitySources(brainOf(this.#env), reader, input)
+    );
+  }
+
+  async relations(input: RelationsGetInput): Promise<RelationView[]> {
+    return await this.#asReader(
+      async (reader) => await relationsFor(brainOf(this.#env), reader, input)
     );
   }
 

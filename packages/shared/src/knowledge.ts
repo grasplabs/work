@@ -1,7 +1,11 @@
 import type {
+  BrainSourceRef,
   ChangeOptions,
   CommandOptions,
   CommandReceipt,
+  EntitiesListInput,
+  EntitySourcesInput,
+  EntitySummary,
   MemoriesGetInput,
   MemoriesLineageInput,
   MemoriesListInput,
@@ -13,6 +17,8 @@ import type {
   MemoryPage,
   MemoryRecord,
   ReceiptsGetInput,
+  RelationsGetInput,
+  RelationView,
   RecallInput,
   RememberInput,
   LessonLineage,
@@ -314,6 +320,19 @@ export interface KnowledgeApi {
    * collections the person may read, as a bounded memory pack.
    */
   recall: (input: RecallInput) => Promise<MemoryPack>;
+  /**
+   * The entities the person's readable sources mention, most mentioned
+   * first, or those with a name starting with `query` (GRA-305).
+   */
+  entities: (input?: EntitiesListInput) => Promise<EntitySummary[]>;
+  /** The readable sources that mention one entity, at their versions. */
+  entitySources: (input: EntitySourcesInput) => Promise<BrainSourceRef[]>;
+  /**
+   * The relations the person's readable sources state about one entity,
+   * on a date and as known at a moment if asked, each with its passage
+   * (GRA-306): what a source says, never an accepted fact.
+   */
+  relations: (input: RelationsGetInput) => Promise<RelationView[]>;
   /**
    * Asks the Brain to remember something of the person's own (brain-api.ts):
    * retry with the same key after a lost reply. Admitted, it is kept as a
