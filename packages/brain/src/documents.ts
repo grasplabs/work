@@ -18,6 +18,7 @@ import {
   links,
   versions,
 } from "./db/schema.ts";
+import { documentLinkIntent } from "./entities.ts";
 import type { BrainEvent, DetailValue } from "./events.ts";
 import {
   FrontmatterError,
@@ -574,6 +575,16 @@ export const writeVersion = async <C>(
         label: link.label,
       }))
     ).map((chunk) => db.insert(links).values(chunk)),
+    // The version's linking intent, and its entity mentions gone with the
+    // text they came from (entities.ts).
+    ...documentLinkIntent(
+      db,
+      collection,
+      documentId,
+      number,
+      now,
+      write.purge === true
+    ),
     outboxed(brain, entry),
     ...also,
   ];

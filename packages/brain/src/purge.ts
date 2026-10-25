@@ -19,6 +19,7 @@ import {
 import { checkedText, indexedValuesOf, writeVersion } from "./documents.ts";
 import type { DocumentRow, Writer } from "./documents.ts";
 import { fromBase64Url, sha256Hex, toBase64Url } from "./encoding.ts";
+import { forgetCollectionEntities } from "./entities.ts";
 import type { BrainEvent } from "./events.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { requireCurrentIndexed } from "./indexing.ts";
@@ -493,6 +494,9 @@ const purgePersonal = async <C>(
           ]
         : []),
       ...released.before,
+      // The entities only its documents name, with their keys, before the
+      // documents take their mentions with them.
+      forgetCollectionEntities(db, collectionId),
       db.delete(sections).where(inArray(sections.documentId, inCollection)),
       db.delete(links).where(inArray(links.fromDocumentId, inCollection)),
       db
