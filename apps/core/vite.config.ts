@@ -17,7 +17,13 @@ import {
   connectProvidersScript,
   directoryClient,
   documentsClient,
+  gmailAccount,
+  gmailPush,
   landscapeClient,
+  slackApp,
+  teamsBot,
+  telegramBot,
+  whatsAppNumber,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
 import { withNoBackgroundCompile } from "./workerd-v8-flags.ts";
@@ -117,6 +123,7 @@ export const coreProject = (
   {
     sandboxSocket,
     bindings = {},
+    remoteBindings = false,
   }: {
     /**
      * For the on-prem project: the sandbox supervisor's socket, read when
@@ -126,6 +133,12 @@ export const coreProject = (
     sandboxSocket?: () => string;
     /** Bindings a project adds to the tests' env, such as a run's size. */
     bindings?: Record<string, unknown>;
+    /**
+     * Whether bindings Wrangler marks remote reach Cloudflare: only the
+     * opt-in real-model run (vite.brain-model.config.ts), for the AI
+     * binding, with the developer's Wrangler login.
+     */
+    remoteBindings?: boolean;
   } = {}
 ) =>
   defineProject({
@@ -195,7 +208,7 @@ export const coreProject = (
       cloudflareTest(() => ({
         wrangler: { configPath: "./wrangler.jsonc" },
         // Tests run fully local, including in CI without Cloudflare credentials.
-        remoteBindings: false,
+        remoteBindings,
         miniflare: {
           bindings: {
             ROUTER_SECRET: "test-router-secret",
@@ -205,6 +218,23 @@ export const coreProject = (
             // env: the shortest archive retention the admin may set.
             AUDIT_ARCHIVE_RETENTION_DAYS: "365",
             ...testSignIn,
+            // The client's Teams bot, so its door is open
+            // (src/channels/door.ts).
+            TEAMS_BOT_ID: teamsBot.id,
+            // The client's Slack app, so its door is open too.
+            SLACK_SIGNING_SECRET: slackApp.signingSecret,
+            // The client's WhatsApp number (src/channels/whatsapp.ts).
+            WHATSAPP_APP_SECRET: whatsAppNumber.appSecret,
+            WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
+            WHATSAPP_VERIFY_TOKEN: whatsAppNumber.verifyToken,
+            // The client's Telegram bot (src/channels/telegram.ts).
+            TELEGRAM_WEBHOOK_SECRET: telegramBot.webhookSecret,
+            // Stephen's Gmail mailbox and its push, so its door is open too.
+            GMAIL_MAILBOX: gmailAccount.mailbox,
+            GMAIL_PUBSUB_AUDIENCE: gmailPush.audience,
+            GMAIL_PUBSUB_SERVICE_ACCOUNT: gmailPush.serviceAccount,
+            GMAIL_PUBSUB_SUBSCRIPTION: gmailPush.subscription,
+            GMAIL_PUBSUB_TOPIC: gmailPush.topic,
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_POINT_LIMITS: "10/25",
             STATISTICS_READ_LIMITS: "20/60",
@@ -306,6 +336,21 @@ export const coreProject = (
                 MICROSOFT_DOCUMENTS_CLIENT_ID: documentsClient.id,
                 MICROSOFT_DOCUMENTS_CLIENT_SECRET: documentsClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
+                // The client's Teams bot, which Entra and the Bot Connector
+                // in test/connect-providers.ts know.
+                TEAMS_BOT_ID: teamsBot.id,
+                TEAMS_BOT_TENANT_ID: teamsBot.tenant,
+                TEAMS_BOT_SECRET: teamsBot.secret,
+                // Its Slack app, which the fake Slack there knows.
+                SLACK_BOT_TOKEN: slackApp.botToken,
+                WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
+                WHATSAPP_ACCESS_TOKEN: whatsAppNumber.accessToken,
+                TELEGRAM_BOT_TOKEN: telegramBot.token,
+                // Stephen's Gmail mailbox, which the fake Google there knows.
+                GMAIL_MAILBOX: gmailAccount.mailbox,
+                GMAIL_CLIENT_ID: gmailAccount.clientId,
+                GMAIL_CLIENT_SECRET: gmailAccount.clientSecret,
+                GMAIL_REFRESH_TOKEN: gmailAccount.refreshToken,
               },
               d1Databases: { DB: "grasp-os-connect" },
               // Its clock (connect's src/clock.ts).
@@ -342,8 +387,16 @@ export default coreProject({
     // The Brain baseline's larger scale sizes, on request only:
     // vite.brain-scale.config.ts.
     "test/brain-scale-sizes.test.ts",
+    // The Brain baseline against a real model, which costs money, on
+    // request only: vite.brain-model.config.ts.
+    "test/brain-real-model.test.ts",
     // The Brain baseline, in a group of its own: vite.brain.config.ts.
     "test/brain-baseline.test.ts",
+    // Stephen's eval, in a group of its own: vite.stephen.config.ts.
+    "test/stephen-eval.test.ts",
+    // Stephen's eval against a real model, which costs money, on request
+    // only: vite.stephen-model.config.ts.
+    "test/stephen-real-model.test.ts",
     "build-blueprints.test.ts",
     "host-json.bundle.test.ts",
   ],

@@ -52,6 +52,8 @@ export const adminSecrets = (tokens: {
   [env.ROOMS_READ_TOKEN, ""],
   // Empty too: the digest's tests set it (test/discord-digest.test.ts).
   [env.DISCORD_DIGEST_WEBHOOK, ""],
+  // The alerts' too (test/alerts.test.ts).
+  [env.STAFF_ALERTS_WEBHOOK, ""],
   // Attio's key likewise (test/admin-crm.test.ts).
   [env.ATTIO_READ_KEY, ""],
 ];

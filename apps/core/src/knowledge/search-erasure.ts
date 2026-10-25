@@ -1,8 +1,9 @@
-import { errorFields, log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/brain/log";
 import { eq, lte, ne, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { searchRebuilds } from "../db/knowledge/schema.ts";
+import type { Brain } from "./brain.ts";
 import { readPayload } from "./payloads.ts";
 
 // Taking purged terms out of the full-text index (0001_search.sql) for
@@ -624,8 +625,8 @@ export type IndexedValues = (
 ) => readonly string[] | undefined;
 
 /** `collectionPlan`, which throws when a read fails. */
-const readCollection = async (
-  env: Env,
+const readCollection = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   collectionId: string,
   valuesOf: IndexedValues
@@ -690,7 +691,7 @@ const readCollection = async (
     const rows = await Promise.all(
       refs.map(async (ref) => ({
         path: ref.path,
-        text: await readPayload(env, ref),
+        text: await readPayload(brain, ref),
       }))
     );
     for (const row of rows) {
@@ -727,14 +728,14 @@ const readCollection = async (
  * `collectionCheckCaps`; when a read fails, the plan is unknown, logged
  * by the error's name, and the index is rebuilt.
  */
-export const collectionPlan = async (
-  env: Env,
+export const collectionPlan = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   collectionId: string,
   valuesOf: IndexedValues
 ): Promise<CollectionPlan> => {
   try {
-    return await readCollection(env, db, collectionId, valuesOf);
+    return await readCollection(brain, db, collectionId, valuesOf);
   } catch (error) {
     // Not readable here (a platform that refuses it): rebuilt instead.
     log.warn("knowledge.purge.index_check_failed", {

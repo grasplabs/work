@@ -1,4 +1,4 @@
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, auditActorSchema } from "@grasp-os/shared/audit";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import { ensureCollection } from "../knowledge/collections.ts";
 import { localExtractor } from "../knowledge/extract.ts";
+import { brainOf } from "../knowledge/ports.ts";
 import type { OnErase } from "../knowledge/purge.ts";
 import { uploadFile } from "../knowledge/uploads.ts";
 import { gatewaySettings, modelForRole, models } from "../models.ts";
@@ -136,7 +137,7 @@ const readingModel = (env: ModelsEnv): string | undefined =>
 /** The collection the onboarding keeps documents in, made by `person` the first time. */
 const documentsCollection = async (env: Env, person: Identity) =>
   await ensureCollection(
-    env,
+    brainOf(env),
     {
       id: collectionIdSchema.parse(onboardingDocumentsCollection),
       name: "Onboarding documents",
@@ -315,7 +316,7 @@ export const documentReadingErasure = (
       if (holding.length > 0) {
         await store.forgetDocuments(
           holding.map(({ id }) => id),
-          by.actor
+          auditActorSchema.parse(by.actor)
         );
       }
     },
@@ -333,7 +334,7 @@ export const documentReadingErasure = (
       if (of.length > 0) {
         await store.forgetDocuments(
           of.map(({ id }) => id),
-          by.actor
+          auditActorSchema.parse(by.actor)
         );
       }
     },

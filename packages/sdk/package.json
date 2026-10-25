@@ -34,6 +34,7 @@
   },
   "dependencies": {
     "@babel/parser": "catalog:",
+    "@grasp-os/brain": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@standard-schema/spec": "catalog:",
     "@tanstack/react-form": "catalog:",

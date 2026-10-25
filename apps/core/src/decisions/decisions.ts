@@ -44,6 +44,8 @@ import {
 import { notRemoved, organizationId } from "../auth/auth.ts";
 import { signInConfig } from "../auth/config.ts";
 import type { Member } from "../auth/identity.ts";
+import { tellInChat } from "../channels/reach.ts";
+import { say } from "../channels/words.ts";
 import {
   apps,
   members,
@@ -670,9 +672,37 @@ const recordAsk = async (
 };
 
 /**
+ * Tells each of `userIds` who has a chat with Stephen in a chat app of
+ * decision `decisionId`, once, with its link (channels/reach.ts); the rest
+ * find it in their inbox alone. Never fails the ask.
+ */
+const tellInTheirChats = async (
+  env: Env,
+  decisionId: string,
+  userIds: readonly string[]
+): Promise<void> => {
+  const origin = signInConfig(env)?.origin;
+  if (origin === undefined) {
+    return;
+  }
+  const link = new URL(`/decisions/${encodeURIComponent(decisionId)}`, origin)
+    .href;
+  await Promise.all(
+    userIds.map(
+      async (userId) =>
+        await tellInChat(env, userId, `decision:${decisionId}`, (locale) =>
+          say("decisionWaiting", locale, { link })
+        )
+    )
+  );
+};
+
+/**
  * Asks the people an independent run's open decision is for, who find it
- * in their inbox (`waitingDecisions`): it never fails for how many they
- * are. Up to {@link maxDeciders}, the ask is audited with whom, by ID, as
+ * in their inbox (`waitingDecisions`), and, up to {@link maxDeciders}, in
+ * their chat with Stephen where they have one (`tellInTheirChats`): it
+ * never fails for how many they are. Up to {@link maxDeciders}, the ask is
+ * audited with whom, by ID, as
  * `decisionRecipients` audits it; past that, with how many alone
  * (`listed: false`), a list too long for the log. How many were asked;
  * none once it was answered, closed or past its deadline.
@@ -695,13 +725,15 @@ export const askDecision = async (
     .orderBy(members.userId)
     .limit(maxDeciders + 1);
   if (people.length <= maxDeciders) {
+    const whom = people.map(({ userId }) => userId);
     await recordAsk(
       env,
       run,
       row,
       { recipients: people.length, reminder: false, listed: true },
-      people.map(({ userId }) => userId)
+      whom
     );
+    await tellInTheirChats(env, row.id, whom);
     return people.length;
   }
   const [counted] = await db

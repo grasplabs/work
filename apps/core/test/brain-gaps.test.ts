@@ -18,7 +18,7 @@ import {
   unique,
 } from "./sign-in.ts";
 
-// The Playbook's teams and gaps (core's brain-records.ts and brain-gaps.ts):
+// The brain's teams and gaps (core's brain-records.ts and brain-gaps.ts):
 // a team's sizes and stakeholders added as dated values, joining the
 // onboarding's team of the same id for whoever reads it; a gap asked
 // about, answered or closed once each. What can go wrong, tried here (the
@@ -149,7 +149,7 @@ const gapRecords = (tag: string) => {
   return { ids, records };
 };
 
-describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
+describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
   it("add a team's sizes and stakeholders as dated values, joining the onboarding's team for admins alone", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
@@ -230,13 +230,13 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
           { sourceId: `src-${tag}`, date: "2026-10-20", role: "Head of sales" },
         ],
       },
-      // By date: the Playbook's of an earlier day, then the roster's own of
+      // By date: the records' of an earlier day, then the roster's own of
       // today, the newest counting.
       financeCounts: [
         { sourceId: `src-${tag}`, people: 2 },
         { sourceId: "src-roster", people: 1 },
       ],
-      // The onboarding's team is the admin's to see; the Playbook's isn't.
+      // The onboarding's team is the admin's to see; the records' isn't.
       memberTeams: [team],
       // A roster team's id, now or later, is never a team record's.
       roster: "brain.record_invalid",
@@ -765,7 +765,7 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
   });
 });
 
-describe("the Playbook's gap answers", { timeout: 120_000 }, () => {
+describe("the brain's gap answers", { timeout: 120_000 }, () => {
   it("show who answered by their name now, and are never answered, asked about or closed by Grasp's staff", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");

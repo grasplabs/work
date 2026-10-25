@@ -1,27 +1,25 @@
-import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
-import { collectionIdSchema } from "@grasp-os/shared/ids";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
+import type { DetailValue } from "@grasp-os/brain/events";
+import { collectionIdSchema } from "@grasp-os/brain/ids";
+import type { Json } from "@grasp-os/brain/json";
+import { knowledgeErrors } from "@grasp-os/brain/knowledge";
 import { and, asc, eq } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { outboxedIfChanged } from "../audit-outbox.ts";
 import { collections } from "../db/knowledge/schema.ts";
-import type { Reader } from "./access.ts";
-import { auditedBatch } from "./audit.ts";
+import { auditedBatch, outboxedIfChanged } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
-import { portsOf } from "./ports.ts";
+import type { Brain } from "./brain.ts";
 
 export type CollectionRow = typeof collections.$inferSelect;
 
 /** The collections `reader` may read, by name. */
-export const readableCollections = async (
-  env: Env,
-  reader: Reader
+export const readableCollections = async <C>(
+  brain: Brain<C>,
+  reader: C
 ): Promise<CollectionRow[]> => {
-  const { collections: allowed } = await allowedFor(portsOf(env), reader);
-  return await drizzle(env.KNOWLEDGE)
+  const { collections: allowed } = await allowedFor(brain.ports, reader);
+  return await brain.db
     .select()
     .from(collections)
     .where(allowed)
@@ -54,17 +52,17 @@ export const readableCollection = async (
  * only when it created it. Returns the collection under that ID, which is
  * `row` unless it existed.
  */
-export const ensureCollection = async (
-  env: Env,
+export const ensureCollection = async <C>(
+  brain: Brain<C>,
   row: CollectionRow,
-  actor: AuditActor,
-  detail: Record<string, AuditDetailValue> = {}
+  actor: Json,
+  detail: Record<string, DetailValue> = {}
 ): Promise<CollectionRow> => {
-  const db = drizzle(env.KNOWLEDGE);
+  const { db } = brain;
   const { access, sensitive, source } = row;
-  await auditedBatch(portsOf(env), db, [
+  await auditedBatch(brain.ports, db, [
     db.insert(collections).values(row).onConflictDoNothing(),
-    outboxedIfChanged(db, {
+    outboxedIfChanged(brain, {
       actor,
       action: "knowledge.collection.created",
       target: { type: "collection", id: row.id },

@@ -269,6 +269,17 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "EMAIL",
   "ENTRA_CLIENT_SECRET",
   "FILES",
+  // Stephen's own Gmail mailbox and the Pub/Sub push that tells core of
+  // new mail (core's src/channels/gmail.ts), its tokens connect's
+  // (connect's src/channels.ts).
+  "GMAIL_CLIENT_ID",
+  "GMAIL_CLIENT_SECRET",
+  "GMAIL_MAILBOX",
+  "GMAIL_PUBSUB_AUDIENCE",
+  "GMAIL_PUBSUB_SERVICE_ACCOUNT",
+  "GMAIL_PUBSUB_SUBSCRIPTION",
+  "GMAIL_PUBSUB_TOPIC",
+  "GMAIL_REFRESH_TOKEN",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
   // The directory's Google client (connect's providers.ts).
@@ -313,6 +324,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "SANDBOX_HOST",
   "SANDBOX_IN_PROCESS",
   "SIGN_IN",
+  // The client's own Slack app (core's src/channels/slack.ts, connect's
+  // src/channels.ts).
+  "SLACK_BOT_TOKEN",
+  "SLACK_SIGNING_SECRET",
   // An App's statistics (core's src/statistics.ts), next to its permissions.
   "STATISTICS",
   "STATISTICS_POINT_LIMITS",
@@ -321,8 +336,18 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "TEAMS_BOT_ID",
   "TEAMS_BOT_SECRET",
   "TEAMS_BOT_TENANT_ID",
+  // The client's own Telegram bot (core's src/channels/telegram.ts,
+  // connect's src/channels.ts).
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_WEBHOOK_SECRET",
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
+  // The client's own WhatsApp number (core's src/channels/whatsapp.ts,
+  // connect's src/channels.ts).
+  "WHATSAPP_ACCESS_TOKEN",
+  "WHATSAPP_APP_SECRET",
+  "WHATSAPP_PHONE_NUMBER_ID",
+  "WHATSAPP_VERIFY_TOKEN",
   "WORKFLOW_BETWEEN_STEPS_MS",
   "WORKFLOW_BUILD_READ_MS",
   "WORKFLOW_OFF_WAIT_MS",

@@ -1,6 +1,7 @@
 import { adminAskPath } from "@grasp-os/shared/admin-ask";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
+import { channelPlatformOf } from "@grasp-os/shared/channels";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { internalErrors, requestErrors } from "@grasp-os/shared/errors";
@@ -39,6 +40,8 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
+import { carryOnAfterConnecting } from "./channels/answer.ts";
+import { channelResponse } from "./channels/door.ts";
 import { ensureClockOnce } from "./clock.ts";
 import {
   catalogLogoResponse,
@@ -212,10 +215,15 @@ const connectionRouteResponse = async (
   request: Request,
   env: Env,
   pathname: string,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response | undefined> => {
   if (pathname === connectionCallbackPath) {
-    return await handleConnectionCallback(request, env);
+    // Someone who connected from a chat app is told there, and what they
+    // asked is answered again, after the browser is sent on.
+    return await handleConnectionCallback(request, env, (userId) => {
+      ctx.waitUntil(carryOnAfterConnecting(env, userId));
+    });
   }
   if (isCatalogLogoPath(pathname)) {
     return await catalogLogoResponse(request, env, pathname, requestId);
@@ -335,7 +343,8 @@ const route = async (
     request,
     env,
     pathname,
-    requestId
+    requestId,
+    ctx
   );
   if (connection !== undefined) {
     return connection;
@@ -350,6 +359,12 @@ const route = async (
   const linked = await linkResponse(pathname, request, env, requestId, ctx);
   if (linked !== undefined) {
     return linked;
+  }
+  // A chat platform's webhook (src/channels/door.ts), which only the
+  // platform's own signed requests get through.
+  const platform = channelPlatformOf(pathname);
+  if (platform !== undefined) {
+    return await channelResponse(request, env, platform, requestId, ctx);
   }
   const appCall = await appCallResponse(pathname, request, env, requestId);
   if (appCall !== undefined) {

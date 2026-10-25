@@ -1,13 +1,13 @@
-import { issuesOf } from "@grasp-os/shared/errors";
+import { issuesOf } from "@grasp-os/brain/errors";
 import {
   builtinDocumentTypeSchema,
   documentTypeSchema,
   splitFrontmatterBlock,
-} from "@grasp-os/shared/knowledge";
+} from "@grasp-os/brain/knowledge";
 import type {
   BuiltinDocumentType,
   DocumentType,
-} from "@grasp-os/shared/knowledge";
+} from "@grasp-os/brain/knowledge";
 import { parse } from "yaml";
 import { z } from "zod";
 

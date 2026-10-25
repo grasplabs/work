@@ -2,3 +2,10 @@
 # Verifies the capability core signs for each call. The same value as in
 # apps/core/.dev.vars; at least 32 characters, e.g. `openssl rand -base64 32`.
 CAPABILITY_SIGNING_KEY=
+# Optional: Stephen's own Gmail mailbox (src/channels.ts), and the Google
+# OAuth client and refresh token connect reads and sends its mail with.
+# Every Gmail request is refused until all four are set.
+GMAIL_MAILBOX=
+GMAIL_CLIENT_ID=
+GMAIL_CLIENT_SECRET=
+GMAIL_REFRESH_TOKEN=

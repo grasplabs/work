@@ -38,6 +38,12 @@ export interface HeldWriteTrace {
   said: string;
   /** What the chat read: each text value of what its reads returned. */
   read: readonly string[];
+  /**
+   * The addresses the person sends from, in lower case: their own
+   * account's on the write's connection, and the shared mailboxes pointed
+   * at them. A write's own mailbox is no recipient: it reaches nobody else.
+   */
+  senders?: readonly string[];
 }
 
 /** An email address, wherever it stands in a value. */
@@ -132,7 +138,7 @@ export const textsOf = (value: unknown): string[] => {
 export const heldWriteRefusal = (
   input: unknown,
   inputs: readonly string[] | null,
-  { said, read }: HeldWriteTrace
+  { said, read, senders = [] }: HeldWriteTrace
 ): HeldWriteRefusal | undefined => {
   if (inputs === null) {
     return "agent.write_unchecked";
@@ -159,6 +165,7 @@ export const heldWriteRefusal = (
     return [...value.matchAll(emailAddress)].some(([found]) => {
       const address = found.toLowerCase();
       return (
+        !senders.includes(address) &&
         !holdsToken(saidLower, address) &&
         (whole || !holdsToken(readLower, address))
       );
@@ -218,6 +225,7 @@ const chatAppText = `This chat is in a chat app, such as Microsoft Teams, where 
 - In the language the person writes in.
 - Say what a fact means for their work, not only the fact.
 - Speak of people by their role ("the finance lead"), never about a colleague as a person.
+- Sickness, harassment or a conflict with someone at work always goes to a person: don't advise on it or judge it, say whom to talk to by their role (their manager, HR, the confidential counsellor), and name no colleague.
 - Cite each document once, where you first use it. Write no other links: the sources under your answer come from what you read.
 - A change waits for the person to press on a card. Ask for it only with what they said or what you read: their words for whom it goes to, IDs and values as you read them, no placeholders.`;
 
