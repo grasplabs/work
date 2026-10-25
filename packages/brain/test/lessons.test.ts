@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { createBrain } from "../src/brain.ts";
 import { brainErrors } from "../src/contract.ts";
 import {
   consolidate,
@@ -367,5 +368,78 @@ describe("consolidating episodes into lesson candidates", () => {
       secondPatched: 2,
       lessons: groups,
     });
+  });
+
+  it("keeps nothing of a person a purge forgot while a job was reading their episodes", async () => {
+    const { brain } = testHost();
+    const ann = `ann-${crypto.randomUUID()}`;
+    await recorded(brain, [
+      run(ann, "failed"),
+      run(ann, "failed"),
+      run(ann, "failed"),
+    ]);
+    // The purge lands between the job's reads and its first write.
+    let purged = false;
+    const racing = new Proxy(env.BRAIN, {
+      get: (target, property) => {
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (!purged) {
+              purged = true;
+              await brain.db.batch(
+                forgetPerson(brain.db, ann, brain.ports.clock())
+              );
+            }
+            return await target.batch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    await consolidate(createBrain(racing, brain.ports), person(ann));
+    const { results: marks } = await env.BRAIN.prepare(
+      "SELECT scope_key FROM brain_consolidation_marks WHERE scope_key = ?"
+    )
+      .bind(scopeKeyOf(person(ann)))
+      .all();
+    const { results: versions } = await env.BRAIN.prepare(
+      "SELECT lesson_id FROM brain_lesson_versions WHERE lesson_id IN (SELECT id FROM brain_lessons WHERE scope_id = ?)"
+    )
+      .bind(ann)
+      .all();
+
+    expect({
+      purged,
+      lessons: await lessonCount(brain, person(ann)),
+      versions: versions.length,
+      marks: marks.length,
+    }).toStrictEqual({ purged: true, lessons: 0, versions: 0, marks: 0 });
+  });
+
+  it("retires a lesson in the batch that erases the last of its support, with no job after", async () => {
+    const { brain } = testHost();
+    const ann = `ann-${crypto.randomUUID()}`;
+    const failures = [
+      run(ann, "failed"),
+      run(ann, "failed"),
+      run(ann, "failed"),
+    ];
+    await recorded(brain, failures);
+    await consolidate(brain, person(ann));
+
+    await eraseOutcomes(
+      brain,
+      failures.map(({ evidenceId }) => evidenceId)
+    );
+    const [lesson] = await lessonsOf(brain, person(ann));
+
+    expect({
+      state: lesson?.state,
+      retiredBy: lesson?.retiredBy,
+    }).toStrictEqual({ state: "retired", retiredBy: "evidence" });
   });
 });

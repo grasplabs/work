@@ -1,7 +1,9 @@
-import { lessonsOf } from "@grasp-os/brain/lessons";
+import { consolidate, lessonsOf } from "@grasp-os/brain/lessons";
+import { recordOutcome } from "@grasp-os/brain/outcomes";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { eraseCaptured } from "../src/brain-capture.ts";
 import { scheduleConsolidation } from "../src/brain-consolidation.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { projectStatus } from "../src/workflows/runs.ts";
@@ -115,6 +117,50 @@ describe(
         supporting: 3,
         others: 0,
         jobIntents: 0,
+      });
+    });
+
+    it("retires a shared chat's lesson when the chat is deleted, with no job after", async () => {
+      const ann = await signedInApi(idp, "user");
+      const ben = await signedInApi(idp, "user");
+      const chatId = crypto.randomUUID();
+      const brain = brainOf(env);
+      for (let n = 0; n < 3; n += 1) {
+        const turn = crypto.randomUUID();
+        // oxlint-disable-next-line no-await-in-loop -- turns settle in order
+        await recordOutcome(brain, {
+          eventId: `chat.turn:${chatId}:${turn}`,
+          source: `chat.turn:test-${chatId}`,
+          sourceSeq: n + 1,
+          purpose: "production",
+          ownerId: ann.userId,
+          scope: "session",
+          audience: { id: chatId, members: [ann.userId, ben.userId] },
+          taskType: "chat.turn",
+          execution: "failed",
+          result: "failure",
+          evidenceId: chatId,
+          evidenceRefs: [{ kind: "chat_turn", id: turn }],
+          versionRefs: [],
+          occurredAt: new Date().toISOString(),
+        });
+      }
+      const scope = { scope: "session" as const, scopeId: chatId };
+      await consolidate(brain, scope);
+      const [before] = await lessonsOf(brain, scope);
+
+      // What deleting the chat erases (workspace.ts).
+      await eraseCaptured(env, [chatId]);
+      const [after] = await lessonsOf(brain, scope);
+
+      expect({
+        before: before?.state,
+        after: after?.state,
+        retiredBy: after?.retiredBy,
+      }).toStrictEqual({
+        before: "candidate",
+        after: "retired",
+        retiredBy: "evidence",
       });
     });
   }

@@ -13,6 +13,8 @@ import {
   brainEpisodes,
   brainErasedEvidence,
   brainForgottenPeople,
+  brainLessonEvidence,
+  brainLessons,
 } from "./db/schema.ts";
 import { idSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
@@ -333,6 +335,25 @@ export const outcomeCursors = async <C>({
     .orderBy(brainCaptureCursors.source);
 
 /**
+ * The statement that retires every open lesson whose support goes with
+ * the episodes `erased` names (a condition on `brain_episodes`): run in
+ * the erasure's batch, before its delete, so a lesson never outlives its
+ * evidence waiting for a job that may never come. Lessons and their
+ * versions stay, as retired, with whatever evidence is left.
+ */
+const retiringOrphans = (db: DrizzleD1Database, erased: SQL, now: Date) =>
+  db
+    .update(brainLessons)
+    .set({ state: "retired", retiredBy: "evidence", updatedAt: now })
+    .where(
+      and(
+        eq(brainLessons.state, "candidate"),
+        sql`EXISTS (SELECT 1 FROM ${brainLessonEvidence} JOIN ${brainEpisodes} ON ${brainEpisodes.id} = ${brainLessonEvidence.episodeId} WHERE ${brainLessonEvidence.lessonId} = ${brainLessons.id} AND ${brainLessonEvidence.revision} = ${brainLessons.revision} AND ${erased})`,
+        sql`NOT EXISTS (SELECT 1 FROM ${brainLessonEvidence} JOIN ${brainEpisodes} ON ${brainEpisodes.id} = ${brainLessonEvidence.episodeId} WHERE ${brainLessonEvidence.lessonId} = ${brainLessons.id} AND ${brainLessonEvidence.revision} = ${brainLessons.revision} AND ${brainLessonEvidence.role} = 'supporting' AND NOT (${erased}))`
+      )
+    );
+
+/**
  * Erases the events where `column` is `id`, audited as one erasure of
  * `target`, with no more than its ID; nothing, and nothing recorded, when
  * none are left. How many it erased.
@@ -344,12 +365,13 @@ const eraseWhere = async <C>(
 ): Promise<number> => {
   const { db } = brain;
   const holds = sql`EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${column} = ${target.id})`;
-  const [, deleted] = await auditedBatch(brain.ports, db, [
+  const results = await auditedBatch(brain.ports, db, [
     outboxedWhere(
       brain,
       { actor: system, action: "knowledge.episode.erased", target },
       holds
     ),
+    retiringOrphans(db, eq(column, target.id), brain.ports.clock()),
     db
       .delete(brainEpisodes)
       .where(eq(column, target.id))
@@ -368,6 +390,7 @@ const eraseWhere = async <C>(
       })
       .onConflictDoNothing(),
   ]);
+  const [, _retired, deleted] = results;
   return deleted.length;
 };
 
@@ -421,6 +444,8 @@ export const forgetPersonOutcomes = (
     db
       .delete(brainEpisodeMembers)
       .where(eq(brainEpisodeMembers.userId, userId)),
+    // A shared session's lessons resting on their episodes alone retire.
+    retiringOrphans(db, eq(brainEpisodes.ownerId, userId), now),
     db.delete(brainEpisodes).where(eq(brainEpisodes.ownerId, userId)),
     // So a capture from before now, delivered again, stays forgotten; a
     // later purge only moves the boundary later.

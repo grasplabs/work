@@ -9,6 +9,7 @@ import { inList } from "./db/d1.ts";
 import {
   brainConsolidationMarks,
   brainEpisodes,
+  brainForgottenPeople,
   brainLessonEvidence,
   brainLessons,
   brainLessonVersions,
@@ -381,7 +382,19 @@ interface Patch {
   content: LessonContent;
   state: "candidate" | "retired";
   retiredBy: "owner" | "evidence" | null;
+  /** When the work that made it started: a purge since outranks it. */
+  since: Date;
 }
+
+/**
+ * Whether `scope` may still be written, for work started at `since`: not
+ * a person a personal purge forgot since then. A job that read their
+ * episodes before the purge writes nothing of them after it.
+ */
+const notForgotten = (scope: ConsolidationScope, since: Date): SQL =>
+  scope.scope === "person"
+    ? sql`NOT EXISTS (SELECT 1 FROM ${brainForgottenPeople} WHERE ${brainForgottenPeople.userId} = ${scope.scopeId} AND ${brainForgottenPeople.forgottenAt} >= ${since.getTime()})`
+    : sql`1`;
 
 /**
  * Applies `patch` in one batch, against its base: the version, its
@@ -405,32 +418,21 @@ const applyPatch = async <C>(
     ]),
     patch.state
   )}`;
-  const atBase = sql`(SELECT ${brainLessons.revision} FROM ${brainLessons} WHERE ${brainLessons.id} = ${patch.lessonId}) = ${patch.base}`;
+  const allowed = notForgotten(patch.scope, patch.since);
+  const atBase = sql`(SELECT ${brainLessons.revision} FROM ${brainLessons} WHERE ${brainLessons.id} = ${patch.lessonId}) = ${patch.base} AND ${allowed}`;
   const thisPatch = sql`EXISTS (SELECT 1 FROM ${brainLessonVersions} WHERE ${brainLessonVersions.patchKey} = ${patchKey})`;
   const evidence = [
     ...patch.content.supporting.map((id) => [id, "supporting"]),
     ...patch.content.contradicting.map((id) => [id, "contradicting"]),
   ];
   const statements = [
-    // A new lesson starts at revision 0, before its first version.
+    // A new lesson starts at revision 0, before its first version: only
+    // while its scope may be written and some of its support still exists.
     db
       .insert(brainLessons)
-      .values({
-        id: patch.lessonId,
-        revision: 0,
-        scope: patch.scope.scope,
-        scopeId: patch.scope.scopeId,
-        groupKey: patch.groupKey,
-        kind: "failure_pattern",
-        applicability: canonicalJson(patch.content.applicability),
-        exclusions: canonicalJson(patch.content.exclusions),
-        instruction: patch.content.instruction,
-        evidenceStatus: patch.content.evidenceStatus,
-        state: "candidate",
-        retiredBy: null,
-        createdAt: now,
-        updatedAt: now,
-      })
+      .select(
+        sql`SELECT ${patch.lessonId}, 0, ${patch.scope.scope}, ${patch.scope.scopeId}, ${patch.groupKey}, 'failure_pattern', ${canonicalJson(patch.content.applicability)}, ${canonicalJson(patch.content.exclusions)}, ${patch.content.instruction}, ${patch.content.evidenceStatus}, 'candidate', NULL, ${now.getTime()}, ${now.getTime()} WHERE ${allowed} AND EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${inList(brainEpisodes.id, patch.content.supporting)})`
+      )
       .onConflictDoNothing(),
     db
       .insert(brainLessonVersions)
@@ -477,7 +479,8 @@ const applyPatch = async <C>(
         and(
           eq(brainLessons.id, patch.lessonId),
           eq(brainLessons.revision, patch.base),
-          thisPatch
+          thisPatch,
+          allowed
         )
       ),
   ] as const;
@@ -503,7 +506,8 @@ const consolidateGroup = async <C>(
   scope: ConsolidationScope,
   groupKey: string,
   taskType: string,
-  mayOpen: boolean
+  mayOpen: boolean,
+  since: Date
 ): Promise<boolean> => {
   const lessonId = await lessonIdOf(scopeKeyOf(scope), groupKey);
   for (let round = 0; round < consolidationLimits.roundsPerJob; round += 1) {
@@ -529,6 +533,7 @@ const consolidateGroup = async <C>(
           content: current.content,
           state: "retired",
           retiredBy: "evidence",
+          since,
         };
       }
     } else if (
@@ -545,6 +550,7 @@ const consolidateGroup = async <C>(
         content,
         state: "candidate",
         retiredBy: null,
+        since,
       };
     }
     if (patch === undefined) {
@@ -578,6 +584,7 @@ export const consolidate = async <C>(
   scope: ConsolidationScope
 ): Promise<ConsolidationResult> => {
   const { db } = brain;
+  const since = brain.ports.clock();
   const scopeKey = scopeKeyOf(scope);
   const mark = await markOf(brain, scopeKey);
   const fresh = await db
@@ -614,7 +621,9 @@ export const consolidate = async <C>(
     done.add(groupKey);
     const mayOpen = opened < consolidationLimits.openPerScope;
     const existed = await lessonAt(brain, await lessonIdOf(scopeKey, groupKey));
-    if (await consolidateGroup(brain, scope, groupKey, taskType, mayOpen)) {
+    if (
+      await consolidateGroup(brain, scope, groupKey, taskType, mayOpen, since)
+    ) {
       patched += 1;
       if (existed === undefined) {
         opened += 1;
@@ -649,20 +658,20 @@ export const consolidate = async <C>(
     }
   }
   if (last !== undefined) {
+    const now = brain.ports.clock();
+    // Not for a person a purge forgot while this job ran: nothing of them
+    // is kept, not even where it read to.
     await db
       .insert(brainConsolidationMarks)
-      .values({
-        scopeKey,
-        recordedAt: last.recordedAt,
-        episodeId: last.id,
-        updatedAt: brain.ports.clock(),
-      })
+      .select(
+        sql`SELECT ${scopeKey}, ${last.recordedAt.getTime()}, ${last.id}, ${now.getTime()} WHERE ${notForgotten(scope, since)}`
+      )
       .onConflictDoUpdate({
         target: brainConsolidationMarks.scopeKey,
         set: {
-          recordedAt: last.recordedAt,
-          episodeId: last.id,
-          updatedAt: brain.ports.clock(),
+          recordedAt: sql`excluded.recorded_at`,
+          episodeId: sql`excluded.episode_id`,
+          updatedAt: sql`excluded.updated_at`,
         },
         // Only forward: a job cut short and made again never moves it back.
         setWhere: or(
@@ -804,6 +813,7 @@ export const retireLesson = async <C>(
     content: current.content,
     state: "retired",
     retiredBy: "owner",
+    since: brain.ports.clock(),
   });
   if (!moved) {
     throw brainErrors.create("brain.revision_conflict");
