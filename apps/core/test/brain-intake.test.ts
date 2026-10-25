@@ -9,7 +9,7 @@ import { intakeIds } from "../src/onboarding/brain-intake.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { claimChecksMax } from "../src/onboarding/team-claims.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, onLink } from "./interview-link.ts";
+import { answering, answeringWith, onLink } from "./interview-link.ts";
 import {
   agree,
   fact,
@@ -651,6 +651,33 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       statements: [accented, "Tickets come in through Zendesk."].toSorted(),
       calls: 1 + 5 + 5,
+    });
+  });
+
+  it("keeps the team's claims when the model answers without any, and tries again", async () => {
+    const ids = await drawnTeam();
+    await intake(ids);
+    await agree(
+      ids.rik,
+      [
+        fact("r1", "step", "Checks the queue at noon."),
+        fact("r2", "step", "Closes the ticket once answered."),
+      ],
+      1
+    );
+    await drawTickets(ids);
+    // An answer with no claims at all is no answer: never "none".
+    const { result: gave } = await answeringWith(
+      () => ({ text: "{}", inputTokens: 1, outputTokens: 1 }),
+      async () => await onboardingStore(env).intakeNext()
+    );
+    const member = await signedInApi(idp, "user");
+    expect({
+      gave,
+      statements: await statementsFor(member.api, ids),
+    }).toStrictEqual({
+      gave: `brain:${ids.team}`,
+      statements: ["Tickets come in through Zendesk."],
     });
   });
 

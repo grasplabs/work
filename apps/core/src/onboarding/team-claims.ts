@@ -83,15 +83,13 @@ interface Labelled {
 }
 
 const claimsSchema = z.object({
-  claims: z
-    .array(
-      z.object({
-        kind: z.string(),
-        text: z.string(),
-        facts: z.array(z.string()),
-      })
-    )
-    .optional(),
+  claims: z.array(
+    z.object({
+      kind: z.string(),
+      text: z.string(),
+      facts: z.array(z.string()),
+    })
+  ),
 });
 
 export type RawClaims = z.output<typeof claimsSchema>;
@@ -246,7 +244,7 @@ const candidatesOf = (
   const clean = withoutNames(names);
   const byLabel = new Map(facts.map((fact) => [fact.label, fact]));
   const claims = new Map<string, Candidate>();
-  for (const { kind, text, facts: cited } of raw.claims ?? []) {
+  for (const { kind, text, facts: cited } of raw.claims) {
     if (!isKind(kind)) {
       continue;
     }
