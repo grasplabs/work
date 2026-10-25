@@ -750,32 +750,51 @@ const ranInFreshAlarm = async (
   };
 };
 
+/**
+ * The nap of the run whose wake passes while a delivery is held. Its first
+ * delivery fails as the nap starts, give or take how slow the host is,
+ * and is retried a second later (`notifyRetryMs`): that retry, held, must
+ * come before the wake, and the hold, ending just past the wake, within
+ * the delivery's timeout (`notifyTimeoutMs`, two seconds for these runs),
+ * or the alarm runs the run itself. With a nap of 2.5 s the first failure
+ * may come up to 1.5 s late and the hold still lasts under 1.6 s.
+ */
+const napMs = 2500;
+
+/** How far past the run's wake its held delivery is let go. */
+const pastWakeMs = 100;
+
 describe("a run that comes due during an alarm's delivery", () => {
   it("runs in an alarm of its own when its wake passes during the delivery", async () => {
     const id = newId();
     notifyFailures.set(id, 1);
-    // The delivery after the failure's backoff, by an alarm the run's
-    // wake hasn't come for yet.
+    // The delivery after the failure's backoff (`notifyRetryMs`, a second),
+    // by an alarm the run's wake hasn't come for yet: the nap leaves that
+    // backoff seconds to spare, however slowly the first delivery fails.
     const delivery = hold(id, "notify", 2);
     await warningsDuring(async () => {
       await workflow("budget-napper", env.BUDGETED_RUNS).create({
         id,
-        params: { duration: 1500 },
+        params: { duration: napMs },
       });
       await delivery.held;
     });
     const journal = await journalOf("budget-napper", id, env.BUDGETED_RUNS);
     const wake = journal.run.wake_at ?? 0;
+    // The delivery came first, its wake still ahead: otherwise the alarm
+    // ran the run itself, and there is no delivery for the wake to pass.
+    const heldBeforeWake = Date.now() < wake;
     // Held past the wake.
-    await pastTime(wake + 900);
+    await pastTime(wake + pastWakeMs);
 
     const releasedAt = tick();
     delivery.release();
     await ended("budget-napper", id, env.BUDGETED_RUNS);
 
-    await expect(
-      ranInFreshAlarm("budget-napper", id, "after", releasedAt)
-    ).resolves.toStrictEqual({ separateAlarm: true, fits: true });
+    expect({
+      heldBeforeWake,
+      ...(await ranInFreshAlarm("budget-napper", id, "after", releasedAt)),
+    }).toStrictEqual({ heldBeforeWake: true, separateAlarm: true, fits: true });
   });
 
   it("runs in an alarm of its own when it is resumed during the delivery", async () => {
