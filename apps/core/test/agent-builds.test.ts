@@ -1427,7 +1427,7 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
               category: "structure",
               severity: "error",
               message:
-                "Line 8: Call the App's bindings as `env.NAME.method(…)` or `appFunctions(env).query(…)`; don't keep `env`, a binding or a stub in a variable or pass it on",
+                "Line 8: Call the App's bindings as `env.NAME.method(…)`, `appFunctions(env).query(…)` or `brain(env.NAME).recall(…)`; don't keep `env`, a binding or a stub in a variable or pass it on",
             },
           ],
         },
