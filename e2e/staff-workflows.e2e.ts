@@ -222,6 +222,11 @@ test("staff see a drawn piece of work as numbers only, never what anyone said, i
   await expect(
     page.getByText("Fewer than 5 people gave it.").first()
   ).toBeVisible();
+  // Whom it was heard from is how many, never who: under 5, not even that.
+  const heard = page.getByRole("region", { name: "Heard from" });
+  await expect(heard).toContainText("Fewer than 5 people so far.");
+  await expect(heard).not.toContainText("Lisa");
+  await expect(heard).not.toContainText("Tom");
 
   // A step opens how many told it, which under 5 it doesn't say.
   await today.getByRole("button", { name: /Step 2/u }).click();

@@ -524,10 +524,33 @@ const Around = ({ record }: { record: RecordOfWork }) => {
   );
 };
 
-/** Who told which step, and how: a dot per person, in the order they talked. */
-const StepsTold = ({ record }: { record: RecordOfWork }) => {
+/** How many told a step, of how many it was heard from: never a count under 5 at a real organization. */
+const ToldCount = ({
+  people,
+  talked,
+}: {
+  people: number | null;
+  talked: number | null;
+}) => {
   const { t } = useLingui();
-  const talked = record.interviews.length;
+  if (people === null) {
+    return t`Fewer than 5`;
+  }
+  return talked === null ? t`${people} people` : t`${people} of ${talked}`;
+};
+
+/**
+ * Who told which step, and how: a dot per person, in the order they talked. `talked` is how many
+ * it was heard from: a real organization's as its drawing counts them, none under 5 (GRA-1079).
+ */
+const StepsTold = ({
+  record,
+  talked,
+}: {
+  record: RecordOfWork;
+  talked: number | null;
+}) => {
+  const { t } = useLingui();
   const { needed } = record;
   return (
     <SettingsSection
@@ -580,9 +603,7 @@ const StepsTold = ({ record }: { record: RecordOfWork }) => {
                   ))}
                 </span>
                 <span className="text-muted-foreground pl-7 tabular-nums sm:pl-0 sm:text-right">
-                  {people === null
-                    ? t`Fewer than 5`
-                    : t`${people} of ${talked}`}
+                  <ToldCount people={people} talked={talked} />
                 </span>
               </div>
               {each.other === null ? null : (
@@ -610,13 +631,31 @@ const StepsTold = ({ record }: { record: RecordOfWork }) => {
   );
 };
 
+/** How many a real organization's piece of work was heard from, as its drawing counts them. */
+const HeardCount = ({ heard }: { heard: number | null | undefined }) => {
+  const { t } = useLingui();
+  if (heard === undefined || heard === 0) {
+    return t`Nobody yet.`;
+  }
+  if (heard === null) {
+    return t`Fewer than 5 people so far.`;
+  }
+  return plural(heard, {
+    one: "# person so far.",
+    other: "# people so far.",
+  });
+};
+
 /** Who it was heard from, each with where their interview stands a click away. */
 const HeardFrom = ({
   view,
   record,
+  heard,
 }: {
   view: OrgView;
   record: RecordOfWork;
+  /** A real organization's: how many its drawing rests on, none under 5; null before it is drawn. */
+  heard: number | null | undefined;
 }) => {
   const { t } = useLingui();
   const { toAsk } = record;
@@ -632,9 +671,16 @@ const HeardFrom = ({
       }
       title={t`Heard from`}
     >
-      {record.interviews.length === 0 ? (
+      {/* Who it was heard from shows only of a sample's made-up people: a real organization's staff see how many, never who (GRA-1084). */}
+      {record.byPerson ? null : (
+        <p className="text-muted-foreground border-t px-5 py-4">
+          <HeardCount heard={heard} />
+        </p>
+      )}
+      {record.byPerson && record.interviews.length === 0 ? (
         <p className="text-muted-foreground border-t px-5 py-4">{t`Nobody yet.`}</p>
-      ) : (
+      ) : null}
+      {record.byPerson && record.interviews.length > 0 ? (
         <ul className="flex flex-col">
           {record.interviews.map((interview) => {
             const { name } = interview.person;
@@ -673,7 +719,7 @@ const HeardFrom = ({
             );
           })}
         </ul>
-      )}
+      ) : null}
     </SettingsSection>
   );
 };
@@ -934,6 +980,10 @@ export const WorkRecord = ({
   stale: boolean;
 }) => {
   const missing = missingOf(record);
+  // A sample's record rests on its made-up people's interviews; a real organization's on its
+  // drawing, as numbers only: who told it is never staff's (GRA-1084).
+  const heard = record.byPerson ? record.interviews.length : drawn?.heard;
+  const told = record.byPerson ? record.interviews.length > 0 : drawn !== null;
   // One column of its own: the area's column is only as tall as the
   // window, and a card that clips its content would shrink to nothing in it.
   return (
@@ -941,16 +991,21 @@ export const WorkRecord = ({
       <Actions record={record} stale={stale} />
       <Header lacking={missing.length} record={record} view={view} />
       <Today drawn={drawn} missing={missing} record={record} view={view} />
-      {record.interviews.length === 0 ? null : (
+      {told ? (
         <>
-          <StepsTold record={record} />
-          <div className="grid items-start gap-6 xl:grid-cols-2">
-            <Around record={record} />
+          <StepsTold record={record} talked={heard ?? null} />
+          {/* What goes around the steps is what people said: a real organization's staff see none of it. */}
+          {record.byPerson ? (
+            <div className="grid items-start gap-6 xl:grid-cols-2">
+              <Around record={record} />
+              <Numbers record={record} />
+            </div>
+          ) : (
             <Numbers record={record} />
-          </div>
+          )}
         </>
-      )}
-      <HeardFrom record={record} view={view} />
+      ) : null}
+      <HeardFrom heard={heard} record={record} view={view} />
     </div>
   );
 };

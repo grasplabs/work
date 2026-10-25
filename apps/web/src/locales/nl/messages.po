@@ -600,6 +600,10 @@ msgstr "{going, plural, one {De teamleider van # team krijgt de link {when}. All
 msgid "{going} of {count}"
 msgstr "{going} van {count}"
 
+#: src/onboarding/work-record.tsx
+msgid "{heard, plural, one {# person so far.} other {# people so far.}}"
+msgstr "{heard, plural, one {Tot nu toe # persoon.} other {Tot nu toe # mensen.}}"
+
 #: src/brain/brain-chips.tsx
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
@@ -1046,6 +1050,10 @@ msgstr "{people} van {talked}"
 #: src/onboarding/work-record.tsx
 msgid "{people} of the {needed} needed told it."
 msgstr "{people} van de {needed} benodigde mensen hebben hem verteld."
+
+#: src/onboarding/work-record.tsx
+msgid "{people} people"
+msgstr "{people} mensen"
 
 #: src/onboarding/work-record.tsx
 msgid "{people} told it: enough for it to count."
@@ -5438,6 +5446,10 @@ msgstr "Minder dan 5 mensen"
 #: src/onboarding/work-record.tsx
 msgid "Fewer than 5 people gave it."
 msgstr "Minder dan 5 mensen gaven het."
+
+#: src/onboarding/work-record.tsx
+msgid "Fewer than 5 people so far."
+msgstr "Tot nu toe minder dan 5 mensen."
 
 #: src/onboarding/work-record.tsx
 msgid "Fewer than 5 people told it so far."

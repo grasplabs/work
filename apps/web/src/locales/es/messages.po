@@ -600,6 +600,10 @@ msgstr "{going, plural, one {El responsable de # equipo recibe su enlace {when}.
 msgid "{going} of {count}"
 msgstr "{going} de {count}"
 
+#: src/onboarding/work-record.tsx
+msgid "{heard, plural, one {# person so far.} other {# people so far.}}"
+msgstr "{heard, plural, one {# persona hasta ahora.} other {# personas hasta ahora.}}"
+
 #: src/brain/brain-chips.tsx
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
@@ -1046,6 +1050,10 @@ msgstr "{people} de {talked}"
 #: src/onboarding/work-record.tsx
 msgid "{people} of the {needed} needed told it."
 msgstr "{people} de las {needed} personas necesarias lo han contado."
+
+#: src/onboarding/work-record.tsx
+msgid "{people} people"
+msgstr "{people} personas"
 
 #: src/onboarding/work-record.tsx
 msgid "{people} told it: enough for it to count."
@@ -5438,6 +5446,10 @@ msgstr "Menos de 5 personas"
 #: src/onboarding/work-record.tsx
 msgid "Fewer than 5 people gave it."
 msgstr "Menos de 5 personas lo dieron."
+
+#: src/onboarding/work-record.tsx
+msgid "Fewer than 5 people so far."
+msgstr "Menos de 5 personas hasta ahora."
 
 #: src/onboarding/work-record.tsx
 msgid "Fewer than 5 people told it so far."
