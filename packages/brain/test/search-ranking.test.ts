@@ -71,4 +71,32 @@ describe("ranking a reader's results", () => {
       both: new Set(before.recall),
     }).toStrictEqual({ after: before, both: new Set([one.id, two.id]) });
   });
+
+  it("puts a section that holds more of the words before a shorter one that holds fewer", async () => {
+    const mine = await newCollection(brain, "Long and short");
+    const marker = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
+    const first = `zqcharlie${marker}`;
+    const second = `zqdelta${marker}`;
+    const filler = "Plain words about nothing in particular. ".repeat(40);
+    const long = await saved(
+      mine,
+      "long.md",
+      `# Notes\nThe ${first} and ${second} report. ${filler}`
+    );
+    const short = await saved(
+      mine,
+      "short.md",
+      `# Notes\nThe ${first} report.`
+    );
+    const reader: Caller = { userId: "ann", reads: [mine.id] };
+
+    const pack = await recall(brain, reader, { query: `${first} ${second}` });
+    const found = pack.items.flatMap(({ sourceRefs }) =>
+      sourceRefs.flatMap((ref) =>
+        ref.kind === "document" ? [ref.documentId] : []
+      )
+    );
+
+    expect(found).toStrictEqual([long.id, short.id]);
+  });
 });

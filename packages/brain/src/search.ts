@@ -36,13 +36,12 @@ import { nearestCollectionsMax, nearestDetail } from "./search-detail.ts";
 // that finds it: whole words first, then trigrams; and only when neither
 // finds anything, trigrams with room for one typo. Within a pass sections
 // rank by which of the query's words each holds, weighed by where (title,
-// then description, headings and text), and by length, as BM25 weighs
-// length: a short section's words count for more than a long one's, so a
-// short section with fewer of the words can come before a long one with
-// more; then by freshness (`matchesSql`). Every word of a search must
+// then description, headings and text; `matchesSql`); among sections that
+// hold them alike, shorter and fresher first. Every word of a search must
 // match (AND): a search narrows as it gets longer. A recall asks a
 // question in its person's words, which no section holds all of, so any
-// of its words matches (OR).
+// of its words matches (OR), and the sections that hold more of them come
+// first, however long.
 //
 // Never BM25 (GRA-1083): its weights count a word over every row of the
 // index, sections of collections the reader can't read too, so the order
@@ -609,17 +608,16 @@ export const searchSections = async <C>(
   const today = new Date(now).toISOString().slice(0, 10);
   // Freshness scales a score by 0.5 to 1: a quarter off for a year without
   // changes, and a quarter off past the review date. It orders sections that
-  // match about as well; it doesn't lift a poor match over a good one.
+  // hold the query's words alike; it never lifts a poor match over a good one.
   const freshness = sql`(1.0
     - 0.25 * min(1.0, max(0.0, (${now} - documents.updated_at) / (${yearMs} * 1.0)))
     - (CASE WHEN documents.review_date < ${today} THEN 0.25 ELSE 0.0 END))`;
   // A section's words count for less the longer it is past a fixed length,
   // as BM25 normalizes for length, but by a constant (`referenceLength`),
   // never the index's average: that would count the length of sections
-  // the reader can't read. As in BM25, this can put a short section with
-  // fewer of the words before a long one with more: ranking the words
-  // first, length only between equals, lost a fifth of the evidence at
-  // scale on the Brain baseline (GRA-1083's numbers).
+  // the reader can't read. Unlike BM25, length only orders sections that
+  // hold the query's words alike (`coverage` comes first): a short section
+  // with fewer of them never passes a long one with more.
   const lengthNorm = sql`(${sql.raw(String(1 - lengthWeight))} + ${sql.raw(String(lengthWeight))} * (
     SELECT length(sections.text) FROM sections
     WHERE sections.document_id = search_rows.document_id
@@ -632,7 +630,7 @@ export const searchSections = async <C>(
   const rows = await db.all(sql`
     WITH matches AS (${sql.join(passes.map(matchesSql), sql` UNION ALL `)}),
     readable AS (
-      SELECT matches.row_id, matches.pass, matches.own,
+      SELECT matches.row_id, matches.pass, matches.own, matches.score AS coverage,
         matches.score * ${freshness} / ${lengthNorm} AS rank,
         search_rows.document_id, search_rows.position,
         collections.id AS collection_id, collections.sensitive,
@@ -661,17 +659,18 @@ export const searchSections = async <C>(
     ranked AS (
       SELECT *,
         row_number() OVER (
-          PARTITION BY document_id ORDER BY pass, own, rank
+          PARTITION BY document_id ORDER BY pass, own, coverage, rank
         ) AS in_document,
         first_value(pass) OVER document AS document_pass,
-        first_value(rank) OVER document AS document_rank
+        first_value(rank) OVER document AS document_rank,
+        first_value(coverage) OVER document AS document_coverage
       FROM found
-      WINDOW document AS (PARTITION BY document_id ORDER BY pass, rank)
+      WINDOW document AS (PARTITION BY document_id ORDER BY pass, coverage, rank)
     ),
     top AS (
       SELECT * FROM ranked
       WHERE in_document <= ${maxHitsPerDocument}
-      ORDER BY document_pass, document_rank, document_id, in_document
+      ORDER BY document_pass, document_coverage, document_rank, document_id, in_document
       LIMIT ${limit}
     )
     -- The title, description and path are the document's as it is now;
@@ -690,7 +689,7 @@ export const searchSections = async <C>(
     JOIN documents ON documents.id = ranked.document_id
     JOIN sections ON sections.document_id = ranked.document_id
       AND sections.position = ranked.position
-    ORDER BY ranked.document_pass, ranked.document_rank, ranked.document_id,
+    ORDER BY ranked.document_pass, ranked.document_coverage, ranked.document_rank, ranked.document_id,
       ranked.in_document
   `);
   const found = z.array(hitRowSchema).parse(rows);
