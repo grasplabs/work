@@ -6,6 +6,7 @@ import { failureText } from "@grasp-os/shared/errors";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { useRouter } from "@tanstack/react-router";
 import { ClockIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
@@ -374,6 +375,7 @@ export const HeldWrite = ({
   onDecided: () => void;
 }) => {
   const { busy, failure, run } = useCoreAction();
+  const router = useRouter();
   const { t } = useLingui();
   // Read again however it went: a failed decision may have changed
   // something too (the action gone already, say).
@@ -382,6 +384,9 @@ export const HeldWrite = ({
   ): Promise<void> => {
     await run(decision);
     onDecided();
+    // Core notes the decision in the chat, which moves it up the chat
+    // list: the list is read again so it shows under its new time.
+    await router.invalidate();
   };
   const shown = useShown(action);
   const title = action.description?.title ?? action.action;
@@ -442,6 +447,7 @@ const RejectAll = ({
   onDecided: () => void;
 }) => {
   const { busy, failure, run } = useCoreAction();
+  const router = useRouter();
   const count = actions.length;
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -473,6 +479,8 @@ const RejectAll = ({
               }
             });
             onDecided();
+            // Each rejection is noted in the chat: its place in the list moves.
+            await router.invalidate();
           })();
         }}
         size="sm"

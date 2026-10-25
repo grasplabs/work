@@ -349,6 +349,7 @@ const Chat = () => {
           id: open,
           title: t`Chat`,
           createdAt: "",
+          lastAt: "",
           running: false,
           projectId: null,
         });

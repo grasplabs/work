@@ -895,11 +895,11 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Stores `message` as the chat's next, and shows it to its watchers;
-   * its ID.
+   * Stores `message` as the chat's next, and marks the chat active then:
+   * every message moves it up its person's list.
    */
-  #keep(chatId: ChatId, message: Message): number {
-    const { id, createdAt } = this.#db
+  #store(chatId: ChatId, message: Message): { id: number; createdAt: Date } {
+    const stored = this.#db
       .insert(chatMessages)
       .values({
         chatId,
@@ -908,6 +908,20 @@ export class Workspace extends DurableObject<Env> {
       })
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
       .get();
+    this.#db
+      .update(chats)
+      .set({ lastAt: stored.createdAt })
+      .where(eq(chats.id, chatId))
+      .run();
+    return stored;
+  }
+
+  /**
+   * Stores `message` as the chat's next, and shows it to its watchers;
+   * its ID.
+   */
+  #keep(chatId: ChatId, message: Message): number {
+    const { id, createdAt } = this.#store(chatId, message);
     const shown = chatMessageOf(
       id,
       message,
@@ -979,12 +993,14 @@ export class Workspace extends DurableObject<Env> {
           project === null ? {} : { project }
         );
       }
+      const now = new Date();
       const made = this.#db
         .insert(chats)
         .values({
           id,
           title,
-          createdAt: new Date(),
+          createdAt: now,
+          lastAt: now,
           personId,
           agentId: agent.data,
           restricted: fix?.restricted === true,
@@ -2717,24 +2733,29 @@ export class Workspace extends DurableObject<Env> {
     return this.#transcript(this.#chat(chatId).id);
   }
 
-  /** `personId`'s chats, newest first: at most {@link listedChats}. */
+  /**
+   * `personId`'s chats, the most recently active first: at most
+   * {@link listedChats}.
+   */
   chats(personId: string): ChatSummary[] {
     return this.#db
       .select({
         id: chats.id,
         title: chats.title,
         createdAt: chats.createdAt,
+        lastAt: chats.lastAt,
         projectId: chats.projectId,
       })
       .from(chats)
       .where(eq(chats.personId, personId))
-      .orderBy(desc(chats.createdAt))
+      .orderBy(desc(chats.lastAt))
       .limit(listedChats)
       .all()
-      .map(({ id, title, createdAt, projectId }) => ({
+      .map(({ id, title, createdAt, lastAt, projectId }) => ({
         id,
         title,
         createdAt: createdAt.toISOString(),
+        lastAt: lastAt.toISOString(),
         running: this.#turns.has(id),
         projectId,
       }));
@@ -3377,14 +3398,7 @@ export class Workspace extends DurableObject<Env> {
       content: `The change you asked for, "${action}" (pending ID ${id}), was decided. ${heldOutcomes[outcome]} Read how it ended, with what it returned, with \`env.connections.outcome("${id}")\`.`,
       timestamp: Date.now(),
     };
-    this.#db
-      .insert(chatMessages)
-      .values({
-        chatId: chat.id,
-        message: JSON.stringify(message),
-        createdAt: new Date(),
-      })
-      .run();
+    this.#store(chat.id, message);
   }
 
   /**
@@ -3408,14 +3422,7 @@ export class Workspace extends DurableObject<Env> {
           : `The connection you asked for as "${name}" was denied: this chat can't use it. Don't ask for it again unless the person says so.`,
       timestamp: Date.now(),
     };
-    this.#db
-      .insert(chatMessages)
-      .values({
-        chatId: chat.id,
-        message: JSON.stringify(message),
-        createdAt: new Date(),
-      })
-      .run();
+    this.#store(chat.id, message);
     this.heldChanged(chat.id);
   }
 
