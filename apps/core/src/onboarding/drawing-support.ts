@@ -158,15 +158,19 @@ const numbersSaid = (drawn: DrawnWork) => {
   const unit = drawn.unit === "hours" ? "hours" : "minutes";
   const entries = Object.entries(drawn.told);
   return {
-    volume: entries.flatMap(([person, { volume, volumeOf }]) =>
-      volume === null
-        ? []
-        : [
-            {
-              person,
-              said: `${volumeOf === "team" ? "The whole team does" : "They do"} about ${volume[0]} in a quiet ${drawn.per} and ${volume[1]} in a busy one.`,
-            },
-          ]
+    // By whose count it is: a median is shown for each on its own
+    // (brain-intake.ts `volumesOf`), so each needs its own five.
+    volume: (["me", "team", "unknown"] as const).map((of) =>
+      entries.flatMap(([person, { volume, volumeOf }]) =>
+        volume === null || (volumeOf ?? "unknown") !== of
+          ? []
+          : [
+              {
+                person,
+                said: `${of === "team" ? "The whole team does" : "They do"} about ${volume[0]} in a quiet ${drawn.per} and ${volume[1]} in a busy one.`,
+              },
+            ]
+      )
     ),
     takes: entries.flatMap(([person, { takes }]) =>
       takes === null
@@ -225,8 +229,9 @@ const checkedNumbers = async (
   const said = numbersSaid(drawn);
   const backed = async (given: readonly { person: string; said: string }[]) =>
     await numberBackedBy(checks, given, factsOf);
+  const volumes = await each(said.volume, async (group) => await backed(group));
   return {
-    volume: await backed(said.volume),
+    volume: volumes.flat(),
     takes: await backed(said.takes),
     wrong: await backed(said.wrong),
     stepMinutes: await each(

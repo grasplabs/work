@@ -219,12 +219,15 @@ const versionOf = (
   const { numbers } = support;
   // The steps five or more are checked to have told, and where each step
   // of the drawing lands among them: a case off the path after a step left
-  // out follows the last step kept before it.
+  // out follows the last step kept before it, and one with no step kept
+  // before it has no place, so it is left out (never put after the first).
   const kept = drawn.steps.flatMap((step, index) =>
     (support.steps[index] ?? []).length >= minTeamShown ? [{ step, index }] : []
   );
-  const placeOf = (index: number): number =>
-    Math.max(kept.filter((each) => each.index <= index).length - 1, 0);
+  const placeOf = (index: number): number | null => {
+    const before = kept.filter((each) => each.index <= index).length;
+    return before === 0 ? null : before - 1;
+  };
   // Each number only from the people checked to have given it.
   const takes = toldOf(numbers.takes).flatMap(({ takes: own }) =>
     own === null ? [] : [own]
@@ -274,7 +277,11 @@ const versionOf = (
       (support.waits[index] ?? []).length >= minTeamShown ? [words(wait)] : []
     ),
     differently: drawn.differently.flatMap(({ when, after }, index) => {
-      if ((support.differently[index] ?? []).length < minTeamShown) {
+      const place = placeOf(after);
+      if (
+        (support.differently[index] ?? []).length < minTeamShown ||
+        place === null
+      ) {
         return [];
       }
       const outOfTen = shownMedian(
@@ -284,7 +291,7 @@ const versionOf = (
           )
         )
       );
-      return [{ when: words(when), does: "", outOfTen, after: placeOf(after) }];
+      return [{ when: words(when), does: "", outOfTen, after: place }];
     }),
     decides: shown(support.answers.decides ?? [], drawn.decides),
     own: shown(support.answers.own ?? [], drawn.own),
@@ -300,7 +307,8 @@ const versionOf = (
       differs === null || !differsKept
         ? null
         : {
-            step: placeOf(differs.step),
+            // Its step is kept (`differsKept`): it has a place.
+            step: placeOf(differs.step) ?? 0,
             other: words(differs.other),
             why: differs.why,
             because: "",

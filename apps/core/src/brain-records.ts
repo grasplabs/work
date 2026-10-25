@@ -561,6 +561,38 @@ export const onboardingStatementsOf = async (
 };
 
 /**
+ * The onboarding's drawings the brain holds now of the workflows
+ * `workflowIds`, by id, each with its workflow: what a piece of work drawn
+ * and checked anew replaces (GRA-1084).
+ */
+export const onboardingDrawingsOf = async (
+  env: Env,
+  workflowIds: readonly string[]
+): Promise<{ id: string; workflowId: string }[]> => {
+  if (workflowIds.length === 0) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      id: brainRecords.id,
+      workflowId: sql<string>`json_extract(${brainRecords.body}, '$.workflowId')`,
+    })
+    .from(brainRecords)
+    .where(
+      and(
+        eq(brainRecords.type, "workflowVersion"),
+        like(brainRecords.id, `${onboardingIdPrefix}%`),
+        inList(
+          sql`json_extract(${brainRecords.body}, '$.workflowId')`,
+          workflowIds
+        )
+      )
+    )
+    .all();
+  return rows;
+};
+
+/**
  * Takes out of the brain, for good, every drawing the onboarding gave it
  * from `since` on: what may have been drawn with a document's reading
  * that a Knowledge purge reached (onboarding/documents.ts). A drawing is

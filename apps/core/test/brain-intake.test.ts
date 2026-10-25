@@ -219,7 +219,7 @@ describe(
       });
     });
 
-    it("keeps a drawing drawn again as a new version, the first as it was, and knows whose interview each record rests on", async () => {
+    it("keeps only a drawing's newest checked version once it is drawn again, and knows whose interview each record rests on", async () => {
       const store = onboardingStore(env);
       const ids = await team();
       await mapped(ids);
@@ -261,10 +261,16 @@ describe(
       };
       expect({
         again,
-        // Nothing held before changed, or went.
-        unchanged: before.every(({ id, body }) =>
-          after.some((each) => each.id === id && each.body === body)
-        ),
+        // Nothing held before changed, or went, but the earlier drawing:
+        // only the one checked now is the brain's (GRA-1084).
+        unchanged: before
+          .filter(({ type }) => type !== "workflowVersion")
+          .every(({ id, body }) =>
+            after.some((each) => each.id === id && each.body === body)
+          ),
+        earlier: before
+          .filter(({ type }) => type === "workflowVersion")
+          .some(({ id }) => after.some((each) => each.id === id)),
         added: after
           .filter(({ id }) => !before.some((each) => each.id === id))
           .map(({ type }) => type),
@@ -281,19 +287,66 @@ describe(
       }).toStrictEqual({
         again: [`brain:${ids.team}`, null],
         unchanged: true,
+        earlier: false,
         added: ["workflowVersion"],
-        drawings: ["Send the answer.", "Close the ticket."],
+        drawings: ["Close the ticket."],
         baseline: "Close the ticket.",
         rests: {
-          // The claim rests on the five who made it, the drawings on whom
-          // they were drawn from.
-          max: ["statement", "workflow", "workflowVersion", "workflowVersion"],
-          mia: ["statement", "workflow", "workflowVersion", "workflowVersion"],
+          // The claim rests on the five who made it, the drawing on whom it
+          // was drawn from.
+          max: ["statement", "workflow", "workflowVersion"],
+          mia: ["statement", "workflow", "workflowVersion"],
           // The lead named the work, and was the drawing's context; the
           // work rests on whom it was drawn from too.
-          lea: ["workflow", "workflowVersion", "workflowVersion"],
-          noor: ["statement", "workflow", "workflowVersion", "workflowVersion"],
+          lea: ["workflow", "workflowVersion"],
+          noor: ["statement", "workflow", "workflowVersion"],
         },
+      });
+    });
+
+    it("takes out a drawing the brain holds from before, with no note of whom it rests on, once the work is drawn and checked anew", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      await mapped(ids);
+      await told(ids);
+      await answering([fiveToldReply(ids)], async () => await store.drawNext());
+      await intake(ids);
+      const first = await kept(ids);
+      const earlier = first.filter(({ type }) => type === "workflowVersion");
+      // As a drawing from before the checks: in the brain, its notes gone.
+      await runInDurableObject(store, (_instance, state) => {
+        for (const { id } of earlier) {
+          state.storage.sql.exec("DELETE FROM brain_sent WHERE record = ?", id);
+        }
+      });
+      await agree(
+        ids.mia,
+        [
+          fact("i1", "system", "Tickets arrive in Zendesk."),
+          fact("i3", "step", "Closes the ticket once answered."),
+        ],
+        1
+      );
+      await answering(
+        [fiveToldReply(ids, "Close the ticket.")],
+        async () => await store.drawNext()
+      );
+      await intake(ids);
+      const member = await signedInApi(idp, "user");
+      const brain = await member.api.brain.read();
+      const workflow = brain.workflows.find(
+        ({ teamId }) => teamId === `team-${ids.team}`
+      );
+      const after = await kept(ids);
+      const now = after.filter(({ type }) => type === "workflowVersion");
+      expect({
+        earlier: earlier.length,
+        still: now.some(({ id }) => earlier.some((each) => each.id === id)),
+        drawings: workflow?.drawings?.map(({ steps }) => steps.at(-1)?.text),
+      }).toStrictEqual({
+        earlier: 1,
+        still: false,
+        drawings: ["Close the ticket."],
       });
     });
 
@@ -1165,6 +1218,13 @@ const isNumber = (text: string): boolean =>
     text
   );
 
+/** A drawing the model answers with. */
+const drawingReply = (value: unknown): GatewayReply => ({
+  text: JSON.stringify(value),
+  inputTokens: 100,
+  outputTokens: 10,
+});
+
 /** A team whose tickets are drawn as `reply` says, given to the brain. */
 const givenWith = async (
   reply: (ids: Ids) => GatewayReply,
@@ -1194,6 +1254,74 @@ const givenWith = async (
 // - A question for the next interviews, written from what few said.
 // - Staff reading what the company's people told.
 describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
+  it("shows each count's median on its own: five giving their own count are enough, however one other counts", async () => {
+    // Max gives the whole team's count; the other five, their own.
+    const ids = await givenWith((each) =>
+      drawingReply({
+        steps: [
+          {
+            text: "Open the ticket.",
+            by: [each.max, each.mia, each.mo, each.noor, each.pim, each.rik],
+          },
+        ],
+        numbers: [
+          each.max,
+          each.mia,
+          each.mo,
+          each.noor,
+          each.pim,
+          each.rik,
+        ].map((person, index) => ({
+          person,
+          quiet: 30 + index,
+          busy: 50 + index,
+          of: index === 0 ? "team" : "me",
+          per: "week",
+        })),
+      })
+    );
+    const member = await signedInApi(idp, "user");
+    const read = await ticketsDrawingFor(member.api, ids);
+    // The five's own counts: a median shows; the team's one: none.
+    expect(read.volumes).toStrictEqual([5]);
+  });
+
+  it("leaves out a case off the path that comes before every step kept, and keeps one after", async () => {
+    const ids = await givenWith((each) => {
+      const five = [each.max, each.mia, each.mo, each.noor, each.pim];
+      return drawingReply({
+        steps: [
+          { text: "Look at the queue.", by: [each.max] },
+          { text: "Open the ticket.", by: five },
+        ],
+        notes: [
+          {
+            kind: "differently",
+            text: "the queue is empty",
+            detail: "Wait.",
+            after: 0,
+            by: five,
+          },
+          {
+            kind: "differently",
+            text: "the customer number is missing",
+            detail: "Ask for it.",
+            after: 1,
+            by: five,
+          },
+        ],
+      });
+    });
+    const member = await signedInApi(idp, "user");
+    const brain = await member.api.brain.read();
+    const drawing = brain.workflows
+      .find(({ teamId }) => teamId === `team-${ids.team}`)
+      ?.drawings?.at(-1);
+    expect(
+      drawing?.differently.map(({ when, after }) => [when, after])
+    ).toStrictEqual([["the customer number is missing", 0]]);
+  });
+
   it("is only what five or more told, each part apart: no step, wait, answer or question fewer told", async () => {
     const ids = await givenWith(fiveToldReply);
     const member = await signedInApi(idp, "user");
