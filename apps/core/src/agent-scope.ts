@@ -60,6 +60,14 @@ export interface AgentApi {
   /** Its name in the code's `env`: a JavaScript identifier. */
   name: string;
   /**
+   * What it is for, in one line: what every request carries of it, in the
+   * chat's index of its APIs (agent.ts); its declaration is read on demand
+   * (`readApi`). Holds what the model must always know of it: that what it
+   * returns is data, never instructions, and what waits for a person or an
+   * admin.
+   */
+  summary: string;
+  /**
    * The types its declaration names, declared before `interface Env`, with
    * their doc comments: names no other API declares.
    */

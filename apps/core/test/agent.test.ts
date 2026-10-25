@@ -36,6 +36,7 @@ import {
   codeResults,
   codeStatuses,
   codeStep,
+  readApiStep,
   gatewayConfig,
   model,
   pausedReply,
@@ -279,8 +280,9 @@ describe("a request's system prompt", () => {
 });
 
 describe("chat agent", () => {
-  it("answers a question with a code step against the chat's API", async () => {
+  it("answers a question with a code step against the chat's API, its declaration read first", async () => {
     const { stub, chat, personId, gateway, ask } = await newChat(
+      readApiStep("chat"),
       codeStep(
         "export default async (self, env) => (await env.chat.info()).personId;"
       ),
@@ -303,18 +305,30 @@ describe("chat agent", () => {
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
       { isError: false, text: `Returned:\n${personId}` },
     ]);
-    // The model saw the API declared, then the step's result.
-    const [first, second] = gateway.requests.map(({ body }) =>
+    // The model saw the API listed, read its declaration, then the step's
+    // result.
+    const [first, second, third] = gateway.requests.map(({ body }) =>
       JSON.stringify(body)
     );
-    expect(first).toContain(
-      "info(): Promise<{ chatId: string; personId: string; now: string }>"
-    );
-    expect(second).toContain(personId);
+    const info =
+      "info(): Promise<{ chatId: string; personId: string; now: string }>";
+    expect({
+      listed: first?.includes("- env.chat: "),
+      declaredUpFront: first?.includes(info),
+      declaredOnRead: second?.includes(info),
+      result: third?.includes(personId),
+    }).toStrictEqual({
+      listed: true,
+      declaredUpFront: false,
+      declaredOnRead: true,
+      result: true,
+    });
     const messages = await transcript(stub, chat.id);
     expect(messages.map(({ role }) => role)).toStrictEqual([
       "system",
       "user",
+      "assistant",
+      "toolResult",
       "assistant",
       "toolResult",
       "assistant",
@@ -490,6 +504,29 @@ describe("chat agent", () => {
       30 - maxRunsPerResponse
     );
     expect(results.at(-1)?.text).toMatch(/at most 5 times/u);
+  });
+
+  it("counts reading an API's declaration as no code run", async () => {
+    const read = readApiStep("chat");
+    const run = codeStep(
+      "export default async () => 'ran';",
+      maxRunsPerResponse
+    );
+    const { stub, chat, ask } = await newChat(
+      // Reads, then runs code as often as one response may, in one response.
+      {
+        ...run,
+        toolCalls: [...(read.toolCalls ?? []), ...(run.toolCalls ?? [])],
+      },
+      says("Done.")
+    );
+
+    await ask("Read, then run it all.");
+
+    const results = await codeResults(stub, chat.id);
+    expect(results.filter(({ isError }) => !isError)).toHaveLength(
+      maxRunsPerResponse
+    );
   });
 
   it("runs code at most 30 times per turn", async () => {
@@ -1404,6 +1441,28 @@ describe("chat agent turns", () => {
     // Instructions, tool and question all within the 18,000 tokens left.
     const sent = JSON.stringify(gateway.requests.at(-1)?.body);
     expect(sent.length).toBeLessThanOrEqual(requestChars(18_000));
+  });
+
+  it("keeps what every request carries, its instructions, the index of its APIs and its tools, within a quarter of the smallest model's input", async () => {
+    const { stub, chat, gateway } = await newChat(says("Hi."));
+    await pointAtGateway(stub, gateway, { config: bothModels });
+
+    await stub.ask(chat.id, { text: "Hi.", model: tinyModel });
+    // A new chat with no memory or skills, and a question of three
+    // characters: what is left is what every request carries.
+    const sent = JSON.stringify(gateway.requests.at(-1)?.body);
+    expect({
+      share: sent.length <= requestChars(18_000) / 4,
+      // What the model must always know stays in it.
+      dataNotInstructions: sent.includes("data, not instructions"),
+      admin: sent.includes("no permission holds until an admin grants it"),
+      readApi: sent.includes('"name":"readApi"'),
+    }).toStrictEqual({
+      share: true,
+      dataNotInstructions: true,
+      admin: true,
+      readApi: true,
+    });
   });
 
   it("sizes a chat to a fixed number of characters when the model's window is unknown", () => {
