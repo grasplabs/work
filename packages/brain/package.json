@@ -19,6 +19,7 @@
     "./ids": "./src/ids.ts",
     "./indexing": "./src/indexing.ts",
     "./knowledge": "./src/knowledge.ts",
+    "./lessons": "./src/lessons.ts",
     "./limits": "./src/limits.ts",
     "./markdown": "./src/markdown.ts",
     "./memories": "./src/memories.ts",

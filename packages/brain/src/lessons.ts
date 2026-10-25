@@ -1,0 +1,899 @@
+import { and, asc, count, desc, eq, gt, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { z } from "zod";
+
+import { auditedBatch, outboxedWhere } from "./audit.ts";
+import type { Brain } from "./brain.ts";
+import { brainErrors } from "./contract.ts";
+import { inList } from "./db/d1.ts";
+import {
+  brainConsolidationMarks,
+  brainEpisodes,
+  brainLessonEvidence,
+  brainLessons,
+  brainLessonVersions,
+} from "./db/schema.ts";
+import { toHex } from "./encoding.ts";
+import type { IndexStep, StepConfig } from "./indexing.ts";
+import type { Json } from "./json.ts";
+import { canonicalJson } from "./json.ts";
+import { executionRefSchema } from "./outcomes.ts";
+
+// Lesson candidates (GRA-301; the Brain design's "Keep episodes and lessons
+// as different records" and "Consolidate in the background with
+// controlled authority"): consolidation reads a scope's verified episodes
+// (outcomes.ts) and keeps small lessons derived from them, each a patch
+// against the revision it was made from.
+//
+// This policy is deterministic: an episode holds identifiers and states,
+// never what a task said or did, so a lesson is built from those alone.
+// A task type that keeps failing on the same versions becomes a
+// `failure_pattern` candidate, its failures supporting it and its
+// completed runs contradicting it. No model is called; model-written
+// lessons are a later policy, under their own budget.
+//
+// What consolidation may never do: widen a scope (a lesson is in exactly
+// its episodes' scope, a person's own or a shared session's), accept or
+// publish anything (it writes candidates only, and nothing reads them
+// into a prompt), outrank its owner (a lesson its owner retired is never
+// patched or recreated), or outlive its evidence (an erased episode is no
+// longer evidence, and a lesson left without enough is retired).
+
+/** Consolidation's bounds: per job, and per scope. */
+export const consolidationLimits = {
+  /** New episodes one job reads. */
+  episodesPerJob: 200,
+  /** Episodes of one group a lesson rests on: the newest. */
+  episodesPerGroup: 100,
+  /** Rounds one job makes against a lesson that moved under it. */
+  roundsPerJob: 3,
+  /** Lessons one job patches. */
+  patchesPerJob: 20,
+  /** Candidates one scope holds open; past it, no new ones. */
+  openPerScope: 50,
+  /** Failures a pattern needs before it is a lesson. */
+  minFailures: 3,
+} as const;
+
+/** The Brain's own, as its events name it. */
+const system: Json = { type: "system" };
+
+/** A scope consolidation reads, as episodes name it. */
+export interface ConsolidationScope {
+  scope: "person" | "session";
+  /** The owner's user ID for `person`, the audience's ID for `session`. */
+  scopeId: string;
+}
+
+/** A scope's key: its marks and its jobs are named by it. */
+export const scopeKeyOf = ({ scope, scopeId }: ConsolidationScope): string =>
+  `${scope}:${scopeId}`;
+
+/** The episodes of `scope`, as a condition. */
+const inScope = ({ scope, scopeId }: ConsolidationScope): SQL | undefined =>
+  scope === "person"
+    ? and(eq(brainEpisodes.scope, "person"), eq(brainEpisodes.ownerId, scopeId))
+    : and(
+        eq(brainEpisodes.scope, "session"),
+        eq(brainEpisodes.audience, scopeId)
+      );
+
+/** The scope an episode is in. */
+const scopeOfEpisode = (row: {
+  scope: string;
+  ownerId: string;
+  audience: string | null;
+}): ConsolidationScope | undefined => {
+  if (row.scope === "person") {
+    return { scope: "person", scopeId: row.ownerId };
+  }
+  if (row.scope === "session" && row.audience !== null) {
+    return { scope: "session", scopeId: row.audience };
+  }
+  return undefined;
+};
+
+/** Where a scope's consolidation got to: none before its first job. */
+type Mark = { recordedAt: Date; episodeId: string } | undefined;
+
+const markOf = async <C>({ db }: Brain<C>, scopeKey: string): Promise<Mark> => {
+  const row = await db
+    .select({
+      recordedAt: brainConsolidationMarks.recordedAt,
+      episodeId: brainConsolidationMarks.episodeId,
+    })
+    .from(brainConsolidationMarks)
+    .where(eq(brainConsolidationMarks.scopeKey, scopeKey))
+    .get();
+  return row;
+};
+
+/** Episodes recorded after `mark`, as a condition. */
+const afterMark = (mark: Mark): SQL | undefined =>
+  mark === undefined
+    ? undefined
+    : or(
+        gt(brainEpisodes.recordedAt, mark.recordedAt),
+        and(
+          eq(brainEpisodes.recordedAt, mark.recordedAt),
+          gt(brainEpisodes.id, mark.episodeId)
+        )
+      );
+
+/**
+ * How many of `scope`'s episodes consolidation hasn't read yet, counted up
+ * to `upTo`: what its host schedules a job by.
+ */
+export const consolidationBacklog = async <C>(
+  brain: Brain<C>,
+  scope: ConsolidationScope,
+  upTo: number = consolidationLimits.episodesPerJob
+): Promise<number> => {
+  const mark = await markOf(brain, scopeKeyOf(scope));
+  const rows = await brain.db
+    .select({ id: brainEpisodes.id })
+    .from(brainEpisodes)
+    .where(and(inScope(scope), afterMark(mark)))
+    .limit(upTo);
+  return rows.length;
+};
+
+/**
+ * Scopes with episodes consolidation hasn't read, recorded before
+ * `olderThan`, at most `limit`: what its host's clock catches up on.
+ */
+export const scopesBehind = async <C>(
+  { db }: Brain<C>,
+  olderThan: Date,
+  limit: number
+): Promise<ConsolidationScope[]> => {
+  const rows = await db
+    .selectDistinct({
+      scope: brainEpisodes.scope,
+      ownerId: brainEpisodes.ownerId,
+      audience: brainEpisodes.audience,
+    })
+    .from(brainEpisodes)
+    .leftJoin(
+      brainConsolidationMarks,
+      eq(
+        brainConsolidationMarks.scopeKey,
+        sql`${brainEpisodes.scope} || ':' || (CASE WHEN ${brainEpisodes.scope} = 'person' THEN ${brainEpisodes.ownerId} ELSE ${brainEpisodes.audience} END)`
+      )
+    )
+    .where(
+      and(
+        sql`${brainEpisodes.recordedAt} < ${olderThan.getTime()}`,
+        or(
+          sql`${brainConsolidationMarks.scopeKey} IS NULL`,
+          gt(brainEpisodes.recordedAt, brainConsolidationMarks.recordedAt),
+          and(
+            eq(brainEpisodes.recordedAt, brainConsolidationMarks.recordedAt),
+            gt(brainEpisodes.id, brainConsolidationMarks.episodeId)
+          )
+        )
+      )
+    )
+    .limit(limit * 4);
+  const scopes = new Map<string, ConsolidationScope>();
+  for (const row of rows) {
+    const scope = scopeOfEpisode(row);
+    if (scope !== undefined && scopes.size < limit) {
+      scopes.set(scopeKeyOf(scope), scope);
+    }
+  }
+  return [...scopes.values()];
+};
+
+const versionRefsSchema = z.array(executionRefSchema);
+
+/** What a group of episodes is about: a task type, on these versions. */
+const groupKeyOf = (taskType: string, versionRefs: string): string => {
+  const versions = versionRefsSchema
+    .parse(JSON.parse(versionRefs))
+    .map(({ kind, id, version }) => `${kind}:${id}@${version ?? ""}`)
+    .toSorted();
+  return canonicalJson([taskType, versions]);
+};
+
+/** A lesson's content at one revision: what its versions keep. */
+interface LessonContent {
+  applicability: { taskType: string; versions: string[] };
+  exclusions: string[];
+  instruction: string;
+  evidenceStatus: "supported" | "contested";
+  supporting: string[];
+  contradicting: string[];
+}
+
+/** The ID of the lesson of `scopeKey`'s group `groupKey`: one per group. */
+const lessonIdOf = async (
+  scopeKey: string,
+  groupKey: string
+): Promise<string> => {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson([scopeKey, groupKey]))
+  );
+  return `lesson-${toHex(new Uint8Array(digest)).slice(0, 32)}`;
+};
+
+/**
+ * What the group `groupKey` of `scope` says now, from its newest episodes:
+ * a failure pattern if it failed often enough; undefined if not.
+ */
+const contentOf = async <C>(
+  { db }: Brain<C>,
+  scope: ConsolidationScope,
+  groupKey: string,
+  taskType: string
+): Promise<LessonContent | undefined> => {
+  const rows = await db
+    .select({
+      id: brainEpisodes.id,
+      execution: brainEpisodes.execution,
+      versionRefs: brainEpisodes.versionRefs,
+    })
+    .from(brainEpisodes)
+    .where(and(inScope(scope), eq(brainEpisodes.taskType, taskType)))
+    .orderBy(desc(brainEpisodes.occurredAt), desc(brainEpisodes.id))
+    .limit(consolidationLimits.episodesPerGroup * 4);
+  const group = rows
+    .filter((row) => groupKeyOf(taskType, row.versionRefs) === groupKey)
+    .slice(0, consolidationLimits.episodesPerGroup);
+  const supporting = group
+    .filter(({ execution }) => execution === "failed")
+    .map(({ id }) => id)
+    .toSorted();
+  const contradicting = group
+    .filter(({ execution }) => execution === "completed")
+    .map(({ id }) => id)
+    .toSorted();
+  if (supporting.length < consolidationLimits.minFailures) {
+    return undefined;
+  }
+  const [, versions] = z
+    .tuple([z.string(), z.array(z.string())])
+    .parse(JSON.parse(groupKey));
+  const runs = supporting.length + contradicting.length;
+  return {
+    applicability: { taskType, versions },
+    exclusions: [],
+    instruction: `${taskType} failed ${supporting.length} of its last ${runs} finished runs on ${versions.length === 0 ? "its current versions" : versions.join(", ")}.`,
+    evidenceStatus: contradicting.length === 0 ? "supported" : "contested",
+    supporting,
+    contradicting,
+  };
+};
+
+/** A lesson as consolidation reads it before patching it. */
+interface LessonAt {
+  id: string;
+  revision: number;
+  state: "candidate" | "retired";
+  retiredBy: "owner" | "evidence" | null;
+  content: LessonContent | undefined;
+}
+
+/**
+ * What a version keeps of its content: all but its evidence, which is
+ * `brain_lesson_evidence`'s, so an erased episode leaves no trace of its
+ * ID in any version.
+ */
+const storedContentSchema = z.strictObject({
+  applicability: z.strictObject({
+    taskType: z.string(),
+    versions: z.array(z.string()),
+  }),
+  exclusions: z.array(z.string()),
+  instruction: z.string(),
+  evidenceStatus: z.enum(["supported", "contested"]),
+});
+
+/** `content` as a version stores it. */
+const storedOf = ({
+  supporting: _supporting,
+  contradicting: _contradicting,
+  ...stored
+}: LessonContent): string => canonicalJson(stored);
+
+/** A stored version's content, with the evidence it still has. */
+const contentFrom = (
+  stored: string,
+  evidence: readonly { episodeId: string; role: string }[]
+): LessonContent => ({
+  ...storedContentSchema.parse(JSON.parse(stored)),
+  supporting: evidence
+    .filter(({ role }) => role === "supporting")
+    .map(({ episodeId }) => episodeId)
+    .toSorted(),
+  contradicting: evidence
+    .filter(({ role }) => role === "contradicting")
+    .map(({ episodeId }) => episodeId)
+    .toSorted(),
+});
+
+const lessonAt = async <C>(
+  { db }: Brain<C>,
+  lessonId: string
+): Promise<LessonAt | undefined> => {
+  const row = await db
+    .select({
+      id: brainLessons.id,
+      revision: brainLessons.revision,
+      state: brainLessons.state,
+      retiredBy: brainLessons.retiredBy,
+      content: brainLessonVersions.content,
+    })
+    .from(brainLessons)
+    .leftJoin(
+      brainLessonVersions,
+      and(
+        eq(brainLessonVersions.lessonId, brainLessons.id),
+        eq(brainLessonVersions.revision, brainLessons.revision)
+      )
+    )
+    .where(eq(brainLessons.id, lessonId))
+    .get();
+  if (row === undefined) {
+    return undefined;
+  }
+  const evidence =
+    row.content === null
+      ? []
+      : await db
+          .select({
+            episodeId: brainLessonEvidence.episodeId,
+            role: brainLessonEvidence.role,
+          })
+          .from(brainLessonEvidence)
+          .where(
+            and(
+              eq(brainLessonEvidence.lessonId, lessonId),
+              eq(brainLessonEvidence.revision, row.revision)
+            )
+          );
+  return {
+    id: row.id,
+    revision: row.revision,
+    state: row.state,
+    retiredBy: row.retiredBy,
+    content:
+      row.content === null ? undefined : contentFrom(row.content, evidence),
+  };
+};
+
+/** A short digest of what a patch writes: part of its key. */
+const digestOf = async (content: string, state: string): Promise<string> => {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${state}\n${content}`)
+  );
+  return toHex(new Uint8Array(digest)).slice(0, 32);
+};
+
+/** A patch: the lesson moved from `base` to `base + 1`, saying `content`. */
+interface Patch {
+  lessonId: string;
+  scope: ConsolidationScope;
+  groupKey: string;
+  base: number;
+  content: LessonContent;
+  state: "candidate" | "retired";
+  retiredBy: "owner" | "evidence" | null;
+}
+
+/**
+ * Applies `patch` in one batch, against its base: the version, its
+ * evidence, and the lesson moved on, only if the lesson is still at its
+ * base. A patch made again (a retried job) writes nothing: its key is
+ * unique. Answers whether the lesson is now at the patch's revision.
+ */
+const applyPatch = async <C>(
+  brain: Brain<C>,
+  patch: Patch
+): Promise<boolean> => {
+  const { db } = brain;
+  const now = brain.ports.clock();
+  const revision = patch.base + 1;
+  const content = storedOf(patch.content);
+  const patchKey = `${patch.lessonId}@${revision}:${await digestOf(
+    canonicalJson([
+      content,
+      patch.content.supporting,
+      patch.content.contradicting,
+    ]),
+    patch.state
+  )}`;
+  const atBase = sql`(SELECT ${brainLessons.revision} FROM ${brainLessons} WHERE ${brainLessons.id} = ${patch.lessonId}) = ${patch.base}`;
+  const thisPatch = sql`EXISTS (SELECT 1 FROM ${brainLessonVersions} WHERE ${brainLessonVersions.patchKey} = ${patchKey})`;
+  const evidence = [
+    ...patch.content.supporting.map((id) => [id, "supporting"]),
+    ...patch.content.contradicting.map((id) => [id, "contradicting"]),
+  ];
+  const statements = [
+    // A new lesson starts at revision 0, before its first version.
+    db
+      .insert(brainLessons)
+      .values({
+        id: patch.lessonId,
+        revision: 0,
+        scope: patch.scope.scope,
+        scopeId: patch.scope.scopeId,
+        groupKey: patch.groupKey,
+        kind: "failure_pattern",
+        applicability: canonicalJson(patch.content.applicability),
+        exclusions: canonicalJson(patch.content.exclusions),
+        instruction: patch.content.instruction,
+        evidenceStatus: patch.content.evidenceStatus,
+        state: "candidate",
+        retiredBy: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing(),
+    db
+      .insert(brainLessonVersions)
+      .select(
+        sql`SELECT ${patch.lessonId}, ${revision}, ${patch.base === 0 ? null : patch.base}, ${content}, ${patchKey}, ${now.getTime()} WHERE ${atBase}`
+      )
+      .onConflictDoNothing(),
+    db
+      .insert(brainLessonEvidence)
+      .select(
+        sql`SELECT ${patch.lessonId}, ${revision}, json_extract(held.value, '$[0]'), json_extract(held.value, '$[1]') FROM json_each(${JSON.stringify(evidence)}) AS held WHERE ${thisPatch} AND ${atBase} AND EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${brainEpisodes.id} = json_extract(held.value, '$[0]'))`
+      )
+      .onConflictDoNothing(),
+    outboxedWhere(
+      brain,
+      {
+        actor: system,
+        action:
+          patch.state === "retired"
+            ? "knowledge.lesson.retired"
+            : "knowledge.lesson.proposed",
+        target: { type: "lesson", id: patch.lessonId },
+        detail: {
+          revision,
+          supporting: patch.content.supporting.length,
+          contradicting: patch.content.contradicting.length,
+        },
+      },
+      sql`${atBase} AND ${thisPatch}`
+    ),
+    db
+      .update(brainLessons)
+      .set({
+        revision,
+        applicability: canonicalJson(patch.content.applicability),
+        exclusions: canonicalJson(patch.content.exclusions),
+        instruction: patch.content.instruction,
+        evidenceStatus: patch.content.evidenceStatus,
+        state: patch.state,
+        retiredBy: patch.retiredBy,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(brainLessons.id, patch.lessonId),
+          eq(brainLessons.revision, patch.base),
+          thisPatch
+        )
+      ),
+  ] as const;
+  await auditedBatch(brain.ports, db, statements);
+  const after = await lessonAt(brain, patch.lessonId);
+  return after?.revision === revision;
+};
+
+/** Whether two contents say the same, with the same evidence. */
+const sameContent = (a: LessonContent | undefined, b: LessonContent): boolean =>
+  a !== undefined &&
+  storedOf(a) === storedOf(b) &&
+  canonicalJson(a.supporting) === canonicalJson(b.supporting) &&
+  canonicalJson(a.contradicting) === canonicalJson(b.contradicting);
+
+/**
+ * Brings the lesson of `scope`'s group `groupKey` up to date with its
+ * episodes now, a round at a time against a lesson that moves under it.
+ * Returns whether it patched.
+ */
+const consolidateGroup = async <C>(
+  brain: Brain<C>,
+  scope: ConsolidationScope,
+  groupKey: string,
+  taskType: string,
+  mayOpen: boolean
+): Promise<boolean> => {
+  const lessonId = await lessonIdOf(scopeKeyOf(scope), groupKey);
+  for (let round = 0; round < consolidationLimits.roundsPerJob; round += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each round reads what the last left
+    const [current, content] = await Promise.all([
+      lessonAt(brain, lessonId),
+      contentOf(brain, scope, groupKey, taskType),
+    ]);
+    // Its owner's correction outranks repetition: never patched again.
+    if (current?.retiredBy === "owner") {
+      return false;
+    }
+    let patch: Patch | undefined;
+    if (content === undefined) {
+      // Not enough failures (left), erased evidence included: an open
+      // candidate is retired; none is opened.
+      if (current?.state === "candidate" && current.content !== undefined) {
+        patch = {
+          lessonId,
+          scope,
+          groupKey,
+          base: current.revision,
+          content: current.content,
+          state: "retired",
+          retiredBy: "evidence",
+        };
+      }
+    } else if (
+      !(
+        current?.state === "candidate" && sameContent(current.content, content)
+      ) &&
+      (current !== undefined || mayOpen)
+    ) {
+      patch = {
+        lessonId,
+        scope,
+        groupKey,
+        base: current?.revision ?? 0,
+        content,
+        state: "candidate",
+        retiredBy: null,
+      };
+    }
+    if (patch === undefined) {
+      return false;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    if (await applyPatch(brain, patch)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/** What one consolidation job did. */
+export interface ConsolidationResult {
+  /** New episodes it read. */
+  read: number;
+  /** Lessons it patched. */
+  patched: number;
+}
+
+/**
+ * Consolidates `scope`'s episodes recorded since its watermark, a bounded
+ * number of them: each group they belong to brought up to date, and the
+ * scope's open candidates checked against their evidence now. Moves the
+ * watermark only forward, after its patches, so a job cut short is made
+ * again from the same place and writes nothing twice.
+ */
+export const consolidate = async <C>(
+  brain: Brain<C>,
+  scope: ConsolidationScope
+): Promise<ConsolidationResult> => {
+  const { db } = brain;
+  const scopeKey = scopeKeyOf(scope);
+  const mark = await markOf(brain, scopeKey);
+  const fresh = await db
+    .select({
+      id: brainEpisodes.id,
+      taskType: brainEpisodes.taskType,
+      versionRefs: brainEpisodes.versionRefs,
+      recordedAt: brainEpisodes.recordedAt,
+    })
+    .from(brainEpisodes)
+    .where(and(inScope(scope), afterMark(mark)))
+    .orderBy(asc(brainEpisodes.recordedAt), asc(brainEpisodes.id))
+    .limit(consolidationLimits.episodesPerJob);
+  // The scope's open candidates, so one whose evidence was erased is
+  // retired even when nothing new arrived in its group.
+  const open = await db
+    .select({
+      groupKey: brainLessons.groupKey,
+      applicability: brainLessons.applicability,
+    })
+    .from(brainLessons)
+    .where(
+      and(
+        eq(brainLessons.scope, scope.scope),
+        eq(brainLessons.scopeId, scope.scopeId),
+        eq(brainLessons.state, "candidate")
+      )
+    )
+    .limit(consolidationLimits.openPerScope);
+  let opened = open.length;
+  let patched = 0;
+  const done = new Set<string>();
+  const run = async (groupKey: string, taskType: string): Promise<void> => {
+    done.add(groupKey);
+    const mayOpen = opened < consolidationLimits.openPerScope;
+    const existed = await lessonAt(brain, await lessonIdOf(scopeKey, groupKey));
+    if (await consolidateGroup(brain, scope, groupKey, taskType, mayOpen)) {
+      patched += 1;
+      if (existed === undefined) {
+        opened += 1;
+      }
+    }
+  };
+  // New episodes' groups in the order they arrived; the watermark moves to
+  // the last episode whose group was brought up to date, so a job that
+  // ran out of patches leaves the rest for the next.
+  let last: (typeof fresh)[number] | undefined;
+  for (const episode of fresh) {
+    const groupKey = groupKeyOf(episode.taskType, episode.versionRefs);
+    if (!done.has(groupKey)) {
+      if (patched >= consolidationLimits.patchesPerJob) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one group at a time, bounded
+      await run(groupKey, episode.taskType);
+    }
+    last = episode;
+  }
+  for (const { groupKey, applicability } of open) {
+    if (patched >= consolidationLimits.patchesPerJob) {
+      break;
+    }
+    if (!done.has(groupKey)) {
+      const { taskType } = z
+        .object({ taskType: z.string() })
+        .parse(JSON.parse(applicability));
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await run(groupKey, taskType);
+    }
+  }
+  if (last !== undefined) {
+    await db
+      .insert(brainConsolidationMarks)
+      .values({
+        scopeKey,
+        recordedAt: last.recordedAt,
+        episodeId: last.id,
+        updatedAt: brain.ports.clock(),
+      })
+      .onConflictDoUpdate({
+        target: brainConsolidationMarks.scopeKey,
+        set: {
+          recordedAt: last.recordedAt,
+          episodeId: last.id,
+          updatedAt: brain.ports.clock(),
+        },
+        // Only forward: a job cut short and made again never moves it back.
+        setWhere: or(
+          gt(sql`excluded.recorded_at`, brainConsolidationMarks.recordedAt),
+          and(
+            eq(sql`excluded.recorded_at`, brainConsolidationMarks.recordedAt),
+            gt(sql`excluded.episode_id`, brainConsolidationMarks.episodeId)
+          )
+        ),
+      });
+  }
+  return { read: fresh.length, patched };
+};
+
+/** A lesson as its host inspects it: every version, with its evidence. */
+export interface Lesson {
+  id: string;
+  revision: number;
+  scope: "person" | "session";
+  scopeId: string;
+  state: "candidate" | "retired";
+  retiredBy: "owner" | "evidence" | null;
+  versions: {
+    revision: number;
+    supersedes: number | null;
+    content: LessonContent;
+    evidence: { episodeId: string; role: "supporting" | "contradicting" }[];
+  }[];
+}
+
+/**
+ * The lessons of `scope`, every version of each with the evidence it
+ * still has: the host's own view, for inspection and checks, never a
+ * reader's.
+ */
+export const lessonsOf = async <C>(
+  { db }: Brain<C>,
+  scope: ConsolidationScope
+): Promise<Lesson[]> => {
+  const lessons = await db
+    .select()
+    .from(brainLessons)
+    .where(
+      and(
+        eq(brainLessons.scope, scope.scope),
+        eq(brainLessons.scopeId, scope.scopeId)
+      )
+    )
+    .orderBy(asc(brainLessons.createdAt), asc(brainLessons.id));
+  if (lessons.length === 0) {
+    return [];
+  }
+  const ids = lessons.map(({ id }) => id);
+  const [versions, evidence] = await Promise.all([
+    db
+      .select()
+      .from(brainLessonVersions)
+      .where(inList(brainLessonVersions.lessonId, ids))
+      .orderBy(asc(brainLessonVersions.revision)),
+    db
+      .select()
+      .from(brainLessonEvidence)
+      .where(inList(brainLessonEvidence.lessonId, ids)),
+  ]);
+  return lessons.map((lesson) => ({
+    id: lesson.id,
+    revision: lesson.revision,
+    scope: lesson.scope,
+    scopeId: lesson.scopeId,
+    state: lesson.state,
+    retiredBy: lesson.retiredBy,
+    versions: versions
+      .filter(({ lessonId }) => lessonId === lesson.id)
+      .map((version) => {
+        const held = evidence
+          .filter(
+            ({ lessonId, revision }) =>
+              lessonId === lesson.id && revision === version.revision
+          )
+          .map(({ episodeId, role }) => ({ episodeId, role }));
+        return {
+          revision: version.revision,
+          supersedes: version.supersedes,
+          content: contentFrom(version.content, held),
+          evidence: held,
+        };
+      }),
+  }));
+};
+
+/**
+ * Retires the lesson `lessonId` at `expectedRevision` as its owner's
+ * correction: the person whose own lessons they are (`ownerId`, the host's
+ * caller). Never patched or recreated after. A lesson that isn't theirs,
+ * or doesn't exist, is `brain.not_found`; a stale revision is
+ * `brain.revision_conflict`.
+ */
+export const retireLesson = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<void> => {
+  const ownerId = brain.ports.ownerOf(reader);
+  const { lessonId, expectedRevision } = brainErrors.parse(
+    "brain.invalid",
+    z.strictObject({
+      lessonId: z.string().min(1).max(128),
+      expectedRevision: z.int().min(1),
+    }),
+    input
+  );
+  const scope: ConsolidationScope = { scope: "person", scopeId: ownerId };
+  const current = await lessonAt(brain, lessonId);
+  const [own] = await brain.db
+    .select({ id: brainLessons.id, groupKey: brainLessons.groupKey })
+    .from(brainLessons)
+    .where(
+      and(
+        eq(brainLessons.id, lessonId),
+        eq(brainLessons.scope, "person"),
+        eq(brainLessons.scopeId, ownerId)
+      )
+    );
+  if (
+    current === undefined ||
+    own === undefined ||
+    current.content === undefined
+  ) {
+    throw brainErrors.create("brain.not_found");
+  }
+  if (current.revision !== expectedRevision) {
+    throw brainErrors.create("brain.revision_conflict");
+  }
+  const moved = await applyPatch(brain, {
+    lessonId,
+    scope,
+    groupKey: own.groupKey,
+    base: current.revision,
+    content: current.content,
+    state: "retired",
+    retiredBy: "owner",
+  });
+  if (!moved) {
+    throw brainErrors.create("brain.revision_conflict");
+  }
+};
+
+/**
+ * The statements that delete `userId`'s own lessons and consolidation's
+ * place in their scope, for a personal purge: a shared session's lessons
+ * lose their episodes' evidence with those episodes.
+ */
+export const forgetPersonLessons = (db: Brain<unknown>["db"], userId: string) =>
+  [
+    db
+      .delete(brainLessons)
+      .where(
+        and(eq(brainLessons.scope, "person"), eq(brainLessons.scopeId, userId))
+      ),
+    db
+      .delete(brainConsolidationMarks)
+      .where(
+        eq(
+          brainConsolidationMarks.scopeKey,
+          scopeKeyOf({ scope: "person", scopeId: userId })
+        )
+      ),
+  ] as const;
+
+/** How many lessons `scope` holds open. */
+export const openLessons = async <C>(
+  { db }: Brain<C>,
+  scope: ConsolidationScope
+): Promise<number> => {
+  const [row] = await db
+    .select({ open: count() })
+    .from(brainLessons)
+    .where(
+      and(
+        eq(brainLessons.scope, scope.scope),
+        eq(brainLessons.scopeId, scope.scopeId),
+        eq(brainLessons.state, "candidate")
+      )
+    );
+  return row?.open ?? 0;
+};
+
+/** New episodes that start a job: as many as a lesson needs. */
+export const consolidationThreshold = consolidationLimits.minFailures;
+
+const consolidationInputSchema = z.strictObject({
+  scope: z.enum(["person", "session"]),
+  scopeId: z.string().min(1).max(256),
+});
+
+/**
+ * The job that consolidates `scope` from where it is now: named by the
+ * scope and its watermark, so starting it again before it moved is the
+ * same job, and one after starts the next.
+ */
+export const consolidationJob = async <C>(
+  brain: Brain<C>,
+  scope: ConsolidationScope
+): Promise<{ id: string; input: Json }> => {
+  const scopeKey = scopeKeyOf(scope);
+  const mark = await markOf(brain, scopeKey);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson([scopeKey, mark?.episodeId ?? null]))
+  );
+  return {
+    id: `consolidation-${toHex(new Uint8Array(digest)).slice(0, 32)}`,
+    input: { scope: scope.scope, scopeId: scope.scopeId },
+  };
+};
+
+/** How a job's one step retries: a consolidation is safe to make again. */
+const consolidationConfig: StepConfig = {
+  retries: { limit: 3, delay: "30 seconds", backoff: "exponential" },
+  timeout: 5 * 60_000,
+};
+
+/** Runs (or resumes) one consolidation job, as its host's engine runs it. */
+export const runConsolidation = async <C>(
+  brain: Brain<C>,
+  payload: unknown,
+  step: IndexStep
+): Promise<void> => {
+  const scope = consolidationInputSchema.parse(payload);
+  await step.do("consolidate", consolidationConfig, async () => {
+    const result = await consolidate(brain, scope);
+    return { ...result };
+  });
+};

@@ -591,6 +591,120 @@ export const brainForgottenPeople = sqliteTable("brain_forgotten_people", {
 });
 
 /**
+ * A lesson candidate (GRA-301), consolidated from a scope's verified
+ * episodes (../lessons.ts): its current revision. A lesson is always in
+ * exactly its episodes' scope, `person` (its owner's own) or `session` (a
+ * shared chat's audience), and consolidation only ever writes candidates:
+ * nothing here is accepted, published or read into a prompt.
+ */
+export const brainLessons = sqliteTable(
+  "brain_lessons",
+  {
+    id: text().primaryKey(),
+    revision: integer().notNull(),
+    scope: text({ enum: ["person", "session"] }).notNull(),
+    /** The owner's user ID for `person`, the audience's ID for `session`. */
+    scopeId: text("scope_id").notNull(),
+    /** What the lesson is about, from its episodes: its group's key. */
+    groupKey: text("group_key").notNull(),
+    kind: text({ enum: ["failure_pattern"] }).notNull(),
+    /** JSON: the task type and versions it applies to. */
+    applicability: text().notNull(),
+    /** JSON array: where it doesn't apply, as far as known. */
+    exclusions: text().notNull(),
+    /** Built from identifiers and counts only: never model or source text. */
+    instruction: text().notNull(),
+    evidenceStatus: text("evidence_status", {
+      enum: ["supported", "contested"],
+    }).notNull(),
+    state: text({ enum: ["candidate", "retired"] }).notNull(),
+    /** Who retired it: its owner's correction outranks repetition. */
+    retiredBy: text("retired_by", { enum: ["owner", "evidence"] }),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    // One lesson per scope and group: a retired one too, which keeps the
+    // group from being recreated past its owner's correction.
+    uniqueIndex("brain_lessons_group_idx").on(
+      table.scope,
+      table.scopeId,
+      table.groupKey
+    ),
+  ]
+);
+
+/**
+ * Every revision of a lesson, the current one too: what it said, and the
+ * revision it superseded, so older versions stay inspectable. A patch's
+ * key is unique: one made again (a retried job) writes nothing.
+ */
+export const brainLessonVersions = sqliteTable(
+  "brain_lesson_versions",
+  {
+    lessonId: text("lesson_id")
+      .notNull()
+      .references(() => brainLessons.id, { onDelete: "cascade" }),
+    revision: integer().notNull(),
+    supersedes: integer(),
+    /** JSON: the lesson's content at this revision. */
+    content: text().notNull(),
+    patchKey: text("patch_key").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.lessonId, table.revision] }),
+    uniqueIndex("brain_lesson_versions_patch_idx").on(table.patchKey),
+  ]
+);
+
+/**
+ * The episodes a lesson's revision rests on: supporting it, or
+ * contradicting it. Goes with its episode, so an erased episode is no
+ * longer evidence of anything.
+ */
+export const brainLessonEvidence = sqliteTable(
+  "brain_lesson_evidence",
+  {
+    lessonId: text("lesson_id").notNull(),
+    revision: integer().notNull(),
+    episodeId: text("episode_id")
+      .notNull()
+      .references(() => brainEpisodes.id, { onDelete: "cascade" }),
+    role: text({ enum: ["supporting", "contradicting"] }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.lessonId, table.revision, table.episodeId],
+    }),
+    index("brain_lesson_evidence_episode_idx").on(table.episodeId),
+    foreignKey({
+      columns: [table.lessonId, table.revision],
+      foreignColumns: [
+        brainLessonVersions.lessonId,
+        brainLessonVersions.revision,
+      ],
+    }).onDelete("cascade"),
+  ]
+);
+
+/**
+ * How far consolidation got in each scope: the last episode it read, by
+ * recorded time and ID. A job starts from a watermark and moves it only
+ * forward, in the batch of its patches.
+ */
+export const brainConsolidationMarks = sqliteTable(
+  "brain_consolidation_marks",
+  {
+    /** `<scope>:<scopeId>`. */
+    scopeKey: text("scope_key").primaryKey(),
+    recordedAt: timestamp("recorded_at").notNull(),
+    episodeId: text("episode_id").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  }
+);
+
+/**
  * How far each host boundary's deliveries reached: the highest capture
  * sequence recorded from it. Only grows, whatever order deliveries land
  * in; what the host still owes is its own backlog of capture intents.
