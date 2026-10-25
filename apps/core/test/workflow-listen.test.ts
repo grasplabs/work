@@ -14,11 +14,16 @@ import {
 } from "../src/workflow-bindings.ts";
 import { loadWorkflowBuild } from "../src/workflow-builds.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import {
+  candidateRunFor,
+  startCandidateRun,
+} from "../src/workflows/candidate-runs.ts";
 import type { Settled } from "../src/workflows/code.ts";
 import { eventTypeKey } from "../src/workflows/event-envelopes.ts";
 import type { RunStep } from "../src/workflows/host.ts";
@@ -501,6 +506,87 @@ describe("listen tasks", { timeout: 120_000 }, () => {
       status: "failed",
       code: "workflow.event_timeout",
       late: "workflow.run_ended",
+    });
+  });
+
+  it("hand a try's catch their timeout, as a timeout, so the run goes on", async () => {
+    const admin = await person("admin");
+    const { workflow } = await listening(admin, [
+      {
+        guard: {
+          try: [
+            listen(
+              "await-job",
+              { one: ofThisJob(completed) },
+              { timeout: { seconds: 2 } }
+            ),
+          ],
+          catch: {
+            errors: {
+              with: {
+                type: "https://open-workflow-specification.org/spec/1.0.0/errors/timeout",
+              },
+            },
+            as: "failure",
+            do: [{ noted: { set: { notes: ["${ $failure.instance }"] } } }],
+          },
+        },
+      },
+    ]);
+    const runId = await started(admin, workflow.id);
+
+    const run = await endOf(admin, workflow.id, runId);
+
+    expect({ status: run.status, output: run.output }).toStrictEqual({
+      status: "completed",
+      output: { notes: ["/do/0/guard/try/0/await-job"] },
+    });
+  });
+
+  it("leave a test run's listen past what a test run may wait to no catch, as a wait's", async () => {
+    const admin = await person("admin");
+    const { workflow } = await listening(admin, [
+      {
+        guard: {
+          try: [
+            listen(
+              "await-job",
+              { one: ofThisJob(completed) },
+              { timeout: { days: 300 } }
+            ),
+          ],
+          // Any error at all: a test run's limit still isn't one to take.
+          catch: { as: "failure", do: [{ noted: { set: { notes: [] } } }] },
+        },
+      },
+    ]);
+    // A test run runs a draft's checkpoint: the published definition, saved.
+    const draft = await workflowDraft(env, admin, workflow.id);
+    const { revision } = await editWorkflowDraft(env, admin, workflow.id, {
+      expectedRevision: draft.revision,
+      source: draft.source,
+      modules: {},
+    });
+    const { runId } = await startCandidateRun(env, admin, workflow.id, {
+      revision,
+      input: { jobId: "job-1" },
+      fixtures: {},
+    });
+
+    const run = await vi.waitFor(
+      async () => {
+        const found = await candidateRunFor(env, admin, workflow.id, runId);
+        if (found.status === "starting" || found.status === "running") {
+          throw new Error(`Test run ${runId} is ${found.status}`);
+        }
+        return found;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+
+    expect({ status: run.status, code: run.error?.code }).toStrictEqual({
+      status: "failed",
+      code: "workflow.candidate_wait_limit",
     });
   });
 
