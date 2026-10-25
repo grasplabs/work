@@ -23,6 +23,9 @@ import { coreProject } from "./vite.config.ts";
 //   BRAIN_MODEL=anthropic/claude-sonnet-5 BRAIN_MODEL_MODE=run BRAIN_MODEL_SPLIT=validation BRAIN_MODEL_BUDGET_USD=5 \
 //     vp -C apps/core test -c vite.brain-model.config.ts
 //
+// Both take the repeats from `BRAIN_MODEL_REPEATS` (3 while unset), so give
+// the estimate the repeats the run will have.
+//
 // The budget is the ledger's deployment limit for the run: core refuses any
 // request that could take the spend past it, so the run stops there. Each
 // run reports on its output as JSON lines (`BRAIN_MODEL_REPORT`); keep them

@@ -171,6 +171,14 @@ const graphSeen = async () => {
 };
 
 /**
+ * What Entra grants the eval's connections: every class's rights, and a
+ * shared mailbox's, so turning a class on later asks no one to connect
+ * again (connect's provider-rights.ts).
+ */
+const everyRight =
+  "openid profile email offline_access User.Read MailboxSettings.Read Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send Mail.Send.Shared Calendars.ReadWrite Calendars.Read.Shared Files.ReadWrite.All Sites.ReadWrite.All Tasks.ReadWrite Notes.ReadWrite";
+
+/**
  * The company's CRM, a HubSpot connection through Composio whose admin
  * allowed reading its notes and changing a deal, served by core's fake
  * toolkit server (mail-server.ts): its latest note plants an instruction
@@ -234,7 +242,7 @@ const connectMicrosoft = async (
   });
   const authorization = new URL(url);
   const query = new URLSearchParams({
-    code: consentCode(authorization, acmeTenant, subject),
+    code: consentCode(authorization, acmeTenant, subject, everyRight),
     state: authorization.searchParams.get("state") ?? "",
   });
   await routed(`/api/connections/callback?${query.toString()}`, {
@@ -421,6 +429,13 @@ export const setUpStephenCompany = async (
     object: { type: "connection", connectionId: crm },
     actions: [crmTools.read, crmTools.change],
     binding: "CRM",
+  });
+  // A company app is read only where an admin points Stephen at it: the
+  // whole CRM, for Lisa's team (app-pointers.ts).
+  await admin.api.connections.pointApp({
+    connectionId: crm,
+    resources: [],
+    audience: { who: "teams", teams: customerService },
   });
   return {
     admin,

@@ -7,6 +7,10 @@
  */
 export interface ConnectorCatalog {
   readonly "google-workspace.calendar@1": {
+    readonly create: {
+      readonly input: { body?: string; calendar: string; end: string; location?: string; showAs?: "busy" | "free"; start: string; subject: string; timeZone: string };
+      readonly output: { event: { calendar: string; end: string; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; organizer: { address: string | null; name: string | null } | null; recurringEventId: string | null; start: string; subject: string | null; webLink: string | null } };
+    };
     readonly get: {
       readonly input: { calendar: string; event: string };
       readonly output: { event: { attendees: Array<{ address: string | null; name: string | null; optional: boolean; response: string | null }>; body: string | null; calendar: string; end: string; id: string; isAllDay: boolean; isCancelled: boolean; joinUrl: string | null; location: string | null; organizer: { address: string | null; name: string | null } | null; recurringEventId: string | null; start: string; subject: string | null; webLink: string | null } };
@@ -17,6 +21,10 @@ export interface ConnectorCatalog {
     };
   };
   readonly "google-workspace.files@1": {
+    readonly createDraft: {
+      readonly input: { format: "doc" | "text"; name: string; text: string };
+      readonly output: { id: string; mimeType: string; name: string; webUrl: string | null };
+    };
     readonly list: {
       readonly input: { drive: string; folder?: string; page?: string; top?: number };
       readonly output: { drive: string; items: Array<{ drive: string; id: string; kind: "file" | "folder" | "other"; lastModifiedAt: string | null; mimeType: string; name: string; parentId: string | null; size: number | null; webUrl: string | null }>; nextPage: string | null };
@@ -60,10 +68,20 @@ export interface ConnectorCatalog {
       readonly output: { id: string; mailbox: string; sent: true; threadId: string | null };
     };
   };
+  readonly "google-workspace.sheets@1": {
+    readonly read: {
+      readonly input: { cells?: string; drive: string; sheet?: string; spreadsheet: string; top?: number };
+      readonly output: { drive: string; id: string; more: boolean; name: string; range: string; rows: Array<Array<(string) | (number) | (boolean) | null>>; sheet: string; sheets: Array<string> };
+    };
+  };
   readonly "microsoft-365.calendar@1": {
     readonly create: {
       readonly input: { body?: string; end: string; location?: string; mailbox: string; showAs?: "free" | "tentative" | "busy" | "oof" | "workingElsewhere"; start: string; subject: string; timeZone: string };
       readonly output: { event: { bodyPreview: string | null; end: { dateTime: string; timeZone: string }; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; mailbox: string; organizer: { address: string | null; name: string | null } | null; showAs: string | null; start: { dateTime: string; timeZone: string }; subject: string | null; webLink: string | null } };
+    };
+    readonly freeTime: {
+      readonly input: { end: string; mailbox: string; minutes: number; start: string; timeZone: string; workingHours?: { days: Array<"sunday" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday">; from: string; to: string } };
+      readonly output: { free: Array<{ end: string; minutes: number; start: string }>; mailbox: string; timeZone: string };
     };
     readonly get: {
       readonly input: { event: string; mailbox: string };
@@ -115,9 +133,17 @@ export interface ConnectorCatalog {
     };
   };
   readonly "microsoft-365.lists@1": {
+    readonly addItem: {
+      readonly input: { list: string; site: string; values: Array<{ column: string; value: (string) | (number) | (boolean) | null }> };
+      readonly output: { item: { createdAt: string | null; fields: Record<string, (string) | (number) | (boolean) | (Array<string>) | null>; id: string; lastModifiedAt: string | null; webUrl: string | null }; list: string; site: string };
+    };
     readonly items: {
       readonly input: { columns?: Array<string>; list: string; page?: string; site: string; top?: number; where?: Array<{ column: string; is: "eq" | "ne" | "gt" | "ge" | "lt" | "le"; value: (string) | (number) }> };
       readonly output: { items: Array<{ createdAt: string | null; fields: Record<string, (string) | (number) | (boolean) | (Array<string>) | null>; id: string; lastModifiedAt: string | null; webUrl: string | null }>; list: string; nextPage: string | null; site: string };
+    };
+    readonly updateItem: {
+      readonly input: { after: Array<{ column: string; value: (string) | (number) | (boolean) | null }>; before: Array<{ column: string; value: (string) | (number) | (boolean) | null }>; item: string; list: string; site: string };
+      readonly output: { item: { createdAt: string | null; fields: Record<string, (string) | (number) | (boolean) | (Array<string>) | null>; id: string; lastModifiedAt: string | null; webUrl: string | null }; list: string; site: string };
     };
   };
   readonly "microsoft-365.mail@1": {
@@ -162,6 +188,34 @@ export interface ConnectorCatalog {
       readonly output: { conversationId: string; earlierMessages: boolean; mailbox: string; messages: Array<{ body: string | null; bodyCut: boolean; bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; conversationId: string | null; flagStatus: string | null; folderId: string | null; from: { address: string | null; name: string | null } | null; hasAttachments: boolean; id: string; importance: string | null; internetMessageId: string | null; isDraft: boolean; isRead: boolean; mailbox: string; receivedAt: string | null; sentAt: string | null; subject: string | null; to: Array<{ address: string | null; name: string | null }>; webLink: string | null }> };
     };
   };
+  readonly "microsoft-365.onenote@1": {
+    readonly create: {
+      readonly input: { mailbox: string; section: string; text: string; title: string };
+      readonly output: { mailbox: string; page: { createdAt: string | null; id: string; lastModifiedAt: string | null; title: string | null }; sectionId: string };
+    };
+    readonly pages: {
+      readonly input: { mailbox: string; page?: string; section: string; top?: number };
+      readonly output: { mailbox: string; nextPage: string | null; pages: Array<{ createdAt: string | null; id: string; lastModifiedAt: string | null; title: string | null }>; sectionId: string };
+    };
+    readonly read: {
+      readonly input: { mailbox: string; page: string };
+      readonly output: { mailbox: string; page: { createdAt: string | null; id: string; lastModifiedAt: string | null; title: string | null }; sectionId: string | null; text: string };
+    };
+    readonly sections: {
+      readonly input: { mailbox: string; page?: string; top?: number };
+      readonly output: { mailbox: string; nextPage: string | null; sections: Array<{ id: string; name: string | null; notebook: string | null; notebookId: string }> };
+    };
+  };
+  readonly "microsoft-365.planner@1": {
+    readonly create: {
+      readonly input: { due?: string; plan: string; title: string };
+      readonly output: { plan: string; task: { assignedTo: Array<string>; bucketId: string | null; completedAt: string | null; createdAt: string | null; due: string | null; id: string; percentComplete: number | null; priority: number | null; title: string | null } };
+    };
+    readonly tasks: {
+      readonly input: { openOnly?: boolean; page?: string; plan: string };
+      readonly output: { nextPage: string | null; plan: string; tasks: Array<{ assignedTo: Array<string>; bucketId: string | null; completedAt: string | null; createdAt: string | null; due: string | null; id: string; percentComplete: number | null; priority: number | null; title: string | null }> };
+    };
+  };
   readonly "microsoft-365.todo@1": {
     readonly complete: {
       readonly input: { list: string; mailbox: string; task: string };
@@ -178,6 +232,12 @@ export interface ConnectorCatalog {
     readonly tasks: {
       readonly input: { list: string; mailbox: string; openOnly?: boolean; page?: string; top?: number };
       readonly output: { listId: string; mailbox: string; nextPage: string | null; tasks: Array<{ completedAt: { dateTime: string; timeZone: string } | null; createdAt: string | null; due: { dateTime: string; timeZone: string } | null; id: string; importance: string | null; lastModifiedAt: string | null; status: string | null; title: string | null }> };
+    };
+  };
+  readonly "microsoft-365.word@1": {
+    readonly read: {
+      readonly input: { drive: string; item: string };
+      readonly output: { drive: string; id: string; lastModifiedAt: string | null; name: string; text: string; webUrl: string | null };
     };
   };
 }

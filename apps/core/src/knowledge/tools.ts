@@ -18,7 +18,6 @@ import type {
   SkillFile,
 } from "@grasp-os/shared/knowledge";
 import { and, asc, eq, gte, lt, ne, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
@@ -29,8 +28,8 @@ import {
   links,
   sections,
 } from "../db/knowledge/schema.ts";
-import type { Reader } from "./access.ts";
 import { allowedFor } from "./authorize.ts";
+import type { Brain } from "./brain.ts";
 import {
   backlinkRows,
   documentMaxLinks,
@@ -38,7 +37,6 @@ import {
   readableDocument,
   toSummary,
 } from "./documents.ts";
-import { portsOf } from "./ports.ts";
 
 // The agent's Knowledge tools (Code Mode: a typed API it filters in code):
 // a small catalog always in its context, then search (search.ts), read and
@@ -108,12 +106,12 @@ const fitting = <Entry>(
  * collection's skills are found by search, which does. Nor is it recorded:
  * it names what may be read, and reading any of it is recorded.
  */
-export const catalog = async (
-  env: Env,
-  reader: Reader
+export const catalog = async <C>(
+  brain: Brain<C>,
+  reader: C
 ): Promise<KnowledgeCatalog> => {
-  const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(portsOf(env), reader);
+  const { db } = brain;
+  const allowed = await allowedFor(brain.ports, reader);
   const collectionRows = await db
     .select({
       id: collections.id,
@@ -182,9 +180,9 @@ const headingsSchema = z.array(z.string());
  * One section of a document (a search hit's `section`), without the rest
  * of it, or the whole document, at its current version.
  */
-export const read = async (
-  env: Env,
-  reader: Reader,
+export const read = async <C>(
+  brain: Brain<C>,
+  reader: C,
   documentId: unknown,
   options?: unknown
 ): Promise<KnowledgeRead> => {
@@ -195,14 +193,14 @@ export const read = async (
   );
   if (section === undefined) {
     const { version, provenance, ...summary } = await getDocument(
-      env,
+      brain,
       reader,
       documentId
     );
     return { ...summary, section: null, text: version.text, provenance };
   }
-  const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(portsOf(env), reader);
+  const { db } = brain;
+  const allowed = await allowedFor(brain.ports, reader);
   const id = documentIdSchema.safeParse(documentId);
   // The section is read in the same query as the access check, as a whole
   // document is (`getDocument`).
@@ -235,7 +233,7 @@ export const read = async (
   const { document, collection, section: row } = found;
   // Recorded before a missing section is refused, as a missing version is:
   // how many sections a document has says something of it too.
-  const provenance = await portsOf(env).onRead(
+  const provenance = await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",
@@ -302,16 +300,16 @@ const underHeading = (text: string, headings: string): string => {
  * The access check is in the same query, so a document they can no longer
  * read, or one that is gone, is left out.
  */
-export const cited = async (
-  env: Env,
-  reader: Reader,
+export const cited = async <C>(
+  brain: Brain<C>,
+  reader: C,
   documentIds: readonly string[]
 ): Promise<ChatCitedDocument[]> => {
   if (documentIds.length === 0) {
     return [];
   }
-  const allowed = await allowedFor(portsOf(env), reader);
-  const rows = await drizzle(env.KNOWLEDGE)
+  const allowed = await allowedFor(brain.ports, reader);
+  const rows = await brain.db
     .select({
       documentId: documents.id,
       collectionId: documents.collectionId,
@@ -386,13 +384,13 @@ const pastFolder = (folder: string): string => `${folder.slice(0, -1)}0`;
  * collection has the whole collection as its folder). All of them are in
  * the document's own collection, so its provenance is that collection's.
  */
-export const follow = async (
-  env: Env,
-  reader: Reader,
+export const follow = async <C>(
+  brain: Brain<C>,
+  reader: C,
   documentId: unknown
 ): Promise<FollowResult> => {
-  const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(portsOf(env), reader);
+  const { db } = brain;
+  const allowed = await allowedFor(brain.ports, reader);
   const { document, collection } = await readableDocument(
     db,
     allowed,
@@ -469,7 +467,7 @@ export const follow = async (
       description: row.description,
     }));
   }
-  const provenance = await portsOf(env).onRead(
+  const provenance = await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",
@@ -494,20 +492,20 @@ export const follow = async (
  * first if any of them were sensitive. Returns the collections, only
  * those that listed a skill, for the context to carry as sources.
  */
-export const noteListedSkills = async (
-  env: Env,
-  reader: Reader,
+export const noteListedSkills = async <C>(
+  brain: Brain<C>,
+  reader: C,
   skills: readonly CatalogSkill[]
 ): Promise<Provenance> => {
   const ids = [...new Set(skills.map(({ collectionId }) => collectionId))];
   if (ids.length === 0) {
     return { collectionIds: [], sensitive: false, restricted: false };
   }
-  const sources = await drizzle(env.KNOWLEDGE)
+  const sources = await brain.db
     .select({ id: collections.id, sensitive: collections.sensitive })
     .from(collections)
     .where(inList(collections.id, ids));
-  return await portsOf(env).onRead(
+  return await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",

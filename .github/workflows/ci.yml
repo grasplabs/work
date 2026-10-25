@@ -201,6 +201,17 @@ jobs:
           # A matrix job's result: a failure if any shard failed.
           TEST: ${{ needs.test.result }}
 
+  # The journeys (playwright.config.ts) in parts, a runner and a stack
+  # each. Unsplit, the job took 18 to 23 minutes and ran into its 30
+  # (October 2026). Playwright runs a project's dependencies in full on
+  # every shard, and the serial projects (Grasp's go, the interviews, the
+  # journeys) depend on everything before them, so `--shard` alone splits
+  # nothing: GRASP_E2E_PART picks the part. The parallel part runs in
+  # shards, which split its test files by count, and the serial part runs
+  # on a stack of its own, where nothing runs before it. Add a shard by
+  # adding a parallel entry and raising the count in every `--shard`.
+  # Part of the required `e2e` (below).
+  #
   # In Playwright's image, which has the browsers and their system packages
   # installed: `playwright install --with-deps` fetched 119 MB of them from
   # the Ubuntu mirror, up to 12 minutes when it was slow (October 2026,
@@ -208,7 +219,7 @@ jobs:
   # builds it carries: check:playwright-image (static) holds the two
   # together, and Renovate moves them in one pull request.
   e2e:
-    name: e2e
+    name: e2e (${{ matrix.part }})
     if: github.event_name != 'push'
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
@@ -218,11 +229,31 @@ jobs:
       # memory isn't held to Docker's 64 MB /dev/shm.
       options: --user 1001 --ipc=host
     runs-on: ubuntu-latest
-    # 11 to 20 minutes when it passed (October 2026), before the image: about
-    # 1 minute of setup, the browsers' system packages from the Ubuntu mirror
-    # (under a minute, but up to 12 when the mirror was slow), 2 minutes for
-    # the stack to build and start, and 8 to 14 minutes of tests.
-    timeout-minutes: 30
+    # About 1 minute of setup and 2 for the stack to build and start, then
+    # each part's tests.
+    timeout-minutes: 20
+    strategy:
+      # A failing part doesn't cancel the others: each says what failed in
+      # it.
+      fail-fast: false
+      matrix:
+        include:
+          - part: 1/3
+            project: parallel
+            artifact: 1-of-3
+            args: --shard=1/3
+          - part: 2/3
+            project: parallel
+            artifact: 2-of-3
+            args: --shard=2/3
+          - part: 3/3
+            project: parallel
+            artifact: 3-of-3
+            args: --shard=3/3
+          - part: serial
+            project: serial
+            artifact: serial
+            args: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -233,14 +264,38 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - run: vp run e2e
+      - run: vp run e2e ${{ matrix.args }}
+        env:
+          GRASP_E2E_PART: ${{ matrix.project }}
       # A failing test is retried with a trace (playwright.config.ts): keep it.
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-traces
+          # One per part: a run's artifact names are unique.
+          name: playwright-traces-${{ matrix.artifact }}
           path: test-results/
           retention-days: 14
+
+  # The one required e2e check (.github/rulesets/main.json) for every part,
+  # so splitting leaves the ruleset as it is. Like `check`, it runs however
+  # they ended and passes only if all of them passed: GitHub counts a
+  # skipped required check as passing.
+  e2e-result:
+    name: e2e
+    needs: [e2e]
+    if: always() && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "e2e parts: $E2E"
+          if [ "$E2E" != success ]; then
+            echo "::error title=e2e::the e2e parts ended as $E2E; e2e passes only when every part succeeds."
+            exit 1
+          fi
+        env:
+          # A matrix job's result: a failure if any part failed.
+          E2E: ${{ needs.e2e.result }}
 
   # The admin's journeys (playwright.admin.config.ts): a stack of
   # their own, the admin on the fake Cloudflare API, so apart from e2e's.
@@ -347,6 +402,125 @@ jobs:
       - run: printf '%s\n' "$PR_TITLE" | vp exec commitlint
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
+
+  # Stephen's eval with a real model (GRA-739), for a change that touches
+  # Stephen: his instructions and tools, the card path, the connectors'
+  # tools whose classes decide what he may do alone, or the eval itself
+  # (scripts/stephen-eval.ts names the files). A broken hard rule blocks the
+  # merge, and the run's numbers go on the pull request. The required
+  # `stephen` (below) always ends, as GitHub counts a skipped required
+  # check as passing: a change that touches no Stephen file passes it
+  # without a model call.
+  stephen-changes:
+    name: stephen-changes
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      stephen: ${{ steps.changed.outputs.stephen }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The diff is against the base commit.
+          fetch-depth: 0
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - id: changed
+        run: node scripts/stephen-eval.ts changed "$BASE"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+
+  # The model is reached with the real AI binding, through an AI Gateway of
+  # CI's own (`STEPHEN_EVAL_GATEWAY`) whose spend limit caps what CI can
+  # spend, and each run's budget (`STEPHEN_EVAL_BUDGET_USD`) is the
+  # ledger's limit too. Its Cloudflare token comes from the stephen-eval
+  # environment's 1Password service account, as staging's does.
+  stephen-eval:
+    name: stephen-eval
+    needs: stephen-changes
+    if: needs.stephen-changes.outputs.stephen == 'true'
+    runs-on: ubuntu-latest
+    # The whole suite with a real model: about 70 turns and their judging.
+    timeout-minutes: 60
+    environment: stephen-eval
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # Secrets never reach a pull request from a fork; we don't accept those.
+      - if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::error title=stephen::A pull request from a fork can't run Stephen's eval."
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-stephen-eval/cloudflare/account-id
+          CLOUDFLARE_API_TOKEN: op://grasp-os-stephen-eval/cloudflare/api-token
+      # Fails on a broken hard rule (test/stephen-real-model.test.ts).
+      - name: Run Stephen's eval with the real model
+        run: |
+          set -o pipefail
+          vp -C apps/core test -c vite.stephen-model.config.ts 2>&1 | tee stephen-eval.log
+        env:
+          STEPHEN_MODEL: ${{ vars.STEPHEN_EVAL_MODEL }}
+          STEPHEN_MODEL_BUDGET_USD: ${{ vars.STEPHEN_EVAL_BUDGET_USD || '3' }}
+          STEPHEN_MODEL_GATEWAY: ${{ vars.STEPHEN_EVAL_GATEWAY || 'stephen-ci' }}
+      - name: Report the numbers
+        if: always()
+        run: node scripts/stephen-eval.ts report stephen-eval.log > stephen-eval.md
+      - name: Post the numbers on the pull request
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          if [ -s stephen-eval.md ]; then
+            gh pr comment "$PR" --repo "$REPO" --body-file stephen-eval.md --edit-last --create-if-none
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+
+  stephen:
+    name: stephen
+    needs: [stephen-changes, stephen-eval]
+    if: always() && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "Stephen's files changed: $CHANGED; the eval ended as $EVAL"
+          if [ "$CHANGES" != success ]; then
+            echo "::error title=stephen::Finding what changed ended as $CHANGES."
+            exit 1
+          fi
+          if [ "$CHANGED" != true ]; then
+            echo "No Stephen file changed: the gate passes without a model call."
+            exit 0
+          fi
+          if [ "$EVAL" != success ]; then
+            echo "::error title=stephen::Stephen's eval ended as $EVAL: a broken hard rule, or a run that didn't finish, blocks the merge."
+            exit 1
+          fi
+        env:
+          CHANGES: ${{ needs.stephen-changes.result }}
+          CHANGED: ${{ needs.stephen-changes.outputs.stephen }}
+          EVAL: ${{ needs.stephen-eval.result }}
 
   # Deploys core and connect from the release job's bundle, never from
   # source: each Worker's modules, static files, bindings, compatibility

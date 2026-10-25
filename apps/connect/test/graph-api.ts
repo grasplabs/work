@@ -20,6 +20,7 @@ import {
 import { beforeEach } from "vite-plus/test";
 import { z } from "zod";
 
+import { contractDocx } from "./fixtures/graph-apps.ts";
 import {
   accessDenied,
   graphAccessDenied,
@@ -67,6 +68,12 @@ import {
   workbookIds,
 } from "./fixtures/graph.ts";
 import type { SheetCell } from "./fixtures/graph.ts";
+import {
+  appControls,
+  appParts,
+  appRoutes,
+  resetApps,
+} from "./graph-apps-fake.ts";
 import { fakeProvider, json, route as routeOn } from "./internet.ts";
 import type { ProviderRoute } from "./internet.ts";
 import type { fakeProviders } from "./oauth-provider.ts";
@@ -88,9 +95,10 @@ const parts = [
   "row",
   "task",
   "version",
+  ...appParts,
 ] as const;
 
-type Part = (typeof parts)[number];
+export type Part = (typeof parts)[number];
 
 /** One condition of a list's `$filter`. */
 interface Condition {
@@ -250,6 +258,53 @@ const eventKey = (mailbox: string, id: string): string => `${mailbox}/${id}`;
 /** An event of `mailbox` as Graph holds it now. */
 const eventOf = (mailbox: string, id: string): GraphEvent =>
   events.get(eventKey(mailbox, id)) ?? eventDetail(mailbox, numberOf(id));
+
+/** An event `holdEvents` puts in a calendar: its times in UTC. */
+export interface HeldEvent {
+  start: string;
+  end: string;
+  showAs?: string;
+  isAllDay?: boolean;
+  isCancelled?: boolean;
+}
+
+/** The events a test put in a calendar, by mailbox; cleared before each test. */
+const heldEvents = new Map<string, HeldEvent[]>();
+
+/** How many events a page of a held calendar's view holds, whatever `$top` asks. */
+const heldPageSize = 2;
+
+/**
+ * Graph's calendar view of `held`: the events overlapping the range, by
+ * start, a few to a page so that a reader must follow the pages.
+ */
+const viewOf = (mailbox: string, held: HeldEvent[], query: URLSearchParams) => {
+  const from = Date.parse(query.get("startDateTime") ?? "");
+  const to = Date.parse(query.get("endDateTime") ?? "");
+  const inRange = held
+    .filter(
+      ({ start, end }) =>
+        Date.parse(`${start}Z`) < to && Date.parse(`${end}Z`) > from
+    )
+    .toSorted((a, b) => a.start.localeCompare(b.start));
+  const skip = Number(query.get("$skiptoken") ?? 0);
+  const next = skip + heldPageSize;
+  return {
+    value: inRange.slice(skip, next).map((one, n) => ({
+      id: `held-${skip + n}`,
+      start: { dateTime: `${one.start}.0000000`, timeZone: "UTC" },
+      end: { dateTime: `${one.end}.0000000`, timeZone: "UTC" },
+      isAllDay: one.isAllDay ?? false,
+      isCancelled: one.isCancelled ?? false,
+      showAs: one.showAs ?? "busy",
+    })),
+    ...(next < inRange.length
+      ? {
+          "@odata.nextLink": `https://graph.microsoft.com/v1.0/users('${encodeURIComponent(mailbox)}')/calendarView?%24skiptoken=${next}`,
+        }
+      : {}),
+  };
+};
 
 /** Whether a guest joins the event the next update reads, once it has read it. */
 let inviteDuringRead = false;
@@ -674,9 +729,12 @@ const graphRoutes: ProviderRoute<Part>[] = [
     keepTag(mailbox, made.id, body);
     return json(made, 201);
   }),
-  route("GET", `${users}/calendarView`, ({ mailbox, query }) =>
-    json(eventPage(mailbox, query.get("$skiptoken")))
-  ),
+  route("GET", `${users}/calendarView`, ({ mailbox, query }) => {
+    const held = heldEvents.get(mailbox);
+    return held === undefined
+      ? json(eventPage(mailbox, query.get("$skiptoken")))
+      : json(viewOf(mailbox, held, query));
+  }),
   route("GET", `${users}/events/(?<id>[^/]+)`, ({ mailbox, id }) => {
     const event = eventOf(mailbox, id);
     if (inviteDuringRead) {
@@ -1054,6 +1112,7 @@ const sharePointAnswer = (url: URL): Response => {
       [itemIds.pdf]: invoicePdf,
       [itemIds.controls]: new TextEncoder().encode(controlText),
       [itemIds.procedure]: new TextEncoder().encode(procedureTexts["3.0"]),
+      [itemIds.contract]: contractDocx,
     }[id ?? ""] ?? own?.bytes;
   return new Response(content ?? new TextEncoder().encode(reportText), {
     headers: { "content-type": "application/octet-stream" },
@@ -1076,9 +1135,11 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     oversizedVersion = undefined;
     events.clear();
     taggedEvents.clear();
+    heldEvents.clear();
     inviteDuringRead = false;
     attendeesLeftOut = undefined;
     resetWorkbooks();
+    resetApps();
   });
   /** The subject of the token's account, if `mailbox` is that account. */
   const ownerOf = (mailbox: string, request: Request): string | undefined => {
@@ -1098,7 +1159,13 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
     parts,
-    routes: [...graphRoutes, ...todoRoutes(ownerOf)],
+    // Planner, OneNote and the suppliers list come first: the suppliers
+    // list's routes are more particular than the other lists'.
+    routes: [
+      ...appRoutes(route, ownerOf),
+      ...graphRoutes,
+      ...todoRoutes(ownerOf),
+    ],
     unmatched: () =>
       json(
         { error: { code: "BadRequest", message: "Unsupported request" } },
@@ -1110,6 +1177,7 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
         : new Response("Taken"),
   });
   return {
+    ...appControls,
     sent,
     /** The writes Graph carried out. */
     writesDone,
@@ -1154,6 +1222,10 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
         writesOnly: true,
         meanwhile,
       });
+    },
+    /** Makes `mailbox`'s calendar hold exactly `held`, as its view reads it. */
+    holdEvents: (mailbox: string, held: HeldEvent[]) => {
+      heldEvents.set(mailbox, held);
     },
     /** Has someone invite a guest to the next event read, right after it. */
     inviteDuringRead: () => {

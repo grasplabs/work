@@ -5,7 +5,8 @@
  * itself, with a token taken as is.
  *
  * To run it, get an access token for a test workspace's user with the
- * connector's scopes (gmail.modify, calendar.events.readonly,
+ * connector's scopes (gmail.modify, calendar.events,
+ * calendar.calendarlist.readonly,
  * drive.readonly; the OAuth 2.0 Playground gives one), then, from the
  * repo root:
  *

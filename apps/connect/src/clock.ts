@@ -7,6 +7,7 @@ import {
   retryComposioCleanups,
 } from "./composio-connections.ts";
 import { purgeExpiredFlows, resealFlows } from "./oauth.ts";
+import { expireHeldActions } from "./pending.ts";
 import { resealTokens } from "./tokens.ts";
 
 // The client's clock for connect (spec 43.5, @grasp-os/workerflow/clock):
@@ -28,6 +29,8 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: retryComposioCleanups,
   },
+  // Held writes from a chat platform whose company's day is over.
+  { name: "held.ended", period: "minute", run: expireHeldActions },
   // What a rotated key sealed, sealed again.
   { name: "vault.tokens", period: "minute", run: resealTokens },
   { name: "vault.flows", period: "minute", run: resealFlows },

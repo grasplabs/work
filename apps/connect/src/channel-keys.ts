@@ -6,6 +6,7 @@ import {
   channelSigningKeysSchema,
 } from "@grasp-os/shared/channel-keys";
 import type {
+  ChannelKeyPlatform,
   ChannelSigningKey,
   ChannelSigningKeys,
 } from "@grasp-os/shared/channel-keys";
@@ -13,9 +14,10 @@ import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
 // The keys a chat platform signs its requests to Grasp with, for core's
-// channel door (core's src/channels/teams.ts), which checks every request
-// against them and never fetches them itself. Only Microsoft's Bot
-// Framework so far: its OpenID metadata names where its key set is.
+// channel door (core's src/channels), which checks every request against
+// them and never fetches them itself: Microsoft's Bot Framework for Teams,
+// and Google's for the Pub/Sub pushes that tell Gmail's door of new mail.
+// Each platform's OpenID metadata names where its key set is.
 //
 // Threat model, and how each is closed:
 //
@@ -37,18 +39,35 @@ import { z } from "zod";
 //   `channel.keys_unavailable`, never an empty key set, so core refuses
 //   every request rather than caching nothing.
 
-/** Microsoft's Bot Framework OpenID metadata, the one URL asked first. */
-const botFrameworkMetadataUrl = new URL(
-  "https://login.botframework.com/v1/.well-known/openidconfiguration"
-);
+/**
+ * Each platform's OpenID metadata, the one URL asked first, and the one
+ * host its key set may be on.
+ */
+const sources = {
+  teams: {
+    metadata: new URL(
+      "https://login.botframework.com/v1/.well-known/openidconfiguration"
+    ),
+    keysHost: "login.botframework.com",
+  },
+  gmail: {
+    metadata: new URL(
+      "https://accounts.google.com/.well-known/openid-configuration"
+    ),
+    keysHost: "www.googleapis.com",
+  },
+} as const satisfies Record<
+  ChannelKeyPlatform,
+  { metadata: URL; keysHost: string }
+>;
 
 /** How long one request for the keys may take. */
 const requestTimeoutMs = 10_000;
 
-/** Whether the key set's URL stays on Microsoft's host, as asked. */
-const onBotFramework = (url: URL): boolean =>
+/** Whether the key set's URL stays on the platform's own host. */
+const onKeysHost = (url: URL, keysHost: string): boolean =>
   url.protocol === "https:" &&
-  url.hostname === botFrameworkMetadataUrl.hostname &&
+  url.hostname === keysHost &&
   url.port === "" &&
   url.username === "" &&
   url.password === "";
@@ -67,7 +86,7 @@ const sentKeySchema = z.object({
 const sentKeySetSchema = z.object({ keys: z.array(z.unknown()).max(256) });
 
 const unavailable = (reason: string): Error => {
-  log.warn("channel.keys_unavailable", { platform: "teams", reason });
+  log.warn("channel.keys_unavailable", { reason });
   return channelErrors.create("channel.keys_unavailable");
 };
 
@@ -139,13 +158,13 @@ const fetchJson = async (url: URL): Promise<unknown> => {
 };
 
 /** The key set's URL the metadata names, if it is one connect follows. */
-const keySetUrl = (metadata: unknown): URL => {
+const keySetUrl = (metadata: unknown, keysHost: string): URL => {
   const parsed = metadataSchema.safeParse(metadata);
   if (!parsed.success || !URL.canParse(parsed.data.jwks_uri)) {
     throw unavailable("metadata_unreadable");
   }
   const url = new URL(parsed.data.jwks_uri);
-  if (!onBotFramework(url)) {
+  if (!onKeysHost(url, keysHost)) {
     // The URL isn't logged: a host that names another could name anything.
     throw unavailable("jwks_uri_refused");
   }
@@ -177,9 +196,14 @@ const narrowed = (key: unknown): ChannelSigningKey | undefined => {
 export const channelSigningKeys = async (
   platform: unknown
 ): Promise<ChannelSigningKeys> => {
-  channelErrors.parse("channel.invalid", channelKeyPlatformSchema, platform);
+  const source =
+    sources[
+      channelErrors.parse("channel.invalid", channelKeyPlatformSchema, platform)
+    ];
   const keySet = sentKeySetSchema.safeParse(
-    await fetchJson(keySetUrl(await fetchJson(botFrameworkMetadataUrl)))
+    await fetchJson(
+      keySetUrl(await fetchJson(source.metadata), source.keysHost)
+    )
   );
   if (!keySet.success) {
     throw unavailable("keys_unreadable");

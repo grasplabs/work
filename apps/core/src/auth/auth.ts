@@ -20,7 +20,7 @@ import { jwt } from "better-auth/plugins/jwt";
 import type { Jwk } from "better-auth/plugins/jwt";
 import { organization } from "better-auth/plugins/organization";
 import { defaultAc } from "better-auth/plugins/organization/access";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
@@ -49,7 +49,12 @@ import {
 import { inList } from "../db/d1.ts";
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { checkClaims } from "./claims.ts";
-import { devIdpOrigin, oidcProviders, providerIds } from "./config.ts";
+import {
+  devIdpOrigin,
+  directoryProviderId,
+  oidcProviders,
+  providerIds,
+} from "./config.ts";
 import type { OidcProvider } from "./config.ts";
 import { keyIdOf, keyRing } from "./token-keys.ts";
 import type { KeyRing, KeyUse } from "./token-keys.ts";
@@ -372,6 +377,121 @@ const gateLetsIn = async (
 };
 
 /**
+ * Folds the user Better Auth just made for a first Microsoft sign-in into
+ * the member the directory made for the same Entra object id, the one
+ * their sign-in's verified ID token names: their account moves to that
+ * member, who takes their name and address, and the new user goes.
+ * Answers the user id the session is for: the directory's member, or
+ * `userId` when there is none, or `userId` isn't new.
+ */
+export const adoptDirectoryMember = async (
+  env: Env,
+  userId: string,
+  now = new Date()
+): Promise<string> => {
+  const db = drizzle(env.DB);
+  const own = await db
+    .select({
+      id: accounts.id,
+      providerId: accounts.providerId,
+      oid: accounts.oid,
+    })
+    .from(accounts)
+    .where(eq(accounts.userId, userId));
+  const [signedIn] = own;
+  // Only a user made just now by an Entra sign-in: that one account, and
+  // no membership yet.
+  if (
+    own.length !== 1 ||
+    signedIn === undefined ||
+    signedIn.providerId !== providerIds.entra ||
+    signedIn.oid === null
+  ) {
+    return userId;
+  }
+  const [held] = await db
+    .select({ userId: accounts.userId })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.providerId, directoryProviderId),
+        eq(accounts.accountId, signedIn.oid),
+        ne(accounts.userId, userId)
+      )
+    );
+  const [fresh] = await db
+    .select({
+      name: users.name,
+      email: users.email,
+      emailVerified: users.emailVerified,
+    })
+    .from(users)
+    .where(eq(users.id, userId));
+  if (held === undefined || fresh === undefined) {
+    return userId;
+  }
+  const memberId = held.userId;
+  const notYetMember = sql`NOT EXISTS (
+    SELECT 1 FROM ${members} WHERE ${members.userId} = ${userId}
+  )`;
+  const moved = sql`EXISTS (
+    SELECT 1 FROM ${accounts}
+    WHERE ${accounts.id} = ${signedIn.id} AND ${accounts.userId} = ${memberId}
+  )`;
+  // One batch, in order: the account moves, the user made for it goes
+  // (freeing their address), the member takes their name and address, and
+  // the directory's account goes, as their sign-in names them from now on.
+  await auditedBatch(env, db, [
+    db
+      .update(accounts)
+      .set({ userId: memberId, updatedAt: now })
+      .where(
+        and(
+          eq(accounts.id, signedIn.id),
+          eq(accounts.userId, userId),
+          notYetMember
+        )
+      ),
+    db
+      .delete(users)
+      .where(
+        and(
+          eq(users.id, userId),
+          sql`NOT EXISTS (SELECT 1 FROM ${accounts} WHERE ${accounts.userId} = ${userId})`
+        )
+      ),
+    db
+      .update(users)
+      .set({
+        name: fresh.name,
+        email: fresh.email,
+        emailVerified: fresh.emailVerified,
+        updatedAt: now,
+      })
+      .where(and(eq(users.id, memberId), moved)),
+    db
+      .delete(accounts)
+      .where(
+        and(
+          eq(accounts.providerId, directoryProviderId),
+          eq(accounts.userId, memberId),
+          moved
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: actorOf({ userId: memberId, staff: false }),
+      action: "member.signed_in_from_directory",
+      target: { type: "user", id: memberId },
+    }),
+  ]);
+  const [account] = await db
+    .select({ userId: accounts.userId })
+    .from(accounts)
+    .where(eq(accounts.id, signedIn.id));
+  return account?.userId ?? userId;
+};
+
+/**
  * The session a sign-in through `providerId` gets, or `false` for none.
  * Staff sessions are marked and cut short; everyone else's opens in the
  * deployment's organization, as a member.
@@ -404,18 +524,30 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
   }
   const fromClient =
     providerId === providerIds.entra || providerId === providerIds.google;
+  // Someone the directory made a member before they ever signed in is
+  // that member from their first Microsoft sign-in on, by the object id
+  // their verified ID token names.
+  const userId =
+    providerId === providerIds.entra
+      ? await adoptDirectoryMember(env, session.userId)
+      : session.userId;
   if (
     !(
       fromClient &&
-      (await gateLetsIn(env, config, session.userId)) &&
-      (await ensureMember(env, config, session.userId))
+      (await gateLetsIn(env, config, userId)) &&
+      (await ensureMember(env, config, userId))
     )
   ) {
     // Sessions come only from an SSO callback, for members.
     return false;
   }
   return {
-    data: { ...session, staff: false, activeOrganizationId: organizationId },
+    data: {
+      ...session,
+      userId,
+      staff: false,
+      activeOrganizationId: organizationId,
+    },
   };
 };
 

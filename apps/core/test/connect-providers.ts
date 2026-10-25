@@ -11,10 +11,12 @@
  * (workerd), so it only holds data.
  */
 import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake.ts";
+import { googleGmailFake } from "../../connect/test/google-gmail-fake.ts";
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
-import { clients } from "../../connect/test/provider-config.ts";
+import { acmeTenant, clients } from "../../connect/test/provider-config.ts";
+import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
@@ -80,8 +82,20 @@ export const landscapeGranted =
  * it carries the authorization's PKCE challenge, so only the flow's own
  * verifier redeems it.
  */
-export const consentCode = (url: URL, tenant: string, subject: string) =>
-  [url.searchParams.get("code_challenge"), tenant, subject].join(".");
+export const consentCode = (
+  url: URL,
+  tenant: string,
+  subject: string,
+  granted?: string
+) =>
+  [
+    url.searchParams.get("code_challenge"),
+    tenant,
+    subject,
+    // What Entra says it granted (`scope`), when the test gives it: base64,
+    // since rights have dots of their own.
+    ...(granted === undefined ? [] : [btoa(granted)]),
+  ].join(".");
 
 /**
  * Where tests post a message arriving in a mailbox's inbox:
@@ -132,7 +146,8 @@ export const osvAnswerUrl = "https://osv-control.test/answer";
 /**
  * Where tests publish Microsoft's Bot Framework signing keys, as
  * login.botframework.com serves them to connect: POST `{ keys }`, public
- * JWKs each with its `endorsements`.
+ * JWKs each with its `endorsements`, added to those published before (a
+ * key with the same `kid` replaced).
  */
 export const botFrameworkKeysUrl = "https://botframework-control.test/keys";
 
@@ -143,8 +158,145 @@ export const botFrameworkKeysUrl = "https://botframework-control.test/keys";
  */
 export const botFrameworkFailUrl = "https://botframework-control.test/fail";
 
+/**
+ * Where tests that post through core's own route, and so are checked
+ * against the isolate's keys, take the one signing key they share: POST
+ * `{ key }`, a private JWK with its `kid`, to have it published, and get
+ * back the key the first test file published, this one or an earlier
+ * one. Test files may share an isolate, which fetches the keys at most
+ * once a minute: one key, published before any of them posts, is always
+ * among them.
+ */
+export const botFrameworkSharedKeyUrl =
+  "https://botframework-control.test/shared-key";
+
 /** Where tests read the paths login.botframework.com was asked for, in order. */
 export const botFrameworkAskedUrl = "https://botframework-control.test/asked";
+
+/**
+ * The client's Teams bot, as core (`TEAMS_BOT_ID`) and connect
+ * (`TEAMS_BOT_*`) are set up with it in the tests, and Entra knows it.
+ */
+export const teamsBot = {
+  id: "5b1e7c2a-3f4d-4e6b-9a8c-1d2e3f4a5b6c",
+  tenant: acmeTenant,
+  secret: "acme-teams-bot-secret",
+} as const;
+
+/**
+ * Where tests set the Bot Connector's rosters: POST `{ members }`, each
+ * `<conversation id> <user id>` to the member Teams answers with.
+ */
+export const botConnectorMembersUrl =
+  "https://bot-connector-control.test/members";
+
+/**
+ * Where tests have Teams refuse streamed messages in a conversation: POST
+ * `{ refuse }`, the conversation's id.
+ */
+export const botConnectorStreamsUrl =
+  "https://bot-connector-control.test/streams";
+
+/**
+ * Where tests read what reached the Bot Connector, in order: `{ posted,
+ * asked }`, the activities it took (`{ conversation, activity }` each) and
+ * the roster reads (`<conversation id> <user id>` each).
+ */
+export const botConnectorPostedUrl =
+  "https://bot-connector-control.test/posted";
+
+/**
+ * The client's Slack app, as core (`SLACK_SIGNING_SECRET`) and connect
+ * (`SLACK_BOT_TOKEN`) are set up with it in the tests.
+ */
+export const slackApp = {
+  signingSecret: "acme-slack-signing-secret-for-tests",
+  botToken: "acme-slack-bot-token-for-tests",
+  botUserId: "UBOTSTEPHEN",
+} as const;
+
+/**
+ * Where tests read what reached Slack's Web API, in order: each call's
+ * method, its form or JSON fields, and whether it carried the bot's token.
+ */
+export const slackPostedUrl = "https://slack-control.test/posted";
+
+/**
+ * Where tests remove the bot from a conversation, as uninstalling its app
+ * does: POST `{ conversation }`; the Bot Connector refuses its posts there
+ * with 403 from then on.
+ */
+export const botConnectorUninstallUrl =
+  "https://bot-connector-control.test/uninstall";
+
+/**
+ * The client's WhatsApp Business number, as core (`WHATSAPP_APP_SECRET`,
+ * `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`) and connect
+ * (`WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`) are set up with it.
+ */
+export const whatsAppNumber = {
+  appSecret: "acme-whatsapp-app-secret-for-tests",
+  phoneNumberId: "106540352242922",
+  verifyToken: "acme-whatsapp-verify-token-for-tests",
+  accessToken: "acme-whatsapp-access-token-for-tests",
+} as const;
+
+/**
+ * The client's Telegram bot, as core (`TELEGRAM_WEBHOOK_SECRET`) and
+ * connect (`TELEGRAM_BOT_TOKEN`) are set up with it in the tests.
+ */
+export const telegramBot = {
+  webhookSecret: "acme-telegram-webhook-secret-for-tests",
+  token: "7140326550:AAH-acme-telegram-token-for-tests",
+  id: 7_140_326_550,
+} as const;
+
+/**
+ * Where tests read what reached Telegram's Bot API, in order: each call's
+ * method, its JSON, and whether its address carried the bot's token.
+ */
+export const telegramSentUrl = "https://telegram-control.test/sent";
+
+/**
+ * Where tests read what reached WhatsApp's Cloud API, in order: each
+ * message's recipient, its JSON, and whether it carried the client's token.
+ */
+export const whatsAppSentUrl = "https://whatsapp-control.test/sent";
+
+/**
+ * Stephen's own Gmail mailbox, as connect holds it (`GMAIL_*`) in the
+ * tests, and the fake Gmail behind it knows it.
+ */
+export const gmailAccount = {
+  mailbox: "stephen@acme.test",
+  clientId: "acme-gmail-client-for-tests",
+  clientSecret: "acme-gmail-client-secret-for-tests",
+  refreshToken: "acme-gmail-refresh-token-for-tests",
+  accessToken: "acme-gmail-access-token-for-tests",
+} as const;
+
+/** The Pub/Sub push that tells Gmail's door of new mail, as core has it. */
+export const gmailPush = {
+  audience: "https://acme.grasp.test/api/channels/gmail",
+  serviceAccount: "gmail-push@acme-grasp.iam.gserviceaccount.com",
+  subscription: "projects/acme-grasp/subscriptions/stephen-gmail",
+  topic: "projects/acme-grasp/topics/stephen-gmail",
+} as const;
+
+/**
+ * Where tests publish Google's signing keys: POST `{ keys }`, public JWKs,
+ * added to those other test files published.
+ */
+export const googleKeysUrl = "https://google-control.test/keys";
+
+/**
+ * Where tests put mail in Stephen's inbox: POST `{ from, replyTo?, subject?,
+ * text }`, answered with the mail's `{ id, threadId }`.
+ */
+export const gmailDeliverUrl = "https://google-control.test/deliver";
+
+/** Where tests read the mail Gmail sent from Stephen's mailbox, in order. */
+export const gmailSentUrl = "https://google-control.test/sent";
 
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
@@ -180,6 +332,67 @@ const losesAnswer = (mailbox) => {
 };
 const npm = (${npmRegistryFake.toString()})();
 const botFramework = (${botFrameworkKeysFake.toString()})();
+let botFrameworkKeys = [];
+let botFrameworkSharedKey = null;
+const botConnector = (${botConnectorFake.toString()})(${JSON.stringify(teamsBot)});
+const telegramSent = [];
+/** Telegram's Bot API, as far as the door's adapter calls it. */
+const telegramAnswer = async (request, url) => {
+  const [, bot, method] = url.pathname.split("/");
+  const fields = await request.json();
+  telegramSent.push({
+    method,
+    fields,
+    authorized: bot === ${JSON.stringify(`bot${telegramBot.token}`)},
+  });
+  if (method === "getMe") {
+    return Response.json({ ok: true, result: { id: ${String(telegramBot.id)}, is_bot: true, first_name: "Stephen", username: "acme_stephen_bot" } });
+  }
+  if (method === "sendMessage") {
+    return Response.json({ ok: true, result: { message_id: telegramSent.length, date: Math.floor(Date.now() / 1000), chat: { id: fields.chat_id, type: "private" }, text: fields.text } });
+  }
+  return Response.json({ ok: true, result: true });
+};
+const whatsAppSent = [];
+/** WhatsApp's Cloud API, as far as the door's adapter calls it. */
+const whatsAppAnswer = async (request, url) => {
+  const fields = await request.json();
+  whatsAppSent.push({
+    path: url.pathname,
+    to: fields.to,
+    fields,
+    authorized: request.headers.get("authorization") === ${JSON.stringify(`Bearer ${whatsAppNumber.accessToken}`)},
+  });
+  return Response.json({
+    messaging_product: "whatsapp",
+    contacts: [{ input: fields.to, wa_id: fields.to }],
+    messages: [{ id: "wamid." + crypto.randomUUID() }],
+  });
+};
+const google = (${googleGmailFake.toString()})(${JSON.stringify(gmailAccount)});
+let googleKeys = [];
+const slackCalls = [];
+/** Slack's Web API, as far as the door's adapter calls it. */
+const slackAnswer = async (request, url) => {
+  const method = url.pathname.slice("/api/".length);
+  const text = await request.text();
+  const type = request.headers.get("content-type") ?? "";
+  const fields = type.includes("json")
+    ? JSON.parse(text)
+    : Object.fromEntries(new URLSearchParams(text));
+  slackCalls.push({
+    method,
+    fields,
+    authorized: request.headers.get("authorization") === ${JSON.stringify(`Bearer ${slackApp.botToken}`)},
+  });
+  if (method === "auth.test") {
+    return Response.json({ ok: true, user_id: ${JSON.stringify(slackApp.botUserId)}, bot_id: "BSTEPHEN", team_id: "TACME" });
+  }
+  if (method === "chat.postMessage") {
+    return Response.json({ ok: true, channel: fields.channel, ts: String(Date.now() / 1000) });
+  }
+  return Response.json({ ok: true });
+};
 const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
 const hibob = { key: null, employees: [] };
@@ -295,6 +508,13 @@ export default {
       Object.assign(documents, await request.json());
       return new Response(null, { status: 204 });
     }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname.startsWith("/v1.0/users/") && url.pathname.split("/").length === 4 && url.searchParams.has("$expand")) {
+      const id = url.pathname.split("/").pop().toLowerCase();
+      const found = directory.users.find((user) => user.id.toLowerCase() === id);
+      return found === undefined
+        ? Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 })
+        : Response.json(found);
+    }
     if (url.href === ${JSON.stringify(stephenGraphUrl)}) {
       return await stephenGraph.control(request);
     }
@@ -399,13 +619,84 @@ export default {
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);
     }
+    if (url.hostname === "api.telegram.org") {
+      return await telegramAnswer(request, url);
+    }
+    if (url.href === ${JSON.stringify(telegramSentUrl)}) {
+      return Response.json(telegramSent);
+    }
+    if (url.hostname === "graph.facebook.com") {
+      return await whatsAppAnswer(request, url);
+    }
+    if (url.href === ${JSON.stringify(whatsAppSentUrl)}) {
+      return Response.json(whatsAppSent);
+    }
+    if (url.hostname === "slack.com") {
+      return await slackAnswer(request, url);
+    }
+    if (url.href === ${JSON.stringify(slackPostedUrl)}) {
+      return Response.json(slackCalls);
+    }
+    const fromMicrosoft = await botConnector.answer(request);
+    if (fromMicrosoft !== undefined) {
+      return fromMicrosoft;
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorMembersUrl)}) {
+      const { members } = await request.json();
+      botConnector.setMembers(members);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorStreamsUrl)}) {
+      const { refuse } = await request.json();
+      botConnector.refuseStreams(refuse);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorUninstallUrl)}) {
+      const { conversation } = await request.json();
+      botConnector.uninstall(conversation);
+      return new Response(null, { status: 204 });
+    }
+    if (url.href === ${JSON.stringify(botConnectorPostedUrl)}) {
+      return Response.json({ posted: botConnector.posted, asked: botConnector.asked });
+    }
     if (url.hostname === "login.botframework.com") {
       return botFramework.answer(request);
     }
-    if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
+    if (request.method === "POST" && url.href === ${JSON.stringify(googleKeysUrl)}) {
       const { keys } = await request.json();
-      botFramework.setKeys(keys);
+      const kids = new Set(keys.map(({ kid }) => kid));
+      googleKeys = [...googleKeys.filter(({ kid }) => !kids.has(kid)), ...keys];
+      google.setKeys(googleKeys);
       return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(gmailDeliverUrl)}) {
+      return Response.json(google.deliver(await request.json()));
+    }
+    if (url.href === ${JSON.stringify(gmailSentUrl)}) {
+      return Response.json(google.sent);
+    }
+    const fromGoogle = await google.answer(request);
+    if (fromGoogle !== undefined) {
+      return fromGoogle;
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
+      // Added to the keys other test files published: files run at once,
+      // and each signs with keys of its own.
+      const { keys } = await request.json();
+      const kids = new Set(keys.map(({ kid }) => kid));
+      botFrameworkKeys = [...botFrameworkKeys.filter(({ kid }) => !kids.has(kid)), ...keys];
+      botFramework.setKeys(botFrameworkKeys);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkSharedKeyUrl)}) {
+      if (botFrameworkSharedKey === null) {
+        const { key } = await request.json();
+        botFrameworkSharedKey = key;
+        const { kid, kty, n, e } = key;
+        botFrameworkKeys = [...botFrameworkKeys, { kid, kty, n, e, use: "sig", endorsements: ["msteams"] }];
+        botFramework.setKeys(botFrameworkKeys);
+      }
+      return Response.json({ key: botFrameworkSharedKey });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkFailUrl)}) {
       const { status } = await request.json();
@@ -442,7 +733,7 @@ export default {
       return new Response("Not found", { status: 404 });
     }
     const form = new URLSearchParams(await request.text());
-    const [challenge, tenant, subject] = (form.get("code") ?? "").split(".");
+    const [challenge, tenant, subject, granted] = (form.get("code") ?? "").split(".");
     const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
     const digest = base64Url(
       new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
@@ -481,6 +772,7 @@ export default {
       ...(forLandscape ? { scope: ${JSON.stringify(landscapeGranted)} } : {}),
       ...(forDirectory ? { scope: ${JSON.stringify(directoryGranted)} } : {}),
       ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
+      ...(granted === undefined ? {} : { scope: atob(granted) }),
     });
   },
 };
