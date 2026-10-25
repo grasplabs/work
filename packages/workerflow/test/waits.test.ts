@@ -744,6 +744,9 @@ describe("a sender's share of an inbox", () => {
       state.storage.sql.exec("UPDATE run SET schema = 11");
       state.storage.sql.exec("DROP INDEX events_sender");
       state.storage.sql.exec("ALTER TABLE events DROP COLUMN sender");
+      state.storage.sql.exec("DROP TRIGGER steps_settled_order");
+      state.storage.sql.exec("DROP INDEX steps_settled");
+      state.storage.sql.exec("ALTER TABLE steps DROP COLUMN settled");
     });
 
     const outcomes = await sendAll(

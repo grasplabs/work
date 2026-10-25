@@ -366,6 +366,9 @@ describe("a wait for a match", () => {
       sql.exec("DROP INDEX events_sender");
       sql.exec("ALTER TABLE events DROP COLUMN sender");
       sql.exec("ALTER TABLE events DROP COLUMN reserved");
+      sql.exec("DROP TRIGGER steps_settled_order");
+      sql.exec("DROP INDEX steps_settled");
+      sql.exec("ALTER TABLE steps DROP COLUMN settled");
     });
 
     const approval = await workflow("approval").get(id);
