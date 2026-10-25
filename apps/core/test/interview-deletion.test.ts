@@ -21,6 +21,7 @@ import { answering, approve, gatewayConfig, onLink } from "./interview-link.ts";
 import {
   agree,
   fact,
+  intakeAlike,
   kept,
   mapReply,
   mapped,
@@ -99,7 +100,13 @@ const linesWith = (words: string): InterviewLine[] => [
   { from: "stephen", text: stephenSays(words) },
 ];
 
-/** Max, Mia and Mo agree to what they told about tickets: one fact each of their own, and one Max and Mia share; Noor and Pim agree to a step each. */
+/**
+ * Max, Mia and Mo agree to what they told about tickets: one fact each of
+ * their own, and with Noor and Pim that tickets arrive in Zendesk and wait
+ * (Max in words of his own); Noor, Pim and Rik agree to a step each. The
+ * team's claims are the two the five share; what one of them said alone
+ * never reaches the brain.
+ */
 const toldWith = async (ids: Ids, said: Said) => {
   await agree(
     ids.max,
@@ -114,6 +121,7 @@ const toldWith = async (ids: Ids, said: Said) => {
     ids.mia,
     [
       fact("i1", "system", "Tickets arrive in Zendesk."),
+      fact("i8", "wait", "Tickets wait for the customer."),
       fact("i9", "wish", `Would like ${said.mia} filled in for them.`),
     ],
     0,
@@ -121,7 +129,11 @@ const toldWith = async (ids: Ids, said: Said) => {
   );
   await agree(
     ids.mo,
-    [fact("o9", "rule", `Every ticket gets ${said.mo}.`)],
+    [
+      fact("o2", "system", "Tickets arrive in Zendesk."),
+      fact("o8", "wait", "Tickets wait for the customer."),
+      fact("o9", "rule", `Every ticket gets ${said.mo}.`),
+    ],
     0,
     linesWith(said.mo)
   );
@@ -153,7 +165,7 @@ const drawAll = async (ids: Ids): Promise<GatewayRequest[]> => {
 const givenToBrain = async (ids: Ids): Promise<void> => {
   for (let round = 0; round < 5; round += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
-    const gave = await onboardingStore(env).intakeNext();
+    const gave = await intakeAlike();
     if (gave === null || gave === `brain:${ids.team}`) {
       return;
     }
@@ -389,7 +401,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
         await remove(ids);
       });
       const redrawn = await drawAll(ids);
-      await store.intakeNext();
+      await intakeAlike();
       const works = await store.teamWorks(ids.team);
       const tickets = works.find(({ name }) => name === "handling new tickets");
       const audit = JSON.stringify(events);
@@ -413,22 +425,17 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
         auditNames: [audit.includes(ids.max), audit.includes(said.max)],
       }).toStrictEqual({
         before: {
+          // The two claims five of them made; what one said alone stays out.
           statements: [
-            `Every ticket gets ${said.mo}.`,
             "Tickets arrive in Zendesk.",
-            `Tickets wait in ${said.max}.`,
-            `Would like ${said.mia} filled in for them.`,
+            "Tickets wait for the customer.",
           ],
           sources: ["7 people"],
           drawings: [6],
         },
         after: {
-          // What Mia agreed to as well stays: it rests on her.
-          statements: [
-            `Every ticket gets ${said.mo}.`,
-            "Tickets arrive in Zendesk.",
-            `Would like ${said.mia} filled in for them.`,
-          ],
+          // Both rested on five, Max among them: under five now, they go.
+          statements: [],
           sources: ["6 people"],
           // The drawing from five is gone; the one from who is left is there.
           drawings: [5],
@@ -468,7 +475,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     });
     // The team given to the brain again, so none of it waits for the next test.
     await drawAll(ids);
-    await onboardingStore(env).intakeNext();
+    await intakeAlike();
     const { entries } = await onboardingStore(env).staffLog({
       what: "interview.deleted",
     });
@@ -493,7 +500,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     const staff = await asStaff();
     await staff.onboardingStaff.deleteInterview(ids.lea);
     const redrawn = await drawAll(ids);
-    await store.intakeNext();
+    await intakeAlike();
     const works = await store.teamWorks(ids.team);
     expect({
       left: await leftOf(ids.lea, said.lea),
@@ -518,11 +525,10 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
         ["planning the rota", null],
       ],
       after: {
+        // The lead's facts are in no claim: the team's stay.
         statements: [
-          `Every ticket gets ${said.mo}.`,
           "Tickets arrive in Zendesk.",
-          `Tickets wait in ${said.max}.`,
-          `Would like ${said.mia} filled in for them.`,
+          "Tickets wait for the customer.",
         ],
         sources: ["6 people"],
         // The map was hers: its work leaves the brain with her facts (GRA-329).
@@ -546,11 +552,11 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
     await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
     await drawAll(ids);
-    await store.intakeNext();
+    await intakeAlike();
     const before = await kept(ids);
     await deleteOnLink(ids.mia);
     await drawAll(ids);
-    await store.intakeNext();
+    await intakeAlike();
     const after = await kept(ids);
     expect({
       before: [...new Set(before.map(({ type }) => type))].toSorted(),
@@ -559,7 +565,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       // Max's drawing waits for the team, here alone.
       restsOn: await store.sentFor(ids.max),
     }).toStrictEqual({
-      before: ["statement", "team", "workflow", "workflowVersion"],
+      // Nothing five of them said alike: no statement, before or after.
+      before: ["team", "workflow", "workflowVersion"],
       after: ["team"],
       brain: { statements: [], sources: [], drawings: null },
       restsOn: [],
@@ -586,7 +593,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       ({ name }) => name === "handling new tickets"
     )?.drawn;
     await drawAll(ids);
-    await store.intakeNext();
+    await intakeAlike();
     const works = await store.teamWorks(ids.team);
     expect({
       drew: drew?.startsWith("work:"),
@@ -631,7 +638,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       async () => await store.drawNext()
     );
     // The team her delete made due for the brain, so it waits for no later test.
-    await store.intakeNext();
+    await intakeAlike();
     expect({
       drew,
       deleted,
@@ -669,14 +676,14 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       });
     let gave: string | null;
     try {
-      gave = await store.intakeNext();
+      gave = await intakeAlike();
     } finally {
       spy.mockRestore();
     }
     const deleted = await deleting;
     const landed = await brainOf(ids);
     await drawAll(ids);
-    await store.intakeNext();
+    await intakeAlike();
     expect({
       gave,
       deleted,
@@ -690,11 +697,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       landed: false,
       left: { words: [], person: [] },
       after: {
-        statements: [
-          `Every ticket gets ${said.mo}.`,
-          "Tickets arrive in Zendesk.",
-          `Would like ${said.mia} filled in for them.`,
-        ],
+        // The claims rested on five, Max among them: under five, none.
+        statements: [],
         sources: ["6 people"],
         drawings: [5],
       },
@@ -796,11 +800,12 @@ describe(
       await store.purgeBrain();
       const after = await brainOf(ids);
       expect({
-        before: before.statements.includes(`Tickets wait in ${said.max}.`),
+        // The claim Max was one of the five behind.
+        before: before.statements.includes("Tickets wait for the customer."),
         withdrawn,
-        stuck: stuck.statements.includes(`Tickets wait in ${said.max}.`),
+        stuck: stuck.statements.includes("Tickets wait for the customer."),
         waiting: waiting.length > 0,
-        after: after.statements.some((text) => text.includes(said.max)),
+        after: after.statements.includes("Tickets wait for the customer."),
         restsOn: await store.sentFor(ids.max),
         gone: await store.sentFor(`gone:${ids.max}`),
       }).toStrictEqual({
@@ -846,7 +851,7 @@ describe(
       await inTheBrain(ids, said);
       await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
       const redrawn = await drawAll(ids);
-      await store.intakeNext();
+      await intakeAlike();
       const brain = await brainOf(ids);
       expect({
         redrawnWith: JSON.stringify(redrawn.map(({ body }) => body)).includes(
@@ -861,7 +866,7 @@ describe(
         redrawn: true,
         drawInput: null,
         restsOn: [],
-        statements: 4,
+        statements: 2,
       });
     });
 
@@ -919,7 +924,7 @@ describe(
       }).toStrictEqual({
         before: [6],
         after: null,
-        statements: 4,
+        statements: 2,
         workflows: false,
       });
     });
@@ -959,7 +964,7 @@ describe(
         edited: edited.drawings,
         statements: edited.statements.length,
         redrawn: redrawn.drawings !== null,
-      }).toStrictEqual({ edited: null, statements: 4, redrawn: true });
+      }).toStrictEqual({ edited: null, statements: 2, redrawn: true });
     });
 
     it("keeps the voice's lines of a withdrawn interview waiting while the cache can't be reached, and takes them out once it can (T5)", async () => {
@@ -1011,7 +1016,7 @@ describe(
         await onLink({ action: "withdraw", ...link });
       });
       const redrawn = await drawAll(ids);
-      await store.intakeNext();
+      await intakeAlike();
       const works = await store.teamWorks(ids.team);
       const tickets = works.find(({ name }) => name === "handling new tickets");
       const left = await leftOf(ids.max, said.max);
@@ -1033,11 +1038,8 @@ describe(
         auditNames: JSON.stringify(events).includes(ids.max),
       }).toStrictEqual({
         after: {
-          statements: [
-            `Every ticket gets ${said.mo}.`,
-            "Tickets arrive in Zendesk.",
-            `Would like ${said.mia} filled in for them.`,
-          ],
+          // The claims rested on five, Max among them: under five, none.
+          statements: [],
           sources: ["6 people"],
           drawings: [5],
         },
@@ -1060,13 +1062,13 @@ describe(
 
       const { status, link, facts } = await putRight(ids, said, fixed);
       await drawAll(ids);
-      await store.intakeNext();
+      await intakeAlike();
       const unapproved = await brainOf(ids);
       const drawnBefore = await store.drawInput(ids.max);
 
       await approve(link, facts);
       await drawAll(ids);
-      await store.intakeNext();
+      await intakeAlike();
       const approved = await brainOf(ids);
 
       expect({
@@ -1076,17 +1078,13 @@ describe(
         approved: approved.statements,
       }).toStrictEqual({
         status: 200,
-        unapproved: [
-          `Every ticket gets ${said.mo}.`,
-          "Tickets arrive in Zendesk.",
-          `Would like ${said.mia} filled in for them.`,
-        ],
+        // Four still say tickets wait: the claim goes until his line,
+        // put right, is approved, and comes back in the words most used.
+        unapproved: ["Tickets arrive in Zendesk."],
         drawnBefore: ["Tickets arrive in Zendesk."],
         approved: [
-          `Every ticket gets ${said.mo}.`,
           "Tickets arrive in Zendesk.",
-          `Tickets wait in ${fixed}.`,
-          `Would like ${said.mia} filled in for them.`,
+          "Tickets wait for the customer.",
         ],
       });
     });
@@ -1115,7 +1113,7 @@ describe(
           return await batch(statements);
         });
       try {
-        await store.intakeNext();
+        await intakeAlike();
       } finally {
         spy.mockRestore();
       }
@@ -1124,7 +1122,7 @@ describe(
       await store.purgeBrain();
       const landed = await brainOf(ids);
       await drawAll(ids);
-      await store.intakeNext();
+      await intakeAlike();
       const after = await brainOf(ids);
       expect({
         fixed: fixed?.status,
@@ -1176,9 +1174,9 @@ describe("the alarm, while something else fails", { timeout: 180_000 }, () => {
     );
     const after = await brainOf(ids);
     expect({
-      stuck: stuck.statements.includes(`Tickets wait in ${said.max}.`),
+      stuck: stuck.statements.includes("Tickets wait for the customer."),
       failed,
-      after: after.statements.some((text) => text.includes(said.max)),
+      after: after.statements.includes("Tickets wait for the customer."),
       armed: alarm !== null,
     }).toStrictEqual({ stuck: true, failed: true, after: false, armed: true });
   });

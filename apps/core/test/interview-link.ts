@@ -12,7 +12,7 @@ import { vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { routed, unique } from "./sign-in.ts";
 
@@ -160,6 +160,26 @@ export const opened = async () => {
 /** The model a request went to, by its id in pi's catalog. */
 export const modelOf = ({ body }: GatewayRequest): unknown =>
   requestModel.safeParse(body).data?.model;
+
+/** What `run` returns while the gateway answers each request as `respond` says, from those so far. */
+export const answeringWith = async <T>(
+  respond: (
+    requests: readonly GatewayRequest[]
+  ) => GatewayReply | undefined | Promise<GatewayReply | undefined>,
+  run: () => Promise<T>
+) => {
+  const before = env.MODEL_GATEWAY;
+  const fake = answeringGateway(respond);
+  const ai: AiBinding = env.AI;
+  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
+  env.MODEL_GATEWAY = gatewayConfig;
+  try {
+    return { requests: fake.requests, result: await run() };
+  } finally {
+    env.MODEL_GATEWAY = before;
+    spy.mockRestore();
+  }
+};
 
 /** What `run` returns while the gateway answers with `replies`. */
 export const answering = async <T>(

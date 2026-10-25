@@ -111,6 +111,7 @@ import { signInConfig } from "../auth/config.ts";
 import {
   keepOnboardingRecords,
   purgeOnboardingDrawings,
+  onboardingStatementsOf,
   purgeOnboardingRecords,
 } from "../brain-records.ts";
 import { organizations } from "../db/core/schema.ts";
@@ -188,6 +189,11 @@ import type { InterviewState, TeamCount } from "./rules.ts";
 import { anyLanguage, spokenKeysOf } from "./spoken-lines.ts";
 import type { SaidIn } from "./spoken-lines.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
+import {
+  claimChecksMax,
+  teamClaims,
+  TooManyClaimChecksError,
+} from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
 import { drawnWorkSchema, drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
@@ -810,6 +816,13 @@ export class Onboarding extends DurableObject<Env> {
     migrateOnWake(ctx, migrations);
     // The one row everything else updates, there before anything asks.
     this.#db.insert(onboarding).values({ id: 1 }).onConflictDoNothing().run();
+    // Woken with work due and no alarm set (a migration made a team due,
+    // say, on an onboarding long finished): the alarm is set for it.
+    void ctx.blockConcurrencyWhile(async () => {
+      if ((await ctx.storage.getAlarm()) === null) {
+        await this.#armDrawing();
+      }
+    });
   }
 
   /** The onboarding as its admin sees it. */
@@ -2006,6 +2019,14 @@ export class Onboarding extends DurableObject<Env> {
         tries,
         error: error instanceof Error ? error.name : "unknown",
       });
+      // Too many checks to put its claims together: nothing was written,
+      // and the audit log says so (GRA-1084).
+      if (error instanceof TooManyClaimChecksError) {
+        this.#changed({ type: "system" }, "onboarding.claims.capped", {
+          checks: claimChecksMax,
+        });
+        this.#deliverAudit();
+      }
       const wait = drawRetryMs[tries - 1];
       this.ctx.storage.transactionSync(() => {
         if (wait === undefined) {
@@ -4985,16 +5006,69 @@ export class Onboarding extends DurableObject<Env> {
     const began = this.#interviewsOf(
       this.#roster()?.people.map(({ id }) => id) ?? []
     );
-    const { records, rests } = await intakeOf(intake);
-    await keepOnboardingRecords(this.env, records, {
-      sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
-      teams: new Set([intakeIds.team(teamId)]),
+    // What five or more of its people said, put together (GRA-1084):
+    // never one person's fact. A failing model throws, and the intake is
+    // tried again, with nothing written.
+    const claims = await teamClaims(this.env, intake, (took) => {
+      this.meter(took, at);
     });
-    const gone = this.ctx.storage.transactionSync(() => {
-      // Whose interview went meanwhile, though they began anew: what rests
-      // on it rests on someone gone (`gonePrefix`), and is taken out.
+    const { records, rests } = await intakeOf(intake, claims);
+    // The team's claims are these now: any statement given before that
+    // isn't one of them goes, so no earlier one outlives what it was put
+    // together from. Found both where it is noted whom each rests on and
+    // in the brain itself, so one given with no note of it goes too: read
+    // before anything is written.
+    const current = new Set(records.map(({ id }) => id));
+    const given = await onboardingStatementsOf(
+      this.env,
+      intakeIds.team(teamId)
+    );
+    const stale = [
+      ...new Set([
+        ...given,
+        ...this.#db
+          .select({ record: brainSent.record })
+          .from(brainSent)
+          .where(
+            and(eq(brainSent.team, teamId), eq(brainSent.type, "statement"))
+          )
+          .all()
+          .map(({ record }) => record),
+      ]),
+    ].filter((record) => !current.has(record));
+    const claimed = [
+      ...new Set(
+        rests.flatMap(({ record, type }) =>
+          type === "statement" ? [record] : []
+        )
+      ),
+    ];
+    // Whom each record rests on is noted before the brain holds it, so no
+    // record is ever there without it: a withdrawal finds it whatever
+    // happens after (`#toPurge`). Each earlier claim is noted as resting
+    // on nobody left (`gonePrefix`), to be taken out at once or by the
+    // alarm until it is, however the intake itself ends.
+    const changed = this.ctx.storage.transactionSync(() => {
+      // One rule for whom a record rests on (GRA-1084): someone counts only
+      // while what they approved is still exactly what the claims and
+      // drawings were made from, read in this transaction against when the
+      // intake began (`#goneSince`). Anyone whose approval changed since is
+      // noted as gone, and the team stays due for another intake. A gone
+      // mark is never cleared here.
       const since = new Set(this.#goneSince(began));
-      // One row a statement: within SQLite's bound parameters.
+      // A claim rests on exactly the people behind it now: whoever it
+      // rested on before and doesn't now no longer counts towards the five
+      // it needs. Who is gone stays gone.
+      this.#db
+        .delete(brainSent)
+        .where(
+          and(
+            inList(brainSent.record, claimed),
+            not(like(brainSent.person, `${gonePrefix}%`))
+          )
+        )
+        .run();
+      // One row a record: within SQLite's bound parameters.
       for (const rest of rests) {
         this.#db
           .insert(brainSent)
@@ -5008,16 +5082,59 @@ export class Onboarding extends DurableObject<Env> {
           .onConflictDoNothing()
           .run();
       }
+      for (const record of stale) {
+        this.#db
+          .update(brainSent)
+          .set({ person: sql`${gonePrefix} || ${brainSent.person}` })
+          .where(
+            and(
+              eq(brainSent.record, record),
+              not(like(brainSent.person, `${gonePrefix}%`))
+            )
+          )
+          .run();
+        this.#db
+          .insert(brainSent)
+          .values({
+            record,
+            type: "statement",
+            team: teamId,
+            person: `${gonePrefix}${record}`,
+          })
+          .onConflictDoNothing()
+          .run();
+      }
+      return since.size > 0;
+    });
+    await keepOnboardingRecords(this.env, records, {
+      sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
+      teams: new Set([intakeIds.team(teamId)]),
+    });
+    const gone = this.ctx.storage.transactionSync(() => {
+      // Whose interview went meanwhile, though they began anew: what rests
+      // on it rests on someone gone (`gonePrefix`), and is taken out.
+      const since = this.#goneSince(began);
+      const ours = [...new Set(rests.map(({ record }) => record))];
+      for (const person of since) {
+        this.#db
+          .update(brainSent)
+          .set({ person: `${gonePrefix}${person}` })
+          .where(
+            and(eq(brainSent.person, person), inList(brainSent.record, ours))
+          )
+          .run();
+      }
       this.#db
         .update(brainTeams)
         .set({ sentAt: sql`coalesce(${brainTeams.sentAt}, ${at})` })
         .where(eq(brainTeams.team, teamId))
         .run();
       this.#brainSettled(teamId, dueAt);
-      return since.size > 0;
+      return changed || since.length > 0 || stale.length > 0;
     });
-    // Someone it rests on deleted their interview while it was given: what
-    // landed of it is taken out again at once, or by the alarm.
+    // Someone it rests on deleted their interview while it was given, or a
+    // claim it gave before isn't the team's now: taken out again at once,
+    // or by the alarm.
     if (gone) {
       try {
         await this.#purgeNow();
@@ -5025,6 +5142,7 @@ export class Onboarding extends DurableObject<Env> {
         log.error("onboarding.purge_failed", {
           error: error instanceof Error ? error.name : "unknown",
         });
+        await this.#armDrawing();
       }
     }
   }
@@ -5045,8 +5163,9 @@ export class Onboarding extends DurableObject<Env> {
    * (`brain_sent`), now that some interviews are gone (their agreement no
    * longer counts, `#agreedAt`):
    *
-   * - a statement once nobody it rests on is left: someone else who agreed
-   *   to the same keeps it;
+   * - a statement once fewer than `minTeamShown` of the people it rests on
+   *   are left: a claim is the team's only while five or more make it
+   *   (GRA-1084);
    * - a drawing once anyone it rests on is gone: their numbers and words
    *   are in it, and what is left is drawn again without them;
    * - a workflow once nobody it rests on is left, or none of its drawings;
@@ -5096,6 +5215,8 @@ export class Onboarding extends DurableObject<Env> {
       if (
         emptied.has(team) ||
         left.length === 0 ||
+        // A claim rests on five or more people, or isn't the team's.
+        (type === "statement" && left.length < minTeamShown) ||
         (type === "workflowVersion" && left.length < on.length) ||
         (unmapped.has(team) &&
           (type === "workflow" || type === "workflowVersion"))
