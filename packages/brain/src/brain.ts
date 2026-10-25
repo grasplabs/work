@@ -16,6 +16,20 @@ import type { MemoryAudience } from "./memories.ts";
 /** Where Knowledge keeps its payloads: an R2 bucket's calls it uses. */
 export type BlobStore = Pick<R2Bucket, "delete" | "get" | "head" | "put">;
 
+/** A collection, as the host decides whether its skills may be selected. */
+export interface SkillCollection {
+  id: string;
+  access: string;
+  owner: string;
+  source: string;
+}
+
+/**
+ * Why a collection's skills may be selected: shipped with the release
+ * (read-only to everyone), or written only by the host's admins.
+ */
+export type SkillAuthority = "shipped" | "admins";
+
 /** A document version's indexing, as Knowledge asks its host to run it. */
 export interface IndexJob {
   documentId: string;
@@ -87,6 +101,24 @@ export interface BrainPorts<C> {
   audiences: (reader: C) => Promise<readonly string[]>;
   /** Who `reader` is, as the host's audit log names them. */
   actorOf: (reader: C) => Json;
+  /** Skills (skills.ts), as the host decides who may use them. */
+  skills: {
+    /**
+     * The capabilities `reader` holds now, by the host's names for them
+     * (core's: from its grants): a skill whose manifest requires one they
+     * lack is never selected. The Brain compares; it never grants.
+     */
+    capabilities: (reader: C) => Promise<readonly string[]>;
+    /**
+     * Which of `collections` may hold a selectable skill, and why (core's:
+     * the shipped skills, and collections only admins write): a skill
+     * anyone else can write is never selected, whatever its manifest says.
+     * A collection left out holds none.
+     */
+    authorityOf: (
+      collections: readonly SkillCollection[]
+    ) => Promise<Readonly<Record<string, SkillAuthority>>>;
+  };
   /**
    * The person whose memories `reader`'s commands are (memories.ts), or a
    * refusal (`brain.denied`) for a caller with none.

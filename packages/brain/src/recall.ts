@@ -81,7 +81,7 @@ export const clampBudget = (
 });
 
 /** A refusal from a read below, as the Brain's stable code. */
-const asBrainError = <C>(brain: Brain<C>, error: unknown): unknown => {
+export const asBrainError = <C>(brain: Brain<C>, error: unknown): unknown => {
   if (brainErrors.codeOf(error) !== undefined) {
     return error;
   }

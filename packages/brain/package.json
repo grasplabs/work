@@ -33,6 +33,7 @@
     "./search": "./src/search.ts",
     "./search-detail": "./src/search-detail.ts",
     "./search-erasure": "./src/search-erasure.ts",
+    "./skills": "./src/skills.ts",
     "./tokens": "./src/tokens.ts",
     "./tools": "./src/tools.ts",
     "./transcripts": "./src/transcripts.ts",
