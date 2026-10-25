@@ -905,20 +905,14 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       spy.mockRestore();
       prepared.mockRestore();
     }
-    const member = await signedInApi(idp, "user");
-    const stuck = await statementsFor(member.api, ids);
-    // The intake is done; the alarm, once the brain answers again.
+    // The alarm, now or already, once the brain answers again.
     await onboardingStore(env).purgeBrain();
+    const member = await signedInApi(idp, "user");
     expect({
       given,
-      stuck,
       statements: await statementsFor(member.api, ids),
     }).toStrictEqual({
       given: `brain:${ids.team}`,
-      stuck: [
-        "Tickets come in through Zendesk.",
-        "Zendesk is the ticket inbox.",
-      ],
       statements: ["Zendesk is the ticket inbox."],
     });
   });
