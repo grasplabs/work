@@ -645,12 +645,14 @@ export default class Connect
     if (!parsed.success) {
       throw connectErrors.create("connect.invalid");
     }
-    const { person, id } = parsed.data;
+    const { person, id, via } = parsed.data;
     await take(
       this.env,
       person,
-      await heldFor(this.env, person, id, "decline"),
-      "decline"
+      await heldFor(this.env, person, id, "decline", via),
+      "decline",
+      false,
+      via
     );
   }
 
@@ -672,8 +674,8 @@ export default class Connect
     if (!parsed.success) {
       throw connectErrors.create("connect.invalid");
     }
-    const { capability, person, id, inputHash } = parsed.data;
-    const held = await heldFor(this.env, person, id, "confirm");
+    const { capability, person, id, inputHash, via } = parsed.data;
+    const held = await heldFor(this.env, person, id, "confirm", via);
     // Its day over: declined as expired, whatever the press carries.
     await refuseEnded(this.env, person, held);
     const call = callOf(held);
@@ -697,11 +699,12 @@ export default class Connect
         id,
         codeOf(error) ?? "internal",
         held,
-        claims?.restricted
+        claims?.restricted,
+        via
       );
       throw error;
     }
-    await take(this.env, person, held, "confirm", claims.restricted);
+    await take(this.env, person, held, "confirm", claims.restricted, via);
     try {
       return await this.#carryOutAudited(call, claims, held);
     } catch (error) {

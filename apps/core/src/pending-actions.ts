@@ -1,3 +1,4 @@
+import type { ChatPlatform } from "@grasp-os/shared/chat";
 import { connectErrors, wasTaken } from "@grasp-os/shared/connect";
 import type {
   ConnectionPerson,
@@ -235,7 +236,12 @@ const confirmHeld = async (
   env: Env,
   identity: Identity,
   held: PendingAction,
-  request: { person: ConnectionPerson; id: unknown; inputHash: unknown }
+  request: {
+    person: ConnectionPerson;
+    id: unknown;
+    inputHash: unknown;
+    via?: ChatPlatform;
+  }
 ): Promise<ConnectResult> => {
   const { person } = request;
   let capability: string;
@@ -325,10 +331,16 @@ export const confirmPendingAction = async (
   env: Env,
   identity: Identity,
   id: unknown,
-  inputHash: unknown
+  inputHash: unknown,
+  via?: ChatPlatform
 ): Promise<ConnectResult> => {
   const person = await personOf(env, identity);
-  const request = { person, id, inputHash };
+  const request = {
+    person,
+    id,
+    inputHash,
+    ...(via === undefined ? {} : { via }),
+  };
   // Connect finds none for staff, and only the person's own.
   const parsedId = z.uuid().safeParse(id);
   const held = parsedId.success
@@ -361,25 +373,28 @@ export const confirmPendingAction = async (
 /**
  * Drops the held action `id` for the signed-in person it waits for: it
  * never runs. Connect refuses anyone the action doesn't wait for, and
- * records it. A chat's agent is told (`tellChat`).
+ * records it, on the chat platform the person declined on (`via`) if any.
+ * A chat's agent is told (`tellChat`).
  */
-const declinePendingAction = async (
+export const declinePendingAction = async (
   env: Env,
   identity: Identity,
-  id: string
+  id: string,
+  via?: ChatPlatform
 ): Promise<void> => {
   const person = await personOf(env, identity);
+  const request = { person, id, ...(via === undefined ? {} : { via }) };
   // Read before it goes, to know which chat to tell: only the person's own.
   const held = z.uuid().safeParse(id).success
     ? await env.CONNECT.pendingAction({ person, id })
     : null;
   await (held === null
-    ? env.CONNECT.declineAction({ person, id })
+    ? env.CONNECT.declineAction(request)
     : wakingHeld(
         env,
         heldWaitOf(held),
         async () => {
-          await env.CONNECT.declineAction({ person, id });
+          await env.CONNECT.declineAction(request);
         },
         async () => await stillHeld(env, person, held.id)
       ));

@@ -70,7 +70,8 @@ import { boundedText, jsonOf } from "../request-body.ts";
 import { stephenFor } from "../stephen-reach.ts";
 import { offerChannelLink } from "./accounts.ts";
 import { answerInChat } from "./answer.ts";
-import { signInCard } from "./cards.tsx";
+import { cancelAction, confirmAction, signInCard } from "./cards.tsx";
+import { pressCard } from "./press.ts";
 import { countSignal } from "./signals.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
@@ -964,6 +965,11 @@ export const channelResponse = async (
       kept,
       afterward,
     });
+  });
+  // A press on a card of held writes, by the member the gate let in, in
+  // their own private chat (press.ts).
+  chat.onAction([confirmAction, cancelAction], async (event) => {
+    await pressCard(env, { platform, userId, event, state });
   });
   // Answered at once: the platform gives up on a webhook long before an
   // answer is ready, and sends it again. The message is handled after,
