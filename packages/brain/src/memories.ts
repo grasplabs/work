@@ -840,11 +840,11 @@ export const memoriesFor = async <C>(
   const kept: MemoryRecord[] = [];
   let chars = 0;
   for (const row of rows) {
-    chars += row.statement.length;
-    if (chars > limits.chars) {
-      break;
+    // One too long for what is left is passed over; older ones may fit.
+    if (chars + row.statement.length <= limits.chars) {
+      chars += row.statement.length;
+      kept.push(recordOf(row));
     }
-    kept.push(recordOf(row));
   }
   return kept;
 };

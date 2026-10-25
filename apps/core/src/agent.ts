@@ -175,7 +175,7 @@ const memorySection = (memory: Memory | undefined): string | null => {
   );
   return [
     "<memory>",
-    `What you always know here: the company's files, and the person's USER.md (at version ${user?.version ?? 0}).`,
+    `What you always know here: the company's files, the person's USER.md (at version ${user?.version ?? 0}), and records kept in the brain that everyone in this chat may read.`,
     memory.text,
     "</memory>",
   ].join("\n");
