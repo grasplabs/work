@@ -1,3 +1,5 @@
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { keyRing } from "../src/auth/token-keys.ts";
@@ -25,6 +27,9 @@ const store = (ids: string[]) => {
 };
 
 const sign = { sign: true } as const;
+
+/** How long the first object's read takes when two share one. */
+const readMs = 100;
 
 /** The IDs of `keys`. */
 const idsOf = (keys: readonly { id: string }[]) => keys.map(({ id }) => id);
@@ -112,6 +117,49 @@ describe("an isolate's token keys", () => {
       ring.keys(keys.read, sign, now),
     ]);
     expect(keys.reads()).toBe(1);
+  });
+
+  it("shares one read between two Durable Objects, each going on in its own with what it read", async () => {
+    const keys = store(["one"]);
+    const ring = keyRing<{ id: string }>();
+    const reading = Promise.withResolvers<true>();
+    // The first object's read is under way, held for a moment, when the
+    // second asks: the second joins it, and each then writes its own
+    // storage with what it got.
+    const slowRead = async () => {
+      reading.resolve(true);
+      await scheduler.wait(readMs);
+      return await keys.read();
+    };
+    const inObject = async (
+      name: string,
+      read: () => Promise<{ id: string }[]>
+    ): Promise<string[]> =>
+      await runInDurableObject(
+        env.WORKFLOW_RUNS.getByName(
+          `token-keys-${name}-${crypto.randomUUID()}`
+        ),
+        async (_object, state) => {
+          const got = await ring.keys(read, { kid: "one" }, now);
+          const { sql } = state.storage;
+          sql.exec("CREATE TABLE read_keys (id TEXT NOT NULL)");
+          for (const { id } of got) {
+            sql.exec("INSERT INTO read_keys (id) VALUES (?)", id);
+          }
+          return sql
+            .exec<{ id: string }>("SELECT id FROM read_keys")
+            .toArray()
+            .map(({ id }) => id);
+        }
+      );
+    const first = inObject("first", slowRead);
+    await reading.promise;
+    const second = inObject("second", keys.read);
+
+    expect({
+      read: await Promise.all([first, second]),
+      reads: keys.reads(),
+    }).toStrictEqual({ read: [["one"], ["one"]], reads: 1 });
   });
 
   it("signs with the keys as they are now, and reads them again at once after it made one", async () => {
