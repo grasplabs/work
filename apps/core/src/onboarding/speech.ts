@@ -21,6 +21,7 @@ import { boundedText, jsonOf } from "../request-body.ts";
 import { keepLine, keptLine } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
 import { gatewaySpeech } from "../speech.ts";
+import { auditStaffRoute } from "../staff-audit.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
 import { speakerVoices, spokenOf, voiceModels } from "./spoken-lines.ts";
 import { onboardingStore } from "./store.ts";
@@ -206,6 +207,8 @@ const forAdmin = async (
   if (person === undefined) {
     return refused(401, authErrors.create("auth.unauthenticated"), requestId);
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "onboarding.speech", []);
   if (!isAdmin(person.role)) {
     return refused(403, roleErrors.create("role.forbidden"), requestId);
   }

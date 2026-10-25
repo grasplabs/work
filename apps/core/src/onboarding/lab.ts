@@ -20,6 +20,7 @@ import { gatewaySettings, modelForRole, models } from "../models.ts";
 import { readOrganization } from "../organization.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { isLocalDevRequest } from "../router-secret.ts";
+import { auditStaffRoute } from "../staff-audit.ts";
 import { turnStream } from "./interview.ts";
 import { onboardingStore } from "./store.ts";
 
@@ -229,6 +230,8 @@ export const labResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "onboarding.lab", []);
   if (!person.staff) {
     return errorResponse(
       403,

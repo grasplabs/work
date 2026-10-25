@@ -30,9 +30,10 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { ScreenSubmissionsRpc } from "./screen-submissions.ts";
 import { ScreenTrustRpc } from "./screen-trust-rpc.ts";
 import { ScreensRpc } from "./screens-rpc.ts";
-import { clientText, fullAccess, withPerson } from "./session-check.ts";
+import { fullAccess, withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
+import { staffAudited } from "./staff-audit.ts";
 import { StoresRpc } from "./stores-rpc.ts";
 import { TemplatesRpc } from "./templates-rpc.ts";
 import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
@@ -89,50 +90,52 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #onboardingGate: OnboardingGateRpc;
 
   /** `sessionId`: the session the connection is signed in with. */
-  constructor(env: Env, check: SessionCheck, sessionId: string) {
+  constructor(env: Env, connectionCheck: SessionCheck, sessionId: string) {
     super();
+    // Every view and action of Grasp's staff, on every namespace, is in
+    // the client's audit log (staff-audit.ts): the one check they all ask.
+    const check = staffAudited(env, connectionCheck);
     this.#check = check;
     // Everything but the onboarding refuses staff who reach the onboarding alone.
     const full = fullAccess(check);
-    // What serves a client's free text refuses Grasp staff altogether
-    // (GRA-1087): whole namespaces here, and the text methods of those that
-    // mix it with numbers and settings (brain, audit, workflows).
-    const text = clientText(full);
     this.#apps = new AppsRpc(env, full);
-    this.#knowledge = new KnowledgeRpc(env, text);
-    this.#brain = new BrainRpc(env, full, text);
-    this.#knowledgeSignals = new KnowledgeSignalsRpc(env, text);
-    this.#memory = new MemoryRpc(env, text);
-    this.#uploads = new UploadsRpc(env, text);
+    this.#knowledge = new KnowledgeRpc(env, full);
+    this.#brain = new BrainRpc(env, full);
+    this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
+    this.#memory = new MemoryRpc(env, full);
+    this.#uploads = new UploadsRpc(env, full);
     this.#permissions = new PermissionsRpc(env, full);
     this.#resourceBindings = new ResourceBindingsRpc(env, full);
     this.#templates = new TemplatesRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
     this.#landscape = new LandscapeRpc(env, full);
-    this.#workflows = new WorkflowsRpc(env, full, text);
+    this.#workflows = new WorkflowsRpc(env, full);
     this.#workflowResources = new WorkflowResourcesRpc(env, full);
-    this.#decisions = new DecisionsRpc(env, text);
+    this.#decisions = new DecisionsRpc(env, full);
     this.#dependencies = new DependenciesRpc(env, full);
     this.#screens = new ScreensRpc(env, full);
     this.#screenTrust = new ScreenTrustRpc(env, full);
     this.#members = new MembersRpc(env, full);
     this.#organization = new OrganizationRpc(env, full);
-    this.#audit = new AuditRpc(env, full, text);
+    this.#audit = new AuditRpc(env, full);
     this.#models = new ModelsRpc(env, full);
-    this.#stores = new StoresRpc(env, text);
+    this.#stores = new StoresRpc(env, full);
     this.#pendingActions = new PendingActionsRpc(env, full);
     this.#unknownOutcomes = new UnknownOutcomesRpc(env, full);
-    this.#screenSubmissions = new ScreenSubmissionsRpc(env, text);
+    this.#screenSubmissions = new ScreenSubmissionsRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
-    this.#chats = new ChatsRpc(env, text);
+    this.#chats = new ChatsRpc(env, full);
     this.#dashboard = new DashboardRpc(env, full);
     this.#emailPreferences = new EmailPreferencesRpc(env, full);
     this.#sessions = new SessionsRpc(env, full, sessionId);
     this.#channelAccounts = new ChannelAccountsRpc(env, full);
     this.#notifications = new NotificationsRpc(env, full);
-    this.#onboarding = new OnboardingRpc(env, check);
-    this.#onboardingStaff = new OnboardingStaffRpc(env, check);
-    this.#onboardingGate = new OnboardingGateRpc(env, check);
+    // The onboarding records each of staff's looks and changes in its own
+    // words already (onboarding/), so its namespaces ask the connection's
+    // check itself: one entry per look, not two.
+    this.#onboarding = new OnboardingRpc(env, connectionCheck);
+    this.#onboardingStaff = new OnboardingStaffRpc(env, connectionCheck);
+    this.#onboardingGate = new OnboardingGateRpc(env, connectionCheck);
   }
 
   get sessions(): SessionsRpc {

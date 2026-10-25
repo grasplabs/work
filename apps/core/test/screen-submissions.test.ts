@@ -35,7 +35,6 @@ import { referenceTo } from "./notes-client-app.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   openRpc,
-  outcome,
   routed,
   signedIn,
   signedInApi,
@@ -1211,11 +1210,11 @@ describe("recovering a screen's submissions", { timeout: 120_000 }, () => {
     ]);
   });
 
-  it("refuses Grasp staff, who see numbers only", async () => {
+  it("lists nothing for Grasp staff", async () => {
     const staff = await signedIn(idp, "grasp-staff", staffPerson());
     const { core } = await openRpc(staff);
     await expect(
-      outcome(core.authenticate().screenSubmissions.list())
-    ).resolves.toBe("role.forbidden");
+      core.authenticate().screenSubmissions.list()
+    ).resolves.toStrictEqual([]);
   });
 });

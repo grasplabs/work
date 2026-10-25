@@ -10,6 +10,7 @@ import { log } from "@grasp-os/shared/log";
 import { identify } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
 import { isOwnOrigin } from "./rpc.ts";
+import { auditStaffRoute } from "./staff-audit.ts";
 
 /** Most reports one person makes in a minute; the rest are refused. */
 export const errorReportsPerMinute = 10;
@@ -86,6 +87,8 @@ export const errorReportResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "error.report", []);
   if (!withinLimit(person.userId)) {
     const response = errorResponse(
       429,

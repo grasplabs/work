@@ -20,7 +20,6 @@ import { drainAuditOutboxes, drainObjectOutbox } from "../src/audit-outbox.ts";
 import { AuditRpc } from "../src/audit-rpc.ts";
 import { identify } from "../src/auth/identity.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { clientText } from "../src/session-check.ts";
 
 /** The log's events after position `after`, oldest first, with positions. */
 const entriesAfter = async (
@@ -116,14 +115,13 @@ export const exportReader = async (
   filter: AuditFilter
 ): Promise<ReadableStreamDefaultReader<Uint8Array>> => {
   const headers = new Headers({ cookie: session });
-  const check = async () => {
+  const rpc = new AuditRpc(env, async () => {
     const identity = await identify(env, headers);
     if (!identity) {
       throw new Error("Session ended");
     }
     return identity;
-  };
-  const rpc = new AuditRpc(env, check, clientText(check));
+  });
   const stream = await rpc.export(filter, "json");
   return stream.getReader();
 };

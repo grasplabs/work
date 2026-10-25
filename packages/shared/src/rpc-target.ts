@@ -50,18 +50,37 @@ const holdWithin = (args: readonly unknown[], bounds: ValueBounds): void => {
   }
 };
 
+/** A call of a target's method, as a {@link CallHook} sees it. */
+export interface TargetCall {
+  target: object;
+  method: string;
+  args: readonly unknown[];
+}
+
+/**
+ * Runs `run`, a target's method, for `call`: what the host does around
+ * every call that arrives (core notes which call it is, so its session
+ * check can audit a staff member's views). It must call `run` once and
+ * answer what it answers.
+ */
+export type CallHook = (call: TargetCall, run: () => unknown) => unknown;
+
 /** `method`, refusing arguments past `bounds` before it runs. */
 const bounded = (
   name: string,
   method: (...args: unknown[]) => unknown,
-  bounds: ValueBounds
+  bounds: ValueBounds,
+  around: CallHook | undefined
 ): ((...args: unknown[]) => unknown) =>
   // A method, so it's called with the target as `this`, as Cap'n Web
   // calls it, and keeps the name it had.
   ({
-    [name](this: unknown, ...args: unknown[]): unknown {
+    [name](this: object, ...args: unknown[]): unknown {
       holdWithin(args, bounds);
-      return Reflect.apply(method, this, args);
+      const run = (): unknown => Reflect.apply(method, this, args);
+      return around === undefined
+        ? run()
+        : around({ target: this, method: name, args }, run);
     },
   })[name] ?? method;
 
@@ -80,7 +99,8 @@ const isMethod = (value: unknown): value is (...args: unknown[]) => unknown =>
 const wrapMethods = (
   prototype: object,
   base: object,
-  bounds: ValueBounds
+  bounds: ValueBounds,
+  around: CallHook | undefined
 ): void => {
   // Every prototype of the chain not wrapped yet: a wrapped one has every
   // prototype above it wrapped too, as all of them are marked together.
@@ -107,7 +127,7 @@ const wrapMethods = (
         isMethod(method) &&
         !Reflect.defineProperty(current, name, {
           ...property,
-          value: bounded(name, method, bounds),
+          value: bounded(name, method, bounds, around),
         })
       ) {
         throw new TypeError(
@@ -132,13 +152,20 @@ const wrapMethods = (
  * `maxDepth` (a direct argument's levels, the call's list of arguments
  * apart), `size` the longest message its transport takes.
  *
- * A method a target calls on itself is held to the same bounds.
+ * A method a target calls on itself is held to the same bounds. `around`
+ * runs around every call of every method, once its arguments are within
+ * them.
  */
-export const boundedRpcTarget = (bounds: ValueBounds) => {
+export const boundedRpcTarget = (bounds: ValueBounds, around?: CallHook) => {
   class BoundedRpcTarget extends RpcTarget {
     constructor() {
       super();
-      wrapMethods(new.target.prototype, BoundedRpcTarget.prototype, bounds);
+      wrapMethods(
+        new.target.prototype,
+        BoundedRpcTarget.prototype,
+        bounds,
+        around
+      );
     }
   }
   return BoundedRpcTarget;

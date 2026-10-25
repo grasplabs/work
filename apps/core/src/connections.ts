@@ -55,6 +55,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { pointSharedMailbox, readSharedMailboxes } from "./shared-mailboxes.ts";
+import { auditStaffRoute } from "./staff-audit.ts";
 import {
   readStephenReach,
   setAppToolClass,
@@ -723,6 +724,8 @@ export const handleConnectionCallback = async (
     await env.CONNECT.abandonFlow(state);
     return failed(authErrors.create("auth.unauthenticated").code);
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, identity, "connections.route", []);
   let finished: { connectionId: string; returnTo: string };
   try {
     finished = await env.CONNECT.finishConnection({
@@ -791,6 +794,8 @@ export const catalogLogoResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "connections.route", []);
   const logo = await env.CONNECT.catalogLogo({
     source: source.data,
     id: named.id,

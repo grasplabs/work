@@ -15,7 +15,6 @@ import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { AppErrorPayload } from "@grasp-os/shared/operations";
 import { portableFunctionPath } from "@grasp-os/shared/portable";
-import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   appFunctionPath,
@@ -65,6 +64,7 @@ import {
 import type { LeasedBuild } from "./screen-trust.ts";
 import { isWorkflowRequest } from "./screen-workflows.ts";
 import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
+import { auditStaffRoute } from "./staff-audit.ts";
 
 // A running App's screen calling one of its App's functions (spec 32.6):
 // `POST /api/app-functions/<app>`, the request as the body, the frame's
@@ -698,11 +698,6 @@ const personRefused = (
   app: string,
   requestId: string
 ): Response | undefined => {
-  // An App's functions answer with its data: never to Grasp staff, who see
-  // numbers only (GRA-1087, session-check.ts `clientText`).
-  if (person.staff) {
-    return errorResponse(403, roleErrors.create("role.forbidden"), requestId);
-  }
   const refusal = personRefusal(request.headers, person.userId);
   if (refusal === undefined) {
     return undefined;
@@ -751,6 +746,8 @@ export const appFunctionResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "app.functions", [app]);
   const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;
@@ -929,6 +926,8 @@ const admitCall = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "app.functions.stream", [app]);
   const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;

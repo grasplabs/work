@@ -128,7 +128,11 @@ describe("app requests", { timeout: 60_000 }, () => {
       ).resolves.toBe("role.forbidden");
     });
 
-    expect(audited).toStrictEqual([]);
+    // Nothing of any request is kept; Grasp staff's attempt is on record
+    // as theirs, by where it was made (staff-audit.ts).
+    expect(
+      audited.map(({ action, detail }) => [action, detail.surface])
+    ).toStrictEqual([["staff.accessed", "connections.requestApp"]]);
     await expect(
       outcome(nobody.core.authenticate().connections.appRequests())
     ).resolves.toBe("auth.unauthenticated");

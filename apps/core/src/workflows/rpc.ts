@@ -38,19 +38,12 @@ import { listRuns, runStatus, startWorkflow } from "./runs.ts";
 export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
-  readonly #text: SessionCheck;
   readonly #params: WorkflowParamsRpc;
 
-  /**
-   * `text`: the check of what serves a run's data (its output, error and
-   * step history), which Grasp staff never pass (session-check.ts
-   * `clientText`); runs' ids, states and times stay theirs to see.
-   */
-  constructor(env: Env, check: SessionCheck, text: SessionCheck) {
+  constructor(env: Env, check: SessionCheck) {
     super();
     this.#env = env;
     this.#check = check;
-    this.#text = text;
     this.#params = new WorkflowParamsRpc(env, check);
   }
 
@@ -71,7 +64,7 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
 
   async status(run: string): Promise<WorkflowRun> {
     return await withPerson(
-      this.#text,
+      this.#check,
       async (by) => await runStatus(this.#env, by, run)
     );
   }
@@ -81,7 +74,7 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     page?: RunHistoryPageQuery
   ): Promise<RunHistoryPage> {
     return await withPerson(
-      this.#text,
+      this.#check,
       async (by) => await runHistory(this.#env, by, run, page)
     );
   }

@@ -100,6 +100,10 @@ const typeRules: readonly {
   // An admin adding records the brain is built from, and a purge
   // rewriting a record's words.
   { action: "brain.records", type: "action" },
+  // A Grasp staff member reaching a namespace, method or route of the
+  // client's deployment (core's staff-audit.ts): what they looked at or
+  // did there, by its surface and identifiers, never its content.
+  { action: "staff.accessed", type: "read" },
   // A gap's owner asked (Grasp's), and a person answering or closing it.
   { action: "brain.gap.asked", type: "action" },
   // A purge rewriting answers, or forgetting who gave them.

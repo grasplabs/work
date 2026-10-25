@@ -38,6 +38,7 @@ import { errorResponse } from "./errors.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { auditStaffRoute } from "./staff-audit.ts";
 
 // Reading the audit log (threat model section 13, R16): admins search it,
 // export it and verify its chain. Admins see all of it, so an export holds
@@ -432,11 +433,8 @@ export const auditExportResponse = async (
       requestId
     );
   }
-  // Events' details are a client's own words: never to Grasp staff
-  // (GRA-1087, session-check.ts `clientText`).
-  if (person.staff) {
-    return errorResponse(403, roleErrors.create("role.forbidden"), requestId);
-  }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "audit.export", []);
   const { searchParams } = new URL(request.url);
   const filter = Object.fromEntries(
     [...searchParams].filter(([name]) => name !== "format")
@@ -483,22 +481,15 @@ export const auditExportResponse = async (
 export class AuditRpc extends CoreRpcTarget implements AuditApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
-  readonly #text: SessionCheck;
 
-  /**
-   * `text`: the check of what reads events' details (search, export),
-   * which Grasp staff never pass (session-check.ts `clientText`); a
-   * verification is counts only.
-   */
-  constructor(env: Env, check: SessionCheck, text: SessionCheck) {
+  constructor(env: Env, check: SessionCheck) {
     super();
     this.#env = env;
     this.#check = check;
-    this.#text = text;
   }
 
   async search(filter?: AuditFilter, before?: number): Promise<AuditPage> {
-    return await withPerson(this.#text, async (person) => {
+    return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
       const parsed = parseFilter(filter);
       const cursor = parsePosition(before);
@@ -526,9 +517,9 @@ export class AuditRpc extends CoreRpcTarget implements AuditApi {
     filter: AuditFilter | undefined,
     format: AuditExportFormat
   ): Promise<ReadableStream<Uint8Array>> {
-    return await withPerson(this.#text, async (person) => {
+    return await withPerson(this.#check, async (person) => {
       const recheck = async (): Promise<void> => {
-        await withPerson(this.#text, requireAdmin);
+        await withPerson(this.#check, requireAdmin);
       };
       const started = await startExport(
         this.#env,

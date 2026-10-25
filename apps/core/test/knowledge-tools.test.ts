@@ -19,7 +19,15 @@ import {
 } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
-import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
 
 // The agent's Knowledge tools (`KNOWLEDGE` in its env, across every
 // collection it may read) and the same reads for people and Apps. These
@@ -684,7 +692,7 @@ const readOf = ({ actor, action, target, provenance, detail }: AuditEvent) => ({
 });
 
 describe("Knowledge reads in the audit log", setUpTime, () => {
-  it("record every read, by an agent, an App or a person, with provenance and no content", async () => {
+  it("record every read, by an agent, an App, a person or staff, with provenance and no content", async () => {
     const admin = await personOf("admin");
     const agent = newAgent();
     const { id } = await admin.api.apps.create({ name: `App ${unique()}` });
@@ -703,6 +711,11 @@ describe("Knowledge reads in the audit log", setUpTime, () => {
       await envOf(actingFor(app, admin.userId), app),
       "HANDBOOK"
     );
+    const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
+    const { core: staffCore } = await openRpc(staffSession);
+    const staff = staffCore.authenticate();
+    const { userId: staffId } = await staff.whoami();
+
     let found: string[] = [];
     const events = await auditedDuring(async () => {
       // An agent, through its tools; a refused read isn't one.
@@ -720,6 +733,8 @@ describe("Knowledge reads in the audit log", setUpTime, () => {
       await admin.knowledge.history(noteId);
       await admin.knowledge.backlinks(noteId);
       await admin.knowledge.follow(noteId);
+      // Staff, reading a collection for everyone.
+      await staff.knowledge.read(noteId);
     });
     const agentActor = {
       type: "agent",
@@ -830,6 +845,13 @@ describe("Knowledge reads in the audit log", setUpTime, () => {
           files: 0,
           sensitive: false,
         },
+      },
+      {
+        actor: { type: "staff", userId: staffId },
+        action: "knowledge.read",
+        target: note,
+        provenance: fromHandbook,
+        detail: { read: "document", version: 1, sensitive: false },
       },
     ];
     expect({

@@ -47,29 +47,6 @@ export const fullAccess = (check: SessionCheck): SessionCheck =>
   );
 
 /**
- * `check`, refusing every Grasp staff session with `role.forbidden`, before
- * anything is read (GRA-1087): what each namespace or method that serves a
- * client's free text (Knowledge, Brain notes and changes, chats, App data,
- * audit details) checks with. Staff see numbers only: a refusal says the
- * same whatever it was asked about, so it tells them nothing either.
- */
-export const clientText = (check: SessionCheck): SessionCheck =>
-  Object.assign(
-    async (): Promise<Identity> => {
-      const person = await check();
-      if (person.staff) {
-        throw roleErrors.create("role.forbidden");
-      }
-      return person;
-    },
-    {
-      forget: (): void => {
-        check.forget?.();
-      },
-    }
-  );
-
-/**
  * How long one reading of who is behind a connection holds. It is read
  * again at most this often, whatever the connection does (rpc.ts): a
  * revoked or expired session, a removal, a changed role or team, or a
