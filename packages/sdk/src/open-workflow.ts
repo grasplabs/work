@@ -316,9 +316,12 @@ export interface AttemptHost {
   readonly until: (frame: CallFrame) => Promise<number>;
   /**
    * Resolves a `for` task's collection, once, on its transformed input:
-   * its items, which the step records.
+   * its items, and their keys where its loop has them
+   * (`metadata.grasp.key`), which the step records.
    */
-  readonly items: (frame: CallFrame) => Promise<FlowValue[]>;
+  readonly items: (
+    frame: CallFrame
+  ) => Promise<{ items: FlowValue[]; keys?: FlowValue[] }>;
   /**
    * Whether a `try` task's catch takes the failure that left its list, as
    * the host decides it from its own record of the run, once.
@@ -459,6 +462,8 @@ interface StepRecord {
   readonly items?: readonly FlowValue[];
   /** Whether a catch step's catch took the failure. */
   readonly caught?: boolean;
+  /** Their keys, where its loop has them, which run history shows. */
+  readonly keys?: readonly FlowValue[];
 }
 
 /** Whether `value` is none, or a whole number from 0. */
@@ -467,6 +472,23 @@ const isCountOrNone = (
 ): value is number | undefined =>
   value === undefined ||
   (typeof value === "number" && isSafeInteger(value) && value >= 0);
+
+/** What a `for` task's enter step recorded of its items: them, and their keys. */
+const loopRecordOf = (
+  value: Record<string, FlowValue>
+): Pick<StepRecord, "items" | "keys"> => {
+  const { items, keys } = value;
+  if (items !== undefined && !isArray(items)) {
+    throw new TypeError("A for task's enter step records its items");
+  }
+  if (keys !== undefined && (!isArray(keys) || items === undefined)) {
+    throw new TypeError("A for task's enter step records keys with its items");
+  }
+  return {
+    ...(items === undefined ? {} : { items }),
+    ...(keys === undefined ? {} : { keys }),
+  };
+};
 
 const readRecord = (value: FlowValue): StepRecord => {
   if (!isRecord(value)) {
@@ -478,10 +500,8 @@ const readRecord = (value: FlowValue): StepRecord => {
   if (!hasOwn(value, "output")) {
     throw new TypeError("A task's step records its output");
   }
-  const { branch, until, items, caught } = value;
-  if (items !== undefined && !isArray(items)) {
-    throw new TypeError("A for task's enter step records its items");
-  }
+  const { branch, until, caught } = value;
+  const loop = loopRecordOf(value);
   if (!isCountOrNone(branch)) {
     throw new TypeError("A switch records its case by number");
   }
@@ -497,7 +517,7 @@ const readRecord = (value: FlowValue): StepRecord => {
     ...(hasOwn(value, "context") ? { context: value.context ?? null } : {}),
     ...(branch === undefined ? {} : { branch }),
     ...(until === undefined ? {} : { until }),
-    ...(items === undefined ? {} : { items }),
+    ...loop,
     ...(caught === undefined ? {} : { caught }),
   };
 };
@@ -756,9 +776,13 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
             if (entered === null) {
               return { skipped: true };
             }
+            const { items, keys } = await attempt.items({
+              input: entered.input,
+            });
             return {
               output: entered.input,
-              items: await attempt.items({ input: entered.input }),
+              items,
+              ...(keys === undefined ? {} : { keys }),
             };
           }
         )
