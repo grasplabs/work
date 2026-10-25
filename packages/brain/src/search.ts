@@ -85,7 +85,7 @@ const yearMs = 365 * 24 * 60 * 60 * 1000;
 const wordPattern = /[\p{L}\p{N}]+/gu;
 
 /** A query's distinct words: lowercased, at most {@link maxTerms}. */
-const termsOf = (query: string): string[] =>
+export const termsOf = (query: string): string[] =>
   [...new Set(query.normalize("NFKC").toLowerCase().match(wordPattern))].slice(
     0,
     maxTerms
@@ -100,7 +100,7 @@ const quoted = (term: string) => `"${term}"`;
  * (`prefix = '2 3'`) don't cover one character, so `"7"*` would merge
  * every term that starts with a 7: seconds at 100k sections, for `INC-7`.
  */
-const asWord = (term: string): string =>
+export const asWord = (term: string): string =>
   // Code points, as in `passesOf`.
   // oxlint-disable-next-line typescript/no-misused-spread -- see passesOf
   [...term].length === 1 ? quoted(term) : `${quoted(term)}*`;

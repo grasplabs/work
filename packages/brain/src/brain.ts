@@ -3,10 +3,11 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import type { Readable, ReadRecord } from "./authorize.ts";
 import type { CollectionRow } from "./collections.ts";
-import type { BrainSourceRef } from "./contract.ts";
+import type { BrainSourceRef, MemoryRecord } from "./contract.ts";
 import type { BrainEvent } from "./events.ts";
 import type { Json } from "./json.ts";
 import type { Provenance } from "./knowledge.ts";
+import type { MemoryAudience } from "./memories.ts";
 
 // The Brain as its modules take it: its database and its host's ports,
 // made once per request by the host (core's ports.ts `brainOf`), so no
@@ -100,6 +101,35 @@ export interface BrainPorts<C> {
       ownerId: string;
     }
   ) => Promise<void>;
+  /**
+   * Memory records in a recall (GRA-298), as the host decides whom they
+   * serve: the Brain matches within what it answers and widens nothing.
+   */
+  memories: {
+    /**
+     * Whom `reader`'s recall serves: the scopes it may read (none for a
+     * reader that reads no memory) and the people who read its answer.
+     */
+    audienceOf: (
+      reader: C
+    ) => Promise<{ audience: MemoryAudience; people: readonly string[] }>;
+    /**
+     * Of `records`, found for `people`, those the host keeps now, in the
+     * same order: each with who published it, when that isn't the reader
+     * (null when it is), and the collections it rests on, each sensitive
+     * or not, for the read the Brain records of those it hands over.
+     */
+    keep: (
+      reader: C,
+      people: readonly string[],
+      records: readonly (MemoryRecord & { ownerId: string })[]
+    ) => Promise<
+      (MemoryRecord & {
+        by: string | null;
+        cites: { id: string; sensitive: boolean }[];
+      })[]
+    >;
+  };
   /** Payloads (payloads.ts), in a bucket whose jurisdiction the host set. */
   blobs: BlobStore;
   /**

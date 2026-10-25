@@ -3,7 +3,6 @@ import type { CollectionRow } from "@grasp-os/brain/collections";
 import type { MemoryRecord } from "@grasp-os/brain/contract";
 import { writeVersion } from "@grasp-os/brain/documents";
 import { memoriesFor } from "@grasp-os/brain/memories";
-import type { MemoryAudience } from "@grasp-os/brain/memories";
 import { readPayload } from "@grasp-os/brain/payloads";
 import {
   brainPayloads,
@@ -43,17 +42,20 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { appFor, versionFiles } from "../apps.ts";
 import { memberRole, teamsOf } from "../auth/identity.ts";
-import { users } from "../db/core/schema.ts";
-import { inList } from "../db/d1.ts";
 import { isRestricted } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
 import {
   audienceCondition,
-  audienceMaxMembers,
-  audienceOf,
   noteProvenance,
   readableForPerson,
 } from "./access.ts";
+import {
+  citedCollections,
+  memoryAudienceOf,
+  namesOf,
+  noAudience,
+  stillReadable,
+} from "./memory-audience.ts";
 import {
   agentMemoryPath,
   appMemoryPath,
@@ -61,7 +63,6 @@ import {
   memoryLimit,
   personalCollectionId,
 } from "./memory-files.ts";
-import { citedCollectionIds, readableByAll } from "./memory-publish.ts";
 import { brainOf } from "./ports.ts";
 
 // An agent's memory: the files it always has in its context, by where it
@@ -145,121 +146,6 @@ const userFile = async (authority: Authority): Promise<Wanted> => ({
   },
 });
 
-/** An audience that reads no memory record. */
-const noAudience: MemoryAudience = {
-  owners: [],
-  teams: [],
-  company: false,
-  sessions: [],
-};
-
-/**
- * Who the memory records of `context` serve (GRA-298; the threat model is
- * on the issue): requester ∩ the chat's audience ∩ output audience, read
- * now. A person's own records only where the chat's audience is them
- * alone; a team's only where every member of it is in the team; the
- * company's unless people from outside it are in the chat; the chat's own
- * session records. A workflow step gets none.
- */
-const memoryAudienceOf = async (
-  env: Env,
-  authority: Authority,
-  work: WorkContext,
-  context: ReturnType<typeof memoryContextSchema.parse>
-): Promise<{ audience: MemoryAudience; people: string[] }> => {
-  const none = { audience: noAudience, people: [] };
-  if (context.type === "workflow") {
-    return none;
-  }
-  const person = authority.onBehalfOf;
-  const sessions = work.type === "chat" ? [work.chatId] : [];
-  const audience = await audienceOf(env, work);
-  const alone =
-    context.type !== "channel" &&
-    (audience === undefined ||
-      (!audience.outsiders &&
-        audience.members.every((member) => member === person)));
-  if (alone) {
-    const teams = await teamsOf(env.DB, person);
-    return {
-      audience: {
-        owners: [person],
-        teams: teams.map(({ id }) => id),
-        company: true,
-        sessions,
-      },
-      people: [person],
-    };
-  }
-  // A chat others share whose members aren't known gets nothing; nor one
-  // kept by another Workspace object's chat of that ID (no members); nor
-  // one with people from outside the company, whose records were cleared
-  // for the company's people only.
-  if (
-    audience === undefined ||
-    audience.members.length === 0 ||
-    audience.outsiders ||
-    audience.members.length > audienceMaxMembers
-  ) {
-    return none;
-  }
-  const memberships = await Promise.all(
-    audience.members.map(async (member) => {
-      const teams = await teamsOf(env.DB, member);
-      return new Set(teams.map(({ id }) => id));
-    })
-  );
-  const [first, ...rest] = memberships;
-  const shared = [...(first ?? [])].filter((team) =>
-    rest.every((teams) => teams.has(team))
-  );
-  return {
-    audience: { owners: [], teams: shared, company: true, sessions },
-    people: [...audience.members],
-  };
-};
-
-/**
- * `records` whose cited documents every one of `people` may read now: a
- * record was cleared for its scope's audience when it was published, and
- * an audience changes (a guest joins, a collection stops being shared).
- */
-const stillReadable = async <Record extends MemoryRecord>(
-  env: Env,
-  people: readonly string[],
-  records: readonly Record[]
-): Promise<Record[]> => {
-  // Each record's whole lineage: a correction rests on what it corrected.
-  const each = await Promise.all(
-    records.map(
-      async ({ sourceRefs }) => await citedCollectionIds(env, sourceRefs)
-    )
-  );
-  const ids = [...new Set(each.flatMap((cited) => [...cited]))];
-  if (ids.length === 0) {
-    return [...records];
-  }
-  const readable = await readableByAll(env, people, ids);
-  return records.filter((_record, index) =>
-    [...(each[index] ?? [])].every((id) => readable.has(id))
-  );
-};
-
-/** The names of the people `userIds`, by ID, as the model may see them. */
-const namesOf = async (
-  env: Env,
-  userIds: readonly string[]
-): Promise<Map<string, string>> => {
-  if (userIds.length === 0) {
-    return new Map();
-  }
-  const rows = await drizzle(env.DB)
-    .select({ id: users.id, name: users.name })
-    .from(users)
-    .where(inList(users.id, userIds));
-  return new Map(rows.map(({ id, name }) => [id, name]));
-};
-
 /** Characters a memory record's statement may never hold in a prompt. */
 const markup = /[<>]/gu;
 
@@ -292,28 +178,6 @@ const recordsBlock = (
         ),
         "</memory>",
       ].join("\n");
-
-/**
- * The collections the documents `records` cite are in, with whether each
- * is sensitive: what a read of the records rests on.
- */
-const citedCollections = async (
-  env: Env,
-  records: readonly MemoryRecord[]
-): Promise<{ id: string; sensitive: boolean }[]> => {
-  const each = await Promise.all(
-    records.map(
-      async ({ sourceRefs }) => await citedCollectionIds(env, sourceRefs)
-    )
-  );
-  const ids = [...new Set(each.flatMap((cited) => [...cited]))];
-  return ids.length === 0
-    ? []
-    : await drizzle(env.KNOWLEDGE)
-        .select({ id: collections.id, sensitive: collections.sensitive })
-        .from(collections)
-        .where(inList(collections.id, ids));
-};
 
 /** The files `context` gets, in the order its memory has them. */
 const wantedFor = async (
@@ -606,12 +470,15 @@ export const forContext = async (
   remember(key, entry);
   // The Brain's records its audience may read now: never cached, so a
   // membership change or a removed record counts from the next turn.
-  const { audience, people } = await memoryAudienceOf(
-    env,
-    authority,
-    work,
-    context
-  );
+  const { audience, people } =
+    context.type === "workflow"
+      ? { audience: noAudience, people: [] }
+      : await memoryAudienceOf(
+          env,
+          authority,
+          work,
+          context.type === "channel"
+        );
   const permitted = await stillReadable(
     env,
     people,
