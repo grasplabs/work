@@ -21,6 +21,7 @@ import {
   topSchema,
   v1,
 } from "./graph.ts";
+import { meRoute, requireOwnMailbox } from "./mail-sorting.ts";
 
 // Calendars, of one mailbox per call, as `/users/{mailbox}` like mail: the
 // same resource, so a permission for invoices@ covers its calendar too.
@@ -544,4 +545,283 @@ const updateEvent = defineTool({
   },
 });
 
-export const calendarTools = [listEvents, getEvent, createEvent, updateEvent];
+/** A time of day, `09:00`, as working hours are given. */
+const timeOfDaySchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u);
+
+/** Days of the week as Graph names them, Sunday first as `getUTCDay` counts. */
+const weekdays = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+] as const;
+
+/** Working hours when the call names none: Monday to Friday, 9 to 5. */
+const defaultWorkingHours = {
+  from: "09:00",
+  to: "17:00",
+  days: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+} as const;
+
+const minuteMs = 60_000;
+const dayMs = 24 * 60 * minuteMs;
+
+/** The longest range free time is looked for in. */
+const maxRangeDays = 31;
+
+/**
+ * How many events a page of the calendar view asks for, and how many pages
+ * free time reads at most: a month of a busy calendar fits many times.
+ */
+const viewPageSize = 100;
+const maxViewPages = 10;
+
+/** `ms` as a wall-clock time in `timeZone`, to the second: `2026-10-26T14:30:00`. */
+const wallClockOf = (ms: number, timeZone: string): string => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(ms)
+      .map(({ type, value }) => [type, value])
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+};
+
+/** How far `timeZone`'s wall clock is ahead of UTC at `ms`. */
+const offsetAt = (ms: number, timeZone: string): number =>
+  Date.parse(`${wallClockOf(ms, timeZone)}Z`) - Math.floor(ms / 1000) * 1000;
+
+/**
+ * The moment a wall-clock time in `timeZone` names. A time a clock change
+ * skips reads with the offset before the change, and one it repeats as
+ * its first.
+ */
+const momentOf = (time: string, timeZone: string): number => {
+  const asUtc = Date.parse(`${withSeconds(time)}Z`);
+  const guess = asUtc - offsetAt(asUtc, timeZone);
+  return asUtc - offsetAt(guess, timeZone);
+};
+
+/** A moment as the wall-clock time `calendar.create` takes: `2026-10-26T14:30`. */
+const localTimeOf = (ms: number, timeZone: string): string =>
+  wallClockOf(ms, timeZone).slice(0, minutesOnly);
+
+/** What free time reads of an event: its times, and whether it takes the time. */
+const busyEvent = z.object({
+  start: graphTime,
+  end: graphTime,
+  isAllDay: z.boolean().nullish(),
+  isCancelled: z.boolean().nullish(),
+  showAs: z.string().nullish(),
+});
+
+/** Ways an event can show that leave the person's time free. */
+const freeShows = new Set(["free", "workingElsewhere"]);
+
+/**
+ * When an event takes the person's time, as moments. Graph gives times in
+ * UTC here; an all-day event spans its days in the organization's time
+ * zone, as the person sees it, whichever zone it was made in.
+ */
+const busyOf = (
+  event: z.infer<typeof busyEvent>,
+  timeZone: string
+): { start: number; end: number } | undefined => {
+  if (event.isCancelled === true || freeShows.has(event.showAs ?? "busy")) {
+    return undefined;
+  }
+  if (event.isAllDay === true) {
+    return {
+      start: momentOf(`${event.start.dateTime.slice(0, 10)}T00:00`, timeZone),
+      end: momentOf(`${event.end.dateTime.slice(0, 10)}T00:00`, timeZone),
+    };
+  }
+  return {
+    start: Date.parse(`${event.start.dateTime.slice(0, 19)}Z`),
+    end: Date.parse(`${event.end.dateTime.slice(0, 19)}Z`),
+  };
+};
+
+/** Midnight of the day `day` (a UTC midnight) names, as a wall-clock time. */
+const dayOf = (day: number): string =>
+  `${new Date(day).toISOString().slice(0, 10)}T00:00`;
+
+/** The working stretches of each day from `start` to `end`, as moments. */
+const workingStretches = (
+  start: number,
+  end: number,
+  timeZone: string,
+  hours: { from: string; to: string; days: readonly string[] }
+): { start: number; end: number }[] => {
+  const stretches: { start: number; end: number }[] = [];
+  const firstDay = Date.parse(`${wallClockOf(start, timeZone).slice(0, 10)}Z`);
+  for (let day = firstDay; momentOf(dayOf(day), timeZone) < end; day += dayMs) {
+    const weekday = weekdays[new Date(day).getUTCDay()] ?? "sunday";
+    if (hours.days.includes(weekday)) {
+      const from = Math.max(
+        momentOf(`${dayOf(day).slice(0, 10)}T${hours.from}`, timeZone),
+        start
+      );
+      const to = Math.min(
+        momentOf(`${dayOf(day).slice(0, 10)}T${hours.to}`, timeZone),
+        end
+      );
+      if (to > from) {
+        stretches.push({ start: from, end: to });
+      }
+    }
+  }
+  return stretches;
+};
+
+/** What is left of `stretches` once every one of `busy` is taken out. */
+const without = (
+  stretches: { start: number; end: number }[],
+  busy: { start: number; end: number }[]
+): { start: number; end: number }[] => {
+  let left = stretches;
+  for (const taken of busy) {
+    left = left.flatMap((stretch) =>
+      taken.end <= stretch.start || taken.start >= stretch.end
+        ? [stretch]
+        : [
+            { start: stretch.start, end: taken.start },
+            { start: taken.end, end: stretch.end },
+          ].filter((part) => part.end > part.start)
+    );
+  }
+  return left;
+};
+
+const freeTime = defineTool({
+  name: "calendar.freeTime",
+  description:
+    "Finds free stretches of at least `minutes` in a person's own calendar between start and end, within working hours (Monday to Friday, 09:00 to 17:00 unless given), earliest first. Start, end and the answer's times are wall-clock times (2026-10-26T14:30) in timeZone, the organization's time zone, as calendar.create takes them: to block a stretch, create an event in it that shows as busy.",
+  input: z.strictObject({
+    mailbox: mailboxSchema,
+    start: localTimeSchema,
+    end: localTimeSchema,
+    timeZone: timeZoneSchema,
+    minutes: z
+      .number()
+      .int()
+      .min(5)
+      .max(24 * 60),
+    workingHours: z
+      .strictObject({
+        from: timeOfDaySchema,
+        to: timeOfDaySchema,
+        days: z.array(z.enum(weekdays)).min(1).max(weekdays.length),
+      })
+      .optional(),
+  }),
+  output: z.strictObject({
+    mailbox: z.string(),
+    timeZone: z.string(),
+    free: z.array(
+      z.strictObject({
+        start: z.string(),
+        end: z.string(),
+        minutes: z.number(),
+      })
+    ),
+  }),
+  readOnly: true,
+  reach: "own",
+  resource: "mailbox",
+  routes: [
+    meRoute,
+    { method: "GET", host: graphHost, path: `${users}/calendarView` },
+  ],
+  run: async ({ mailbox, start, end, timeZone, minutes, workingHours }) => {
+    const from = momentOf(start, timeZone);
+    const to = momentOf(end, timeZone);
+    if (to <= from) {
+      throw new ToolError("The range must end after it starts", {
+        code: invalidCode,
+      });
+    }
+    if (to - from > maxRangeDays * dayMs) {
+      throw new ToolError(
+        `Free time is looked for in at most ${maxRangeDays} days at a time`,
+        { code: invalidCode }
+      );
+    }
+    const hours = workingHours ?? defaultWorkingHours;
+    if (hours.to <= hours.from) {
+      throw new ToolError("Working hours must end after they start", {
+        code: invalidCode,
+      });
+    }
+    // Own only. The connector may read colleagues' and shared calendars
+    // (Calendars.Read.Shared), and their free time is theirs to share.
+    await requireOwnMailbox(mailbox);
+    const view = graphUrl(`/users/${segment(mailbox)}/calendarView`, {
+      startDateTime: new Date(from).toISOString(),
+      endDateTime: new Date(to).toISOString(),
+      $select: "start,end,isAllDay,isCancelled,showAs",
+      $orderby: "start/dateTime",
+      $top: String(viewPageSize),
+    });
+    const busy: { start: number; end: number }[] = [];
+    let page: string | undefined;
+    for (let read = 0; read < maxViewPages; read += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- each page names the next
+      const { value, "@odata.nextLink": nextLink } = await graphJson(
+        atPage(new URL(view), page),
+        pageOf(busyEvent),
+        { headers: inUtc }
+      );
+      for (const event of value) {
+        const taken = busyOf(event, timeZone);
+        if (taken !== undefined) {
+          busy.push(taken);
+        }
+      }
+      page = nextPageOf(nextLink) ?? undefined;
+      if (page === undefined) {
+        break;
+      }
+    }
+    if (page !== undefined) {
+      throw new ToolError(
+        "This calendar holds too many events in that range: look in a shorter one",
+        { code: invalidCode }
+      );
+    }
+    const free = without(
+      workingStretches(from, to, timeZone, hours),
+      busy
+    ).filter((stretch) => stretch.end - stretch.start >= minutes * minuteMs);
+    return {
+      output: {
+        mailbox,
+        timeZone,
+        free: free.map((stretch) => ({
+          start: localTimeOf(stretch.start, timeZone),
+          end: localTimeOf(stretch.end, timeZone),
+          minutes: Math.round((stretch.end - stretch.start) / minuteMs),
+        })),
+      },
+    };
+  },
+});
+
+export const calendarTools = [
+  listEvents,
+  getEvent,
+  freeTime,
+  createEvent,
+  updateEvent,
+];

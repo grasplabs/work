@@ -1,0 +1,18 @@
+{
+  "name": "@grasp-os/brain",
+  "private": true,
+  "description": "The Brain: a standalone, content-agnostic knowledge store for Workers, its contract and its server",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./contract": "./src/contract.ts",
+    "./errors": "./src/errors.ts",
+    "./ids": "./src/ids.ts",
+    "./knowledge": "./src/knowledge.ts",
+    "./limits": "./src/limits.ts"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  }
+}

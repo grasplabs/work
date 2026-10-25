@@ -62,6 +62,11 @@ const sdk = realpathSync(path.join(modules, "@grasp-os/sdk"));
  * them, or a check would read each as `any`.
  */
 const shared = realpathSync(path.join(sdk, "node_modules/@grasp-os/shared"));
+/**
+ * The Brain's contract, which the SDK re-exports (`@grasp-os/sdk/brain`)
+ * and Knowledge's types come from: kept for the same reason.
+ */
+const brain = realpathSync(path.join(sdk, "node_modules/@grasp-os/brain"));
 const require = createRequire(path.join(root, "package.json"));
 
 /** React as the kit's modules, App modules and packages import it. */
@@ -576,6 +581,8 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
       name = `/node_modules/@grasp-os/sdk${real.slice(sdk.length)}`;
     } else if (real.startsWith(`${shared}/`)) {
       name = `/node_modules/@grasp-os/shared${real.slice(shared.length)}`;
+    } else if (real.startsWith(`${brain}/`)) {
+      name = `/node_modules/@grasp-os/brain${real.slice(brain.length)}`;
     } else if (inPackage === real) {
       // The compiler's own package.json, read for the entry.
       continue;

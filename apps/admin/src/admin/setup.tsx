@@ -53,6 +53,7 @@ import { z } from "zod";
 
 import type { ClientSetup, SetupDeploy } from "../clients/setup.ts";
 import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
+import { overBars } from "../clients/watch-signals.ts";
 import type { DeployStep } from "../deploy/deploy.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
@@ -73,8 +74,11 @@ import {
   RollBack,
   RotateSecrets,
   SettingUpNow,
-  SealedSecretChange,
   SignInChange,
+  SealedSecretChange,
+  TeamsBotChange,
+  TeamsPackageDownload,
+  TestAlert,
   useRefreshSetup,
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
@@ -977,6 +981,76 @@ const HostingSection = ({
     </SetupSection>
   ) : null;
 
+/** Milliseconds as seconds, to one decimal. */
+const secondsOf = (ms: number | null): string =>
+  ms === null ? "No answers to time" : `up to ${(ms / 1000).toFixed(1)} s`;
+
+/**
+ * How its Stephen fares in the chat apps, as the admin's watch last read
+ * it (src/clients/watch.ts): a line a signal, the ones over their bar
+ * marked, as staff were told of them.
+ */
+const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
+  const { watched } = setup;
+  if (watched === null) {
+    return null;
+  }
+  const { signals, readAt } = watched;
+  const over = overBars(signals);
+  return (
+    <SetupSection
+      description={`Over the last ${signals.hours} hours, as the admin's hourly watch read it at ${formatTime(readAt)}. Counts only. Each signal over its bar was posted to the staff alerts' channel.`}
+      title="Stephen"
+    >
+      <Facts
+        rows={[
+          { label: "Answered", value: String(signals.answered) },
+          {
+            label: "Answer time",
+            value: `Median ${secondsOf(signals.p50Ms)}, 9 in 10 ${secondsOf(signals.p90Ms)}`,
+            attention: over.has("stephen_slow"),
+          },
+          {
+            label: "Turns failed",
+            value: String(signals.failed),
+            attention: over.has("stephen_failing"),
+          },
+          {
+            label: "Over budget",
+            value: String(signals.overBudget),
+            attention: over.has("stephen_over_budget"),
+          },
+          {
+            label: "Busy",
+            value: String(signals.busy),
+            attention: over.has("stephen_busy"),
+          },
+          {
+            label: "Requests refused",
+            value: String(signals.refused),
+            attention: over.has("stephen_refused"),
+          },
+          {
+            label: "Sends failed",
+            value: String(signals.sendFailed),
+            attention: over.has("stephen_sends_failing"),
+          },
+          {
+            label: "Uninstalled",
+            value: String(signals.uninstalled),
+            attention: over.has("stephen_uninstalled"),
+          },
+          {
+            label: "Need a new sign-in",
+            value: `${signals.companyAgain} of the company's connections, ${signals.personalAgain} of people's own`,
+            attention: over.has("stephen_connections_again"),
+          },
+        ]}
+      />
+    </SetupSection>
+  );
+};
+
 const Status = ({
   clientId,
   setup,
@@ -1032,6 +1106,7 @@ const Status = ({
         clientId={clientId}
       />
     </SetupSection>
+    <StephenWatched setup={setup} />
     <SetupSection
       description="From its address to where its data is. Everything after the router is in the company’s own Cloudflare account, in the EU."
       title="How it runs"
@@ -1074,6 +1149,14 @@ const isSealedSecretName = (
   target !== null && Object.hasOwn(sealedSecretWords, target);
 
 /** What staff did by hand, in a sentence. */
+/** What staff did by hand that needs nothing of its event to say, in a sentence. */
+const plainEventWords: Readonly<Record<string, string>> = {
+  "client.rotate_secrets": "Rotated its secrets.",
+  "client.sign_in": "Changed how its people sign in.",
+  "client.teams_bot": "Changed its Teams bot.",
+};
+
+/** What staff did by hand, in a sentence. */
 const eventWords = ({
   action,
   target,
@@ -1102,12 +1185,6 @@ const eventWords = ({
     case "client.unpin": {
       return "Let it follow the rollouts again.";
     }
-    case "client.rotate_secrets": {
-      return "Rotated its secrets.";
-    }
-    case "client.sign_in": {
-      return "Changed how its people sign in.";
-    }
     case "client.sealed_secret": {
       return isSealedSecretName(target)
         ? sealedSecretWords[target]
@@ -1127,7 +1204,7 @@ const eventWords = ({
         : `Linked it to ${target} in Attio.`;
     }
     default: {
-      return action;
+      return plainEventWords[action] ?? action;
     }
   }
 };
@@ -1739,7 +1816,10 @@ const SealedFacts = ({
   );
 };
 
-/** The client's own Teams bot: whether its secret is set, and setting it. */
+/**
+ * The client's own Teams bot: its app id, tenant and secret's expiry, its
+ * secret, setting each, and its app package for its IT.
+ */
 const TeamsBotSection = ({
   clientId,
   setup,
@@ -1749,20 +1829,63 @@ const TeamsBotSection = ({
   setup: ClientSetup;
   refresh: Refresh;
 }) => {
-  const secret = sealedRow(setup, "TEAMS_BOT_SECRET", "Secret");
+  const bot = setup.teamsBot;
+  const botSecret = setup.sealedSecrets.find(
+    ({ name }) => name === "TEAMS_BOT_SECRET"
+  );
   return (
     <SetupSection
-      description="The client secret of its own Teams bot, kept sealed by the admin and given only to its connect, with each deploy."
+      description="Its own Teams bot, registered in its own Entra: its connect sends as it and its core answers it, from the next deploy. The secret is kept sealed by the admin and given only to its connect."
       title="Its Teams bot"
     >
-      <SealedFacts none="No secret set." rows={[secret]} setup={setup} />
+      {bot === null && botSecret === undefined ? (
+        <Quiet>No bot set.</Quiet>
+      ) : (
+        <Facts
+          rows={[
+            ...(bot === null
+              ? []
+              : [
+                  { label: "App id", value: bot.appId },
+                  { label: "Tenant", value: bot.tenantId },
+                  {
+                    label: "Secret expires",
+                    value: formatDate(bot.secretExpiresOn),
+                  },
+                ]),
+            {
+              label: "Secret",
+              value:
+                botSecret === undefined
+                  ? "Not set"
+                  : `Set on ${dayOf(botSecret.setAt)} by ${botSecret.setBy}`,
+              attention: botSecret === undefined,
+            },
+            ...(setup.configPending
+              ? [
+                  {
+                    label: "Live",
+                    value: "With the next deploy",
+                    attention: true,
+                  },
+                ]
+              : []),
+          ]}
+        />
+      )}
+      {bot === null ? null : (
+        <Body>
+          <TeamsPackageDownload clientId={clientId} />
+        </Body>
+      )}
+      <TeamsBotChange bot={bot} clientId={clientId} refresh={refresh} />
       <SealedSecretChange
         clientId={clientId}
         description="The bot app's client secret, from its registration in the company's own Entra. It is sealed and never shown again, here or anywhere; its connect gets it with the next deploy."
         label="Client secret"
         name="TEAMS_BOT_SECRET"
         refresh={refresh}
-        set={secret !== null}
+        set={botSecret !== undefined}
       />
     </SetupSection>
   );
@@ -1979,6 +2102,12 @@ const Settings = ({
           />
         </>
       )}
+      <SetupSection
+        description="What needs someone at Grasp about it, such as its Teams bot's secret running out, is posted to the staff alerts' channel with a link here."
+        title="Staff alerts"
+      >
+        <TestAlert clientId={clientId} />
+      </SetupSection>
     </>
   );
 };

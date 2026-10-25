@@ -226,8 +226,8 @@ describe("what it refuses", () => {
   it("refuses a platform it doesn't serve, and anything but a request", async () => {
     const connect = connectForBot();
     const unknown = await connect.channelFetch(
-      "slack",
-      adapterRequest("https://slack.com/api/chat.postMessage")
+      "discord",
+      adapterRequest("https://graph.facebook.com/v21.0/123/messages")
     );
     const notARequest = await connect.channelFetch("teams", {
       url: activities(),

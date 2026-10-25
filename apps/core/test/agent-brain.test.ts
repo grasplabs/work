@@ -12,7 +12,7 @@ import { signedInApi, signedInWithRole } from "./sign-in.ts";
 // The company brain for a chat's code (`env.brain`): read as the chat's
 // person, only once the agent holds the brain permission (a platform
 // permission, `brain`), and every call recorded as the chat's agent's.
-// Its open questions are the Playbook's gaps (GRA-527): an answered or
+// Its open questions are the brain's gaps (GRA-527): an answered or
 // closed one is no longer open, and an answer never reaches the agent.
 
 const idp = mockIdp();

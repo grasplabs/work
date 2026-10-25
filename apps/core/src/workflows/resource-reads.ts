@@ -12,6 +12,7 @@ import { z } from "zod";
 import { permissions } from "../db/core/schema.ts";
 import { documents } from "../db/knowledge/schema.ts";
 import { readAsDelegate } from "../knowledge/binding.ts";
+import { brainOf } from "../knowledge/ports.ts";
 import { search } from "../knowledge/search.ts";
 import { read } from "../knowledge/tools.ts";
 import { pinnedTemplate } from "../resource-templates.ts";
@@ -110,7 +111,7 @@ const searched = async (
       bound.permissionId,
       async (reader) =>
         await search(
-          env,
+          brainOf(env),
           reader,
           request.text,
           { limit: request.limit ?? defaultHits },
@@ -153,7 +154,7 @@ const document = async (
       runAuthority(run),
       runContext(run),
       bound.permissionId,
-      async (reader) => await read(env, reader, request.id)
+      async (reader) => await read(brainOf(env), reader, request.id)
     );
     return { title: found.title, text: found.text };
   } catch (error) {

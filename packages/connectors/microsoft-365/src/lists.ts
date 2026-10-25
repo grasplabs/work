@@ -1,6 +1,10 @@
-import { defineTool } from "@grasp-os/connector-kit/connector";
+import {
+  defineTool,
+  invalidCode,
+  ToolError,
+} from "@grasp-os/connector-kit/connector";
 import { segmentValuePattern } from "@grasp-os/connector-kit/manifest";
-import { segment } from "@grasp-os/connector-kit/provider";
+import { jsonBody, segment } from "@grasp-os/connector-kit/provider";
 import { z } from "zod";
 
 import {
@@ -8,6 +12,7 @@ import {
   graphHost,
   graphJson,
   graphUrl,
+  idSchema,
   nextPageOf,
   pageOf,
   pageSchema,
@@ -21,7 +26,8 @@ import {
 // can't open is refused by Graph, whatever the permission says.
 //
 // Many registers (contracts, suppliers, assets) are lists rather than
-// workbooks; reading their items is what this adds. Changing them is not.
+// workbooks. Their items are read, added, and changed only from what was
+// read, as an Excel table's rows are: never deleted.
 
 const sites = `${v1}/sites/{site}`;
 
@@ -245,4 +251,204 @@ const listItems = defineTool({
   },
 });
 
-export const listTools = [listItems];
+/** A value a column is written as: text, a number, a yes/no, or empty. */
+const writtenValue = z.union([
+  z.string().max(64 * 1024),
+  z.number(),
+  z.boolean(),
+  z.null(),
+]);
+type WrittenValue = z.infer<typeof writtenValue>;
+
+/**
+ * An item's columns, as written: a column and its value each, every column
+ * once. A list, not a map, so the input's JSON Schema names every key.
+ */
+const valuesSchema = z
+  .array(z.strictObject({ column: columnSchema, value: writtenValue }))
+  .min(1)
+  .max(64)
+  .refine(
+    (values) =>
+      new Set(values.map(({ column }) => column)).size === values.length,
+    "A column is named twice"
+  );
+type Values = z.infer<typeof valuesSchema>;
+
+/** The fields Graph is sent for `values`. */
+const fieldsOf = (values: Values): Record<string, WrittenValue> =>
+  Object.fromEntries(values.map(({ column, value }) => [column, value]));
+
+/** Whether a column, as an item holds it, stands as `value`. */
+const holds = (held: unknown, value: WrittenValue): boolean =>
+  (held ?? null) === value;
+
+/** Columns a write may not set: SharePoint's own, and the views' links. */
+const unwritable = (values: Values): string[] =>
+  values.map(({ column }) => column).filter((column) => !isOwnColumn(column));
+
+const refuseUnwritable = (values: Values): void => {
+  const columns = unwritable(values);
+  if (columns.length > 0) {
+    throw new ToolError(
+      `Only a list's own columns are written: ${columns.join(", ")}`,
+      { code: invalidCode }
+    );
+  }
+};
+
+/** An item's columns as `values` names them, as the item holds them. */
+const asHeld = (
+  fields: Record<string, unknown> | null | undefined,
+  values: Values
+): Values =>
+  values.map(({ column }) => {
+    const parsed = writtenValue.safeParse(fields?.[column] ?? null);
+    return {
+      column,
+      value: parsed.success ? parsed.data : JSON.stringify(fields?.[column]),
+    };
+  });
+
+const itemPath = (site: string, list: string): string =>
+  `/sites/${segment(site)}/lists/${segment(list)}/items`;
+
+const addItem = defineTool({
+  name: "lists.addItem",
+  description:
+    "Adds an item to a SharePoint list in a site: a value for each column it sets, by the column's internal name, empty as null.",
+  input: z.strictObject({
+    site: siteSchema,
+    list: listSchema,
+    values: valuesSchema,
+  }),
+  output: z.strictObject({
+    site: z.string(),
+    list: z.string(),
+    item: itemSchema,
+  }),
+  readOnly: false,
+  reach: "company",
+  destructive: false,
+  resource: "site",
+  // Recovery `none`: an item carries no column of ours to find it by, and
+  // the same values may rightly be added twice, so an item of unknown
+  // outcome stays unknown, for its person to say what became of it.
+  routes: [
+    { method: "POST", host: graphHost, path: `${sites}/lists/{list}/items` },
+  ],
+  describe: {
+    title: "Add an item to a SharePoint list",
+    fields: [
+      { label: "Site", input: "site" },
+      { label: "List", input: "list" },
+      { label: "Item", input: "values" },
+    ],
+  },
+  run: async ({ site, list, values }) => {
+    refuseUnwritable(values);
+    const added = await graphJson(
+      graphUrl(itemPath(site, list)),
+      graphListItem,
+      jsonBody({ fields: fieldsOf(values) })
+    );
+    const item = itemOf(added);
+    return {
+      output: { site, list, item },
+      change: { before: null, after: asHeld(added.fields, values) },
+    };
+  },
+});
+
+const updateItem = defineTool({
+  name: "lists.updateItem",
+  description:
+    "Changes columns of an item of a SharePoint list: the columns as read (before), and as they will stand (after), each by its internal name. Refused when the item no longer holds what was read.",
+  input: z.strictObject({
+    site: siteSchema,
+    list: listSchema,
+    item: idSchema,
+    before: valuesSchema,
+    after: valuesSchema,
+  }),
+  output: z.strictObject({
+    site: z.string(),
+    list: z.string(),
+    item: itemSchema,
+  }),
+  readOnly: false,
+  reach: "company",
+  destructive: true,
+  resource: "site",
+  // Recovery `repeat`: the write sets the columns, and a repeat finds the
+  // item already standing as asked and writes nothing. One whose item
+  // someone changed meanwhile is refused as any changed item is.
+  repeatable: true,
+  routes: [
+    {
+      method: "GET",
+      host: graphHost,
+      path: `${sites}/lists/{list}/items/{item}`,
+    },
+    {
+      method: "PATCH",
+      host: graphHost,
+      path: `${sites}/lists/{list}/items/{item}/fields`,
+    },
+  ],
+  describe: {
+    title: "Change an item of a SharePoint list",
+    fields: [
+      { label: "Site", input: "site" },
+      { label: "List", input: "list" },
+      { label: "Item", input: "item" },
+      { label: "Now", input: "before" },
+      { label: "Will be", input: "after" },
+    ],
+  },
+  run: async ({ site, list, item: id, before, after }) => {
+    refuseUnwritable(after);
+    const path = `${itemPath(site, list)}/${segment(id)}`;
+    const found = await graphJson(
+      graphUrl(path, { $select: itemFields, $expand: "fields" }),
+      graphListItem.extend({ "@odata.etag": z.string().nullish() })
+    );
+    const fields = found.fields ?? {};
+    if (after.every(({ column, value }) => holds(fields[column], value))) {
+      // Already as asked: a repeat of this call, or a change to what is.
+      // Nothing is written, so no change is said.
+      return { output: { site, list, item: itemOf(found) } };
+    }
+    if (!before.every(({ column, value }) => holds(fields[column], value))) {
+      throw new ToolError(
+        "The item no longer holds what was read: read it again",
+        { code: "conflict" }
+      );
+    }
+    // Only the item as it was checked: if anyone changed it since, Graph
+    // refuses the write (412) instead.
+    const etag = found["@odata.etag"];
+    const written = await graphJson(
+      graphUrl(`${path}/fields`),
+      z.record(z.string(), z.json()),
+      {
+        ...jsonBody(fieldsOf(after)),
+        method: "PATCH",
+        ...(etag === null || etag === undefined
+          ? {}
+          : {
+              headers: { "content-type": "application/json", "if-match": etag },
+            }),
+      }
+    );
+    return {
+      output: { site, list, item: itemOf({ ...found, fields: written }) },
+      change: {
+        before: asHeld(fields, after),
+        after: asHeld(written, after),
+      },
+    };
+  },
+});
+
+export const listTools = [listItems, addItem, updateItem];

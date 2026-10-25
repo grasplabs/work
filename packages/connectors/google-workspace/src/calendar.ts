@@ -3,8 +3,9 @@ import {
   invalidCode,
   ToolError,
 } from "@grasp-os/connector-kit/connector";
+import type { Effect } from "@grasp-os/connector-kit/connector";
 import { forbiddenInValue } from "@grasp-os/connector-kit/manifest";
-import { segment } from "@grasp-os/connector-kit/provider";
+import { jsonBody, segment } from "@grasp-os/connector-kit/provider";
 import { z } from "zod";
 
 import {
@@ -31,8 +32,23 @@ import {
 // in a path parameter, which the egress refuses so a value can't end the
 // path early. Those calendars hold no organization's data, so they are
 // left out rather than widening what a parameter may hold.
+//
+// Writes. `calendar.create` puts an event in the person's own calendar
+// only, with nobody invited. `calendar.events` would let it write any
+// calendar shared with the person, so before it writes it reads the
+// calendar's entry in the person's own calendar list
+// (`/users/me/calendarList/{calendar}`, `me` being the token's person,
+// the calendar still bound to the capability's) and goes no further
+// unless Google says it is their primary one. Its input has no guests, it
+// sends none, and Google is told to notify nobody (`sendUpdates=none`).
+// The event's ID is the call's effect key (64 lowercase hex characters,
+// which Google's event IDs allow), so the same call can't make a second
+// event, and a call of unknown outcome is found by that ID.
 
 const calendars = "/calendar/v3/calendars/{calendar}";
+
+/** The person's own entry for a calendar: whether it is their primary. */
+const calendarEntry = "/calendar/v3/users/me/calendarList/{calendar}";
 
 /**
  * A calendar's ID: one address, and nothing the egress refuses in a path
@@ -264,4 +280,189 @@ const getEvent = defineTool({
   },
 });
 
-export const calendarTools = [listEvents, getEvent];
+const minutesOnly = "2026-10-26T14:30".length;
+
+/** The same time with its seconds, so that two compare as strings. */
+const withSeconds = (time: string): string =>
+  time.length === minutesOnly ? `${time}:00` : time;
+
+/**
+ * Whether `time` names a day and time that exist: `Date.parse` moves
+ * 30 February on to 2 March, and 24:00 on to the next day, so the time it
+ * read must read back the same.
+ */
+const isRealTime = (time: string): boolean => {
+  const parsed = Date.parse(`${time}Z`);
+  return (
+    !Number.isNaN(parsed) &&
+    new Date(parsed).toISOString().startsWith(withSeconds(time))
+  );
+};
+
+/**
+ * A wall-clock time without an offset, `2026-10-26T14:30`, or with
+ * seconds: read in the call's time zone, as the person confirming it reads
+ * it.
+ */
+const localTimeSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/u)
+  .refine(isRealTime, { message: "Not a time" });
+
+/** Whether the runtime knows `timeZone`. */
+const isTimeZone = (timeZone: string): boolean => {
+  try {
+    // oxlint-disable-next-line no-new -- constructing it is the check
+    new Intl.DateTimeFormat("en", { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** An IANA time zone, `Europe/Amsterdam`: the organization's. */
+const timeZoneSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z][\w+-]*(?:\/[\w+-]+)*$/u)
+  .refine(isTimeZone, { message: "Not a time zone" });
+
+/** Whether the event shows the person as busy or free. */
+const showAsSchema = z.enum(["busy", "free"]);
+
+const createInput = z.strictObject({
+  calendar: calendarSchema,
+  subject: z.string().min(1).max(255),
+  start: localTimeSchema,
+  end: localTimeSchema,
+  timeZone: timeZoneSchema,
+  location: z.string().max(255).optional(),
+  body: z
+    .string()
+    .max(32 * 1024)
+    .optional(),
+  showAs: showAsSchema.optional(),
+});
+
+/** An event a write made, its times as Google gave them back. */
+const writtenSchema = z.strictObject({ event: summarySchema });
+
+/**
+ * An event as Google takes it: nobody invited, and with the call's effect
+ * key as its ID if there is one, so it can be made only once and found.
+ */
+const googleNewEvent = (
+  {
+    subject,
+    start,
+    end,
+    timeZone,
+    location,
+    body,
+    showAs,
+  }: z.output<typeof createInput>,
+  { key }: Effect
+) => ({
+  ...(key === null ? {} : { id: key }),
+  summary: subject,
+  start: { dateTime: withSeconds(start), timeZone },
+  end: { dateTime: withSeconds(end), timeZone },
+  ...(location === undefined ? {} : { location }),
+  ...(body === undefined ? {} : { description: body }),
+  transparency: showAs === "free" ? "transparent" : "opaque",
+  attendees: [],
+  guestsCanInviteOthers: false,
+});
+
+const calendarEntrySchema = z.object({
+  id: z.string(),
+  primary: z.boolean().nullish(),
+});
+
+/**
+ * Refuses (`access_denied`) a calendar that isn't the person's own
+ * primary one, as Google lists it for them.
+ */
+const requireOwnCalendar = async (calendar: string): Promise<void> => {
+  const entry = await googleJson(
+    googleUrl(
+      apisHost,
+      `/calendar/v3/users/me/calendarList/${segment(calendar)}`
+    ),
+    calendarEntrySchema
+  );
+  if (entry.id !== calendar || entry.primary !== true) {
+    throw new ToolError("Events go only in the person's own calendar", {
+      code: "access_denied",
+    });
+  }
+};
+
+const createEvent = defineTool({
+  name: "calendar.create",
+  description:
+    "Puts an event in a person's own calendar (their address), with nobody invited. Its start and end are wall-clock times (2026-10-26T14:30) in timeZone, the organization's time zone.",
+  input: createInput,
+  output: writtenSchema,
+  readOnly: false,
+  reach: "own",
+  destructive: false,
+  resource: "calendar",
+  routes: [
+    { method: "GET", host: apisHost, path: calendarEntry },
+    { method: "POST", host: apisHost, path: `${calendars}/events` },
+    { method: "GET", host: apisHost, path: `${calendars}/events/{event}` },
+  ],
+  describe: {
+    title: "Put an event in your calendar",
+    fields: [
+      { label: "Calendar", input: "calendar" },
+      { label: "Title", input: "subject" },
+      { label: "Starts", input: "start" },
+      { label: "Ends", input: "end" },
+      { label: "Time zone", input: "timeZone" },
+      { label: "Where", input: "location" },
+      { label: "Notes", input: "body" },
+      { label: "Show as", input: "showAs" },
+    ],
+  },
+  run: async (input, effect) => {
+    if (withSeconds(input.end) <= withSeconds(input.start)) {
+      throw new ToolError("The event must end after it starts", {
+        code: invalidCode,
+      });
+    }
+    await requireOwnCalendar(input.calendar);
+    const made = await googleJson(
+      googleUrl(
+        apisHost,
+        `/calendar/v3/calendars/${segment(input.calendar)}/events`,
+        { sendUpdates: "none" }
+      ),
+      googleEvent,
+      jsonBody(googleNewEvent(input, effect))
+    );
+    return { output: { event: summaryOf(input.calendar, made) } };
+  },
+  // Made, if the calendar has an event with the key as its ID.
+  find: async ({ calendar }, { key }) => {
+    try {
+      const made = await googleJson(
+        googleUrl(
+          apisHost,
+          `/calendar/v3/calendars/${segment(calendar)}/events/${segment(key)}`
+        ),
+        googleEvent
+      );
+      return { output: { event: summaryOf(calendar, made) } };
+    } catch (error) {
+      if (error instanceof ToolError && error.details?.code === "not_found") {
+        return null;
+      }
+      throw error;
+    }
+  },
+});
+
+export const calendarTools = [listEvents, getEvent, createEvent];
