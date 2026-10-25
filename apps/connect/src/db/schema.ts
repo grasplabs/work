@@ -305,6 +305,14 @@ export const pendingActions = sqliteTable(
      * any other call.
      */
     stamp: text(),
+    /**
+     * When it ends unconfirmed: a write held in a chat on a chat platform
+     * (a Teams card scrolls away, and its values may have moved on) ends
+     * at midnight of the company's day it was held on, as core signed it
+     * (`CapabilityClaims.heldUntil`). Null for one that waits until it is
+     * decided, as every other does.
+     */
+    endsAt: timestamp("ends_at"),
   },
   (table) => [
     uniqueIndex("pending_actions_call_idx").on(
@@ -321,6 +329,10 @@ export const pendingActions = sqliteTable(
     index("pending_actions_connection_idx").on(table.connectionId),
     // Dropping an ended run's, by the range of its steps' keys.
     index("pending_actions_key_idx").on(table.idempotencyKey),
+    // Ending those whose day is over.
+    index("pending_actions_ends_idx")
+      .on(table.endsAt)
+      .where(sql`${table.endsAt} IS NOT NULL`),
   ]
 );
 
@@ -425,6 +437,12 @@ export const composioCleanups = sqliteTable(
  * changes nothing (it would store stale tokens, or bring deleted ones
  * back). `refresh_until` is a short lease: while it runs, one refresh is
  * under way and others wait for its result, across isolates.
+ *
+ * `granted_scopes` is what the provider last said these tokens were
+ * granted (its token answer's `scope`), as it said it; null when it said
+ * nothing, or for tokens stored before connect kept it. It tells a
+ * connection made before its connector asked for a right from one the
+ * provider refuses for another reason (tokens.ts `markIfGrantLacks`).
  */
 export const connectionTokens = sqliteTable("connection_tokens", {
   connectionId: text("connection_id")
@@ -434,6 +452,7 @@ export const connectionTokens = sqliteTable("connection_tokens", {
   accessExpiresAt: timestamp("access_expires_at").notNull(),
   generation: integer().notNull(),
   refreshUntil: timestamp("refresh_until"),
+  grantedScopes: text("granted_scopes"),
   updatedAt: timestamp("updated_at").notNull(),
 });
 

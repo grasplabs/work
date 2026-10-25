@@ -16,13 +16,17 @@ import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
+import { renewGmailWatch } from "./channels/gmail.ts";
+import { sweepChannelSignals } from "./channels/signals.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
+import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
 import { sweepIndexing } from "./knowledge/indexing.ts";
 import { sweepBrainReceipts } from "./knowledge/memories.ts";
 import { sweepPayloads } from "./knowledge/payloads.ts";
+import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { syncLandscapes } from "./landscape.ts";
 import { retryDisconnects } from "./members.ts";
@@ -69,10 +73,22 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   },
   { name: "knowledge.uploads", period: "minute", run: sweepUploads },
   // Knowledge payloads no version refers to (src/knowledge/payloads.ts).
-  { name: "knowledge.payloads", period: "minute", run: sweepPayloads },
+  {
+    name: "knowledge.payloads",
+    period: "minute",
+    run: async (env, at) => {
+      await sweepPayloads(brainOf(env), at);
+    },
+  },
   // Documents whose indexing never started or ended unfinished, and failed
   // ones due another run (src/knowledge/indexing.ts).
-  { name: "knowledge.indexing", period: "minute", run: sweepIndexing },
+  {
+    name: "knowledge.indexing",
+    period: "minute",
+    run: async (env, at) => {
+      await sweepIndexing(brainOf(env), at);
+    },
+  },
   // Deploys apply migrations first (CI's db:migrate, and the admin's
   // deploy), so `platform_versions` exists. A version running before it
   // does records nothing, and the first run after the migration records
@@ -154,7 +170,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   {
     name: "knowledge.brain_receipts",
     period: "quarterHour",
-    run: sweepBrainReceipts,
+    run: async (env, at) => {
+      await sweepBrainReceipts(brainOf(env), at);
+    },
   },
   {
     name: "email.kept",
@@ -163,6 +181,14 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   },
   { name: "guests.sweep", period: "quarterHour", run: sweepGuestChats },
   { name: "channels.links", period: "quarterHour", run: sweepChannelLinks },
+  // Stephen's counts past their week (src/channels/signals.ts).
+  {
+    name: "channels.signals",
+    period: "quarterHour",
+    run: sweepChannelSignals,
+  },
+  // Gmail's watch on Stephen's mailbox, renewed daily (channels/gmail.ts).
+  { name: "channels.gmail_watch", period: "quarterHour", run: renewGmailWatch },
   {
     name: "workflows.run_details",
     period: "quarterHour",
@@ -201,6 +227,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "packages.files",
     period: "quarterHour",
     run: sweepPackageFiles,
+  },
+  // Approved packages checked again for malware reported since, a bounded
+  // number of graphs a run (src/dependencies/requests.ts).
+  {
+    name: "dependencies.malware",
+    period: "quarterHour",
+    run: recheckMalware,
   },
   { name: "apps.releases", period: "quarterHour", run: sweepReleases },
   {

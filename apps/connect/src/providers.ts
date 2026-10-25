@@ -20,6 +20,7 @@ import type { AppRecord } from "./bundled-connectors.ts";
 import { hibobAccount, hibobCredential } from "./hibob.ts";
 import { idTokenClaims, lookupAccount } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
+import { classesOnByDefault, microsoftRights } from "./provider-rights.ts";
 
 // The providers people connect accounts from, as config records: one
 // generic OAuth flow (src/oauth.ts) runs them all, and one API-key sign-in
@@ -246,27 +247,11 @@ const microsoft: OAuthProviderConfig = {
   authorizationEndpoint: (tenant) =>
     `${microsoftLogin}/${tenant}/oauth2/v2.0/authorize`,
   tokenEndpoint: (tenant) => `${microsoftLogin}/${tenant}/oauth2/v2.0/token`,
-  // What the Microsoft 365 connector needs: mail (the person's own and
-  // shared mailboxes), calendars, files in OneDrive and SharePoint, and
-  // changing an Excel workbook's rows.
-  scopes: [
-    "openid",
-    "profile",
-    "email",
-    "offline_access",
-    "User.Read",
-    "Mail.ReadWrite",
-    "Mail.ReadWrite.Shared",
-    "Mail.Send",
-    "Mail.Send.Shared",
-    "Calendars.Read",
-    "Calendars.Read.Shared",
-    "Files.Read.All",
-    "Files.ReadWrite.All",
-    "Sites.Read.All",
-  ],
+  // Those of the classes on by default; a consent asks those of the classes
+  // the company turned on (`rightsFor`, GRA-717).
+  scopes: microsoftRights(classesOnByDefault),
   // Asked for since the connector writes workbooks: a connection made
-  // before can't, and is reconnected in place.
+  // before can't, and is reconnected in place. Change own asks for it.
   renewalRequires: ["Files.ReadWrite.All"],
   scopeSeparator: " ",
   authorizationParams: () => ({ response_mode: "query" }),
@@ -349,14 +334,20 @@ const google: OAuthProviderConfig = {
   tokenEndpoint: () => "https://oauth2.googleapis.com/token",
   revocationEndpoint: "https://oauth2.googleapis.com/revoke",
   // What the Google Workspace connector needs: Gmail (read, label, draft,
-  // send), calendar events and Drive, read-only where it only reads.
+  // send), calendar events (putting one in the person's own calendar) and
+  // which calendar is theirs, and Drive, read-only but for the drafts it
+  // makes in the person's own Drive (`drive.file`: only its own files). A
+  // connection granted before the connector wrote events is marked for
+  // reconnecting on its first refused write (tokens.ts `markIfGrantLacks`).
   scopes: [
     "openid",
     "email",
     "profile",
     "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/calendar.events.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
   ],
   scopeSeparator: " ",
   authorizationParams: (tenant) => ({
@@ -768,4 +759,28 @@ export const grantedAsAsked = (
     [...scopes].every((each) => granted.allowed.has(each)) &&
     granted.required.every((each) => scopes.has(each.toLowerCase()))
   );
+};
+
+/** The OpenID scopes, which a provider's answer may name or leave out. */
+const signInScopes: ReadonlySet<string> = new Set([
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+]);
+
+/**
+ * The scopes `provider` asks for now that a grant of `scope` (a token
+ * answer's) lacks, besides the OpenID ones: those its connector came to
+ * ask for after the connection was made.
+ */
+export const scopesLacking = (
+  { scopes }: OAuthProviderConfig,
+  scope: string
+): string[] => {
+  const granted = scopesOf(scope);
+  return scopes.filter((each) => {
+    const asked = each.toLowerCase();
+    return !(signInScopes.has(asked) || granted.has(asked));
+  });
 };

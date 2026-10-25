@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import { ensureCollection } from "../knowledge/collections.ts";
 import { localExtractor } from "../knowledge/extract.ts";
+import { brainOf } from "../knowledge/ports.ts";
 import type { OnErase } from "../knowledge/purge.ts";
 import { uploadFile } from "../knowledge/uploads.ts";
 import { gatewaySettings, modelForRole, models } from "../models.ts";
@@ -136,7 +137,7 @@ const readingModel = (env: ModelsEnv): string | undefined =>
 /** The collection the onboarding keeps documents in, made by `person` the first time. */
 const documentsCollection = async (env: Env, person: Identity) =>
   await ensureCollection(
-    env,
+    brainOf(env),
     {
       id: collectionIdSchema.parse(onboardingDocumentsCollection),
       name: "Onboarding documents",
@@ -307,7 +308,7 @@ export const documentReadingErasure = (
       const shared = await store.documents();
       return shared.filter((document) => textsOf(document).some(holds)).length;
     },
-    rewrite: async (person, rewrite) => {
+    rewrite: async (by, rewrite) => {
       const shared = await store.documents();
       const holding = shared.filter((document) =>
         textsOf(document).some((text) => rewrite(text) !== text)
@@ -315,11 +316,11 @@ export const documentReadingErasure = (
       if (holding.length > 0) {
         await store.forgetDocuments(
           holding.map(({ id }) => id),
-          actorOf(person)
+          by.actor
         );
       }
     },
-    forgetDocuments: async (person, named) => {
+    forgetDocuments: async (by, named) => {
       const paths = new Set(
         named.flatMap(({ collectionId, path }) =>
           collectionId === onboardingDocumentsCollection ? [path] : []
@@ -333,7 +334,7 @@ export const documentReadingErasure = (
       if (of.length > 0) {
         await store.forgetDocuments(
           of.map(({ id }) => id),
-          actorOf(person)
+          by.actor
         );
       }
     },

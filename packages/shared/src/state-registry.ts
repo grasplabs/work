@@ -237,6 +237,15 @@ const coreDb: D1State = {
       "Links a chat sent, good for 15 minutes: the chat sends a new one."
     ),
     channel_conversations: exported(`${core}channels/door.ts`),
+    chat_workflow_offers: transient(
+      `${core}channels/workflow-offers.ts`,
+      "Starts Stephen offered on a card, good for a day, and where to tell their runs' ends: a run that ends after a move is told in Grasp only."
+    ),
+    channel_signals: transient(
+      `${core}channels/signals.ts`,
+      "Hourly counts of how Stephen fared in the chat apps, kept a week for the admin's watch."
+    ),
+    chat_audiences: exported(`${core}knowledge/access.ts`),
     invitations: exported(auth),
     teams: exported(auth),
     team_members: exported(auth),
@@ -315,6 +324,12 @@ const coreDb: D1State = {
     workflow_param_values: exported(`${core}workflows/params.ts`),
     workflow_owners: exported(`${core}workflows/owners.ts`),
     hidden_connectors: exported(`${core}connections.ts`),
+    tool_class_settings: exported(`${core}tool-classes.ts`),
+    stephen_reach: exported(`${core}stephen-reach.ts`),
+    stephen_places: exported(`${core}stephen-reach.ts`),
+    app_tool_classes: exported(`${core}stephen-reach.ts`),
+    shared_mailbox_pointers: exported(`${core}shared-mailboxes.ts`),
+    app_pointers: exported(`${core}app-pointers.ts`),
     app_requests: exported(`${core}app-requests.ts`),
     improvement_signal_computations: cache(`${core}signals.ts`),
     improvement_signals: cache(`${core}signals.ts`),

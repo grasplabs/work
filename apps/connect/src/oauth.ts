@@ -51,6 +51,7 @@ import {
 import { exchangeCode, revokeToken } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { dropPendingActions } from "./pending.ts";
+import { rightsFor } from "./provider-rights.ts";
 import { grantedAsAsked, providerFor } from "./providers.ts";
 import type {
   ApiKeyProviderConfig,
@@ -194,6 +195,8 @@ export const startConnection = async (
     scope,
     origin,
     returnTo,
+    classes,
+    sharedMailbox,
     ...rest
   } = connectionErrors.parse(
     "connection.invalid",
@@ -247,7 +250,12 @@ export const startConnection = async (
     response_type: "code",
     client_id: client.id,
     redirect_uri: redirectUri,
-    scope: provider.scopes.join(provider.scopeSeparator),
+    scope: (
+      (classes === undefined
+        ? undefined
+        : rightsFor(provider.id, classes, sharedMailbox === true)) ??
+      provider.scopes
+    ).join(provider.scopeSeparator),
     state,
     code_challenge: await pkceChallenge(verifier),
     code_challenge_method: "S256",
@@ -427,6 +435,9 @@ const reconnect = async (
             ),
             generation: sql<number>`${row.generation}`.as("generation"),
             refreshUntil: sql<null>`NULL`.as("refresh_until"),
+            grantedScopes: sql<string | null>`${row.grantedScopes}`.as(
+              "granted_scopes"
+            ),
             updatedAt: sql<Date>`${now.getTime()}`.as("updated_at"),
           })
           .from(connections)
@@ -613,6 +624,7 @@ const keepTokens = async (
       accessToken: tokens.accessToken,
       refreshToken,
       expiresAt: tokens.expiresAt,
+      scope: tokens.scope,
     },
     drop,
     refuse

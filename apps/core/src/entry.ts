@@ -40,6 +40,7 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
+import { carryOnAfterConnecting } from "./channels/answer.ts";
 import { channelResponse } from "./channels/door.ts";
 import { ensureClockOnce } from "./clock.ts";
 import {
@@ -214,10 +215,15 @@ const connectionRouteResponse = async (
   request: Request,
   env: Env,
   pathname: string,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response | undefined> => {
   if (pathname === connectionCallbackPath) {
-    return await handleConnectionCallback(request, env);
+    // Someone who connected from a chat app is told there, and what they
+    // asked is answered again, after the browser is sent on.
+    return await handleConnectionCallback(request, env, (userId) => {
+      ctx.waitUntil(carryOnAfterConnecting(env, userId));
+    });
   }
   if (isCatalogLogoPath(pathname)) {
     return await catalogLogoResponse(request, env, pathname, requestId);
@@ -337,7 +343,8 @@ const route = async (
     request,
     env,
     pathname,
-    requestId
+    requestId,
+    ctx
   );
   if (connection !== undefined) {
     return connection;

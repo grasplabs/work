@@ -21,7 +21,7 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // What the onboarding learned, in the brain (GRA-367,
 // src/onboarding/brain-intake.ts): once a piece of work is drawn, its
 // team, one source for its interviews, the facts its people agreed to and
-// the drawing reach the Playbook's records, which every member reads.
+// the drawing reach the brain's records, which every member reads.
 // AI Gateway is the outside system, faked behind the AI binding. The ways
 // it can fail, tried here:
 //

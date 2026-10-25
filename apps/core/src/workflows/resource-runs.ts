@@ -37,6 +37,7 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
+import { tellOfferedRunEnd } from "../channels/offered-runs.ts";
 import {
   workflowResourceRunControls,
   workflowResourceRunTerminations,
@@ -1149,6 +1150,8 @@ export const tellParentOfEnd = async (env: Env, row: RunRow): Promise<void> => {
  */
 const afterEnd = async (env: Env, row: RunRow): Promise<void> => {
   await tellParentOfEnd(env, row);
+  // Where a press on Stephen's card started it: told once, best effort.
+  await tellOfferedRunEnd(env, row);
   const children = await drizzle(env.DB)
     .select()
     .from(workflowResourceRuns)

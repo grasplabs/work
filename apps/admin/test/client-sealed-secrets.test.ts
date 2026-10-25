@@ -1,9 +1,10 @@
 /**
- * A client's Teams bot secret, sealed in the admin. Written from how it
- * could leak or land in the wrong place first: shown back on a page or in
- * what a page is sent, logged, kept or audited in the clear, set by
- * someone who isn't staff, given to another client's connect, or deployed
- * without the one staff set.
+ * A client's Teams bot secret and Slack app secrets, sealed in the admin.
+ * Written from how they could leak or land in the wrong place first:
+ * shown back on a page or in what a page is sent, logged, kept or audited
+ * in the clear, set by someone who isn't staff, given to another client's
+ * Worker or to the wrong one of its own, pasted into the wrong field, or
+ * deployed without the one staff set.
  */
 import { env, exports } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -14,6 +15,7 @@ import {
   setSealedSecretFn,
 } from "../src/clients/functions.ts";
 import { SettingsError, setSealedSecret } from "../src/clients/settings.ts";
+import { slackAppManifest } from "../src/clients/slack-app.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import {
   auditEvents,
@@ -45,6 +47,13 @@ const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 /** A client secret as Entra mints one: 40 characters. */
 const botSecret = (): string =>
   `Bq8~${crypto.randomUUID().replaceAll("-", "")}.x_4`;
+
+/** A Slack bot token as Slack mints one. */
+const slackToken = (): string =>
+  `xoxb-${String(Date.now()).slice(-12)}-${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
+
+/** A Slack app's signing secret: 32 hex characters. */
+const signingSecret = (): string => crypto.randomUUID().replaceAll("-", "");
 
 /** An active client on a new account in the fake, running a new release as a deploy made it. */
 const liveClient = async () => {
@@ -467,6 +476,141 @@ describe("a client's Teams bot secret", () => {
       versions,
       connect: false,
       logged: false,
+    });
+  });
+});
+
+describe("a client's Slack app", () => {
+  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  beforeEach(async () => {
+    await db
+      .update(clients)
+      .set({ status: "offboarded" })
+      .where(eq(clients.status, "active"));
+  });
+
+  it("gives its bot token only to its own connect and its signing secret only to its own core, at its next deploy", async () => {
+    const acme = await liveClient();
+    const other = await liveClient();
+    const bot = slackToken();
+    const signing = signingSecret();
+
+    await setSealedSecret(env, staff, {
+      clientId: acme.clientId,
+      name: "SLACK_BOT_TOKEN",
+      value: bot,
+    });
+    await setSealedSecret(env, staff, {
+      clientId: acme.clientId,
+      name: "SLACK_SIGNING_SECRET",
+      value: signing,
+    });
+    await redeploy(acme.clientId, acme.releaseId);
+    await redeploy(other.clientId, other.releaseId);
+    const events = await sealedEventsOf(acme.clientId);
+    const slackOn = (account: AccountState, script: string) => {
+      const secrets = liveSecretsOf(account, script);
+      return {
+        token: secrets.get("SLACK_BOT_TOKEN") ?? null,
+        signing: secrets.get("SLACK_SIGNING_SECRET") ?? null,
+      };
+    };
+
+    expect({
+      connect: slackOn(acme.account, "grasp-os-connect"),
+      core: slackOn(acme.account, "grasp-os-core"),
+      otherConnect: slackOn(other.account, "grasp-os-connect"),
+      otherCore: slackOn(other.account, "grasp-os-core"),
+      events: events.map(({ target }) => target),
+    }).toStrictEqual({
+      connect: { token: bot, signing: null },
+      core: { token: null, signing },
+      otherConnect: { token: null, signing: null },
+      otherCore: { token: null, signing: null },
+      events: ["SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"],
+    });
+  });
+
+  it("refuses a value pasted into the wrong field, or a token that acts as more than the bot, keeping nothing", async () => {
+    const acme = await liveClient();
+    const userToken = slackToken().replace("xoxb-", "xoxp-");
+    const appToken = slackToken().replace("xoxb-", "xapp-");
+    const tries = [
+      ["SLACK_BOT_TOKEN", userToken],
+      ["SLACK_BOT_TOKEN", appToken],
+      ["SLACK_BOT_TOKEN", signingSecret()],
+      ["SLACK_BOT_TOKEN", botSecret()],
+      ["SLACK_SIGNING_SECRET", slackToken()],
+      ["SLACK_SIGNING_SECRET", botSecret()],
+      ["SLACK_SIGNING_SECRET", signingSecret().toUpperCase()],
+    ] as const;
+
+    const codes = await Promise.all(
+      tries.map(
+        async ([name, value]) =>
+          await codeOf(
+            setSealedSecret(env, staff, {
+              clientId: acme.clientId,
+              name,
+              value,
+            })
+          )
+      )
+    );
+
+    expect({
+      codes,
+      rows: await sealedRowsOf(acme.clientId),
+      events: await sealedEventsOf(acme.clientId),
+    }).toStrictEqual({
+      codes: tries.map(() => "secret_invalid"),
+      rows: [],
+      events: [],
+    });
+  });
+
+  it("is set up on its settings page from a manifest that sends to its own core, without showing a secret set there", async () => {
+    const acme = await liveClient();
+    const bot = slackToken();
+    await setSealedSecret(env, staff, {
+      clientId: acme.clientId,
+      name: "SLACK_BOT_TOKEN",
+      value: bot,
+    });
+
+    const page = await rawPage(
+      `/organizations/${acme.clientId}/setup?tab=settings`
+    );
+
+    expect({
+      requestUrl: page.includes(
+        `https://${acme.clientId}.grasp.test/api/channels/slack`
+      ),
+      shown: page.includes("Bot token"),
+      leaked: page.includes(bot),
+    }).toStrictEqual({ requestUrl: true, shown: true, leaked: false });
+  }, 60_000);
+
+  it("asks Slack only for what connect lets core send and the door reads, in direct messages", () => {
+    const manifest = slackAppManifest("acme.grasp.test", "Acme");
+
+    expect({
+      name: manifest.display_information.name,
+      scopes: manifest.oauth_config.scopes,
+      events: manifest.settings.event_subscriptions,
+      interactivity: manifest.settings.interactivity,
+    }).toStrictEqual({
+      name: "Stephen for Acme",
+      // No user scopes, channel history, files or admin.
+      scopes: { bot: ["chat:write", "im:history", "im:read", "users:read"] },
+      events: {
+        request_url: "https://acme.grasp.test/api/channels/slack",
+        bot_events: ["message.im"],
+      },
+      interactivity: {
+        is_enabled: true,
+        request_url: "https://acme.grasp.test/api/channels/slack",
+      },
     });
   });
 });

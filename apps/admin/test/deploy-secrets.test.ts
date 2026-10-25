@@ -112,8 +112,10 @@ describe("a Worker's secrets", () => {
       "CAPABILITY_SIGNING_KEY_PREVIOUS",
       "TOKEN_ENCRYPTION_KEY",
       "TOKEN_ENCRYPTION_KEY_PREVIOUS",
-      // A client's own bot secret, sealed: never what every client shares.
+      // A client's own bot secrets, sealed: never what every client shares.
       "TEAMS_BOT_SECRET",
+      "SLACK_BOT_TOKEN",
+      "SLACK_SIGNING_SECRET",
     ];
     const codes = await Promise.all(
       names.map(async (name) => {
