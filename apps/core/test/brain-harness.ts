@@ -1,3 +1,4 @@
+import { recordOutcome } from "@grasp-os/brain/outcomes";
 /**
  * The Brain baseline's harness (GRA-295, experiment E01): loads the frozen
  * company of brain-corpus.ts into core through its public APIs, then asks
@@ -42,7 +43,9 @@ import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
+import { turnSource } from "../src/brain-capture.ts";
 import { workspace } from "../src/durable-objects.ts";
+import { brainOf } from "../src/knowledge/ports.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import {
   gatewayConfig,
@@ -117,8 +120,9 @@ export type BrainArm = (typeof brainArms)[number];
  * one hands the model a section its person may not read; on a task that
  * revokes access, one hands it what its person could read before the
  * revocation, as a cache that outlived it would; the others change stored
- * state mid-trial, in Knowledge, in core, in R2, in the chat's object and
- * in an earlier chat's history. Two must not break it, as they read what
+ * state mid-trial, in Knowledge, in core, in R2, in the chat's object, in
+ * an earlier chat's history and in the Brain's captured learning events
+ * (one resting on another chat than the trial's). Two must not break it, as they read what
  * the task revokes before the revocation, while it was allowed:
  * `readElsewhereFirst` in another chat, so the gate's cut at the
  * revocation is where it should be; `historyAfterRevocation` in an earlier
@@ -137,6 +141,7 @@ export const brainControls = [
   "changesHistory",
   "changesChat",
   "changesChatTitle",
+  "changesCapture",
 ] as const;
 export type BrainControl = (typeof brainControls)[number];
 
@@ -362,12 +367,59 @@ const bookkeeping = new Set([
  */
 export type KnowledgeStateCheck = "rows" | "counts";
 
+/** A placeholder for each of `values`, for an `IN` list. */
+const placeholders = (values: readonly string[]): string =>
+  values.map(() => "?").join(", ");
+
+/** A chat a trial asks in, and its Workspace object. */
+interface OwnTrial {
+  chatId: string;
+  workspaceId: string;
+}
+
+/**
+ * The Brain's capture of the trial's own turns (src/brain-capture.ts), as
+ * conditions on Knowledge's capture tables that leave it out, by table:
+ * the learning events resting on the trial's chat, their members, and the
+ * cursor of its Workspace object's turns. Every settled turn writes these,
+ * whatever the task asked, as it writes the chat's own messages
+ * (`historyTables`): host-written learning evidence that no reader or
+ * model receives, so not a change a task made. Left out as narrowly as
+ * the chat's messages are, by the chats the trial itself asks in (its own,
+ * and the elsewhere control's, whose object the gate doesn't read either):
+ * an event of any other chat or run, a member added to another's, or another source's cursor
+ * moving is still a change, and the gate's "would catch" test still
+ * catches a real leak and an unrequested change.
+ */
+const ownCapture = (
+  asked: readonly OwnTrial[]
+): Record<string, { where: string; bindings: string[] }> => {
+  const chats = asked.map(({ chatId }) => chatId);
+  const sources = asked.map(({ workspaceId }) => turnSource(workspaceId));
+  return {
+    brain_episodes: {
+      where: `evidence_id NOT IN (${placeholders(chats)})`,
+      bindings: chats,
+    },
+    brain_episode_members: {
+      where: `episode_id NOT IN (SELECT id FROM brain_episodes WHERE evidence_id IN (${placeholders(chats)}))`,
+      bindings: chats,
+    },
+    brain_capture_cursors: {
+      where: `source NOT IN (${placeholders(sources)})`,
+      bindings: sources,
+    },
+  };
+};
+
 /**
  * Each table's digest, in core's and Knowledge's databases, but the
- * bookkeeping ones: what stored state holds.
+ * bookkeeping ones and, for a trial, its own turns' capture (`ownCapture`):
+ * what stored state holds.
  */
 const stateOf = async (
-  knowledge: KnowledgeStateCheck
+  knowledge: KnowledgeStateCheck,
+  asked: readonly OwnTrial[] = []
 ): Promise<Map<string, string>> => {
   // Each database's tables read in one batch, both databases at once: two
   // round trips a database (its tables, then all their rows), rather than
@@ -383,14 +435,18 @@ const stateOf = async (
       return [];
     }
     const counts = name === "knowledge" && knowledge === "counts";
+    const leftOut =
+      name === "knowledge" && asked.length > 0 ? ownCapture(asked) : {};
     const results = await db.batch(
-      tables.map((table) =>
-        db.prepare(
-          counts
-            ? `SELECT count(*) AS count FROM "${table}"`
-            : `SELECT * FROM "${table}"`
-        )
-      )
+      tables.map((table) => {
+        const what = counts ? "count(*) AS count" : "*";
+        const filter = leftOut[table];
+        return filter === undefined
+          ? db.prepare(`SELECT ${what} FROM "${table}"`)
+          : db
+              .prepare(`SELECT ${what} FROM "${table}" WHERE ${filter.where}`)
+              .bind(...filter.bindings);
+      })
     );
     return await Promise.all(
       tables.map(async (table, index): Promise<[string, string]> => {
@@ -882,7 +938,11 @@ const elsewhereOf = async (
     company.people[place.persona].userId,
     other.agent.agentId
   );
-  return { stub: other.stub, chatId: chat.id };
+  return {
+    stub: other.stub,
+    chatId: chat.id,
+    workspaceId: other.agent.agentId,
+  };
 };
 
 /** A model provider: what it answers each gateway request with, in a turn. */
@@ -1097,8 +1157,8 @@ const changes = (arm: BrainArm | BrainControl): arm is ChangingControl =>
  * A change no task asks for, where `where` says: a note saved in the
  * person's own collection, an App created in core, a file put in R2, a
  * dashboard row written in the chat's object, a message of an earlier chat
- * or of this one rewritten, or this chat's title changed, as a broken tool
- * would.
+ * or of this one rewritten, this chat's title changed, as a broken tool
+ * would, or a learning event recorded of another chat.
  * Nothing a later trial reads.
  */
 const changeState = async (
@@ -1146,6 +1206,27 @@ const changeState = async (
       state.storage.sql.exec(
         "UPDATE chat_messages SET message = message || ' ' WHERE id = (SELECT min(id) FROM chat_messages)"
       );
+    });
+    return;
+  }
+  if (where === "changesCapture") {
+    // A learning event resting on another chat than the trial's, as a
+    // capture that reached past the trial's own turns would record.
+    const otherChat = crypto.randomUUID();
+    await recordOutcome(brainOf(env), {
+      eventId: `chat.turn:${otherChat}:control`,
+      source: turnSource(place.agent.agentId),
+      sourceSeq: 1,
+      purpose: "production",
+      ownerId: company.people[place.persona].userId,
+      scope: "person",
+      taskType: "chat.turn",
+      execution: "completed",
+      result: "unknown",
+      evidenceId: otherChat,
+      evidenceRefs: [{ kind: "chat", id: otherChat }],
+      versionRefs: [],
+      occurredAt: new Date().toISOString(),
     });
     return;
   }
@@ -1256,6 +1337,8 @@ const historyTables = [
   ["chat_messages", "chat_id"],
   ["chat_sources", "chat_id"],
   ["chat_code_runs", "chat_id"],
+  // Its turns' captures for the Brain, owed or given up on (`ownCapture`).
+  ["brain_capture_intents", "evidence_id"],
 ] as const;
 
 const workspaceStateOf = async (
@@ -1389,11 +1472,16 @@ export const transcriptWithReads = (
 const trialStateOf = async (
   place: Workspace,
   chatId: string,
-  knowledge: KnowledgeStateCheck
+  knowledge: KnowledgeStateCheck,
+  /** The other chats the trial asks in: the elsewhere control's. */
+  elsewhere: readonly OwnTrial[] = []
 ): Promise<Map<string, string>> => {
   // Read at once: nothing changes stored state while the gate reads it.
   const [state, objectState, files] = await Promise.all([
-    stateOf(knowledge),
+    stateOf(knowledge, [
+      { chatId, workspaceId: place.agent.agentId },
+      ...elsewhere,
+    ]),
     workspaceStateOf(place, chatId),
     filesDigest(),
   ]);
@@ -1473,9 +1561,10 @@ const revokeMidRun = async (
   place: Workspace,
   chatId: string,
   { arm, task, knowledge }: TrialPlan,
-  keep: (restore: () => Promise<void>) => void
+  keep: (restore: () => Promise<void>) => void,
+  elsewhere: readonly OwnTrial[]
 ): Promise<MidRun> => {
-  const before = await trialStateOf(place, chatId, knowledge);
+  const before = await trialStateOf(place, chatId, knowledge, elsewhere);
   const stale =
     arm === "staleAccess"
       ? await sourcesFor(company, place, { arm: "fullText", task })
@@ -1483,7 +1572,7 @@ const revokeMidRun = async (
   await revokeAccess(company, place, task, keep);
   return {
     before,
-    after: await trialStateOf(place, chatId, knowledge),
+    after: await trialStateOf(place, chatId, knowledge, elsewhere),
     ...(stale?.sources === undefined ? {} : { stale: stale.sources }),
   };
 };
@@ -1533,7 +1622,9 @@ const earlierTurns = async (
   }: {
     chatId: string;
     plan: TrialPlan;
-    elsewhere: { stub: Workspace["stub"]; chatId: string } | undefined;
+    elsewhere:
+      | { stub: Workspace["stub"]; chatId: string; workspaceId: string }
+      | undefined;
     keep: () => Promise<void>;
   }
 ): Promise<void> => {
@@ -1593,7 +1684,8 @@ const runTrial = async (
       : undefined;
   // The gate and what reached the model cover the whole trial, earlier
   // turns too; cost and latency are the question's own.
-  const stateBefore = await trialStateOf(place, chat.id, plan.knowledge);
+  const asked = elsewhere === undefined ? [] : [elsewhere];
+  const stateBefore = await trialStateOf(place, chat.id, plan.knowledge, asked);
   // A revocation is the harness's own change, made between the two: the
   // state is compared on either side of it, never across it.
   let revoked: MidRun | undefined;
@@ -1622,9 +1714,16 @@ const runTrial = async (
       revoked =
         task.revoke === undefined
           ? undefined
-          : await revokeMidRun(company, place, chat.id, plan, (given) => {
-              restore = given;
-            });
+          : await revokeMidRun(
+              company,
+              place,
+              chat.id,
+              plan,
+              (given) => {
+                restore = given;
+              },
+              asked
+            );
       revokedAt = gateway.requests.length;
       spentBefore = await charged();
       // A cold question starts in a just-evicted object, its caches and
@@ -1665,7 +1764,7 @@ const runTrial = async (
     await chatRows.keep();
     const changedTables = changedInTrial({
       before: stateBefore,
-      after: await trialStateOf(place, chat.id, plan.knowledge),
+      after: await trialStateOf(place, chat.id, plan.knowledge, asked),
       revoked,
       chatIntact: chatRows.intact(),
     });
