@@ -1,8 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    // The Brain runs in Workers: R2, D1 and the scheduler are its globals.
-    "types": ["@cloudflare/workers-types"]
+    // The Brain runs in Workers: R2, D1 and the scheduler are its globals;
+    // its tests run in workerd.
+    "types": [
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-pool-workers/types"
+    ]
   },
-  "include": ["src", "test", "drizzle.config.ts"]
+  "include": ["src", "test", "drizzle.config.ts", "vite.config.ts"]
 }
