@@ -21,19 +21,20 @@ import { Composer } from "./composer.tsx";
 import { useAsk } from "./use-ask.ts";
 
 // The chat box's one control for the model and how hard it thinks, in the
-// box as a page shows it: a model is picked from the list with its
-// provider's mark, an effort from the bar under it for a model that
+// box as a page shows it: a model is picked from the list by its
+// maker's mark or name, an effort from the bar under it for a model that
 // thinks, and both are kept for the person in this browser, so the box
 // opens on them again. Only an admin is offered to add a provider.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 // A new deployment's models, as core offers them, first the default, with
-// the efforts core's catalogue gives each; then one that doesn't think,
-// from a provider without a mark.
+// the efforts core's catalogue gives each; then two that don't think,
+// one from a maker without a mark here and one from a maker with one.
 const [chatDefault, lowCost] = defaultGatewayModels;
 const plain = "openai/gpt-4.1-mini";
-const models = [...defaultGatewayModels, plain];
+const marked = "anthropic/claude-opus-4-8";
+const models = [...defaultGatewayModels, plain, marked];
 const efforts: Record<string, ModelEfforts> = {
   [chatDefault]: { levels: ["high", "max"], default: "high" },
   [lowCost]: { levels: ["low", "high", "max"], default: "high" },
@@ -174,7 +175,7 @@ describe("the model picker", () => {
   it("opens on the default model at its default effort", async () => {
     await opened("user");
     expect(control().getAttribute("aria-label")).toBe(
-      "Model: deepseek-v4.1-flash-1017, thinking high. Change model or thinking"
+      "Model: deepseek-v4.1-flash-1017 by DeepSeek, thinking high. Change model or thinking"
     );
     await press(control());
     expect([
@@ -187,6 +188,30 @@ describe("the model picker", () => {
     expect(thinkingBar().getAttribute("aria-valuetext")).toBe("High");
     await key(thinkingBar(), "ArrowRight");
     expect(thinkingBar().getAttribute("aria-valuetext")).toBe("Max");
+  });
+
+  it("names each model by its maker, not by the provider that serves it", async () => {
+    await opened("user");
+    await press(control());
+    // DeepSeek and GLM both run on Workers AI. A maker without a mark here
+    // shows its name; one with a mark keeps its name for assistive tech.
+    expect(
+      [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          'fieldset[aria-label="Model"] button'
+        ),
+      ].map((button) => button.textContent)
+    ).toStrictEqual([
+      expect.stringMatching(/^DeepSeek deepseek-v4\.1-flash-1017/u),
+      "Z.ai glm-5.3-flash",
+      "OpenAI gpt-4.1-mini",
+      "Anthropic claude-opus-4-8",
+    ]);
+    expect(
+      [...document.querySelectorAll("fieldset svg")].every(
+        (mark) => mark.getAttribute("aria-hidden") === "true"
+      )
+    ).toBeTruthy();
   });
 
   it("offers each model its own efforts, and no bar for one that doesn't think", async () => {
@@ -205,7 +230,7 @@ describe("the model picker", () => {
     expect([
       document.querySelector('input[type="range"]'),
       control().getAttribute("aria-label"),
-    ]).toStrictEqual([null, "Model: gpt-4.1-mini. Change model"]);
+    ]).toStrictEqual([null, "Model: gpt-4.1-mini by OpenAI. Change model"]);
   });
 
   it("keeps the model and effort picked for the person, and opens on them again", async () => {
@@ -216,7 +241,7 @@ describe("the model picker", () => {
     expect(thinkingBar().getAttribute("aria-valuetext")).toBe("High");
     await key(thinkingBar(), "ArrowLeft");
     const chosen =
-      "Model: glm-5.3-flash, thinking low. Change model or thinking";
+      "Model: glm-5.3-flash by Z.ai, thinking low. Change model or thinking";
     expect(control().getAttribute("aria-label")).toBe(chosen);
 
     act(() => {
