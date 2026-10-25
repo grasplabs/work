@@ -18,7 +18,8 @@ import { testBinding } from "./test-env.ts";
 // CI; only the provider differs, the Brain baseline's real one
 // (brain-gateway-provider.ts), with the model the run names listed first
 // in its gateway, and the run's budget as the ledger's deployment limit.
-// It reports on the run's output as JSON lines.
+// It reports on the run's output as JSON lines, then fails if a hard rule
+// broke: CI's `stephen` gate (GRA-739) blocks the merge on it.
 
 const settings = z
   .object({
@@ -126,10 +127,12 @@ describe("Stephen's eval against a real model", () => {
       model: report.identity.model,
       sha: report.identity.build?.sha,
       withinBudget: spent <= settings.budgetUsd * micros,
+      broken: report.hardRules.filter(({ broken }) => broken.length > 0),
     }).toStrictEqual({
       model: settings.model,
       sha: settings.build.sha,
       withinBudget: true,
+      broken: [],
     });
   });
 });

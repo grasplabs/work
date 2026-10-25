@@ -19,7 +19,8 @@ import { coreProject } from "./vite.config.ts";
 //     vp -C apps/core test -c vite.stephen-model.config.ts
 //
 // `STEPHEN_MODEL_CASES` takes case IDs, comma-separated, to run only
-// those (`R1,X2`). The budget is the ledger's deployment limit for the
+// those (`R1,X2`); `STEPHEN_MODEL_GATEWAY` names the AI Gateway, the
+// account's `default` unless set (CI's has a spend limit of its own). The budget is the ledger's deployment limit for the
 // run: core refuses any request that could take the spend past it. The
 // report and every model exchange go to the output as JSON lines
 // (`STEPHEN_MODEL_REPORT`, `STEPHEN_MODEL_EXCHANGES`); keep them outside
@@ -35,7 +36,9 @@ if (!(Number.isFinite(budgetUsd) && budgetUsd > 0)) {
 
 /** The model under test: a gateway ref, the deployment default if unset. */
 const [deploymentDefault] = defaultGatewayModels;
-const model = process.env.STEPHEN_MODEL ?? deploymentDefault;
+const named = process.env.STEPHEN_MODEL;
+// CI passes an unset repository variable as empty.
+const model = named === undefined || named === "" ? deploymentDefault : named;
 
 const git = (...args: string[]): string =>
   execFileSync("git", args, {
@@ -59,7 +62,7 @@ export default coreProject(
       // A deployment's gateway as the console first configures it, with
       // the model under test listed first, which makes it the one chats ask.
       MODEL_GATEWAY: {
-        gateway: "default",
+        gateway: process.env.STEPHEN_MODEL_GATEWAY ?? "default",
         models: [
           model,
           ...defaultGatewayModels.filter((listed) => listed !== model),
