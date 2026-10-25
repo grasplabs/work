@@ -2039,6 +2039,7 @@ msgstr "Ein Wort hinzufügen"
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Ausnahme hinzufügen"
+
 #: src/chat/model-picker.tsx
 msgid "Add another provider"
 msgstr "Weiteren Anbieter hinzufügen"
@@ -4605,13 +4606,14 @@ msgctxt "row height"
 msgid "Default"
 msgstr "Standard"
 
-#: src/settings/person-limits.tsx
-msgid "Default limit"
-msgstr "Standardgrenze"
 #: src/chat/model-picker.tsx
 msgctxt "the default model"
 msgid "Default"
 msgstr "Standard"
+
+#: src/settings/person-limits.tsx
+msgid "Default limit"
+msgstr "Standardgrenze"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Default: {fallback}"
@@ -6351,10 +6353,6 @@ msgstr "Wie weit die Workflows sind"
 #: src/landscape/app-cells.tsx
 msgid "How Grasp knows about {appName}"
 msgstr "Woher Grasp {appName} kennt"
-
-#: src/chat/composer.tsx
-msgid "How hard it thinks"
-msgstr "Wie gründlich es nachdenkt"
 
 #: src/onboarding/interview-words.ts
 msgctxt "part of an interview"
@@ -12772,10 +12770,6 @@ msgstr "die Frist"
 #: src/settings/person-limits.tsx
 msgid "The default"
 msgstr "Der Standard"
-
-#: src/chat/composer.tsx
-msgid "The default, {each}"
-msgstr "Standard, {each}"
 
 #: src/workflows/test-run.tsx
 msgid "The details of this run were removed when its retention ended."
