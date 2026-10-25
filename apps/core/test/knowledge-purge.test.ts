@@ -565,6 +565,9 @@ describe("a personal purge", setUpTime, () => {
     expect(heldBefore).toStrictEqual([
       "BRAIN_OBJECTS",
       "brain_memories.statement",
+      "brain_memory_words.statement",
+      "brain_memory_words_content.c0",
+      "brain_memory_words_data.block",
       "search_trigrams.c3",
       "search_words.text",
       "search_words_content.c3",
