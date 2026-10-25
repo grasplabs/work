@@ -84,7 +84,10 @@ import type { SessionCheck } from "./session-check.ts";
 // | sources, tools,    | the brain's records (brain-records.ts), for everyone     |
 // | candidates,        | signed in, after the onboarding's; a record's counts and |
 // | statements, teams, | stakeholders for an onboarding team join that team, for  |
-// | gaps               | whoever reads it; gaps with what became of them          |
+// | gaps               | whoever reads it; gaps with what became of them.         |
+// |                    | Statements never for Grasp's staff, who read numbers     |
+// |                    | only; the onboarding's are the team's claims five or     |
+// |                    | more of its people made (GRA-1084)                       |
 // | workflows          | the brain's records, as the onboarding drew them, for    |
 // |                    | everyone signed in                                       |
 // | goals, landscape,  | nothing core can read holds them yet: empty              |
@@ -815,7 +818,9 @@ export const readBrain = async (
       records.tools
     ),
     sources: [...sources, ...records.sources, ...transcribed],
-    statements: records.statements,
+    // Grasp staff read numbers only, never what the company's people
+    // said (GRA-1084): no statement at all, whoever added it.
+    statements: person.staff ? [] : records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),
     workflows: records.workflows,
