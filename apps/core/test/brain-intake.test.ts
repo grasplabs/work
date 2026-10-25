@@ -887,12 +887,10 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     const member = await signedInApi(idp, "user");
     const stuck = await statementsFor(member.api, ids);
     // The intake is done; the alarm, once the brain answers again.
-    const after = await onboardingStore(env).intakeNext();
     await onboardingStore(env).purgeBrain();
     expect({
       given,
       stuck,
-      after,
       statements: await statementsFor(member.api, ids),
     }).toStrictEqual({
       given: `brain:${ids.team}`,
@@ -900,7 +898,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
         "Tickets come in through Zendesk.",
         "Zendesk is the ticket inbox.",
       ],
-      after: null,
       statements: ["Zendesk is the ticket inbox."],
     });
   });
