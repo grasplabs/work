@@ -327,6 +327,7 @@ describe("in a group chat", setUpTime, () => {
 
     await expect(reached(group)).resolves.toStrictEqual({
       activities: [],
+      sent: [],
       lines: [],
       asked: [],
     });

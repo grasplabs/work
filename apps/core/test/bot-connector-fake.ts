@@ -10,10 +10,6 @@
  * the Worker that stands in for the internet behind connect
  * (test/connect-providers.ts embeds its source).
  */
-/** A path's part, as it named it. */
-const decoded = (part: string | undefined): string =>
-  decodeURIComponent(part ?? "");
-
 export const botConnectorFake = (bot: {
   id: string;
   tenant: string;
@@ -137,6 +133,11 @@ export const botConnectorFake = (bot: {
       ? Response.json(members[key])
       : Response.json({ error: { code: "MemberNotFound" } }, { status: 404 });
   };
+
+  /** A path's part, as it named it. */
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- the fake runs as its own script, from this function's source alone
+  const decoded = (part: string | undefined): string =>
+    decodeURIComponent(part ?? "");
 
   const botConnector = async (request: Request, url: URL) => {
     const bearer = (request.headers.get("authorization") ?? "").replace(
