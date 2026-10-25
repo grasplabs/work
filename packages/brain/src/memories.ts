@@ -36,7 +36,7 @@ import {
   versions,
 } from "./db/schema.ts";
 import { sectionCountOf, versionText } from "./documents.ts";
-import { toHex } from "./encoding.ts";
+import { fromBase64Url, toBase64Url, toHex } from "./encoding.ts";
 import { brainReceiptIdSchema, memoryIdSchema } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
 import type { Json } from "./json.ts";
@@ -733,7 +733,7 @@ export const memoriesGet = async <C>(
 };
 
 /** Where a page ends: its last record's time and ID, and their seal. */
-const cursorSchema = z.tuple([z.int().min(0), z.string().min(1), z.string()]);
+const cursorSchema = z.tuple([z.int().min(0), z.string().min(1)]);
 
 /** Whose walk a cursor is, and of which kind of record (or all). */
 interface CursorScope {
@@ -743,34 +743,54 @@ interface CursorScope {
   among: "mine" | "shared";
 }
 
-/**
- * The seal of a cursor's position for `scope`: a cursor is opaque, and
- * only the person it was written for walks on from it, through the same
- * kind of record.
- */
-const cursorSeal = async <C>(
-  brain: Brain<C>,
-  { caller, kind, among }: CursorScope,
-  recordedAt: number,
-  id: string
-): Promise<string> =>
-  await keyed(brain, "grasp-os brain list cursor", [
-    caller,
-    kind ?? null,
-    among,
-    recordedAt,
-    id,
-  ]);
+/** Bytes of a cursor's nonce: AES-GCM's standard 96 bits. */
+const cursorNonceLength = 12;
 
-/** A cursor for `scope` after the record `row`. */
+/**
+ * The key cursors are encrypted with: HKDF-Expand (RFC 5869) of one block
+ * from the deployment's HMAC key for cursors, as an AES-256-GCM key.
+ */
+const cursorKey = async <C>(brain: Brain<C>): Promise<CryptoKey> => {
+  const prk = await brain.ports.keys.hmac("grasp-os brain list cursor", [
+    "sign",
+  ]);
+  const info = new TextEncoder().encode("grasp-os brain list cursor aes-gcm");
+  const okm = await crypto.subtle.sign(
+    "HMAC",
+    prk,
+    new Uint8Array([...info, 1])
+  );
+  return await crypto.subtle.importKey(
+    "raw",
+    new Uint8Array(okm).slice(0, 32),
+    "AES-GCM",
+    false,
+    ["encrypt", "decrypt"]
+  );
+};
+
+/** What a cursor is bound to: whose walk, of which list and kind. */
+const cursorContext = ({ caller, kind, among }: CursorScope): Uint8Array =>
+  new TextEncoder().encode(canonicalJson([caller, kind ?? null, among]));
+
+/**
+ * A cursor for `scope` after the position `row`: encrypted, so it says
+ * nothing of where it points (a shared list's cursor may point past
+ * records the caller can't see), and bound to `scope`, so only the person
+ * it was written for walks on from it, through the same list and kind.
+ */
 const writeCursor = async <C>(
   brain: Brain<C>,
   scope: CursorScope,
-  row: typeof brainMemories.$inferSelect
+  row: { recordedAt: Date; id: string }
 ): Promise<string> => {
-  const recordedAt = row.recordedAt.getTime();
-  const seal = await cursorSeal(brain, scope, recordedAt, row.id);
-  return btoa(JSON.stringify([recordedAt, row.id, seal]));
+  const nonce = crypto.getRandomValues(new Uint8Array(cursorNonceLength));
+  const sealed = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce, additionalData: cursorContext(scope) },
+    await cursorKey(brain),
+    new TextEncoder().encode(JSON.stringify([row.recordedAt.getTime(), row.id]))
+  );
+  return toBase64Url(new Uint8Array([...nonce, ...new Uint8Array(sealed)]));
 };
 
 /**
@@ -782,21 +802,33 @@ const readCursor = async <C>(
   scope: CursorScope,
   cursor: string
 ): Promise<{ recordedAt: Date; id: string }> => {
-  let parsed: z.output<typeof cursorSchema>;
+  let position: z.output<typeof cursorSchema>;
   try {
-    parsed = cursorSchema.parse(JSON.parse(atob(cursor)));
+    const bytes = fromBase64Url(cursor);
+    const opened = await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: bytes.slice(0, cursorNonceLength),
+        additionalData: cursorContext(scope),
+      },
+      await cursorKey(brain),
+      bytes.slice(cursorNonceLength)
+    );
+    position = cursorSchema.parse(JSON.parse(new TextDecoder().decode(opened)));
   } catch {
     throw brainErrors.create("brain.invalid");
   }
-  const [recordedAt, id, seal] = parsed;
-  if (seal !== (await cursorSeal(brain, scope, recordedAt, id))) {
-    throw brainErrors.create("brain.invalid");
-  }
+  const [recordedAt, id] = position;
   return { recordedAt: new Date(recordedAt), id };
 };
 
-/** Most rows one shared listing reads to fill its page; past it, it ends. */
-const sharedScanMax = 500;
+/**
+ * How a shared listing reads: batches of a fixed size, at most so many a
+ * call, whatever its page size, so a call's work never depends on how many
+ * records the host keeps from the caller.
+ */
+const sharedBatch = 100;
+const sharedBatchesMax = 3;
 
 type MemoryRow = typeof brainMemories.$inferSelect;
 
@@ -828,10 +860,11 @@ const rowsAfter = async <C>(
     .limit(most);
 
 /**
- * Up to `size` + 1 of the shared rows `where` admits after `after` that
- * the host keeps for `people`, newest first: read a batch at a time until
- * that many are kept, the rows run out, or {@link sharedScanMax} were read.
- * A row the host drops is never the page's, nor where its cursor points.
+ * Of the shared rows `where` admits after `after`, the first `size` + 1
+ * the host keeps for `people`, newest first, read in batches of
+ * {@link sharedBatch}, at most {@link sharedBatchesMax}: and, when those
+ * ran out before that many were kept while rows may remain, the last row
+ * read, kept or not, to go on from.
  */
 const keptRowsAfter = async <C>(
   brain: Brain<C>,
@@ -840,15 +873,15 @@ const keptRowsAfter = async <C>(
   where: SQL | undefined,
   after: { recordedAt: Date; id: string } | undefined,
   size: number
-): Promise<MemoryRow[]> => {
+): Promise<{
+  kept: MemoryRow[];
+  scannedTo?: { recordedAt: Date; id: string };
+}> => {
   const kept: MemoryRow[] = [];
   let position = after;
-  let scanned = 0;
-  while (kept.length <= size && scanned < sharedScanMax) {
-    const wanted = Math.min(size + 1, sharedScanMax - scanned);
+  for (let batches = 0; batches < sharedBatchesMax; batches += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each batch starts where the last ended
-    const batch = await rowsAfter(brain, where, position, wanted);
-    scanned += batch.length;
+    const batch = await rowsAfter(brain, where, position, sharedBatch);
     // oxlint-disable-next-line no-await-in-loop -- as above
     const checked = await brain.ports.memories.keep(
       reader,
@@ -858,22 +891,28 @@ const keptRowsAfter = async <C>(
     const ids = new Set<string>(checked.map(({ id }) => id));
     kept.push(...batch.filter((row) => ids.has(row.id)));
     const last = batch.at(-1);
-    if (last === undefined || batch.length < wanted) {
-      break;
+    if (
+      kept.length > size ||
+      last === undefined ||
+      batch.length < sharedBatch
+    ) {
+      return { kept: kept.slice(0, size + 1) };
     }
-    position = { recordedAt: last.recordedAt, id: last.id };
+    position = last;
   }
-  return kept.slice(0, size + 1);
+  return position === undefined || position === after
+    ? { kept }
+    : { kept, scannedTo: { recordedAt: position.recordedAt, id: position.id } };
 };
 
 /**
  * The caller's own records, or (`among: "shared"`) others' shared records
  * their memory audience reads now, newest first, a page at a time. A
- * shared page holds only records the host keeps, and its cursor points at
- * the last of them, a record the caller was just shown: never at one the
- * host dropped. A page has a cursor only when more kept records follow,
- * so a short page never says hidden ones exist; a listing that reads
- * {@link sharedScanMax} rows without filling its page ends there.
+ * shared page holds only records the host keeps; a call reads a bounded
+ * number of rows, so its work doesn't grow with the records kept from the
+ * caller, and a page it couldn't fill in that time comes back short, even
+ * empty, with a cursor to go on from. Cursors are encrypted: one after a
+ * record the caller can't see looks like any other.
  */
 export const memoriesList = async <C>(
   brain: Brain<C>,
@@ -893,14 +932,15 @@ export const memoriesList = async <C>(
     cursor === undefined ? undefined : await readCursor(brain, scope, cursor);
   const ofKind = kind === undefined ? undefined : eq(brainMemories.kind, kind);
   let rows: MemoryRow[];
+  let scannedTo: { recordedAt: Date; id: string } | undefined;
   if (among === "shared") {
     // Others' shared records: those the caller's memory audience reads
     // now, as the host compiles it, re-checked by the host before shown.
     const { audience, people } = await brain.ports.memories.audienceOf(reader);
     const shared = audienceScope(audience);
-    rows =
+    const read =
       shared === undefined
-        ? []
+        ? { kept: [] }
         : await keptRowsAfter(
             brain,
             reader,
@@ -909,6 +949,7 @@ export const memoriesList = async <C>(
             after,
             size
           );
+    ({ kept: rows, scannedTo } = read);
   } else {
     rows = await rowsAfter(
       brain,
@@ -919,16 +960,22 @@ export const memoriesList = async <C>(
   }
   const page = rows.slice(0, size);
   const last = page.at(-1);
+  // Where the next page starts: after the page's last record when more
+  // follow; after the last row read when the read ran out first, which the
+  // cursor, encrypted, doesn't tell apart.
+  let next: { recordedAt: Date; id: string } | undefined;
+  if (rows.length > size && last !== undefined) {
+    next = last;
+  } else if (scannedTo !== undefined) {
+    next = scannedTo;
+  }
   return {
     // What another's record rests on is shown in its lineage, as far as
     // the reader may see it (memory-lineage.ts), never listed here.
     records: page.map((row) =>
       among === "shared" ? { ...recordOf(row), sourceRefs: [] } : recordOf(row)
     ),
-    cursor:
-      rows.length > size && last !== undefined
-        ? await writeCursor(brain, scope, last)
-        : null,
+    cursor: next === undefined ? null : await writeCursor(brain, scope, next),
   };
 };
 

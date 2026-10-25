@@ -1,10 +1,14 @@
+import { createBrain } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
 import type { MemoryLineage } from "@grasp-os/brain/contract";
+import { memoriesList } from "@grasp-os/brain/memories";
 import { brainMemories } from "@grasp-os/brain/schema";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
+import type { Reader } from "../src/knowledge/access.ts";
+import { portsOf } from "../src/knowledge/ports.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -102,6 +106,12 @@ const nodesOf = (lineage: MemoryLineage) =>
 
 /** The time `minutesAgo` minutes ago. */
 const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+
+/** The most statements and host checks any one of `calls` made. */
+const most = (calls: readonly { statements: number; checks: number }[]) => ({
+  statements: Math.max(...calls.map(({ statements }) => statements)),
+  checks: Math.max(...calls.map(({ checks }) => checks)),
+});
 
 /** The IDs of a page's records, in its order. */
 const idsOf = (page: { records: readonly { id: string }[] }): string[] =>
@@ -429,11 +439,12 @@ describe("a memory record's lineage", setUpTime, () => {
     const one = await list(1);
     const next = await list(1, one.cursor ?? undefined);
     const two = await list(2);
-    const decoded = atob(one.cursor ?? "");
 
     expect({
       one: idsOf(one),
-      cursorNamesHidden: keptFrom.some((id) => decoded.includes(id)),
+      cursorNamesHidden: keptFrom.some(
+        (id) => one.cursor?.includes(id) === true
+      ),
       next: idsOf(next),
       // Nothing kept follows: no cursor, so nothing says more exists.
       nextCursor: next.cursor,
@@ -488,5 +499,118 @@ describe("a memory record's lineage", setUpTime, () => {
     expect(nodesOf(lineage)).toStrictEqual(
       leaves.map((id) => `memory:${id}`).toSorted()
     );
+  });
+
+  it("does the same bounded work per shared page however many records are kept from the reader, going on from where it stopped", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ada = await signedInApi(idp, "user");
+    const ben = await signedInApi(idp, "user");
+    const both = await newTeam(admin, [ada, ben]);
+    const adaOnly = await newTeam(admin, [ada]);
+    const hidden = await documentIn(admin, {
+      name: `Ada's team ${unique()}`,
+      access: "teams",
+      teams: [adaOnly],
+    });
+    const visible = await seed("The one Ben may see.", {
+      scope: "team",
+      scopeId: both,
+      ownerId: ada.userId,
+      recordedAt: at(10_000),
+    });
+    const reader: Reader = {
+      type: "person",
+      person: {
+        userId: ben.userId,
+        email: "ben@example.com",
+        name: "Ben",
+        role: "user",
+        teams: [],
+        staff: false,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    };
+    // Walks Ben's shared list a record at a time to its end, counting the
+    // statements each call sends to the Brain's database and the checks it
+    // asks of the host.
+    const walk = async () => {
+      let statements = 0;
+      let checks = 0;
+      const real = env.KNOWLEDGE;
+      const counted: D1Database = {
+        prepare: (query) => {
+          statements += 1;
+          return real.prepare(query);
+        },
+        batch: async <T>(batched: D1PreparedStatement[]) =>
+          await real.batch<T>(batched),
+        exec: async (query) => await real.exec(query),
+        // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+        dump: async () => await real.dump(),
+        withSession: (constraint) => real.withSession(constraint),
+      };
+      const ports = portsOf(env);
+      const brain = createBrain(counted, {
+        ...ports,
+        memories: {
+          ...ports.memories,
+          keep: async (...args) => {
+            checks += 1;
+            return await ports.memories.keep(...args);
+          },
+        },
+      });
+      const calls: { records: number; statements: number; checks: number }[] =
+        [];
+      const found: string[] = [];
+      let cursor: string | null | undefined;
+      do {
+        statements = 0;
+        checks = 0;
+        // oxlint-disable-next-line no-await-in-loop -- page after page
+        const page = await memoriesList(brain, reader, {
+          among: "shared",
+          limit: 1,
+          ...(typeof cursor === "string" ? { cursor } : {}),
+        });
+        found.push(...page.records.map(({ id }) => id));
+        calls.push({ records: page.records.length, statements, checks });
+        ({ cursor } = page);
+      } while (cursor !== null && calls.length < 20);
+      return { calls, found: found.filter((id) => id === visible).length };
+    };
+
+    const fewHidden = await walk();
+    const keptFrom = 300;
+    for (let n = 0; n < keptFrom; n += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- seeded one by one
+      await seed(`Hidden ${n}.`, {
+        scope: "team",
+        scopeId: both,
+        ownerId: ada.userId,
+        recordedAt: at(n),
+        sourceRefs: [hidden],
+      });
+    }
+    const manyHidden = await walk();
+
+    expect({
+      few: { found: fewHidden.found, calls: fewHidden.calls.length },
+      many: {
+        found: manyHidden.found,
+        // Empty pages with a cursor until the scan gets past what he
+        // can't see, then his record.
+        pages: manyHidden.calls.map(({ records }) => records),
+        most: most(manyHidden.calls),
+      },
+    }).toStrictEqual({
+      few: { found: 1, calls: 1 },
+      many: {
+        found: 1,
+        pages: [0, 1],
+        // Three batches at most, whatever is kept from him.
+        most: { statements: 3, checks: 3 },
+      },
+    });
   });
 });
