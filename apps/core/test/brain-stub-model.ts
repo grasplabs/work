@@ -240,7 +240,7 @@ export const transcriptOf = (body: unknown): TranscriptPart[] => [
 ];
 
 /** The tool results the model got since the person last wrote. */
-const resultsSinceQuestion = (body: unknown): string[] => {
+export const resultsSinceQuestion = (body: unknown): string[] => {
   const messages = messagesOf(body);
   const asked = messages.findLastIndex(
     ({ role, content }) =>

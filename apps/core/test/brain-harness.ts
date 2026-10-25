@@ -452,8 +452,8 @@ const grantedKeys = (company: BrainCompany): string[] => [
  * The month and day the run's model calls count in, whatever the clock
  * says: a run across midnight at a month's end still reads one total.
  */
-const brainBudgetMonth = "2400-01";
-const brainBudgetDay = "2400-01-01";
+export const brainBudgetMonth = "2400-01";
+export const brainBudgetDay = "2400-01-01";
 
 /** Points `stub` at the provider, its calls counted in the run's month. */
 const pointAt = async (
