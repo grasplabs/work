@@ -44,6 +44,7 @@ import {
 } from "../auth/identity.ts";
 import { uploadCleanups, uploads } from "../db/core/schema.ts";
 import { errorResponse } from "../errors.ts";
+import { auditStaffRoute } from "../staff-audit.ts";
 import { runEngine } from "../workflows/engine.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
 import { requireWritable } from "./collection-rules.ts";
@@ -849,6 +850,8 @@ export const originalResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "uploads.original", { uploadId });
   const knowledge = drizzle(env.KNOWLEDGE);
   const reader = { type: "person", person } as const;
   const ready = await drizzle(env.DB)

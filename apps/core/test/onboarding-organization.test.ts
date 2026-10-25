@@ -209,9 +209,12 @@ describe("the organization, for Grasp's staff", { timeout: 60_000 }, () => {
     const { staff } = await asStaff();
 
     const reads: StaffOrganization[] = [];
-    const events = await auditedDuring(async () => {
-      reads.push(await staff.onboardingStaff.organization());
-    });
+    const events = await auditedDuring(
+      async () => {
+        reads.push(await staff.onboardingStaff.organization());
+      },
+      { staffAccesses: true }
+    );
 
     const [organization] = reads;
     const text = JSON.stringify(events);
@@ -240,7 +243,8 @@ describe("the organization, for Grasp's staff", { timeout: 60_000 }, () => {
         ["Sol Sand", "sent", true],
         ["Sam Smit", "waiting", false],
       ],
-      actions: [["onboarding.organization.read", "staff"]],
+      // On record as a staff look (staff-audit.ts), naming no one.
+      actions: [["staff.accessed", "staff"]],
       names: false,
     });
   });

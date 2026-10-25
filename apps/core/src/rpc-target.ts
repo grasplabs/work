@@ -3,6 +3,8 @@ import { heldPool, rpcCopyNodeBounds } from "@grasp-os/shared/rpc-accounting";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 
+import { noteCall } from "./call-context.ts";
+
 /**
  * The longest message a browser's connection to core takes, in UTF-16 code
  * units. The product's own calls share the connection, and a document, an
@@ -59,9 +61,11 @@ export const isolateRpcHeld = heldPool(56 * 1024 * 1024);
  * What every target a browser reaches over core's connection (rpc.ts)
  * extends: each call's arguments arrive as deep and as big as one message
  * of the connection may make them, or are refused (`request.too_deep`,
- * `request.too_large`), however many messages built them.
+ * `request.too_large`), however many messages built them; and each call
+ * runs with itself noted (call-context.ts).
  */
-export const CoreRpcTarget = boundedRpcTarget({
-  depth: rpcArgumentDepth,
-  size: browserMessageSize,
-});
+export const CoreRpcTarget = boundedRpcTarget(
+  { depth: rpcArgumentDepth, size: browserMessageSize },
+  // Each call noted, for what its method asks on its way (staff-audit.ts).
+  noteCall
+);

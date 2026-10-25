@@ -430,15 +430,23 @@ export const firstVersion = async (
 /**
  * The audit events from core the log appended while `run` ran, in log
  * order. The outboxes are drained before and after, so earlier events
- * aren't counted and this run's are all in.
+ * aren't counted and this run's are all in. A staff member's access
+ * entries (`staff.accessed`, core's staff-audit.ts), which come with each
+ * of their calls, are left out unless `staffAccesses` asks for them: their
+ * own tests read them (staff-audit.test.ts), and every other test reads
+ * what the call itself recorded.
  */
 export const auditedDuring = async (
-  run: () => Promise<unknown>
+  run: () => Promise<unknown>,
+  { staffAccesses = false }: { staffAccesses?: boolean } = {}
 ): Promise<AuditEvent[]> => {
   const after = await logHead();
   await run();
   const events = await eventsAfter(after);
-  return events.filter(({ source }) => source === "core");
+  return events.filter(
+    ({ source, action }) =>
+      source === "core" && (staffAccesses || action !== "staff.accessed")
+  );
 };
 
 /** A short random name part, so tests don't share people or things. */
