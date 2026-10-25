@@ -93,6 +93,11 @@ export const keyRing = <Key extends IdentifiedKeyRow>() => {
   /** Moves on with `forget`: a read begun before it is never held. */
   let version = 0;
   /**
+   * How many reads began: only the latest is held, so one that ran past
+   * its time and settles after its replacement doesn't put back older rows.
+   */
+  let begunReads = 0;
+  /**
    * Tokens checked with the held copy, unread, though it lacked their key
    * (one another isolate may have made since), by how many such checks of
    * each are still to be taken. Each check's own decision: no later read
@@ -114,8 +119,10 @@ export const keyRing = <Key extends IdentifiedKeyRow>() => {
   ): Promise<Key[]> => {
     const begun = version;
     return await sharedRun(reads, String(begun), keysReadMs, async () => {
+      begunReads += 1;
+      const number = begunReads;
       const keys = await read();
-      if (begun === version) {
+      if (begun === version && number === begunReads) {
         held = { keys, readAt: now };
       }
       return keys;
