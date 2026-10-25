@@ -142,9 +142,21 @@ msgstr "{all, plural, one {{count} von # Person} other {{count} von # Personen}}
 msgid "{alone} of {handled} items without a person"
 msgstr "{alone} von {handled} Vorgängen ohne Person"
 
+#: src/settings/person-limits.tsx
+msgid "{amount} a month, {messagesAnHour, plural, one {# message an hour} other {# messages an hour}}"
+msgstr "{amount} im Monat, {messagesAnHour, plural, one {# Nachricht pro Stunde} other {# Nachrichten pro Stunde}}"
+
+#: src/settings/person-limits.tsx
+msgid "{amount} a month, no limit on messages"
+msgstr "{amount} im Monat, keine Grenze für Nachrichten"
+
 #: src/dashboard/spend-widget.tsx
 msgid "{amount} in all"
 msgstr "{amount} insgesamt"
+
+#: src/settings/person-limits.tsx
+msgid "{amount} of {limitShown}"
+msgstr "{amount} von {limitShown}"
 
 #: src/brain/brain-atlas.ts
 msgid "{answered} answered"
@@ -820,6 +832,10 @@ msgstr "{name} ab"
 msgid "{name} has no app to show."
 msgstr "{name} hat keine App zum Anzeigen."
 
+#: src/settings/stephen-settings.tsx
+msgid "{name} in {appName}"
+msgstr "{name} in {appName}"
+
 #: src/dashboard/widget-board.tsx
 msgid "{name} in {domain}"
 msgstr "{name} in {domain}"
@@ -896,6 +912,10 @@ msgstr "{name}: {count}"
 #: src/routes/_shell.settings.spend.tsx
 msgid "{name}: {shown} of the limit"
 msgstr "{name}: {shown} des Limits"
+
+#: src/settings/person-limits.tsx
+msgid "{name}: {shown} of their limit"
+msgstr "{name}: {shown} der eigenen Grenze"
 
 #: src/chat/builds.tsx
 msgid "{name}: version {version} waiting for review"
@@ -1789,6 +1809,10 @@ msgstr "Eine Mitarbeiterliste ist der schnellste Weg: Namen, E-Mail-Adressen, Te
 msgid "A step"
 msgstr "Ein Schritt"
 
+#: src/settings/person-limits.tsx
+msgid "A team no longer in your organization"
+msgstr "Ein Team, das nicht mehr zu deiner Organisation gehört"
+
 #: src/onboarding/setup-steps.tsx
 msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
 msgstr "Ein Team ohne Teamleitung bekommt seine Links am ersten Tag, und ich frage jede Person, was sie macht."
@@ -1957,6 +1981,10 @@ msgstr "Widget hinzufügen"
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Add a word"
 msgstr "Ein Wort hinzufügen"
+
+#: src/settings/person-limits.tsx
+msgid "Add an exception"
+msgstr "Ausnahme hinzufügen"
 
 #: src/chat/project-dialog.tsx
 msgid "Add documents"
@@ -2740,6 +2768,14 @@ msgstr "als {binding}"
 msgid "As each team's lead named them"
 msgstr "Wie die Teamleitung sie genannt hat"
 
+#: src/settings/stephen-settings.tsx
+msgid "As for Stephen"
+msgstr "Wie für Stephen"
+
+#: src/settings/stephen-settings.tsx
+msgid "As for the whole company"
+msgstr "Wie für das ganze Unternehmen"
+
 #: src/onboarding/work-record.tsx
 msgid "As it runs today"
 msgstr "Wie es heute läuft"
@@ -3413,6 +3449,7 @@ msgid "change"
 msgstr "ändern"
 
 #: src/routes/_shell.settings.outcomes.tsx
+#: src/settings/person-limits.tsx
 msgid "Change"
 msgstr "Änderung"
 
@@ -3452,6 +3489,22 @@ msgstr "Angaben ändern"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Change plan"
 msgstr "Tarif ändern"
+
+#: src/settings/stephen-settings.tsx
+msgid "Change the company's"
+msgstr "Das des Unternehmens ändern"
+
+#: src/settings/person-limits.tsx
+msgid "Change the default limit"
+msgstr "Standardgrenze ändern"
+
+#: src/settings/person-limits.tsx
+msgid "Change the limit for {name}"
+msgstr "Grenze für {name} ändern"
+
+#: src/settings/stephen-settings.tsx
+msgid "Change their own"
+msgstr "Das Eigene ändern"
 
 #: src/onboarding/organization-dialogs.tsx
 msgid "Change this team"
@@ -3673,6 +3726,14 @@ msgstr "Sammlung wählen"
 msgid "Choose a file"
 msgstr "Datei auswählen"
 
+#: src/settings/person-limits.tsx
+msgid "Choose a person or a team"
+msgstr "Person oder Team wählen"
+
+#: src/settings/person-limits.tsx
+msgid "Choose a person or a team."
+msgstr "Wähle eine Person oder ein Team."
+
 #: src/onboarding/place-picker.tsx
 msgid "Choose documents"
 msgstr "Dokumente auswählen"
@@ -3700,6 +3761,10 @@ msgstr "Mitarbeiterliste auswählen"
 #: src/workflows/chosen-at-run-time.tsx
 msgid "Chosen at run time: {options}"
 msgstr "Während des Laufs gewählt: {options}"
+
+#: src/settings/stephen-settings.tsx
+msgid "Chosen teams"
+msgstr "Ausgewählte Teams"
 
 #: src/activity/audit-log.tsx
 msgid "Clear"
@@ -4022,6 +4087,10 @@ msgstr "Das Verbinden hat nicht funktioniert. Versuchen Sie es erneut oder frage
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connecting it needs your organization's own sign-in app, which Grasp can't use yet."
 msgstr "Zum Verbinden braucht Ihre Organisation eine eigene Anmelde-App, die Grasp noch nicht nutzen kann."
+
+#: src/routes/_shell.connect-microsoft.tsx
+msgid "Connecting your Microsoft 365"
+msgstr "Ihr Microsoft 365 wird verbunden"
 
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
@@ -4388,6 +4457,10 @@ msgctxt "row height"
 msgid "Default"
 msgstr "Standard"
 
+#: src/settings/person-limits.tsx
+msgid "Default limit"
+msgstr "Standardgrenze"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Default: {fallback}"
 msgstr "Standard: {fallback}"
@@ -4650,6 +4723,14 @@ msgstr "Trainiert nicht mit Ihren Daten"
 msgid "Does nothing until it is turned on again."
 msgstr "Bewirkt nichts, bis sie wieder eingeschaltet wird."
 
+#: src/settings/stephen-settings.tsx
+msgid "Does things for people here"
+msgstr "Erledigt hier Dinge für Personen"
+
+#: src/settings/stephen-settings.tsx
+msgid "Does things for people in {name}"
+msgstr "Erledigt Dinge für Personen in {name}"
+
 #: src/engines/screen-approval.tsx
 msgid "Doesn't build now"
 msgstr "Lässt sich gerade nicht bauen"
@@ -4780,6 +4861,10 @@ msgstr "Entwurf"
 msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Entwurf"
+
+#: src/settings/stephen-settings.tsx
+msgid "Drafts, events and files of their own, after they press a card."
+msgstr "Eigene Entwürfe, Termine und Dateien, nachdem die Person eine Karte bestätigt."
 
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Draw again"
@@ -4947,6 +5032,10 @@ msgstr "Genug ist bekannt: Es sind über {threshold} %. Das Unternehmen kommt he
 msgid "Enter a number."
 msgstr "Geben Sie eine Zahl ein."
 
+#: src/settings/person-limits.tsx
+msgid "Enter a whole number from 1 to {most}, or leave it empty."
+msgstr "Gib eine ganze Zahl von 1 bis {most} ein oder lass das Feld leer."
+
 #: src/engines/resource-bindings.tsx
 msgid "Enter a whole percent from 1 to 99."
 msgstr "Geben Sie einen ganzen Prozentwert von 1 bis 99 ein."
@@ -4954,6 +5043,10 @@ msgstr "Geben Sie einen ganzen Prozentwert von 1 bis 99 ein."
 #: src/engines/resource-bindings.tsx
 msgid "Enter an amount in US dollars from {least} to {most}, such as 2.50."
 msgstr "Geben Sie einen Betrag in US-Dollar von {least} bis {most} ein, zum Beispiel 2.50."
+
+#: src/settings/person-limits.tsx
+msgid "Enter an amount of at least 0, or leave it empty."
+msgstr "Gib einen Betrag von mindestens 0 ein oder lass das Feld leer."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Enter an amount, such as 12.50."
@@ -5062,11 +5155,16 @@ msgstr "Jedes Team hat seine Leitung"
 msgid "Every team, whether it takes part or not. A team that was left out can be asked in: its lead gets a link first."
 msgstr "Jedes Team, ob es teilnimmt oder nicht. Ein ausgelassenes Team kann dazugeholt werden: Die Teamleitung bekommt zuerst einen Link."
 
+#: src/settings/stephen-settings.tsx
+msgid "Every tool he has is of one of these kinds. Each is on for whom you choose, in every app."
+msgstr "Jedes seiner Werkzeuge gehört zu einer dieser Arten. Jede ist für die eingeschaltet, die du wählst, in jeder App."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Every tool it has: domains and agents use only what they are granted."
 msgstr "Jedes seiner Tools: Domänen und Agenten nutzen nur, was ihnen erlaubt ist."
 
 #: src/knowledge/collection-markers.tsx
+#: src/settings/stephen-settings.tsx
 msgid "Everyone"
 msgstr "Alle"
 
@@ -5105,6 +5203,10 @@ msgstr "Alle, die es machen, haben gesprochen, also zählt ein Schritt, den eine
 #: src/onboarding/work-record.tsx
 msgid "Everyone who does this work has talked."
 msgstr "Alle, die diese Arbeit machen, haben gesprochen."
+
+#: src/settings/person-limits.tsx
+msgid "Everyone without an exception"
+msgstr "Alle ohne Ausnahme"
 
 #: src/onboarding/organization-words.ts
 msgid "Everyone's link is due: out once the interviews run."
@@ -5817,6 +5919,14 @@ msgstr "Grasp zeigt hier einen Pfad, sobald es für diese App einen MCP, einen n
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp won't run what {about} needs: {requirement}"
 msgstr "Grasp führt nicht aus, was {about} braucht: {requirement}"
+
+#: src/settings/person-limits.tsx
+msgid "Grasp's budget allows at most {most} a month for one person, so no limit can be above it. Ask Grasp to raise the budget first."
+msgstr "Das Budget von Grasp erlaubt höchstens {most} im Monat für eine Person, also kann keine Grenze darüber liegen. Bitte Grasp zuerst, das Budget zu erhöhen."
+
+#: src/settings/person-limits.tsx
+msgid "Grasp's budgets can't be read just now, so no limit can be checked against them. Contact Grasp."
+msgstr "Die Budgets von Grasp lassen sich gerade nicht lesen, also kann keine Grenze daran geprüft werden. Wende dich an Grasp."
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Grasp's first conversation with the sponsor, read for the ten things Stephen needs before his first interview."
@@ -6680,6 +6790,10 @@ msgid "Job"
 msgstr "Stelle"
 
 #: src/activity/audit-words.ts
+msgid "Joined from the directory, writing to Stephen"
+msgstr "Über das Verzeichnis beigetreten, beim Schreiben an Stephen"
+
+#: src/activity/audit-words.ts
 msgid "Joined through an invitation"
 msgstr "Ist über eine Einladung beigetreten"
 
@@ -6896,6 +7010,14 @@ msgstr "Leitungen gesprochen: {count} von {of}"
 msgid "Leave"
 msgstr "Verlassen"
 
+#: src/settings/person-limits.tsx
+msgid "Leave a field empty for no limit."
+msgstr "Lass ein Feld leer, um keine Grenze zu setzen."
+
+#: src/settings/person-limits.tsx
+msgid "Leave a field empty for no limit. A monthly limit can be at most {ceiling}, Grasp's budget for one person."
+msgstr "Lass ein Feld leer, um keine Grenze zu setzen. Eine Monatsgrenze kann höchstens {ceiling} sein, das Budget von Grasp für eine Person."
+
 #: src/onboarding/work-record.tsx
 msgid "Leave it to the rules"
 msgstr "Den Regeln überlassen"
@@ -6946,6 +7068,10 @@ msgstr "Lassen Sie die E-Mails von Grasp durch"
 msgid "Let me put it all together for you."
 msgstr "Ich setze jetzt alles für Sie zusammen."
 
+#: src/workflows/ask-stephen.tsx
+msgid "Let people ask Stephen to start it"
+msgstr "Leute Stephen bitten lassen, ihn zu starten"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Let the interviews run again"
 msgstr "Die Interviews wieder laufen lassen"
@@ -6966,6 +7092,14 @@ msgstr "Lizenz"
 #: src/frame/person-menu.tsx
 msgid "Light"
 msgstr "Hell"
+
+#: src/settings/person-limits.tsx
+msgid "Limit for {name}"
+msgstr "Grenze für {name}"
+
+#: src/settings/person-limits.tsx
+msgid "Limits per person"
+msgstr "Grenzen pro Person"
 
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/chat-accounts.tsx
@@ -7147,6 +7281,10 @@ msgstr "Erstellt mit Grasp am {date}"
 msgid "Madrid"
 msgstr "Madrid"
 
+#: src/settings/stephen-settings.tsx
+msgid "Mail and messages to other people, after they press a card with every recipient."
+msgstr "Mails und Nachrichten an andere, nachdem die Person eine Karte mit allen Empfängern bestätigt."
+
 #: src/frame/app-sidebar.tsx
 msgid "Main"
 msgstr "Hauptmenü"
@@ -7257,6 +7395,10 @@ msgstr "Genannt"
 #: src/routes/guest.tsx
 msgid "Messages"
 msgstr "Nachrichten"
+
+#: src/settings/person-limits.tsx
+msgid "Messages they send Grasp in a chat app."
+msgstr "Nachrichten, die die Person Grasp in einer Chat-App schickt."
 
 #: src/interview/sound-check.tsx
 msgid "Microphone: {name}"
@@ -7401,9 +7543,17 @@ msgstr "Hypothekenberatung"
 msgid "Mosaic"
 msgstr "Mosaik"
 
+#: src/settings/person-limits.tsx
+msgid "Most a month, in US dollars"
+msgstr "Höchstens im Monat, in US-Dollar"
+
 #: src/onboarding/work-rules.tsx
 msgid "Most differences are findings: it depends on the case, the office or the date. Only one nobody can explain needs someone to settle it."
 msgstr "Die meisten Unterschiede sind Erkenntnisse: Es hängt vom Fall, vom Standort oder vom Datum ab. Nur einen, den niemand erklären kann, muss jemand klären."
+
+#: src/settings/person-limits.tsx
+msgid "Most messages an hour"
+msgstr "Höchstens Nachrichten pro Stunde"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Most people can’t name every tool they use, so a small app on the work laptops tells me. We set it up with you or your IT, or you skip it for now."
@@ -7841,6 +7991,14 @@ msgstr "Noch keine Interviews. Sie beginnen, sobald das Unternehmen sein Team in
 msgid "No invoices yet."
 msgstr "Noch keine Rechnungen."
 
+#: src/settings/person-limits.tsx
+msgid "No limit"
+msgstr "Keine Grenze"
+
+#: src/settings/person-limits.tsx
+msgid "No limit set"
+msgstr "Keine Grenze gesetzt"
+
 #: src/onboarding/interview-people.tsx
 msgid "No link out yet: it waits for its day, or for their team lead."
 msgstr "Noch kein Link verschickt: Er wartet auf seinen Tag oder auf die Teamleitung."
@@ -7900,9 +8058,17 @@ msgstr "Für diese Instanz ist noch kein Modell eingerichtet."
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
 msgstr "Noch keine Module. Ein Modul enthält Berechnungen, die eine Aufgabe über eine lokale Bindung aufruft."
 
+#: src/settings/person-limits.tsx
+msgid "No monthly limit, {messagesAnHour, plural, one {# message an hour} other {# messages an hour}}"
+msgstr "Keine Monatsgrenze, {messagesAnHour, plural, one {# Nachricht pro Stunde} other {# Nachrichten pro Stunde}}"
+
 #: src/workflows/triggers.tsx
 msgid "No next run"
 msgstr "Kein nächster Lauf"
+
+#: src/settings/person-limits.tsx
+msgid "No one is in your organization yet."
+msgstr "Noch ist niemand in deiner Organisation."
 
 #: src/engines/resource-bindings.tsx
 msgid "No other domain serves every function it declares, public and exactly as declared."
@@ -8083,6 +8249,7 @@ msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "Nein: Sein Hash oder seine Verknüpfung zum vorherigen Ereignis stimmt nicht."
 
 #: src/brain/brain.ts
+#: src/settings/stephen-settings.tsx
 msgid "Nobody"
 msgstr "Niemand"
 
@@ -8715,6 +8882,10 @@ msgstr "Aus"
 msgid "Off the usual way after step {number}"
 msgstr "Abweichungen nach Schritt {number}"
 
+#: src/settings/stephen-settings.tsx
+msgid "Off, he answers nobody in any chat app. Grasp's own chat keeps working."
+msgstr "Ausgeschaltet antwortet er niemandem in einer Chat-App. Der Chat in Grasp funktioniert weiter."
+
 #: src/connections/offer-switch.tsx
 msgid "Off, nobody can connect it, admins included. Connections already made go on."
 msgstr "Aus: Niemand kann es verbinden, auch Admins nicht. Bestehende Verbindungen laufen weiter."
@@ -8777,6 +8948,10 @@ msgstr "nach Zeitplan (sein Parameter {param})"
 #: src/chat/builds-state.ts
 msgid "on every {event} event"
 msgstr "bei jedem Ereignis {event}"
+
+#: src/settings/stephen-settings.tsx
+msgid "On in chat apps"
+msgstr "In Chat-Apps eingeschaltet"
 
 #: src/chat/builds-state.ts
 msgid "on mail to {address}@"
@@ -9354,6 +9529,7 @@ msgid "Pending"
 msgstr "Ausstehend"
 
 #: src/onboarding/interview-people.tsx
+#: src/settings/person-limits.tsx
 msgid "People"
 msgstr "Personen"
 
@@ -9811,6 +9987,10 @@ msgctxt "column: how the person rated their interview"
 msgid "Rating"
 msgstr "Bewertung"
 
+#: src/settings/stephen-settings.tsx
+msgid "Reach others"
+msgstr "Andere erreichen"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Reached"
 msgstr "Erreicht"
@@ -9879,6 +10059,10 @@ msgstr "Eingeschränkte Quellen gelesen und ist jetzt an sie gebunden"
 msgid "Read the code of version {version}"
 msgstr "Code von Version {version} lesen"
 
+#: src/settings/stephen-settings.tsx
+msgid "Read the company's"
+msgstr "Das des Unternehmens lesen"
+
 #: src/onboarding/hr-leads.tsx
 msgid "Read the leads from {name} again"
 msgstr "Leitungen erneut aus {name} lesen"
@@ -9892,6 +10076,10 @@ msgstr "Transkript lesen"
 #: src/onboarding/work-record.tsx
 msgid "Read the transcript of {name}"
 msgstr "Transkript von {name} lesen"
+
+#: src/settings/stephen-settings.tsx
+msgid "Read their own"
+msgstr "Das Eigene lesen"
 
 #: src/activity/audit-words.ts
 msgid "Read what a guest wrote"
@@ -10089,6 +10277,7 @@ msgid "Reminded on {date}"
 msgstr "Erinnert am {date}"
 
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/person-limits.tsx
 msgid "Remove"
 msgstr "Entfernen"
 
@@ -10104,6 +10293,10 @@ msgstr "{file} entfernen"
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"
 msgstr "{name} entfernen?"
+
+#: src/settings/person-limits.tsx
+msgid "Remove the exception for {name}"
+msgstr "Ausnahme für {name} entfernen"
 
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Remove: {item}"
@@ -10594,6 +10787,7 @@ msgstr "Gleiche Version, anderer Inhalt: {changed}"
 #: src/chat/project-dialog.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/settings/person-limits.tsx
 #: src/workflows/resource-params.tsx
 msgid "Save"
 msgstr "Speichern"
@@ -10861,6 +11055,14 @@ msgstr "Mitarbeiterliste teilen"
 msgid "Shared code changed"
 msgstr "Gemeinsamer Code geändert"
 
+#: src/settings/stephen-settings.tsx
+msgid "Shared mailboxes, colleagues' calendars and the company's files."
+msgstr "Geteilte Postfächer, Kalender von Kolleginnen und Kollegen und die Dateien des Unternehmens."
+
+#: src/settings/stephen-settings.tsx
+msgid "Shared mailboxes, registers and the company's records, after they press a card."
+msgstr "Geteilte Postfächer, Register und Datensätze des Unternehmens, nachdem die Person eine Karte bestätigt."
+
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Shared with"
 msgstr "Geteilt mit"
@@ -11069,6 +11271,10 @@ msgid "Signed in {time}"
 msgstr "Angemeldet am {time}"
 
 #: src/activity/audit-words.ts
+msgid "Signed in for the first time, after joining from the directory"
+msgstr "Zum ersten Mal angemeldet, nach dem Beitritt über das Verzeichnis"
+
+#: src/activity/audit-words.ts
 msgid "Signed in to a connection again"
 msgstr "Bei einer Verbindung erneut angemeldet"
 
@@ -11148,6 +11354,10 @@ msgstr "Jemand anderes hat sich in diesem Browser angemeldet, deshalb wurde dies
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
 msgstr "Jemand, der nicht mehr da ist"
+
+#: src/settings/person-limits.tsx
+msgid "Someone no longer in your organization"
+msgstr "Jemand, der nicht mehr zu deiner Organisation gehört"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Someone's own work"
@@ -11395,6 +11605,10 @@ msgstr "Stephen fragt nach"
 msgid "Stephen asks them which work comes back most. To ask about a piece of work, open the person."
 msgstr "Stephen fragt sie, welche Arbeit am häufigsten wiederkommt. Um nach einer bestimmten Arbeit zu fragen, öffne die Person."
 
+#: src/workflows/ask-stephen.tsx
+msgid "Stephen can offer it in Microsoft Teams to anyone who may start it. It starts only when they press Start, and runs as them."
+msgstr "Stephen kann ihn in Microsoft Teams allen anbieten, die ihn starten dürfen. Er startet erst, wenn sie auf „Starten“ drücken, und läuft in ihrem Namen."
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Stephen is reading it. This takes a minute."
 msgstr "Stephen liest es. Das dauert eine Minute."
@@ -11617,6 +11831,10 @@ msgctxt "filter: teams that take part in the interviews"
 msgid "Taking part"
 msgstr "Dabei"
 
+#: src/routes/_shell.connect-microsoft.tsx
+msgid "Taking you to the Microsoft sign-in…"
+msgstr "Sie werden zur Anmeldung bei Microsoft weitergeleitet…"
+
 #: src/onboarding/work-list.tsx
 msgid "Talked"
 msgstr "Gesprochen"
@@ -11693,6 +11911,10 @@ msgctxt "workflows filter"
 msgid "Team"
 msgstr "Team"
 
+#: src/settings/person-limits.tsx
+msgid "Team {name}"
+msgstr "Team {name}"
+
 #: src/onboarding/interview-words.ts
 msgid "Team does not take part"
 msgstr "Team nimmt nicht teil"
@@ -11735,6 +11957,7 @@ msgstr "Teamgröße unbekannt."
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.settings.profile.tsx
+#: src/settings/person-limits.tsx
 msgid "Teams"
 msgstr "Teams"
 
@@ -11756,6 +11979,10 @@ msgstr "Teams"
 #: src/brain/brain-source-contents.tsx
 msgid "Teams and roles"
 msgstr "Teams und Rollen"
+
+#: src/settings/stephen-settings.tsx
+msgid "Teams for {label}"
+msgstr "Teams für {label}"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Teams named"
@@ -12012,6 +12239,10 @@ msgstr "Die Apps, die Teams genannt haben, und die, die im Einsatz sind, aber ni
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Die Apps, in denen Ihre Workflows arbeiten können. Grasp tut nur, was Sie pro App erlauben."
 
+#: src/settings/stephen-settings.tsx
+msgid "The assistant people chat with in Microsoft Teams and the other chat apps. What is set here is all he may do: a place or an app only narrows it."
+msgstr "Der Assistent, mit dem Personen in Microsoft Teams und den anderen Chat-Apps chatten. Was hier eingestellt ist, ist alles, was er darf: Ein Ort oder eine App schränkt es nur ein."
+
 #: src/brain/brain-atlas.ts
 msgid "The board"
 msgstr "Die Geschäftsleitung"
@@ -12118,6 +12349,10 @@ msgstr "Der Tag, an dem die anderen Teams ihre Links erhalten"
 msgid "the deadline"
 msgstr "die Frist"
 
+#: src/settings/person-limits.tsx
+msgid "The default"
+msgstr "Der Standard"
+
 #: src/chat/composer.tsx
 msgid "The default, {each}"
 msgstr "Standard, {each}"
@@ -12194,6 +12429,10 @@ msgstr "Der Export hat nicht funktioniert. Versuchen Sie es erneut."
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "The file could not be read. Try a PDF or a text file."
 msgstr "Die Datei konnte nicht gelesen werden. Versuchen Sie es mit einer PDF- oder Textdatei."
+
+#: src/settings/person-limits.tsx
+msgid "The first {listed} people, by name."
+msgstr "Die ersten {listed} Personen, nach Name."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "The first {shown} by domain; more domains have models bound."
@@ -12637,9 +12876,21 @@ msgstr "Der Link funktioniert nicht mehr, und was gesagt wurde, geht mit."
 msgid "Their numbers show once the first person starts their interview."
 msgstr "Die Zahlen erscheinen, sobald die erste Person ihr Interview beginnt."
 
+#: src/settings/person-limits.tsx
+msgid "Their own limit"
+msgstr "Eigene Grenze"
+
+#: src/settings/stephen-settings.tsx
+msgid "Their own mail, calendar and files. Runs at once."
+msgstr "Eigene Mails, Kalender und Dateien. Läuft sofort."
+
 #: src/onboarding/interview-people.tsx
 msgid "Their rating"
 msgstr "Ihre Bewertung"
+
+#: src/settings/person-limits.tsx
+msgid "Their team's limit"
+msgstr "Grenze des Teams"
 
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"
@@ -12714,6 +12965,10 @@ msgstr "Diese Releases können nie aktuell gemacht werden: {releases}."
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "These requirements are about how people work, not which apps they use. They stay in your policy; no rule watches them."
 msgstr "Diese Anforderungen betreffen die Arbeitsweise, nicht die genutzten Apps. Ihre Richtlinie enthält sie weiterhin, aber keine Regel überwacht sie."
+
+#: src/settings/person-limits.tsx
+msgid "They are no longer in your organization."
+msgstr "Sie gehören nicht mehr zu deiner Organisation."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
@@ -12945,6 +13200,10 @@ msgstr "Diese Liste ist zu groß. Ich kann bis zu {peopleMost} Personen in bis z
 #: src/routes/_shell.settings.models.tsx
 msgid "This month"
 msgstr "Diesen Monat"
+
+#: src/settings/person-limits.tsx
+msgid "This month by person"
+msgstr "Dieser Monat pro Person"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "This month so far"
@@ -13932,6 +14191,14 @@ msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Was als Erfolg zählt"
 
+#: src/settings/person-limits.tsx
+msgid "What each person's model calls may cost a month, and how many messages they may send an hour. A person's own exception goes first, then their team's, then the default."
+msgstr "Was die Modellaufrufe jeder Person im Monat kosten dürfen und wie viele Nachrichten sie pro Stunde senden darf. Die eigene Ausnahme einer Person gilt zuerst, dann die ihres Teams, dann der Standard."
+
+#: src/settings/person-limits.tsx
+msgid "What each person's model calls may cost a month, and how many messages they may send an hour. A person's own exception goes first, then their team's, then the default. Grasp's budget of {ceiling} a person is the ceiling."
+msgstr "Was die Modellaufrufe jeder Person im Monat kosten dürfen und wie viele Nachrichten sie pro Stunde senden darf. Die eigene Ausnahme einer Person gilt zuerst, dann die ihres Teams, dann der Standard. Das Budget von Grasp von {ceiling} pro Person ist die Obergrenze."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "What each role may do in Grasp. An admin gives each member theirs."
 msgstr "Was jede Rolle in Grasp darf. Ein Admin gibt jedem Mitglied seine."
@@ -13986,6 +14253,14 @@ msgstr "Wie es weitergeht"
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "What he leaves alone"
 msgstr "Was er auslässt"
+
+#: src/settings/stephen-settings.tsx
+msgid "What he may do"
+msgstr "Was er darf"
+
+#: src/settings/stephen-settings.tsx
+msgid "What he may do in {appName}: as for the whole company, or for fewer people."
+msgstr "Was er in {appName} darf: wie für das ganze Unternehmen oder für weniger Personen."
 
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "What is marked is what {who} wrote down."
@@ -14284,6 +14559,10 @@ msgstr "Woher alles stammt: Gespräche, Dokumente, Pulse und Verbindungen."
 msgid "Where it comes from"
 msgstr "Woher es kommt"
 
+#: src/settings/stephen-settings.tsx
+msgid "Where people reach him"
+msgstr "Wo Personen ihn erreichen"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Where people stop"
 msgstr "Wo Personen aufhören"
@@ -14363,6 +14642,7 @@ msgstr "Während Stephen mit Ihrem Team spricht: wie weit die Interviews sind, T
 
 #: src/inbox/item-detail.tsx
 #: src/onboarding/work-record.tsx
+#: src/settings/person-limits.tsx
 msgid "Who"
 msgstr "Wer"
 
@@ -14387,6 +14667,10 @@ msgstr "Wer gibt ein neues Tool frei"
 #: src/brain/brain.ts
 msgid "Who can answer"
 msgstr "Wer antworten kann"
+
+#: src/settings/stephen-settings.tsx
+msgid "Who can talk to him"
+msgstr "Wer mit ihm sprechen kann"
 
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"
@@ -14422,6 +14706,14 @@ msgstr "Wer welches Team leitet"
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Who people chose"
 msgstr "Wen die Personen gewählt haben"
+
+#: src/settings/stephen-settings.tsx
+msgid "Who reaches him in {name}"
+msgstr "Wer ihn in {name} erreicht"
+
+#: src/settings/stephen-settings.tsx
+msgid "Who reaches him in each place, as above or fewer, and whether he does things for people there or only answers."
+msgstr "Wer ihn an jedem Ort erreicht, wie oben oder weniger, und ob er dort Dinge für Personen erledigt oder nur antwortet."
 
 #: src/onboarding/work-record.tsx
 msgid "Who said what"

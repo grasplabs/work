@@ -44,8 +44,10 @@ import {
   listWorkflowResources,
   publishWorkflowVersion,
   releaseWorkflowName,
+  setWorkflowAskable,
   shareWorkflowResource,
   unshareWorkflowResource,
+  workflowAskable,
   workflowDefinition,
   workflowMembers,
   workflowSource,
@@ -165,6 +167,19 @@ export class WorkflowResourcesRpc
   async unshare(id: string, input: unknown): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await unshareWorkflowResource(this.#env, person, id, input);
+    });
+  }
+
+  async askable(id: string): Promise<boolean> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowAskable(this.#env, person, id)
+    );
+  }
+
+  async setAskable(id: string, askable: unknown): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await setWorkflowAskable(this.#env, person, id, askable);
     });
   }
 

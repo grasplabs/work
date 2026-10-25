@@ -178,14 +178,21 @@ const teamsEnv = (changes: Partial<Env> = {}): Env => ({
   ...changes,
 });
 
+/**
+ * The keys this file's requests are checked against, fetched for it
+ * alone: test files may share an isolate, whose keys another file may
+ * have fetched before this one published its own.
+ */
+const fileKeys = teamsKeys();
+
 /** Delivers `activity` with `authorization` to the door; what happened. */
 const deliver = async (
   activity: unknown,
   authorization: string | undefined,
   doorEnv: Env = teamsEnv(),
-  adapters: (
-    adaptersEnv: Env
-  ) => ReturnType<typeof channelAdapters> = channelAdapters
+  adapters: (adaptersEnv: Env) => ReturnType<typeof channelAdapters> = (
+    adaptersEnv
+  ) => channelAdapters(adaptersEnv, { teamsKeys: fileKeys })
 ): Promise<{ status: number; handled: number }> => {
   const chat = new Chat({
     userName: "Stephen",
@@ -475,7 +482,12 @@ describe("every adapter", () => {
         (request: Request, options: WebhookOptions) => Promise<Response>
       > = chat.webhooks;
       const platforms = Object.keys(webhooks);
-      expect(platforms).toStrictEqual(["teams"]);
+      expect(platforms).toStrictEqual([
+        "teams",
+        "slack",
+        "whatsapp",
+        "telegram",
+      ]);
       for (const [platform, webhook] of Object.entries(webhooks)) {
         // oxlint-disable-next-line no-await-in-loop
         const response = await webhook(

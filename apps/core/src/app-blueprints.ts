@@ -66,6 +66,7 @@ import {
 } from "./db/core/schema.ts";
 import { ensureCollection } from "./knowledge/collections.ts";
 import { appMemoryPath } from "./knowledge/memory-files.ts";
+import { brainOf } from "./knowledge/ports.ts";
 import {
   appBindingKinds,
   bindingKindsOf,
@@ -1140,7 +1141,7 @@ export const installBuiltinBlueprint = async (
   for (const collection of builtin.collections) {
     // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
     await ensureCollection(
-      env,
+      brainOf(env),
       {
         ...collection,
         owner: releaseOwner,

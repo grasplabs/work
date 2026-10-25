@@ -44,7 +44,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
       subject: { type: "app", appId },
       object: { type: "collection", collectionId },
       actions: ["read"],
-      binding: "PLAYBOOK",
+      binding: "BOARD_PACK",
     }));
     await api.permissions.request({
       subject: { type: "app", appId },
@@ -66,7 +66,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
     page,
     `${appName}: read on Collection ${collectionId}`
   );
-  await expect(reading).toContainText("as PLAYBOOK");
+  await expect(reading).toContainText("as BOARD_PACK");
   await expect(reading).toContainText("Version to review: None current");
   await reading.getByRole("button", { name: /^Approve /u }).click();
   await expect(

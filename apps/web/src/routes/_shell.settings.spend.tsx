@@ -7,6 +7,7 @@ import type {
   ModelSettings,
   ModelSpender,
 } from "@grasp-os/shared/models";
+import { isAdmin } from "@grasp-os/shared/roles";
 import {
   Alert,
   AlertDescription,
@@ -34,6 +35,7 @@ import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { dollars, monthEnd, percent, shareOf } from "../settings/money.ts";
+import { PersonLimitsSection } from "../settings/person-limits.tsx";
 import {
   SettingsBody,
   SettingsError,
@@ -47,7 +49,8 @@ import { useCoreAction } from "../use-core-action.ts";
 // Grasp sets, and where it went, by workflow, person and run. Core counts
 // every call, budget or not, so the month's total and the workflows that
 // spent most show without one; the budgets' limits are rules, and stay on
-// the Models page.
+// the Models page. The limits the company's admins set per person show
+// here too, beside what each person spent (settings/person-limits.tsx).
 
 /** One number of the top row: what it is, the amount, and a line that puts it in its place. */
 const Figure = ({
@@ -536,6 +539,7 @@ const Spend = ({
 const SpendPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   if (page.state !== "ready") {
     return (
       <SettingsSection title={t`AI spend`}>
@@ -548,6 +552,10 @@ const SpendPage = () => {
   return (
     <>
       <Spend settings={page.data.settings} spend={page.data.spend} />
+      <PersonLimitsSection
+        editable={isAdmin(identity.role)}
+        limits={page.data.limits}
+      />
       <Held held={page.data.settings.held} />
     </>
   );
@@ -559,10 +567,11 @@ export const Route = createFileRoute("/_shell/settings/spend")({
   component: SpendPage,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [settings, spend] = await Promise.all([
+      const [settings, spend, limits] = await Promise.all([
         session.models.settings(),
         session.models.spend(),
+        session.models.limits(),
       ]);
-      return { settings, spend };
+      return { settings, spend, limits };
     }),
 });

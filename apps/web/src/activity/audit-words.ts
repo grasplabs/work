@@ -142,6 +142,14 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "member.invitation.accepted",
     text: msg`Joined through an invitation`,
   },
+  {
+    action: "member.joined_from_directory",
+    text: msg`Joined from the directory, writing to Stephen`,
+  },
+  {
+    action: "member.signed_in_from_directory",
+    text: msg`Signed in for the first time, after joining from the directory`,
+  },
   { action: "member", text: msg`Changed a member` },
   { action: "team.created", text: msg`Created a team` },
   { action: "team.deleted", text: msg`Deleted a team` },

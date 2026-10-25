@@ -8,7 +8,7 @@ import {
   recallInputSchema,
   recallLimits,
   rememberInputSchema,
-} from "../src/brain-api.ts";
+} from "../src/contract.ts";
 
 // What the Brain's contract accepts from a caller, and what it refuses
 // before any work: a caller sends a question or content, narrower

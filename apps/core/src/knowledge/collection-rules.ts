@@ -17,7 +17,7 @@ import { canCreate, canWrite } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { ensureCollection, readableCollections } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
-import { portsOf } from "./ports.ts";
+import { portsOf, brainOf } from "./ports.ts";
 
 // Core's rules for Knowledge's collections: who may create and change
 // which, the teams a collection is shared with (core's database), and the
@@ -85,7 +85,7 @@ export const listCollections = async (
   env: Env,
   reader: Reader
 ): Promise<Collection[]> => {
-  const rows = await readableCollections(env, reader);
+  const rows = await readableCollections(brainOf(env), reader);
   const shared =
     rows.length === 0
       ? []
@@ -174,6 +174,6 @@ export const createCollection = async (
       .values(teamIds.map((teamId) => ({ collectionId: row.id, teamId })));
   }
   // A new ID: created now, with its audit event.
-  await ensureCollection(env, row, actorOf(person));
+  await ensureCollection(brainOf(env), row, actorOf(person));
   return toCollection(row, teamIds, isWritable(env, person, row));
 };
