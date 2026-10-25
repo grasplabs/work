@@ -632,6 +632,14 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       await waitingRun(admin);
     const other = await personApi("admin");
     const member = await personApi("builder");
+    // Asleep between its checks once it has gone quiet, with nothing of it
+    // running: a parked run suspends once every call it has out is parked.
+    await vi.waitFor(
+      async () => {
+        await expect(liveStatus(run.id)).resolves.toBe("waiting");
+      },
+      { timeout: 10_000, interval: 100 }
+    );
     const listed = await other.api.unknownOutcomes.listAll();
     const [receipt] = await receiptsFrom(mailbox);
     const theirs = listed.filter(
