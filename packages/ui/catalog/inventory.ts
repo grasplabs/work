@@ -330,7 +330,7 @@ export const shadcnComponents = {
       "DialogTrigger",
     ],
     changes:
-      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim` token instead of raw black.",
+      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim` token instead of raw black. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen.",
   },
   direction: {
     status: "supported",
@@ -570,6 +570,8 @@ export const shadcnComponents = {
       "PopoverTitle",
       "PopoverTrigger",
     ],
+    changes:
+      "The content is never taller than the room beside its anchor (`--available-height`) and scrolls, as the kit's menus and selects do.",
   },
   progress: {
     status: "supported",
@@ -654,7 +656,7 @@ export const shadcnComponents = {
       "SheetTrigger",
     ],
     changes:
-      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim` token instead of raw black.",
+      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim` token instead of raw black. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen.",
   },
   sidebar: {
     status: "supported",
