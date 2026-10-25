@@ -151,9 +151,12 @@ describe("the interviews in Grasp's onboarding area", () => {
     const staff = await asStaff();
 
     const reads: AdminSnapshot[] = [];
-    const events = await auditedDuring(async () => {
-      reads.push(await staff.onboardingStaff.interviews());
-    });
+    const events = await auditedDuring(
+      async () => {
+        reads.push(await staff.onboardingStaff.interviews());
+      },
+      { staffAccesses: true }
+    );
     const links = reads[0]?.links ?? [];
     const stateOf = (person: string) =>
       links.find((link) => link.person === person)?.state;
@@ -171,7 +174,8 @@ describe("the interviews in Grasp's onboarding area", () => {
       states: ["completed", "invited", "waiting"],
       oli: [4, "claire", true],
       words: false,
-      audited: [["onboarding.interviews.read", "staff", "organization"]],
+      // On record as a staff look (staff-audit.ts), naming no one.
+      audited: [["staff.accessed", "staff", undefined]],
     });
   });
 
@@ -180,9 +184,12 @@ describe("the interviews in Grasp's onboarding area", () => {
     const staff = await asStaff();
 
     const paths: string[] = [];
-    const events = await auditedDuring(async () => {
-      paths.push(await staff.onboardingStaff.link(ids.ona));
-    });
+    const events = await auditedDuring(
+      async () => {
+        paths.push(await staff.onboardingStaff.link(ids.ona));
+      },
+      { staffAccesses: true }
+    );
     const path = paths[0] ?? "";
     const secret = path.split("#")[1] ?? "";
     // The link staff were given opens Ona's interview, and nobody else's.
@@ -198,7 +205,9 @@ describe("the interviews in Grasp's onboarding area", () => {
     }).toStrictEqual({
       path: true,
       opens: true,
-      audited: [["onboarding.link.read", "interview"]],
+      // On record as a staff look before anything was read, by the kind of
+      // what was asked alone (staff-audit.ts).
+      audited: [["staff.accessed", undefined]],
       secretInLog: false,
       named: false,
       nobody: "onboarding.not_found",
