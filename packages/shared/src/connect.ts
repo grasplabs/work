@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
+import { chatPlatformSchema } from "./chat.ts";
 import { directoryProviderSchema } from "./directory.ts";
 import { placesProviderSchema } from "./document-places.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
@@ -18,6 +19,7 @@ import type { PackageRegistryApi } from "./packages.ts";
 import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
 import type { CodeSubject, WorkContext } from "./permissions.ts";
 import { roleSchema } from "./roles.ts";
+import type { StephenReachApi } from "./stephen-reach.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
 /**
@@ -474,7 +476,7 @@ export const appRequestsListed = 200;
  * needs it (`needs_reauth`) is starting one for its provider and scope:
  * finished with the account it holds, it is that connection again.
  */
-export interface ConnectionsApi {
+export interface ConnectionsApi extends StephenReachApi {
   start: (request: {
     provider: OAuthProvider;
     scope: ConnectionScope;
@@ -1131,6 +1133,13 @@ export interface PendingAction {
   /** ISO 8601. */
   requestedAt: string;
   /**
+   * When it ends unconfirmed (ISO 8601): one asked for in a chat on a chat
+   * platform, such as Teams, ends at midnight of the company's day it was
+   * asked on, and is declined as expired after. Absent for one that waits
+   * until it is decided.
+   */
+  endsAt?: string;
+  /**
    * The App's approved resource binding it came through, as it served then
    * (`HeldBinding`); null for any other call; `unreadable` when what connect
    * stored no longer reads as one, which core never confirms.
@@ -1146,6 +1155,11 @@ export const confirmActionSchema = z.strictObject({
   person: connectionPersonSchema,
   id: z.uuid(),
   inputHash: inputHashSchema,
+  /**
+   * The chat platform the person decided on (a press on a Teams card), as
+   * core verified it: its events name it. None in Grasp's own app.
+   */
+  via: chatPlatformSchema.optional(),
 });
 export type ConfirmAction = z.input<typeof confirmActionSchema>;
 
@@ -1153,6 +1167,8 @@ export type ConfirmAction = z.input<typeof confirmActionSchema>;
 export const declineActionSchema = z.strictObject({
   person: connectionPersonSchema,
   id: z.uuid(),
+  /** As `ConfirmAction.via`. */
+  via: chatPlatformSchema.optional(),
 });
 export type DeclineAction = z.input<typeof declineActionSchema>;
 
@@ -1535,7 +1551,7 @@ export type ConnectorEventsAck = z.input<typeof connectorEventsAckSchema>;
  * (`ChannelApi.channelFetch`). Each is added with its hosts and its
  * credential in connect's src/channels.ts when it is switched on.
  */
-export const channelPlatformSchema = z.enum(["teams"]);
+export const channelPlatformSchema = z.enum(["teams", "slack", "whatsapp"]);
 export type ChannelPlatform = z.infer<typeof channelPlatformSchema>;
 
 /**
@@ -1710,6 +1726,14 @@ export interface ConnectApi extends PackageRegistryApi, ChannelApi {
   connectorContract: (
     request: ConnectorContractRequest
   ) => Promise<ConnectorContract>;
+  /**
+   * Whether an action of a connection only reads, the input properties it
+   * takes and the connection's provider (`ActionShape`), by the rules a
+   * call of it goes by. `connect.action_not_found` for one the connection
+   * doesn't allow; `connect.server_unavailable` when a Composio server
+   * can't be reached to list its tools.
+   */
+  actionShape: (request: ActionShapeRequest) => Promise<ActionShape>;
   /**
    * The held actions waiting for `person`, newest first (at most 200):
    * none for Grasp staff.
@@ -1907,6 +1931,25 @@ export type ConnectorContractRequest = z.input<
   typeof connectorContractRequestSchema
 >;
 
+/** Which action of which connection `actionShape` describes. */
+export const actionShapeRequestSchema = z.strictObject({
+  connectionId: connectionIdSchema,
+  action: permissionActionSchema,
+});
+export type ActionShapeRequest = z.input<typeof actionShapeRequestSchema>;
+
+/**
+ * What core needs to know of an action before a chat's agent calls it,
+ * without calling it: whether it only reads (as connect decides whether
+ * it holds a call), the input properties it takes (`null` when connect
+ * can't read them now), and the connection's provider.
+ */
+export interface ActionShape {
+  readOnly: boolean;
+  inputs: string[] | null;
+  provider: string;
+}
+
 /** One action of a generated contract. */
 export interface ConnectorContractAction {
   /** The tool a call of it names, e.g. `mail.send`. */
@@ -1986,6 +2029,8 @@ export const connectErrors = defineErrorFamily({
   "connect.action_failed": "The action reported an error.",
   "connect.pending_not_found":
     "There's no such action waiting for you: it was confirmed or declined, or it isn't yours.",
+  "connect.pending_expired":
+    "This action waited past the end of the day it was asked on, so it ended and nothing was done. Ask again.",
   "connect.pending_changed":
     "This isn't the action you were shown, so nothing was done. Look at it again.",
   "connect.held":

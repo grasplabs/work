@@ -25,6 +25,7 @@ import { z } from "zod";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
   appPointers,
+  appToolClasses,
   sharedMailboxPointers,
   teamMembers,
   teams,
@@ -56,7 +57,7 @@ const toolClassSchema = z.enum(toolClasses);
  * generated table and checked: a value that isn't a class stops core from
  * loading rather than letting the tool through.
  */
-const nativeClasses: ReadonlyMap<
+export const nativeClasses: ReadonlyMap<
   string,
   ReadonlyMap<string, ToolClass>
 > = new Map(
@@ -94,7 +95,7 @@ export const audienceOf = (row: {
 };
 
 /** Off, for a row that can't be read: never more than the admin chose. */
-const off: ToolClassAudience = { who: "nobody" };
+export const off: ToolClassAudience = { who: "nobody" };
 
 /** Every class the company turns on or off, as it has them now. */
 export const readToolClasses = async (
@@ -269,6 +270,28 @@ const audienceNow = async (
   return audienceOf(row) ?? off;
 };
 
+/**
+ * For whom `app` narrows `toolClass` now: `undefined` while it has it as
+ * the class is, off for a row that can't be read.
+ */
+const appAudienceNow = async (
+  env: Env,
+  app: string,
+  toolClass: CompanyToolClass
+): Promise<ToolClassAudience | undefined> => {
+  const row = await drizzle(env.DB)
+    .select({ who: appToolClasses.who, teams: appToolClasses.teams })
+    .from(appToolClasses)
+    .where(
+      and(eq(appToolClasses.app, app), eq(appToolClasses.toolClass, toolClass))
+    )
+    .get();
+  if (row === undefined || row.who === "asClass") {
+    return undefined;
+  }
+  return audienceOf(row) ?? off;
+};
+
 /** Whether `audience` takes in the person `userId`. */
 export const takesIn = async (
   env: Env,
@@ -420,6 +443,14 @@ export const requireToolClassOn = async (
     mailTool ? inOwnMailbox[toolClass] : toolClass
   );
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
+    throw connectErrors.create("connect.class_off");
+  }
+  // An app only narrows its classes (Settings › Stephen, stephen-reach.ts).
+  const narrowed = await appAudienceNow(env, owner.provider, toolClass);
+  if (
+    narrowed !== undefined &&
+    !(await takesIn(env, narrowed, authority.onBehalfOf))
+  ) {
     throw connectErrors.create("connect.class_off");
   }
   return {};

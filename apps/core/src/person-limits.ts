@@ -213,13 +213,19 @@ export const personLimitsIn = async (
   month: string
 ): Promise<PersonLimits> => {
   const ledger = modelLedger(env);
-  const [stored, everyone, memberships] = await Promise.all([
+  const db = drizzle(env.DB);
+  const [stored, everyone, memberships, organizationTeams] = await Promise.all([
     ledger.personLimits(),
     membersOf(env),
-    drizzle(env.DB)
+    db
       .select({ userId: teamMembers.userId, teamId: teamMembers.teamId })
       .from(teamMembers)
       .orderBy(asc(teamMembers.teamId)),
+    db
+      .select({ teamId: teams.id, name: teams.name })
+      .from(teams)
+      .where(eq(teams.organizationId, organizationId))
+      .orderBy(asc(teams.name), asc(teams.id)),
   ]);
   const listed = everyone.slice(0, personLimitsListed);
   const keys = listed.map(({ userId }) => userId);
@@ -259,5 +265,6 @@ export const personLimitsIn = async (
       };
     }),
     more: everyone.length > listed.length,
+    teams: organizationTeams,
   };
 };

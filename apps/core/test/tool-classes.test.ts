@@ -163,6 +163,7 @@ describe("the classes a company turned on", setUpTime, () => {
     await env.DB.batch([
       env.DB.prepare("DELETE FROM tool_class_settings"),
       env.DB.prepare("DELETE FROM shared_mailbox_pointers"),
+      env.DB.prepare("DELETE FROM app_tool_classes"),
     ]);
   });
 
@@ -224,6 +225,46 @@ describe("the classes a company turned on", setUpTime, () => {
     );
     // Held for the person to confirm: nothing has gone out yet.
     await expect(sentWith(theirs.subject)).resolves.toStrictEqual([]);
+  });
+
+  it("let an app narrow a class to some teams, from the next call on, but never widen it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const inTeam = await signedInApi(idp, "user");
+    const outside = await signedInApi(idp, "user");
+    const { id, mailbox } = await connectShared(admin);
+    await pointedAt(admin, mailbox);
+    const team = await teamOf(inTeam.userId);
+    await admin.api.connections.setToolClass("read-company", {
+      who: "everyone",
+    });
+    // Microsoft 365 reads the company's for one team only; Reach others,
+    // off for the company, stays off however the app has it.
+    await admin.api.connections.setAppToolClass("microsoft", "read-company", {
+      who: "teams",
+      teams: [team],
+    });
+    await admin.api.connections.setAppToolClass("microsoft", "reach-others", {
+      who: "everyone",
+    });
+
+    const theirs = await chatCalling(admin, inTeam.userId, mailbox, id);
+    await expect(theirs.answered()).resolves.toBe(
+      answer({ list: "done", send: off })
+    );
+    const others = await chatCalling(admin, outside.userId, mailbox, id);
+    await expect(others.answered()).resolves.toBe(
+      answer({ list: off, send: off })
+    );
+
+    // As the class again: the person outside the team reads from the next
+    // call on.
+    await admin.api.connections.setAppToolClass("microsoft", "read-company", {
+      who: "asClass",
+    });
+    const again = await chatCalling(admin, outside.userId, mailbox, id);
+    await expect(again.answered()).resolves.toBe(
+      answer({ list: "done", send: off })
+    );
   });
 
   it("are changed by the company's admins only, never by Grasp staff, and only to teams it has", async () => {
