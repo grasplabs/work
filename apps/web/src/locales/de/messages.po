@@ -6681,7 +6681,7 @@ msgstr "Die Nutzung beginnt, wenn Stephen das Kickoff liest, und wächst mit jed
 
 #: src/interview/page.tsx
 msgid "It stays here for you to read. You can still delete it."
-msgstr "Es bleibt hier, damit du es lesen kannst. Du kannst es weiterhin löschen."
+msgstr "Es bleibt hier, damit Sie es lesen können. Sie können es weiterhin löschen."
 
 #: src/interview/words.ts
 msgid "It still does not work. You can stop for now and come back later. Your place is kept."
@@ -9346,7 +9346,7 @@ msgstr "oder wählen Sie sie auf Ihrem Computer aus"
 
 #: src/interview/closed.tsx
 msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
-msgstr "Oder zieh dich zurück: Nichts von dem, was du gesagt hast, wird ab jetzt verwendet, und du kannst es hier weiterhin lesen."
+msgstr "Oder ziehen Sie sich zurück: Nichts von dem, was Sie gesagt haben, wird ab jetzt verwendet, und Sie können es hier weiterhin lesen."
 
 #: src/routes/_shell.onboarding.tsx
 msgctxt "onboarding area section"
@@ -15249,7 +15249,7 @@ msgstr "Sie wurden dies als {owner} gefragt. Beantworten Sie es im Gehirn: Alle 
 
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
-msgstr "Du hast dich zurückgezogen. Nichts von dem, was du gesagt hast, wird ab jetzt verwendet."
+msgstr "Sie haben sich zurückgezogen. Nichts von dem, was Sie gesagt haben, wird ab jetzt verwendet."
 
 #: src/interview/transcript.tsx
 #: src/routes/guest.tsx

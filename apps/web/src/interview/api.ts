@@ -161,6 +161,14 @@ const posted = async <T>(
   if (!response.ok && response.status !== 409) {
     return await refusalOf(response);
   }
+  if (response.status === 409) {
+    // A 409 is the copy kept, or a refusal with its code (a notice that
+    // changed): the refusal is told as it is, never tried again.
+    const refusal = await refusalOf(response.clone());
+    if (refusal.code !== null) {
+      return refusal;
+    }
+  }
   try {
     const parsed = schema.safeParse(await response.json());
     if (parsed.success) {
