@@ -123,7 +123,10 @@ export interface BudgetInput {
    * its lineage's root (models.ts, `lineage`).
    */
   lineage?: { rootRunId: string };
-  work?: { authority: Authority } | { onboarding: true };
+  work?:
+    | { authority: Authority }
+    | { onboarding: true }
+    | { platform: "brain_upkeep" };
 }
 
 /** The person a call is made by or for, if any. */

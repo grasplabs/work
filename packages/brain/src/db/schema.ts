@@ -571,3 +571,120 @@ export const brainCaptureCursors = sqliteTable("brain_capture_cursors", {
   seq: integer().notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
+
+/**
+ * Where linking each source stands (../entities.ts): one row per document
+ * or memory record, named `doc:<id>` or `mem:<id>`, written in the batch
+ * that makes a new version or revision current, so the change is its own
+ * durable intent. `version` is that version; `linked_version` the one
+ * whose mentions are held. Removing the source removes its row, and its
+ * mentions with it.
+ */
+export const brainLinkJobs = sqliteTable(
+  "brain_link_jobs",
+  {
+    source: text().primaryKey(),
+    documentId: text("document_id").references(() => documents.id, {
+      onDelete: "cascade",
+    }),
+    memoryId: text("memory_id").references(() => brainMemories.id, {
+      onDelete: "cascade",
+    }),
+    /** The source's current version (a memory's revision). */
+    version: integer().notNull(),
+    /** The version whose mentions are held, if any. */
+    linkedVersion: integer("linked_version"),
+    state: text({ enum: ["queued", "retrying", "linked", "failed"] }).notNull(),
+    /** Failed attempts at linking the current version. */
+    attempts: integer().notNull().default(0),
+    /** The code of the error linking the current version last failed with. */
+    failure: text(),
+    /** Which run links the current version: 0, then one more per rerun. */
+    run: integer().notNull().default(0),
+    /** When linking the current version last failed for good. */
+    failedAt: timestamp("failed_at"),
+    /** Only part of the text was read: the rest is past the extractor's bound. */
+    partial: integer({ mode: "boolean" }).notNull().default(false),
+    /** When the source last changed: the sweep waits for it to settle. */
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    index("brain_link_jobs_state_idx").on(table.state, table.updatedAt),
+    index("brain_link_jobs_document_idx").on(table.documentId),
+    index("brain_link_jobs_memory_idx").on(table.memoryId),
+  ]
+);
+
+/**
+ * Stable entities (../entities.ts): only an ID and the kind the
+ * extractor gave. Names live on the mentions, so removing every source
+ * of a name removes the name; the entity's ID stays for when it is
+ * mentioned again.
+ */
+export const brainEntities = sqliteTable("brain_entities", {
+  id: text().primaryKey(),
+  kind: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The exact evidence an entity is known by, each keyed to the deployment
+ * (an HMAC, never the identifier or name itself): an identifier the
+ * source states (`id:`), or, for an entity with none, its name within one
+ * partition (`name:`). One entity per key.
+ */
+export const brainEntityKeys = sqliteTable(
+  "brain_entity_keys",
+  {
+    keyHash: text("key_hash").primaryKey(),
+    entityId: text("entity_id")
+      .notNull()
+      .references(() => brainEntities.id, { onDelete: "cascade" }),
+  },
+  (table) => [index("brain_entity_keys_entity_idx").on(table.entityId)]
+);
+
+/**
+ * The entity mentions of each source's linked version, replaced whole by
+ * each generation: `linked` to one entity, or `ambiguous` with the
+ * entities it may be (`candidates`, a JSON array), never linked until
+ * evidence decides it.
+ */
+export const brainMentions = sqliteTable(
+  "brain_mentions",
+  {
+    source: text()
+      .notNull()
+      .references(() => brainLinkJobs.source, { onDelete: "cascade" }),
+    position: integer().notNull(),
+    documentId: text("document_id"),
+    memoryId: text("memory_id"),
+    version: integer().notNull(),
+    /** Whose names it resolves among: `collection:<id>` or `memory:<scope>:<id>`. */
+    partition: text().notNull(),
+    kind: text().notNull(),
+    /** As the source wrote it. */
+    name: text().notNull(),
+    /** The name normalized, as names are matched. */
+    alias: text().notNull(),
+    entityId: text("entity_id").references(() => brainEntities.id, {
+      onDelete: "cascade",
+    }),
+    state: text({ enum: ["linked", "ambiguous"] }).notNull(),
+    /** How it was linked: an identifier, a name, or a new entity. */
+    resolution: text({
+      enum: ["identifier", "alias", "new", "none"],
+    }).notNull(),
+    /** JSON array of entity IDs: an ambiguous mention's candidates. */
+    candidates: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.source, table.position] }),
+    index("brain_mentions_entity_idx").on(table.entityId),
+    index("brain_mentions_alias_idx").on(
+      table.partition,
+      table.kind,
+      table.alias
+    ),
+  ]
+);

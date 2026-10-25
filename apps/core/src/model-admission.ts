@@ -277,7 +277,10 @@ export const waitOf = (
 /** What a call's shares count it by: its trigger and work, which core's host sets. */
 interface FairInput {
   trigger: AuditActor;
-  work?: { authority: Authority } | { onboarding: true };
+  work?:
+    | { authority: Authority }
+    | { onboarding: true }
+    | { platform: "brain_upkeep" };
   binding?: { app: string };
   /** For a workflow run's call: whose share it takes (models.ts). */
   shareSubject?: string;

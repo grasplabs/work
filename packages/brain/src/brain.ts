@@ -23,6 +23,15 @@ export interface IndexJob {
 }
 
 /**
+ * A source version's entity linking (entities.ts), as the Brain asks its
+ * host to run it: `source` is the link job's (`doc:<id>`, `mem:<id>`).
+ */
+export interface LinkJob {
+  source: string;
+  version: number;
+}
+
+/**
  * What the Brain asks of its host, in one place: the Brain reaches the
  * host's people, roles, teams and Apps, its buckets, audit log, secrets,
  * job runner and clock only through these. `C` is the host's caller,
@@ -159,12 +168,21 @@ export interface BrainPorts<C> {
     ) => Promise<CryptoKey>;
   };
   /**
-   * Runs indexing jobs (indexing.ts) durably: the host runs `runIndexing`
-   * for each, retrying as it says.
+   * Extracts the entities `text` mentions, through the host's own model
+   * gateway (its rules, budgets and audit): the Brain never calls a model
+   * provider itself. Answers what `extractedEntitiesSchema` (entities.ts)
+   * takes, which the Brain validates again and checks against the text;
+   * throws when it can't, and the linking job retries.
+   */
+  extractEntities: (text: string) => Promise<unknown>;
+  /**
+   * Runs indexing jobs (indexing.ts) and linking jobs (entities.ts)
+   * durably: the host runs `runIndexing` or `runLinking` for each,
+   * retrying as it says.
    */
   jobs: {
     /** Starts the job `id`; one started already under it is left as it is. */
-    start: (id: string, job: IndexJob) => Promise<void>;
+    start: (id: string, job: IndexJob | LinkJob) => Promise<void>;
     /** Whether the job `id` is running or has ended; undefined if unknown. */
     status: (id: string) => Promise<"running" | "ended" | undefined>;
   };
