@@ -334,7 +334,8 @@ describe("consolidating episodes into lesson candidates", () => {
       ),
       cas: await lessonCount(brain, person(cas)),
     }).toStrictEqual({
-      job: { read: 0, patched: 1 },
+      // Two of three failures left: retired by the erasure itself.
+      job: { read: 0, patched: 0 },
       state: "retired",
       retiredBy: "evidence",
       erasedStillEvidence: false,
@@ -441,5 +442,52 @@ describe("consolidating episodes into lesson candidates", () => {
       state: lesson?.state,
       retiredBy: lesson?.retiredBy,
     }).toStrictEqual({ state: "retired", retiredBy: "evidence" });
+  });
+
+  it("keeps a lesson an erasure retired while a job was patching it retired", async () => {
+    const { brain } = testHost();
+    const ann = `ann-${crypto.randomUUID()}`;
+    const first = [run(ann, "failed"), run(ann, "failed"), run(ann, "failed")];
+    await recorded(brain, first);
+    await consolidate(brain, person(ann));
+    await recorded(brain, [run(ann, "failed")]);
+    // The job reads four failures; two of the first go before it writes.
+    let erased = false;
+    const racing = new Proxy(env.BRAIN, {
+      get: (target, property) => {
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (!erased) {
+              erased = true;
+              await eraseOutcomes(
+                brain,
+                first.slice(0, 2).map(({ evidenceId }) => evidenceId)
+              );
+            }
+            return await target.batch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    await consolidate(createBrain(racing, brain.ports), person(ann));
+    const [lesson] = await lessonsOf(brain, person(ann));
+
+    expect({
+      erased,
+      state: lesson?.state,
+      retiredBy: lesson?.retiredBy,
+      // Revision 2 is the erasure's retirement; nothing after it.
+      revision: lesson?.revision,
+    }).toStrictEqual({
+      erased: true,
+      state: "retired",
+      retiredBy: "evidence",
+      revision: 2,
+    });
   });
 });

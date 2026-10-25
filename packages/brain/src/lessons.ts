@@ -18,6 +18,7 @@ import { toHex } from "./encoding.ts";
 import type { IndexStep, StepConfig } from "./indexing.ts";
 import type { Json } from "./json.ts";
 import { canonicalJson } from "./json.ts";
+import { lessonMinFailures } from "./lesson-orphans.ts";
 import { executionRefSchema } from "./outcomes.ts";
 
 // Lesson candidates (GRA-301; the Brain design's "Keep episodes and lessons
@@ -52,8 +53,8 @@ export const consolidationLimits = {
   patchesPerJob: 20,
   /** Candidates one scope holds open; past it, no new ones. */
   openPerScope: 50,
-  /** Failures a pattern needs before it is a lesson. */
-  minFailures: 3,
+  /** Failures a pattern needs before it is a lesson, and to stay one. */
+  minFailures: lessonMinFailures,
 } as const;
 
 /** The Brain's own, as its events name it. */
@@ -418,7 +419,13 @@ const applyPatch = async <C>(
     ]),
     patch.state
   )}`;
-  const allowed = notForgotten(patch.scope, patch.since);
+  // A candidate only while enough of its support still exists: one read
+  // before an erasure never lands as a candidate after it.
+  const supported =
+    patch.state === "candidate"
+      ? sql`(SELECT count(*) FROM ${brainEpisodes} WHERE ${inList(brainEpisodes.id, patch.content.supporting)}) >= ${lessonMinFailures}`
+      : sql`1`;
+  const allowed = sql`${notForgotten(patch.scope, patch.since)} AND ${supported}`;
   const atBase = sql`(SELECT ${brainLessons.revision} FROM ${brainLessons} WHERE ${brainLessons.id} = ${patch.lessonId}) = ${patch.base} AND ${allowed}`;
   const thisPatch = sql`EXISTS (SELECT 1 FROM ${brainLessonVersions} WHERE ${brainLessonVersions.patchKey} = ${patchKey})`;
   const evidence = [
