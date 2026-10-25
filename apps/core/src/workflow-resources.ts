@@ -52,6 +52,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  ne,
   or,
   sql,
 } from "drizzle-orm";
@@ -2770,6 +2771,64 @@ export const shareWorkflowResource = async (
     }
     throw error;
   }
+};
+
+/**
+ * Whether workflow `id`'s owner lets people ask Stephen to start it in a
+ * chat app (`workflow_resources.askable`), for anyone with a role in it.
+ */
+export const workflowAskable = async (
+  env: Env,
+  by: Acting,
+  id: unknown
+): Promise<boolean> => {
+  const workflow = await requireWorkflowRole(env, by, id, "user");
+  const [row] = await drizzle(env.DB)
+    .select({ askable: workflowResources.askable })
+    .from(workflowResources)
+    .where(eq(workflowResources.id, workflow.id));
+  return row?.askable === true;
+};
+
+/**
+ * Lets people ask Stephen to start workflow `id` in a chat app, or stops
+ * that, for `by`, who must own it and isn't Grasp staff: whom he may offer
+ * it to is whoever could start it themselves (channels/workflow-offers.ts).
+ * A change is audited; setting what it is already records nothing.
+ */
+export const setWorkflowAskable = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  askable: unknown
+): Promise<void> => {
+  requireNotStaff(by);
+  const workflow = await requireWorkflowRole(env, by, id, "user");
+  if (workflow.owner !== by.userId) {
+    throw roleErrors.create("role.forbidden");
+  }
+  const allowed = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    z.boolean(),
+    askable
+  );
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(workflowResources)
+      .set({ askable: allowed })
+      .where(
+        and(
+          eq(workflowResources.id, workflow.id),
+          isNull(workflowResources.deletedAt),
+          ne(workflowResources.askable, allowed)
+        )
+      ),
+    outboxedIfChanged(
+      db,
+      entry(by, "workflow.askable_changed", workflow.id, { askable: allowed })
+    ),
+  ]);
 };
 
 /**
