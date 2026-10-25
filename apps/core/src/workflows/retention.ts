@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedWhere } from "../audit-outbox.ts";
+import { eraseRunCaptures } from "../brain-capture.ts";
 import {
   workflowResourceParams,
   workflowEmittedEvents,
@@ -598,8 +599,11 @@ export const sweepRunDetails = async (env: Env, now: Date): Promise<void> => {
     // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
     const gone = await removedElsewhere(env, rows);
     if (gone.length > 0) {
-      // Its receipts first, the row marked last: a sweep that stops in
-      // between leaves the run due, and the next does it all again.
+      // Its receipts and what the Brain captured of it first, the row
+      // marked last: a sweep that stops in between leaves the run due, and
+      // the next does it all again.
+      // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
+      await eraseRunCaptures(env, gone);
       // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
       await pruneReceipts(db, gone, now);
       // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another

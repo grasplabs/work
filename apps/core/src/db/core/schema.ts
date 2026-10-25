@@ -2169,6 +2169,43 @@ export const quotaPolicies = sqliteTable("quota_policies", {
 });
 
 /**
+ * Settled runs' outcomes still owed to the Brain (src/brain-capture.ts):
+ * one row per eligible run, written with the write that ended it
+ * (src/workflows/runs.ts, `projectStatus`), so a run never ends without
+ * its capture. Delivery builds the outcome from the run's row then, and
+ * deletes the intent once the Brain has it; one the Brain refused for good
+ * stays `dead`, for someone to look at. `seq` only grows (AUTOINCREMENT),
+ * so it is the Brain's cursor of this source.
+ */
+export const brainCaptureIntents = sqliteTable(
+  "brain_capture_intents",
+  {
+    seq: integer().primaryKey({ autoIncrement: true }),
+    /** The Brain's event ID: one intent per event. */
+    eventId: text("event_id").notNull(),
+    /** The run the outcome rests on: its erasure drops the intent. */
+    evidenceId: text("evidence_id").notNull(),
+    state: text({ enum: ["pending", "dead"] })
+      .notNull()
+      .default("pending"),
+    /** Failed deliveries. */
+    attempts: integer().notNull().default(0),
+    /** The code of the last failed delivery. */
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("brain_capture_intents_event_idx").on(table.eventId),
+    index("brain_capture_intents_evidence_idx").on(table.evidenceId),
+    index("brain_capture_intents_state_idx").on(
+      table.state,
+      table.attempts,
+      table.seq
+    ),
+  ]
+);
+
+/**
  * Each pause, resume or cancel of a run that the host admitted
  * (src/workflows/controls.ts): its durable receipt. `admitted` until the
  * engine confirms it (`applied`), or a cancel supersedes a pause or resume

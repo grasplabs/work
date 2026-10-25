@@ -70,6 +70,12 @@ export interface BrainPorts<C> {
      */
     key: (reader: C) => Promise<string>;
   };
+  /**
+   * The audiences `reader` is in now, by the host's IDs for them (core's:
+   * the chats others share that count them, while they are a member): a
+   * shared session's events reach only these (outcomes.ts).
+   */
+  audiences: (reader: C) => Promise<readonly string[]>;
   /** Who `reader` is, as the host's audit log names them. */
   actorOf: (reader: C) => Json;
   /**

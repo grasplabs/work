@@ -18,6 +18,8 @@ import type { OnErase } from "../src/purge.ts";
 export interface Caller {
   userId: string;
   reads: readonly string[];
+  /** The audiences the host counts them in now. */
+  audiences?: readonly string[];
 }
 
 /** The Brain over the test database, and what its ports were told. */
@@ -80,6 +82,7 @@ export const testHost = (): {
           }))
         ),
     },
+    audiences: async (caller) => await Promise.resolve(caller.audiences ?? []),
     blobs: env.BLOBS,
     audit: {
       eventOf: (entry) => {

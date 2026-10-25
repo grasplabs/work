@@ -485,7 +485,7 @@ const purgePersonal = async <C>(
       db.delete(documents).where(eq(documents.collectionId, collectionId)),
       db.delete(collections).where(eq(collections.id, collectionId)),
       ...released.after,
-      ...forgetPerson(db, input.userId),
+      ...forgetPerson(db, input.userId, brain.ports.clock()),
     ];
     if (first !== undefined) {
       await db.batch([first, ...rest]);
