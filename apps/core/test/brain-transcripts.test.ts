@@ -21,9 +21,9 @@ import {
 // WebVTT file uploaded into Knowledge, its text extracted in the sandbox,
 // its turns saved with its document (src/brain-transcripts.ts,
 // packages/brain transcripts.ts). `brain.read` lists such a source by how
-// many turns it has; `brain.transcript` opens one. A team's interviews'
-// transcript is tried in brain-intake.test.ts, and the kickoff's absence
-// in brain.test.ts. The ways it can leak, tried here:
+// many turns it has; `brain.transcript` opens one. That a team's
+// interviews have none, for anyone, is tried in brain-intake.test.ts, and
+// the kickoff's absence in brain.test.ts. The ways it can leak, tried here:
 //
 // - To someone who may not read the document: another person, an admin
 //   (who reads the collections for admins, never a person's own), or

@@ -4838,6 +4838,10 @@ msgstr "Dominios"
 msgid "Domains and agents with a permission"
 msgstr "Dominios y agentes con un permiso"
 
+#: src/knowledge/uploads.tsx
+msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
+msgstr "No subas grabaciones de entrevistas ni sus subtítulos: las entrevistas van por el flujo de entrevistas."
+
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
 msgid "done"
@@ -13896,8 +13900,8 @@ msgid "Upload"
 msgstr "Subir"
 
 #: src/knowledge/uploads.tsx
-msgid "Upload a PDF, Word or Excel file"
-msgstr "Sube un archivo PDF, Word o Excel"
+msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
+msgstr "Sube un archivo PDF, Word o Excel, o subtítulos (.vtt)"
 
 #: src/policies/policies-table.tsx
 msgctxt "column: who uploaded a policy, and when"

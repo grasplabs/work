@@ -370,8 +370,7 @@ export interface BrainApi {
   /**
    * One source's transcript (`brain.transcript`), as the person may read it
    * now, or null: alike when it has none and when they may not read it.
-   * A team's interviews' carries only the statements their people
-   * approved; never anything said.
+   * A team's interviews have none, for anyone.
    */
   transcript: (sourceId: string) => Promise<Transcript | null>;
   /**

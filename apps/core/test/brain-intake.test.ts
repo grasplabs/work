@@ -3,9 +3,9 @@ import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { eventsAfter, logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { answering } from "./interview-link.ts";
 import {
@@ -13,8 +13,6 @@ import {
   fact,
   kept,
   mapped,
-  othersTold,
-  rosterOf,
   team,
   ticketsReply,
   told,
@@ -44,8 +42,8 @@ import {
 // - A drawing written over when the work is drawn again.
 // - What a record rests on lost, so deleting an interview can't find it.
 // - Someone else adding, or squatting on, the onboarding's own records.
-// - What someone said, or a fact they didn't approve, in the transcript of
-//   their team's interviews: its turns are the approved statements alone.
+// - What someone said, approved or not, on their team's interviews'
+//   source: it has no transcript, for members, admins and staff alike.
 
 const idp = mockIdp();
 
@@ -338,50 +336,32 @@ describe(
       });
     });
 
-    it("carries as its interviews' transcript only the statements their people approved, to staff, admins and members alike, and nothing to anyone outside", async () => {
+    it("gives its interviews' source no transcript and no statement, for members, admins and staff alike, and nothing to anyone outside", async () => {
       const store = onboardingStore(env);
       const ids = await team();
       await mapped(ids);
-      await agree(ids.max, [
-        fact("m1", "step", "Opens the ticket in Zendesk."),
-        fact("m2", "system", "Tickets arrive in Zendesk."),
-        fact("m3", "handoff", "Max hands billing questions to Noor."),
-      ]);
-      await agree(ids.mia, [
-        fact("i1", "system", "Tickets arrive in Zendesk."),
-        fact(
-          "i2",
-          "wish",
-          "Would like the customer number filled in for them."
-        ),
-      ]);
-      // Mo says more than he approves: a raw line, and a fact he left out
-      // of what he agreed to.
+      await told(ids);
+      // Rik also says something he doesn’t approve.
       await agree(
-        ids.mo,
+        ids.rik,
         [
-          fact("o1", "wait", "A ticket waits days for the customer's reply."),
+          fact("r1", "step", "Checks the queue at noon."),
           {
-            id: "o2",
+            id: "r2",
             tag: "rule",
-            text: "You said: Mo skips the queue for his friends.",
-            record: "Mo skips the queue for his friends.",
+            text: "You said: Rik skips the queue for his friends.",
+            record: "Rik skips the queue for his friends.",
           },
         ],
-        0,
-        [
-          { from: "stephen", text: "What starts one?" },
-          { from: "person", text: "Honestly Lea never answers her mail." },
-        ]
+        1,
+        [{ from: "person", text: "Honestly Lea never answers her mail." }]
       );
-      await othersTold(ids);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
       await store.intakeNext();
-      // The audience the read-back admitted them to (GRA-329's notice,
-      // `company.role_and_team`): the company's Brain, by team and role,
-      // never by name. Its readers, staff and admins included, each get
-      // the approved statements and never a raw turn; nobody outside the
-      // deployment gets anything.
+      // Nick (GRA-529): members and admins see only what five or more
+      // people said, put together, and staff only numbers. Nothing core
+      // holds is that yet, so the source has no turns for anyone: only how
+      // many people it rests on.
       const member = await signedInApi(idp, "user");
       const admin = await signedInApi(idp, "admin");
       const { core: staffCore } = await openRpc(
@@ -390,79 +370,44 @@ describe(
       const staff = staffCore.authenticate();
       const { core: nobodyCore } = await openRpc();
       const teamId = `team-${ids.team}`;
+      const records = await kept(ids);
+      const said = [
+        ...records.flatMap(({ type, body }) =>
+          type === "statement"
+            ? [z.object({ text: z.string() }).parse(JSON.parse(body)).text]
+            : []
+        ),
+        "Lea never answers",
+        "skips the queue",
+      ];
       const shownTo = async (api: SessionApi) => {
         const brain = await api.brain.read();
         const source = brain.sources.find(
           ({ teamIds }) => teamIds?.includes(teamId) === true
         );
-        const transcript =
+        const opened =
           source === undefined ? null : await api.brain.transcript(source.id);
-        const shown = JSON.stringify([source, transcript]);
+        const shown = JSON.stringify([source, opened]);
         return {
-          // The listing says how many turns; opening the source reads them.
-          listed: source?.transcriptTurns,
+          listed: source === undefined ? null : { how: source.how },
+          turns: source?.transcriptTurns,
           inListing: source?.transcript,
-          transcript,
-          sameAsStatements:
-            JSON.stringify(
-              transcript?.turns.map(({ text }) => text).toSorted()
-            ) ===
-            JSON.stringify(
-              brain.statements
-                .filter(({ sourceId }) => sourceId === source?.id)
-                .map(({ text }) => text)
-                .toSorted()
-            ),
-          unsaid: ["Lea never answers", "skips the queue", "You said"].filter(
-            (words) => shown.includes(words)
-          ),
+          opened,
+          statements: said.filter((words) => shown.includes(words)),
         };
       };
-      const admitted = {
-        listed: 4,
+      const safe = {
+        listed: { how: "7 people" },
+        turns: undefined,
         inListing: undefined,
-        transcript: {
-          unit: "passage",
-          turns: [
-            {
-              at: "1",
-              speaker: "Ops",
-              text: "A ticket waits days for the customer's reply.",
-            },
-            {
-              at: "2",
-              speaker: "Ops",
-              text: "Someone hands billing questions to someone.",
-            },
-            { at: "3", speaker: "Ops", text: "Tickets arrive in Zendesk." },
-            {
-              at: "4",
-              speaker: "Ops",
-              text: "Would like the customer number filled in for them.",
-            },
-          ],
-          chapters: [],
-        },
-        sameAsStatements: true,
-        unsaid: [],
+        opened: null,
+        statements: [],
       };
-      const head = await logHead();
-      const shown = {
+      expect({
+        said: said.length > 2,
         staff: await shownTo(staff),
         admin: await shownTo(admin.api),
         member: await shownTo(member.api),
-      };
-      const events = await eventsAfter(head);
-      const opened = events.filter(
-        ({ action }) => action === "brain.transcript.read"
-      );
-      expect({
-        ...shown,
-        // Each opening recorded, by source and count, never a word.
-        opened: opened.map(({ target, detail }) => ({
-          type: target?.type,
-          turns: detail?.turns,
-        })),
         nobody: {
           read: await outcome(nobodyCore.authenticate().brain.read()),
           opened: await outcome(
@@ -472,59 +417,14 @@ describe(
           ),
         },
       }).toStrictEqual({
-        staff: admitted,
-        admin: admitted,
-        member: admitted,
-        opened: [
-          { type: "source", turns: 4 },
-          { type: "source", turns: 4 },
-          { type: "source", turns: 4 },
-        ],
+        said: true,
+        staff: safe,
+        admin: safe,
+        member: safe,
         nobody: {
           read: "auth.unauthenticated",
           opened: "auth.unauthenticated",
         },
-      });
-
-      // The admin renames the roster team: their brain names it by the
-      // roster, a member's by its record, and each transcript's speaker is
-      // the team as that reader's brain names it.
-      const renamed = rosterOf(ids, [
-        "lea",
-        "max",
-        "mia",
-        "mo",
-        "noor",
-        "pim",
-        "rik",
-      ]);
-      await store.saveRoster(
-        {
-          ...renamed,
-          teams: renamed.teams.map((each) => ({ ...each, name: "Support" })),
-        },
-        { type: "system" }
-      );
-      const speakerFor = async (api: SessionApi) => {
-        const brain = await api.brain.read();
-        const source = brain.sources.find(
-          ({ teamIds }) => teamIds?.includes(teamId) === true
-        );
-        const transcript =
-          source === undefined ? null : await api.brain.transcript(source.id);
-        return {
-          team: brain.teams.find(({ id }) => id === teamId)?.name,
-          speakers: [
-            ...new Set(transcript?.turns.map(({ speaker }) => speaker)),
-          ],
-        };
-      };
-      expect({
-        admin: await speakerFor(admin.api),
-        member: await speakerFor(member.api),
-      }).toStrictEqual({
-        admin: { team: "Support", speakers: ["Support"] },
-        member: { team: "Ops", speakers: ["Ops"] },
       });
     });
 

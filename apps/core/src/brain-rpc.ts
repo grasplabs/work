@@ -15,6 +15,7 @@ import type {
   Vision,
   Workspace,
 } from "@grasp-os/shared/brain";
+import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
 import type {
   BrainRecordInput,
   BrainRecordsAdded,
@@ -47,8 +48,6 @@ import {
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
 import {
   brainTranscript,
-  interviewTurns,
-  isTeamInterviews,
   knowledgeTranscriptSources,
 } from "./brain-transcripts.ts";
 import { catalogEntries, personOf } from "./connections.ts";
@@ -76,9 +75,9 @@ import type { SessionCheck } from "./session-check.ts";
 // |                    | interview and the documents shared in the onboarding     |
 // |                    | (admins); each team's interviews, once the brain holds   |
 // |                    | what they learned, for whoever reads records naming them |
-// |                    | (with how many admitted statements its transcript has);  |
-// |                    | Knowledge documents saved with a transcript, for whoever |
-// |                    | may read them, by turn count (brain-transcripts.ts)      |
+// |                    | (never with a transcript); Knowledge documents saved     |
+// |                    | with a transcript, for whoever may read them, by turn    |
+// |                    | count (brain-transcripts.ts)                             |
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
@@ -98,8 +97,7 @@ import type { SessionCheck } from "./session-check.ts";
 // company, so its reading reaches the company's admins here too, never its
 // transcript. Everyone else gets the brain without them. No
 // interview's words reach the brain: the onboarding keeps them for staff
-// alone, so a team's interviews carry as transcript only the statements
-// their people approved (brain-transcripts.ts). A team lead's interview shows as
+// alone, so sources carry no transcript. A team lead's interview shows as
 // its team's stakeholder interview: only someone who led the team when
 // their link went out, as the admin's progress counts them, and only by
 // the week it finished in, from the week after. An employee's never does,
@@ -459,6 +457,10 @@ const onboardingSources = (
   ];
 };
 
+/** Whether `id` is a team's interviews, as the onboarding gives them the brain. */
+const isTeamInterviews = (id: string): boolean =>
+  id.startsWith(`${onboardingIdPrefix}src-`);
+
 /**
  * The onboarding's sources `named` (the kickoff, the staff list, a team's
  * interviews), for a
@@ -761,19 +763,6 @@ const onboardingHeld = async (env: Env): Promise<OnboardingHeld> => {
   };
 };
 
-/**
- * The brain's teams as `brain.read` gives them `person`: the onboarding's
- * (the roster's, for an admin) with what the records added, then the
- * records' own. What `brain.transcript` names a team's interviews' speaker
- * by, so both name it alike.
- */
-const brainTeams = async (
-  env: Env,
-  person: Identity,
-  records: HeldRecords
-): Promise<Team[]> =>
-  teamsOf(onboardingTeams(await onboardingFacts(env, person)), records);
-
 /** The brain's workspace, as `person` may read it. */
 export const readBrain = async (
   env: Env,
@@ -811,19 +800,10 @@ export const readBrain = async (
         id === kickoffSourceId || id === rosterSourceId || isTeamInterviews(id)
     )
   );
-  const fromOnboarding =
+  const sources =
     facts === null
       ? await sourcesForRecords(env, named)
       : onboardingSources(facts).map(({ source }) => source);
-  // A team's interviews have their admitted statements as turns
-  // (brain-transcripts.ts), never what was said: counted here, read by
-  // `brain.transcript` when the source is opened.
-  const sources = fromOnboarding.map((source): Source => {
-    const turns = isTeamInterviews(source.id)
-      ? interviewTurns(source, records.statements)
-      : 0;
-    return turns === 0 ? source : { ...source, transcriptTurns: turns };
-  });
 
   return {
     company,
@@ -873,13 +853,7 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
   async transcript(sourceId: unknown): Promise<Transcript | null> {
     return await withPerson(
       this.#check,
-      async (person) =>
-        await brainTranscript(
-          this.#env,
-          person,
-          sourceId,
-          async (records) => await brainTeams(this.#env, person, records)
-        )
+      async (person) => await brainTranscript(this.#env, person, sourceId)
     );
   }
 

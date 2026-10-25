@@ -106,9 +106,6 @@ const typeRules: readonly {
   { action: "brain.gap.answers_purged", type: "action" },
   { action: "brain.gap.answerer_erased", type: "action" },
   { action: "brain.gap", type: "decision" },
-  // A person opening the transcript of a team's interviews: their approved
-  // statements, read one source at a time.
-  { action: "brain.transcript.read", type: "read" },
   { action: "knowledge.search", type: "read" },
   { action: "knowledge.read", type: "read" },
   // Knowledge usage signals: the daily computation, an owner reading those
