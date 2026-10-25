@@ -329,20 +329,31 @@ export interface ChannelMessage {
 /** What takes a member's message on from the door. */
 export type ChannelHandoff = (accepted: ChannelMessage) => Promise<void>;
 
-/** Keeps the conversation `userId` wrote in, or notes they wrote again. */
+/**
+ * Keeps the conversation `userId` wrote in, or notes they wrote again, with
+ * the language they wrote in where the door knows it (Teams).
+ */
 const keepConversation = async (
   env: Env,
   platform: Platform,
   threadId: string,
   userId: string,
+  locale?: ChannelLocale,
   now = new Date()
 ): Promise<void> => {
   await drizzle(env.DB)
     .insert(channelConversations)
-    .values({ platform, threadId, userId, createdAt: now, lastMessageAt: now })
+    .values({
+      platform,
+      threadId,
+      userId,
+      locale,
+      createdAt: now,
+      lastMessageAt: now,
+    })
     .onConflictDoUpdate({
       target: [channelConversations.platform, channelConversations.threadId],
-      set: { userId, lastMessageAt: now },
+      set: { userId, locale, lastMessageAt: now },
     });
 };
 
@@ -1528,7 +1539,13 @@ export const channelResponse = async (
     later.push(send);
   };
   chat.onDirectMessage(async (thread, message) => {
-    await keepConversation(env, platform, thread.id, userId);
+    await keepConversation(
+      env,
+      platform,
+      thread.id,
+      userId,
+      localeOf(activity.locale)
+    );
     await takeOn({
       platform,
       userId,

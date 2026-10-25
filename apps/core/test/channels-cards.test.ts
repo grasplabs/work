@@ -497,6 +497,7 @@ const values = {
   count: 3,
   where: "Sales register.xlsx",
   workflow: "Weekly report",
+  link: "https://acme.grasp.test/decisions/d-1",
 };
 
 /** Block Kit's limits, as Slack documents them for a message's blocks. */
