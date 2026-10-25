@@ -1,0 +1,78 @@
+# Stephen's eval against the real model once a week (GRA-739), on main as
+# staging runs it, through staging's AI Gateway with a budget of its own
+# (`STEPHEN_WEEKLY_BUDGET_USD`, about €20), so a model's drift shows even
+# when nothing in Stephen changed. Its numbers go to the run's summary, to
+# the issue `STEPHEN_EVAL_ISSUE` names when set, and its report and every
+# model exchange to the run's artifact. Also by hand, from the Actions tab.
+name: Stephen's eval, weekly
+
+on:
+  schedule:
+    # Mondays, 05:23 UTC.
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stephen-weekly
+  cancel-in-progress: false
+
+jobs:
+  eval:
+    name: eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: grasp-os-staging
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: main
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-staging/cloudflare/account-id
+          CLOUDFLARE_API_TOKEN: op://grasp-os-staging/cloudflare/api-token
+      - name: Run Stephen's eval with the real model
+        run: |
+          set -o pipefail
+          vp -C apps/core test -c vite.stephen-model.config.ts 2>&1 | tee stephen-eval.log
+        env:
+          STEPHEN_MODEL: ${{ vars.STEPHEN_EVAL_MODEL }}
+          STEPHEN_MODEL_BUDGET_USD: ${{ vars.STEPHEN_WEEKLY_BUDGET_USD || '22' }}
+          STEPHEN_MODEL_GATEWAY: ${{ vars.STEPHEN_WEEKLY_GATEWAY || 'default' }}
+      - name: Report the numbers
+        if: always()
+        run: node scripts/stephen-eval.ts report stephen-eval.log > stephen-eval.md
+      - name: Post the numbers on the eval's issue
+        if: always() && vars.STEPHEN_EVAL_ISSUE != ''
+        run: |
+          if [ -s stephen-eval.md ]; then
+            gh issue comment "$ISSUE" --repo "$REPO" --body-file stephen-eval.md
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ vars.STEPHEN_EVAL_ISSUE }}
+          REPO: ${{ github.repository }}
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stephen-eval
+          path: |
+            stephen-eval.log
+            stephen-eval.md
+          if-no-files-found: ignore
+          retention-days: 90

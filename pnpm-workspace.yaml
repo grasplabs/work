@@ -23,8 +23,7 @@ allowBuilds:
   # Install scripts of the model SDKs under pi-ai, which core never needs.
   "@google/genai": false
   protobufjs: false
-  # A banner asking for funding, under the Gmail adapter's Babel runtime.
-  core-js-pure: false
+  core-js-pure: set this to true or false
 
 catalog:
   # Tooling
@@ -98,6 +97,8 @@ catalog:
   "@chat-adapter/gmail": 4.43.0
   "@chat-adapter/slack": 4.43.0
   "@chat-adapter/teams": 4.43.0
+  "@chat-adapter/telegram": 4.43.0
+  "@chat-adapter/whatsapp": 4.43.0
   chat: 4.43.0
   # What the Teams and Slack adapters send through; packages/chat's tests
   # check its fix against it (src/workerd.ts). On the version they resolve.

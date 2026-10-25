@@ -78,24 +78,97 @@ interface Block {
   tool_use_id?: unknown;
 }
 
-const messagesOf = (body: unknown): { role: unknown; content: unknown }[] => {
+/**
+ * A message of a request, in either wire format the gateway speaks:
+ * Anthropic's, where tool results are blocks of a person's message, or
+ * chat completions' (Workers AI, the default models), where each is a
+ * message of its own that names its call, the model's calls ride beside
+ * its text, and the system prompt is the first message.
+ */
+interface WireMessage {
+  role: unknown;
+  content: unknown;
+  /** Chat completions: the call a tool message answers. */
+  call?: string;
+  /** Chat completions: the calls the model made in this message. */
+  calls?: unknown;
+}
+
+/** The roles chat completions give the system prompt. */
+const systemRoles: ReadonlySet<unknown> = new Set(["system", "developer"]);
+
+const messagesOf = (body: unknown): WireMessage[] => {
   if (typeof body !== "object" || body === null || !("messages" in body)) {
     return [];
   }
   const { messages } = body;
   return Array.isArray(messages)
-    ? messages.flatMap((message: unknown) =>
+    ? messages.flatMap((message: unknown): WireMessage[] =>
         typeof message === "object" && message !== null && "role" in message
           ? [
               {
                 role: message.role,
                 content: "content" in message ? message.content : undefined,
+                ...("tool_call_id" in message &&
+                typeof message.tool_call_id === "string"
+                  ? { call: message.tool_call_id }
+                  : {}),
+                ...("tool_calls" in message &&
+                message.tool_calls !== undefined &&
+                message.tool_calls !== null
+                  ? { calls: message.tool_calls }
+                  : {}),
               },
             ]
           : []
       )
     : [];
 };
+
+/**
+ * What the model's calls in a chat completions message say: each call's
+ * arguments, which come as a JSON string, read as the object they encode.
+ */
+const callsText = (calls: unknown): string =>
+  modelStrings(
+    Array.isArray(calls)
+      ? calls.map((call: unknown) => {
+          if (
+            typeof call !== "object" ||
+            call === null ||
+            !("function" in call) ||
+            typeof call.function !== "object" ||
+            call.function === null ||
+            !("arguments" in call.function) ||
+            typeof call.function.arguments !== "string"
+          ) {
+            return call;
+          }
+          try {
+            const decoded: unknown = JSON.parse(call.function.arguments);
+            return decoded;
+          } catch {
+            return call.function.arguments;
+          }
+        })
+      : calls
+  ).join("\n");
+
+/**
+ * The request's system prompt: Anthropic's `system`, or the system
+ * messages of chat completions.
+ */
+export const systemTextOf = (body: unknown): string =>
+  [
+    ...modelStrings(
+      typeof body === "object" && body !== null && "system" in body
+        ? body.system
+        : undefined
+    ),
+    ...messagesOf(body)
+      .filter(({ role }) => systemRoles.has(role))
+      .flatMap(({ content }) => modelStrings(content)),
+  ].join("\n");
 
 const blocksOf = (content: unknown): Block[] => {
   if (typeof content === "string") {
@@ -133,32 +206,41 @@ export interface TranscriptPart {
  * given and what tools returned.
  */
 export const transcriptOf = (body: unknown): TranscriptPart[] => [
-  {
-    by: "source",
-    text: modelStrings(
-      typeof body === "object" && body !== null && "system" in body
-        ? body.system
-        : undefined
-    ).join("\n"),
-  },
-  ...messagesOf(body).flatMap(({ role, content }) =>
-    blocksOf(content).map((block): TranscriptPart => {
-      const text = modelStrings(block).join("\n");
-      if (role === "assistant") {
-        return { by: "model", text };
+  { by: "source", text: systemTextOf(body) },
+  ...messagesOf(body).flatMap(
+    ({ role, content, call, calls }): TranscriptPart[] => {
+      if (systemRoles.has(role)) {
+        return [];
       }
-      if (block.type !== "tool_result") {
-        return { by: "source", text };
+      if (role === "tool") {
+        const text = modelStrings(content).join("\n");
+        return [
+          call === undefined
+            ? { by: "tool", text }
+            : { by: "tool", text, call },
+        ];
       }
-      return typeof block.tool_use_id === "string"
-        ? { by: "tool", text, call: block.tool_use_id }
-        : { by: "tool", text };
-    })
+      const parts = blocksOf(content).map((block): TranscriptPart => {
+        const text = modelStrings(block).join("\n");
+        if (role === "assistant") {
+          return { by: "model", text };
+        }
+        if (block.type !== "tool_result") {
+          return { by: "source", text };
+        }
+        return typeof block.tool_use_id === "string"
+          ? { by: "tool", text, call: block.tool_use_id }
+          : { by: "tool", text };
+      });
+      return calls === undefined
+        ? parts
+        : [...parts, { by: "model", text: callsText(calls) }];
+    }
   ),
 ];
 
 /** The tool results the model got since the person last wrote. */
-const resultsSinceQuestion = (body: unknown): string[] => {
+export const resultsSinceQuestion = (body: unknown): string[] => {
   const messages = messagesOf(body);
   const asked = messages.findLastIndex(
     ({ role, content }) =>
@@ -166,10 +248,14 @@ const resultsSinceQuestion = (body: unknown): string[] => {
   );
   return messages
     .slice(asked + 1)
-    .flatMap(({ content }) =>
-      blocksOf(content).filter(({ type }) => type === "tool_result")
+    .flatMap(({ role, content }) =>
+      role === "tool"
+        ? [content]
+        : blocksOf(content)
+            .filter(({ type }) => type === "tool_result")
+            .map((block) => block.content)
     )
-    .flatMap(({ content }) => modelStrings(content));
+    .flatMap((content) => modelStrings(content));
 };
 
 const tokensOf = (text: string): number => Math.ceil(text.length / 4);

@@ -10,12 +10,14 @@ import { stringify } from "yaml";
 import { versionFiles } from "../apps.ts";
 import { appEntries, apps } from "../db/core/schema.ts";
 import { brainPayloads, documents, versions } from "../db/knowledge/schema.ts";
-import { appEntryPath, appsCollectionId } from "./app-entries.ts";
+import { appEntryPath, appOfEntry, appsCollectionId } from "./app-entries.ts";
 import { ensureCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import { writeVersion } from "./documents.ts";
 import type { Writer } from "./documents.ts";
 import { appMemoryPath } from "./memory-files.ts";
+import { brainOf } from "./ports.ts";
+import type { ErasedDocument, OnErase } from "./purge.ts";
 
 // The Apps collection: one entry per App, its AGENTS.md at its current
 // version, with its name and description, so people and agents find the
@@ -250,12 +252,12 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
     return;
   }
   const collection = await ensureCollection(
-    env,
+    brainOf(env),
     appsCollectionRow(),
     appsActor
   );
   const write = async (entry: string) =>
-    await writeVersion(env, appsWriter, {
+    await writeVersion(brainOf(env), appsWriter, {
       collection,
       path,
       text: entry,
@@ -327,3 +329,71 @@ export const indexApps = async (env: Env): Promise<void> => {
     await indexAppNow(env, id);
   }
 };
+
+/**
+ * Refuses with `knowledge.read_only` a purge of an App's entry while what
+ * indexing would write now (`entryNow`) holds a term (`holds`), saying
+ * where: the next indexing (a version made current, the cron catching up)
+ * makes the entry from the App itself, out of a purge's reach, and would
+ * put it back, even when the entry is still of an older version without
+ * it. Refuses too, failing closed, when the App or its current version
+ * can't be read.
+ */
+const requireIndexedWithout = async (
+  env: Env,
+  document: ErasedDocument,
+  holds: (text: string) => boolean
+): Promise<void> => {
+  const refuse = (why: string) =>
+    knowledgeErrors.create("knowledge.read_only", {
+      issues: [
+        `documentIds: document ${document.id} is an App's entry in the Apps collection, made from the App itself: ${why}`,
+      ],
+    });
+  const appId = appOfEntry(document.path);
+  let now: Awaited<ReturnType<typeof entryNow>>;
+  try {
+    now = appId === undefined ? undefined : await entryNow(env, appId);
+  } catch (error) {
+    log.error("knowledge.purge.app_unreadable", {
+      documentId: document.id,
+      ...errorFields(error),
+    });
+    now = undefined;
+  }
+  if (now === undefined) {
+    throw refuse(
+      "the App or its current version can't be read, so it can't be checked for the terms; try again later"
+    );
+  }
+  if (!holds(now.text)) {
+    return;
+  }
+  const where = [
+    ...(holds(now.agents)
+      ? ["a term is in the App's AGENTS.md: publish a version without it"]
+      : []),
+    ...(holds(now.name) || holds(now.description)
+      ? [
+          // No API renames an App or changes its description yet.
+          "a term is in the App's name or description, which a purge can't reach: the App's builders or Grasp support must change it first",
+        ]
+      : []),
+  ];
+  throw refuse(
+    `${where.length > 0 ? where.join("; ") : "a term is in what indexing writes for it"}; then purge`
+  );
+};
+
+/**
+ * The Apps collection as a Knowledge purge reaches it (purge.ts
+ * `OnErase`): its entries are made from each App, so a purge of one is
+ * refused while the App holds a term.
+ */
+export const appsErasure = (env: Env): Pick<OnErase, "requireRewritable"> => ({
+  requireRewritable: async (document, holds) => {
+    if (document.source === "apps") {
+      await requireIndexedWithout(env, document, holds);
+    }
+  },
+});

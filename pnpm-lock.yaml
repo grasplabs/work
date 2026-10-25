@@ -42,6 +42,12 @@ catalogs:
     '@chat-adapter/teams':
       specifier: 4.43.0
       version: 4.43.0
+    '@chat-adapter/telegram':
+      specifier: 4.43.0
+      version: 4.43.0
+    '@chat-adapter/whatsapp':
+      specifier: 4.43.0
+      version: 4.43.0
     '@cloudflare/vite-plugin':
       specifier: 1.64.0
       version: 1.64.0
@@ -402,6 +408,9 @@ importers:
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.3(@cloudflare/workers-types@5.20261012.1)(@opentelemetry/api@1.9.1)(kysely@0.29.6)
+      fflate:
+        specifier: 'catalog:'
+        version: 0.8.3
       jose:
         specifier: 'catalog:'
         version: 6.2.12
@@ -524,12 +533,21 @@ importers:
       '@chat-adapter/teams':
         specifier: 'catalog:'
         version: 4.43.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.5)
+      '@chat-adapter/telegram':
+        specifier: 'catalog:'
+        version: 4.43.0(supports-color@10.2.2)(zod@4.6.5)
+      '@chat-adapter/whatsapp':
+        specifier: 'catalog:'
+        version: 4.43.0(supports-color@10.2.2)(zod@4.6.5)
       '@earendil-works/pi-agent-core':
         specifier: 'catalog:'
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5))(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(undici@7.29.1)(ws@8.21.3)(zod@4.6.5)
       '@earendil-works/pi-ai':
         specifier: 'catalog:'
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5))(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(undici@7.29.1)(ws@8.21.3)(zod@4.6.5)
+      '@grasp-os/brain':
+        specifier: workspace:*
+        version: link:../../packages/brain
       '@grasp-os/chat':
         specifier: workspace:*
         version: link:../../packages/chat
@@ -741,6 +759,12 @@ importers:
         specifier: 'catalog:'
         version: 0.3.3(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(esbuild@0.28.2)(happy-dom@21.0.3)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)
 
+  packages/brain:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.5
+
   packages/chat:
     dependencies:
       chat:
@@ -901,6 +925,9 @@ importers:
       '@babel/parser':
         specifier: 'catalog:'
         version: 7.29.9
+      '@grasp-os/brain':
+        specifier: workspace:*
+        version: link:../brain
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../shared
@@ -938,6 +965,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@grasp-os/brain':
+        specifier: workspace:*
+        version: link:../brain
       capnweb:
         specifier: 'catalog:'
         version: 0.12.0
@@ -1460,6 +1490,14 @@ packages:
 
   '@chat-adapter/teams@4.43.0':
     resolution: {integrity: sha512-+fMTr9ouzS5y9v/HmN+gVGmC3rscSs06rEnoIaYM0btReX1MW09/SLoxROeAU8EAxp/quOddIn4qp4+YQgWpbw==}
+    engines: {node: '>=20'}
+
+  '@chat-adapter/telegram@4.43.0':
+    resolution: {integrity: sha512-tBtRW7QzvF8pI5rrIUwEWesDMZLPaPdyhn9leTrC5J0B8cwb/uXvhgmrtaOQ5GzEQR8AnbIINGHyEY32nMeNLw==}
+    engines: {node: '>=20'}
+
+  '@chat-adapter/whatsapp@4.43.0':
+    resolution: {integrity: sha512-TNyIj02VxqV+5F2xC/+ua9fR5pfCJHBLQsCUUWAQ9n7BQoclItSehJ1obcI9rArKlzXM9Xs+4bgK7LzWuxWMJw==}
     engines: {node: '>=20'}
 
   '@clack/core@1.5.1':
@@ -8841,6 +8879,26 @@ snapshots:
     transitivePeerDependencies:
       - ai
       - debug
+      - supports-color
+      - workflow
+      - zod
+
+  '@chat-adapter/telegram@4.43.0(supports-color@10.2.2)(zod@4.6.5)':
+    dependencies:
+      '@chat-adapter/shared': 4.43.0(supports-color@10.2.2)(zod@4.6.5)
+      chat: 4.43.0(supports-color@10.2.2)(zod@4.6.5)
+    transitivePeerDependencies:
+      - ai
+      - supports-color
+      - workflow
+      - zod
+
+  '@chat-adapter/whatsapp@4.43.0(supports-color@10.2.2)(zod@4.6.5)':
+    dependencies:
+      '@chat-adapter/shared': 4.43.0(supports-color@10.2.2)(zod@4.6.5)
+      chat: 4.43.0(supports-color@10.2.2)(zod@4.6.5)
+    transitivePeerDependencies:
+      - ai
       - supports-color
       - workflow
       - zod

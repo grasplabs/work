@@ -21,6 +21,21 @@ interface __BaseEnv_Env {
    */
   SLACK_SIGNING_SECRET?: string;
   /**
+   * The client's WhatsApp Business number (src/channels/whatsapp.ts): the
+   * Meta app's secret every webhook is signed with, a Worker secret; the
+   * Cloud API's id of the number; and the token Meta's subscription check
+   * must name. Until all three are set, WhatsApp's door answers 404.
+   */
+  WHATSAPP_APP_SECRET?: string;
+  WHATSAPP_PHONE_NUMBER_ID?: string;
+  WHATSAPP_VERIFY_TOKEN?: string;
+  /**
+   * The secret the client's Telegram bot's webhook was registered with, a
+   * Worker secret: Telegram sends it with every update
+   * (src/channels/telegram.ts). Unset, Telegram's door answers 404.
+   */
+  TELEGRAM_WEBHOOK_SECRET?: string;
+  /**
    * Stephen's own Gmail mailbox, which people email, and the Pub/Sub push
    * that tells its door of new mail (src/channels/gmail.ts): the push's
    * audience, the service account it pushes as, its subscription and the

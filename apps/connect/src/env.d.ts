@@ -79,6 +79,21 @@ interface __BaseEnv_Env {
    */
   SLACK_BOT_TOKEN?: string;
   /**
+   * The client's WhatsApp Business number: its Cloud API phone number id,
+   * the one number connect sends from, and the system user's access token
+   * it sends with (src/channels.ts), set by hand on staging until the
+   * console seals them per client. While either is unset, every WhatsApp
+   * request is refused as `unconfigured`.
+   */
+  WHATSAPP_PHONE_NUMBER_ID?: string;
+  WHATSAPP_ACCESS_TOKEN?: string;
+  /**
+   * The client's Telegram bot's token from BotFather (src/channels.ts), set
+   * by hand on staging until the console seals it per client. While it is
+   * unset, every Telegram request is refused as `unconfigured`.
+   */
+  TELEGRAM_BOT_TOKEN?: string;
+  /**
    * Stephen's own Gmail mailbox (people email Stephen), and the OAuth
    * client and refresh token connect reads and sends its mail with. Until
    * all four are set, every Gmail request is refused as `unconfigured`.

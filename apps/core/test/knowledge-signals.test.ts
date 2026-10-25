@@ -948,7 +948,7 @@ describe("Knowledge usage signals", () => {
             query.includes('from "collections"') ||
             query.includes("search_rows")
         )
-        // The improvement signals' read of Playbook records, their own.
+        // The improvement signals' read of the brain's records, their own.
         .filter(({ query }) => !query.includes('"versions"'))
         .map(async (recorded) => {
           const plan = await planOf(recorded);

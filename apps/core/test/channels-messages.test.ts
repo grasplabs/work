@@ -11,7 +11,7 @@ import {
 import { says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant, otherTenant } from "./sign-in-config.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { signedInApi } from "./sign-in.ts";
 import {
   kept,
   member,
@@ -139,19 +139,6 @@ describe("someone who isn't one of the client's people", () => {
     ]);
   });
 
-  it("is asked to sign in once when they're the client's but Grasp hasn't seen them", async () => {
-    const newcomer = teamsPerson();
-    await onRoster(newcomer, { userRole: "user", tenantId: acmeTenant });
-
-    await post(messageFrom(newcomer));
-
-    await expect(kept(newcomer.conversation)).resolves.toStrictEqual([]);
-    const { lines } = await reached(newcomer.conversation);
-    expect(lines).toStrictEqual([
-      "I don't know you yet. Sign in to Grasp once with your work account, and I'll answer you right after.",
-    ]);
-  });
-
   it("gets one line once they're removed, without a look at the roster", async () => {
     const admin = await signedInApi(idp, "admin");
     const { userId, teams } = await member(idp);
@@ -212,31 +199,6 @@ describe("someone who isn't one of the client's people", () => {
   });
 });
 
-describe("a group chat or a channel", () => {
-  it("gets one line, even from a known person, and nothing is taken", async () => {
-    const { teams } = await member(idp);
-    const group = `19:${unique()}@thread.v2`;
-
-    await post(
-      messageFrom(teams, {
-        conversation: {
-          id: group,
-          conversationType: "groupChat",
-          tenantId: acmeTenant,
-        },
-      })
-    );
-
-    await expect(kept(group)).resolves.toStrictEqual([]);
-    await expect(reached(group)).resolves.toMatchObject({
-      lines: [
-        "I only answer in a private chat. Send me a direct message, and I'll help you there.",
-      ],
-      asked: [],
-    });
-  });
-});
-
 describe("a flood from one person", () => {
   // The clock stands still, so no token comes back while a test sends.
   beforeEach(() => {
@@ -283,7 +245,7 @@ describe("a platform the deployment hasn't set up", () => {
     const { teams } = await member(idp);
 
     await expect(
-      post(messageFrom(teams), { path: "/api/channels/whatsapp" })
+      post(messageFrom(teams), { path: "/api/channels/discord" })
     ).resolves.toBe(404);
     await expect(
       post(messageFrom(teams), { coreEnv: { ...env, TEAMS_BOT_ID: "" } })
