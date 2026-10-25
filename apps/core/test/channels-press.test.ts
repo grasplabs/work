@@ -113,12 +113,19 @@ const editsOf = async (turn: Turn): Promise<string[]> => {
 const linesAfterCard = async (turn: Turn): Promise<string[]> => {
   const { sent } = await reached(turn.person.teams.conversation);
   const at = sent.findIndex(({ id }) => id === turn.cardId);
-  return sent
-    .slice(at + 1)
-    .filter(({ editOf }) => editOf === undefined)
-    .flatMap(({ activity }) =>
-      activity.text === undefined ? [] : [activity.text]
-    );
+  return (
+    sent
+      .slice(at + 1)
+      .filter(({ editOf }) => editOf === undefined)
+      // Not the card offering their own Microsoft 365 (connect-own.ts).
+      .filter(
+        ({ activity }) =>
+          !JSON.stringify(activity).includes("/connect-microsoft")
+      )
+      .flatMap(({ activity }) =>
+        activity.text === undefined ? [] : [activity.text]
+      )
+  );
 };
 
 describe("a press that mustn't run anything", setUpTime, () => {
