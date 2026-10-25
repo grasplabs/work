@@ -787,10 +787,9 @@ describe(
         spy.mockRestore();
       }
       const stuck = await brainOf(ids);
-      const alarm = await runInDurableObject(
-        onboardingStore(env),
-        async (_instance, state) => await state.storage.getAlarm()
-      );
+      // What is still to come out stays on record, resting on someone
+      // gone, for the alarm to take out (`#armDrawing` sets it for that).
+      const waiting = await store.sentFor(`gone:${ids.max}`);
       // The alarm, once the brain answers again.
       await store.purgeBrain();
       const after = await brainOf(ids);
@@ -798,7 +797,7 @@ describe(
         before: before.statements.includes(`Tickets wait in ${said.max}.`),
         withdrawn,
         stuck: stuck.statements.includes(`Tickets wait in ${said.max}.`),
-        alarm: alarm !== null,
+        waiting: waiting.length > 0,
         after: after.statements.some((text) => text.includes(said.max)),
         restsOn: await store.sentFor(ids.max),
         gone: await store.sentFor(`gone:${ids.max}`),
@@ -806,7 +805,7 @@ describe(
         before: true,
         withdrawn: 200,
         stuck: true,
-        alarm: true,
+        waiting: true,
         after: false,
         restsOn: [],
         gone: [],
