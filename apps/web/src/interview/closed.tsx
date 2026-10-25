@@ -165,7 +165,14 @@ const hintMs = 2600;
  * to be held; held for four seconds, filling up as it goes, it asks first,
  * and says what would be lost and what they can do instead.
  */
-export const DeleteInterview = ({ onDelete }: { onDelete: () => void }) => {
+export const DeleteInterview = ({
+  onDelete,
+  onWithdraw,
+}: {
+  onDelete: () => void;
+  /** Withdrawing instead, while they still take part. */
+  onWithdraw?: () => void;
+}) => {
   const { t } = useLingui();
   const [holding, setHolding] = useState(false);
   const [hint, setHint] = useState(false);
@@ -251,6 +258,11 @@ export const DeleteInterview = ({ onDelete }: { onDelete: () => void }) => {
             <DialogDescription>
               {t`Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead.`}
             </DialogDescription>
+            {onWithdraw === undefined ? null : (
+              <DialogDescription>
+                {t`Or withdraw: nothing you said is used from now on, and you can still read it here.`}
+              </DialogDescription>
+            )}
           </DialogHeader>
           <DialogFooter>
             <Button
@@ -263,6 +275,17 @@ export const DeleteInterview = ({ onDelete }: { onDelete: () => void }) => {
               <Trash2Icon data-icon="inline-start" />
               {t`Delete it`}
             </Button>
+            {onWithdraw === undefined ? null : (
+              <Button
+                onClick={() => {
+                  setAsking(false);
+                  onWithdraw();
+                }}
+                variant="outline"
+              >
+                {t`Withdraw instead`}
+              </Button>
+            )}
             <DialogClose autoFocus render={<Button />}>
               {t`Keep my interview`}
             </DialogClose>

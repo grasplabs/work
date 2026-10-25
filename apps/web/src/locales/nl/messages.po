@@ -6679,6 +6679,10 @@ msgstr "Dit verschijnt zodra de desktopagent of single sign-on ziet dat iemand d
 msgid "It starts when Stephen reads the kickoff, and grows with every interview."
 msgstr "Het begint wanneer Stephen de kickoff leest, en groeit met elk interview."
 
+#: src/interview/page.tsx
+msgid "It stays here for you to read. You can still delete it."
+msgstr "Het blijft hier voor jou om te lezen. Je kunt het nog steeds verwijderen."
+
 #: src/interview/words.ts
 msgid "It still does not work. You can stop for now and come back later. Your place is kept."
 msgstr "Het werkt nog steeds niet. Je kunt nu stoppen en later terugkomen. Je plek blijft bewaard."
@@ -9339,6 +9343,10 @@ msgstr "Bewerkingen"
 #: src/onboarding/document-drop.tsx
 msgid "or choose them from your computer"
 msgstr "of kies ze op je computer"
+
+#: src/interview/closed.tsx
+msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
+msgstr "Of trek je terug: niets van wat je zei wordt nog gebruikt, en je kunt het hier nog steeds lezen."
 
 #: src/routes/_shell.onboarding.tsx
 msgctxt "onboarding area section"
@@ -14908,6 +14916,10 @@ msgstr "Met het bestuur"
 msgid "Withdraw"
 msgstr "Intrekken"
 
+#: src/interview/closed.tsx
+msgid "Withdraw instead"
+msgstr "Liever terugtrekken"
+
 #: src/settings/invitations.tsx
 msgid "Withdraw the invitation of {email}"
 msgstr "Uitnodiging van {email} intrekken"
@@ -15234,6 +15246,10 @@ msgstr "Je meldt je aan op de eigen pagina van {app}."
 #: src/inbox/items.ts
 msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
 msgstr "Dit is je gevraagd als {owner}. Beantwoord het in het brein: iedereen in het bedrijf leest het antwoord, met je naam."
+
+#: src/interview/page.tsx
+msgid "You withdrew. Nothing you said is used from now on."
+msgstr "Je hebt je teruggetrokken. Niets van wat je zei wordt nog gebruikt."
 
 #: src/interview/transcript.tsx
 #: src/routes/guest.tsx

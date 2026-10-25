@@ -6679,6 +6679,10 @@ msgstr "Die Angabe erscheint, sobald der Desktop-Agent oder Single Sign-on eine 
 msgid "It starts when Stephen reads the kickoff, and grows with every interview."
 msgstr "Die Nutzung beginnt, wenn Stephen das Kickoff liest, und wächst mit jedem Interview."
 
+#: src/interview/page.tsx
+msgid "It stays here for you to read. You can still delete it."
+msgstr "Es bleibt hier, damit du es lesen kannst. Du kannst es weiterhin löschen."
+
 #: src/interview/words.ts
 msgid "It still does not work. You can stop for now and come back later. Your place is kept."
 msgstr "Es funktioniert immer noch nicht. Sie können jetzt aufhören und später wiederkommen. Ihr Stand bleibt erhalten."
@@ -9339,6 +9343,10 @@ msgstr "Operationen"
 #: src/onboarding/document-drop.tsx
 msgid "or choose them from your computer"
 msgstr "oder wählen Sie sie auf Ihrem Computer aus"
+
+#: src/interview/closed.tsx
+msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
+msgstr "Oder zieh dich zurück: Nichts von dem, was du gesagt hast, wird ab jetzt verwendet, und du kannst es hier weiterhin lesen."
 
 #: src/routes/_shell.onboarding.tsx
 msgctxt "onboarding area section"
@@ -14908,6 +14916,10 @@ msgstr "Mit dem Vorstand"
 msgid "Withdraw"
 msgstr "Zurückziehen"
 
+#: src/interview/closed.tsx
+msgid "Withdraw instead"
+msgstr "Stattdessen zurückziehen"
+
 #: src/settings/invitations.tsx
 msgid "Withdraw the invitation of {email}"
 msgstr "Einladung von {email} zurückziehen"
@@ -15234,6 +15246,10 @@ msgstr "Sie melden sich auf der Seite von {app} an."
 #: src/inbox/items.ts
 msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
 msgstr "Sie wurden dies als {owner} gefragt. Beantworten Sie es im Gehirn: Alle im Unternehmen lesen die Antwort, mit Ihrem Namen."
+
+#: src/interview/page.tsx
+msgid "You withdrew. Nothing you said is used from now on."
+msgstr "Du hast dich zurückgezogen. Nichts von dem, was du gesagt hast, wird ab jetzt verwendet."
 
 #: src/interview/transcript.tsx
 #: src/routes/guest.tsx

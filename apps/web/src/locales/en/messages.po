@@ -6679,6 +6679,10 @@ msgstr "It shows once the desktop agent or single sign-on sees someone use the a
 msgid "It starts when Stephen reads the kickoff, and grows with every interview."
 msgstr "It starts when Stephen reads the kickoff, and grows with every interview."
 
+#: src/interview/page.tsx
+msgid "It stays here for you to read. You can still delete it."
+msgstr "It stays here for you to read. You can still delete it."
+
 #: src/interview/words.ts
 msgid "It still does not work. You can stop for now and come back later. Your place is kept."
 msgstr "It still does not work. You can stop for now and come back later. Your place is kept."
@@ -9339,6 +9343,10 @@ msgstr "Operations"
 #: src/onboarding/document-drop.tsx
 msgid "or choose them from your computer"
 msgstr "or choose them from your computer"
+
+#: src/interview/closed.tsx
+msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
+msgstr "Or withdraw: nothing you said is used from now on, and you can still read it here."
 
 #: src/routes/_shell.onboarding.tsx
 msgctxt "onboarding area section"
@@ -14908,6 +14916,10 @@ msgstr "With the board"
 msgid "Withdraw"
 msgstr "Withdraw"
 
+#: src/interview/closed.tsx
+msgid "Withdraw instead"
+msgstr "Withdraw instead"
+
 #: src/settings/invitations.tsx
 msgid "Withdraw the invitation of {email}"
 msgstr "Withdraw the invitation of {email}"
@@ -15234,6 +15246,10 @@ msgstr "You sign in on {app}’s own page."
 #: src/inbox/items.ts
 msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
 msgstr "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
+
+#: src/interview/page.tsx
+msgid "You withdrew. Nothing you said is used from now on."
+msgstr "You withdrew. Nothing you said is used from now on."
 
 #: src/interview/transcript.tsx
 #: src/routes/guest.tsx
