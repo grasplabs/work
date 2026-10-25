@@ -354,7 +354,9 @@ export const clientSealedSecrets = sqliteTable(
       .notNull()
       .references(() => clients.id),
     /** The Worker secret it becomes, such as `TEAMS_BOT_SECRET`. */
-    name: text({ enum: ["TEAMS_BOT_SECRET"] }).notNull(),
+    name: text({
+      enum: ["TEAMS_BOT_SECRET", "SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"],
+    }).notNull(),
     /** AES-256-GCM, bound to the client and the name: `v1.<iv>.<ciphertext>`, base64. */
     sealed: text().notNull(),
     /** The staff member who last set it. */

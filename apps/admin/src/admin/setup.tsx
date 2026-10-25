@@ -41,6 +41,7 @@ import {
   CheckIcon,
   CircleDashedIcon,
   CircleIcon,
+  CopyIcon,
   ExternalLinkIcon,
   LoaderCircleIcon,
   PauseIcon,
@@ -51,8 +52,10 @@ import type { ReactNode } from "react";
 import { z } from "zod";
 
 import type { ClientSetup, SetupDeploy } from "../clients/setup.ts";
+import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
 import { overBars } from "../clients/watch-signals.ts";
 import type { DeployStep } from "../deploy/deploy.ts";
+import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
 import type { ClientHostingView } from "../hosting/placement.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
@@ -72,8 +75,8 @@ import {
   RotateSecrets,
   SettingUpNow,
   SignInChange,
+  SealedSecretChange,
   TeamsBotChange,
-  TeamsBotSecretChange,
   TeamsPackageDownload,
   TestAlert,
   useRefreshSetup,
@@ -1132,6 +1135,20 @@ const Status = ({
 /** What a ring change records besides. */
 const ringSchema = z.object({ ring: z.number() });
 
+/** What setting each sealed secret did, for its log. */
+const sealedSecretWords: Record<SealedSecretName, string> = {
+  TEAMS_BOT_SECRET: "Set its Teams bot's secret.",
+  SLACK_BOT_TOKEN: "Set its Slack app's bot token.",
+  SLACK_SIGNING_SECRET: "Set its Slack app's signing secret.",
+};
+
+/** Whether `target` names a sealed secret. */
+const isSealedSecretName = (
+  target: string | null
+): target is SealedSecretName =>
+  target !== null && Object.hasOwn(sealedSecretWords, target);
+
+/** What staff did by hand, in a sentence. */
 /** What staff did by hand that needs nothing of its event to say, in a sentence. */
 const plainEventWords: Readonly<Record<string, string>> = {
   "client.rotate_secrets": "Rotated its secrets.",
@@ -1169,8 +1186,8 @@ const eventWords = ({
       return "Let it follow the rollouts again.";
     }
     case "client.sealed_secret": {
-      return target === "TEAMS_BOT_SECRET"
-        ? "Set its Teams bot's secret."
+      return isSealedSecretName(target)
+        ? sealedSecretWords[target]
         : "Set one of its secrets.";
     }
     case "client.apply_settings": {
@@ -1761,6 +1778,44 @@ const Releases = ({
   );
 };
 
+/** Who set client's sealed secret `name` and when, as a row; null while it isn't set. */
+const sealedRow = (
+  setup: ClientSetup,
+  name: SealedSecretName,
+  label: string
+) => {
+  const secret = setup.sealedSecrets.find((each) => each.name === name);
+  return secret === undefined
+    ? null
+    : { label, value: `Set on ${dayOf(secret.setAt)} by ${secret.setBy}` };
+};
+
+/** Who set `rows` and when, and whether they're live yet; `none` while none is set. */
+const SealedFacts = ({
+  setup,
+  rows,
+  none,
+}: {
+  setup: ClientSetup;
+  rows: ({ label: string; value: string } | null)[];
+  none: string;
+}) => {
+  const set = rows.filter((row) => row !== null);
+  if (set.length === 0) {
+    return <Quiet>{none}</Quiet>;
+  }
+  return (
+    <Facts
+      rows={[
+        ...set,
+        ...(setup.configPending
+          ? [{ label: "Live", value: "With the next deploy", attention: true }]
+          : []),
+      ]}
+    />
+  );
+};
+
 /**
  * The client's own Teams bot: its app id, tenant and secret's expiry, its
  * secret, setting each, and its app package for its IT.
@@ -1824,10 +1879,99 @@ const TeamsBotSection = ({
         </Body>
       )}
       <TeamsBotChange bot={bot} clientId={clientId} refresh={refresh} />
-      <TeamsBotSecretChange
+      <SealedSecretChange
         clientId={clientId}
+        description="The bot app's client secret, from its registration in the company's own Entra. It is sealed and never shown again, here or anywhere; its connect gets it with the next deploy."
+        label="Client secret"
+        name="TEAMS_BOT_SECRET"
         refresh={refresh}
         set={botSecret !== undefined}
+      />
+    </SetupSection>
+  );
+};
+
+/** Copying the manifest its Slack app is created from (src/clients/slack-app.ts). */
+const CopySlackManifest = ({
+  hostname,
+  clientName,
+}: {
+  hostname: string;
+  clientName: string;
+}) => (
+  <div className="flex flex-wrap items-center gap-3 border-t px-5 py-4">
+    <Button
+      onClick={() => {
+        void navigator.clipboard.writeText(
+          JSON.stringify(slackAppManifest(hostname, clientName), null, 2)
+        );
+      }}
+      size="sm"
+      variant="outline"
+    >
+      <CopyIcon />
+      Copy app manifest
+    </Button>
+    <span className="text-muted-foreground text-sm">
+      In the company&apos;s Slack, create an app from it, install it, then set
+      its bot token and signing secret below.
+    </span>
+  </div>
+);
+
+/**
+ * The client's own Slack app: the manifest to create it from, whether its
+ * bot token and signing secret are set, and setting them.
+ */
+const SlackAppSection = ({
+  clientId,
+  clientName,
+  setup,
+  refresh,
+}: {
+  clientId: string;
+  clientName: string;
+  setup: ClientSetup;
+  refresh: Refresh;
+}) => {
+  const { hostname } = setup.provisioning;
+  const token = sealedRow(setup, "SLACK_BOT_TOKEN", "Bot token");
+  const signing = sealedRow(setup, "SLACK_SIGNING_SECRET", "Signing secret");
+  return (
+    <SetupSection
+      description="Its own Slack app, which sends to its core. The bot token is kept sealed and given only to its connect, the signing secret only to its core, with each deploy."
+      title="Its Slack app"
+    >
+      {hostname === null ? (
+        <Quiet>Give the admin a domain first: the app sends to it.</Quiet>
+      ) : (
+        <>
+          <Facts
+            rows={[{ label: "Request URL", value: slackRequestUrl(hostname) }]}
+          />
+          <CopySlackManifest clientName={clientName} hostname={hostname} />
+        </>
+      )}
+      <SealedFacts
+        none="No bot token or signing secret set."
+        rows={[token, signing]}
+        setup={setup}
+      />
+      <SealedSecretChange
+        clientId={clientId}
+        description="The app's Bot User OAuth Token (xoxb-), from OAuth & Permissions once it's installed. It is sealed and never shown again; its connect gets it with the next deploy."
+        label="Bot token"
+        name="SLACK_BOT_TOKEN"
+        refresh={refresh}
+        set={token !== null}
+      />
+      <SealedSecretChange
+        clientId={clientId}
+        description="The app's Signing Secret, from Basic Information. It is sealed and never shown again; its core gets it with the next deploy."
+        label="Signing secret"
+        name="SLACK_SIGNING_SECRET"
+        refresh={refresh}
+        set={signing !== null}
       />
     </SetupSection>
   );
@@ -1944,7 +2088,19 @@ const Settings = ({
         )}
       </SetupSection>
       {client === null ? null : (
-        <TeamsBotSection clientId={clientId} refresh={refresh} setup={setup} />
+        <>
+          <TeamsBotSection
+            clientId={clientId}
+            refresh={refresh}
+            setup={setup}
+          />
+          <SlackAppSection
+            clientId={clientId}
+            clientName={client.name}
+            refresh={refresh}
+            setup={setup}
+          />
+        </>
       )}
       <SetupSection
         description="What needs someone at Grasp about it, such as its Teams bot's secret running out, is posted to the staff alerts' channel with a link here."

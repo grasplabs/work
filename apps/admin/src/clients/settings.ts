@@ -269,6 +269,22 @@ export const sealedSecretInputSchema = z.object({
  */
 const secretValuePattern = /^[\u0021-\u007E]{8,256}$/u;
 
+/**
+ * What each sealed secret looks like where its shape is known, over
+ * `secretValuePattern`: a Slack bot token is `xoxb-`, never a user's
+ * (`xoxp-`) or an app-level one (`xapp-`), which would act as more than
+ * the bot; Slack's signing secret is 32 hex characters. So a value pasted
+ * into the wrong field is refused rather than deployed.
+ */
+const secretShapes: Partial<Record<SealedSecretName, RegExp>> = {
+  SLACK_BOT_TOKEN: /^xoxb-[0-9A-Za-z-]{20,250}$/u,
+  SLACK_SIGNING_SECRET: /^[0-9a-f]{32}$/u,
+};
+
+/** Whether `value` can be a client's secret `name`. */
+const isSecretOf = (name: SealedSecretName, value: string): boolean =>
+  secretValuePattern.test(value) && (secretShapes[name]?.test(value) ?? true);
+
 /** How often a set is tried while other sets of the same secret race it. */
 const sealAttempts = 3;
 
@@ -356,7 +372,7 @@ const writeSealed = async (
 
 /**
  * Seals `value` as client `clientId`'s secret `name`, such as its Teams
- * bot's (`TEAMS_BOT_SECRET`), as `staff`, replacing the one it had:
+ * bot's (`TEAMS_BOT_SECRET`) or its Slack app's, as `staff`, replacing the one it had:
  * audited (`client.sealed_secret`, its name as the target, and whether it
  * replaced one), never with anything of the value, and marking the client
  * (`configChangedAt`) so its next deploy gives it to its connect. Refused
@@ -378,7 +394,7 @@ export const setSealedSecret = async (
   const db = adminDatabase(env.DB);
   const { clientId, name, value } = sealedSecretInputSchema.parse(input);
   const trimmed = typeof value === "string" ? value.trim() : "";
-  if (!secretValuePattern.test(trimmed)) {
+  if (!isSecretOf(name, trimmed)) {
     throw new SettingsError(
       "secret_invalid",
       `That isn't a value ${clientId}'s ${name} can be`
