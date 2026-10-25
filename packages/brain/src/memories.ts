@@ -123,11 +123,15 @@ const refsSchema = z.array(brainSourceRefSchema);
  * task outcomes recorded as their experience (outcomes.ts), for a
  * personal purge's batch (purge.ts), which records the audit event.
  */
-export const forgetPerson = (db: DrizzleD1Database, userId: string) =>
+export const forgetPerson = (
+  db: DrizzleD1Database,
+  userId: string,
+  now: Date
+) =>
   [
     db.delete(brainMemories).where(eq(brainMemories.ownerId, userId)),
     db.delete(brainReceipts).where(eq(brainReceipts.caller, callerKey(userId))),
-    ...forgetPersonOutcomes(db, userId),
+    ...forgetPersonOutcomes(db, userId, now),
   ] as const;
 
 /** How many records and receipts `forgetPerson` deletes. */

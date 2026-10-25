@@ -226,7 +226,9 @@ describe("task outcomes", () => {
       return events.some((event) => event.eventId === eventId);
     };
 
-    await brain.db.batch(forgetPersonOutcomes(brain.db, "ben"));
+    await brain.db.batch(
+      forgetPersonOutcomes(brain.db, "ben", brain.ports.clock())
+    );
     // Each delivered again, as after a lost reply or a restart.
     const again = [
       await recordOutcome(brain, own),
@@ -252,6 +254,23 @@ describe("task outcomes", () => {
       sharedForAnn: true,
       after: true,
     });
+  });
+
+  it("never moves a personal purge's boundary earlier", async () => {
+    const { brain } = testHost();
+    const later = new Date();
+    const earlier = new Date(later.getTime() - 120_000);
+    const between = new Date(later.getTime() - 60_000).toISOString();
+
+    await brain.db.batch(forgetPersonOutcomes(brain.db, "cas", later));
+    // A purge whose clock lagged, after the first.
+    await brain.db.batch(forgetPersonOutcomes(brain.db, "cas", earlier));
+    const receipt = await recordOutcome(
+      brain,
+      settled({ ownerId: "cas", occurredAt: between })
+    );
+
+    expect(receipt.recorded).toBeFalsy();
   });
 
   it("reads the events of a reader in more shared chats than one statement could bind", async () => {

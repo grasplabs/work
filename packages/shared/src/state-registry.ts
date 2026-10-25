@@ -445,6 +445,10 @@ const knowledgeDb: D1State = {
       `${brain}outcomes.ts`,
       "How far each host boundary's task outcomes reached."
     ),
+    brain_erased_evidence: exported(
+      `${brain}outcomes.ts`,
+      "Execution records whose events were erased: late captures stay erased."
+    ),
     brain_forgotten_people: exported(
       `${brain}outcomes.ts`,
       "Who a personal purge forgot, and when: late captures stay forgotten."

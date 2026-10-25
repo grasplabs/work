@@ -8,6 +8,7 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { eraseRunCaptures } from "../src/brain-capture.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
@@ -84,16 +85,28 @@ const racingKnowledge = (first: () => Promise<unknown>): D1Database => {
 /**
  * The Brain's database, with its first batch landing and its reply lost:
  * a delivery that recorded its event and stopped before its check after.
+ * `first` runs just before that batch lands, `lostNow` as its reply goes.
  */
-const lostReply = (): D1Database => {
+const lostReply = (
+  first: () => Promise<unknown> = async () => {
+    await Promise.resolve();
+  },
+  lostNow: () => void = () => {
+    // Nothing to note.
+  }
+): D1Database => {
   let lost = false;
   return new Proxy(knowledge, {
     get: (target, property) => {
       if (property === "batch") {
         return async (statements: D1PreparedStatement[]) => {
+          if (!lost) {
+            await first();
+          }
           const results = await target.batch(statements);
           if (!lost) {
             lost = true;
+            lostNow();
             throw new Error("D1_ERROR: Network connection lost.");
           }
           return results;
@@ -401,6 +414,40 @@ describe("a workflow run's outcome", () => {
       intent: null,
       recorded: 1,
     });
+  });
+
+  it("stays erased when its run's details go between its check and a delivery whose reply is lost", async () => {
+    const { builder, app } = await newApp(true);
+    const run = await runningRun(app, builder.userId);
+    // The check passes, then retention erases the run's captures, then the
+    // delivery's record lands and its reply is lost.
+    let lost = false;
+    const racing = lostReply(
+      async () => {
+        await eraseRunCaptures(env, [run]);
+      },
+      () => {
+        lost = true;
+      }
+    );
+
+    await completed(run, { ...env, KNOWLEDGE: racing });
+    await vi.waitFor(
+      () => {
+        expect(lost).toBeTruthy();
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+    await runCron();
+
+    expect({
+      events: await eventsOf(run),
+      intent: await runIntent(run),
+      recorded: await audited(
+        "knowledge.episode.recorded",
+        `workflow.run:${run}`
+      ),
+    }).toStrictEqual({ events: [], intent: null, recorded: 0 });
   });
 
   it("goes with the run's details when its retention is over", async () => {

@@ -11,6 +11,7 @@ import {
   brainCaptureCursors,
   brainEpisodeMembers,
   brainEpisodes,
+  brainErasedEvidence,
   brainForgottenPeople,
 } from "./db/schema.ts";
 import { idSchema } from "./ids.ts";
@@ -156,7 +157,10 @@ export const recordOutcome = async <C>(
   // the purge is never learned from again, however late it arrives.
   const forgotten = (userId: SQL | string) =>
     sql`EXISTS (SELECT 1 FROM ${brainForgottenPeople} WHERE ${brainForgottenPeople.userId} = ${userId} AND ${brainForgottenPeople.forgottenAt} >= ${occurredAt.getTime()})`;
-  const isNew = sql`NOT EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${brainEpisodes.id} = ${outcome.eventId}) AND NOT ${forgotten(outcome.ownerId)}`;
+  // Its record erased (a run's details past retention, a chat deleted):
+  // never recorded after, however late a delivery lands.
+  const erased = sql`EXISTS (SELECT 1 FROM ${brainErasedEvidence} WHERE ${brainErasedEvidence.evidenceId} = ${outcome.evidenceId})`;
+  const isNew = sql`NOT EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${brainEpisodes.id} = ${outcome.eventId}) AND NOT ${forgotten(outcome.ownerId)} AND NOT ${erased}`;
   const [, inserted] = await auditedBatch(brain.ports, db, [
     // Before the insert, on its condition: recorded only if it is new.
     outboxedWhere(
@@ -341,6 +345,16 @@ const eraseWhere = async <C>(
       .delete(brainEpisodes)
       .where(eq(column, target.id))
       .returning({ id: brainEpisodes.id }),
+    // An execution record's erasure is remembered, so a delivery whose
+    // reply was lost, landing after it, records nothing (`recordOutcome`).
+    ...(column === brainEpisodes.evidenceId
+      ? [
+          db
+            .insert(brainErasedEvidence)
+            .values({ evidenceId: target.id, erasedAt: brain.ports.clock() })
+            .onConflictDoNothing(),
+        ]
+      : []),
   ]);
   return deleted.length;
 };
@@ -387,19 +401,22 @@ export const eraseOutcome = async <C>(
 export const forgetPersonOutcomes = (
   db: DrizzleD1Database,
   userId: string,
-  now: Date = new Date()
+  now: Date
 ) =>
   [
     db
       .delete(brainEpisodeMembers)
       .where(eq(brainEpisodeMembers.userId, userId)),
     db.delete(brainEpisodes).where(eq(brainEpisodes.ownerId, userId)),
-    // So a capture from before now, delivered again, stays forgotten.
+    // So a capture from before now, delivered again, stays forgotten; a
+    // later purge only moves the boundary later.
     db
       .insert(brainForgottenPeople)
       .values({ userId, forgottenAt: now })
       .onConflictDoUpdate({
         target: brainForgottenPeople.userId,
-        set: { forgottenAt: now },
+        set: {
+          forgottenAt: sql`max(${brainForgottenPeople.forgottenAt}, excluded.forgotten_at)`,
+        },
       }),
   ] as const;

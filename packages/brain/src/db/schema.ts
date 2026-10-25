@@ -514,6 +514,17 @@ export const brainEpisodeMembers = sqliteTable(
  * (../outcomes.ts). Their user ID alone, kept for as long as a capture
  * from before could still arrive: the erasure's own record.
  */
+/**
+ * The host's execution records whose events were erased with them (a
+ * run's details past retention, a deleted chat): a capture resting on one,
+ * delivered after a lost reply, is never recorded (../outcomes.ts). Their
+ * IDs alone, kept as the erasure's own record.
+ */
+export const brainErasedEvidence = sqliteTable("brain_erased_evidence", {
+  evidenceId: text("evidence_id").primaryKey(),
+  erasedAt: timestamp("erased_at").notNull(),
+});
+
 export const brainForgottenPeople = sqliteTable("brain_forgotten_people", {
   userId: text("user_id").primaryKey(),
   forgottenAt: timestamp("forgotten_at").notNull(),
