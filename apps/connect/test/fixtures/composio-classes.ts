@@ -1,15 +1,18 @@
 import type { ToolClass } from "@grasp-os/shared/connect";
 
+import { composioClasses as shipped } from "../../src/composio-classes.ts";
 import type { ComposioClasses } from "../../src/composio-classes.ts";
 
-// The classes of the fake Composio's tools, in place of the release's
-// table (src/composio-classes.ts), in connect's tests and in the connect
-// core's tests bundle (core's test/build-connect.ts). Every tool the tests
+// The release's table (src/composio-classes.ts), with the classes of the
+// fake Composio's tools in place of its HubSpot's, in connect's tests and
+// in the connect core's tests bundle (core's test/build-connect.ts), so a
+// test can run a reviewed toolkit's own tools too. Every tool the tests
 // call is classed, but for `HUBSPOT_UNCLASSED`, which no one classed, and
 // `HUBSPOT_REFUSED`, which a review turned down. Writable, so a test can
 // reclass a tool as a release would.
 
 export const composioClasses: Record<string, Record<string, ToolClass>> = {
+  ...shipped,
   hubspot: {
     HUBSPOT_LIST_CONTACTS: "read-company",
     HUBSPOT_GET_CONTACT: "read-company",
