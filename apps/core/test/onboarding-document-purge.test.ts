@@ -120,9 +120,9 @@ const purge = async (
 };
 
 /** The people of a team, by key. */
-type Key = "lea" | "max" | "mia" | "mo";
+type Key = "lea" | "max" | "mia" | "mo" | "noor";
 
-/** A team called Ops, led by Lea, with Max, Mia and Mo, in an onboarding that started yesterday. */
+/** A team called Ops, led by Lea, with Max, Mia, Mo and Noor, in an onboarding that started yesterday: five, as many as reach the brain. */
 const team = async () => {
   const store = onboardingStore(env);
   const id = unique();
@@ -132,14 +132,16 @@ const team = async () => {
     max: `max-${id}`,
     mia: `mia-${id}`,
     mo: `mo-${id}`,
+    noor: `noor-${id}`,
   };
   const names: Record<Key, [string, string]> = {
     lea: ["Lea Lind", "Team lead"],
     max: ["Max Mol", "Agent"],
     mia: ["Mia Moor", "Agent"],
     mo: ["Mo Mertens", "Agent"],
+    noor: ["Noor Nijs", "Agent"],
   };
-  const keys: Key[] = ["lea", "max", "mia", "mo"];
+  const keys: Key[] = ["lea", "max", "mia", "mo", "noor"];
   const roster: Roster = {
     teams: [{ id: ids.team, name: "Ops", lead: ids.lea, does: "", off: false }],
     people: keys.map((key) => ({
@@ -271,7 +273,7 @@ const rotaReply = (ids: Ids): GatewayReply => ({
   outputTokens: 1,
 });
 
-/** Lea's map drawn and the rota out of the way, then Max, Mia and Mo agree to what they told about tickets. */
+/** Lea's map drawn and the rota out of the way, then Max, Mia, Mo and Noor agree to what they told about tickets. */
 const toldAll = async (ids: Ids) => {
   const store = onboardingStore(env);
   await store.releaseDue();
@@ -286,6 +288,7 @@ const toldAll = async (ids: Ids) => {
   await agree(ids.mo, [
     fact("o1", "wait", "A ticket waits days for the customer's reply."),
   ]);
+  await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
 };
 
 /** What `run` returns while the gateway answers each request with what `respond` makes. */
