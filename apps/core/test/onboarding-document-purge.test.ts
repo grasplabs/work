@@ -19,6 +19,7 @@ import type { Answer, GatewayReply } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, approveAgreed, gatewayConfig } from "./interview-link.ts";
+import { intakeAlike } from "./onboarding-team.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
@@ -46,7 +47,9 @@ const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const sessionKey = z.object({ key: z.string().optional() });
 
 /** A word nobody else says, as one lower-case token: what must go. */
-const sentinelOf = () => `zorblax${unique()}`;
+// Letters only: a drawn part with a digit never reaches the brain (GRA-1084).
+const sentinelOf = () =>
+  `zorblax${unique().replaceAll(/\d/gu, (digit) => "abcdefghij".charAt(Number(digit)))}`;
 
 /** A Word file that names `word`. */
 const documentWith = (word: string) =>
@@ -250,10 +253,11 @@ const ticketsReply = (ids: Ids, tool: string): Answer => ({
     starts_by: [ids.max],
     steps: [
       {
-        text: "Open the ticket.",
+        // All five told it, in the words of the document's reading, so it
+        // reaches the brain (GRA-1084).
+        text: `Open the ticket in ${tool}.`,
         who: "Agent",
         tool,
-        // All five told it, so it reaches the brain (GRA-1084).
         by: [ids.max, ids.mia, ids.mo, ids.noor, ids.pim],
         minutes: [1, 2, 5],
       },
@@ -461,13 +465,13 @@ describe(
       const ids = await team();
       await toldAll(ids);
       const drewWith = await drawAll(ids, word, word);
-      await onboardingStore(env).intakeNext();
+      await intakeAlike();
       const before = await leftOf(admin, ids, word);
       const purged = await purge(admin, [shared.document], [word]);
       const purgedDetail = await detailOf("onboarding.document.purged");
       const recordsDetail = await detailOf("brain.records.purged");
       const drewAgainWith = await drawAll(ids, "Zendesk", word);
-      await onboardingStore(env).intakeNext();
+      await intakeAlike();
       const after = await leftOf(admin, ids, word);
       const tickets = await ticketsOf(ids.team);
       expect({
