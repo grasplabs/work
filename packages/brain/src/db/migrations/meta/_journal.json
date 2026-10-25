@@ -43,6 +43,13 @@
       "when": 1792956114988,
       "tag": "0005_brain_entities",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792957353354,
+      "tag": "0006_memory_cites",
+      "breakpoints": true
     }
   ]
 }
