@@ -96,6 +96,16 @@ export interface ConnectorCatalog {
       readonly output: { event: { bodyPreview: string | null; end: { dateTime: string; timeZone: string }; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; mailbox: string; organizer: { address: string | null; name: string | null } | null; showAs: string | null; start: { dateTime: string; timeZone: string }; subject: string | null; webLink: string | null } };
     };
   };
+  readonly "microsoft-365.chats@1": {
+    readonly list: {
+      readonly input: { mailbox: string; page?: string; top?: number };
+      readonly output: { chats: Array<{ id: string; kind: string | null; lastUpdatedAt: string | null; members: Array<string>; topic: string | null; webUrl: string | null }>; mailbox: string; nextPage: string | null };
+    };
+    readonly messages: {
+      readonly input: { chat: string; mailbox: string; page?: string; top?: number };
+      readonly output: { chat: { id: string; kind: string | null; lastUpdatedAt: string | null; members: Array<string>; topic: string | null; webUrl: string | null }; mailbox: string; messages: Array<{ from: string | null; id: string; sentAt: string | null; text: string }>; nextPage: string | null };
+    };
+  };
   readonly "microsoft-365.excel@1": {
     readonly addRow: {
       readonly input: { drive: string; table: string; values: Array<{ column: string; value: (string) | (number) | (boolean) | ({ date: string }) | ({ formula: string }) | null }>; workbook: string };
@@ -186,6 +196,16 @@ export interface ConnectorCatalog {
     readonly thread: {
       readonly input: { conversation: string; mailbox: string };
       readonly output: { conversationId: string; earlierMessages: boolean; mailbox: string; messages: Array<{ body: string | null; bodyCut: boolean; bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; conversationId: string | null; flagStatus: string | null; folderId: string | null; from: { address: string | null; name: string | null } | null; hasAttachments: boolean; id: string; importance: string | null; internetMessageId: string | null; isDraft: boolean; isRead: boolean; mailbox: string; receivedAt: string | null; sentAt: string | null; subject: string | null; to: Array<{ address: string | null; name: string | null }>; webLink: string | null }> };
+    };
+  };
+  readonly "microsoft-365.meetings@1": {
+    readonly list: {
+      readonly input: { from: string; mailbox: string; page?: string; to: string; top?: number };
+      readonly output: { mailbox: string; meetings: Array<{ end: string; id: string; organizer: string | null; start: string; subject: string | null; webLink: string | null }>; nextPage: string | null };
+    };
+    readonly transcript: {
+      readonly input: { event: string; mailbox: string };
+      readonly output: { mailbox: string; meeting: { end: string; id: string; organizer: string | null; start: string; subject: string | null; webLink: string | null }; transcripts: Array<{ createdAt: string | null; id: string; lines: Array<{ at: string; speaker: string | null; text: string }> }> };
     };
   };
   readonly "microsoft-365.onenote@1": {
