@@ -5877,6 +5877,10 @@ msgstr "Go live"
 msgid "Go on without sound"
 msgstr "Go on without sound"
 
+#: src/frame/page-states.tsx
+msgid "Go to Chat"
+msgstr "Go to Chat"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Go to Grasp"
 msgstr "Go to Grasp"
@@ -12453,6 +12457,10 @@ msgstr "The {top} who spent most; more spent less."
 msgid "The account you signed in with."
 msgstr "The account you signed in with."
 
+#: src/frame/page-states.tsx
+msgid "The address may be wrong, or the page was moved or removed."
+msgstr "The address may be wrong, or the page was moved or removed."
+
 #: src/activity/audit-words.ts
 msgid "The agent looked something up"
 msgstr "The agent looked something up"
@@ -13489,6 +13497,10 @@ msgstr "This one can only be released: a budget record it counts against is dama
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "This page didn't load"
+
+#: src/frame/page-states.tsx
+msgid "This page is not here"
+msgstr "This page is not here"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "This policy is not here any more"
