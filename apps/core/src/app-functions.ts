@@ -124,6 +124,12 @@ interface FunctionCaller {
   readonly runOrigin?: RunOrigin | undefined;
   /** Aborted once the call is cancelled (`BindingCaller.cancelled`). */
   readonly cancelled?: AbortSignal | undefined;
+  /**
+   * That the calling work is a Grasp staff member's (its authority's
+   * server-set mark, GRA-1088): the called App's authority carries it
+   * too, so its events say "(Grasp staff)". Core sets it, never a call.
+   */
+  readonly byStaff?: boolean;
 }
 
 /**
@@ -222,6 +228,7 @@ export const invocationFor = async (
     requireHolds,
     runOrigin,
     cancelled,
+    byStaff = false,
   }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
@@ -232,6 +239,7 @@ export const invocationFor = async (
     onBehalfOf: by.userId,
     mode: "interactive",
     appVersion: release.manifest.resourceVersion,
+    ...(byStaff ? { staff: true as const } : {}),
   };
   // Before every protected step: the call starts, each mutation commits
   // and each resource request (the operation host's one gate, `admit`).
@@ -758,6 +766,12 @@ interface FunctionCallOptions {
    * starts with its own.
    */
   readonly sources?: InvocationSources;
+  /**
+   * That the calling work is a Grasp staff member's (its authority's
+   * server-set mark, GRA-1088): the called App's authority carries it
+   * too, so its events say "(Grasp staff)". Core sets it, never a call.
+   */
+  readonly byStaff?: boolean;
 }
 
 /**
@@ -1050,6 +1064,7 @@ const callFunction = async (
     cancelled,
     onAdmitted,
     sources = invocationSources(),
+    byStaff,
   } = options;
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
@@ -1127,6 +1142,7 @@ const callFunction = async (
       by,
       requestId,
       deadline,
+      ...(byStaff === true ? { byStaff } : {}),
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
       ...(agent === undefined ? {} : { agent }),
       sources,

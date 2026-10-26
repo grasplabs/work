@@ -1539,31 +1539,33 @@ export default workflowTests(definition, [{ name: "runs", mocks: { note: null },
     });
   });
 
-  it("calls as the Grasp staff member who started the run, under the binding an admin approved, audited as theirs", async () => {
+  it("calls as the Grasp staff member who started the run, under the binding an admin approved, each App down the chain audited as theirs", async () => {
     const admin = await person("admin");
     const builder = await signedInApi(idp, "builder");
-    const crm = await sealedApp(crmFiles(), "CRM");
-    const reference = JSON.stringify({
-      contractId: "desk.add",
-      kind: "action",
-    });
-    const { id } = await builder.api.apps.create({ name: "Staff desk" });
+    const [first, second] = await Promise.all(
+      ["First", "Second"].map(async (name) => await sealedApp(relayFiles, name))
+    );
+    if (first === undefined || second === undefined) {
+      throw new Error("Two relays");
+    }
+    const go = JSON.stringify({ contractId: "relay.go", kind: "action" });
+    const { id } = await builder.api.apps.create({ name: "Staff relay" });
     await published(id);
     await release(builder, id, {
-      ...deskFiles(),
-      "workflows/noter.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
+      ...relayFiles,
+      "workflows/relayer.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
-export default workflow("noter", { params: {}, input: z.unknown() }, async (step, { env }) =>
-  await step.do("note", { description: "Note", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
-    (await env.APP.callFunction(${reference}, { text: "from staff" })) as Json
+export default workflow("relayer", { params: {}, input: z.unknown() }, async (step, { env }) =>
+  await step.do("relay", { description: "Relay", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
+    (await env.APP.callFunction(${go}, {})) as Json
   )
 );
 `,
-      "workflows/noter.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+      "workflows/relayer.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
 
-import definition from "./noter.ts";
+import definition from "./relayer.ts";
 
-export default workflowTests(definition, [{ name: "runs", mocks: { note: null }, expect: {} }]);
+export default workflowTests(definition, [{ name: "runs", mocks: { relay: null }, expect: {} }]);
 `,
     });
     const session = await signedIn(idp, "grasp-staff", staffPerson());
@@ -1572,37 +1574,43 @@ export default workflowTests(definition, [{ name: "runs", mocks: { note: null },
     const { userId: staffId } = await whoami(session);
     // What the run did is the client's admins' to read.
     const reader = await signedInApi(idp, "admin");
-    const startNoter = async () => {
-      const run = await staff.workflows.start(id, "noter");
+    const relayed = async () => {
+      const run = await staff.workflows.start(id, "relayer");
       await finished(run.id);
-      return await reader.api.workflows.status(run.id);
+      const { output } = await reader.api.workflows.status(run.id);
+      return output;
     };
 
-    // Before an admin approves the binding: nothing reaches the CRM.
-    const unbound = await startNoter();
+    // Before an admin approves the binding: nothing reaches the relay.
+    const unbound = await relayed();
     await approveResourceBinding(env, admin, {
       app: id,
-      alias: "crm",
-      target: { kind: "app", appId: crm.app },
+      alias: "next",
+      target: { kind: "app", appId: first.app },
       reviewed: { version: 1 },
     });
-    const bound = await startNoter();
+    await bind(admin, first, second.app, "next");
+    const bound = await relayed();
+    const events = await allEvents();
+    const staffOf = (callee: string) =>
+      callsTo(events, callee).map(({ actor, onBehalfOf }) => ({
+        actor: actor.type,
+        staff: "staff" in actor ? actor.staff : undefined,
+        onBehalfOf,
+      }));
 
     expect({
-      unbound: unbound.output,
-      status: bound.status,
-      output: bound.output,
-      audited: callsTo(await allEvents(), crm.app).map(
-        ({ actor, onBehalfOf }) => ({
-          staff: "staff" in actor ? actor.staff : undefined,
-          onBehalfOf,
-        })
-      ),
+      unbound,
+      bound,
+      // The run's call of the first relay, and the first relay's of the
+      // second: the called App's side says so too.
+      first: staffOf(first.app),
+      second: staffOf(second.app),
     }).toStrictEqual({
-      unbound: { ok: true, value: "error:resource.unavailable" },
-      status: "completed",
-      output: { ok: true, value: "null" },
-      audited: [{ staff: staffId, onBehalfOf: staffId }],
+      unbound: { ok: true, value: "+error:resource.unavailable:undefined" },
+      bound: { ok: true, value: "+++error:resource.unavailable:undefined" },
+      first: [{ actor: "workflow", staff: staffId, onBehalfOf: staffId }],
+      second: [{ actor: "app", staff: staffId, onBehalfOf: staffId }],
     });
   });
 });
