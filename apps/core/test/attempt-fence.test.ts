@@ -671,6 +671,81 @@ describe(
       expect(codeOf(answered)).toBe("brain.denied");
     });
 
+    it("refuses the run's next model or connection call once what it recalled can't be read, until it recalls again", async () => {
+      const admin = await personApi("admin");
+      const app = await appWith(admin, {});
+      const subject = { type: "app", appId: appIdSchema.parse(app) } as const;
+      const { collectionId } = await collectionWithNote(admin.api, {
+        name: "Handbook",
+        access: "everyone",
+      });
+      const collectionGrant = await requestGranted(
+        idp,
+        admin,
+        readCollection(subject, collectionId)
+      );
+      await requestGranted(idp, admin, {
+        subject,
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+      const calls: WorkflowCalls = {
+        steps: { tidy: ["BRAIN"] },
+        kinds: { tidy: "exact" },
+        models: {},
+        keyed: [],
+        all: ["BRAIN"],
+      };
+      const outcomes: Record<string, string> = {};
+      await cancelledAt(
+        app,
+        admin.userId,
+        calls,
+        undefined,
+        async (attempt) => {
+          const recalled = await attempt.callBrain("BRAIN", { query: "note" });
+          outcomes.recalled = codeOf(recalled);
+          await admin.api.permissions.revoke(collectionGrant);
+          outcomes.model = codeOf(
+            await attempt.callModel({
+              binding: "MODEL",
+              instructions: "x",
+              input: "y",
+              outputSchema: {},
+            })
+          );
+          outcomes.connection = codeOf(
+            await attempt.callConnection("MAIL", ["send", {}, {}])
+          );
+          // Recalled again: a pack without what it may no longer read. Its
+          // next call is held only to what this step is reviewed to call.
+          await attempt.callBrain("BRAIN", { query: "note" });
+          outcomes.refreshed = codeOf(
+            await attempt.callModel({
+              binding: "MODEL",
+              instructions: "x",
+              input: "y",
+              outputSchema: {},
+            })
+          );
+          return recalled;
+        }
+      );
+
+      expect({
+        recalled: outcomes.recalled,
+        model: outcomes.model,
+        connection: outcomes.connection,
+        refreshedIsRevoked: outcomes.refreshed === "brain.revoked",
+      }).toStrictEqual({
+        recalled: "ok",
+        model: "brain.revoked",
+        connection: "brain.revoked",
+        refreshedIsRevoked: false,
+      });
+    });
+
     it("refuses a recall from a step whose review doesn't show it calling the Brain", async () => {
       const admin = await personApi("admin");
       const { app } = await recallingApp(admin);

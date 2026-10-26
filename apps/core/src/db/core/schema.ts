@@ -2206,6 +2206,27 @@ export const brainCaptureIntents = sqliteTable(
 );
 
 /**
+ * What a run's latest recall on each Brain binding cites (GRA-299;
+ * workflows/host.ts): the collections and document versions of its pack,
+ * identifiers only. Before the run calls a model or a connection, the host
+ * checks the run may still read them all; a recall on the binding again
+ * replaces them, the deliberate refresh. Goes with the run's details.
+ */
+export const runBrainEvidence = sqliteTable(
+  "run_brain_evidence",
+  {
+    runId: text("run_id").notNull(),
+    /** The run's binding of the Brain the pack came through. */
+    binding: text().notNull(),
+    packId: text("pack_id").notNull(),
+    /** JSON array of the collection IDs its pack cites. */
+    collectionIds: text("collection_ids").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.binding] })]
+);
+
+/**
  * Each pause, resume or cancel of a run that the host admitted
  * (src/workflows/controls.ts): its durable receipt. `admitted` until the
  * engine confirms it (`applied`), or a cancel supersedes a pause or resume
