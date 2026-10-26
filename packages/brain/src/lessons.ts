@@ -392,7 +392,15 @@ const applyPatch = async <C>(
     patch.state === "candidate"
       ? sql`(SELECT count(*) FROM ${brainEpisodes} WHERE ${inList(brainEpisodes.id, patch.content.supporting)}) >= ${lessonMinFailures}`
       : sql`1`;
-  const allowed = sql`${notForgotten(patch.scope, patch.since)} AND ${supported}`;
+  // Opening a candidate, or reopening a retired one, only while its scope
+  // holds fewer than its cap, checked in the batch that opens it: jobs that
+  // overlap can't open past it between them. A patch to one open already
+  // passes.
+  const withinCap =
+    patch.state === "candidate"
+      ? sql`(COALESCE((SELECT ${brainLessons.state} FROM ${brainLessons} WHERE ${brainLessons.id} = ${patch.lessonId}), 'retired') = 'candidate' OR (SELECT count(*) FROM ${brainLessons} WHERE ${brainLessons.scope} = ${patch.scope.scope} AND ${brainLessons.scopeId} = ${patch.scope.scopeId} AND ${brainLessons.state} = 'candidate') < ${consolidationLimits.openPerScope})`
+      : sql`1`;
+  const allowed = sql`${notForgotten(patch.scope, patch.since)} AND ${supported} AND ${withinCap}`;
   const atBase = sql`(SELECT ${brainLessons.revision} FROM ${brainLessons} WHERE ${brainLessons.id} = ${patch.lessonId}) = ${patch.base} AND ${allowed}`;
   const thisPatch = sql`EXISTS (SELECT 1 FROM ${brainLessonVersions} WHERE ${brainLessonVersions.patchKey} = ${patchKey})`;
   const evidence = [
@@ -400,12 +408,13 @@ const applyPatch = async <C>(
     ...patch.content.contradicting.map((id) => [id, "contradicting"]),
   ];
   const statements = [
-    // A new lesson starts at revision 0, before its first version: only
+    // A new lesson starts at revision 0, before its first version, not yet
+    // open (so it doesn't count against its scope's cap until it is): only
     // while its scope may be written and some of its support still exists.
     db
       .insert(brainLessons)
       .select(
-        sql`SELECT ${patch.lessonId}, 0, ${patch.scope.scope}, ${patch.scope.scopeId}, ${patch.groupKey}, 'failure_pattern', ${canonicalJson(patch.content.applicability)}, ${canonicalJson(patch.content.exclusions)}, ${patch.content.instruction}, ${patch.content.evidenceStatus}, 'candidate', NULL, ${now.getTime()}, ${now.getTime()} WHERE ${allowed} AND EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${inList(brainEpisodes.id, patch.content.supporting)})`
+        sql`SELECT ${patch.lessonId}, 0, ${patch.scope.scope}, ${patch.scope.scopeId}, ${patch.groupKey}, 'failure_pattern', ${canonicalJson(patch.content.applicability)}, ${canonicalJson(patch.content.exclusions)}, ${patch.content.instruction}, ${patch.content.evidenceStatus}, 'retired', NULL, ${now.getTime()}, ${now.getTime()} WHERE ${allowed} AND EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${inList(brainEpisodes.id, patch.content.supporting)})`
       )
       .onConflictDoNothing(),
     db

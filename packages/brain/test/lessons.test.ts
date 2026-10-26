@@ -729,4 +729,65 @@ describe("consolidating episodes into lesson candidates", () => {
       text: "workflow:invoices/tidy failed 3 of its last 3 finished runs on app:invoices@3.",
     });
   });
+
+  it("never opens past the scope's cap when another job opens one meanwhile", async () => {
+    const { brain } = testHost();
+    const ann = `ann-${crypto.randomUUID()}`;
+    const scope = person(ann);
+    await recorded(
+      brain,
+      Array.from({ length: consolidationLimits.openPerScope - 1 }, (_, n) =>
+        Array.from({ length: 3 }, () =>
+          run(ann, "failed", { taskType: `workflow:app/held-${n}` })
+        )
+      ).flat()
+    );
+    for (let job = 0; job < 3; job += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one job after another
+      await consolidate(brain, scope);
+    }
+    await recorded(
+      brain,
+      Array.from({ length: 3 }, () =>
+        run(ann, "failed", { taskType: "workflow:app/new" })
+      )
+    );
+    // Another job opens the scope's last free candidate just before this
+    // one writes, after this one counted what was open.
+    let overlapped = false;
+    const racing = new Proxy(env.BRAIN, {
+      get: (target, property) => {
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (!overlapped) {
+              overlapped = true;
+              const at = Date.now();
+              await target
+                .prepare(
+                  "INSERT INTO brain_lessons (id, revision, scope, scope_id, group_key, kind, applicability, exclusions, instruction, evidence_status, state, retired_by, created_at, updated_at) VALUES (?, 1, 'person', ?, ?, 'failure_pattern', '{\"taskType\":\"other\",\"versions\":[]}', '[]', 'Other.', 'supported', 'candidate', NULL, ?, ?)"
+                )
+                .bind(crypto.randomUUID(), ann, crypto.randomUUID(), at, at)
+                .run();
+            }
+            return await target.batch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    await consolidate(createBrain(racing, brain.ports), scope);
+    const lessons = await lessonsOf(brain, scope);
+
+    expect({
+      overlapped,
+      open: lessons.filter(({ state }) => state === "candidate").length,
+    }).toStrictEqual({
+      overlapped: true,
+      open: consolidationLimits.openPerScope,
+    });
+  });
 });
