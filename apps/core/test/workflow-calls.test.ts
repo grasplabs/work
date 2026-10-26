@@ -2466,8 +2466,9 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
       ran,
       requests: gateway.requests.length,
     }).toStrictEqual({
-      // Nothing kept says attempt 1 never started: refused, as left open.
-      retried: { name: "TimeoutError", code: null },
+      // Nothing kept says attempt 1 never started: refused, as left open,
+      // and never tried again: its call was tried.
+      retried: { name: "NonRetryableError", code: null },
       ran: ["first attempt"],
       requests: 1,
     });
@@ -2529,14 +2530,17 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
     });
     const [refused, retried, leftOpen] = failed;
     expect({
+      refused,
       // The retry fails as the attempt that ran did, never run itself.
       retried,
       leftOpen,
       ran,
       requests: gateway.requests.length,
     }).toStrictEqual({
-      retried: refused,
-      leftOpen: { name: "TimeoutError", code: null },
+      refused: { name: "Error", code: "model.failed" },
+      // As the attempt that ran failed, and never tried again after it.
+      retried: { name: "NonRetryableError", code: "model.failed" },
+      leftOpen: { name: "NonRetryableError", code: null },
       ran: ["first attempt"],
       requests: 1,
     });
@@ -3168,10 +3172,11 @@ describe("an activation's share of core's CPU, for calls tried once", () => {
       unfunded: await attempted(0),
     }).toStrictEqual({
       // Run, the call tried once: its retries only ever run an attempt
-      // that never ran its module (the host's own check).
-      funded: { retries: [2], ran: true },
+      // that never ran its module (the host's own check); the engine may
+      // make more than its two, for those core cuts off (GRA-1097).
+      funded: { retries: [6], ran: true },
       // Run all the same, on a share of its own.
-      unfunded: { retries: [2], ran: true },
+      unfunded: { retries: [6], ran: true },
     });
   });
 });

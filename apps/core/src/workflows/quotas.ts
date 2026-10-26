@@ -14,7 +14,7 @@ import type {
 } from "@grasp-os/shared/quota-policy";
 import type { QuotaPolicyReport } from "@grasp-os/shared/quota-policy-report";
 import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
-import { and, desc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -742,6 +742,13 @@ export interface AttemptAdmission {
   /** The attempts the quota policy admits at the step: none after this many. */
   attemptsAllowed: number;
   /**
+   * The attempts of the step the lineage admitted, this one included: the
+   * attempts that ran, by their engine number, however many the engine
+   * numbered in between that core cut off unadmitted (resource-host.ts).
+   * Absent where nothing admits attempts: count the engine's number then.
+   */
+  ran?: number;
+  /**
    * Admits one host call of the attempt against its lineage's
    * (`hostCallsOf`), throwing the refusal.
    */
@@ -1145,6 +1152,30 @@ const outOfHostCalls = (
 ): boolean =>
   attempt.collecting !== true && made >= policy.limits.lineageHostCalls;
 
+/**
+ * The attempts of `attempt`'s step run `run`'s lineage admitted before it:
+ * the step's attempts that ran, each once, whichever activations admitted
+ * it, `attempt` itself not counted (one admitted again is the same one).
+ */
+const ranBefore = async (
+  env: QuotaEnv,
+  run: string,
+  attempt: QuotaAttempt
+): Promise<number> => {
+  const held = runLineageAttempts;
+  const [row] = await drizzle(env.DB)
+    .select({ ran: sql<number>`count(DISTINCT ${held.attempt})` })
+    .from(held)
+    .where(
+      and(
+        eq(held.runId, run),
+        eq(held.stepKey, attempt.key),
+        ne(held.attempt, attempt.number)
+      )
+    );
+  return row?.ran ?? 0;
+};
+
 /** `admitAttempt` under `policy`; `retried` once read again (`policyStill`). */
 const admitAttemptOnce = async (
   env: QuotaEnv,
@@ -1163,7 +1194,10 @@ const admitAttemptOnce = async (
   ) {
     throw limitReached("steps", policy);
   }
-  if (attempt.number > policy.limits.workflowAttemptsPerStep) {
+  // Counted by the attempts that ran (`ran`), never by the engine's
+  // numbers: one core cut off unadmitted ran nothing (GRA-1097).
+  const ran = await ranBefore(env, owner.run, attempt);
+  if (ran + 1 > policy.limits.workflowAttemptsPerStep) {
     throw workflowErrors.create("workflow.too_many_attempts", {
       max: policy.limits.workflowAttemptsPerStep,
       generation: policy.generation,
@@ -1302,6 +1336,7 @@ const admitAttemptOnce = async (
     const hostCalls = hostCallsOf(env, root, identity);
     return {
       attemptsAllowed: policy.limits.workflowAttemptsPerStep,
+      ran: ran + 1,
       hostCall: hostCalls.take,
       settle: async () => {
         await settleAttempt(

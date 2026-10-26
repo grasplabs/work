@@ -32,6 +32,7 @@ import {
 import { startWorkflow } from "../src/workflow-starts.ts";
 import type { Settled } from "../src/workflows/code.ts";
 import { runEngine } from "../src/workflows/engine.ts";
+import { cpuLimitKill } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { admitAttempt, quotaPolicy } from "../src/workflows/quotas.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
@@ -1788,6 +1789,15 @@ const placesOf = async (id: string | null): Promise<number> => {
   return row?.places ?? 0;
 };
 
+/** Step `task:greet`'s module on `host`, stopped past its CPU time as the Loader stops it. */
+const stoppedIn = async (host: ResourceRunHost): Promise<void> => {
+  await host.do(
+    "task:greet",
+    { input: { input: { who: "Ada" }, context: {} } },
+    async () => await Promise.reject(cpuLimitKill())
+  );
+};
+
 /** A greeting, then the greeting called out: one expression in each task. */
 const greetThenCall = (name: string): string =>
   definitionOf(name, [
@@ -1876,6 +1886,161 @@ describe(
           resource: `workflow-resource:${workflow.id}`,
         })),
       });
+    });
+
+    it("retries a step as often as its attempts that ran allow, however many the engine numbered that core cut off", async () => {
+      const by = await builder();
+      const workflow = await published(by, (name) =>
+        definitionOf(name, [
+          {
+            greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } },
+          },
+        ])
+      );
+      const manifest = await env.DB.prepare(
+        "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+      )
+        .bind(workflow.id)
+        .first<{ hash: string }>();
+      const build = await loadWorkflowBuild(
+        env,
+        workflow.id,
+        1,
+        manifest?.hash ?? ""
+      );
+      const runId = crypto.randomUUID();
+      // The run's row, its lineage's root: none of the engine's own runs it.
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'person', ?, ?, ?, 1, ?, ?, 1, 'h', ?)"
+        ).bind(
+          runId,
+          by.userId,
+          `key-${runId}`,
+          workflow.id,
+          manifest?.hash ?? "",
+          by.userId,
+          Date.now()
+        ),
+        env.DB.prepare(
+          "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, ?, 'b', ?, 'running', ?)"
+        ).bind(runId, workflow.id, manifest?.hash ?? "", by.userId, Date.now()),
+      ]);
+      // The lineage's own admission, as a run's activations admit attempts.
+      const owner = {
+        run: runId,
+        root: runId,
+        subject: by.userId,
+        resource: `workflow-resource:${workflow.id}`,
+      };
+      // What the engine was told each time, and what each attempt ended as.
+      const retries: number[] = [];
+      const ends: string[] = [];
+      // An activation of the run, its engine claiming the step's attempt
+      // `attempt` under its one key; with `fuel`, that much to spend.
+      const activation = (attempt: number, fuel?: number) =>
+        new ResourceRunHost(
+          env,
+          {
+            do: async (name, config, fn) => {
+              retries.push(config.retries?.limit ?? 0);
+              try {
+                return await fn({ attempt, idempotencyKey: `key:${name}` });
+              } catch (error) {
+                ends.push(error instanceof Error ? error.name : "unknown");
+                return null;
+              }
+            },
+            sleep: async () => {
+              await Promise.resolve();
+            },
+            sleepUntil: async () => {
+              await Promise.resolve();
+            },
+            waitForEvent: async () =>
+              await Promise.reject(new Error("No waits here")),
+            waitForMatch: async () =>
+              await Promise.reject(new Error("No waits here")),
+          },
+          {
+            runId,
+            workflowId: workflow.id,
+            version: 1,
+            principal: by.userId,
+            input: { who: "Ada" },
+            params: {},
+            createdAt: Date.now(),
+            build,
+            calling: {
+              runId,
+              rootRunId: runId,
+              workflowId: workflow.id,
+              version: 1,
+              principal: by.userId,
+              invoker: { type: "person", id: by.userId, appVersion: null },
+              bindings: new Map(),
+              restricted: false,
+            },
+            maxModelCalls: 1,
+          },
+          {
+            // Each activation took the run over from the last.
+            leaseOf: () => ({
+              generation: attempt,
+              deadline: Date.now() + 60_000,
+            }),
+            tampered: () => {},
+            ...(fuel === undefined ? {} : { activationFuel: fuel }),
+            admitAttempt: async (asked) =>
+              await admitAttempt(env, owner, asked),
+          }
+        );
+      await stoppedIn(activation(1));
+      // An activation with no fuel left: cut off, it runs and admits nothing.
+      await stoppedIn(activation(2, 0));
+      await stoppedIn(activation(3));
+      await stoppedIn(activation(4));
+      const receipts = await receiptsOf(runId);
+
+      expect({
+        ends,
+        engineRetries: [...new Set(retries)],
+        ran: receipts.map(({ attempt }) => attempt),
+      }).toStrictEqual({
+        // Retried after each that ran, and after the one cut off; the third
+        // that ran is the step's last, whatever the engine has left.
+        ends: [
+          "TimeoutError",
+          "TimeoutError",
+          "TimeoutError",
+          "NonRetryableError",
+        ],
+        // The step's two retries, and room for four cut off besides.
+        engineRetries: [6],
+        ran: [1, 3, 4],
+      });
+    });
+
+    it("fails a step stopped past its CPU time in every activation once three of its attempts ran, however many more the engine allows", async () => {
+      const by = await builder();
+      const workflow = await published(by, greetThenCall);
+      const result = await withCpuKills(
+        "task:greet",
+        () => true,
+        async () => {
+          const { runId } = await start(by, workflow.id);
+          const run = await ended(by, workflow.id, runId);
+          return { run, runId };
+        },
+        "end"
+      );
+      const receipts = await receiptsOf(result.runId);
+      expect({
+        status: result.run.status,
+        // Each that ran, in its own activation: the third is the last.
+        ran: new Set(receipts.map(({ attempt }) => attempt)).size,
+        settled: receipts.every(({ settled }) => settled === 1),
+      }).toStrictEqual({ status: "failed", ran: 3, settled: true });
     });
 
     it("fails a run whose expressions would take its lineage past its host calls, counting on across a CPU kill and the retry under the same key", async () => {

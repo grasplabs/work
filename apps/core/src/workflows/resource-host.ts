@@ -15,6 +15,7 @@ import {
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import { encode } from "@grasp-os/workerflow/codec";
+import { namedError } from "@grasp-os/workerflow/errors";
 import type { AttemptLease } from "@grasp-os/workerflow/run";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { expressionError } from "@grasp-os/workflow-expressions/errors";
@@ -940,13 +941,58 @@ const attemptContextSchema = z.object({
 });
 
 /**
- * A step's retries: platform failures (a timeout, the isolate's CPU) are
- * tried again; an expression's failure is the same every time, and isn't
- * (`isRetryable`).
+ * A step's retries that run: platform failures (a timeout, the isolate's
+ * CPU) are tried again; an expression's failure is the same every time,
+ * and isn't (`isRetryable`). Counted by the attempts core admitted
+ * (`AttemptAdmission.ran`), never by the engine's numbers: an attempt core
+ * cuts off unadmitted (`#attemptOf`: its activation's fuel spent, its
+ * isolate stopped) runs nothing, and takes none of them (GRA-1097).
  */
+const stepRetries = 2;
+
+/**
+ * The engine's attempts at a step beyond those that run, for the ones
+ * core cuts off: what the engine is told it may make, on Cloudflare
+ * Workflows and Workerflow alike, so a step cut off this often still runs
+ * its own. Bounded, so a step cut off every time still ends.
+ */
+const cutOffAttempts = 4;
+
+/** A step's retries and timeout, as the engine takes them. */
 const stepConfig = {
-  retries: { limit: 2, delay: 1000, backoff: "exponential" as const },
+  retries: {
+    limit: stepRetries + cutOffAttempts,
+    delay: 1000,
+    backoff: "exponential" as const,
+  },
   timeout: maxAttemptTimeoutMs,
+};
+
+/**
+ * `error`, an attempt's failure, as the engine takes it once the attempt
+ * was the step's last that may run (`ran` past {@link stepRetries}): never
+ * retried, whatever the engine has left of its own attempts, its name the
+ * engine's for that (`toStepError`) and its message and code kept.
+ */
+/** Whether attempt `ran` of a step is past those that may run. */
+const overRetries = (ran: number | undefined): boolean =>
+  ran !== undefined && ran > stepRetries + 1;
+
+const lastRetry = (error: unknown, ran: number | undefined): unknown => {
+  if (
+    ran === undefined ||
+    ran <= stepRetries ||
+    !(error instanceof Error) ||
+    error.name === "NonRetryableError"
+  ) {
+    return error;
+  }
+  const code: unknown = Reflect.get(error, "code");
+  return namedError(
+    "NonRetryableError",
+    error.message,
+    typeof code === "string" ? code : undefined
+  );
 };
 
 /**
@@ -1624,7 +1670,12 @@ export class ResourceRunHost
     const { idempotencyKey: key, attempt: number } = told;
     const earlier = this.#ranBefore(key, number);
     if (earlier !== undefined) {
-      throw toStepError(this.#triedOnce.failureOf(key, earlier) ?? leftOpen);
+      // Its call was tried: nothing more of the step runs, so the engine
+      // tries it no more, however many of its attempts it has left.
+      throw lastRetry(
+        toStepError(this.#triedOnce.failureOf(key, earlier) ?? leftOpen),
+        Number.POSITIVE_INFINITY
+      );
     }
     let ranModule = false;
     try {
@@ -1993,6 +2044,14 @@ export class ResourceRunHost
     }
     // Settled however it ends, from here on (the `finally` below).
     try {
+      // Past the step's attempts that may run: the last of them ended with
+      // no outcome core saw (the engine timed it out, or its activation
+      // stopped), and the engine tries again, as its own count allows.
+      if (admission !== undefined && overRetries(admission.ran)) {
+        throw workflowErrors.create("workflow.too_many_attempts", {
+          max: stepRetries + 1,
+        });
+      }
       const attempt =
         admission === undefined
           ? undefined
@@ -2038,6 +2097,8 @@ export class ResourceRunHost
         throw toStepError(forIsolate(this.#tampered));
       }
       return this.#outcomeOf(run, attempt, result, hostMade);
+    } catch (error) {
+      throw lastRetry(error, admission?.ran);
     } finally {
       // Settled last, however it ended: what it held of its lineage's time
       // turns into what it used, its evaluations' and its record's checks'
