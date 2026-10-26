@@ -85,11 +85,14 @@ import type { SessionCheck } from "./session-check.ts";
 // | candidates,        | signed in, after the onboarding's; a record's counts and |
 // | statements, teams, | stakeholders for an onboarding team join that team, for  |
 // | gaps               | whoever reads it; gaps with what became of them.         |
-// |                    | Statements never for Grasp's staff, who read numbers     |
-// |                    | only; the onboarding's are the team's claims five or     |
-// |                    | more of its people made (GRA-1084)                       |
+// |                    | The onboarding's statements are the team's claims five   |
+// |                    | or more of its people made (GRA-1084)                    |
 // | workflows          | the brain's records, as the onboarding drew them, for    |
 // |                    | everyone signed in                                       |
+//
+// Grasp's staff are admins, and read what admins read (Nick,
+// 2026-10-25): that each of their reads is audited and visible to the
+// client is GRA-1087's.
 // | goals, landscape,  | nothing core can read holds them yet: empty              |
 // | policies           |                                                          |
 //
@@ -818,9 +821,7 @@ export const readBrain = async (
       records.tools
     ),
     sources: [...sources, ...records.sources, ...transcribed],
-    // Grasp staff read numbers only, never what the company's people
-    // said (GRA-1084): no statement at all, whoever added it.
-    statements: person.staff ? [] : records.statements,
+    statements: records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),
     workflows: records.workflows,
