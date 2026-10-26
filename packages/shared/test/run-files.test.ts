@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { isZip, runFileTypeOf } from "../src/run-files.ts";
+import {
+  isZip,
+  runFileLimits,
+  runFileNamed,
+  runFileNameSchema,
+  runFileTypeOf,
+} from "../src/run-files.ts";
 
 // The type a file someone else made shows (GRA-886): by its bytes, never
 // by the label it came with, which only names a text type for bytes with
@@ -47,6 +53,29 @@ describe("the run-file type of a file someone else made", () => {
       zip: undefined,
       isZip: true,
       pdfIsZip: false,
+    });
+  });
+});
+
+describe("a run file's name for its type", () => {
+  it("never cuts a character in half when the type's extension takes its place at the length limit", () => {
+    // An emoji is two UTF-16 code units; its first lands on the cut.
+    const stem = `${"a".repeat(runFileLimits.nameLength - 6)}\u{1F600}`;
+    const renamed = runFileNamed(
+      `${stem}.bin`,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
+
+    expect({
+      fitsBefore: runFileNameSchema.safeParse(`${stem}.bin`).success,
+      renamed: renamed.endsWith(".docx"),
+      length: renamed.length <= runFileLimits.nameLength,
+      valid: runFileNameSchema.safeParse(renamed).success,
+    }).toStrictEqual({
+      fitsBefore: true,
+      renamed: true,
+      length: true,
+      valid: true,
     });
   });
 });
