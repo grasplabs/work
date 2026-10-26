@@ -9,13 +9,16 @@ import { brainErrors } from "./contract.ts";
 import { inList } from "./db/d1.ts";
 import {
   brainCaptureCursors,
+  brainConsolidationDue,
   brainEpisodeMembers,
   brainEpisodes,
   brainErasedEvidence,
   brainForgottenPeople,
+  brainSequences,
 } from "./db/schema.ts";
 import { idSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
+import { retiringOrphans, scopeKeyOf } from "./lesson-orphans.ts";
 
 // The Brain's runtime API for its host (GRA-300; the Brain design's
 // "Automatic platform operation"): `recordOutcome` keeps a settled task's
@@ -170,7 +173,12 @@ export const recordOutcome = async <C>(
   // however late a delivery lands.
   const erased = sql`EXISTS (SELECT 1 FROM ${brainErasedEvidence} WHERE ${brainErasedEvidence.evidenceId} IN (${outcome.evidenceId}, ${erasedEventKey(outcome.eventId)}))`;
   const isNew = sql`NOT EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${brainEpisodes.id} = ${outcome.eventId}) AND NOT ${forgotten(outcome.ownerId)} AND NOT ${erased}`;
-  const [, inserted] = await auditedBatch(brain.ports, db, [
+  const scope =
+    outcome.audience === undefined
+      ? { scope: "person" as const, scopeId: outcome.ownerId }
+      : { scope: "session" as const, scopeId: outcome.audience.id };
+  const recordedNow = sql`EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${brainEpisodes.id} = ${outcome.eventId} AND ${brainEpisodes.delivery} = ${delivery})`;
+  const [, _counted, inserted] = await auditedBatch(brain.ports, db, [
     // Before the insert, on its condition: recorded only if it is new.
     outboxedWhere(
       brain,
@@ -186,10 +194,19 @@ export const recordOutcome = async <C>(
       },
       isNew
     ),
+    // The order it is recorded in, from one counter moved in this batch:
+    // commit order, whatever the clock said (lessons.ts reads by it).
+    db
+      .insert(brainSequences)
+      .values({ name: "episodes", value: 1 })
+      .onConflictDoUpdate({
+        target: brainSequences.name,
+        set: { value: sql`${brainSequences.value} + 1` },
+      }),
     db
       .insert(brainEpisodes)
       .select(
-        sql`SELECT ${outcome.eventId}, ${outcome.source}, ${outcome.sourceSeq}, ${outcome.ownerId}, ${outcome.scope}, ${outcome.audience?.id ?? null}, ${outcome.taskType}, ${outcome.execution}, ${outcome.result}, ${outcome.evidenceId}, ${JSON.stringify(outcome.evidenceRefs)}, ${JSON.stringify(outcome.versionRefs)}, ${occurredAt.getTime()}, ${now.getTime()}, ${delivery} WHERE ${isNew}`
+        sql`SELECT ${outcome.eventId}, ${outcome.source}, ${outcome.sourceSeq}, ${outcome.ownerId}, ${outcome.scope}, ${outcome.audience?.id ?? null}, ${outcome.taskType}, ${outcome.execution}, ${outcome.result}, ${outcome.evidenceId}, ${JSON.stringify(outcome.evidenceRefs)}, ${JSON.stringify(outcome.versionRefs)}, ${occurredAt.getTime()}, ${now.getTime()}, ${delivery}, (SELECT ${brainSequences.value} FROM ${brainSequences} WHERE ${brainSequences.name} = 'episodes') WHERE ${isNew}`
       )
       .onConflictDoNothing({ target: brainEpisodes.id })
       .returning({ id: brainEpisodes.id }),
@@ -198,9 +215,19 @@ export const recordOutcome = async <C>(
     db
       .insert(brainEpisodeMembers)
       .select(
-        sql`SELECT ${outcome.eventId}, members.value FROM json_each(${JSON.stringify(outcome.audience?.members ?? [])}) AS members WHERE EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${brainEpisodes.id} = ${outcome.eventId} AND ${brainEpisodes.delivery} = ${delivery}) AND NOT ${forgotten(sql`members.value`)}`
+        sql`SELECT ${outcome.eventId}, members.value FROM json_each(${JSON.stringify(outcome.audience?.members ?? [])}) AS members WHERE ${recordedNow} AND NOT ${forgotten(sql`members.value`)}`
       )
       .onConflictDoNothing(),
+    // Its scope's consolidation is due (lessons.ts), if it was recorded.
+    db
+      .insert(brainConsolidationDue)
+      .select(
+        sql`SELECT ${scopeKeyOf(scope)}, ${scope.scope}, ${scope.scopeId}, ${now.getTime()}, ${now.getTime()} WHERE ${recordedNow}`
+      )
+      .onConflictDoUpdate({
+        target: brainConsolidationDue.scopeKey,
+        set: { touchedAt: sql`excluded.touched_at` },
+      }),
     db
       .insert(brainCaptureCursors)
       .values({
@@ -344,12 +371,13 @@ const eraseWhere = async <C>(
 ): Promise<number> => {
   const { db } = brain;
   const holds = sql`EXISTS (SELECT 1 FROM ${brainEpisodes} WHERE ${column} = ${target.id})`;
-  const [, deleted] = await auditedBatch(brain.ports, db, [
+  const results = await auditedBatch(brain.ports, db, [
     outboxedWhere(
       brain,
       { actor: system, action: "knowledge.episode.erased", target },
       holds
     ),
+    ...retiringOrphans(db, eq(column, target.id), brain.ports.clock()),
     db
       .delete(brainEpisodes)
       .where(eq(column, target.id))
@@ -368,6 +396,7 @@ const eraseWhere = async <C>(
       })
       .onConflictDoNothing(),
   ]);
+  const [, _versions, _links, _lessons, _due, deleted] = results;
   return deleted.length;
 };
 
@@ -421,6 +450,8 @@ export const forgetPersonOutcomes = (
     db
       .delete(brainEpisodeMembers)
       .where(eq(brainEpisodeMembers.userId, userId)),
+    // A shared session's lessons resting on their episodes alone retire.
+    ...retiringOrphans(db, eq(brainEpisodes.ownerId, userId), now),
     db.delete(brainEpisodes).where(eq(brainEpisodes.ownerId, userId)),
     // So a capture from before now, delivered again, stays forgotten; a
     // later purge only moves the boundary later.

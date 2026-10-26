@@ -470,6 +470,30 @@ const knowledgeDb: D1State = {
       `${brain}outcomes.ts`,
       "Execution records whose events were erased, and single events taken back: late captures stay erased."
     ),
+    brain_lessons: exported(
+      `${brain}lessons.ts`,
+      "Lesson candidates consolidated from a scope's episodes."
+    ),
+    brain_lesson_versions: exported(
+      `${brain}lessons.ts`,
+      "Every revision of a lesson, and what it superseded."
+    ),
+    brain_lesson_evidence: exported(
+      `${brain}lessons.ts`,
+      "The episodes each lesson revision rests on."
+    ),
+    brain_consolidation_marks: exported(
+      `${brain}lessons.ts`,
+      "How far consolidation read each scope's episodes."
+    ),
+    brain_consolidation_due: exported(
+      `${brain}lessons.ts`,
+      "Scopes whose consolidation is due."
+    ),
+    brain_sequences: exported(
+      `${brain}outcomes.ts`,
+      "Counters numbering what the Brain records, in order."
+    ),
     brain_forgotten_people: exported(
       `${brain}outcomes.ts`,
       "Who a personal purge forgot, and when: late captures stay forgotten."
