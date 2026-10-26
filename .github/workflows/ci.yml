@@ -24,14 +24,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  # Everything but `vp test`, once: format, lint and types, the repo checks,
-  # the build, and that generated files are committed. Part of the required
-  # `check` (below).
+  # Everything but `vp test` and the build (release, below), once: format,
+  # lint and types, the repo checks, and that generated files are
+  # committed. Part of the required `check` (below).
   static:
     name: static
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    # About 2 minutes with a warm cache (October 2026).
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,12 +52,7 @@ jobs:
       - run: vp run check:wrangler-configs
       - run: vp run check:state-registry
       - run: vp run check:playwright-image
-      - run: vp run -r build
-      # The admin isn't deployed from here (see deploy-staging): check that
-      # its build is a Worker wrangler would deploy. No credentials needed.
-      - run: vp exec wrangler deploy --dry-run
-        working-directory: apps/admin
-      # Generated files (Worker types, route trees, migrations, the
+      # Generated files (Worker types, migrations, the
       # frontend's translation catalogs) must be committed.
       - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
@@ -74,14 +68,40 @@ jobs:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    # The test step's 25 minutes, and room for the steps around it.
-    timeout-minutes: 31
+    # The test step's 15 minutes, and room for the steps around it.
+    timeout-minutes: 21
     strategy:
       # A failing shard doesn't cancel the other: each says what failed in
       # it.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard:
+          [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+          ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,26 +118,34 @@ jobs:
       # descendants, and workerd is gdb's sibling, so tracing is opened up:
       # the runner is a throwaway VM. A failed install leaves the dump to say
       # gdb didn't run, and the tests run regardless.
+      # In the background, beside the tests: the dump needs it only once a
+      # run has stalled, minutes in, and the install took 10 to 15 s.
       - name: Install gdb for stall stack dumps
         continue-on-error: true
-        timeout-minutes: 3
         run: |
-          command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends gdb)
           sudo sysctl -w kernel.yama.ptrace_scope=0
-      # Two shards split by a hash of each file's path took 10 to 14
-      # minutes each (October 2026), and a slow runner ran one into this
-      # step's timeout: core's heaviest files could land together, and a
-      # shard runs its project groups (core and the rest, then core's
-      # screens, then on-prem) one after another. Five shards split by
-      # duration took 4 to 7 minutes each at first, leaving room for a
-      # runner twice as slow; four left the heaviest at about 9. As tests
-      # grew, five reached the 16 minutes this step had, and 4 of 9 PR runs
-      # lost a shard to it (October 2026, GRA-981): six shards, durations
-      # refreshed from recent runs, and 25 minutes, so a slow runner still
-      # fits. Refresh the durations from the shards' test-progress
-      # artifacts when the split drifts (scripts/test-durations.ts).
+          command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends gdb > "$RUNNER_TEMP/gdb-install.log" 2>&1 &)
+      # Shards split by how long each file takes (scripts/test-sequencer.ts,
+      # with the times in scripts/test-durations.json), each shard running
+      # one project group only (scripts/test-shards.ts): a shard that ran
+      # its groups one after another started each group's pools after the
+      # one before had ended, up to two minutes a group. Six shards took
+      # 14 to 16 minutes (October 2026, GRA-1094). No shard's time can be
+      # shorter than its longest file's, so split a file that sets it
+      # rather than adding shards. Refresh the durations from the shards'
+      # test-progress artifacts when the split drifts
+      # (scripts/test-durations.ts).
+      # A failed test is tried once more: a third of pull request runs
+      # failed, most often on a few flaky files, each a whole re-run of CI
+      # (October 2026). The flaky
+      # reporter (scripts/flaky-reporter.ts) names every test that passed
+      # only when tried again, as a warning and in the step summary, so it
+      # is fixed, not retried for ever.
       # Vitest's default runs a worker per CPU but one, which left a third
       # of the runner's CPU idle; a worker per CPU measured about 6% faster.
+      # Even then the CPUs were idle a third of the time, tests waiting on
+      # their runs' timers (October 2026, GRA-1094): six workers on the
+      # runner's four CPUs. Eight left as much idle and ran slower.
       # Vitest times a test out from inside its worker, so a worker that is
       # blocked, or whose request workerd cancelled, never reports its test.
       # The stall reporter (scripts/stall-reporter.ts) names such a test or
@@ -133,12 +161,12 @@ jobs:
       # one), with the runner's memory.
       # Reporters given here replace Vitest's defaults, so github-actions is
       # listed for the inline failure annotations.
-      - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=100% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
-        timeout-minutes: 25
+      - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
+        timeout-minutes: 15
         env:
           # Below the step's timeout, so the reporter says what still runs
           # before the step is killed.
-          GRASP_STALL_REPORT_AFTER_MINUTES: 23
+          GRASP_STALL_REPORT_AFTER_MINUTES: 13
           # Seconds past a test's own timeout (counted for each attempt):
           # room for the hooks around it, which have timeouts of their own.
           # The longest is 120 s, set by workerflow's process tests
@@ -178,26 +206,27 @@ jobs:
             echo "The kernel log is unavailable, so an OOM kill can't be ruled out: $kernel_log"
           fi
 
-  # The one required check (.github/rulesets/main.json) for static and every
-  # test shard, so sharding leaves the ruleset as it is. It runs however
+  # The one required check (.github/rulesets/main.json) for static, release
+  # and every test shard, so sharding leaves the ruleset as it is. It runs however
   # they ended, and passes only if all of them passed: GitHub counts a
   # skipped required check as passing, so this job mustn't be skipped when
   # one of them failed, was cancelled or was skipped.
   check:
     name: check
-    needs: [static, test]
+    needs: [static, release, test]
     if: always() && github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: |
-          echo "static: $STATIC, test shards: $TEST"
-          if [ "$STATIC" != success ] || [ "$TEST" != success ]; then
-            echo "::error title=check::static ended as $STATIC and the test shards as $TEST; check passes only when both succeed."
+          echo "static: $STATIC, release: $RELEASE, test shards: $TEST"
+          if [ "$STATIC" != success ] || [ "$RELEASE" != success ] || [ "$TEST" != success ]; then
+            echo "::error title=check::static ended as $STATIC, release as $RELEASE and the test shards as $TEST; check passes only when all three succeed."
             exit 1
           fi
         env:
           STATIC: ${{ needs.static.result }}
+          RELEASE: ${{ needs.release.result }}
           # A matrix job's result: a failure if any shard failed.
           TEST: ${{ needs.test.result }}
 
@@ -207,9 +236,11 @@ jobs:
   # every shard, and the serial projects (Grasp's go, the interviews, the
   # journeys) depend on everything before them, so `--shard` alone splits
   # nothing: GRASP_E2E_PART picks the part. The parallel part runs in
-  # shards, which split its test files by count, and the serial part runs
-  # on a stack of its own, where nothing runs before it. Add a shard by
-  # adding a parallel entry and raising the count in every `--shard`.
+  # parts, each the files scripts/e2e-parts.ts gives it by their times
+  # (scripts/e2e-durations.json), and each serial project on a stack of its
+  # own, where nothing runs before it: on one stack the three took about 7
+  # minutes (October 2026, GRA-1094). Add a parallel part by adding an
+  # entry and raising the count in every entry's `part`.
   # Part of the required `e2e` (below).
   #
   # In Playwright's image, which has the browsers and their system packages
@@ -238,22 +269,39 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - part: 1/3
+          - part: 1/8
             project: parallel
-            artifact: 1-of-3
-            args: --shard=1/3
-          - part: 2/3
+            artifact: 1-of-8
+          - part: 2/8
             project: parallel
-            artifact: 2-of-3
-            args: --shard=2/3
-          - part: 3/3
+            artifact: 2-of-8
+          - part: 3/8
             project: parallel
-            artifact: 3-of-3
-            args: --shard=3/3
-          - part: serial
-            project: serial
-            artifact: serial
-            args: ""
+            artifact: 3-of-8
+          - part: 4/8
+            project: parallel
+            artifact: 4-of-8
+          - part: 5/8
+            project: parallel
+            artifact: 5-of-8
+          - part: 6/8
+            project: parallel
+            artifact: 6-of-8
+          - part: 7/8
+            project: parallel
+            artifact: 7-of-8
+          - part: 8/8
+            project: parallel
+            artifact: 8-of-8
+          - part: onboarding
+            project: onboarding
+            artifact: onboarding
+          - part: interview
+            project: interview
+            artifact: interview
+          - part: journeys
+            project: journeys
+            artifact: journeys
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -264,9 +312,26 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - run: vp run e2e ${{ matrix.args }}
+      - run: |
+          files=""
+          if [ "$GRASP_E2E_PART" = parallel ]; then
+            files=$(node scripts/e2e-parts.ts "$PART")
+          fi
+          # Unquoted: a filter per file.
+          vp run e2e $files --reporter=github,json
         env:
           GRASP_E2E_PART: ${{ matrix.project }}
+          PART: ${{ matrix.part }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/e2e-results.json
+      # Kept for passing runs too: the times the parts are split by come
+      # from it (scripts/e2e-durations.ts).
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-results-${{ matrix.artifact }}
+          path: ${{ runner.temp }}/e2e-results.json
+          if-no-files-found: ignore
+          retention-days: 14
       # A failing test is retried with a trace (playwright.config.ts): keep it.
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -350,8 +415,10 @@ jobs:
 
   # Builds a release bundle as main will publish it (core, connect, the
   # frontend's static files and D1 migrations, with its manifest) and checks
-  # every blob against the manifest. For a pull request or the merge queue,
-  # that's all. On a push to main it's the commit's only build: the bundle
+  # every blob against the manifest, and builds the admin, which isn't part
+  # of a release. For a pull request or the merge queue, that's all, and
+  # it's the run's only build: part of the required `check` (above). On a
+  # push to main it's the commit's only build too: the bundle
   # is the run's `release` artifact, which deploy-staging deploys and
   # publish-release publishes as it is, so the release the admin rolls
   # out is the one staging ran and accepted, byte for byte.
@@ -370,6 +437,15 @@ jobs:
           run-install: |
             - args: ["--frozen-lockfile"]
       - run: vp run release:build --out release-out
+      # The admin isn't deployed from here (see deploy-staging): check that
+      # its build is a Worker wrangler would deploy. No credentials needed.
+      - if: github.event_name != 'push'
+        run: vp run build && vp exec wrangler deploy --dry-run
+        working-directory: apps/admin
+      # The builds above regenerate the route trees, which must be committed
+      # (static checks the other generated files without building).
+      - if: github.event_name != 'push'
+        run: git diff --exit-code -- '*routeTree.gen.ts'
       # Every file but the build's `.grasp-release` marker, which only
       # release:build reads. The download checks the artifact's digest, and
       # each job that uses it checks every file against the manifest again.

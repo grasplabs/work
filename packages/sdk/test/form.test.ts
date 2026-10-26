@@ -113,7 +113,7 @@ const host = (answer: (sent: Sent) => Answer | Promise<Answer>) => {
       return { result: { ok: true, value: answered.value } };
     },
     // These cases only make calls; live queries are core's own test
-    // (screen-client.test.ts).
+    // (screen-client-live.test.ts).
     watch: async () => {
       await Promise.resolve();
       throw new Error("Nothing here follows a query.");

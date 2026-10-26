@@ -1,14 +1,14 @@
+/**
+ * The permission probes' harness (GRA-731), shared by the files that ask
+ * them: the company they are asked in, the stand-in model that tries every
+ * read it can, and how a probe is asked through `Workspace.ask` and through
+ * the Teams door. Each file makes its own IdP and door (`mockIdp()`,
+ * `watched()`), which register its hooks, and its own company with
+ * `companyOnce`.
+ */
 import { env } from "cloudflare:workers";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { afterEach, beforeEach, vi } from "vite-plus/test";
 
-import { channelText } from "../src/channels/stephen-rules.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { model, pointAtGateway } from "./agent-chat.ts";
@@ -36,7 +36,6 @@ import type { BrainPersona } from "./fixtures/brain-corpus.ts";
 import {
   isDocument,
   memoryOwnerOf,
-  peopleMatters,
   permissionProbes,
   unreadableTo,
 } from "./fixtures/permission-probes.ts";
@@ -44,7 +43,7 @@ import type {
   PermissionProbe,
   ProbeTarget,
 } from "./fixtures/permission-probes.ts";
-import { mockIdp } from "./idp.ts";
+import type { Idp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 import {
@@ -53,37 +52,17 @@ import {
   post,
   reached,
   teamsPerson,
-  watched,
 } from "./teams-door.ts";
 import type { TeamsPerson } from "./teams-door.ts";
 
-// Who may see what (GRA-731): the 150 permission probes
-// (fixtures/permission-probes.ts) in the Brain baseline's company, each
-// asked as one person about what another may see, through `Workspace.ask`
-// and once more through the Teams door, as the Brain baseline's security
-// gate checks a trial: nothing its asker may not read reaches a model or
-// the answer. The model is a stand-in that tries every read it can (the
-// catalog, searches for the target's own words and code, the target's
-// document by its ID, recall), so a probe passes on the platform's
-// permissions alone; controls show the same reads do reach what the asker
-// may read. Someone removed and a guest get one line, and nothing is read.
-// People matters (sickness, harassment, a conflict) go to a person: the
-// rule is in what the model is told in a chat app, and what HR keeps about
-// a colleague never reaches it. Whether a real model follows the rule is
-// the eval's (GRA-739), not a stub's.
-
-const idp = mockIdp();
-
-watched();
-
-/** Every probe runs a turn or two: the whole file takes minutes. */
-const probeTime = { timeout: 600_000 };
+/** Every probe runs a turn or two: a file of them takes minutes. */
+export const probeTime = { timeout: 600_000 };
 
 /** What the stand-in answers once its reads came back. */
-const refusal = "I can't share that with you.";
+export const refusal = "I can't share that with you.";
 
 /** Strings a target holds that its reader alone may see. */
-const secretsOf = (target: ProbeTarget): readonly string[] => {
+export const secretsOf = (target: ProbeTarget): readonly string[] => {
   if (isDocument(target)) {
     const document = brainDocuments[target];
     return "canary" in document
@@ -102,7 +81,7 @@ const forbiddenFor = (asker: BrainPersona): string[] =>
  * The colleague HR's sick notes name, whom no question names: never named
  * to someone who may not read them.
  */
-const colleaguesInHrNotes = ["Karin Aydin"];
+export const colleaguesInHrNotes = ["Karin Aydin"];
 
 /**
  * Code that tries every read a chat's agent has for `queries` and `ids`.
@@ -145,8 +124,8 @@ interface Probing {
 }
 
 /**
- * The model behind every Workspace in the file: for the probing under way,
- * it runs the probing code once, then refuses.
+ * The model behind every Workspace in a file's company: for the probing
+ * under way, it runs the probing code once, then refuses.
  */
 const prober = () => {
   let current: Probing = { queries: [], ids: [] };
@@ -170,7 +149,7 @@ const prober = () => {
  * prompt, what the person said and what tools returned, never the
  * model's own code or words.
  */
-const sentSince = (requests: readonly GatewayRequest[], from: number) =>
+export const sentSince = (requests: readonly GatewayRequest[], from: number) =>
   requests
     .slice(from)
     .flatMap(({ body }) => transcriptOf(body))
@@ -179,17 +158,19 @@ const sentSince = (requests: readonly GatewayRequest[], from: number) =>
     .join("\n");
 
 /** Which of `forbidden` is in `text`. */
-const leaksIn = (text: string, forbidden: readonly string[]): string[] =>
+export const leaksIn = (text: string, forbidden: readonly string[]): string[] =>
   forbidden.filter((secret) => text.includes(secret));
 
 /**
  * The door's limit is per sender: each message a little later than the
  * last, so a person's sixty probes in a row are each taken. The whole
  * clock moves (`Date` and `Date.now`), so what Teams signs and what the
- * door checks agree.
+ * door checks agree. The files that share a worker share this module
+ * (and so `clockAhead`), which only ever moves on: each file's clock is
+ * as far ahead as the files before it left it, never back.
  */
 let clockAhead = 0;
-const later = () => {
+export const later = () => {
   clockAhead += 3100;
   vi.setSystemTime(Date.now() + 3100);
 };
@@ -198,7 +179,7 @@ const later = () => {
  * Runs the clock `clockAhead` ahead in each of a describe's tests, still
  * running: the mock IdP restores every mock after each test.
  */
-const clockRunsAhead = () => {
+export const clockRunsAhead = () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
     vi.setSystemTime(Date.now() + clockAhead);
@@ -208,7 +189,7 @@ const clockRunsAhead = () => {
   });
 };
 
-interface Company {
+export interface Company {
   brain: BrainCompany;
   model: ReturnType<typeof prober>;
   /** Each persona's own Workspace and agent, granted the shared collections. */
@@ -242,60 +223,64 @@ const teamsOf = (person: Awaited<ReturnType<typeof signedInApi>>) => {
   return teamsPerson(oid);
 };
 
-let company: Promise<Company> | undefined;
-
-/** The file's one company, shared by its tests: storage lasts the whole file. */
-const setUp = async (): Promise<Company> => {
-  company ??= (async () => {
-    const brain = await setUpBrainCompany(idp);
-    const stand = prober();
-    const places = {
-      ana: await workspaceOf(brain, "ana"),
-      bram: await workspaceOf(brain, "bram"),
-    };
-    // Stephen, as the door's chats run him, granted what each persona's
-    // own agent is: the collections that aren't private.
-    for (const [key, { access }] of Object.entries(brainCollections)) {
-      if (access.type !== "private") {
-        // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-        await grantCollection(
-          brain,
-          { type: "agent", agentId: chatAgentId },
-          key
+/**
+ * A test file's one company, shared by its tests: storage lasts the whole
+ * file, and each file starts empty, so each file makes its own.
+ */
+export const companyOnce = (idp: Idp): (() => Promise<Company>) => {
+  let company: Promise<Company> | undefined;
+  return async () => {
+    company ??= (async () => {
+      const brain = await setUpBrainCompany(idp);
+      const stand = prober();
+      const places = {
+        ana: await workspaceOf(brain, "ana"),
+        bram: await workspaceOf(brain, "bram"),
+      };
+      // Stephen, as the door's chats run him, granted what each persona's
+      // own agent is: the collections that aren't private.
+      for (const [key, { access }] of Object.entries(brainCollections)) {
+        if (access.type !== "private") {
+          // oxlint-disable-next-line no-await-in-loop -- one grant at a time
+          await grantCollection(
+            brain,
+            { type: "agent", agentId: chatAgentId },
+            key
+          );
+        }
+      }
+      for (const persona of ["ana", "bram"] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one object at a time
+        await pointAtGateway(places[persona].stub, stand.gateway);
+        // oxlint-disable-next-line no-await-in-loop -- one object at a time
+        await pointAtGateway(
+          workspace(env, personalWorkspaceId(brain.people[persona].userId)),
+          stand.gateway
         );
       }
-    }
-    for (const persona of ["ana", "bram"] as const) {
-      // oxlint-disable-next-line no-await-in-loop -- one object at a time
-      await pointAtGateway(places[persona].stub, stand.gateway);
-      // oxlint-disable-next-line no-await-in-loop -- one object at a time
-      await pointAtGateway(
-        workspace(env, personalWorkspaceId(brain.people[persona].userId)),
-        stand.gateway
-      );
-    }
-    const removed = await signedInApi(idp, "user");
-    await brain.admin.api.members.remove(removed.userId);
-    const guestOnTeams = teamsPerson();
-    await onRoster(guestOnTeams, { userRole: "guest", tenantId: acmeTenant });
-    return {
-      brain,
-      model: stand,
-      places,
-      teams: {
-        ana: teamsOf(brain.people.ana),
-        bram: teamsOf(brain.people.bram),
-      },
-      memories: {
-        ana: await memoryIdOf(brain.people.ana),
-        bram: await memoryIdOf(brain.people.bram),
-      },
-      removed,
-      removedOnTeams: teamsOf(removed),
-      guestOnTeams,
-    };
-  })();
-  return await company;
+      const removed = await signedInApi(idp, "user");
+      await brain.admin.api.members.remove(removed.userId);
+      const guestOnTeams = teamsPerson();
+      await onRoster(guestOnTeams, { userRole: "guest", tenantId: acmeTenant });
+      return {
+        brain,
+        model: stand,
+        places,
+        teams: {
+          ana: teamsOf(brain.people.ana),
+          bram: teamsOf(brain.people.bram),
+        },
+        memories: {
+          ana: await memoryIdOf(brain.people.ana),
+          bram: await memoryIdOf(brain.people.bram),
+        },
+        removed,
+        removedOnTeams: teamsOf(removed),
+        guestOnTeams,
+      };
+    })();
+    return await company;
+  };
 };
 
 /** What the probing for `target` tries: its own words and code, and its document. */
@@ -322,13 +307,13 @@ const onTeams = (asker: PermissionProbe["asker"], place: Company) => {
 };
 
 /** How many activities the door sent `person` so far. */
-const sentCount = async (person: TeamsPerson): Promise<number> => {
+export const sentCount = async (person: TeamsPerson): Promise<number> => {
   const { activities } = await reached(person.conversation);
   return activities.length;
 };
 
 /** What one probe came to, as the gate reads it. */
-interface ProbeOutcome {
+export interface ProbeOutcome {
   id: string;
   /** What its asker may not see that reached a model or the answer. */
   leaked: string[];
@@ -341,7 +326,7 @@ interface ProbeOutcome {
 }
 
 /** Asks `probe` through `Workspace.ask`, as its asker. */
-const askedInWorkspace = async (
+export const askedInWorkspace = async (
   probe: PermissionProbe,
   place: Company
 ): Promise<ProbeOutcome> => {
@@ -389,7 +374,7 @@ const askedInWorkspace = async (
 };
 
 /** What the door sent `person` since `before`, as one text. */
-const postedTo = async (person: TeamsPerson, before: number) => {
+export const postedTo = async (person: TeamsPerson, before: number) => {
   const { activities } = await reached(person.conversation);
   return activities
     .slice(before)
@@ -398,7 +383,7 @@ const postedTo = async (person: TeamsPerson, before: number) => {
 };
 
 /** Asks `probe` on Teams, through the door. */
-const askedThroughDoor = async (
+export const askedThroughDoor = async (
   probe: PermissionProbe,
   place: Company
 ): Promise<ProbeOutcome> => {
@@ -439,179 +424,9 @@ const askedThroughDoor = async (
   };
 };
 
-const memberProbes = permissionProbes.filter(
+export const memberProbes = permissionProbes.filter(
   ({ asker }) => asker === "ana" || asker === "bram"
 );
-const outsiderProbes = permissionProbes.filter(
+export const outsiderProbes = permissionProbes.filter(
   ({ asker }) => asker === "removed" || asker === "guest"
 );
-
-describe("the permission probes", probeTime, () => {
-  clockRunsAhead();
-
-  it("are 150, guests and removed people among them, each asking as one person about what another may see", () => {
-    expect({
-      probes: permissionProbes.length,
-      unique: new Set(permissionProbes.map(({ id }) => id)).size,
-      askers: [...new Set(permissionProbes.map(({ asker }) => asker))],
-      // Every probe's target is one its asker may not see.
-      foreign: permissionProbes.every(
-        ({ asker, target }) =>
-          asker === "removed" ||
-          asker === "guest" ||
-          unreadableTo[asker].includes(target)
-      ),
-    }).toStrictEqual({
-      probes: 150,
-      unique: 150,
-      askers: ["ana", "bram", "removed", "guest"],
-      foreign: true,
-    });
-  });
-
-  it("reach what their asker may read: the same reads would catch a leak", async () => {
-    const place = await setUp();
-    // Each target, asked by someone who may read it.
-    const readers: [BrainPersona, ProbeTarget][] = [
-      ["ana", "routePlans"],
-      ["ana", "planningOfficeDays"],
-      ["ana", "roster"],
-      ["ana", "hubs"],
-      ["bram", "budget"],
-      ["bram", "tolls"],
-      ["ana", "memory:ana"],
-      ["bram", "memory:bram"],
-    ];
-    const reachedSecrets: string[] = [];
-    for (const [asker, target] of readers) {
-      // oxlint-disable-next-line no-await-in-loop -- one turn at a time
-      const probed = await askedInWorkspace(
-        {
-          id: `control-${asker}-${target}`,
-          asker,
-          target,
-          language: "en",
-          tactic: "ask",
-          question: "Tell me everything.",
-        },
-        place
-      );
-      const sent = sentSince(place.model.gateway.requests, 0);
-      reachedSecrets.push(
-        ...(secretsOf(target).every((secret) => sent.includes(secret))
-          ? [target]
-          : [`${target} not reached`])
-      );
-      expect(probed.leaked).toStrictEqual([]);
-    }
-    expect(reachedSecrets).toStrictEqual(readers.map(([, target]) => target));
-  });
-
-  it("show a member nothing they may not read through Workspace.ask: no canary, fact or colleague's memory reaches a model or the answer", async () => {
-    const place = await setUp();
-    const outcomes: ProbeOutcome[] = [];
-    for (const probe of memberProbes) {
-      // oxlint-disable-next-line no-await-in-loop -- one turn at a time
-      outcomes.push(await askedInWorkspace(probe, place));
-    }
-    expect({
-      asked: outcomes.length,
-      unanswered: outcomes.filter(({ answered }) => answered !== true),
-      leaks: outcomes.filter(({ leaked }) => leaked.length > 0),
-    }).toStrictEqual({ asked: 120, unanswered: [], leaks: [] });
-  });
-
-  it("show a member nothing they may not read through the Teams door either", async () => {
-    const place = await setUp();
-    const outcomes: ProbeOutcome[] = [];
-    for (const probe of memberProbes) {
-      // oxlint-disable-next-line no-await-in-loop -- one message at a time
-      outcomes.push(await askedThroughDoor(probe, place));
-    }
-    expect({
-      asked: outcomes.length,
-      unanswered: outcomes.filter(({ answered }) => answered !== true),
-      leaks: outcomes.filter(({ leaked }) => leaked.length > 0),
-    }).toStrictEqual({ asked: 120, unanswered: [], leaks: [] });
-  });
-
-  it("refuse someone removed in Workspace.ask, and give them and a guest one line through the door, with nothing read", async () => {
-    const place = await setUp();
-    const inWorkspace: ProbeOutcome[] = [];
-    for (const probe of outsiderProbes.filter(
-      ({ asker }) => asker === "removed"
-    )) {
-      // oxlint-disable-next-line no-await-in-loop -- one turn at a time
-      inWorkspace.push(await askedInWorkspace(probe, place));
-    }
-    const throughDoor: ProbeOutcome[] = [];
-    for (const probe of outsiderProbes) {
-      // oxlint-disable-next-line no-await-in-loop -- one message at a time
-      throughDoor.push(await askedThroughDoor(probe, place));
-    }
-    expect({
-      inWorkspace: inWorkspace.map(({ read, refusedWith }) => ({
-        read,
-        refusedWith,
-      })),
-      throughDoor: throughDoor.map(({ read, refusedWith }) => ({
-        read,
-        refusedWith,
-      })),
-    }).toStrictEqual({
-      inWorkspace: inWorkspace.map(() => ({
-        read: false,
-        refusedWith: "permission.person_inactive",
-      })),
-      throughDoor: throughDoor.map(() => ({
-        read: false,
-        refusedWith: "1 line",
-      })),
-    });
-  });
-});
-
-describe("people matters", probeTime, () => {
-  clockRunsAhead();
-
-  it("go to a person: the rule is what Stephen is told on Teams, in every language, and no colleague HR keeps notes about reaches a model or the answer", async () => {
-    const place = await setUp();
-    const { text: rule } = await channelText();
-    const outcomes: { id: string; told: boolean; leaked: string[] }[] = [];
-    for (const matter of peopleMatters) {
-      for (const asker of ["ana", "bram"] as const) {
-        place.model.probing({
-          queries: [matter.question, "sick leave", "complaint"],
-          ids: [place.brain.documents.get("sickNotes")?.id ?? ""],
-        });
-        const from = place.model.gateway.requests.length;
-        const person = place.teams[asker];
-        // oxlint-disable-next-line no-await-in-loop -- one message at a time
-        const before = await sentCount(person);
-        later();
-        // oxlint-disable-next-line no-await-in-loop -- one message at a time
-        await post(
-          messageFrom(person, {
-            text: matter.question,
-            locale: matter.language,
-          })
-        );
-        const sent = sentSince(place.model.gateway.requests, from);
-        // oxlint-disable-next-line no-await-in-loop -- one message at a time
-        const posted = await postedTo(person, before);
-        outcomes.push({
-          id: `${asker}-${matter.id}`,
-          told: sent.includes(rule) && sent.includes("always goes to a person"),
-          leaked: leaksIn(`${sent}\n${posted}`, [
-            ...colleaguesInHrNotes,
-            ...secretsOf("sickNotes"),
-          ]),
-        });
-      }
-    }
-    expect(
-      outcomes.filter(({ told, leaked }) => !told || leaked.length > 0)
-    ).toStrictEqual([]);
-    expect(outcomes).toHaveLength(30);
-  });
-});

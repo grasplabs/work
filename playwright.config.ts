@@ -24,20 +24,20 @@ const browserPolicyTests = /(?:screen-attacks|product-page-scripts)\.e2e\.ts$/u;
  * which signs out everyone the other tests signed in. So it runs last, in
  * a project of its own after all the others, one test at a time.
  */
-const onboardingTests = /onboarding\.e2e\.ts$/u;
+export const onboardingTests = /onboarding\.e2e\.ts$/u;
 /**
  * Someone's own interview (e2e/interview.e2e.ts): its link goes out once
  * the agreements are in, which tells the team, and the onboarding's tests
  * expect links that wait. So it runs after them, one test at a time.
  */
-const interviewTests = /interview\.e2e\.ts$/u;
+export const interviewTests = /interview\.e2e\.ts$/u;
 /**
  * The journeys that matter most, end to end (e2e/*-journey.e2e.ts): the
  * admin's onboarding, an employee's interview on a phone, a lead's by
  * voice. Each sends links, which tells the team, and replaces the roster
  * the tests before read, so they run last, one at a time.
  */
-const journeyTests = /journey\.e2e\.ts$/u;
+export const journeyTests = /journey\.e2e\.ts$/u;
 /**
  * What grants, retires or revokes package approvals: each bumps the
  * deployment's shared policy generation in the one database every worker
@@ -136,9 +136,14 @@ const serialProjects = (before: string[]): Project[] => [
  * stack, unless CI splits it. Playwright runs a project's dependencies in
  * full on every shard, so `--shard` alone can't split a suite whose
  * serial tail depends on everything before it. CI runs the parallel part
- * in shards (`parallel` with `--shard`) and the serial part (`serial`) on
- * a stack of its own, where nothing runs before it to wait for. Locally
- * both run on one stack, the serial part last.
+ * in parts (`parallel`, with the files of each), and each serial project
+ * on a stack of its own (`onboarding`, `interview`, `journeys`, the
+ * journeys a file a stack with `--shard`): they run one after another
+ * only so that what one does can't change what the next sees, and a
+ * stack of its own sees nothing before it. One stack held all three, 18
+ * tests one at a time, about 7 minutes (October 2026, GRA-1094). `serial`
+ * runs the three in turn on one stack. Locally all of it runs on one
+ * stack, the serial projects last.
  */
 const e2eProjects = (): Project[] => {
   const part = process.env.GRASP_E2E_PART;
@@ -154,8 +159,12 @@ const e2eProjects = (): Project[] => {
   if (part === "serial") {
     return serialProjects([]);
   }
+  const alone = serialProjects([]).find(({ name }) => name === part);
+  if (alone !== undefined) {
+    return [{ ...alone, dependencies: [] }];
+  }
   throw new Error(
-    `GRASP_E2E_PART is "${part}": leave it unset, or set "parallel" or "serial".`
+    `GRASP_E2E_PART is "${part}": leave it unset, or set "parallel", "serial", "onboarding", "interview" or "journeys".`
   );
 };
 
