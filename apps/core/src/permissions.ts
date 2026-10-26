@@ -41,6 +41,7 @@ import {
   requireBuilder,
   roleErrors,
 } from "@grasp-os/shared/roles";
+import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   and,
@@ -66,7 +67,7 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
-import { memberRole } from "./auth/identity.ts";
+import { activeStaffRole, memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
 import { personOf, requireOfferedConnection } from "./connections.ts";
 import {
@@ -1694,14 +1695,33 @@ export const askedAgainBy = (
   permission.actions.some((action) => changesThings(permission.object, action));
 
 /**
+ * The role of the person work acts for, read now, while they may still
+ * have it done: a member's, or, for work a Grasp staff member started (its
+ * authority's server-set `staff` mark, GRA-1088), the staff role while
+ * their staff session is still valid (`activeStaffRole`). The mark is the
+ * only way past membership: staff on unmarked work count as no one, and a
+ * member on marked work as well. `undefined` for no one.
+ */
+export const personRole = async (
+  env: Env,
+  person: string,
+  staff: boolean | undefined
+): Promise<Role | undefined> =>
+  staff === true
+    ? await activeStaffRole(env, person)
+    : await memberRole(env.DB, person);
+
+/**
  * The person an App or agent acts for must still be in the organization:
- * nothing works for someone who has left or was removed.
+ * nothing works for someone who has left or was removed (`personRole`).
  */
 export const requireActivePerson = async (
   env: Env,
   authority: Authority
 ): Promise<void> => {
-  if (!(await memberRole(env.DB, authority.onBehalfOf))) {
+  if (
+    (await personRole(env, authority.onBehalfOf, authority.staff)) === undefined
+  ) {
     throw permissionErrors.create("permission.person_inactive");
   }
 };
