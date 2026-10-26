@@ -129,7 +129,8 @@ How to read it:
 Then, for the company's own onboarding, where you talk its admin through connecting what you need, write "onboarding": one entry for each of these languages, by its code: ${interviewLocales.map((each) => `${each} (${NAMED[each]})`).join(", ")}. Each in its own language, and only from what was said:
 - "business": what the company does, in one short sentence addressed to its admin, such as "You build and renovate homes for housing associations." Empty when the conversation doesn't say.
 - "documents": the kinds of documents its work runs on that the conversation names, as plural nouns, at most ${contextDocumentsMax}, such as "calculations" or "supplier invoices". None when it names none.
-- "example": one turn of an interview with someone at this company about the work the conversation says costs time: "role" is their team or role in a few words, "question" what you ask them in one short sentence, "answer" their answer in one or two short sentences as said on a call, and "time" how long it takes them as they would say it. Leave all four empty when the conversation names no such work. Roles, never names of people.`;
+- "example": one turn of an interview with someone at this company about the work the conversation says costs time: "role" is their team or role in a few words, "question" what you ask them in one short sentence, "answer" their answer in one or two short sentences as said on a call, and "time" how long it takes them as they would say it. Leave all four empty when the conversation names no such work. Roles, never names of people.
+- The company's admin reads all of this: never anything from what Stephen must leave alone or what is sensitive right now, nor anything about one person.`;
 
 /** What the model answers: loose, as the check that follows is strict. */
 const answerSchema = z.object({
