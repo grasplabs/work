@@ -24,20 +24,20 @@ const browserPolicyTests = /(?:screen-attacks|product-page-scripts)\.e2e\.ts$/u;
  * which signs out everyone the other tests signed in. So it runs last, in
  * a project of its own after all the others, one test at a time.
  */
-const onboardingTests = /onboarding\.e2e\.ts$/u;
+export const onboardingTests = /onboarding\.e2e\.ts$/u;
 /**
  * Someone's own interview (e2e/interview.e2e.ts): its link goes out once
  * the agreements are in, which tells the team, and the onboarding's tests
  * expect links that wait. So it runs after them, one test at a time.
  */
-const interviewTests = /interview\.e2e\.ts$/u;
+export const interviewTests = /interview\.e2e\.ts$/u;
 /**
  * The journeys that matter most, end to end (e2e/*-journey.e2e.ts): the
  * admin's onboarding, an employee's interview on a phone, a lead's by
  * voice. Each sends links, which tells the team, and replaces the roster
  * the tests before read, so they run last, one at a time.
  */
-const journeyTests = /journey\.e2e\.ts$/u;
+export const journeyTests = /journey\.e2e\.ts$/u;
 /**
  * What grants, retires or revokes package approvals: each bumps the
  * deployment's shared policy generation in the one database every worker

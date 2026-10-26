@@ -125,8 +125,6 @@ jobs:
         run: |
           sudo sysctl -w kernel.yama.ptrace_scope=0
           command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends gdb > "$RUNNER_TEMP/gdb-install.log" 2>&1 &)
-      # TEMPORARY (GRA-1094): how busy the runner's CPUs are while the tests run.
-      - run: nohup vmstat -n 5 > "$RUNNER_TEMP/vmstat.log" 2>&1 &
       # Shards split by how long each file takes (scripts/test-sequencer.ts,
       # with the times in scripts/test-durations.json), each shard running
       # one project group only (scripts/test-shards.ts): a shard that ran
@@ -184,10 +182,6 @@ jobs:
           # stack and sockets: at most 20 s and 300 KB, so the log shows
           # where it is stuck.
           GRASP_STALL_DUMP_STACKS: gdb
-      # TEMPORARY (GRA-1094): the CPU's average user, system, idle and I/O wait.
-      - if: always()
-        run: |
-          awk 'NR>2 {us+=$13; sy+=$14; id+=$15; wa+=$16; n++; free=$4+$5+$6; if (!least || free<least) least=free} END {if (n) printf "CPU over %d samples: user %.0f%%, system %.0f%%, idle %.0f%%, I/O wait %.0f%%; least free memory %.1f GB\n", n, us/n, sy/n, id/n, wa/n, least/1048576}' "$RUNNER_TEMP/vmstat.log" | tee -a "$GITHUB_STEP_SUMMARY"
       # Kept for passing runs too: the durations the shards are split by
       # come from it (scripts/test-durations.ts).
       - if: always()
@@ -242,10 +236,11 @@ jobs:
   # every shard, and the serial projects (Grasp's go, the interviews, the
   # journeys) depend on everything before them, so `--shard` alone splits
   # nothing: GRASP_E2E_PART picks the part. The parallel part runs in
-  # shards, which split its test files by count, and each serial project
-  # on a stack of its own, where nothing runs before it: on one stack the
-  # three took about 7 minutes (October 2026, GRA-1094). Add a shard by
-  # adding a parallel entry and raising the count in every `--shard`.
+  # parts, each the files scripts/e2e-parts.ts gives it by their times
+  # (scripts/e2e-durations.json), and each serial project on a stack of its
+  # own, where nothing runs before it: on one stack the three took about 7
+  # minutes (October 2026, GRA-1094). Add a parallel part by adding an
+  # entry and raising the count in every entry's `part`.
   # Part of the required `e2e` (below).
   #
   # In Playwright's image, which has the browsers and their system packages
@@ -277,47 +272,36 @@ jobs:
           - part: 1/8
             project: parallel
             artifact: 1-of-8
-            args: --shard=1/8
           - part: 2/8
             project: parallel
             artifact: 2-of-8
-            args: --shard=2/8
           - part: 3/8
             project: parallel
             artifact: 3-of-8
-            args: --shard=3/8
           - part: 4/8
             project: parallel
             artifact: 4-of-8
-            args: --shard=4/8
           - part: 5/8
             project: parallel
             artifact: 5-of-8
-            args: --shard=5/8
           - part: 6/8
             project: parallel
             artifact: 6-of-8
-            args: --shard=6/8
           - part: 7/8
             project: parallel
             artifact: 7-of-8
-            args: --shard=7/8
           - part: 8/8
             project: parallel
             artifact: 8-of-8
-            args: --shard=8/8
           - part: onboarding
             project: onboarding
             artifact: onboarding
-            args: ""
           - part: interview
             project: interview
             artifact: interview
-            args: ""
           - part: journeys
             project: journeys
             artifact: journeys
-            args: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -328,11 +312,19 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - run: vp run e2e ${{ matrix.args }} --reporter=github,json
+      - run: |
+          files=""
+          if [ "$GRASP_E2E_PART" = parallel ]; then
+            files=$(node scripts/e2e-parts.ts "$PART")
+          fi
+          # Unquoted: a filter per file.
+          vp run e2e $files --reporter=github,json
         env:
           GRASP_E2E_PART: ${{ matrix.project }}
-          # TEMPORARY (GRA-1094): each test's time, to split the parts by it.
+          PART: ${{ matrix.part }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/e2e-results.json
+      # Kept for passing runs too: the times the parts are split by come
+      # from it (scripts/e2e-durations.ts).
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
