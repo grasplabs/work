@@ -156,7 +156,8 @@ const documentsOf = async <C>(
         sql`${versions.number} IN (SELECT value FROM json_each(${JSON.stringify(
           [...new Set(refs.map(({ version }) => version))]
         )}))`,
-        allowed.documents()
+        allowed.documents(),
+        allowed.version(versions.documentId, versions.number)
       )
     );
   const readable = new Map(

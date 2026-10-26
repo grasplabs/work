@@ -262,6 +262,39 @@ export const versions = sqliteTable(
 );
 
 /**
+ * What a document version rests on, when it was written from what its
+ * writer read (GRA-1093): each collection it cites, and each document in
+ * it (`cited_document_id`, '' for the collection alone). Written only for
+ * a version saved from a pinned chat or run, never by a person's own save,
+ * and copied to a version that restores it. A reader sees the version only
+ * while they may read every collection it cites and every document it
+ * cites is still in its collection (authorize.ts, `allowedOf`): a derived
+ * copy never shows more than its sources' audience. Its key leads with the
+ * version, so that check is one index range.
+ */
+export const brainDocumentCites = sqliteTable(
+  "brain_document_cites",
+  {
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    version: integer().notNull(),
+    collectionId: text("collection_id").notNull(),
+    citedDocumentId: text("cited_document_id").notNull().default(""),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.documentId,
+        table.version,
+        table.collectionId,
+        table.citedDocumentId,
+      ],
+    }),
+  ]
+);
+
+/**
  * The sections search holds of each document: those of its indexed version
  * (`documents.indexed_version`), split by heading, in order, replaced
  * whole by each published generation (../indexing.ts).

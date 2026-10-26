@@ -123,7 +123,7 @@ export const brainNotes = async (
                 eq(target.collectionId, documents.collectionId),
                 eq(ranked.toCollectionId, documents.collectionId),
                 eq(target.path, ranked.path),
-                allowed.documents(target.path)
+                allowed.documents(target)
               )
             )
             .where(lte(ranked.rank, brainNoteMaxLinks))

@@ -3,7 +3,7 @@ import type { SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { inList, notInList } from "./db/d1.ts";
-import { collections, documents } from "./db/schema.ts";
+import { brainDocumentCites, collections, documents } from "./db/schema.ts";
 import type { DetailValue } from "./events.ts";
 
 // What a reader may read, as the host decides it: Knowledge holds no
@@ -34,11 +34,27 @@ export interface Allowed {
   collections: SQL;
   /**
    * The documents they may read, as a condition on `collections` and on
-   * the column that has their path (`documents.path` unless an alias's):
-   * those of `collections`, and in a collection `Readable.only` names,
-   * only those at its paths.
+   * the document's row (`documents` unless an alias of it): those of
+   * `collections`, in a collection `Readable.only` names only those at its
+   * paths, and whose current and indexed versions rest on nothing they
+   * may not read (`version`).
    */
-  documents: (path?: SQLiteColumn) => SQL;
+  documents: (of?: DocumentColumns) => SQL;
+  /**
+   * That version `version` of document `id` rests on nothing they may not
+   * read (`brain_document_cites`, GRA-1093): every collection it cites is
+   * one they may read, and every document it cites is still in its
+   * collection. A version written by a person's own save cites nothing.
+   */
+  version: (id: SQLiteColumn | SQL, version: SQLiteColumn | SQL) => SQL;
+}
+
+/** The columns of a document row (`documents`, or an alias of it). */
+export interface DocumentColumns {
+  id: SQLiteColumn;
+  path: SQLiteColumn;
+  currentVersion: SQLiteColumn;
+  indexedVersion: SQLiteColumn;
 }
 
 /** `readable` as conditions every read puts inside its SQL. */
@@ -52,11 +68,22 @@ export const allowedOf = ({
   const inCollections =
     ids.length === 0 ? sql`0` : inList(sql`+${collections.id}`, ids);
   const limited = Object.entries(only).filter(([id]) => ids.includes(id));
+  const readable = JSON.stringify(ids);
+  const version = (id: SQLiteColumn | SQL, at: SQLiteColumn | SQL): SQL =>
+    sql`NOT EXISTS (SELECT 1 FROM ${brainDocumentCites} AS cite WHERE cite.document_id = ${id} AND cite.version = ${at} AND (cite.collection_id NOT IN (SELECT value FROM json_each(${readable})) OR (cite.cited_document_id <> '' AND NOT EXISTS (SELECT 1 FROM ${documents} AS cited WHERE cited.id = cite.cited_document_id AND cited.collection_id = cite.collection_id))))`;
   return {
     collections: inCollections,
-    documents: (path = documents.path) => {
+    version,
+    documents: (of = documents) => {
+      // Its current version, and the one search holds the sections of,
+      // which may still be an older one (indexing.ts).
+      const rests = and(
+        version(of.id, of.currentVersion),
+        version(of.id, of.indexedVersion)
+      );
+      const { path } = of;
       if (limited.length === 0) {
-        return inCollections;
+        return and(inCollections, rests) ?? sql`0`;
       }
       const whole = notInList(
         collections.id,
@@ -67,7 +94,7 @@ export const allowedOf = ({
           ? sql`0`
           : and(eq(collections.id, id), inList(path, paths))
       );
-      return and(inCollections, or(whole, ...atPaths)) ?? sql`0`;
+      return and(inCollections, or(whole, ...atPaths), rests) ?? sql`0`;
     },
   };
 };

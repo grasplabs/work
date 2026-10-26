@@ -164,7 +164,7 @@ export const follow = async <C>(
       and(
         eq(target.collectionId, links.toCollectionId),
         eq(target.path, links.toPath),
-        allowed.documents(target.path)
+        allowed.documents(target)
       )
     )
     .where(
