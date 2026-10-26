@@ -2220,10 +2220,7 @@ export class Onboarding extends DurableObject<Env> {
         .select()
         .from(checkedDifferences)
         .all()
-        .map(({ work, drawnAt }) => [work, drawnAt])
-    );
-    const clean = withoutNames(
-      this.#roster()?.people.map(({ name }) => name) ?? []
+        .map((row) => [row.work, row])
     );
     const differences: Difference[] = [];
     let mapped = 0;
@@ -2253,17 +2250,18 @@ export class Onboarding extends DurableObject<Env> {
         // Shown only when the brain's intake checked five or more people
         // behind each way, in this drawing, and without a name in either
         // (GRA-1084): never one person's way of doing it.
+        const check = checked.get(work.id);
         if (
           differs?.why === "conflict" &&
           heard &&
-          checked.get(work.id) === drawn.at
+          check?.drawnAt === drawn.at
         ) {
           differences.push({
             work: work.id,
             name: work.local === "" ? work.name : work.local,
             team: team.name,
-            way: clean(drawn.steps[differs.step]?.text ?? ""),
-            other: clean(differs.other),
+            way: check.way,
+            other: check.other,
             holds: settled.get(work.id) ?? null,
           });
         }
@@ -5205,13 +5203,18 @@ export class Onboarding extends DurableObject<Env> {
           (support.steps[differs.step] ?? []).length >= minTeamShown &&
           support.other.length >= minTeamShown;
         if (checked) {
+          // As checked: each way with the roster's names taken out now,
+          // never again with whatever names it has later.
+          const shown = {
+            drawnAt: work.drawn.at,
+            way: clean(work.drawn.steps[differs.step]?.text ?? ""),
+            other: clean(differs.other),
+            at,
+          };
           this.#db
             .insert(checkedDifferences)
-            .values({ work: work.id, drawnAt: work.drawn.at, at })
-            .onConflictDoUpdate({
-              target: checkedDifferences.work,
-              set: { drawnAt: work.drawn.at, at },
-            })
+            .values({ work: work.id, ...shown })
+            .onConflictDoUpdate({ target: checkedDifferences.work, set: shown })
             .run();
         } else {
           this.#db
@@ -5410,6 +5413,12 @@ export class Onboarding extends DurableObject<Env> {
       .delete(countedWorks)
       .where(
         sql`${countedWorks.work} not in (select ${works.id} from ${works})`
+      )
+      .run();
+    this.#db
+      .delete(checkedDifferences)
+      .where(
+        sql`${checkedDifferences.work} not in (select ${works.id} from ${works})`
       )
       .run();
   }

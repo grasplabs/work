@@ -306,6 +306,28 @@ describe("what needs the admin", { timeout: 120_000 }, () => {
     });
   });
 
+  it("keeps a name out of a difference once the roster calls that person something else", async () => {
+    const ids = await team();
+    await drawn(ids);
+    const store = onboardingStore(env);
+    const { roster } = await store.view();
+    // Only Max's name changes, to one that doesn't hold "Max" alone.
+    await store.saveRoster(
+      {
+        teams: roster?.teams ?? [],
+        people: (roster?.people ?? []).map((each) =>
+          each.name === "Max Mol" ? { ...each, name: "Maximilian Mol" } : each
+        ),
+      },
+      { type: "system" }
+    );
+    const { api } = await signedInApi(idp, "admin");
+    const { differences } = await api.onboarding.review();
+    expect(differences.map(({ other }) => other)).toStrictEqual([
+      "Look up the customer in Salesforce, as someone does.",
+    ]);
+  });
+
   it("shows no difference whose other way fewer than five are checked to tell, the drawing's word for five notwithstanding", async () => {
     const ids = await team();
     // One of the five says something else, as the check finds.

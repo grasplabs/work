@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f5b9a4a6-ac1d-4a8d-a8b3-b0184b3864e3",
+  "id": "f444533d-b4ec-4a56-bd3b-be45ad44be41",
   "prevId": "efb7f62a-970c-42b4-bdd4-5290c03c88ed",
   "tables": {
     "answer_waits": {
@@ -256,6 +256,20 @@
         },
         "drawn_at": {
           "name": "drawn_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "way": {
+          "name": "way",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "other": {
+          "name": "other",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
