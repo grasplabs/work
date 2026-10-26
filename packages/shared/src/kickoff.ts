@@ -1,7 +1,9 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
+import type { ContextWords } from "./onboarding-context.ts";
 import { interviewLocaleSchema } from "./onboarding.ts";
+import type { InterviewLocale } from "./onboarding.ts";
 
 // The kickoff (core's onboarding/kickoff.ts): Grasp's first conversation
 // with the company's sponsor, brought in by Grasp's staff and read for the
@@ -67,6 +69,12 @@ export interface KickoffReading {
    * names them to the admin as he says hello.
    */
   sponsor?: string;
+  /**
+   * Stephen's words about the company for the admin's onboarding, by
+   * language: what it is, the documents its work runs on, an interview
+   * turn about its work. None from a reading made before they were.
+   */
+  words?: Partial<Record<InterviewLocale, ContextWords>>;
 }
 
 /** The kickoff as Grasp's staff see it. */

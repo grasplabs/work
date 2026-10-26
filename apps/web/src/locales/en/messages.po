@@ -443,6 +443,14 @@ msgstr "{devices, plural, one {Signed in on # device. Sign out any you do not re
 msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
 msgstr "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
 
+#: src/onboarding/setup-steps.tsx
+msgid "{documentKinds}, and whatever explains how you work. Share what you have. Drafts are fine too."
+msgstr "{documentKinds}, and whatever explains how you work. Share what you have. Drafts are fine too."
+
+#: src/onboarding/setup-steps.tsx
+msgid "{documentKinds}. Connect where they live, and I’ll only read what you share with me."
+msgstr "{documentKinds}. Connect where they live, and I’ll only read what you share with me."
+
 #: src/brain/brain-atlas.ts
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# document} other {# documents}}"
@@ -913,6 +921,10 @@ msgstr "{name} was first seen on {firstSeen}, more than a month ago."
 msgid "{name}, per {key}"
 msgstr "{name}, per {key}"
 
+#: src/onboarding/about-story.tsx
+msgid "{name}, where does the time go in your week?"
+msgstr "{name}, where does the time go in your week?"
+
 #: src/dashboard/report.ts
 msgid "{name}: {count}"
 msgstr "{name}: {count}"
@@ -1242,8 +1254,8 @@ msgid "{sponsor} gave me the big picture. Now I need the details."
 msgstr "{sponsor} gave me the big picture. Now I need the details."
 
 #: src/onboarding/setup-steps.tsx
-msgid "{sponsor} told me a lot about your company in our first conversation. Before we start, which language do you prefer?"
-msgstr "{sponsor} told me a lot about your company in our first conversation. Before we start, which language do you prefer?"
+msgid "{sponsor} told me a lot about your company in our first conversation."
+msgstr "{sponsor} told me a lot about your company in our first conversation."
 
 #: src/brain/brain.ts
 msgid "{statements, plural, one {# statement: {breakdown}} other {# statements: {breakdown}}}"
@@ -3693,10 +3705,6 @@ msgstr "Charge"
 msgid "Charge {amount} for this model call?"
 msgstr "Charge {amount} for this model call?"
 
-#: src/onboarding/about-story.tsx
-msgid "Chasing paperwork. Half of every file is waiting for payslips."
-msgstr "Chasing paperwork. Half of every file is waiting for payslips."
-
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
 msgid "Chat"
@@ -4431,10 +4439,6 @@ msgstr "Customer data"
 msgid "Customer records, messages, tickets, CRM fields or files that identify customers."
 msgstr "Customer records, messages, tickets, CRM fields or files that identify customers."
 
-#: src/onboarding/about-story.tsx
-msgid "Customer service"
-msgstr "Customer service"
-
 #: src/frame/person-menu.tsx
 msgid "Dark"
 msgstr "Dark"
@@ -4768,6 +4772,14 @@ msgstr "Dismiss this signal about {name}"
 #: src/activity/audit-words.ts
 msgid "Dismissed a knowledge signal"
 msgstr "Dismissed a knowledge signal"
+
+#: src/routes/_shell.settings.onboarding.tsx
+msgid "Do it now"
+msgstr "Do it now"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Do this later"
+msgstr "Do this later"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Do you have anything that explains how you work?"
@@ -5252,10 +5264,6 @@ msgstr "Every invited team interviewed"
 #: src/routes/_shell.settings.notifications.tsx
 msgid "Every Monday: hours, runs, and what is waiting."
 msgstr "Every Monday: hours, runs, and what is waiting."
-
-#: src/onboarding/about-story.tsx
-msgid "Every morning I copy new tickets into a spreadsheet. There goes my first hour."
-msgstr "Every morning I copy new tickets into a spreadsheet. There goes my first hour."
 
 #: src/brain/brain-atlas.ts
 msgid "Every one of them is interviewed."
@@ -6287,8 +6295,12 @@ msgid "How long"
 msgstr "How long"
 
 #: src/onboarding/about-story.tsx
-msgid "How long does one of those take you, Tim?"
-msgstr "How long does one of those take you, Tim?"
+msgid "How long does one of those take you, {name}?"
+msgstr "How long does one of those take you, {name}?"
+
+#: src/onboarding/about-story.tsx
+msgid "How long does that take you, {name}?"
+msgstr "How long does that take you, {name}?"
 
 #: src/workflows/chosen-at-run-time.tsx
 msgid "how long it waits"
@@ -7504,10 +7516,6 @@ msgctxt "button: note the one reminder as sent"
 msgid "Mark reminded"
 msgstr "Mark reminded"
 
-#: src/onboarding/about-story.tsx
-msgid "Mark, where does the time go on a mortgage file?"
-msgstr "Mark, where does the time go on a mortgage file?"
-
 #: src/export/export-menu.tsx
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
@@ -7708,10 +7716,6 @@ msgstr "More was sent than is shown above. Read exactly what was sent."
 #: src/chat/held-writes.tsx
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 msgstr "More will be sent than is shown above. Read exactly what will be sent before you confirm."
-
-#: src/onboarding/about-story.tsx
-msgid "Mortgage advice"
-msgstr "Mortgage advice"
 
 #: src/routes/_shell.landscape.index.tsx
 msgid "Mosaic"
@@ -11860,6 +11864,10 @@ msgstr "Stephen can offer it in Microsoft Teams to anyone who may start it. It s
 msgid "Stephen is reading it. This takes a minute."
 msgstr "Stephen is reading it. This takes a minute."
 
+#: src/routes/_shell.settings.onboarding.tsx
+msgid "Stephen talks to nobody until you pick the day the interviews start."
+msgstr "Stephen talks to nobody until you pick the day the interviews start."
+
 #: src/routes/interview.tsx
 msgid "Stephen, drawn in dots."
 msgstr "Stephen, drawn in dots."
@@ -13617,6 +13625,10 @@ msgstr "To do"
 msgctxt "inbox tab: what waits on you"
 msgid "To do"
 msgstr "To do"
+
+#: src/routes/_shell.settings.onboarding.tsx
+msgid "To do: let your team know, and send the interview links"
+msgstr "To do: let your team know, and send the interview links"
 
 #: src/onboarding/setup-steps.tsx
 msgid "To everyone"

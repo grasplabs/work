@@ -26,6 +26,7 @@ import type {
   RosterInput,
 } from "@grasp-os/shared/onboarding";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
+import type { ContextWords } from "@grasp-os/shared/onboarding-context";
 import { documentErrors } from "@grasp-os/shared/onboarding-documents";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import type { GateView, KnownPart } from "@grasp-os/shared/onboarding-gate";
@@ -208,6 +209,7 @@ const downloadCsv = (content: string, filename: string): void => {
 const connectProps = ({ data, go }: StepProps) => ({
   choices: data.choices,
   signIn: data.signIn,
+  named: data.view.context,
   identity: data.identity,
   go,
 });
@@ -224,6 +226,22 @@ const useRefresh = (): (() => Promise<void>) => {
 const toolsIn = (documents: OnboardingDocument[]): string[] => [
   ...new Set(documents.flatMap((each) => each.reading.tools)),
 ];
+
+/** What the kickoff told about the company, in the language the page is in; undefined where it told nothing in it. */
+const useContextWords = (data: SetupData): ContextWords | undefined => {
+  const { i18n } = useLingui();
+  return data.view.context.words[isLocale(i18n.locale) ? i18n.locale : "en"];
+};
+
+/** The kinds of documents the company's work runs on, as a list that starts a sentence; null where the kickoff named none. */
+const kindsOf = (words: ContextWords | undefined): string | null => {
+  const kinds = words?.documents ?? [];
+  if (kinds.length === 0) {
+    return null;
+  }
+  const list = formatList(kinds);
+  return `${list.charAt(0).toLocaleUpperCase()}${list.slice(1)}`;
+};
 
 /** What Stephen says as a step arrives, and how; even, unless it says otherwise. */
 interface Headline {
@@ -247,6 +265,9 @@ const useHeadlines = ({
   const { t } = useLingui();
   const { admin } = data;
   const { sponsor } = data.view;
+  // What the kickoff told about the company, in the language the page is in; else Stephen speaks as for anyone.
+  const words = useContextWords(data);
+  const documentKinds = kindsOf(words);
   const named = toolsIn(data.documents).slice(0, 4);
   const tools = formatList(named);
   const { progress } = data.view;
@@ -277,11 +298,16 @@ const useHeadlines = ({
     hr,
     welcome: {
       title: t`Hi ${admin}, I’m Stephen`,
-      // The sponsor by name, only when the kickoff gave one.
-      sentence:
+      // The sponsor by name, only when the kickoff gave one; and what the company does, when it said.
+      sentence: [
         sponsor === null
-          ? t`Before we start, which language do you prefer?`
-          : t`${sponsor} told me a lot about your company in our first conversation. Before we start, which language do you prefer?`,
+          ? ""
+          : t`${sponsor} told me a lot about your company in our first conversation.`,
+        words?.business ?? "",
+        t`Before we start, which language do you prefer?`,
+      ]
+        .filter((each) => each !== "")
+        .join(" "),
       voice: { tone: tones.warm },
     },
     company: {
@@ -290,11 +316,17 @@ const useHeadlines = ({
     },
     sources: {
       title: t`Where does the work get written down?`,
-      sentence: t`Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me.`,
+      sentence:
+        documentKinds === null
+          ? t`Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me.`
+          : t`${documentKinds}. Connect where they live, and I’ll only read what you share with me.`,
     },
     documents: {
       title: t`Do you have anything that explains how you work?`,
-      sentence: t`Policies, procedures, work instructions. Share whatever you have. Drafts are fine too.`,
+      sentence:
+        documentKinds === null
+          ? t`Policies, procedures, work instructions. Share whatever you have. Drafts are fine too.`
+          : t`${documentKinds}, and whatever explains how you work. Share what you have. Drafts are fine too.`,
     },
     pulse: {
       title: t`Which tools do people actually use?`,
@@ -1556,10 +1588,13 @@ const Leads = (props: StepProps) => {
 /**
  * Tell the team, and plan the interviews: the message the admin sends
  * themselves, and the day the interviews start. The leads get their link
- * that morning; everyone else once their lead talked.
+ * that morning; everyone else once their lead talked. Not ready to yet,
+ * the admin can do it later: the onboarding ends here for now, and the
+ * platform keeps it as an open to-do (Settings, Onboarding) until they do.
  */
 const Team = (props: StepProps) => {
   const { t } = useLingui();
+  const navigate = useNavigate();
   const lines = useHeadlines(props).team;
   const { admin, company, view } = props.data;
   const { run, busy, failure } = useCoreAction();
@@ -1710,6 +1745,15 @@ const Team = (props: StepProps) => {
       >
         {t`I sent it`}
       </Primary>
+      {view.plan === null ? (
+        <Later
+          onClick={() => {
+            void navigate({ to: "/settings/onboarding" });
+          }}
+        >
+          {t`Do this later`}
+        </Later>
+      ) : null}
     </>
   );
 };

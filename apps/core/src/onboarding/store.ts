@@ -55,6 +55,7 @@ import {
   setupChoicesSchema,
 } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
+import type { OnboardingContext } from "@grasp-os/shared/onboarding-context";
 import type {
   DocumentReading,
   OnboardingDocument,
@@ -171,6 +172,7 @@ import { storedDocumentReadingSchema } from "./document-reading.ts";
 import { checkedSupport } from "./drawing-support.ts";
 import type { Support } from "./drawing-support.ts";
 import {
+  contextOf,
   kickoffBrief,
   storedAnswersSchema,
   storedReadingSchema,
@@ -840,6 +842,7 @@ export class Onboarding extends DurableObject<Env> {
       agreed: agreementsIn(row.agreements),
       paused: row.pausedAt !== null,
       sponsor: this.#sponsor(),
+      context: this.#context(),
       waiting: roster === null ? 0 : this.#waiting(roster),
     };
   }
@@ -854,6 +857,20 @@ export class Onboarding extends DurableObject<Env> {
         (unconfirmed.people.has(person.id) ||
           unconfirmed.teams.has(person.team))
     ).length;
+  }
+
+  /** What the admin's onboarding knows of the company from the kickoff: read without its transcript. */
+  #context(): OnboardingContext {
+    const [row] = this.#db
+      .select({ reading: kickoff.reading, answers: kickoff.answers })
+      .from(kickoff)
+      .all();
+    return row === undefined
+      ? contextOf(null, {})
+      : contextOf(
+          storedReadingSchema.parse(JSON.parse(row.reading)),
+          storedAnswersSchema.parse(JSON.parse(row.answers))
+        );
   }
 
   /** The sponsor's first name, when the kickoff named them: read without its transcript. */

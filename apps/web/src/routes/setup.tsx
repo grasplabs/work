@@ -38,6 +38,7 @@ import {
   settledAs,
   stepIndex,
   steps,
+  suitesFor,
 } from "../onboarding/setup.ts";
 import type { Kept, ReviewItemId, SetupStep } from "../onboarding/setup.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
@@ -410,7 +411,15 @@ const Setup = () => {
           >
             <SetupStepBody
               cramped={cramped}
-              data={{ ...data, admin, sendingDomain, signIn, suites, identity }}
+              data={{
+                ...data,
+                admin,
+                sendingDomain,
+                signIn,
+                // The sign-ins the kickoff named, where it named any.
+                suites: suitesFor(suites, data.view.context),
+                identity,
+              }}
               go={go}
               listening={listening}
               message={kept.message}
