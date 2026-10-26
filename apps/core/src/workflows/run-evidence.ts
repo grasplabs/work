@@ -6,7 +6,7 @@ import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, PermissionId, RunId } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { runBrainEvidence } from "../db/core/schema.ts";
@@ -37,9 +37,20 @@ const contextOf = ({ app, runId }: EvidenceRun) =>
   ({ type: "run", appId: app, runId }) as const;
 
 /**
+ * Most document refs one run keeps (one per document and binding): far
+ * above what a run's recalls cite, so a run past it is recalling in a
+ * loop. It is refused further recalls rather than kept growing, and each
+ * check before something leaves the run stays one bounded query.
+ */
+export const runEvidenceMaxRows = 1000;
+
+/**
  * Adds what `pack`, recalled through the binding of `permissionId`, cites
  * to the run's evidence: never replacing, never narrowing. An empty pack
- * adds nothing and clears nothing.
+ * adds nothing and clears nothing. Refuses, as `brain.budget_exceeded`
+ * and adding nothing, a pack that would take the run past
+ * `runEvidenceMaxRows`: counted and added in one statement, so recalls
+ * running side by side can't each fit under it and together pass it.
  */
 export const recordRunEvidence = async (
   env: Env,
@@ -47,18 +58,37 @@ export const recordRunEvidence = async (
   permissionId: PermissionId,
   pack: MemoryPack
 ): Promise<void> => {
-  const refs = pack.sourceVersions.flatMap((ref) =>
-    ref.kind === "document" ? [[ref.documentId, ref.collectionId]] : []
-  );
-  if (refs.length === 0) {
+  const cited = new Map<string, string>();
+  for (const ref of pack.sourceVersions) {
+    if (ref.kind === "document") {
+      cited.set(ref.documentId, ref.collectionId);
+    }
+  }
+  if (cited.size === 0) {
     return;
   }
-  await drizzle(env.DB)
+  const refs = JSON.stringify([...cited]);
+  const db = drizzle(env.DB);
+  await db
     .insert(runBrainEvidence)
     .select(
-      sql`SELECT ${run.runId}, json_extract(cited.value, '$[0]'), json_extract(cited.value, '$[1]'), ${permissionId}, ${Date.now()} FROM json_each(${JSON.stringify(refs)}) AS cited WHERE 1`
+      sql`SELECT ${run.runId}, json_extract(cited.value, '$[0]'), json_extract(cited.value, '$[1]'), ${permissionId}, ${Date.now()} FROM json_each(${refs}) AS cited WHERE (SELECT count(*) FROM ${runBrainEvidence} WHERE ${runBrainEvidence.runId} = ${run.runId}) + (SELECT count(*) FROM json_each(${refs}) AS fresh WHERE NOT EXISTS (SELECT 1 FROM ${runBrainEvidence} AS kept WHERE kept.run_id = ${run.runId} AND kept.document_id = json_extract(fresh.value, '$[0]') AND kept.permission_id = ${permissionId})) <= ${runEvidenceMaxRows}`
     )
     .onConflictDoNothing();
+  // Every ref kept, now or before: otherwise the cap held it back.
+  const [kept] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(runBrainEvidence)
+    .where(
+      and(
+        eq(runBrainEvidence.runId, run.runId),
+        eq(runBrainEvidence.permissionId, permissionId),
+        sql`${runBrainEvidence.documentId} IN (SELECT json_extract(value, '$[0]') FROM json_each(${refs}))`
+      )
+    );
+  if ((kept?.count ?? 0) < cited.size) {
+    throw brainErrors.create("brain.budget_exceeded");
+  }
 };
 
 /** Whether `error` is a refusal of access, rather than a passing failure. */

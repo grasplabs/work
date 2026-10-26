@@ -19,6 +19,7 @@ import {
 import type { Settled } from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import { keepMessage } from "../src/workflows/kept-email.ts";
+import { runEvidenceMaxRows } from "../src/workflows/run-evidence.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -844,6 +845,48 @@ describe(
       }).toStrictEqual({
         beforeIsRevoked: false,
         after: "brain.revoked",
+      });
+    });
+
+    it("refuses a recall that would keep more than a run's cap of evidence, though one citing only what it keeps still answers", async () => {
+      const admin = await personApi("admin");
+      const { app, noteId, calls } = await evidenceApp(admin);
+      let answered: Record<string, string> = {};
+      await cancelledAt(
+        app,
+        admin.userId,
+        calls,
+        undefined,
+        async (attempt) => {
+          // The note alone (`note.md`: "See …").
+          await attempt.callBrain("BRAIN", { query: "See" });
+          const kept = await env.DB.prepare(
+            "SELECT run_id AS run, permission_id AS permission FROM run_brain_evidence WHERE document_id = ?"
+          )
+            .bind(noteId)
+            .first<{ run: string; permission: string }>();
+          if (kept === null) {
+            throw new Error("The recall kept no evidence");
+          }
+          // Up to the cap, as a run recalling in a loop would come to.
+          await env.DB.prepare(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO run_brain_evidence SELECT ?, 'filler-' || i, 'filler', ?, 0 FROM n"
+          )
+            .bind(runEvidenceMaxRows - 1, kept.run, kept.permission)
+            .run();
+          answered = {
+            // The note again: nothing more to keep.
+            again: codeOf(await attempt.callBrain("BRAIN", { query: "See" })),
+            // `other.md` ("Back to …"): one past the cap.
+            past: codeOf(await attempt.callBrain("BRAIN", { query: "Back" })),
+          };
+          return { ok: true, value: null };
+        }
+      );
+
+      expect(answered).toStrictEqual({
+        again: "ok",
+        past: "brain.budget_exceeded",
       });
     });
 

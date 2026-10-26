@@ -291,4 +291,69 @@ describe("a workflow's recall through the Brain binding", () => {
       answering.mockRestore();
     }
   });
+
+  it("fails as revoked, never with its own message, a run that throws what it recalled once it may no longer read it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const word = rareWord();
+    const handbook = await collectionSaying(admin, "Handbook", word);
+    const { id: app } = await admin.api.apps.create({ name: "Recall" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    const collectionGrant = await requestGranted(
+      idp,
+      admin,
+      readCollection(app_, handbook)
+    );
+    await requestGranted(idp, admin, brainFor(app));
+    await release(admin, app, {
+      ...sampleApp(),
+      ...withBrain(
+        workflowFiles(
+          "thrower",
+          `  const recalled = await step.do("recall", { description: "Recall the plan" }, async () => {
+    const pack = await brain(env.BRAIN).recall({ query: ${JSON.stringify(word)} });
+    return pack.items.map(({ statement }) => statement).join(" ") as Json;
+  });
+  await step.sleep("go", { description: "Wait", duration: "1 day" });
+  await step.do("fail", { description: "Fail with it" }, async () => {
+    throw new Error(String(recalled));
+  });
+  return null;`,
+          { recall: "", fail: null }
+        )
+      ),
+    });
+    /** A run of `thrower`, `between` its recall and its throw. */
+    const thrown = async (between?: () => Promise<void>) => {
+      const { id } = await admin.api.workflows.start(app, "thrower");
+      await sleeping(id, "go");
+      await stopped(id);
+      await between?.();
+      await woken(id);
+      await finished(id);
+      const { status, error, failure } = await admin.api.workflows.status(id);
+      // Its failure report, and the error the engine ended it with.
+      const stored = JSON.stringify([failure ?? null, error ?? null]);
+      return {
+        status,
+        code: failure?.error.code ?? null,
+        recalledText: stored.includes(word),
+      };
+    };
+
+    const kept = await thrown();
+    const revoked = await thrown(async () => {
+      await admin.api.permissions.revoke(collectionGrant);
+    });
+
+    expect({ kept, revoked }).toStrictEqual({
+      // Still readable: its own error, as it threw it.
+      kept: {
+        status: "failed",
+        code: "workflow.run_failed",
+        recalledText: true,
+      },
+      // Not any more: its error is the refusal, its text nowhere in it.
+      revoked: { status: "failed", code: "brain.revoked", recalledText: false },
+    });
+  });
 });

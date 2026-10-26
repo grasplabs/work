@@ -413,19 +413,28 @@ const runWorkflow = async (
     // ended it, or the newer activation, records what comes of it.
     throw new Error(`Run ${runId} is no longer this activation's`);
   }
-  // Its output leaves the run too (its screens and details show it): not
-  // once it may no longer read what it recalled (run-evidence.ts).
-  const outputRefused =
-    result.ok && hosted !== undefined
+  // Its output leaves the run too (its screens and details show it), and
+  // so does its error, which its code may have made of recalled text
+  // (catching a refusal and throwing what it recalled, say): neither once
+  // it may no longer read what it recalled (run-evidence.ts). A run caught
+  // tampering fails with that refusal, checked or not.
+  const evidenceRefused =
+    tampered === undefined && hosted !== undefined
       ? await evidenceRefusal(env, hosted)
       : undefined;
-  const failed = tampered ?? (result.ok ? outputRefused : result.error);
+  const failed =
+    tampered ?? evidenceRefused ?? (result.ok ? undefined : result.error);
   if (failed) {
     // A failed run stops here, whatever failed: the step's retries (only
     // for failures trying again may fix, host.ts) are behind it. Its
     // report is kept in a step, once, before the run ends; its end, and
     // that it failed, are the engine's to say (runs.ts, `projectStatus`).
-    const stopped = stoppedWith(failed, lastFailed);
+    // Refused for its evidence, it reports no step: the step it stopped at
+    // and that step's input may hold what it recalled.
+    const stopped = stoppedWith(
+      failed,
+      evidenceRefused === undefined ? lastFailed : undefined
+    );
     await step.do(`${coreStepPrefix}end`, {}, async () => {
       await recordFailure(env, row, stopped);
       return null;
