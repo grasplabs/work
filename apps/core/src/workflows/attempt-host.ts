@@ -15,7 +15,11 @@ export interface AttemptCalls {
     binding: unknown,
     call: unknown
   ) => Promise<Settled<unknown>>;
-  callBrain: (binding: unknown, request: unknown) => Promise<Settled<unknown>>;
+  callBrain: (
+    binding: unknown,
+    operation: unknown,
+    request: unknown
+  ) => Promise<Settled<unknown>>;
   callFunction: (
     reference: unknown,
     input: unknown
@@ -162,9 +166,10 @@ export class AttemptHost extends RpcTarget implements AttemptCalls {
 
   async callBrain(
     binding: unknown,
+    operation: unknown,
     request: unknown
   ): Promise<Settled<unknown>> {
-    return await this.#calls.callBrain(binding, request);
+    return await this.#calls.callBrain(binding, operation, request);
   }
 
   async callFunction(

@@ -560,19 +560,28 @@ export type NoSkillReason = z.infer<typeof noSkillReasonSchema>;
 /**
  * A selection: the one applicable skill, pinned at the version read, with
  * the versions it depends on; or an explicit no-skill result. Either way,
- * every skill considered, with why.
+ * every skill considered, with why. A host checks what it hands a caller
+ * against it.
  */
-export interface SkillSelection {
-  id: string;
-  contractVersion: number;
+export const skillSelectionSchema = z.strictObject({
+  id: z.string(),
+  contractVersion: z.int(),
   /** The rules it followed: deterministic, never a model's choice. */
-  selectionPolicyVersion: string;
-  result:
-    | { kind: "skill"; skill: SkillRef; dependencies: SkillRef[] }
-    | { kind: "none"; reason: NoSkillReason };
-  considered: { skill: SkillRef; outcome: SkillOutcome }[];
-  createdAt: string;
-}
+  selectionPolicyVersion: z.string(),
+  result: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("skill"),
+      skill: skillRefSchema,
+      dependencies: z.array(skillRefSchema),
+    }),
+    z.strictObject({ kind: z.literal("none"), reason: noSkillReasonSchema }),
+  ]),
+  considered: z.array(
+    z.strictObject({ skill: skillRefSchema, outcome: skillOutcomeSchema })
+  ),
+  createdAt: z.string(),
+});
+export type SkillSelection = z.infer<typeof skillSelectionSchema>;
 
 /** A skill read at the exact version a selection pinned. */
 export const skillsReadInputSchema = z.strictObject({
@@ -580,15 +589,6 @@ export const skillsReadInputSchema = z.strictObject({
   version: revisionSchema,
 });
 export type SkillsReadInput = z.input<typeof skillsReadInputSchema>;
-
-/** A skill as read: its exact version, its manifest and its text. */
-export interface SkillRead {
-  skill: SkillRef;
-  /** Its manifest at that version; null when it has none that parses. */
-  manifest: SkillManifest | null;
-  /** The whole `SKILL.md` at that version: instructions are data to the host. */
-  text: string;
-}
 
 /** A skill's name, as its frontmatter has it. */
 export const skillNameSchema = z
@@ -653,6 +653,16 @@ export const skillManifestSchema = z.object({
   status: z.enum(["accepted", "retired"]).default("accepted"),
 });
 export type SkillManifest = z.infer<typeof skillManifestSchema>;
+
+/** A skill as read: its exact version, its manifest and its text. */
+export const skillReadSchema = z.strictObject({
+  skill: skillRefSchema,
+  /** Its manifest at that version; null when it has none that parses. */
+  manifest: skillManifestSchema.nullable(),
+  /** The whole `SKILL.md` at that version: instructions are data to the host. */
+  text: z.string(),
+});
+export type SkillRead = z.infer<typeof skillReadSchema>;
 
 // --- operations and errors --------------------------------------------------
 

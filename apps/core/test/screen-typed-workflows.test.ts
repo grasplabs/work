@@ -1,5 +1,7 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { v } from "@grasp-os/sdk";
 import {
+  decisionFingerprint,
   declaredWorkflows,
   GraspClient,
   readWorkflowReference,
@@ -49,6 +51,8 @@ import {
   readWorkflowRequest,
   readWorkflowWatch,
 } from "../src/screen-workflows.ts";
+import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
+import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -296,6 +300,23 @@ const workflowReference = async (release: Release, alias: string) => {
   if (declared === undefined) {
     throw new Error(`No workflow ${alias}`);
   }
+  const fingerprint = await workflowFingerprint(declared);
+  // Its decisions as the generator writes them (generate.ts).
+  const decisions: Record<string, unknown> = {};
+  for (const [key, decision] of Object.entries(declared.decisions)) {
+    decisions[key] = {
+      kind: "workflowDecision",
+      resourceId: release.manifest.resourceId,
+      resourceVersion: release.manifest.resourceVersion,
+      workflow: `workflows.${alias}`,
+      workflowFingerprint: fingerprint,
+      key,
+      // oxlint-disable-next-line no-await-in-loop -- one digest at a time
+      fingerprint: await decisionFingerprint(decision),
+      valueSchema: { kind: "descriptor", descriptor: decision.value },
+      context: decision.context,
+    };
+  }
   return {
     kind: "workflow",
     visibility: "public",
@@ -303,12 +324,12 @@ const workflowReference = async (release: Release, alias: string) => {
     resourceVersion: release.manifest.resourceVersion,
     alias,
     contractId: `workflows.${alias}`,
-    fingerprint: await workflowFingerprint(declared),
+    fingerprint,
     input: declared.input,
     output: declared.output,
     events: {},
     listens: {},
-    decisions: {},
+    decisions,
   };
 };
 
@@ -501,6 +522,68 @@ const following = async (
 /** How long a push or a run's change may take, and how often to look. */
 const settles = { timeout: 30_000, interval: 50 };
 
+/** A workflow that sleeps a moment, then an hour, then greets. */
+const twoSleepsOf = (name: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [
+      { first: { wait: "PT1S" } },
+      { second: { wait: "PT1H" } },
+      { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
+    ],
+  });
+
+/**
+ * A workflow asking `recipient` for decision `contract`, as `approval`, in
+ * its task `ask`, then greeting.
+ */
+const askingOf =
+  (contract: string, recipient: string) =>
+  (name: string): string =>
+    JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name,
+        version: "1.0.0",
+        title: name,
+        metadata: {
+          grasp: {
+            profile: "grasp-open-workflow/1",
+            params: {},
+            bindings: { approval: { kind: "decision", contract } },
+          },
+        },
+      },
+      input: { schema: objectSchema({ who: { type: "string" } }) },
+      output: { schema: objectSchema({ status: { type: "string" } }) },
+      do: [
+        {
+          ask: {
+            call: "grasp.decision",
+            with: {
+              binding: "approval",
+              recipients: [recipient],
+              prompt: "Greet them?",
+              input: { who: "${ $workflow.input.who }" },
+            },
+          },
+        },
+        { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
+      ],
+    });
+
 /** What a failed run's snapshot says of `error`: its code and words. */
 const failureShown = (error: { code: string | null; message: string }) => {
   const { code, message } = failureOf(error);
@@ -512,6 +595,27 @@ const shownOf = (pushed: unknown): unknown =>
   typeof pushed === "string"
     ? pushed
     : z.object({ status: z.string() }).safeParse(pushed).data?.status;
+
+/** The waits a snapshot lists: kind, ID, key, task and `canRespond`. */
+const waitsListed = (snapshot: unknown) =>
+  z
+    .object({
+      waits: z.array(
+        z.object({
+          kind: z.string(),
+          id: z.string(),
+          key: z.string(),
+          taskId: z.string(),
+          canRespond: z.boolean().optional(),
+        })
+      ),
+    })
+    .parse(snapshot).waits;
+
+/** How many waits a pushed snapshot lists. */
+const waitsShown = (pushed: unknown): number | undefined =>
+  z.object({ waits: z.array(z.unknown()) }).safeParse(pushed).data?.waits
+    .length;
 
 /** A control's receipt, without its revision. */
 const staged = (receipt: unknown) => {
@@ -607,6 +711,187 @@ describe(
           waits: [],
         },
       });
+    });
+
+    it("publishes what a run waits on with its status: its task's sleep while it runs, nothing once it has ended", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      // Running, and asleep in its `hold` task: one snapshot says both.
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.waits).toHaveLength(
+          1
+        );
+      }, settles);
+      const asleep = channel.peekRun(read, handle.runId);
+      await channel.control(read, handle.runId, "cancel", () => {
+        // Answered below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "cancelled"
+        );
+      }, settles);
+      const ended = channel.peekRun(read, handle.runId);
+      stopRun();
+      const [wait] = asleep.value?.waits ?? [];
+
+      expect({
+        status: asleep.value?.status,
+        wait:
+          wait === undefined
+            ? undefined
+            : {
+                kind: wait.kind,
+                purpose: "purpose" in wait ? wait.purpose : undefined,
+                key: wait.key,
+                taskId: wait.taskId,
+                // An hour's sleep (in seconds), from when it was first reached.
+                length:
+                  wait.deadline === null
+                    ? null
+                    : Math.round((wait.deadline - wait.openedAt) / 1000),
+              },
+        ended: {
+          waits: ended.value?.waits,
+          later: ended.revision > asleep.revision,
+        },
+      }).toStrictEqual({
+        status: "running",
+        wait: {
+          kind: "timer",
+          purpose: "sleep",
+          key: "hold",
+          taskId: "hold",
+          length: 3600,
+        },
+        ended: { waits: [], later: true },
+      });
+    });
+
+    it("lists a decision its run waits on as a wait its starter can't answer, and none once the run ended", async () => {
+      const admin = await signedIn("admin");
+      const builder = await signedIn("builder");
+      const key = `approval-${unique()}`;
+      await publishCatalogContract(env, admin.acting, {
+        key,
+        kind: "decision",
+        input: JSON.stringify(v.object({ who: v.string() }).descriptor),
+        response: JSON.stringify(v.object({ comment: v.string() }).descriptor),
+      });
+      const workflow = await createWorkflowResource(
+        env,
+        builder.acting,
+        `ask-${unique()}`
+      );
+      await publishWorkflowVersion(env, builder.acting, workflow.id, {
+        definition: askingOf(key, "role:admin")(workflow.name),
+        basedOn: null,
+      });
+      await approveWorkflowBinding(env, admin.acting, workflow.id, {
+        alias: "approval",
+        target: { kind: "decision", deciders: ["role:admin"] },
+        reviewed: { version: 1 },
+      });
+      const { app, reference } = await requestsApp(undefined, {
+        admin,
+        builder,
+        workflow,
+      });
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      // Asking the admins, its run waits on the decision: one snapshot.
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.waits).toHaveLength(
+          1
+        );
+      }, settles);
+      const asked = channel.peekRun(read, handle.runId);
+      await channel.control(read, handle.runId, "cancel", () => {
+        // Answered below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "cancelled"
+        );
+      }, settles);
+      const ended = channel.peekRun(read, handle.runId);
+      stopRun();
+      const { decision } = z
+        .object({ decision: z.string() })
+        .parse(
+          await env.DB.prepare(
+            "SELECT id AS decision FROM workflow_decisions WHERE resource_run_id = ?"
+          )
+            .bind(handle.runId)
+            .first()
+        );
+      expect({
+        asked: waitsListed(asked.value),
+        ended: {
+          waits: ended.value?.waits,
+          later: ended.revision > asked.revision,
+        },
+      }).toStrictEqual({
+        // Metadata only, and never theirs to answer: a run's own person
+        // answers none of its decisions (R8).
+        asked: [
+          {
+            kind: "decision",
+            id: decision,
+            key: "approval",
+            taskId: "ask",
+            canRespond: false,
+          },
+        ],
+        ended: { waits: [], later: true },
+      });
+    });
+
+    it("shows a run's next wait at a revision of its own, though it was running all along", async () => {
+      const { builder, app, reference } = await requestsApp(
+        undefined,
+        undefined,
+        twoSleepsOf
+      );
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const shown: { revision: number; keys: string[] }[] = [];
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        const now = channel.peekRun(read, handle.runId);
+        if (now.value !== undefined) {
+          shown.push({
+            revision: now.revision,
+            keys: now.value.waits.map(({ key }) => key),
+          });
+        }
+      });
+      await vi.waitFor(() => {
+        expect(shown.at(-1)?.keys).toStrictEqual(["second"]);
+      }, settles);
+      stopRun();
+      const first = shown.find(({ keys }) => keys.includes("first"));
+      const second = shown.find(({ keys }) => keys.includes("second"));
+
+      expect({
+        sawFirst: first !== undefined,
+        later:
+          first !== undefined &&
+          second !== undefined &&
+          second.revision > first.revision,
+      }).toStrictEqual({ sawFirst: true, later: true });
     });
 
     it("cancels a run with a receipt answered again under its key", async () => {
@@ -1876,6 +2161,7 @@ describe(
           .safeParse(binding.received.at(-1)?.outcome).data?.canRun;
       await vi.waitFor(() => {
         expect(shownOf(first.received.at(-1)?.outcome)).toBe("running");
+        expect(waitsShown(first.received.at(-1)?.outcome)).toBe(1);
         expect(canRun()).toBeTruthy();
       }, settles);
       // Rebound away: the screen is told at once, nothing else needed.
@@ -1916,12 +2202,13 @@ describe(
           .map(({ outcome: shown }) => shownOf(shown))
           .filter((shown) => shown !== "queued")
           .filter((shown, at, all) => at === 0 || shown !== all[at - 1]),
-        // Shown again at the revision it had before it was refused.
-        sameRevision: new Set(
-          [...first.received, ...second.received]
-            .filter(({ outcome: shown }) => shownOf(shown) === "running")
-            .map(({ revision }) => revision)
-        ).size,
+        // Shown again at the revision the run has now (it may have moved
+        // on while refused: a wait opening is a revision), the same to a
+        // screen that only now asks.
+        sameRevision: new Set([
+          first.received.at(-1)?.revision,
+          second.received.at(0)?.revision,
+        ]).size,
         second: second.received.map(({ outcome: shown }) => shownOf(shown)),
       }).toStrictEqual({
         first: ["running", "workflow.run_unavailable", "running"],
