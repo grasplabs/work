@@ -8,7 +8,7 @@ import { portsOf } from "../src/knowledge/ports.ts";
 import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
+import { newTeam, readCollection } from "./knowledge.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // The Brain's entity and relation reads for a chat's code (GRA-306, the
@@ -32,11 +32,14 @@ const once: IndexStep = { do: async (_name, _config, fn) => await fn() };
 const linkedHandbook = async (
   admin: Awaited<ReturnType<typeof signedInApi>>,
   text: string,
-  answer: unknown
+  answer: unknown,
+  teams?: string[]
 ): Promise<string> => {
   const { id: collectionId } = await admin.api.knowledge.createCollection({
     name: `Handbook ${unique()}`,
-    access: "everyone",
+    ...(teams === undefined
+      ? { access: "everyone" as const }
+      : { access: "teams" as const, teams }),
   });
   const saved = await admin.api.knowledge.saveDocument({
     collectionId,
@@ -130,5 +133,42 @@ describe("a chat's entity and relation reads", setUpTime, () => {
         sourceRef: { kind: "document", collectionId },
       },
     ]);
+  });
+
+  it("answer a person only from what they may read: a team's relation is none of another member's", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const team = await newTeam(admin, [admin]);
+    const thing = `Payroll ${unique()}`;
+    const said = `Bram owns ${thing}.`;
+    await linkedHandbook(
+      admin,
+      said,
+      {
+        entities: [
+          { kind: "person", name: "Bram" },
+          { kind: "process", name: thing },
+        ],
+        relations: [
+          { subject: "Bram", predicate: "owns", object: thing, evidence: said },
+        ],
+      },
+      [team]
+    );
+    const [found] = await admin.api.knowledge.entities({ query: thing });
+    const entityId = found?.id ?? "-";
+    const forAdmin = await admin.api.knowledge.relations({ entityId });
+    const forMember = await member.api.knowledge.relations({ entityId });
+    const memberSees = await member.api.knowledge.entities({ query: thing });
+
+    expect({
+      admin: forAdmin.map(({ subject, evidence }) => [subject.name, evidence]),
+      member: forMember,
+      memberSees,
+    }).toStrictEqual({
+      admin: [["Bram", said]],
+      member: [],
+      memberSees: [],
+    });
   });
 });
