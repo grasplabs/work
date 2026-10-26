@@ -42,7 +42,12 @@ import {
 } from "./app-code.ts";
 import { assertNoBindings } from "./authority.ts";
 import { extractCandidates } from "./candidates.ts";
-import { compileModule, stripTypes, transformModule } from "./compile.ts";
+import {
+  compileModule,
+  refreshNames,
+  stripTypes,
+  transformModule,
+} from "./compile.ts";
 import { isError } from "./diagnostic.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import {
@@ -89,10 +94,13 @@ import {
   kitModuleName,
   kitStylesheet,
   ownEntry,
+  previewRefresh,
+  previewRuntime,
   screenReferences,
   screenRuntime,
 } from "./kit.ts";
 import { lint } from "./lint.ts";
+import { previewEntry } from "./preview-entry.ts";
 import {
   appCodeTarget,
   computeTarget,
@@ -123,6 +131,12 @@ export type ScreenBuild =
       screens: Record<string, ScreenClosure>;
       css: string;
       diagnostics: Diagnostic[];
+      /**
+       * A preview build's (`preview-screens`): each screen's App modules
+       * put together into one entry (preview-entry.ts), by its module's
+       * name, which the preview frame evaluates for an update.
+       */
+      entries?: Record<string, string>;
     }
   | { ok: false; diagnostics: Diagnostic[] };
 
@@ -221,17 +235,31 @@ const strayProblems = (
 const messageIn = (path: string, error: unknown): string =>
   messageOf(error).replace(`/${path}: `, "").replace(`${path}: `, "");
 
-/** Compiles one App file, with what it imports, or says why it can't be. */
+/**
+ * What a preview build's module starts with (spec 19.2.1): the names the
+ * Refresh instrumentation calls (`refreshNames`), bound to the preview
+ * kit's registry, each component's family its file's path and its name.
+ */
+const refreshHeader = (path: string): string =>
+  `import{register as __graspRefreshRegister,signature as ${refreshNames.signature}}from${JSON.stringify(kitModuleName(previewRefresh))};const ${refreshNames.register}=(type,id)=>__graspRefreshRegister(type,${JSON.stringify(`${path} `)}+id);`;
+
+/**
+ * Compiles one App file, with what it imports, or says why it can't be:
+ * with `refresh`, for a preview, instrumented for React Fast Refresh.
+ */
 const compileFile = (
   path: string,
   source: string,
   files: ReadonlySet<string>,
-  typeFiles: ReadonlySet<string>
+  typeFiles: ReadonlySet<string>,
+  refresh = false
 ): { code: string; imported: ModuleImports } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
   let compiled: string;
   try {
-    compiled = compileModule(source, path, [collectImports(imports)]);
+    compiled = compileModule(source, path, [collectImports(imports)], {
+      refresh,
+    });
   } catch (error) {
     const message = messageIn(path, error);
     return {
@@ -271,12 +299,14 @@ const compileFile = (
   }
   const imported: ModuleImports = { app: new Set(), kit: new Set() };
   try {
-    return {
-      code: transformModule(compiled, path, [
-        rewriteImports(path, files, kit, imported),
-      ]),
-      imported,
-    };
+    const code = transformModule(compiled, path, [
+      rewriteImports(path, files, kit, imported),
+    ]);
+    if (!refresh) {
+      return { code, imported };
+    }
+    imported.kit.add(kitModuleName(previewRefresh));
+    return { code: `${refreshHeader(path)}${code}`, imported };
   } catch (error) {
     return {
       errors: [problem("imports", messageIn(path, error), { file: path })],
@@ -336,11 +366,25 @@ const closureOf = (
  * The kit's modules these import, and every kit module those import. The
  * runtime renders the screens: a page needs it for any of them.
  */
-const kitModulesFor = (imported: Iterable<string>): string[] =>
-  closureOf(
-    [...imported, kitModuleName(screenRuntime)],
-    (name) => ownEntry(kit.moduleImports, name) ?? []
-  );
+const kitModulesFor = (
+  imported: Iterable<string>,
+  preview = false
+): string[] =>
+  preview
+    ? closureOf(
+        // The preview runtime loads the screen runtime by name, once
+        // React Fast Refresh is in (sdk/src/preview-runtime.ts).
+        [
+          ...imported,
+          kitModuleName(previewRuntime),
+          kitModuleName(screenRuntime),
+        ],
+        (name) => ownEntry(kit.previewModuleImports, name) ?? []
+      )
+    : closureOf(
+        [...imported, kitModuleName(screenRuntime)],
+        (name) => ownEntry(kit.moduleImports, name) ?? []
+      );
 
 /**
  * What a page loads for the screen in the module `entry`, given what each
@@ -349,13 +393,15 @@ const kitModulesFor = (imported: Iterable<string>): string[] =>
  */
 const screenClosure = (
   entry: string,
-  imports: ReadonlyMap<string, ModuleImports>
+  imports: ReadonlyMap<string, ModuleImports>,
+  preview = false
 ): ScreenClosure => {
   const modules = closureOf([entry], (name) => imports.get(name)?.app ?? []);
   return {
     modules,
     kitModules: kitModulesFor(
-      modules.flatMap((name) => [...(imports.get(name)?.kit ?? [])])
+      modules.flatMap((name) => [...(imports.get(name)?.kit ?? [])]),
+      preview
     ),
   };
 };
@@ -416,9 +462,15 @@ const checkScreens = (files: Record<string, string>): Diagnostic[] => {
  * Builds an App's screens: `screens/*.tsx`, the `components/` they use and
  * the declarations (`*.d.ts`) at the App's root and among its components,
  * which are types alone and never modules.
+ *
+ * With `preview`, for a chat's draft (spec 19.2.1): each module is
+ * instrumented for React Fast Refresh, what a screen loads of the kit is
+ * the preview kit's, and each screen's App modules are put together into
+ * one entry too (`ScreenBuild.entries`). Every gate is the same.
  */
 export const buildScreens = async (
-  files: Record<string, string>
+  files: Record<string, string>,
+  { preview = false }: { preview?: boolean } = {}
 ): Promise<ScreenBuild> => {
   const app = buildFiles(files);
   const tooMuch = appCodeLimitErrors(app);
@@ -463,7 +515,7 @@ export const buildScreens = async (
   const imports = new Map<string, ModuleImports>();
   const errors: Diagnostic[] = [];
   for (const [path, source] of sources) {
-    const result = compileFile(path, source, known, typeFiles);
+    const result = compileFile(path, source, known, typeFiles, preview);
     if ("code" in result) {
       modules[appModuleName(path)] = result.code;
       imports.set(appModuleName(path), result.imported);
@@ -496,17 +548,35 @@ export const buildScreens = async (
       .map(([, source]) => source),
     kitModules
   );
+  const screens: Record<string, ScreenClosure> = Object.fromEntries(
+    paths
+      .filter((path) => screenFile.test(path))
+      .map((path) => appModuleName(path))
+      .map((entry) => [entry, screenClosure(entry, imports, preview)])
+  );
   return {
     ok: true,
     modules,
-    screens: Object.fromEntries(
-      paths
-        .filter((path) => screenFile.test(path))
-        .map((path) => appModuleName(path))
-        .map((entry) => [entry, screenClosure(entry, imports)])
-    ),
+    screens,
     css,
     diagnostics,
+    ...(preview
+      ? {
+          entries: Object.fromEntries(
+            Object.entries(screens).map(([entry, closure]) => [
+              entry,
+              previewEntry({
+                entry,
+                closure: closure.modules,
+                modules,
+                kitModules: closure.modules.flatMap((name) => [
+                  ...(imports.get(name)?.kit ?? []),
+                ]),
+              }),
+            ])
+          ),
+        }
+      : {}),
   };
 };
 
@@ -1132,6 +1202,7 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
  */
 export type CompileTarget =
   | "screens"
+  | "preview-screens"
   | "server"
   | "app"
   | "app-tests"
@@ -1142,6 +1213,7 @@ export type CompileTarget =
 /** What a build of each target answers. */
 export interface TargetBuilds {
   screens: ScreenBuild;
+  "preview-screens": ScreenBuild;
   server: ServerBuild;
   app: AppCodeBuild;
   "app-tests": AppCodeBuild;
@@ -1160,7 +1232,11 @@ const targetBuilds: {
     files: Record<string, string>
   ) => TargetBuilds[Target] | Promise<TargetBuilds[Target]>;
 } = {
-  screens: buildScreens,
+  screens: async (files) => await buildScreens(files),
+  // A chat's draft (spec 19.2.1): every gate of `screens`, instrumented
+  // for React Fast Refresh, on the preview kit.
+  "preview-screens": async (files) =>
+    await buildScreens(files, { preview: true }),
   server: buildServer,
   app: checkAppCode,
   "app-tests": buildAppTests,

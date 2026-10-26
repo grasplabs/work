@@ -615,14 +615,17 @@ const isScreenModule = (
  * map), connected to the page through `port`, its files through
  * `filePort` (file-port.ts), its links through `linkPort` (link-port.ts),
  * and tells the page once it has rendered for the first time, as the
- * `start` the page named.
+ * `start` the page named. `onLoaded` is called once the screen's modules
+ * have evaluated, before it first renders: a preview registers their
+ * components with Fast Refresh there (preview-runtime.ts).
  */
 export const runScreen = async (
   port: MessagePort,
   screen: string,
   start: ScreenStart,
   filePort: MessagePort,
-  linkPort: MessagePort
+  linkPort: MessagePort,
+  onLoaded?: () => void
 ): Promise<void> => {
   const page = connectBridge(port);
   reportProblems();
@@ -639,6 +642,7 @@ export const runScreen = async (
     if (!isScreenModule(loaded)) {
       throw new Error(`${screen} has no default export to render.`);
     }
+    onLoaded?.();
     // One client for the App session this frame runs, over the page's
     // bridge: every screen in it reads through the same queries and
     // submissions, and none makes its own (spec 10.7.1).

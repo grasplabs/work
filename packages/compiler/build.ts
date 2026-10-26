@@ -42,6 +42,8 @@ import {
   kitModule,
   kitModuleName,
   kitStylesheet,
+  previewRefresh,
+  previewRuntime,
   screenHooks,
   screenRuntime,
   screenSdk,
@@ -155,15 +157,17 @@ const uiEntries = (): Entry[] =>
  * and mounts the session client (see kit.ts). They share the client's
  * module, so the provider the runtime mounts is the one the hooks read.
  */
-const sdkEntries = (): Entry[] =>
-  [sdkRoot, screenHooks, screenSdk, screenRuntime].map((specifier) => {
-    const target =
-      exportsOf(sdk)[`.${specifier.slice("@grasp-os/sdk".length)}`];
-    if (typeof target !== "string") {
-      throw new TypeError(`@grasp-os/sdk doesn't export ${specifier}`);
+const sdkEntries = (extra: readonly string[] = []): Entry[] =>
+  [sdkRoot, screenHooks, screenSdk, screenRuntime, ...extra].map(
+    (specifier) => {
+      const target =
+        exportsOf(sdk)[`.${specifier.slice("@grasp-os/sdk".length)}`];
+      if (typeof target !== "string") {
+        throw new TypeError(`@grasp-os/sdk doesn't export ${specifier}`);
+      }
+      return { specifier, id: path.join(sdk, target) };
     }
-    return { specifier, id: path.join(sdk, target) };
-  });
+  );
 
 /**
  * lucide-react's icons, one module each, and the export names App code
@@ -206,6 +210,18 @@ const production = {
 };
 
 /**
+ * What the preview kit is built as (spec 19.2.1): React's development
+ * builds, the only ones React Fast Refresh works with, whatever `NODE_ENV`
+ * the building process has, as for `production`.
+ */
+const development = {
+  "process.env.NODE_ENV": JSON.stringify("development"),
+};
+
+/** Which kit a build is of: the one every screen loads, or a preview's. */
+type KitProfile = "production" | "preview";
+
+/**
  * The export conditions the kit's packages resolve by, the production ones
  * whatever `NODE_ENV` is (see `production`). Vite picks `development` or
  * `production` by `NODE_ENV`, and some packages (Radix, under cmdk) ship
@@ -215,10 +231,21 @@ const kitResolve = {
   conditions: ["module", "browser", "production"],
 };
 
-/** A CommonJS package as it loads in production (see `production`). */
-const requireProduction = (specifier: string): unknown => {
+/** The preview kit's export conditions: the development ones (see `kitResolve`). */
+const previewKitResolve = {
+  conditions: ["module", "browser", "development"],
+};
+
+/**
+ * A CommonJS package as it loads in production, or in development for
+ * the preview kit (see `production`).
+ */
+const requireAs = (
+  specifier: string,
+  mode: "production" | "development"
+): unknown => {
   const { NODE_ENV: before } = process.env;
-  process.env.NODE_ENV = "production";
+  process.env.NODE_ENV = mode;
   try {
     // Not a copy this process loaded earlier, under its own NODE_ENV.
     Reflect.deleteProperty(require.cache, require.resolve(specifier));
@@ -238,9 +265,9 @@ const identifier = /^[A-Za-z_$][\w$]*$/u;
 /**
  * React's packages are CommonJS, whose exports a bundler can't list. Each
  * gets an ES module that re-exports what the package exports under Node,
- * in production.
+ * in production, or in development for the preview kit.
  */
-const reactEntries: Plugin = {
+const reactEntries = (mode: "production" | "development"): Plugin => ({
   name: "kit-react-entries",
   resolveId: (id) => (id.startsWith(virtualEntry) ? id : null),
   load: (id) => {
@@ -250,7 +277,7 @@ const reactEntries: Plugin = {
     const specifier = id.slice(virtualEntry.length);
     const exported = z
       .record(z.string(), z.unknown())
-      .parse(requireProduction(specifier));
+      .parse(requireAs(specifier, mode));
     const names = Object.keys(exported).filter(
       (name) => identifier.test(name) && name !== "default"
     );
@@ -258,7 +285,7 @@ const reactEntries: Plugin = {
 export const { ${names.join(", ")} } = m;
 export default m;`;
   },
-};
+});
 
 /**
  * Compiles the kit's own sources with Babel and the React Compiler, the same
@@ -374,17 +401,24 @@ const candidatesByModule = (
  * import each other by that name instead of by relative path. Returns their
  * code and what each imports, by flat name.
  */
-const buildKitModules = async (entries: Entry[]): Promise<FlatModules> => {
+const buildKitModules = async (
+  entries: Entry[],
+  profile: KitProfile = "production"
+): Promise<FlatModules> => {
+  const preview = profile === "preview";
   const config: InlineConfig = {
     configFile: false,
     root,
     logLevel: "warn",
-    mode: "production",
-    define: production,
-    resolve: kitResolve,
+    mode: preview ? "development" : "production",
+    define: preview ? development : production,
+    resolve: preview ? previewKitResolve : kitResolve,
     // Babel compiles TypeScript here, with the React Compiler.
     oxc: false,
-    plugins: [reactEntries, reactCompiler],
+    plugins: [
+      reactEntries(preview ? "development" : "production"),
+      reactCompiler,
+    ],
     build: {
       write: false,
       minify: true,
@@ -907,6 +941,18 @@ const buildAppCompiler = async (
     ...icons,
     ...sdkEntries(),
   ]);
+  // The preview kit (spec 19.2.1): the same entries, React's development
+  // builds, and React Fast Refresh, which the production kit never has.
+  const { code: previewKitCode, imports: previewModuleImports } =
+    await buildKitModules(
+      [
+        ...react,
+        ...components,
+        ...icons,
+        ...sdkEntries([previewRefresh, previewRuntime]),
+      ],
+      "preview"
+    );
   const imports = [
     ...reactImports,
     ...components.map(({ specifier }) => specifier),
@@ -921,6 +967,7 @@ const buildAppCompiler = async (
     stylesheets,
     moduleCandidates: candidatesByModule(sources),
     moduleImports,
+    previewModuleImports,
     // Generated workflow code and compute modules are type-checked against
     // their SDK entries too, and an App's server code against the SDK's
     // server side.
@@ -950,6 +997,7 @@ const buildAppCompiler = async (
     require.resolve("esbuild-wasm/esbuild.wasm")
   );
   const kitModules = modulesOf(kitCode);
+  const kitPreviewModules = modulesOf(previewKitCode);
   // App workflows and the code generated from JSON workflows share one set:
   // each imports only its own entry of it (imports.ts).
   const workflowSdkModules = modulesOf(
@@ -967,6 +1015,7 @@ const buildAppCompiler = async (
     .update(compiler)
     .update(kitJson)
     .update(kitModules.version)
+    .update(kitPreviewModules.version)
     .update(workflowSdkModules.version)
     .update(serverSdkModules.version)
     .update(packageBuilder)
@@ -977,6 +1026,7 @@ const buildAppCompiler = async (
     [compilerAssets.source]: compiler,
     [compilerAssets.kit]: kitJson,
     [compilerAssets.kitModules]: JSON.stringify(kitModules),
+    [compilerAssets.kitPreviewModules]: JSON.stringify(kitPreviewModules),
     [compilerAssets.workflowSdkModules]: JSON.stringify(workflowSdkModules),
     [compilerAssets.serverSdkModules]: JSON.stringify(serverSdkModules),
     [compilerAssets.packageBuilder]: packageBuilder,

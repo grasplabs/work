@@ -234,6 +234,9 @@ catalogs:
     react-markdown:
       specifier: 10.1.0
       version: 10.1.0
+    react-refresh:
+      specifier: 0.19.0
+      version: 0.19.0
     react-resizable-panels:
       specifier: 4.14.2
       version: 4.14.2
@@ -857,6 +860,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.3.0(react@19.3.0)
+      react-refresh:
+        specifier: 'catalog:'
+        version: 0.19.0
       tailwindcss:
         specifier: 'catalog:'
         version: 4.3.3
@@ -969,6 +975,9 @@ importers:
       capnweb:
         specifier: 'catalog:'
         version: 0.12.0
+      react-refresh:
+        specifier: 'catalog:'
+        version: 0.19.0
       zod:
         specifier: 'catalog:'
         version: 4.6.5
@@ -7357,6 +7366,10 @@ packages:
         optional: true
       redux:
         optional: true
+
+  react-refresh@0.19.0:
+    resolution: {integrity: sha512-5HdstYgoJBbBofjapO5qCPcovECJCBfvjLb+iTcsmqDFVMRdqy0qs7iiInBJTUXmIFc2bjoc5b2HVLp2zRtYhQ==}
+    engines: {node: '>=0.10.0'}
 
   react-remove-scroll-bar@2.3.8:
     resolution: {integrity: sha512-9r+yi9+mgU33AKcj6IbT9oRCO78WriSj6t/cF8DWBZJ9aOGPOTEDvdUDz1FwKim7QXWwmHqtdHnRJfhAxEG46Q==}
@@ -14420,6 +14433,8 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.3.0
       redux: 5.0.1
+
+  react-refresh@0.19.0: {}
 
   react-remove-scroll-bar@2.3.8(@types/react@19.3.0)(react@19.3.0):
     dependencies:

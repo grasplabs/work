@@ -68,6 +68,7 @@ export {
   kitModuleName,
   packageModuleName,
   packageModulePrefix,
+  previewRuntime,
   screenRuntime,
 } from "./kit.ts";
 export { platformPeers, platformScope } from "./packages/platform.ts";
@@ -190,6 +191,14 @@ const readModules = async (
 /** The kit's modules, which every App's modules import: one set per release. */
 export const kitModules = async (assets: Fetcher): Promise<KitModules> =>
   await readModules(assets, compilerAssets.kitModules);
+
+/**
+ * The preview kit's modules (spec 19.2.1), which a chat's preview of a
+ * draft loads in place of the kit's: React's development builds and
+ * React Fast Refresh. One set per release.
+ */
+export const kitPreviewModules = async (assets: Fetcher): Promise<KitModules> =>
+  await readModules(assets, compilerAssets.kitPreviewModules);
 
 /**
  * The workflow SDK's modules, which every App's workflows import
