@@ -37,7 +37,8 @@ import { decoded } from "./text.ts";
 // meeting the person wasn't in is never read. The ways it can fail, which
 // the tests start from: a colleague's meetings read through their mailbox;
 // a meeting the person declined, or one they never had in their calendar,
-// read anyway; what someone said taken as an instruction.
+// read anyway; another occurrence of a recurring meeting read under this
+// one's title and dates; what someone said taken as an instruction.
 
 const users = `${v1}/users/{mailbox}`;
 
@@ -225,8 +226,37 @@ export const transcriptLines = (vtt: string): Line[] =>
 const odataString = (value: string): string =>
   `'${value.replaceAll("'", "''")}'`;
 
-/** The most transcripts of one meeting read: a meeting held again keeps adding them. */
+/** The most transcripts of one occurrence read: transcription stopped and started again adds one each time. */
 const maxTranscripts = 10;
+
+/** How early before an occurrence's start its transcript may begin: people join early. */
+const earlyMs = 30 * 60 * 1000;
+
+/** How long after an occurrence's end its transcript may begin: a meeting that runs over. */
+const overrunMs = 3 * 60 * 60 * 1000;
+
+/** An event's time, given in UTC (`inUtc`) without a zone, as milliseconds. */
+const utcMs = ({ dateTime }: { dateTime: string }): number =>
+  Date.parse(`${dateTime.slice(0, 23)}Z`);
+
+/**
+ * Whether a transcript belongs to the occurrence `event` is: it began
+ * between a little before the occurrence's start and a while after its
+ * end. Every occurrence of a recurring meeting shares one join URL, and so
+ * one online meeting and its transcripts, so a transcript of another day's
+ * occurrence must never come back under this one's title and dates. One
+ * that doesn't say when it began is left out: it can't be told apart.
+ */
+const ofOccurrence = (
+  event: GraphMeetingEvent,
+  transcript: z.infer<typeof graphTranscript>
+): boolean => {
+  const began = Date.parse(transcript.createdDateTime ?? "");
+  return (
+    began >= utcMs(event.start) - earlyMs &&
+    began <= utcMs(event.end) + overrunMs
+  );
+};
 
 const readTranscript = defineTool({
   name: "meetings.transcript",
@@ -287,21 +317,24 @@ const readTranscript = defineTool({
       pageOf(graphTranscript)
     );
     const read = await Promise.all(
-      transcripts.slice(0, maxTranscripts).map(async (transcript) => {
-        const response = await graphFetch(
-          graphUrl(
-            `${meetingPath}/transcripts/${segment(transcript.id)}/content`,
-            { $format: "text/vtt" }
-          )
-        );
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        checkReadable(bytes.byteLength);
-        return {
-          id: transcript.id,
-          createdAt: transcript.createdDateTime ?? null,
-          lines: transcriptLines(new TextDecoder().decode(bytes)),
-        };
-      })
+      transcripts
+        .filter((transcript) => ofOccurrence(event, transcript))
+        .slice(0, maxTranscripts)
+        .map(async (transcript) => {
+          const response = await graphFetch(
+            graphUrl(
+              `${meetingPath}/transcripts/${segment(transcript.id)}/content`,
+              { $format: "text/vtt" }
+            )
+          );
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          checkReadable(bytes.byteLength);
+          return {
+            id: transcript.id,
+            createdAt: transcript.createdDateTime ?? null,
+            lines: transcriptLines(new TextDecoder().decode(bytes)),
+          };
+        })
     );
     return {
       output: { mailbox, meeting: meetingOf(event), transcripts: read },

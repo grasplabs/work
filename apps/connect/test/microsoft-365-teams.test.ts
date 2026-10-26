@@ -152,9 +152,11 @@ describe("the Microsoft 365 connector's meeting tools", () => {
           start: "2026-10-21T09:00:00.0000000",
         },
         { id: eventIds.standup, subject: "Team standup" },
+        // The fake's calendar view doesn't hold to the window.
+        { id: eventIds.reviewEarlier, start: "2026-10-14T09:00:00.0000000" },
       ],
     });
-    expect(listed).toHaveProperty("meetings.length", 2);
+    expect(listed).toHaveProperty("meetings.length", 3);
     const view = requests().find(({ path }) => path.endsWith("/calendarView"));
     expect(view?.query).toMatchObject({
       startDateTime: window.from,
@@ -186,7 +188,7 @@ describe("the Microsoft 365 connector's meeting tools", () => {
       transcripts: [
         {
           id: transcriptIds.review,
-          createdAt: "2026-10-21T09:46:12.000Z",
+          createdAt: "2026-10-21T09:01:12.000Z",
           lines: [
             {
               at: "00:00:03.120",
@@ -211,6 +213,40 @@ describe("the Microsoft 365 connector's meeting tools", () => {
     // The empty cue is left out: three lines, not four.
     expect(output).toHaveProperty("transcripts.0.lines.length", 3);
     expect(provenance).toStrictEqual([eventIds.review, transcriptIds.review]);
+  });
+
+  it("read only the transcript of the occurrence asked for, of a meeting that recurs", async () => {
+    const connection = await connected();
+    const read = async (event: string) =>
+      await outputOf(ownCall(connection, "meetings.transcript", { event }));
+    // Both occurrences share one join URL, so one online meeting, which
+    // lists the transcripts of both.
+    const [earlier, later] = await Promise.all([
+      read(eventIds.reviewEarlier),
+      read(eventIds.review),
+    ]);
+    expect({ earlier, later }).toMatchObject({
+      earlier: {
+        meeting: { id: eventIds.reviewEarlier },
+        transcripts: [
+          {
+            id: transcriptIds.reviewEarlier,
+            lines: [
+              {
+                speaker: "Lisa Meyer",
+                text: "Northwind wants net 60; we'll come back next week.",
+              },
+            ],
+          },
+        ],
+      },
+      later: {
+        meeting: { id: eventIds.review },
+        transcripts: [{ id: transcriptIds.review }],
+      },
+    });
+    expect(earlier).toHaveProperty("transcripts.length", 1);
+    expect(later).toHaveProperty("transcripts.length", 1);
   });
 
   it("give no transcript for a meeting never transcribed", async () => {

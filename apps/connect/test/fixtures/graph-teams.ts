@@ -86,6 +86,8 @@ export const eventIds = {
   cancelled: "AAMkAGI2TG93AAA=cancelled",
   /** An online meeting the person accepted, never transcribed. */
   standup: "AAMkAGI2TG93AAA=standup",
+  /** The review's occurrence a week earlier: the same meeting, recurring. */
+  reviewEarlier: "AAMkAGI2TG93AAA=reviewEarlier",
 } as const;
 
 const joinUrl = (meeting: string): string =>
@@ -98,7 +100,26 @@ export const meetingIds = {
 
 export const transcriptIds = {
   review: "MSMjMCMjZDAwYWU3NjUtNmM2Yi00NjQxLTgwMWQtMTkzMmFmMjEzNzdh",
+  reviewEarlier: "MSMjMCMjZDAwYWU3NjUtNmM2Yi00NjQxLTgwMWQtMTkzMmFmMjEzNzdi",
 } as const;
+
+/**
+ * The review's transcripts, as Graph lists them for its online meeting:
+ * every occurrence of a recurring meeting shares one, so the earlier
+ * occurrence's is listed too, first.
+ */
+export const reviewTranscripts = [
+  {
+    id: transcriptIds.reviewEarlier,
+    meetingId: meetingIds.review,
+    createdDateTime: "2026-10-14T09:02:40.000Z",
+  },
+  {
+    id: transcriptIds.review,
+    meetingId: meetingIds.review,
+    createdDateTime: "2026-10-21T09:01:12.000Z",
+  },
+];
 
 /** One event of the person's calendar, as a calendar view gives it in UTC. */
 const event = (
@@ -109,17 +130,19 @@ const event = (
     response = "accepted",
     cancelled = false,
     meeting,
+    day = "2026-10-21",
   }: {
     online?: boolean;
     response?: string;
     cancelled?: boolean;
     meeting?: string;
+    day?: string;
   } = {}
 ) => ({
   id,
   subject,
-  start: { dateTime: "2026-10-21T09:00:00.0000000", timeZone: "UTC" },
-  end: { dateTime: "2026-10-21T09:45:00.0000000", timeZone: "UTC" },
+  start: { dateTime: `${day}T09:00:00.0000000`, timeZone: "UTC" },
+  end: { dateTime: `${day}T09:45:00.0000000`, timeZone: "UTC" },
   isOnlineMeeting: online,
   isCancelled: cancelled,
   responseStatus: { response, time: "2026-10-19T10:00:00Z" },
@@ -141,6 +164,10 @@ export const calendarEvents = [
   event(eventIds.standup, "Team standup", {
     response: "organizer",
     meeting: meetingIds.standup,
+  }),
+  event(eventIds.reviewEarlier, "Northwind contract review", {
+    meeting: meetingIds.review,
+    day: "2026-10-14",
   }),
 ];
 
@@ -173,4 +200,11 @@ export const reviewVtt = `WEBVTT
 0b2a6f0e-1/25-0
 00:00:14.500 --> 00:00:18.000
 <v Lisa Meyer>${plantedInstruction}</v>
+`;
+
+/** The earlier occurrence's transcript: other words, said a week before. */
+export const reviewEarlierVtt = `WEBVTT
+
+00:00:01.000 --> 00:00:04.000
+<v Lisa Meyer>Northwind wants net 60; we'll come back next week.</v>
 `;

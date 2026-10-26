@@ -19,6 +19,8 @@ import {
   member,
   meetingIds,
   onlineMeetings,
+  reviewEarlierVtt,
+  reviewTranscripts,
   reviewVtt,
   transcriptIds,
 } from "./fixtures/graph-teams.ts";
@@ -151,16 +153,7 @@ export const teamsRoutes = (
           return json(graphAccessDenied, 403);
         }
         return json({
-          value:
-            id === meetingIds.review
-              ? [
-                  {
-                    id: transcriptIds.review,
-                    meetingId: id,
-                    createdDateTime: "2026-10-21T09:46:12.000Z",
-                  },
-                ]
-              : [],
+          value: id === meetingIds.review ? reviewTranscripts : [],
         });
       }
     ),
@@ -171,14 +164,18 @@ export const teamsRoutes = (
         if (ownerOf(mailbox, request) === undefined) {
           return json(graphAccessDenied, 403);
         }
-        if (id !== meetingIds.review || transcript !== transcriptIds.review) {
+        const vtt = {
+          [transcriptIds.review]: reviewVtt,
+          [transcriptIds.reviewEarlier]: reviewEarlierVtt,
+        }[transcript];
+        if (id !== meetingIds.review || vtt === undefined) {
           return json(notFound, 404);
         }
         // Without `$format=text/vtt` Graph answers in Word's format.
         if (query.get("$format") !== "text/vtt") {
           return json({ error: { code: "BadRequest" } }, 400);
         }
-        return new Response(reviewVtt, {
+        return new Response(vtt, {
           headers: { "content-type": "text/vtt" },
         });
       }
