@@ -7,6 +7,7 @@ import {
 } from "@grasp-os/shared/interview-links";
 import type { InterviewFact } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 import { z } from "zod";
@@ -209,4 +210,22 @@ export const countedFor = async (model: string) => {
     calls: of.reduce((sum, { calls }) => sum + calls, 0),
     tokensIn: of.reduce((sum, { tokensIn }) => sum + tokensIn, 0),
   };
+};
+
+/**
+ * Holds the store's own alarm for a test that draws what is due and gives
+ * a team to the brain itself, step by step, as the alarm would (`drawNext`,
+ * `intakeNext`). Agreeing, deleting or drawing sets the alarm half a second
+ * on, and on a slow runner it got there first: it drew outside the test's
+ * faked gateway, so the drawing failed and waited a minute to be tried
+ * again, or it took a gateway reply queued for the test's own drawing, or
+ * its `model.call` landed amid the test's audit events, or it
+ * gave the team to the brain before the test did. Deleting the alarm isn't
+ * enough: the next agreement or drawing sets it again, and one already
+ * going runs on.
+ */
+export const holdAlarm = async (): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), (instance) => {
+    vi.spyOn(instance, "alarm").mockResolvedValue();
+  });
 };
