@@ -27,6 +27,7 @@ import {
   requireOpenRun,
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
+import { brainDocumentRead } from "./history-access.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { catalog } from "./knowledge/catalog.ts";
@@ -93,10 +94,15 @@ export class KnowledgeApi
   /**
    * Hands over what a read returned once the chat has recorded its sources
    * and the documents it hands over (`given`), which its answers may cite.
+   * Of those, the ones whose text it hands over (`pinned`) are kept with
+   * the run too (`brainDocumentRead`, history-access.ts), so its result is
+   * withheld from the model once one is erased or moved, though its
+   * collection may still be read.
    */
   async #recorded<T extends { provenance: Provenance }>(
     result: T,
-    given: readonly string[]
+    given: readonly string[],
+    pinned: readonly { documentId: string; collectionId: string }[] = []
   ): Promise<T> {
     await recordSources(
       this.env,
@@ -104,6 +110,15 @@ export class KnowledgeApi
       result.provenance.collectionIds,
       given
     );
+    if (pinned.length > 0) {
+      await recordRunReads(
+        this.env,
+        this.ctx.props,
+        pinned.map(({ collectionId, documentId }) =>
+          brainDocumentRead(collectionId, documentId)
+        )
+      );
+    }
     return result;
   }
 
@@ -156,7 +171,8 @@ export class KnowledgeApi
         );
         return await this.#recorded(
           found,
-          found.hits.map(({ documentId }) => documentId)
+          found.hits.map(({ documentId }) => documentId),
+          found.hits
         );
       }
     );
@@ -171,7 +187,11 @@ export class KnowledgeApi
           async (reader) =>
             await read(brainOf(this.env), reader, documentId, options)
         );
-        return await this.#recorded(document, [document.id]);
+        return await this.#recorded(
+          document,
+          [document.id],
+          [{ documentId: document.id, collectionId: document.collectionId }]
+        );
       }
     );
   }

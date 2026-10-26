@@ -55,6 +55,15 @@ export interface BrainStore<C> {
     reader: C,
     refs: readonly { documentId: string; collectionId: string }[]
   ) => Promise<void>;
+  /**
+   * Of `refs`, those `reader` may read now, each as
+   * `<collectionId>/<documentId>`: one query, whatever their number. One
+   * deleted or purged, or moved to another collection, is not.
+   */
+  readableDocuments: (
+    reader: C,
+    refs: readonly { documentId: string; collectionId: string }[]
+  ) => Promise<Set<string>>;
   /** Sections that match `query`, best first, of those `reader` may read. */
   findEvidence: (
     reader: C,
@@ -67,6 +76,36 @@ export interface BrainStore<C> {
    */
   accessKey: (reader: C) => Promise<string>;
 }
+
+/** `BrainStore.readableDocuments`, for `brain`. */
+const readableDocuments = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  refs: readonly { documentId: string; collectionId: string }[]
+): Promise<Set<string>> => {
+  if (refs.length === 0) {
+    return new Set();
+  }
+  const allowed = await allowedFor(brain.ports, reader);
+  const rows = await brain.db
+    .select({
+      documentId: documents.id,
+      collectionId: documents.collectionId,
+    })
+    .from(documents)
+    .innerJoin(collections, eq(collections.id, documents.collectionId))
+    .where(
+      and(
+        inList(documents.id, [
+          ...new Set(refs.map(({ documentId }) => documentId)),
+        ]),
+        allowed.documents()
+      )
+    );
+  return new Set(
+    rows.map(({ documentId, collectionId }) => `${collectionId}/${documentId}`)
+  );
+};
 
 /** The Brain's store over Knowledge's D1 database. */
 export const d1BrainStore = <C>(brain: Brain<C>): BrainStore<C> => ({
@@ -84,30 +123,7 @@ export const d1BrainStore = <C>(brain: Brain<C>): BrainStore<C> => ({
     );
   },
   requireDocumentsReadable: async (reader, refs) => {
-    if (refs.length === 0) {
-      return;
-    }
-    const allowed = await allowedFor(brain.ports, reader);
-    const rows = await brain.db
-      .select({
-        documentId: documents.id,
-        collectionId: documents.collectionId,
-      })
-      .from(documents)
-      .innerJoin(collections, eq(collections.id, documents.collectionId))
-      .where(
-        and(
-          inList(documents.id, [
-            ...new Set(refs.map(({ documentId }) => documentId)),
-          ]),
-          allowed.documents()
-        )
-      );
-    const readable = new Set(
-      rows.map(
-        ({ documentId, collectionId }) => `${collectionId}/${documentId}`
-      )
-    );
+    const readable = await readableDocuments(brain, reader, refs);
     if (
       refs.some(
         ({ documentId, collectionId }) =>
@@ -117,6 +133,8 @@ export const d1BrainStore = <C>(brain: Brain<C>): BrainStore<C> => ({
       throw brainErrors.create("brain.not_found");
     }
   },
+  readableDocuments: async (reader, refs) =>
+    await readableDocuments(brain, reader, refs),
   findEvidence: async (reader, { query, collectionIds, limit }) =>
     await searchSections(
       brain,
