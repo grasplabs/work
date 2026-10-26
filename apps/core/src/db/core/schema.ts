@@ -1164,11 +1164,15 @@ export const sdkReleasePins = sqliteTable(
  * writes, which only the host chose when it sealed the release, or, for a
  * workflow version (`resource_id` a workflow resource's), the exact version
  * of another workflow it runs (`kind` `workflow`, `schema_hash` that
- * version's contract hash, workflow-resources.ts).
+ * version's contract hash, workflow-resources.ts). A workflow version's
+ * catalog binding names its contract key, and, for an `operation` binding
+ * an admin approved with a store operation, the store, its definition and
+ * the path that serve it (`approval_id`, workflow-bindings.ts): the single
+ * binding inventory (spec 24).
  * Routing, not a grant: whoever calls is authorized on every call. Also
- * how a store finds the releases that still rely on it: it can't be
- * deleted while any release kept is bound to it (data-stores.ts), and
- * retention deletes a release's rows here with it.
+ * how a store finds the releases that still rely on it, and the consumers
+ * whose approvals resolve to it: it can't be deleted while either does
+ * (data-stores.ts), and retention deletes a release's rows here with it.
  */
 export const sdkResourceBindings = sqliteTable(
   "sdk_resource_bindings",
@@ -1203,6 +1207,20 @@ export const sdkResourceBindings = sqliteTable(
      * it (a workflow's `namespace/name/semver`); null for a store's.
      */
     contractId: text("contract_id"),
+    /**
+     * For a consumer's public store-operation dependency (GRA-680): the
+     * operation's path in the store its approval resolved, which
+     * `target_id` then names; null otherwise.
+     */
+    targetPath: text("target_path"),
+    /**
+     * The approval this row's target projects (`workflow_binding_approvals`
+     * for a workflow's `operation` binding): written in the approval's own
+     * batch and reset when it is revoked or replaced, so the row names what
+     * serves the binding only while an approval does. Null for a target the
+     * seal or publication chose.
+     */
+    approvalId: text("approval_id"),
   },
   (table) => [
     primaryKey({
