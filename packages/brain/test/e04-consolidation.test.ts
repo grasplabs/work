@@ -138,11 +138,14 @@ const scoreLessons = (
   const checks = [
     // 1. Every version that failed is still named by a lesson.
     ...[...failed].map((version) => ofVersion(version) !== undefined),
-    // 2. The first failure still counts as evidence.
-    lessons.some(({ versions }) =>
-      versions.some(({ evidence }) =>
-        evidence.some(({ episodeId }) => episodeId === firstFailure)
-      )
+    // 2. The first failure still counts as evidence: in its lesson's
+    // latest revision, never only in an older one.
+    lessons.some(
+      ({ versions }) =>
+        versions
+          .at(-1)
+          ?.evidence.some(({ episodeId }) => episodeId === firstFailure) ===
+        true
     ),
     // 3. A counterexample still contests its lesson.
     ...[...contested].map(
