@@ -19,10 +19,14 @@ import { acmeTenant, clients } from "../../connect/test/provider-config.ts";
 import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
+import { stephenGoogleFake } from "./stephen-google-fake.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
 
 /** Grasp's Entra app for connections, as set on connect in the tests. */
 export const connectClient = clients.microsoft;
+
+/** Grasp's Google client for connections, as set on connect in the tests. */
+export const googleConnectClient = clients.google;
 
 /** Grasp's Entra app for the application landscape, as set on connect. */
 export const landscapeClient = clients.microsoftLandscape;
@@ -122,6 +126,13 @@ export const graphLoseUrl = "https://graph-control.test/lose";
  * table, and reads the writes that reached them (test/stephen-graph-fake.ts).
  */
 export const stephenGraphUrl = "https://graph-control.test/stephen";
+
+/**
+ * Where Stephen's eval on Google sets a mailbox's mail and calendar, a
+ * shared drive's files or a spreadsheet, and reads the writes that reached
+ * them (test/stephen-google-fake.ts).
+ */
+export const stephenGoogleUrl = "https://google-control.test/stephen";
 
 /** Where tests read how many drafts Graph made for `?mailbox=`: `{ drafts }`. */
 export const graphDraftsUrl = "https://graph-control.test/drafts";
@@ -324,8 +335,48 @@ const base64Url = (bytes) =>
     .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 const encoded = (value) =>
   base64Url(new TextEncoder().encode(JSON.stringify(value)));
+/**
+ * Google's token endpoint redeeming a code \`consentCode\` made for Grasp's
+ * Google client, with what was granted: the account it names, in the
+ * Workspace domain it names. \`undefined\` for every other request to it.
+ */
+const googleConsent = async (request) => {
+  const form = new URLSearchParams(await request.text());
+  if (form.get("grant_type") !== "authorization_code" || form.get("client_id") !== ${JSON.stringify(clients.google.id)}) {
+    return undefined;
+  }
+  // The domain has dots of its own: the code always ends in what was granted.
+  const [challenge, ...rest] = (form.get("code") ?? "").split(".");
+  const granted = rest.pop() ?? "";
+  const subject = rest.pop() ?? "";
+  const domain = rest.join(".");
+  const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
+  const digest = base64Url(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
+  );
+  if (form.get("client_secret") !== ${JSON.stringify(clients.google.secret)} || digest !== challenge) {
+    return Response.json({ error: "invalid_grant" }, { status: 400 });
+  }
+  const claims = {
+    iss: "https://accounts.google.com",
+    aud: ${JSON.stringify(clients.google.id)},
+    sub: subject,
+    hd: domain,
+    email: subject + "@" + domain,
+    email_verified: true,
+  };
+  return Response.json({
+    token_type: "Bearer",
+    access_token: "access." + subject,
+    refresh_token: "refresh." + subject,
+    expires_in: 3599,
+    id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
+    scope: atob(granted),
+  });
+};
 const graphEvents = (${graphEventsFake.toString()})();
 const stephenGraph = (${stephenGraphFake.toString()})();
+const stephenGoogle = (${stephenGoogleFake.toString()})();
 const graphSent = [];
 const graphLosing = new Map();
 const graphDrafts = new Map();
@@ -699,6 +750,19 @@ export default {
     }
     if (url.href === ${JSON.stringify(gmailSentUrl)}) {
       return Response.json(google.sent);
+    }
+    if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
+      return await stephenGoogle.control(request);
+    }
+    const fromStephenGoogle = await stephenGoogle.answer(request, url);
+    if (fromStephenGoogle !== undefined) {
+      return fromStephenGoogle;
+    }
+    if (request.method === "POST" && url.href === "https://oauth2.googleapis.com/token") {
+      const answered = await googleConsent(request.clone());
+      if (answered !== undefined) {
+        return answered;
+      }
     }
     const fromGoogle = await google.answer(request);
     if (fromGoogle !== undefined) {
