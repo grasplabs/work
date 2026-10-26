@@ -313,6 +313,11 @@ export const fakeComposioApi = (
     logos: Map<string, () => Response>;
     /** The MCP servers' requests and tool runs, all of them together. */
     mcp: typeof mcp.state;
+    /**
+     * Runs as it takes a server's update, before applying it: another
+     * change landing in between, once.
+     */
+    beforeUpdate: (() => Promise<void>) | undefined;
   } = {
     requests: [],
     health: "up",
@@ -326,6 +331,7 @@ export const fakeComposioApi = (
     logoRequests: [],
     logos: new Map(),
     mcp: mcp.state,
+    beforeUpdate: undefined,
   };
 
   /** The logo host's answer, as `state.logos` has it. */
@@ -485,6 +491,19 @@ export const fakeComposioApi = (
     if (request.method === "DELETE") {
       return deletion(route);
     }
+    if (request.method === "PATCH" && route.startsWith("/mcp/")) {
+      // Composio's update of a server: its allowlist, here.
+      const server = state.holds.servers.get(route.slice("/mcp/".length));
+      if (server === undefined) {
+        return notFound();
+      }
+      const before = state.beforeUpdate;
+      state.beforeUpdate = undefined;
+      await before?.();
+      const body = await bodyOf(request);
+      server.allowedTools = stringsOf(body.allowed_tools);
+      return Response.json({ id: route.slice("/mcp/".length) });
+    }
     if (
       request.method === "GET" &&
       ["/auth_configs", "/mcp/servers", "/connected_accounts"].includes(route)
@@ -581,6 +600,7 @@ export const fakeComposioApi = (
     state.endless = false;
     state.toolsStatus = undefined;
     state.failing = undefined;
+    state.beforeUpdate = undefined;
     state.serverUrlBase = mcpBase;
     state.accountInUrl = "own";
     state.holds = {

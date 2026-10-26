@@ -107,6 +107,12 @@ const storedTools = ({ tools }: Pick<Connection, "tools">) => {
 export const allowedToolNames = (connection: Pick<Connection, "tools">) =>
   storedTools(connection).map(composioToolName);
 
+/** Those of them the admin marked as only reading, which run unheld. */
+export const readToolNames = (connection: Pick<Connection, "tools">) =>
+  storedTools(connection).flatMap((tool) =>
+    typeof tool !== "string" && tool.read === true ? [tool.name] : []
+  );
+
 /**
  * What connect takes a tool the admin allowed on a Composio connection to
  * be: whether it only reads, which input property names its resource

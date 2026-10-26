@@ -4,6 +4,8 @@ import {
   composioToolsSchema,
   connectionCallbackPath,
   connectionErrors,
+  changeToolkitToolsSchema,
+  connectErrors,
   finishConnectionSchema,
   oauthFlowLifetimeMs,
   startToolkitConnectionSchema,
@@ -17,13 +19,13 @@ import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { eq, lte, sql } from "drizzle-orm";
+import { eq, lte, notInArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { recordEvents } from "./audit.ts";
+import { recordEventIf, recordEvents } from "./audit.ts";
 import { composioEntry, composioTools } from "./catalog.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
 import {
@@ -34,7 +36,13 @@ import {
 } from "./connection-audit.ts";
 import { isComposioServerUrl } from "./connections.ts";
 import type { Connection } from "./connections.ts";
-import { composioCleanups, composioFlows, connections } from "./db/schema.ts";
+import {
+  composioCleanups,
+  composioFlows,
+  connections,
+  pendingActions,
+} from "./db/schema.ts";
+import { dropPendingActions } from "./pending.ts";
 
 // Connecting a Composio toolkit: one shared connection per toolkit, scoped
 // to the tools the admin allows. Composio holds its tokens, in its cloud,
@@ -392,7 +400,10 @@ const detailOf = (toolkit: string) => ({ provider: toolkit, scope: "shared" });
 const refuseUnlessAdmin = async (
   env: Env,
   person: ConnectionPerson,
-  toolkit: string
+  toolkit: string,
+  /** What was refused: connecting, or changing a connection's tools. */
+  action: "connection.connect" | "connection.tools" = "connection.connect",
+  connectionId?: string
 ): Promise<void> => {
   let reason: "connection.staff_not_allowed" | "role.forbidden" | undefined;
   if (person.staff) {
@@ -403,11 +414,13 @@ const refuseUnlessAdmin = async (
   if (reason === undefined) {
     return;
   }
-  await auditRefusal(env, person, "connection.connect", {
-    ...detailOf(toolkit),
-    outcome: "refused",
-    reason,
-  });
+  await auditRefusal(
+    env,
+    person,
+    action,
+    { ...detailOf(toolkit), outcome: "refused", reason },
+    connectionId
+  );
   throw reason === "role.forbidden"
     ? roleErrors.create("role.forbidden")
     : connectionErrors.create("connection.staff_not_allowed");
@@ -425,6 +438,35 @@ const readToolsOf = (tools: readonly (string | ComposioToolRule)[]): string[] =>
   tools.flatMap((tool) =>
     typeof tool !== "string" && tool.read === true ? [tool.name] : []
   );
+
+/**
+ * Whether every one of `tools` is one of `toolkit`'s, each held to a
+ * resource only by one of its own input properties: a name that matches
+ * nothing would be an entry that silently allows nothing, or holds
+ * nothing. With the names Composio says only read (`hinted`).
+ */
+const checkedTools = async (
+  key: string,
+  toolkit: string,
+  tools: readonly (string | ComposioToolRule)[]
+): Promise<{ fits: boolean; hinted: ReadonlySet<string> }> => {
+  const toolkitTools = await composioTools(key, toolkit);
+  const inputsOf = new Map(
+    toolkitTools.map(({ name, inputs }) => [name, inputs])
+  );
+  const hinted = new Set(
+    toolkitTools.flatMap(({ name, readOnly }) => (readOnly ? [name] : []))
+  );
+  const fits = tools.every((tool) => {
+    const inputs = inputsOf.get(composioToolName(tool));
+    const resource = typeof tool === "string" ? undefined : tool.resource;
+    return (
+      inputs !== undefined &&
+      (resource === undefined || inputs.includes(resource))
+    );
+  });
+  return { fits, hinted };
+};
 
 /**
  * Starts connecting a toolkit for an admin who consented: records their
@@ -456,24 +498,9 @@ export const startToolkitConnection = async (
     throw connectionErrors.create("connection.own_auth_required");
   }
   // Only tools the toolkit has, each held to a resource only by one of its
-  // own input properties: a name that matches nothing would be an entry
-  // that silently allows nothing, or holds nothing.
-  const toolkitTools = await composioTools(key, toolkit);
-  const inputsOf = new Map(
-    toolkitTools.map(({ name, inputs }) => [name, inputs])
-  );
-  const hinted = new Set(
-    toolkitTools.flatMap(({ name, readOnly }) => (readOnly ? [name] : []))
-  );
+  // own input properties (`checkedTools`).
+  const { fits, hinted } = await checkedTools(key, toolkit, tools);
   const readTools = readToolsOf(tools);
-  const fits = tools.every((tool) => {
-    const inputs = inputsOf.get(composioToolName(tool));
-    const resource = typeof tool === "string" ? undefined : tool.resource;
-    return (
-      inputs !== undefined &&
-      (resource === undefined || inputs.includes(resource))
-    );
-  });
   if (!fits) {
     throw connectionErrors.create("connection.invalid");
   }
@@ -982,3 +1009,169 @@ export const revokeAtComposio = async (
     },
     null
   );
+
+/** Sets the allowlist of Composio's MCP server `serverId` to `tools`. */
+const setServerTools = async (
+  key: string,
+  serverId: string,
+  tools: readonly (string | ComposioToolRule)[]
+): Promise<void> => {
+  await composioRequest(key, {
+    method: "PATCH",
+    path: `/mcp/${encodeURIComponent(serverId)}`,
+    body: { allowed_tools: tools.map(composioToolName) },
+    schema: z.unknown(),
+  });
+};
+
+/**
+ * Changes which tools a shared Composio connection allows, and which of
+ * them only read, for an admin (GRA-993; the threat model is on the
+ * issue). Only tools its toolkit has, as connecting checks them.
+ * Composio's server first, then connect's own list, which every call goes
+ * by, only if it is still the list read: should another change have won
+ * in between, Composio is set back to what connect holds and the change
+ * is refused (`connection.tools_changed`). So connect never allows a tool
+ * Composio wasn't told of, and a lost race leaves no wider list. Audited
+ * with the lists' hashes and counts, the tools newly marked as reads that
+ * Composio doesn't call read-only named, as consenting names them; a
+ * held action of a tool taken away is dropped. The tools it allows now.
+ */
+export const changeToolkitTools = async (
+  env: Env,
+  request: unknown
+): Promise<{ tools: string[] }> => {
+  const { person, connectionId, tools } = connectionErrors.parse(
+    "connection.invalid",
+    changeToolkitToolsSchema,
+    request
+  );
+  const db = drizzle(env.DB);
+  const row = await db
+    .select()
+    .from(connections)
+    .where(eq(connections.id, connectionId))
+    .get();
+  const changeable =
+    row !== undefined &&
+    row.serverKind === "composio" &&
+    row.scope === "shared" &&
+    row.status === "active" &&
+    row.composioServerId !== null &&
+    row.tools !== null;
+  if (!changeable) {
+    throw connectErrors.create("connect.connection_not_found");
+  }
+  const { provider: toolkit } = row;
+  const serverId = row.composioServerId ?? "";
+  const before = row.tools ?? "[]";
+  await refuseUnlessAdmin(env, person, toolkit, "connection.tools", row.id);
+  const detail = detailOf(toolkit);
+  const failed = async (reason: string, outcome: "refused" | "failed") => {
+    await auditRefusal(
+      env,
+      person,
+      "connection.tools",
+      { ...detail, outcome, reason },
+      row.id
+    );
+  };
+  const key = composioKey(env);
+  if (key === undefined) {
+    await failed("connection.provider_unavailable", "failed");
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  const { fits, hinted } = await checkedTools(key, toolkit, tools);
+  if (!fits) {
+    await failed("connection.invalid", "refused");
+    throw connectionErrors.create("connection.invalid");
+  }
+  const stored = JSON.stringify(tools);
+  const names = tools.map(composioToolName);
+  if (stored === before) {
+    return { tools: names };
+  }
+  const previous = composioToolsSchema.parse(JSON.parse(before));
+  try {
+    await setServerTools(key, serverId, tools);
+  } catch (error) {
+    if (!(error instanceof ComposioError)) {
+      throw error;
+    }
+    await failed("connection.provider_refused", "failed");
+    throw connectionErrors.create("connection.provider_refused");
+  }
+  const previousNames = new Set(previous.map(composioToolName));
+  const previousReads = new Set(readToolsOf(previous));
+  const readTools = readToolsOf(tools);
+  // Newly marked as reads without Composio's hint: the admin's word alone,
+  // named, as consenting names them.
+  const named = packedNames(
+    readTools.filter((tool) => !previousReads.has(tool) && !hinted.has(tool))
+  );
+  // Only while the list is still the one read.
+  const stillRead = sql`${connections.id} = ${row.id} AND ${connections.tools} = ${before}`;
+  const changed = await recordEventIf(
+    env,
+    connectionEvent(person, "connection.tools", row.id, {
+      ...detail,
+      outcome: "ok",
+      beforeHash: await sha256Hex(before),
+      toolsHash: await sha256Hex(stored),
+      toolCount: tools.length,
+      readCount: readTools.length,
+      added: names.filter((name) => !previousNames.has(name)).length,
+      removed: [...previousNames].filter((name) => !names.includes(name))
+        .length,
+      unnamedReads: named.rest.length,
+    }),
+    {
+      from: connections,
+      where: stillRead,
+    },
+    [
+      db
+        .update(connections)
+        .set({ tools: stored, updatedAt: new Date() })
+        .where(stillRead),
+    ]
+  );
+  if (!changed) {
+    // Another change won: Composio goes back to what connect holds now.
+    const now = await db
+      .select({ tools: connections.tools })
+      .from(connections)
+      .where(eq(connections.id, row.id))
+      .get();
+    const kept = composioToolsSchema.safeParse(
+      JSON.parse(now?.tools ?? "null")
+    );
+    if (kept.success) {
+      await setServerTools(key, serverId, kept.data).catch((error: unknown) => {
+        log.warn("composio.tools_restore_failed", errorFields(error));
+      });
+    }
+    await failed("connection.tools_changed", "refused");
+    throw connectionErrors.create("connection.tools_changed");
+  }
+  const [firstNames, ...moreNames] = named.details.map((part, index) =>
+    connectionEvent(person, "connection.tools.read_tools", row.id, {
+      ...detail,
+      hinted: false,
+      part: index + 1,
+      ...part,
+    })
+  );
+  if (firstNames !== undefined) {
+    await recordEvents(env, [firstNames, ...moreNames]);
+  }
+  // A held action of a tool taken away would be refused when confirmed:
+  // dropped now, so nobody is asked to confirm it.
+  await dropPendingActions(
+    env,
+    sql`${pendingActions.connectionId} = ${row.id} AND ${notInArray(pendingActions.action, names)}`,
+    "connection.tools_changed",
+    person
+  );
+  return { tools: names };
+};
