@@ -62,7 +62,10 @@ import {
 import { inList } from "../db/d1.ts";
 import { takesExactly } from "../workflows/exact-values.ts";
 import { removedText } from "../workflows/retention.ts";
-import { tellScreens } from "../workflows/run-changes.ts";
+import {
+  tellDecisionFollowers,
+  tellScreens,
+} from "../workflows/run-changes.ts";
 import { oweWake, sendWake } from "../workflows/wakes.ts";
 import type { Wake } from "../workflows/wakes.ts";
 import {
@@ -165,13 +168,13 @@ const ofRun = (run: DecisionRun): SQL =>
     : eq(workflowDecisions.runId, run.runId);
 
 /**
- * Tells the screens of the run's App it changed: an independent run has
- * none that follow its decisions.
+ * Tells the screens of the run's App it changed; for an independent run an
+ * App started, the App's connections following its decision queries.
  */
 const tellRunScreens = async (env: Env, run: DecisionRun): Promise<void> => {
-  if (!isResource(run)) {
-    await tellScreens(env, changed(run));
-  }
+  await (isResource(run)
+    ? tellDecisionFollowers(env, run.runId)
+    : tellScreens(env, changed(run)));
 };
 
 /** A person a decision asks, and the link that leads them to it. */
