@@ -618,14 +618,14 @@ export const DocumentDrop = ({
           <span className="min-w-0 flex-1">{error}</span>
         </p>
       )}
-      {/* Rows keep their own height and the list scrolls past four and a bit, rather than squeezing them. */}
+      {/* Rows keep their own height and the list scrolls past four and a bit, or fewer where the window is low, rather than squeezing them or the page scrolling. */}
       {/* The arrow keys move between its rows' buttons, and Delete takes one out. */}
       {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the keys act on the buttons inside it */}
       <ul
         aria-hidden={rows.length > 0 ? undefined : true}
         aria-label={t`Documents`}
         className={cn(
-          "grid max-h-70 min-w-0 auto-rows-max overflow-auto text-left transition-all",
+          "setup-document-list grid min-w-0 auto-rows-max overflow-auto text-left transition-all",
           rows.length > 0 && "pt-1"
         )}
         onKeyDown={onListKey}

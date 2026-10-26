@@ -64,8 +64,8 @@ const layout: Record<SetupStep, { width: string; brain: number }> = {
   documents: { width: "max-w-150", brain: 260 },
   pulse: { width: "max-w-140", brain: 240 },
   leads: { width: "max-w-140", brain: 260 },
-  team: { width: "max-w-130", brain: 270 },
-  listening: { width: "max-w-140", brain: 300 },
+  team: { width: "max-w-130 lg:max-w-240", brain: 270 },
+  listening: { width: "max-w-140 lg:max-w-240", brain: 300 },
   review: { width: "max-w-110", brain: 330 },
   open: { width: "max-w-110", brain: 450 },
 };
@@ -220,7 +220,8 @@ const useArrowKeys = (
 /**
  * A step never needs scrolling: the brain takes what the window leaves
  * once the step itself has its room, down to a small one, in steps, so it
- * does not flutter as a line comes and goes. On a phone a step that does
+ * does not flutter as a line comes and goes; where not even the small one
+ * fits, it makes way. On a phone a step that does
  * not fit even beside the smallest brain is cramped: its sentence makes way
  * once read, and where that frees too little, the brain makes way with it,
  * until the next step.
@@ -262,6 +263,9 @@ const useBrainRoom = (step: SetupStep) => {
   let brain = wanted;
   if (brainAway === step) {
     brain = 0;
+  } else if (measured && !phone && room < brainLeast) {
+    // Where even the smallest brain leaves the step too little room, it makes way, so the page never scrolls.
+    brain = 0;
   } else if (measured) {
     brain = Math.max(brainLeast, Math.min(wanted, room));
   }
@@ -279,8 +283,9 @@ const useBrainRoom = (step: SetupStep) => {
 
 /**
  * Leaving the onboarding, Stephen stops mid-sentence rather than talk over
- * the app; every step that follows is a new start, so a pause from the
- * last one lets go.
+ * the app; every step that follows is a new start, so he stops what he was
+ * saying on the last one (a step he finished before says nothing to cut it), and
+ * a pause from it lets go.
  */
 const useVoiceBetweenSteps = (step: SetupStep): void => {
   useEffect(
@@ -294,6 +299,7 @@ const useVoiceBetweenSteps = (step: SetupStep): void => {
   useEffect(() => {
     if (last.current !== step) {
       last.current = step;
+      stopSpeaking();
       resumeVoice();
     }
   }, [step]);

@@ -1070,14 +1070,6 @@ msgstr "{people}, ou {fewer} et un document"
 msgid "{percent}% known now"
 msgstr "{percent} % connu à ce jour"
 
-#: src/onboarding/knowledge-bar.tsx
-msgid "{percent}% known. Your team can start at {threshold}%, and I keep learning after that."
-msgstr "{percent} % connu. Votre équipe peut commencer à {threshold} %, et je continue d’apprendre ensuite."
-
-#: src/onboarding/knowledge-bar.tsx
-msgid "{percent}% known. Your team can start at {threshold}%."
-msgstr "{percent} % connu. Votre équipe peut commencer à {threshold} %."
-
 #. Who connected the app, then the day they did.
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{person}, {date}"
@@ -3072,6 +3064,7 @@ msgstr "Absent ces semaines-ci. Rien n’attend {first}."
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/onboarding/setup-frame.tsx
 #: src/tour/tour-layer.tsx
 msgid "Back"
 msgstr "Retour"
@@ -6310,6 +6303,10 @@ msgstr "Combien ont donné chaque note"
 msgid "How much has to be known before it opens"
 msgstr "Ce qu’il faut savoir avant d’ouvrir"
 
+#: src/onboarding/knowledge-bar.tsx
+msgid "How much I know about your organization, not how far you are in these steps. It grows as you share and as I talk to your team. Your team can start at {threshold}%, and I keep learning after that."
+msgstr "Ce que je sais de votre organisation, pas votre avancement dans ces étapes. Cela grandit avec ce que vous partagez et avec mes conversations avec votre équipe. Votre équipe peut commencer à {threshold} %, et je continue d’apprendre ensuite."
+
 #: src/onboarding/work-canvas.tsx
 msgid "How often is not known"
 msgstr "Fréquence inconnue"
@@ -7061,6 +7058,10 @@ msgstr "Connu"
 msgctxt "where a workflow stands"
 msgid "Known"
 msgstr "Connu"
+
+#: src/onboarding/knowledge-bar.tsx
+msgid "Known about your organization"
+msgstr "Connu de votre organisation"
 
 #: src/onboarding/work-words.ts
 msgctxt "where a workflow stands"
@@ -14556,6 +14557,10 @@ msgstr "Ce qu'il peut faire"
 #: src/settings/stephen-settings.tsx
 msgid "What he may do in {appName}: as for the whole company, or for fewer people."
 msgstr "Ce qu'il peut faire dans {appName} : comme pour toute l'entreprise, ou pour moins de personnes."
+
+#: src/onboarding/knowledge-bar.tsx
+msgid "What I know about your organization: {percent}%. This is not how far you are in these steps. Your team can start at {threshold}%."
+msgstr "Ce que je sais de votre organisation : {percent} %. Ce n’est pas votre avancement dans ces étapes. Votre équipe peut commencer à {threshold} %."
 
 #: src/interview/transcript.tsx
 msgid "What is marked is what I wrote down. You check it at the end."

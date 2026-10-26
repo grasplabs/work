@@ -72,6 +72,14 @@ export const Explained = createContext<{
 });
 
 /**
+ * Whether the admin has been through this step before and Stephen finished
+ * it: coming back to it, back or forward, his message is there in full at
+ * once and its way on with it. He says nothing again, and nothing lights
+ * up; only what is done on this visit he answers as ever.
+ */
+export const Seen = createContext(false);
+
+/**
  * Whether, on a phone, the step does not fit beside even the smallest
  * brain: its sentence then makes way once read and tells how much room that
  * frees, so the brain can make way too where that is not enough.
@@ -257,12 +265,14 @@ const useHeadingSaid = ({
   const { line, from } = stepLine(title, arrivingWith?.text ?? sentence);
   // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
   const [arrived] = useState(line);
+  const seen = useContext(Seen);
   // Done again on this visit: his answer is said on its own, not his line again.
   const announced = answer?.announce === true;
   const alone = !answeredOnArrival || announced;
   useSay(line, {
     delay: 120,
     when:
+      !seen &&
       (answer === undefined || answeredOnArrival || arrived === line) &&
       !(announced && arrived !== line),
     tone: arrivingWith?.tone ?? voice.tone,
@@ -487,7 +497,11 @@ export const Callout = ({
   text: string;
   tone?: Tone;
 }) => {
-  useSay(text, { after: true, tone });
+  const seen = useContext(Seen);
+  // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
+  const [arrived] = useState(text);
+  // On a step seen before, only a line that changed on this visit is said.
+  useSay(text, { after: true, tone, when: !seen || text !== arrived });
   return (
     <p className="animate-in fade-in duration-500">
       <SpokenText from={0} line={text} text={text} />
@@ -509,20 +523,27 @@ export const useSayFollowing = (
   { tone = tones.even, quick = false }: StepVoice = {}
 ): void => {
   const shown = useRef(text);
+  const seen = useContext(Seen);
+  // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
+  const [arrived] = useState(text);
+  // On a step seen before, it is said only once a choice changes it.
+  const quiet = seen && text === arrived;
   useEffect(() => {
     shown.current = text;
-    const id = window.setTimeout(() => {
-      speak(text, {
-        after: true,
-        tone,
-        quick,
-        still: () => shown.current === text,
-      });
-    }, followsMs);
+    const id = quiet
+      ? undefined
+      : window.setTimeout(() => {
+          speak(text, {
+            after: true,
+            tone,
+            quick,
+            still: () => shown.current === text,
+          });
+        }, followsMs);
     return () => {
       window.clearTimeout(id);
     };
-  }, [text, tone, quick]);
+  }, [text, tone, quick, quiet]);
 };
 
 /** A number with what it counts. */

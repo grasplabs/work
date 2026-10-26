@@ -1,4 +1,6 @@
+import { Button } from "@grasp-os/ui/components/button";
 import { useLingui } from "@lingui/react/macro";
+import { ArrowLeftIcon } from "lucide-react";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 
@@ -12,12 +14,15 @@ import type { SetupStep } from "./setup.ts";
 
 // The frame of every onboarding screen (prototype
 // `components/onboarding/onboarding-frame.tsx`), with as little as possible
-// around the step: from the third step, what Grasp knows, top centre; one
-// centred column; where you are, bottom centre; bottom right, pause and the
-// sound, with the language before them on every step after the first,
-// where it is chosen. The dots go back, and
+// around the step: from the third step, what Grasp knows of the
+// organization, top centre, and from the second a way back a step, top
+// left, in the same row; one centred column; where you are, bottom centre;
+// bottom right, pause and the sound, with the language before them on
+// every step after the first, where it is chosen. The dots go back, and
 // forward again as far as you have been; so do the arrow keys; Escape
-// leaves. After the wizard, a word says where things stand.
+// leaves. After the wizard, a word says where things stand. The frame is
+// as high as the window and the page never scrolls, so the way on is
+// always in sight.
 
 const dotClass = {
   current:
@@ -91,6 +96,7 @@ export const SetupFrame = ({
     open: t`Ready`,
   };
   const word = words[step];
+  const back = steps[index - 1];
 
   // With nothing on screen to leave by, Escape does it, unless something open is closing on it.
   useEffect(() => {
@@ -111,17 +117,36 @@ export const SetupFrame = ({
   }, [onExit]);
 
   return (
-    <div className="bg-background flex min-h-svh flex-col text-sm">
-      {/* Nothing up here but how much Grasp knows, in the middle. */}
-      <header className="flex h-18 flex-none items-center justify-center px-4 sm:px-10">
+    <div className="bg-background flex h-svh flex-col overflow-hidden text-sm">
+      {/* A way back a step on the left, and how much Grasp knows of the organization in the middle, in one row. */}
+      <header className="setup-header grid h-18 flex-none items-center px-4 sm:px-10">
+        <div className="flex items-center">
+          {back === undefined ? null : (
+            <span className="animate-in fade-in duration-500">
+              <Button
+                onClick={() => {
+                  onGo(back);
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                <ArrowLeftIcon data-icon="inline-start" />
+                {t`Back`}
+              </Button>
+            </span>
+          )}
+        </div>
         {index >= stepIndex("company") ? (
           <KnowledgeCorner {...knowledge} />
-        ) : null}
+        ) : (
+          <span />
+        )}
       </header>
-      <main className="flex flex-1 flex-col items-center px-4 py-2">
+      {/* A step fits between the two rows, a long list scrolling in its own panel; only where a window is too small even for that, on a phone, does the step scroll between them. */}
+      <main className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 py-2">
         <div className="my-auto flex w-full justify-center">{children}</div>
       </main>
-      <footer className="bg-background setup-footer sticky bottom-0 grid h-18 flex-none items-center px-4 sm:px-10">
+      <footer className="bg-background setup-footer grid h-18 flex-none items-center px-4 sm:px-10">
         {/* The mark bottom left, across from the language. */}
         <GraspMark className="text-foreground size-5" />
         <nav aria-label={t`Onboarding steps`} className="flex items-center">

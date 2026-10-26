@@ -23,7 +23,7 @@ import {
 } from "../voice/voice.ts";
 import type { Tone } from "../voice/voice.ts";
 import { KnowledgeBar } from "./knowledge-bar.tsx";
-import { Explained, Primary, tones } from "./setup-parts.tsx";
+import { Explained, Primary, Seen, tones } from "./setup-parts.tsx";
 import type { StepProps } from "./setup-steps.tsx";
 import { readingSeconds } from "./setup.ts";
 
@@ -325,15 +325,17 @@ const Prepared = ({
  * The story's clock: a line at a time, said by Stephen, and after the
  * fifth line every turn of the conversation, in the team's own voices.
  * How far a line is comes from his voice as he says it; with the sound
- * off, from the time it takes to say. With less motion, it is told at
- * once.
+ * off, from the time it takes to say. With less motion, or coming back to
+ * it once it was told, it is told at once.
  */
 const useStory = (script: Script): Told => {
-  const reduce = useSyncExternalStore(
+  const lessMotionWanted = useSyncExternalStore(
     onMotionChange,
     () => window.matchMedia(lessMotion).matches,
     () => false
   );
+  const seen = useContext(Seen);
+  const reduce = lessMotionWanted || seen;
   const voice = useVoice();
   const beats = script.lines.length;
   const [beat, setBeat] = useState(0);
@@ -511,6 +513,7 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   const script = useScript(data);
   const { lines, conversation } = script;
   const story = useStory(script);
+  const seen = useContext(Seen);
   const { beat, turn, progress, told } = story;
 
   useEffect(() => {
@@ -574,9 +577,12 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   const gate = told || beat >= gateBeat;
   return (
     <>
-      {[...lines, ...conversation].map((each) => (
-        <Prepared key={each.text} {...each} />
-      ))}
+      {/* Told before, nothing of it is said again, so nothing is fetched. */}
+      {seen
+        ? null
+        : [...lines, ...conversation].map((each) => (
+            <Prepared key={each.text} {...each} />
+          ))}
       <h1 className="sr-only">{t`Here’s the plan`}</h1>
       <div
         aria-live="polite"

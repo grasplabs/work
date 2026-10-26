@@ -9,6 +9,7 @@ import { SetupStepBody } from "./setup-steps.tsx";
 import type { SetupData } from "./setup-steps.tsx";
 import { listeningOf } from "./setup.ts";
 import type { SetupStep } from "./setup.ts";
+import { noteHeard } from "./visit.ts";
 
 // What the onboarding's step tells the company's admin while Stephen talks
 // to their people, from what it renders.
@@ -25,15 +26,22 @@ const view = (paused: boolean, sponsor: string | null): OnboardingView => ({
   waiting: 0,
 });
 
-/** What a step says, as text without its markup. */
-const said = (
+interface Shown {
+  paused?: boolean;
+  settled?: "mail"[];
+  sponsor?: string | null;
+  /** Stephen finished this step before. */
+  seen?: boolean;
+}
+
+/** A step as it is drawn as it arrives, its markup and all. */
+const drawn = (
   step: SetupStep,
-  {
-    paused = false,
-    settled = [],
-    sponsor = null,
-  }: { paused?: boolean; settled?: "mail"[]; sponsor?: string | null }
+  { paused = false, settled = [], sponsor = null, seen = false }: Shown
 ): string => {
+  if (seen) {
+    noteHeard(step);
+  }
   const data: SetupData = {
     admin: "Ada",
     company: null,
@@ -91,10 +99,14 @@ const said = (
         today={today}
       />
     </I18nProvider>
-  )
+  );
+};
+
+/** What a step says, as text without its markup. */
+const said = (step: SetupStep, shown: Shown): string =>
+  drawn(step, shown)
     .replaceAll(/<[^>]+>/gu, " ")
     .replaceAll(/\s+/gu, " ");
-};
 
 describe("the step while Stephen talks to the team", () => {
   it("says the interviews are paused, while Grasp paused them", () => {
@@ -154,4 +166,24 @@ describe("the welcome", () => {
       expect(said("welcome", { sponsor })).toContain(says);
     }
   );
+});
+
+describe("a step the admin comes back to", () => {
+  it("shows its way on at once, rather than after Stephen says it again", () => {
+    // Held back (inert) until explained on arrival; there at once when seen before.
+    expect({
+      first: drawn("review", { settled: ["mail"] }).includes("inert"),
+      again: drawn("review", { settled: ["mail"], seen: true }).includes(
+        "inert"
+      ),
+    }).toStrictEqual({ first: true, again: false });
+  });
+
+  it("keeps the language chosen on the welcome, with Stephen's answer in full", () => {
+    const answer = "English it is. This takes about 8 minutes. Ready to start?";
+    expect({
+      first: said("welcome", {}).includes(answer),
+      again: said("welcome", { seen: true }).includes(answer),
+    }).toStrictEqual({ first: false, again: true });
+  });
 });

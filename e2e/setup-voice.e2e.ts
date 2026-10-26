@@ -93,6 +93,11 @@ test("the admin goes through empty steps and back, with the sound on and off", a
       name: "Do you have anything that explains how you work?",
     })
   ).toBeVisible();
+  // The way back at the top, beside what Grasp knows, goes back a step too.
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Where does the work get written down?" })
+  ).toBeVisible();
   expect(asked.length).toBe(before);
 });
 
@@ -134,12 +139,13 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
     await leaveNothingChosen();
     const page = await pageOf(admin);
     await page.goto("/setup?step=sources");
+    // What Grasp knows of the organization, said apart from how far the admin is through the steps.
     const bar = page.getByRole("button", {
-      name: /% known\. Your team can start at/u,
+      name: /^What I know about your organization: \d+%\. This is not how far you are in these steps\./u,
     });
     const known = async (): Promise<number> =>
       Number(
-        /^(?<known>\d+)%/u.exec((await bar.getAttribute("aria-label")) ?? "")
+        /: (?<known>\d+)%/u.exec((await bar.getAttribute("aria-label")) ?? "")
           ?.groups?.known
       );
     await expect(bar).toBeVisible();
