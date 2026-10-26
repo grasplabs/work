@@ -78,7 +78,10 @@ const partsOf = (mime: string) => {
       .replace(/^\r\n/u, "")
       .split("\r\n\r\n");
     return {
-      headers: headers.split("\r\n"),
+      // Each header as one line, its folds undone (RFC 5322).
+      headers: headers.replaceAll(/\r\n[ \t]+/gu, " ").split("\r\n"),
+      // Each header line as it was sent, folds and all.
+      lines: headers.split("\r\n"),
       body: body.join("\r\n\r\n").replaceAll("\r\n", ""),
     };
   });
@@ -158,6 +161,43 @@ describe("a Gmail write that attaches files", () => {
       `Content-Disposition: attachment; filename="Q4 _final__ x__y_ _.txt"; filename*=UTF-8''Q4%20%22final%22%3B%20x%3D%22y%22%20%C3%A9.txt`,
       "Content-Transfer-Encoding: base64",
     ]);
+  });
+
+  it("keeps every line of a long name's header within the limit, the name whole once its continuations are read", async () => {
+    const connection = await connected();
+    // 150 characters of Chinese: each 9 characters once percent-encoded.
+    const name = `${"\u6587".repeat(150)}.txt`;
+    const long = await attach(name, "text/plain", "long");
+    await send(connection, [long], "run-2:long");
+    const [sent] = writes();
+    const [, file] = partsOf(rawOf(sent?.body)).parts;
+    const disposition =
+      file?.headers.find((header) =>
+        header.startsWith("Content-Disposition:")
+      ) ?? "";
+    const pieces = [
+      ...disposition.matchAll(/filename\*(?<at>\d+)\*=(?<piece>[^;]+)/gu),
+    ];
+    expect({
+      // Within the line limit (RFC 5322: 998), and each of the name's
+      // continuations within its recommended 78.
+      longest:
+        Math.max(...(file?.lines ?? []).map((line) => line.length)) <= 998 &&
+        (file?.lines ?? [])
+          .filter((line) => line.includes("filename*"))
+          .every((line) => line.length <= 78),
+      numbered: pieces.map(({ groups }) => Number(groups?.at)),
+      name: decodeURIComponent(
+        pieces
+          .map(({ groups }) => groups?.piece ?? "")
+          .join("")
+          .replace(/^UTF-8''/u, "")
+      ),
+    }).toStrictEqual({
+      longest: true,
+      numbered: Array.from({ length: pieces.length }, (_, at) => at),
+      name,
+    });
   });
 
   it("is refused, with nothing sent, for bytes that aren't the files its input names", async () => {
