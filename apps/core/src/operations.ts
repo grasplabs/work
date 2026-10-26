@@ -1,4 +1,10 @@
-import { memoryPackSchema } from "@grasp-os/brain/contract";
+import {
+  memoryPackSchema,
+  skillReadSchema,
+  skillSelectionSchema,
+  skillsReadInputSchema,
+  skillsSelectInputSchema,
+} from "@grasp-os/brain/contract";
 import { AppError } from "@grasp-os/sdk";
 import type {
   AnyResource,
@@ -1469,6 +1475,8 @@ const knowledgeRequests = {
   search: knowledgeSearchSchema,
   read: knowledgeReadSchema,
   recall: resourceRecallInputSchema,
+  skillsSelect: skillsSelectInputSchema,
+  skillsRead: skillsReadInputSchema,
 } as const;
 
 /** Whether `method` is an operation a knowledge resource serves. */
@@ -1500,6 +1508,8 @@ const knowledgeResults = {
   search: knowledgeHitsSchema,
   read: knowledgeDocumentSchema,
   recall: memoryPackSchema,
+  skillsSelect: skillSelectionSchema,
+  skillsRead: skillReadSchema,
 } as const;
 
 /**

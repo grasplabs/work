@@ -522,6 +522,30 @@ describe(describeWorkflow, () => {
     }
   });
 
+  it("names the Brain binding a step selects or reads a skill through, and refuses another skills call or the skills kept", () => {
+    const select = `return await brain(env.BRAIN).skills.select({ task: { type: "invoice" } });`;
+    const read = `return await brain(env.BRAIN).skills.read({ documentId: "d", version: 1 });`;
+    expect({
+      select: reviewedCalls(brainSource(select)).steps,
+      read: reviewedCalls(brainSource(read)).steps,
+    }).toStrictEqual({
+      select: { recall: ["BRAIN"] },
+      read: { recall: ["BRAIN"] },
+    });
+    for (const code of [
+      // Kept: its calls could be made anywhere.
+      `const skills = brain(env.BRAIN).skills; return await skills.select({ task: { type: "invoice" } });`,
+      // No such call.
+      `return await brain(env.BRAIN).skills.remove({ name: "x" });`,
+      // Computed: any name.
+      `return await brain(env.BRAIN).skills["select"]({ task: { type: "invoice" } });`,
+    ]) {
+      expect(() => describeWorkflow(brainSource(code))).toThrow(
+        "don't keep `env`"
+      );
+    }
+  });
+
   it("names a binding a step's option calls, such as a decision's ask", () => {
     const source = workflowSource(
       `await step.decision("approve", { description: "Approve", from: params.reviewer, timeout: "1 day", ask: async (request) => await env.MAIL.call("mail.send", request) });`,
