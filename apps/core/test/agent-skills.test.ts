@@ -7,6 +7,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { withheldResult } from "../src/agent.ts";
+import {
+  graspSkillsCollectionId,
+  syncGraspSkills,
+} from "../src/knowledge/grasp-skills.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { capabilitiesOf } from "../src/knowledge/skill-capabilities.ts";
 import {
@@ -37,6 +41,9 @@ import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 // - a skill's text stays in the chat's later requests once the agent may
 //   no longer read it, because the chat didn't keep where it came from
 //   (the same record judges a sensitive one by the client's data rule).
+// - a shipped Grasp skill is never selected for its task, or an admin's
+//   adapted copy of one leaves the task ambiguous, or doesn't take its
+//   place.
 
 const idp = mockIdp();
 
@@ -415,6 +422,75 @@ describe("a chat's skills", setUpTime, () => {
     }).toStrictEqual({
       whileReadable: true,
       afterRevoking: [{ secret: false, withheld: true }],
+    });
+  });
+
+  it("selects each shipped Grasp skill for its task, and an admin's adapted copy of one in its place", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    await syncGraspSkills(env);
+    const person = {
+      type: "person",
+      person: await member.api.whoami(),
+    } as const;
+    const selected = async (type: string) =>
+      resultOf(await selectSkill(brainOf(env), person, { task: { type } }));
+    const shipped = {
+      workflow: await selected("workflow.draw"),
+      interview: await selected("stakeholder.interview"),
+      baseline: await selected("baseline.run"),
+      boardPage: await selected("board-page.write"),
+    };
+    const { documents } = await admin.api.knowledge.listDocuments(
+      graspSkillsCollectionId
+    );
+    const baseline = documents.find(
+      ({ path }) => path === "run-a-baseline/SKILL.md"
+    );
+    if (baseline === undefined) {
+      throw new Error("There's no shipped run-a-baseline skill");
+    }
+
+    // An admin copies it into the company's skills to adapt it.
+    const copy = await admin.api.knowledge.copySkill({
+      documentId: baseline.id,
+    });
+    const afterCopy = await selectSkill(brainOf(env), person, {
+      task: { type: "baseline.run" },
+    });
+
+    expect({
+      shipped: Object.values(shipped).map((result) =>
+        typeof result === "object" && result !== null && "skill" in result
+          ? result.skill
+          : result
+      ),
+      afterCopy: {
+        result:
+          afterCopy.result.kind === "skill"
+            ? afterCopy.result.skill.documentId
+            : afterCopy.result.reason,
+        considered: afterCopy.considered.map(({ skill, outcome }) => [
+          skill.collectionId === graspSkillsCollectionId ? "shipped" : "copy",
+          outcome,
+        ]),
+      },
+    }).toStrictEqual({
+      shipped: [
+        "draw-a-workflow",
+        "interview-a-stakeholder",
+        "run-a-baseline",
+        "write-board-page",
+      ],
+      // Its prerequisites name the shipped collection, so the copy finds
+      // them too.
+      afterCopy: {
+        result: copy.id,
+        considered: [
+          ["shipped", "replaced"],
+          ["copy", "selected"],
+        ],
+      },
     });
   });
 });

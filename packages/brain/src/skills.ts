@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, like, or } from "drizzle-orm";
 
 import { allowedFor } from "./authorize.ts";
 import type { Brain, SkillAuthority } from "./brain.ts";
@@ -28,6 +28,7 @@ import {
 import { getDocument } from "./documents.ts";
 import { parseBaseFields, parseFrontmatter } from "./frontmatter.ts";
 import { collectionIdSchema, documentIdSchema } from "./ids.ts";
+import type { CollectionId } from "./ids.ts";
 import type { Provenance } from "./knowledge.ts";
 import { readPayload } from "./payloads.ts";
 import { asBrainError } from "./recall.ts";
@@ -53,7 +54,10 @@ import { asBrainError } from "./recall.ts";
 //   skill's own collection, or the collection it names, never by name
 //   across collections; a name twice there is ambiguous, never "the one
 //   the caller reads". `replaces` reaches a skill in the same collection,
-//   or, from a collection only admins write, a shipped skill.
+//   or, from a collection only admins write, a shipped skill. A skill
+//   there with a shipped skill's name takes it out of selection without
+//   naming it (the client's adapted copy, which can't name itself),
+//   whether or not the copy applies: how admins switch one off.
 // - A missing prerequisite or dependency: each must be accepted and usable
 //   by the caller (a prerequisite: its own capabilities, prerequisites and
 //   dependencies in turn, never through a cycle), or that one
@@ -68,7 +72,8 @@ import { asBrainError } from "./recall.ts";
 //   `skillsVisitMax` visits through prerequisites, it selects none.
 // - A pin changing under a run: the selection pins the version it read;
 //   `readSkill` returns exactly that version, retired or superseded since,
-//   while the caller may still read it.
+//   while the caller may still read it, and only from a collection the
+//   host vouches for: a team's "accepted" skill is never read as vetted.
 // - Unrecorded selections: every one, a no-skill one too, is recorded by
 //   the host's `onRead` port with its result and counts, never a skill's
 //   text.
@@ -126,7 +131,12 @@ const manifestOf = (path: string, text: string): Parsed => {
 /**
  * Whether `text` at `path` is a skill's, by its own frontmatter: checked
  * as leniently as a purge reads it (`parseBaseFields`), so a skill whose
- * manifest a later release reads more narrowly is still one.
+ * manifest a later release reads more narrowly is still one. A version
+ * without a `type` is typed by its file name (`SKILL.md`), as every skill
+ * is that doesn't say it: the document's path is its every version's, as
+ * a save never changes it (documents.ts `writeVersion`). Should documents
+ * ever move, the path a version was saved at must be kept with it, and
+ * read here.
  */
 const isSkillText = (path: string, text: string): boolean => {
   try {
@@ -155,17 +165,39 @@ const manifestAt = async <C>(
   return parsed;
 };
 
+/** Every document that is, or was saved as, a skill: by its type, or by its file name. */
+const skillDocument = or(
+  eq(documents.type, "skill"),
+  like(documents.path, "%SKILL.md")
+);
+
+/** What a selection reads of the skills it may weigh. */
+interface Selectable {
+  candidates: Candidate[];
+  /** How many skill documents it read. */
+  read: number;
+  /** The names of admins' skill documents, readable or not (`copiedOver`). */
+  copied: ReadonlySet<string>;
+}
+
 /**
  * The selectable skills `reader` may read, at their current versions, in a
- * fixed order: those in collections the host vouches for; undefined past
- * `skillsReadMax`.
+ * fixed order: those in collections the host vouches for, and of those
+ * only the ones in `within` when the caller is bound to some (none reads
+ * nothing); undefined past `skillsReadMax`.
  */
 const selectableSkills = async <C>(
   brain: Brain<C>,
-  reader: C
-): Promise<{ candidates: Candidate[]; read: number } | undefined> => {
+  reader: C,
+  within: readonly CollectionId[] | undefined
+): Promise<Selectable | undefined> => {
   const { db } = brain;
+  if (within?.length === 0) {
+    return { candidates: [], read: 0, copied: new Set() };
+  }
   const allowed = await allowedFor(brain.ports, reader);
+  const bound =
+    within === undefined ? undefined : inList(collections.id, within);
   // The collections holding skills the reader may read, vouched for first,
   // so only theirs are scanned: a collection anyone may fill with skills
   // never uses up the cap below and so never stops a selection.
@@ -178,7 +210,7 @@ const selectableSkills = async <C>(
     })
     .from(documents)
     .innerJoin(collections, eq(collections.id, documents.collectionId))
-    .where(and(eq(documents.type, "skill"), allowed.documents()))
+    .where(and(skillDocument, allowed.documents(), bound))
     .limit(skillsScanMax + 1);
   if (held.length > skillsScanMax) {
     return undefined;
@@ -188,7 +220,7 @@ const selectableSkills = async <C>(
     held.some((collection) => collection.id === id)
   );
   if (vouchedIds.length === 0) {
-    return { candidates: [], read: 0 };
+    return { candidates: [], read: 0, copied: new Set() };
   }
   const vouched = await db
     .select({
@@ -210,7 +242,7 @@ const selectableSkills = async <C>(
     .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
     .where(
       and(
-        eq(documents.type, "skill"),
+        skillDocument,
         allowed.documents(),
         inList(collections.id, vouchedIds)
       )
@@ -221,10 +253,21 @@ const selectableSkills = async <C>(
     return undefined;
   }
   const candidates: Candidate[] = [];
+  const copied = new Set<string>();
   for (const row of vouched) {
     // oxlint-disable-next-line no-await-in-loop -- bounded by skillsReadMax, in order
     const parsed = await manifestAt(brain, row.path, row.payload);
     const authority = authorities[row.collection.id];
+    if (authority === "admins") {
+      // Every admins' skill document names a shipped skill it is a copy
+      // of, by its folder and by its name: one whose frontmatter no
+      // longer reads (a purge broke it) still does, so a shipped skill an
+      // admin switched off never comes back that way.
+      copied.add(row.path.split("/").at(-2) ?? "");
+      if (parsed !== null) {
+        copied.add(parsed.name);
+      }
+    }
     if (parsed !== null && authority !== undefined) {
       candidates.push({
         ref: {
@@ -239,7 +282,7 @@ const selectableSkills = async <C>(
       });
     }
   }
-  return { candidates, read: vouched.length };
+  return { candidates, read: vouched.length, copied };
 };
 
 /** Whether every one of `needed` is in `held`. */
@@ -456,6 +499,17 @@ const replacedBy = (by: Candidate, all: readonly Candidate[]): Candidate[] =>
   });
 
 /**
+ * Whether `candidate` is a shipped skill an admins' skill document the
+ * caller reads has the name of (`copied`): the client's copy of it,
+ * adapted (which can't name itself in `replaces`). The copy takes it out
+ * of selection whatever the copy's own state, so a copy that doesn't
+ * apply, can't be used, is retired or no longer reads as a skill at all
+ * selects nothing in its place: how admins switch a shipped skill off.
+ */
+const copiedOver = (candidate: Candidate, copied: ReadonlySet<string>) =>
+  candidate.authority === "shipped" && copied.has(candidate.ref.name);
+
+/**
  * Each of the skills `relevant` to the task, with why it was or wasn't
  * selected, and the one left applicable, with its dependencies' pins, once
  * `replaces` is applied: one is selected, more are each ambiguous.
@@ -465,7 +519,8 @@ const outcomesOf = async <C>(
   relevant: readonly Candidate[],
   all: readonly Candidate[],
   traits: ReadonlySet<string>,
-  held: ReadonlySet<string>
+  held: ReadonlySet<string>,
+  copied: ReadonlySet<string>
 ): Promise<{
   outcomes: Map<Candidate, SkillOutcome>;
   left: { candidate: Candidate; pins: SkillRef[] }[];
@@ -475,6 +530,10 @@ const outcomesOf = async <C>(
   const applicable: { candidate: Candidate; pins: SkillRef[] }[] = [];
   const walk: Walk = { known: new Map(), visited: 0, exceeded: false };
   for (const candidate of relevant) {
+    if (copiedOver(candidate, copied)) {
+      outcomes.set(candidate, "replaced");
+      continue;
+    }
     // oxlint-disable-next-line no-await-in-loop -- in order, bounded by skillsReadMax
     const checked = await checkedOf(brain, candidate, traits, held, all, walk);
     if ("blocked" in checked) {
@@ -526,13 +585,19 @@ const resultOf = (
  * version read, or an explicit no-skill result; recorded either way, with
  * where what it weighed came from (`provenance`), as a recall's sources,
  * for a host that keeps them with what the caller does next. Refused as
- * the Brain refuses a recall (`brain.denied` for a caller the host doesn't
- * let use the Brain, `brain.invalid` for a malformed task).
+ * the Brain refuses a recall (`brain.denied` for a caller the
+ * host doesn't let use the Brain, `brain.invalid` for a malformed task).
  */
 export const selectSkillWithSources = async <C>(
   brain: Brain<C>,
   reader: C,
-  input: unknown
+  input: unknown,
+  /**
+   * The only collections it may weigh skills of, for a caller bound to
+   * some, as a recall's `within`: an App's knowledge resource passes those
+   * it binds that its person may read (none weighs nothing).
+   */
+  within?: readonly CollectionId[]
 ): Promise<{ selection: SkillSelection; provenance: Provenance }> => {
   try {
     const { task } = brainErrors.parse(
@@ -543,7 +608,7 @@ export const selectSkillWithSources = async <C>(
     await brain.ports.recall.require(reader);
     const traits = new Set(task.traits);
     const held = new Set(await brain.ports.skills.capabilities(reader));
-    const selectable = await selectableSkills(brain, reader);
+    const selectable = await selectableSkills(brain, reader, within);
     const all = selectable?.candidates ?? [];
     const relevant = all.filter(({ manifest }) =>
       manifest.tasks.includes(task.type)
@@ -553,7 +618,8 @@ export const selectSkillWithSources = async <C>(
       relevant,
       all,
       traits,
-      held
+      held,
+      selectable?.copied ?? new Set()
     );
     const result = resultOf(selectable === undefined || exceeded, left);
     // Recorded with its result and counts, as the host records a read: the
@@ -592,7 +658,7 @@ export const selectSkillWithSources = async <C>(
   }
 };
 
-/** `selectSkillWithSources`'s selection alone. */
+/** `selectSkillWithSources`'s selection, for a caller bound to no collections. */
 export const selectSkill = async <C>(
   brain: Brain<C>,
   reader: C,
@@ -612,7 +678,12 @@ export const selectSkill = async <C>(
 export const readSkillWithSources = async <C>(
   brain: Brain<C>,
   reader: C,
-  input: unknown
+  input: unknown,
+  /**
+   * The only collections it may read from, for a caller bound to some, as
+   * `selectSkillWithSources` takes them: a skill elsewhere isn't found.
+   */
+  within?: readonly CollectionId[]
 ): Promise<{ read: SkillRead; provenance: Provenance }> => {
   try {
     const { documentId, version } = brainErrors.parse(
@@ -621,6 +692,32 @@ export const readSkillWithSources = async <C>(
       input
     );
     await brain.ports.recall.require(reader);
+    // Located before it is read, so a skill elsewhere is never read, nor
+    // recorded as read: not found, as one the reader can't see. Only in a
+    // collection the host vouches for, as selection weighs (a skill a team
+    // writes is never read as a vetted one), and within the caller's bound.
+    const located = await brain.db
+      .select({
+        id: collections.id,
+        access: collections.access,
+        owner: collections.owner,
+        source: collections.source,
+      })
+      .from(documents)
+      .innerJoin(collections, eq(collections.id, documents.collectionId))
+      .where(eq(documents.id, documentId))
+      .get();
+    const vouched =
+      located === undefined
+        ? {}
+        : await brain.ports.skills.authorityOf([located]);
+    if (
+      located === undefined ||
+      vouched[located.id] === undefined ||
+      (within !== undefined && !within.some((id) => id === located.id))
+    ) {
+      throw brainErrors.create("brain.not_found");
+    }
     const read = await getDocument(brain, reader, documentId, version);
     // A skill at the pinned version itself, whatever the document is now:
     // a later version of another type leaves the pin readable, and an
@@ -647,7 +744,7 @@ export const readSkillWithSources = async <C>(
   }
 };
 
-/** `readSkillWithSources`'s read alone. */
+/** `readSkillWithSources`'s read, for a caller bound to no collections. */
 export const readSkill = async <C>(
   brain: Brain<C>,
   reader: C,

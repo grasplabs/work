@@ -467,7 +467,11 @@ export const bindings = ({ connections, collections, brains = [] }) => {
     const name = brains[index];
     all[name] = {
       recall: async (request) =>
-        unwrapped(await currentAttempt().callBrain(name, request)),
+        unwrapped(await currentAttempt().callBrain(name, "recall", request)),
+      skillsSelect: async (request) =>
+        unwrapped(await currentAttempt().callBrain(name, "skillsSelect", request)),
+      skillsRead: async (request) =>
+        unwrapped(await currentAttempt().callBrain(name, "skillsRead", request)),
     };
   }
   for (let index = 0; index < connections.length; index += 1) {
