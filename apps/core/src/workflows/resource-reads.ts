@@ -21,7 +21,11 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { permissions, runChatSources } from "../db/core/schema.ts";
+import {
+  permissions,
+  runChatSources,
+  runInheritedEvidence,
+} from "../db/core/schema.ts";
 import { readableSources } from "../history-access.ts";
 import { readAsDelegate } from "../knowledge/binding.ts";
 import { brainOf } from "../knowledge/ports.ts";
@@ -101,7 +105,7 @@ export interface KnowledgeCall {
  */
 export const boundCollection = async (
   env: Env,
-  run: CallingRun,
+  run: Pick<CallingRun, "workflowId">,
   permissionId: string
 ): Promise<{ permissionId: PermissionId; collectionId: CollectionId }> => {
   const row = await drizzle(env.DB)
@@ -377,34 +381,47 @@ const requireChatPinsReadable = async (
   }
 };
 
-/** `requireResourceRunEvidenceReadable` for `run`'s own evidence alone. */
-const requireOwnEvidenceReadable = async (
+/** A run whose bindings pins came through: whom they are checked as. */
+type EvidenceHolder = Pick<CallingRun, "runId" | "workflowId" | "principal">;
+
+/** A pin, as a holder's check reads it. */
+interface HeldPin {
+  documentId: string;
+  collectionId: string;
+  permissionId: string;
+  recalled: boolean;
+}
+
+/**
+ * Refuses, as `brain.revoked`, `pins` once `holder` may no longer read
+ * them as it would now: each binding's permission still the holder
+ * workflow's and active (`boundCollection`), the Brain still admitting it
+ * for a recall's, each document still in its collection and readable
+ * there.
+ */
+const requireHeldReadable = async (
   env: Env,
-  run: CallingRun
+  holder: EvidenceHolder,
+  pins: readonly HeldPin[]
 ): Promise<void> => {
-  await requireChatPinsReadable(env, run.runId);
-  const rows = await evidenceOf(env, run.runId);
-  if (rows.length === 0) {
-    return;
-  }
   const store = d1BrainStore(brainOf(env));
   try {
-    for (const permissionId of new Set(rows.map((row) => row.permissionId))) {
+    for (const permissionId of new Set(pins.map((pin) => pin.permissionId))) {
       // oxlint-disable-next-line no-await-in-loop -- one per binding, few
-      const bound = await boundCollection(env, run, permissionId);
+      const bound = await boundCollection(env, holder, permissionId);
       // oxlint-disable-next-line no-await-in-loop -- one per binding, few
       await readAsDelegate(
         env,
-        runAuthority(run),
-        runContext(run),
+        runAuthority(holder),
+        runContext(holder),
         bound.permissionId,
         async (reader) => {
-          const pinned = rows.filter(
-            (row) => row.permissionId === permissionId
+          const pinned = pins.filter(
+            (pin) => pin.permissionId === permissionId
           );
           // A recall's evidence needs the Brain too; a search's or a
           // read's only the collection.
-          if (pinned.some((row) => row.recalled)) {
+          if (pinned.some((pin) => pin.recalled)) {
             await store.requireBrainGrant(reader);
           }
           await store.requireDocumentsReadable(reader, pinned);
@@ -420,10 +437,46 @@ const requireOwnEvidenceReadable = async (
 };
 
 /**
+ * `requireResourceRunEvidenceReadable` for `run` alone: what its chat had
+ * read, its own pins, and what the run whose event started it was held
+ * to, each under the run it came through (`run_inherited_evidence`).
+ */
+const requireOwnEvidenceReadable = async (
+  env: Env,
+  run: CallingRun
+): Promise<void> => {
+  await requireChatPinsReadable(env, run.runId);
+  const rows = await evidenceOf(env, run.runId);
+  if (rows.length > 0) {
+    await requireHeldReadable(env, run, rows);
+  }
+  const inherited = await drizzle(env.DB)
+    .select()
+    .from(runInheritedEvidence)
+    .where(eq(runInheritedEvidence.runId, run.runId));
+  for (const viaRunId of new Set(inherited.map((row) => row.viaRunId))) {
+    const held = inherited.filter((row) => row.viaRunId === viaRunId);
+    const [first] = held;
+    if (first !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one per run, few
+      await requireHeldReadable(
+        env,
+        {
+          runId: viaRunId,
+          workflowId: first.viaWorkflowId,
+          principal: first.viaPrincipal,
+        },
+        held
+      );
+    }
+  }
+};
+
+/**
  * Most ancestors a run's check follows: past any lineage's levels, so one
  * deeper is held as one it can't check.
  */
-const ancestorsMax = 64;
+export const ancestorsMax = 64;
 
 /**
  * `requireRunEvidenceReadable` for a run of a JSON workflow

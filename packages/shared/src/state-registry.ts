@@ -296,6 +296,10 @@ const coreDb: D1State = {
       `${core}workflows/host.ts`,
       "What each run's recalls and reads cite, checked before its next calls."
     ),
+    run_inherited_evidence: transient(
+      `${core}workflow-starts.ts`,
+      "What the run whose event started a run was held to, checked before its next calls."
+    ),
     run_chat_sources: transient(
       `${core}workflow-starts.ts`,
       "What the chat that had a run started had read, checked before its next calls."

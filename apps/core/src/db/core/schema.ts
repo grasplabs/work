@@ -2241,6 +2241,39 @@ export const runBrainEvidence = sqliteTable(
 );
 
 /**
+ * What the run whose event started a run was held to (GRA-1093;
+ * workflow-starts.ts): each pin of it, of its ancestors, and of what they
+ * inherited, with the run whose binding's permission it came through
+ * (`via_*`), copied once as the start is admitted, as the event's run may
+ * end before this one does. Before anything leaves the run, each is
+ * checked under that run's workflow and person as they are now. Goes with
+ * the run's details.
+ */
+export const runInheritedEvidence = sqliteTable(
+  "run_inherited_evidence",
+  {
+    runId: text("run_id").notNull(),
+    viaRunId: text("via_run_id").notNull(),
+    viaWorkflowId: text("via_workflow_id").notNull(),
+    viaPrincipal: text("via_principal").notNull(),
+    documentId: text("document_id").notNull(),
+    collectionId: text("collection_id").notNull(),
+    permissionId: text("permission_id").notNull(),
+    recalled: integer({ mode: "boolean" }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.runId,
+        table.viaRunId,
+        table.documentId,
+        table.permissionId,
+      ],
+    }),
+  ]
+);
+
+/**
  * What the chat whose agent had a run started had read (GRA-1093;
  * workflow-starts.ts): each of its sources still unwithheld then, with the
  * chat's scope, copied once as the start is admitted. Before anything

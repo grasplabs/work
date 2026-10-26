@@ -1,6 +1,10 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { v } from "@grasp-os/sdk";
+import {
+  triggerIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -19,6 +23,7 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
@@ -26,6 +31,7 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { drainEmittedEvents } from "../src/workflows/event-delivery.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
@@ -387,7 +393,14 @@ const recallingWorkflow = async (
   }
   // A read reads the document its input names.
   const who = how === "read" ? leave.id : "Ada";
-  return { workflow, collectionGrant, documentId: leave.id, fact, who };
+  return {
+    workflow,
+    collectionGrant,
+    documentId: leave.id,
+    fact,
+    who,
+    eventContract: keys.event,
+  };
 };
 
 /** Run `run` once it sleeps in its hold, after its recall. */
@@ -763,6 +776,105 @@ describe("a JSON workflow's recalled evidence", () => {
       revoked: {
         child: { status: "failed", code: "brain.revoked", carries: false },
         parent: "failed",
+      },
+    });
+  });
+
+  it("holds a run an emitted event started to what the emitting run recalled, after that run ended", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    /**
+     * The run a trigger starts on what a recalling run emitted, waiting
+     * before it ends with the event's data; `between` its start and end.
+     */
+    const triggered = async (between?: (made: Made) => Promise<void>) => {
+      const made = await recallingWorkflow(ada, admin, "emit");
+      const consumer = await createWorkflowResource(
+        env,
+        ada,
+        `take-${unique()}`
+      );
+      await publishWorkflowVersion(env, ada, consumer.id, {
+        definition: JSON.stringify({
+          document: {
+            dsl: "1.0.3",
+            namespace: workflowNamespace,
+            name: consumer.name,
+            version: "1.0.0",
+            title: consumer.name,
+            metadata: {
+              grasp: {
+                profile: "grasp-open-workflow/1",
+                params: {},
+                bindings: {},
+              },
+            },
+          },
+          input: { schema: objectSchema({ recalled: { type: "string" } }) },
+          output: { schema: objectSchema({ status: { type: "string" } }) },
+          do: [
+            { hold: { wait: "PT3S" } },
+            { finish: { set: { status: "${ $workflow.input.recalled }" } } },
+          ],
+        }),
+        basedOn: null,
+      });
+      const trigger = await createTriggerResource(env, admin, {
+        kind: "system",
+        workflowId: consumer.id,
+        version: 1,
+        config: { event: { contract: made.eventContract, type: recalledType } },
+      });
+      await granted(admin, admin, {
+        subject: {
+          type: "trigger",
+          triggerId: triggerIdSchema.parse(trigger.id),
+        },
+        object: {
+          type: "workflow",
+          workflowId: workflowResourceIdSchema.parse(consumer.id),
+        },
+        actions: ["start"],
+        binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
+      });
+      const emitter = await startedHolding(ada, made);
+      const emitterEnd = await ended(ada, made.workflow.id, emitter);
+      await drainEmittedEvents(env);
+      const runId = await vi.waitFor(
+        async () => {
+          const row = await env.DB.prepare(
+            "SELECT run.id FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_type = 'trigger' AND receipt.invoker_id = ?"
+          )
+            .bind(trigger.id)
+            .first<{ id: string }>();
+          expect(row).not.toBeNull();
+          return row?.id ?? "";
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+      await holding(runId);
+      await between?.(made);
+      return {
+        emitter: emitterEnd.status,
+        triggered: endOf(made, await ended(admin, consumer.id, runId)),
+      };
+    };
+
+    const kept = await triggered();
+    const revoked = await triggered(async ({ collectionGrant }) => {
+      await revokePermission(env, admin, collectionGrant);
+    });
+
+    expect({ kept, revoked }).toStrictEqual({
+      kept: {
+        emitter: "completed",
+        triggered: { status: "completed", code: null, carries: true },
+      },
+      // The emitting run long ended, its collection revoked: the run its
+      // event started still never lets what it carries leave.
+      revoked: {
+        emitter: "completed",
+        triggered: { status: "failed", code: "brain.revoked", carries: false },
       },
     });
   });
