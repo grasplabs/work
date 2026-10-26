@@ -712,6 +712,8 @@ export const brainErrors = errorFamily({
     "This request follows a contract version the Brain doesn't support.",
   "brain.revoked":
     "Evidence this run recalled can no longer be read. Recall again before using it.",
+  "brain.would_widen":
+    "This write would show what was read from the Brain to people who can't read where it came from.",
   "brain.unavailable":
     "The Brain can't answer just now. Try again in a moment.",
 });

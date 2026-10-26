@@ -83,6 +83,13 @@ import { inList } from "../db/d1.ts";
 // - Typing by signature only: a binary type's bytes are checked by their
 //   first bytes alone. Nothing serves a run file yet; before downloads
 //   (phase 2) serve one, check this again (a polyglot file passes).
+// - What a run read of the Brain, copied into a file (GRA-1093): a file
+//   never leaves its run but through the run's own calls, each refused
+//   once the run may no longer read what it recalled or read (its
+//   evidence, resource-reads.ts), so a file needs no pins of its own.
+//   Before downloads (phase 2) serve one, a download must check its run's
+//   evidence as a call does (`requireResourceRunEvidenceReadable`), and
+//   refuse a file whose run may no longer read it.
 
 /** What each call of a files use asks for, as the action's use declares it. */
 export const filesCallOperations = {

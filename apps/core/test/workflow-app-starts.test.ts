@@ -1490,6 +1490,76 @@ describe("what a start rechecks, and records", () => {
     });
   });
 
+  it("writes what an agent's chat read into the App only for readers who may read it too, refusing and auditing a write that would widen it", async () => {
+    const fx = await fixture();
+    const { agent: granted } = await agentOf(fx);
+    /** A chat of Bob's whose code read `collectionId`, and an agent in it. */
+    const chatReading = async (collectionId: string) => {
+      const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+      const stub = workspace(env, workspaceId);
+      const chat = await stub.createChat(
+        "Questions",
+        fx.bob.userId,
+        workspaceId
+      );
+      await runInDurableObject(stub, (_object, state) => {
+        state.storage.sql.exec(
+          "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
+          chat.id,
+          collectionId
+        );
+      });
+      const agent: CallingAgent = { ...granted, workspaceId, chatId: chat.id };
+      return agent;
+    };
+    // Everyone's handbook; and a collection of Bob's own, which Ada, the
+    // App's owner who reads its requests, may not read.
+    const handbook = await createCollection(env, fx.admin, {
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    const bobs = await createCollection(env, fx.bob, {
+      name: `Bob's ${unique()}`,
+      access: "me",
+    });
+    const fromHandbook = await chatReading(handbook.id);
+    const fromBobs = await chatReading(bobs.id);
+
+    const open = await call(
+      fx,
+      fx.bob,
+      "requests.submit",
+      { who: "Bob" },
+      { agent: fromHandbook }
+    );
+    const widening = await call(
+      fx,
+      fx.bob,
+      "requests.submit",
+      { who: "Bob" },
+      { agent: fromBobs }
+    );
+    const refused = await detailsOf("brain.copy_refused", fx.app);
+    const logged = await allEvents();
+    const refusal = logged.find(
+      (event) =>
+        event.action === "brain.copy_refused" && event.target?.id === fx.app
+    );
+
+    expect({
+      open: open.ok,
+      widening: widening.ok ? null : widening.error.code,
+      refused,
+      provenance: refusal?.provenance,
+    }).toStrictEqual({
+      open: true,
+      widening: "brain.would_widen",
+      // Named by its chat and the collection, never by what was written.
+      refused: [{ chat: fromBobs.chatId, mode: "appMembers" }],
+      provenance: [bobs.id],
+    });
+  });
+
   it("admits no start of an agent's commit once its permission is revoked after the check, before the receipt", async () => {
     const fx = await fixture();
     const { agent, permissionId } = await agentOf(fx);

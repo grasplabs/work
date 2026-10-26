@@ -11,7 +11,11 @@ import {
   schemaHash,
   appErrorDetailsOf,
 } from "@grasp-os/sdk/host";
-import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
+import type {
+  AccessMode,
+  AppManifest,
+  OperationManifest,
+} from "@grasp-os/sdk/host";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import type { RunHandle } from "@grasp-os/sdk/server";
 import { fileErrors } from "@grasp-os/shared/app-files";
@@ -290,6 +294,15 @@ export interface Invocation {
    * counted on that root (quotas.ts).
    */
   readonly workflows?: WorkflowStarts;
+  /**
+   * Refuses (`brain.would_widen`) a commit into tables read as `modes`
+   * once a reader of them may not read what the call's writer read of the
+   * Brain (copy-audience.ts, GRA-1093): set for a call an agent's chat, or
+   * a workflow run, made.
+   */
+  readonly requireWithinAudience?: (
+    modes: readonly AccessMode[]
+  ) => Promise<void>;
   /**
    * How core stages a mutation's notifications of the App's workflow runs
    * (`ctx.notify`, workflow-notifications.ts), for this call; none staged
@@ -3340,6 +3353,18 @@ const runMutation = async (
     }
     // Cancelled meanwhile: nothing it staged commits.
     requireNotCancelled(run);
+    // What its writer read of the Brain reaches only a table every reader
+    // of which may read it too (copy-audience.ts, GRA-1093).
+    const written = [...new Set(staging.writes().map(({ table }) => table))];
+    if (written.length > 0) {
+      const modes = written.map(
+        (table) => run.app.manifest.schema.tables[table]?.access.read ?? "none"
+      );
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await trusted(
+        async () => await invocation.requireWithinAudience?.(modes)
+      );
+    }
     try {
       // oxlint-disable-next-line no-await-in-loop -- see above
       const committed = await trusted(
