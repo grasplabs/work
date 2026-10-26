@@ -62,6 +62,7 @@ describe("a tool", () => {
         }),
         output,
         readOnly,
+        reach: "own",
         answersFile: true,
         routes: [route],
         run: async () => await Promise.reject(new Error("Not run")),
