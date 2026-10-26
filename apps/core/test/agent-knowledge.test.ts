@@ -1402,6 +1402,52 @@ describe("a chat's recall before a question", setUpTime, () => {
     });
   });
 
+  it("answers without evidence, told why, when the recall runs out of time", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const fact = `The code is ${unique()}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    await admin.knowledge.saveDocument({
+      collectionId,
+      path: "code.md",
+      text: `# Code ${word}\n\n${fact}.`,
+      ifVersion: 0,
+    });
+    const { stub, chat, gateway, ask, agent } = await chatOf(
+      person.userId,
+      says("I couldn't read Knowledge in time.")
+    );
+    await grantRead(admin, agent, collectionId);
+    await grantBrain(admin, agent);
+    // Too short for any run to finish: only for this test's turn.
+    const restore = await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1" });
+    let reply: Awaited<ReturnType<typeof ask>>;
+    try {
+      reply = await ask(word);
+    } finally {
+      await restore();
+    }
+
+    const [request] = gateway.requests.map(({ body }) => splitRequest(body));
+    expect({
+      outcome: reply.outcome,
+      statuses: await codeStatuses(stub, chat.id),
+      told: request?.results.includes("wall_expired"),
+      sent: JSON.stringify(gateway.requests.map(({ body }) => body)).includes(
+        fact
+      ),
+    }).toStrictEqual({
+      outcome: "answered",
+      statuses: ["wall_expired"],
+      told: true,
+      sent: false,
+    });
+  });
+
   it("withholds what a recall handed over once its document is gone or the Brain permission is revoked, though its collection may still be read, and audits it", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
@@ -1480,48 +1526,6 @@ describe("a chat's recall before a question", setUpTime, () => {
         `brain-document:${erased.collectionId}/${erased.documentId}`,
       ],
       revokedSources: ["brain-grant"],
-    });
-  });
-
-  it("answers without evidence, told why, when the recall runs out of time", async () => {
-    const admin = await newAdmin();
-    const person = await newPerson();
-    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
-    const fact = `The code is ${unique()}`;
-    const { id: collectionId } = await admin.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    await admin.knowledge.saveDocument({
-      collectionId,
-      path: "code.md",
-      text: `# Code ${word}\n\n${fact}.`,
-      ifVersion: 0,
-    });
-    const { stub, chat, gateway, ask, agent } = await chatOf(
-      person.userId,
-      says("I couldn't read Knowledge in time.")
-    );
-    await grantRead(admin, agent, collectionId);
-    await grantBrain(admin, agent);
-    // Too short for any run to finish.
-    await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1" });
-
-    const reply = await ask(word);
-
-    const [request] = gateway.requests.map(({ body }) => splitRequest(body));
-    expect({
-      outcome: reply.outcome,
-      statuses: await codeStatuses(stub, chat.id),
-      told: request?.results.includes("wall_expired"),
-      sent: JSON.stringify(gateway.requests.map(({ body }) => body)).includes(
-        fact
-      ),
-    }).toStrictEqual({
-      outcome: "answered",
-      statuses: ["wall_expired"],
-      told: true,
-      sent: false,
     });
   });
 });
