@@ -120,8 +120,9 @@ jobs:
       # Vitest's default runs a worker per CPU but one, which left a third
       # of the runner's CPU idle; a worker per CPU measured about 6% faster.
       # Even then the CPUs were idle a third of the time, tests waiting on
-      # their runs' timers (October 2026, GRA-1094): six workers on the
-      # runner's four CPUs.
+      # their runs' timers (October 2026, GRA-1094), and with six a
+      # quarter to a third, with 5.6 GB of memory still free: eight
+      # workers on the runner's four CPUs.
       # Vitest times a test out from inside its worker, so a worker that is
       # blocked, or whose request workerd cancelled, never reports its test.
       # The stall reporter (scripts/stall-reporter.ts) names such a test or
@@ -137,7 +138,7 @@ jobs:
       # one), with the runner's memory.
       # Reporters given here replace Vitest's defaults, so github-actions is
       # listed for the inline failure annotations.
-      - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
+      - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=200% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
         timeout-minutes: 15
         env:
           # Below the step's timeout, so the reporter says what still runs
