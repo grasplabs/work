@@ -235,7 +235,6 @@ describe("the admin's frame", () => {
       "Integrations to build",
       "Platform",
       "Ask Grasp",
-      "Sources",
       "Stephen Lab",
       "Organizations",
     ].map((text) => sidebar.indexOf(text));
@@ -391,61 +390,6 @@ describe("the admin's frame", () => {
       nothingToBuild: false,
       companyAsked: true,
       companyWords: true,
-    });
-  });
-
-  it("lays out the sources: the admin's own tools with no address until the admin serves them, today's digest, and every system to connect in order", async () => {
-    const acme = await liveClient();
-    acme.account.admin = readySnapshot("Acme");
-
-    const { status, html } = await page("/sources");
-    const text = html.replaceAll(tags, " ").replaceAll(spaces, " ");
-    const parts = [
-      ">Sources</h1>",
-      ">Grasp admin</h2>",
-      ">The morning digest</h2>",
-      ">To connect, in this order</h2>",
-    ].map((part) => html.indexOf(part));
-    // The systems still to connect, in the order they come.
-    const order = [
-      "Grasp platform",
-      "Rooms",
-      "Attio",
-      "Stripe",
-      "Composio",
-      "Discord",
-    ].map((name) => text.indexOf(`${name} To come`));
-
-    expect({
-      status,
-      partsInOrder:
-        parts.every((at) => at >= 0) &&
-        parts.toSorted((a, b) => a - b).every((at, i) => at === parts[i]),
-      systemsInOrder:
-        order.every((at) => at >= 0) &&
-        order.toSorted((a, b) => a - b).every((at, i) => at === order[i]),
-      // Not served yet (GRA-656): nothing to copy, and its tools listed.
-      address: html.includes("/api/admin/mcp"),
-      ownToCome: html
-        .slice(
-          html.indexOf(">Grasp admin</h2>"),
-          html.indexOf(">The morning digest</h2>")
-        )
-        .includes(">To come</span>"),
-      tools: html.includes(">daily_digest</code>"),
-      // The digest is today's, from the organizations that answered.
-      digest: text.includes("Grasp, ") && text.includes("1 organization"),
-      // Rooms is read through its service route, so no MCP tools of its own.
-      roomsTools: html.includes(">get_signature_receipt</code>"),
-    }).toStrictEqual({
-      status: 200,
-      partsInOrder: true,
-      systemsInOrder: true,
-      address: false,
-      ownToCome: true,
-      tools: true,
-      digest: true,
-      roomsTools: false,
     });
   });
 
