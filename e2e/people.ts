@@ -313,6 +313,7 @@ const cast = {
   setupConnect: { admin: "admin" },
   setupDocuments: { admin: "admin" },
   setupStory: { admin: "admin" },
+  pagePanel: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;
