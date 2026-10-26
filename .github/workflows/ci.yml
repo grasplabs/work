@@ -75,7 +75,7 @@ jobs:
       # it.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -92,12 +92,15 @@ jobs:
       # descendants, and workerd is gdb's sibling, so tracing is opened up:
       # the runner is a throwaway VM. A failed install leaves the dump to say
       # gdb didn't run, and the tests run regardless.
+      # In the background, beside the tests: the dump needs it only once a
+      # run has stalled, minutes in, and the install took 10 to 15 s.
       - name: Install gdb for stall stack dumps
         continue-on-error: true
-        timeout-minutes: 3
         run: |
-          command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends gdb)
           sudo sysctl -w kernel.yama.ptrace_scope=0
+          command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends gdb > "$RUNNER_TEMP/gdb-install.log" 2>&1 &)
+      # TEMPORARY (GRA-1094): how busy the runner's CPUs are while the tests run.
+      - run: nohup vmstat -n 5 > "$RUNNER_TEMP/vmstat.log" 2>&1 &
       # Shards split by how long each file takes (scripts/test-sequencer.ts,
       # with the times in scripts/test-durations.json), each shard running
       # one project group only (scripts/test-shards.ts): a shard that ran
@@ -152,6 +155,10 @@ jobs:
           # stack and sockets: at most 20 s and 300 KB, so the log shows
           # where it is stuck.
           GRASP_STALL_DUMP_STACKS: gdb
+      # TEMPORARY (GRA-1094): the CPU's average user, system, idle and I/O wait.
+      - if: always()
+        run: |
+          awk 'NR>2 {us+=$13; sy+=$14; id+=$15; wa+=$16; n++} END {if (n) printf "CPU over %d samples: user %.0f%%, system %.0f%%, idle %.0f%%, I/O wait %.0f%%\n", n, us/n, sy/n, id/n, wa/n}' "$RUNNER_TEMP/vmstat.log" | tee -a "$GITHUB_STEP_SUMMARY"
       # Kept for passing runs too: the durations the shards are split by
       # come from it (scripts/test-durations.ts).
       - if: always()
@@ -206,8 +213,9 @@ jobs:
   # every shard, and the serial projects (Grasp's go, the interviews, the
   # journeys) depend on everything before them, so `--shard` alone splits
   # nothing: GRASP_E2E_PART picks the part. The parallel part runs in
-  # shards, which split its test files by count, and the serial part runs
-  # on a stack of its own, where nothing runs before it. Add a shard by
+  # shards, which split its test files by count, and each serial project
+  # on a stack of its own, where nothing runs before it: on one stack the
+  # three took about 7 minutes (October 2026, GRA-1094). Add a shard by
   # adding a parallel entry and raising the count in every `--shard`.
   # Part of the required `e2e` (below).
   #
@@ -257,9 +265,17 @@ jobs:
             project: parallel
             artifact: 5-of-5
             args: --shard=5/5
-          - part: serial
-            project: serial
-            artifact: serial
+          - part: onboarding
+            project: onboarding
+            artifact: onboarding
+            args: ""
+          - part: interview
+            project: interview
+            artifact: interview
+            args: ""
+          - part: journeys
+            project: journeys
+            artifact: journeys
             args: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
