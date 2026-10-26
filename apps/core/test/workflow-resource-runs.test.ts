@@ -2370,16 +2370,16 @@ describe(
             { workflowPersonAttempts: 1, workflowSteps: 1 },
             async () => {
               // Recorded first, so each read of it later is one query. The
-              // holder's share coming back reads it, to wake the run
-              // (share-wakes.ts); the load reads it for its model calls,
-              // then for its step limit, and that read fails.
+              // load's read for its step limit fails (`stepLimitOf`): the
+              // holder's share coming back, the run's own wakes and
+              // admissions read it too, each in its own time.
               await quotaPolicy(env);
               return await withPolicyReadFailingOnce(
                 async () => {
                   await terminateResourceRun(env, by, hanging.id, holder.runId);
                   return await ended(by, workflow.id, runId);
                 },
-                { skip: 2 }
+                { by: "stepLimitOf" }
               );
             }
           );

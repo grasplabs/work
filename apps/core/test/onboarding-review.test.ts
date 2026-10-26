@@ -6,8 +6,9 @@ import type {
 } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -196,7 +197,22 @@ const drawn = async (ids: Ids) => {
   return { tickets: tickets?.id ?? "", rota: rota?.id ?? "" };
 };
 
+/**
+ * Holds the store's own alarm for the test, which draws each piece of work
+ * itself (`drawn`), against the replies it queues in order. A drawing sets
+ * the alarm half a second on, and on a slow runner the alarm drew next
+ * first: it took a reply meant for the test's own drawing, so tickets was
+ * drawn from the rota's answer, one way, with nothing to settle.
+ */
+const holdAlarm = async (): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), (instance) => {
+    vi.spyOn(instance, "alarm").mockResolvedValue();
+  });
+};
+
 describe("what needs the admin", { timeout: 60_000 }, () => {
+  beforeEach(holdAlarm);
+
   it("is a step told two ways that nobody could explain, never who told which, and keeps how the admin settled it", async () => {
     const ids = await team();
     const { tickets } = await drawn(ids);
