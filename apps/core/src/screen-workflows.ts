@@ -559,6 +559,23 @@ const revisionOf = (
   appRestricted = false
 ): number => generation + row.summaryRevision + 1 + (appRestricted ? 1 : 0);
 
+/** Why a run compensates, as its row keeps it (resource-runs.ts). */
+const compensationSchema = z.object({
+  cause: z.enum(["failure", "cancellation"]),
+  code: z.string().nullable(),
+});
+
+/**
+ * Run `row`'s compensation while the engine rolls it back (spec 10.7.3):
+ * why, from its row; none once it ended, or while it doesn't.
+ */
+const compensationOf = (
+  row: RunRow
+): z.infer<typeof compensationSchema> | undefined =>
+  row.status === "running" && row.compensation !== null
+    ? compensationSchema.safeParse(JSON.parse(row.compensation)).data
+    : undefined;
+
 /** Workflow `id`'s policy generation now. */
 const generationOf = async (env: Env, id: string): Promise<number> => {
   const row = await drizzle(env.DB)
@@ -707,6 +724,26 @@ export const failureOf = (
 };
 
 /**
+ * A compensating run's snapshot's compensation (spec 10.7.3): its cause,
+ * its cleanup's activity (the engine reports it running), and, after a
+ * failure, what it failed with, as a failed run says it; none otherwise.
+ */
+const compensationShown = (
+  compensation: z.infer<typeof compensationSchema> | undefined
+): { compensation?: Json } =>
+  compensation === undefined
+    ? {}
+    : {
+        compensation: {
+          cause: compensation.cause,
+          activity: "running",
+          ...(compensation.cause === "failure"
+            ? { originalError: failureOf({ code: compensation.code }) }
+            : {}),
+        },
+      };
+
+/**
  * What a completed run returned, projected by the output the App declared:
  * `contract.invalid_return` for anything else, `workflow.run_details_removed`
  * past its retention.
@@ -803,6 +840,36 @@ const snapshotWaits = async (
   );
 };
 
+/**
+ * What a screen may ask of run `row` now: nothing that pauses, resumes or
+ * cuts its compensation short (spec 10.7.3), nor what the person may no
+ * longer start (`mayStart`), nor anything past a control applying.
+ */
+const controlOf = (
+  row: RunRow,
+  {
+    pending,
+    mayStart,
+    compensating,
+  }: {
+    pending: ResourceControlRow["kind"] | undefined;
+    mayStart: boolean;
+    compensating: boolean;
+  }
+): Json => {
+  const free = mayStart && !compensating;
+  return {
+    canPause:
+      free &&
+      pending === undefined &&
+      (row.status === "starting" || row.status === "running"),
+    canResume: free && pending === undefined && row.status === "paused",
+    canCancel: free && !isEnded(row.status) && pending !== "cancel",
+    pendingControl:
+      pending === undefined ? null : { kind: pending, stage: "applying" },
+  };
+};
+
 /** Run `runId`'s snapshot for the asking person, and its revision. */
 const runSnapshot = async (
   env: Env,
@@ -822,19 +889,25 @@ const runSnapshot = async (
   // it, under the revision its row says (`summary_revision`, which every
   // write that changes either moves on in that write).
   const [row, pending] = await runAndPending(env, seen.row);
-  const ended = isEnded(row.status);
   const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
   const appRestricted = await appHost(env, asking.app).isRestricted();
+  const compensation = compensationOf(row);
   // Read after the row: a wait opened or closed since moves its revision on.
   const waits = await snapshotWaits(env, asking, resolved, row, appRestricted);
-  const status = await shownStatus(env, row, waits.length);
+  const status =
+    compensation === undefined
+      ? await shownStatus(env, row, waits.length)
+      : "compensating";
   const contract = await startedContract(
     env,
     asking,
     resolved,
     originAppVersion
   );
-  const returned = row.status === "completed" || row.status === "failed";
+  const returned =
+    row.status === "completed" ||
+    row.status === "failed" ||
+    compensation?.cause === "failure";
   if (returned && row.restricted && !appRestricted) {
     // What a restricted run returned, or why it failed, only to an App in
     // restricted mode itself: never out through one that isn't.
@@ -855,18 +928,16 @@ const runSnapshot = async (
     startedAt: row.status === "starting" ? null : row.createdAt.getTime(),
     finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
     waits,
-    control: {
-      canPause:
-        mayStart &&
-        pending === undefined &&
-        (row.status === "starting" || row.status === "running"),
-      canResume: mayStart && pending === undefined && row.status === "paused",
-      canCancel: !ended && pending !== "cancel" && mayStart,
-      pendingControl:
-        pending === undefined ? null : { kind: pending, stage: "applying" },
-    },
+    control: controlOf(row, {
+      pending,
+      mayStart,
+      compensating: compensation !== undefined,
+    }),
     ...(output === undefined ? {} : { output }),
     ...(row.status === "failed" ? { error: failureOf(result.error) } : {}),
+    // Compensating after a failure: what it failed with, as a failed run
+    // says it; its cleanup's activity, which the engine reports as running.
+    ...compensationShown(compensation),
   };
   return { value, revision: revisionOf(generation, row, appRestricted) };
 };

@@ -95,6 +95,7 @@ import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
+import { compensationFailedError } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
 import { wakingOnSettle } from "./share-wakes.ts";
 
@@ -253,6 +254,7 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
         stopRequestedAt: sql<null>`NULL`.as("stop_requested"),
         controlGeneration: sql<number>`0`.as("control_generation"),
         summaryRevision: sql<number>`0`.as("summary_revision"),
+        compensation: sql<null>`NULL`.as("compensation"),
       })
       .from(sql`(SELECT 1)`)
       .where(
@@ -1315,6 +1317,32 @@ const afterEnd = async (env: Env, row: RunRow): Promise<void> => {
 };
 
 /**
+ * What run projection `engine` makes of a run's row: its status, its
+ * failure code (`failureCode`, the engine's), and, while it rolls back,
+ * why (`compensating`, kept as JSON), which its snapshot shows as
+ * compensating. A run whose compensation failed is failed, as that,
+ * however it ended (spec 10.7.3), a cancelled run's included.
+ */
+const projectedOf = (
+  engine: EngineStatus,
+  failureCode: string | null
+): {
+  status: (typeof projected)[keyof typeof projected];
+  failure: string | null;
+  compensating: string | undefined;
+} => {
+  const compensationFailed = engine.rollback === "errored";
+  return {
+    status: compensationFailed ? "failed" : projected[engine.status],
+    failure: compensationFailed ? compensationFailedError.code : failureCode,
+    compensating:
+      engine.status === "rollingBack" && engine.compensation !== undefined
+        ? JSON.stringify(engine.compensation)
+        : undefined,
+  };
+};
+
+/**
  * Makes run `id`'s row say where the engine says it is: a notification no
  * newer than the last the row took changes nothing, and an ended run never
  * changes again. Its end is audited with the change, once. A failed end
@@ -1337,7 +1365,7 @@ export const projectResourceRun = async (
     await afterEnd(env, row);
     return;
   }
-  const status = projected[engine.status];
+  const { status, failure, compensating } = projectedOf(engine, failureCode);
   const ended = !unended.includes(status);
   const action = endActions[status];
   const db = drizzle(env.DB);
@@ -1353,7 +1381,10 @@ export const projectResourceRun = async (
           ? {}
           : { engineSequence: engine.sequence }),
         ...(ended ? { endedAt: new Date(engine.at) } : {}),
-        ...(status === "failed" && failureCode !== null ? { failureCode } : {}),
+        ...(status === "failed" && failure !== null
+          ? { failureCode: failure }
+          : {}),
+        ...(compensating === undefined ? {} : { compensation: compensating }),
       })
       .where(
         and(
@@ -1371,7 +1402,7 @@ export const projectResourceRun = async (
       : [
           outboxedIfChanged(
             db,
-            withFailure(runEntry(row, action), status, failureCode)
+            withFailure(runEntry(row, action), status, failure)
           ),
         ]),
     // Ended or paused, it waits in the admission queue for nothing more:
@@ -1605,7 +1636,11 @@ const stopResourceRun = async (
     }
     return;
   }
-  await runEngine(env).terminate(row.id);
+  // A run rolling back isn't cut short (spec 10.7.3): nothing was
+  // terminated, so nothing is audited as terminated.
+  if ((await runEngine(env).terminate(row.id)) === "rolling_back") {
+    throw workflowErrors.create("workflow.control_refused");
+  }
   // The engine took the terminate: audited below whatever this lookup
   // does, the row left to the end's notification if it can't be read.
   let live: Awaited<ReturnType<ReturnType<typeof runEngine>["status"]>>;
@@ -1623,9 +1658,15 @@ const stopResourceRun = async (
     // notification can be newer. A run that ended on its own first is
     // left to its end's notification, which carries when it ended: the
     // status doesn't, and taken now its row would say this call's time.
+    // With how its rollback went, if it rolled back: a cancellation whose
+    // compensation failed ends failed (spec 10.7.3), and the late end's
+    // notification can't change an ended row.
     await projectResourceRun(env, row.id, {
       status: live.status,
       at: Date.now(),
+      ...(live.rollback === undefined
+        ? {}
+        : { rollback: live.rollback.status }),
     });
   }
   if (!audited) {
