@@ -56,7 +56,8 @@ const visibleTo = (userId: string, audiences: readonly string[]): SQL => {
   // counts as one they weren't part of (its version recorded how many).
   const whole = sql`(SELECT count(*) FROM ${brainLessonEvidence} WHERE ${current}) = (SELECT json_extract(${brainLessonVersions.content}, '$.episodes') FROM ${brainLessonVersions} WHERE ${brainLessonVersions.lessonId} = ${brainLessons.id} AND ${brainLessonVersions.revision} = ${brainLessons.revision})`;
   const shared = sql`${brainLessons.scope} = 'session' AND ${inList(brainLessons.scopeId, audiences)} AND EXISTS (SELECT 1 FROM ${brainLessonEvidence} WHERE ${current}) AND ${whole} AND NOT EXISTS (SELECT 1 FROM ${brainLessonEvidence} WHERE ${current} AND NOT EXISTS (SELECT 1 FROM ${brainEpisodeMembers} WHERE ${brainEpisodeMembers.episodeId} = ${brainLessonEvidence.episodeId} AND ${brainEpisodeMembers.userId} = ${userId}))`;
-  return sql`(${own}) OR (${shared})`;
+  // One group of its own: a caller's `id = ? AND` this must hold for both.
+  return sql`((${own}) OR (${shared}))`;
 };
 
 const applicabilitySchema = z.object({
@@ -209,13 +210,17 @@ export const lessonLineage = async <C>(
         ({ revision }) => revision === version.revision
       );
       const seen = of.filter((each) => Boolean(each.seen));
-      const stored = storedSchema.parse(JSON.parse(version.content));
+      // A version not of this shape shows no text: read as hidden, never
+      // as one whose episode count is missing.
+      const parsed = storedSchema.safeParse(JSON.parse(version.content));
+      const stored = parsed.success ? parsed.data : undefined;
       // A session version's text only for someone part of every episode it
       // was written from, none of them erased since; a person's own lesson
       // is theirs, whatever was erased of it.
       const whole =
-        row.scope === "person" ||
-        (seen.length === of.length && of.length === stored.episodes);
+        stored !== undefined &&
+        (row.scope === "person" ||
+          (seen.length === of.length && of.length === stored.episodes));
       return {
         revision: version.revision,
         supersedes: version.supersedes,

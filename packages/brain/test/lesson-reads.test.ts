@@ -236,6 +236,49 @@ describe("inspecting lessons", () => {
     });
   });
 
+  it("never lets a lesson its reader may see stand in for another they may not, to read or retire", async () => {
+    const { brain } = testHost();
+    const chat = named("chat");
+    const ann = named("ann");
+    const ben = named("ben");
+    // A: a shared chat's lesson Ben was there for. B: Ann's own.
+    for (let n = 0; n < 3; n += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await recordOutcome(
+        brain,
+        failed(ann, { id: chat, members: [ann, ben] })
+      );
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await recordOutcome(brain, failed(ann));
+    }
+    await consolidate(brain, { scope: "session", scopeId: chat });
+    await consolidate(brain, { scope: "person", scopeId: ann });
+    const [shared] = await lessonsOf(brain, {
+      scope: "session",
+      scopeId: chat,
+    });
+    const [own] = await lessonsOf(brain, { scope: "person", scopeId: ann });
+    const lessonId = own?.id ?? "";
+    const ben_ = as(ben, [chat]);
+    const lineage = await outcome(lessonLineage(brain, ben_, { lessonId }));
+    const retire = await outcome(
+      lessonsRetire(brain, ben_, { lessonId, expectedRevision: 1 })
+    );
+    const annLists = await listed(brain, as(ann));
+
+    expect({
+      seesShared: await listed(brain, ben_),
+      lineage,
+      retire,
+      stillAnns: annLists.includes(lessonId),
+    }).toStrictEqual({
+      seesShared: [shared?.id],
+      lineage: "brain.not_found",
+      retire: "brain.not_found",
+      stillAnns: true,
+    });
+  });
+
   it("hides a shared lesson, and its older versions' text, once turns some reader wasn't part of are erased", async () => {
     const { brain } = testHost();
     const chat = named("chat");

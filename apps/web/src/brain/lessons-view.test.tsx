@@ -41,7 +41,7 @@ const summary = (revision: number, state: "candidate" | "retired") => ({
   updatedAt: at,
 });
 
-const shown = async (admin: boolean) => {
+const shown = async (admin: boolean, refuse = false) => {
   const calls: string[] = [];
   let retired = false;
   const knowledge = {
@@ -90,6 +90,9 @@ const shown = async (admin: boolean) => {
     }) => {
       await Promise.resolve();
       calls.push(`retire ${input.lessonId}@${input.expectedRevision}`);
+      if (refuse) {
+        throw new Error("Someone changed this lesson meanwhile.");
+      }
       retired = true;
     },
   };
@@ -191,5 +194,25 @@ describe(LessonsView, () => {
     );
 
     expect(buttons).not.toContain("Retire this lesson");
+  });
+
+  it("keeps a refused retirement's reason on screen, reading nothing again", async () => {
+    const { calls } = await shown(true, true);
+    await settle();
+    await press("chat.turn failed");
+    await press("Retire this lesson");
+    const buttons = [...document.querySelectorAll("button")].map(
+      (each) => each.textContent
+    );
+
+    expect({
+      calls,
+      alert: document.querySelector('[role="alert"]')?.textContent,
+      retireStillOffered: buttons.includes("Retire this lesson"),
+    }).toStrictEqual({
+      calls: ["list", "lineage lesson-1", "retire lesson-1@2"],
+      alert: "Someone changed this lesson meanwhile.",
+      retireStillOffered: true,
+    });
   });
 });

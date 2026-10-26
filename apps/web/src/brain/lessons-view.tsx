@@ -171,13 +171,17 @@ const LessonPanel = ({
               disabled={busy}
               onClick={() => {
                 void (async () => {
-                  await run(async (session) => {
+                  const retired = await run(async (session) => {
                     await session.knowledge.lessonsRetire({
                       lessonId: lesson.id,
                       expectedRevision: lesson.revision,
                     });
+                    return true;
                   });
-                  onChanged();
+                  // Read again only once retired: a refusal stays on screen.
+                  if (retired === true) {
+                    onChanged();
+                  }
                 })();
               }}
               variant="outline"

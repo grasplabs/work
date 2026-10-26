@@ -289,22 +289,32 @@ const storedOf = ({
     episodes: recorded ?? supporting.length + contradicting.length,
   });
 
-/** A stored version's content, with the evidence it still has. */
+/**
+ * A stored version's content, with the evidence it still has; undefined
+ * for one not of this shape (none after the lessons' hard cut, 0008):
+ * read as no content, never as content missing a field.
+ */
 const contentFrom = (
   stored: string,
   evidence: readonly { episodeId: string; role: string }[]
-): LessonContent => ({
-  ...omitEpisodes(storedContentSchema.parse(JSON.parse(stored))),
-  recorded: storedContentSchema.parse(JSON.parse(stored)).episodes,
-  supporting: evidence
-    .filter(({ role }) => role === "supporting")
-    .map(({ episodeId }) => episodeId)
-    .toSorted(),
-  contradicting: evidence
-    .filter(({ role }) => role === "contradicting")
-    .map(({ episodeId }) => episodeId)
-    .toSorted(),
-});
+): LessonContent | undefined => {
+  const parsed = storedContentSchema.safeParse(JSON.parse(stored));
+  if (!parsed.success) {
+    return undefined;
+  }
+  return {
+    ...omitEpisodes(parsed.data),
+    recorded: parsed.data.episodes,
+    supporting: evidence
+      .filter(({ role }) => role === "supporting")
+      .map(({ episodeId }) => episodeId)
+      .toSorted(),
+    contradicting: evidence
+      .filter(({ role }) => role === "contradicting")
+      .map(({ episodeId }) => episodeId)
+      .toSorted(),
+  };
+};
 
 const lessonAt = async <C>(
   { db }: Brain<C>,
@@ -782,19 +792,25 @@ export const lessonsOf = async <C>(
     retiredBy: lesson.retiredBy,
     versions: versions
       .filter(({ lessonId }) => lessonId === lesson.id)
-      .map((version) => {
+      .flatMap((version) => {
         const held = evidence
           .filter(
             ({ lessonId, revision }) =>
               lessonId === lesson.id && revision === version.revision
           )
           .map(({ episodeId, role }) => ({ episodeId, role }));
-        return {
-          revision: version.revision,
-          supersedes: version.supersedes,
-          content: contentFrom(version.content, held),
-          evidence: held,
-        };
+        const content = contentFrom(version.content, held);
+        // One not of this shape is left out, never shown half read.
+        return content === undefined
+          ? []
+          : [
+              {
+                revision: version.revision,
+                supersedes: version.supersedes,
+                content,
+                evidence: held,
+              },
+            ];
       }),
   }));
 };
