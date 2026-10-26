@@ -145,6 +145,49 @@ describe("a chat's instructions and memory", setUpTime, () => {
     });
   });
 
+  it("keep a USER.md saved from what the chat read out of later chats once its agent may no longer read that", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "user");
+    const marker = `Route ${unique()}`;
+    const { id: plans } = await admin.api.knowledge.createCollection({
+      name: `Plans ${unique()}`,
+      access: "everyone",
+    });
+    const plan = await admin.api.knowledge.saveDocument({
+      collectionId: plans,
+      path: "plan.md",
+      text: `# Plan\n\n${marker}.`,
+      ifVersion: 0,
+    });
+    // The chat reads the plan, then keeps what it read in USER.md.
+    const { ask, agent, gateway } = await chatOf(
+      person.userId,
+      codeStep(
+        `export default async (self, env) => { const read = await env.knowledge.read(${JSON.stringify(plan.id)}); return await env.memory.saveUser({ text: read.text, ifVersion: 0 }); };`
+      ),
+      says("Noted."),
+      says("Still there."),
+      says("Gone.")
+    );
+    const grant = await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, plans, "PLANS")
+    );
+
+    await ask("Remember the plan.");
+    await ask("What do you remember?");
+    const kept = systemOf(gateway.requests.at(-1)?.body);
+    await admin.api.permissions.revoke(grant);
+    await ask("And now?");
+    const revoked = systemOf(gateway.requests.at(-1)?.body);
+
+    expect({
+      kept: kept.includes(marker),
+      revoked: revoked.includes(marker),
+    }).toStrictEqual({ kept: true, revoked: false });
+  });
+
   it("carry the collections whose skills the prompt lists as the chat's sources, and only those", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");

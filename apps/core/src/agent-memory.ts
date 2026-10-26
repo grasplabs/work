@@ -11,6 +11,8 @@ import {
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { forSandbox } from "./bindings.ts";
+import { workspace } from "./durable-objects.ts";
+import { brainCitesOf } from "./history-access.ts";
 import { saveUserMemory } from "./knowledge/memory.ts";
 
 // Memory for a chat's code: `await env.memory.saveUser({ text, ifVersion })`.
@@ -40,7 +42,15 @@ export class MemoryApi extends WorkerEntrypoint<Env, AgentScope> {
         // Again right before the save commits, after it was prepared.
         async () => {
           await admitEffect(this.env, scope, "memory.saveUser");
-        }
+        },
+        // What its chat had read: a later chat reads this version only
+        // while it may still read all of it (GRA-1093).
+        await brainCitesOf(
+          this.env,
+          await workspace(this.env, scope.workspaceId).heldSourcesOf(
+            scope.chatId
+          )
+        )
       );
       // Knowledge records the save; the chat shows it here.
       await recordToolCall(this.env, scope, {
