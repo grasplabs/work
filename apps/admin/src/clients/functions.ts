@@ -18,6 +18,7 @@ import { adminReader } from "./admin.ts";
 import { applySettings } from "./apply.ts";
 import { clientGrid, defaultLiveOptions, gridLive } from "./grid.ts";
 import type { LiveStatus } from "./grid.ts";
+import { clientQuotaPolicy } from "./quota-policy.ts";
 import {
   ringInputSchema,
   sealedSecretInputSchema,
@@ -99,6 +100,14 @@ export const fetchClientAdmins = createServerFn({ method: "POST" }).handler(
 export const fetchClientSetup = createServerFn({ method: "GET" })
   .validator(clientSchema)
   .handler(async ({ data }) => await getClientSetup(env, data.clientId));
+
+/**
+ * A client's quota policy: the generation the admin sets beside the one
+ * its core applies, read live; null for no such client.
+ */
+export const fetchClientQuotaPolicy = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(async ({ data }) => await clientQuotaPolicy(env, data.clientId));
 
 export const setRingFn = createServerFn({ method: "POST" })
   .validator(ringInputSchema)
