@@ -1241,16 +1241,31 @@ export const businessStoreVersions = sqliteTable(
 );
 
 /**
- * The App a store serves, claimed by the first seal that binds it and kept
- * for good: retention deletes releases and their bindings, never this. So
- * a store an App stopped using never comes to serve another App, which
- * would read what the first left behind.
+ * The one canonical owner of a store's schema and operations (spec 40.8),
+ * claimed once and kept for good: retention deletes releases and their
+ * bindings, never this. So a store its owner stopped using never comes to
+ * serve another owner, which would read what the first left behind. The
+ * owner is an App (`appId`), claimed by the first seal that binds the
+ * store, or an independent workflow (`workflowId`, GRA-682), claimed when
+ * an admin activates a version that declares it: exactly one of the two.
+ * A workflow's store has no App, so nothing that looks a store's App up
+ * ever finds one for it.
  */
-export const sdkStoreOwners = sqliteTable("sdk_store_owners", {
-  storeId: text("store_id").primaryKey(),
-  appId: text("app_id").notNull(),
-  claimedAt: timestamp("claimed_at").notNull(),
-});
+export const sdkStoreOwners = sqliteTable(
+  "sdk_store_owners",
+  {
+    storeId: text("store_id").primaryKey(),
+    appId: text("app_id"),
+    workflowId: text("workflow_id"),
+    claimedAt: timestamp("claimed_at").notNull(),
+  },
+  () => [
+    check(
+      "sdk_store_owners_one_owner",
+      sql`(app_id IS NULL) <> (workflow_id IS NULL)`
+    ),
+  ]
+);
 
 /**
  * The store an App of spec 8's layout runs on, one per App: created by the
