@@ -21,7 +21,7 @@ import type {
 } from "../../src/workflows/code.ts";
 import { isCpuLimitKill } from "../../src/workflows/host.ts";
 
-// Sessions on plain workerd (scripts/workerd-sandbox-session.test.ts): the
+// Sessions on plain workerd (scripts/workerd-sandbox-session*.test.ts): the
 // same `runInSession` core runs, with `SANDBOX_HOST` bound to the sandbox
 // supervisor as on-prem binds it. Each case passes a capability of this
 // Worker's own into an isolate and says how the call ended, and whether
