@@ -360,9 +360,9 @@ describe("Settings › Stephen", () => {
           )
       ).length,
     }).toStrictEqual({
-      // Stephen's on and who; Teams' who and acts; five classes; Microsoft
+      // Stephen's on and who; Teams' who and acts; six classes; Microsoft
       // 365's two.
-      shown: 11,
+      shown: 12,
       enabled: 0,
     });
   });

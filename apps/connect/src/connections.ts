@@ -134,6 +134,7 @@ const reachOf = {
   "change-own": "own",
   "change-company": "company",
   "reach-others": "others",
+  "read-others": "conversations",
 } as const satisfies Record<Exclude<ToolClass, "never">, ToolReach>;
 
 /**
@@ -189,7 +190,10 @@ export const allowedTool = (
       ? { read: false, resource: undefined }
       : { read: tool.read === true, resource: tool.resource };
   const read =
-    rule.read && (reviewed === "read-own" || reviewed === "read-company");
+    rule.read &&
+    (reviewed === "read-own" ||
+      reviewed === "read-company" ||
+      reviewed === "read-others");
   return {
     read,
     resource: rule.resource,

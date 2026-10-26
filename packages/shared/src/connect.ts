@@ -195,6 +195,7 @@ export const companyToolClasses = [
   "change-own",
   "change-company",
   "reach-others",
+  "read-others",
 ] as const satisfies readonly Exclude<ToolClass, "never">[];
 export const companyToolClassSchema = z.enum(companyToolClasses);
 export type CompanyToolClass = z.infer<typeof companyToolClassSchema>;
@@ -827,11 +828,18 @@ export interface CatalogTool {
  * their calendar, a draft in their mailbox), what the company keeps
  * together (`company`: a SharePoint library, a shared drive), or other
  * people (`others`: anything that reaches someone else, such as sending
- * an email). A tool that can reach further than its usual call says the
+ * an email), or what other people said where the person was
+ * (`conversations`: their Teams chats, the transcripts of meetings they
+ * were in). A tool that can reach further than its usual call says the
  * furthest: a drive tool that takes a person's OneDrive or a SharePoint
  * library is `company`.
  */
-export const toolReaches = ["own", "company", "others"] as const;
+export const toolReaches = [
+  "own",
+  "company",
+  "others",
+  "conversations",
+] as const;
 export const toolReachSchema = z.enum(toolReaches);
 export type ToolReach = z.infer<typeof toolReachSchema>;
 
@@ -846,6 +854,7 @@ export const toolClasses = [
   "change-own",
   "change-company",
   "reach-others",
+  "read-others",
   "never",
 ] as const;
 export type ToolClass = (typeof toolClasses)[number];
@@ -856,7 +865,10 @@ export type ToolClass = (typeof toolClasses)[number];
  * meeting's attendees told) still reaches them. Otherwise a read-only tool
  * reads and any other changes something. Whether a change destroys
  * anything doesn't move it to another class: it decides how a held call
- * reads, not whether the class is on.
+ * reads, not whether the class is on. Reading what others said in the
+ * person's own chats and meetings is a class of its own, off until a
+ * company turns it on: their words are someone else's, even where the
+ * person may read them. Writing there reaches the people in them.
  */
 export const toolClassOf = ({
   readOnly,
@@ -867,6 +879,9 @@ export const toolClassOf = ({
 }): Exclude<ToolClass, "never"> => {
   if (reach === "others") {
     return "reach-others";
+  }
+  if (reach === "conversations") {
+    return readOnly ? "read-others" : "reach-others";
   }
   if (readOnly) {
     return reach === "own" ? "read-own" : "read-company";
@@ -905,6 +920,7 @@ export const defaultToolClassAudiences: Readonly<
   "change-own": { who: "everyone" },
   "change-company": { who: "nobody" },
   "reach-others": { who: "nobody" },
+  "read-others": { who: "nobody" },
 };
 
 /** The classes an admin just turned on, for `ConnectApi.requireClassRights`. */

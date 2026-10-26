@@ -10261,6 +10261,10 @@ msgstr "Leerlo"
 msgid "Read it again"
 msgstr "Volver a leerlo"
 
+#: src/settings/stephen-settings.tsx
+msgid "Read others' words"
+msgstr "Leer lo que dicen otros"
+
 #: src/activity/audit-words.ts
 msgid "Read restricted sources, and is held to them"
 msgstr "Leyó fuentes restringidas y queda sujeto a ellas"
@@ -12243,6 +12247,10 @@ msgstr "Equipos"
 #: src/brain/brain-source-contents.tsx
 msgid "Teams and roles"
 msgstr "Equipos y roles"
+
+#: src/settings/stephen-settings.tsx
+msgid "Teams chats and meetings they were in: what others wrote and said there, summarised for them alone."
+msgstr "Chats y reuniones de Teams en los que participaron: lo que otros escribieron y dijeron allí, resumido solo para ellos."
 
 #: src/settings/stephen-settings.tsx
 msgid "Teams for {label}"
