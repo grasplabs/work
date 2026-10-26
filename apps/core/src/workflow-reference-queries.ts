@@ -844,6 +844,8 @@ interface DecisionRow {
   readonly manifestHash: string;
   /** Whether it still takes answers (`resourceDecisionPending`). */
   readonly pending: number;
+  /** Whether its run is restricted (restricted.ts). */
+  readonly restricted: boolean;
 }
 
 /**
@@ -886,6 +888,7 @@ const decisionRows = (env: Env, where: ReturnType<typeof and>) =>
       version: workflowResourceRuns.version,
       manifestHash: workflowResourceRuns.manifestHash,
       pending: sql<number>`${resourceDecisionPending(new Date())}`,
+      restricted: workflowResourceRuns.restricted,
     })
     .from(workflowDecisions)
     .innerJoin(
@@ -957,10 +960,11 @@ const decisionsPage = async (
     return { items: [], hasMore: false };
   }
   const { after, runId } = options;
+  const appRestricted = await restrictedApp(env, caller);
   const rows: DecisionRow[] = await decisionRows(
     env,
     and(
-      decisionScope(env, caller, pinned, await restrictedApp(env, caller)),
+      decisionScope(env, caller, pinned, appRestricted),
       resourceDecisionPending(new Date()),
       ...(runId === undefined ? [] : [eq(workflowResourceRuns.id, runId)]),
       ...(after === undefined
@@ -1001,7 +1005,9 @@ const decisionsPage = async (
           manifestHash: row.manifestHash,
         },
         // Listed only while the caller may answer it and it takes answers.
-        wait: decisionWaitOf(row, named, true),
+        // Answerable only where the run's restricted mode is the App's
+        // (workflows/screen-runs.ts, `appDecision`).
+        wait: decisionWaitOf(row, named, row.restricted === appRestricted),
       });
     }
   }
@@ -1034,12 +1040,13 @@ const decisionDetail = async (
   if (pinned === undefined || query.decisionKeys.size === 0) {
     throw refused;
   }
+  const appRestricted = await restrictedApp(env, caller);
   const row: DecisionRow | undefined = await decisionRows(
     env,
     and(
       eq(workflowDecisions.id, decisionId),
       eq(workflowResourceRuns.id, runId),
-      decisionScope(env, caller, pinned, await restrictedApp(env, caller))
+      decisionScope(env, caller, pinned, appRestricted)
     )
   ).get();
   const named =
@@ -1058,12 +1065,15 @@ const decisionDetail = async (
   if (row.pending !== 1 || row.description === "" || row.input === null) {
     return null;
   }
+  // Answerable only where the run's restricted mode is the App's
+  // (workflows/screen-runs.ts, `appDecision`).
+  const canRespond = row.restricted === appRestricted;
   return {
     key: named.key,
-    wait: decisionWaitOf(row, named, true),
+    wait: decisionWaitOf(row, named, canRespond),
     prompt: row.description,
     context: row.input,
-    canRespond: true,
+    canRespond,
   };
 };
 
