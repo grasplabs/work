@@ -75,6 +75,7 @@ import type { Settled, StepError } from "../src/workflows/code.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { cpuLimitKill } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
+import { quotaPolicy } from "../src/workflows/quotas.ts";
 import type { FrozenCatalogBinding } from "../src/workflows/resource-authority.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import type { TriedOnceMarks } from "../src/workflows/resource-host.ts";
@@ -100,6 +101,7 @@ import {
   runObject,
   stopped,
   whileEngineRefuses,
+  withPolicyReadFailingOnce,
   woken,
 } from "./runs.ts";
 import {
@@ -1469,6 +1471,89 @@ describe("grasp.model calls of JSON workflows", () => {
       revokedRequests: 0,
       limited: { status: "failed", code: "workflow.model_call_limit" },
       limitedRequests: 1,
+    });
+  });
+});
+
+describe("a JSON workflow's model call limit, when the quota policy can't be read as its run loads", () => {
+  it("holds the run to the limit this isolate last read, refusing a call past it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // Two model calls, and the workflow's own limit of two: only the
+    // host's ceiling, the policy's limit, can stop the second.
+    const key = `summary-${unique()}`;
+    await publishCatalogContract(env, admin, { key, kind: "model" });
+    const greet = (id: string) => ({
+      [id]: {
+        call: "grasp.model",
+        with: {
+          binding: "summary",
+          instructions: "Greet them.",
+          input: { who: "${ $workflow.input.who }" },
+          outputSchema: objectSchema({ line: { type: "string" } }),
+        },
+      },
+    });
+    const { workflow } = await published(ada, {
+      bindings: { summary: { kind: "model", contract: key } },
+      limits: { maxModelCalls: 2 },
+      tasks: [
+        greet("greet"),
+        greet("again"),
+        { finish: { set: { status: "done" } } },
+      ],
+    });
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "summary",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+    });
+    // A run loaded under a policy of one model call a lineage: the limit
+    // this isolate last read.
+    gatewayAnswering(answer('{"line":"Hello Ada"}'));
+    const lowered = await withQuotas({ lineageModelRequests: 1 }, async () =>
+      endOf(await ended(ada, workflow.id, await started(ada, workflow.id)))
+    );
+    // The deployment's own limit again, recorded first, so the next read
+    // of it is one query: the load's, which fails.
+    await quotaPolicy(env);
+    const gateway = gatewayAnswering(
+      answer('{"line":"Hello Ada"}'),
+      answer('{"line":"Never sent"}')
+    );
+    const { failed, value } = await withPolicyReadFailingOnce(
+      async () =>
+        endOf(await ended(ada, workflow.id, await started(ada, workflow.id))),
+      { by: "modelCallLimitOf" }
+    );
+
+    expect({
+      lowered,
+      failed,
+      end: value,
+      requests: gateway.requests.length,
+    }).toStrictEqual({
+      lowered: { status: "failed", code: "workflow.model_call_limit" },
+      failed: true,
+      // The policy now admits a lineage's second request: the limit last
+      // read, not the platform's, refuses it.
+      end: { status: "failed", code: "workflow.model_call_limit" },
+      requests: 1,
+    });
+  });
+
+  it("holds a run on an isolate that never read the policy to the platform's limit", async () => {
+    // A fresh isolate's module, which has read no policy yet.
+    vi.resetModules();
+    const { modelCallLimitOf } = await import("../src/workflows/host.ts");
+    const { failed, value } = await withPolicyReadFailingOnce(
+      async () => await modelCallLimitOf(env),
+      { by: "modelCallLimitOf" }
+    );
+
+    expect({ failed, limit: value }).toStrictEqual({
+      failed: true,
+      limit: platformLimits.lineageModelRequests,
     });
   });
 });
