@@ -53,7 +53,7 @@ describe("the release pages", () => {
     await importReleases(env.RELEASES, adminDatabase(env.DB));
   });
 
-  it("list every imported release with its note, newest first", async () => {
+  it("list every imported release by its version and what it holds, newest first", async () => {
     const { status, html } = await page("/platform/releases");
 
     expect(status).toBe(200);
@@ -62,7 +62,29 @@ describe("the release pages", () => {
     );
     expect(positions.every((position) => position >= 0)).toBeTruthy();
     expect(positions).toStrictEqual(positions.toSorted((a, b) => a - b));
-    expect(html).toContain(escaped(second.manifest.notes));
+    const token = second.manifest.notes.slice("feat(core): second ".length);
+    // A feature starts the next major, the fix after it is that major's
+    // first minor: counted in the order they were built, whatever order
+    // the import took them in.
+    const major = new RegExp(`v(\\d+)\\.0 · Second ${token}`, "u").exec(
+      html
+    )?.[1];
+    const own = await page(`/platform/releases/${third.id}`);
+    expect({
+      second: major !== undefined,
+      third: html.includes(`v${major ?? "?"}.1 · Third ${token}`),
+      first: html.includes(`v${Number(major) - 1}.0 · First ${token}`),
+      // Its id is still there, under its name.
+      id: html.includes(`>${second.id}</span>`),
+      // The same version on its own page, read alone.
+      own: own.html.includes(`>v${major ?? "?"}.1</h1>`),
+    }).toStrictEqual({
+      second: true,
+      third: true,
+      first: true,
+      id: true,
+      own: true,
+    });
   });
 
   it("show a release's Workers, modules and migrations", async () => {
@@ -150,7 +172,8 @@ describe("the release pages", () => {
     expect(html).toContain(`The newest ${RELEASE_LIST_LIMIT} releases.`);
     // The list shows the newest 97 old ones (and the three above): its
     // last row links to the diff from the one before it, which isn't shown.
-    expect(html).toContain(`Since ${ids[3]}`);
+    // Named by its version: the fourth oldest of all, before any feature.
+    expect(html).toContain(`?from=${ids[3]}&amp;to=${ids[4]}">Since v0.4<`);
 
     // From the oldest: the other 100 old ones and the three above lie
     // between, and the notes show the newest 100 of them.

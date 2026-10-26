@@ -79,10 +79,10 @@ export const rolloutStateWords = (rollout: RolloutView): string => {
     return `Reached every client, ${failed} failed: waiting for a retry of ${failed === 1 ? "it" : "them"}, or a cancel to end it there`;
   }
   if (rollout.status === "waiting") {
-    return `Ring ${rollout.ring} passed: waiting for approval to roll out to every other client`;
+    return `${ringWords(rollout.ring)} passed: waiting for approval to roll out to every other client`;
   }
   if (rollout.status === "running") {
-    return `Rolling out to ring ${rollout.ring}`;
+    return `Rolling out to ${ringWords(rollout.ring)}`;
   }
   const { status } = rollout;
   return `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
@@ -568,7 +568,7 @@ export const Targets = ({
           role="alert"
         >
           <p>
-            {`Rolling ${confirming.ring === undefined ? (names.get(confirming.clientId) ?? confirming.clientId) : `ring ${confirming.ring}`} back puts the shared secrets it ran before back. If you revoked them at their providers, its people can't sign in or reach their connections until the next secrets rollout.`}
+            {`Rolling ${confirming.ring === undefined ? (names.get(confirming.clientId) ?? confirming.clientId) : ringWords(confirming.ring)} back puts the shared secrets it ran before back. If you revoked them at their providers, its people can't sign in or reach their connections until the next secrets rollout.`}
           </p>
           <div className="flex gap-2">
             <Button
@@ -608,7 +608,7 @@ export const Targets = ({
                 size="sm"
                 variant="outline"
               >
-                {`Roll back ring ${ring}`}
+                {`Roll back ${ringWords(ring)}`}
               </Button>
             ) : undefined
           }
