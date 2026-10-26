@@ -3420,6 +3420,7 @@ msgstr "Peut {verbs} les données de l’entreprise"
 msgid "Can’t be read"
 msgstr "Illisible"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
@@ -3890,6 +3891,7 @@ msgstr "Fermé sans entretien"
 msgid "Closes {closes}"
 msgstr "Se termine le {closes}"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
 msgid "Code"
 msgstr "Code"
@@ -4256,6 +4258,7 @@ msgstr "Conversations"
 msgid "Copenhagen"
 msgstr "Copenhague"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/review-parts.tsx
@@ -4276,9 +4279,29 @@ msgstr "Copier l’adresse"
 msgid "Copy app ID"
 msgstr "Copier l’ID de l’application"
 
+#: src/chat/answer-markdown.tsx
+msgid "Copy code"
+msgstr "Copier le code"
+
 #: src/landscape/audit-trail.tsx
 msgid "Copy fingerprint"
 msgstr "Copier l’empreinte"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table"
+msgstr "Copier le tableau"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as CSV"
+msgstr "Copier le tableau en CSV"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as Markdown"
+msgstr "Copier le tableau en Markdown"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as TSV"
+msgstr "Copier le tableau en TSV"
 
 #: src/chat/thread.tsx
 msgid "Copy the answer"
@@ -4291,6 +4314,10 @@ msgstr "Copier le lien"
 #: src/onboarding/interviews-progress.tsx
 msgid "Copy the link for {name}"
 msgstr "Copier le lien de {name}"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copying didn't work"
+msgstr "La copie n’a pas fonctionné"
 
 #: src/landscape/landscape.ts
 msgid "Core AI"
@@ -4928,6 +4955,18 @@ msgstr "Télécharger {name}"
 #: src/dashboard/report-dialog.tsx
 msgid "Download Markdown"
 msgstr "Télécharger en Markdown"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table"
+msgstr "Télécharger le tableau"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table as CSV"
+msgstr "Télécharger le tableau en CSV"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table as Markdown"
+msgstr "Télécharger le tableau en Markdown"
 
 #: src/landscape/landscape-overview.ts
 msgid "DPA status"
@@ -9298,6 +9337,10 @@ msgstr "Ouvrir sur le côté"
 msgid "Open Chat"
 msgstr "Ouvrir le chat"
 
+#: src/chat/answer-markdown.tsx
+msgid "Open external link?"
+msgstr "Ouvrir le lien externe ?"
+
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 msgid "Open full page"
 msgstr "Ouvrir en pleine page"
@@ -9321,6 +9364,10 @@ msgstr "Ouvrir dans le paysage applicatif"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open it anyway"
 msgstr "Ouvrir quand même"
+
+#: src/chat/answer-markdown.tsx
+msgid "Open link"
+msgstr "Ouvrir le lien"
 
 #: src/dashboard/runs-widget.tsx
 msgid "Open now"
@@ -15425,6 +15472,10 @@ msgstr "Vous vous êtes retiré. Rien de ce que vous avez dit n’est utilisé �
 #: src/routes/guest.tsx
 msgid "You:"
 msgstr "Vous :"
+
+#: src/chat/answer-markdown.tsx
+msgid "You’re about to visit an external website."
+msgstr "Vous êtes sur le point de visiter un site externe."
 
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
