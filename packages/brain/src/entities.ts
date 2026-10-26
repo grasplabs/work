@@ -11,6 +11,7 @@ import { brainErrors } from "./contract.ts";
 import type { BrainSourceRef } from "./contract.ts";
 import { inList } from "./db/d1.ts";
 import {
+  brainAssertions,
   brainEntities,
   brainEntityKeys,
   brainLinkJobs,
@@ -95,6 +96,28 @@ export const extractedEntitiesSchema = z.object({
       identifiers: z.array(z.string()).optional(),
     })
   ),
+  /**
+   * Relations the text states between those entities (relations.ts), each
+   * with the passage that states it and when it holds.
+   */
+  relations: z
+    .array(
+      z.object({
+        /** The subject's name, as `entities` gives it. */
+        subject: z.string(),
+        /** What the relation is, in the extractor's words (`owns`). */
+        predicate: z.string(),
+        /** The object's name, as `entities` gives it. */
+        object: z.string(),
+        /** From when it holds, as an ISO date, if the text says. */
+        validFrom: z.string().nullish(),
+        /** Until when it holds, as an ISO date, if the text says. */
+        validTo: z.string().nullish(),
+        /** The passage of the text that states it, word for word. */
+        evidence: z.string(),
+      })
+    )
+    .optional(),
 });
 
 /** How long a source stays unchanged before it is read. */
@@ -115,6 +138,9 @@ const identifierMaxLength = 320;
 
 /** Mention rows per insert: each binds 13, and D1 binds at most 100. */
 const mentionsPerInsert = 7;
+
+/** Relation rows per insert: each binds 17, and D1 binds at most 100. */
+const assertionsPerInsert = 5;
 
 /** Sources the sweep looks at, each minute. */
 const sweepBatch = 20;
@@ -159,11 +185,8 @@ export const linkRunId = (source: string, version: number, run: number) =>
 
 const wordCharacter = /[\p{L}\p{N}]/u;
 
-/**
- * Whether `folded` holds `term` whole: never as part of a longer word or
- * address ("anna@example.org" in "joanna@example.org", "Ann" in "Anna").
- */
-const holds = (folded: string, term: string): boolean => {
+/** Where `folded` holds `term` whole first (see `holds`), or -1. */
+const wholeAt = (folded: string, term: string): number => {
   for (
     let at = folded.indexOf(term);
     at !== -1;
@@ -175,10 +198,75 @@ const holds = (folded: string, term: string): boolean => {
       (before === undefined || !wordCharacter.test(before)) &&
       (after === undefined || !wordCharacter.test(after))
     ) {
-      return true;
+      return at;
     }
   }
-  return false;
+  return -1;
+};
+
+/**
+ * Whether `folded` holds `term` whole: never as part of a longer word or
+ * address ("anna@example.org" in "joanna@example.org", "Ann" in "Anna").
+ */
+const holds = (folded: string, term: string): boolean =>
+  wholeAt(folded, term) !== -1;
+
+const spaceCharacter = /\s/u;
+
+/**
+ * `text` folded a character at a time (NFKC, lower case, single spaces),
+ * with where in `text` each folded code unit starts and ends: so a match
+ * in the folded text is a span of the text itself.
+ */
+const foldedWithPlaces = (
+  text: string
+): { folded: string; starts: number[]; ends: number[] } => {
+  let folded = "";
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let spaced = false;
+  let index = 0;
+  for (const character of text) {
+    const at = index;
+    index += character.length;
+    if (spaceCharacter.test(character)) {
+      spaced = folded !== "";
+      continue;
+    }
+    if (spaced) {
+      folded += " ";
+      starts.push(at);
+      ends.push(at);
+      spaced = false;
+    }
+    const piece = character.normalize("NFKC").toLowerCase();
+    folded += piece;
+    const end = index;
+    // One place for each code unit of the piece, as the folded string
+    // counts them.
+    starts.push(...Array.from({ length: piece.length }, () => at));
+    ends.push(...Array.from({ length: piece.length }, () => end));
+  }
+  return { folded, starts, ends };
+};
+
+/**
+ * The span of `text` that `quote` matches, folded alike and whole: the
+ * text's own characters, never the quote's, or `undefined` when the text
+ * doesn't hold it.
+ */
+export const spanOf = (text: string, quote: string): string | undefined => {
+  const term = foldedWithPlaces(quote).folded;
+  if (term === "") {
+    return undefined;
+  }
+  const { folded, starts, ends } = foldedWithPlaces(text);
+  const at = wholeAt(folded, term);
+  const start = starts[at];
+  const end = ends[at + term.length - 1];
+  return at === -1 || start === undefined || end === undefined
+    ? undefined
+    : text.slice(start, end);
 };
 
 /** Text as names are matched: NFKC, lower case, single spaces. */
@@ -207,7 +295,7 @@ export const forgetEntitiesOf = (
   db
     .delete(brainEntities)
     .where(
-      sql`${brainEntities.id} IN (SELECT entity_id FROM brain_mentions WHERE source IN ${sources}) AND NOT EXISTS (SELECT 1 FROM brain_mentions AS other WHERE other.entity_id = ${brainEntities.id} AND other.source NOT IN ${sources}) AND ${condition}`
+      sql`(${brainEntities.id} IN (SELECT entity_id FROM brain_mentions WHERE source IN ${sources}) OR ${brainEntities.id} IN (SELECT subject_entity_id FROM brain_assertions WHERE source IN ${sources}) OR ${brainEntities.id} IN (SELECT object_entity_id FROM brain_assertions WHERE source IN ${sources})) AND NOT EXISTS (SELECT 1 FROM brain_mentions AS other WHERE other.entity_id = ${brainEntities.id} AND other.source NOT IN ${sources}) AND NOT EXISTS (SELECT 1 FROM brain_assertions AS said WHERE (said.subject_entity_id = ${brainEntities.id} OR said.object_entity_id = ${brainEntities.id}) AND said.source NOT IN ${sources}) AND ${condition}`
     );
 
 /** One link job's key, as the subquery `forgetEntitiesOf` takes. */
@@ -215,15 +303,20 @@ const onlySource = (key: string): SQL => sql`(SELECT ${key})`;
 
 /**
  * The statements that erase what is linked of `source` now, if `condition`
- * holds as it runs: the entities only it mentions, then its mentions.
+ * holds as it runs: the entities only it names (with what of it names
+ * them, by cascade), then its mentions and every relation it ever stated,
+ * superseded ones too: each quotes it.
  */
 const eraseLinked = (
   db: DrizzleD1Database,
   key: string,
   condition: SQL = sql`1`
-): [BatchItem<"sqlite">, BatchItem<"sqlite">] => [
+): BatchItem<"sqlite">[] => [
   forgetEntitiesOf(db, onlySource(key), condition),
   db.delete(brainMentions).where(and(eq(brainMentions.source, key), condition)),
+  db
+    .delete(brainAssertions)
+    .where(and(eq(brainAssertions.source, key), condition)),
 ];
 
 /**
@@ -395,11 +488,23 @@ interface Mention {
   identifiers: string[];
 }
 
-/** A source version as read for linking: its partition and mentions. */
+/** A relation as the extractor's answer gives it, checked (relations.ts). */
+export interface Relation {
+  /** The subject's and object's names, folded as mentions' are. */
+  subject: string;
+  object: string;
+  predicate: string;
+  validFrom: string | null;
+  validTo: string | null;
+  evidence: string;
+}
+
+/** A source version as read for linking: its partition, mentions, relations. */
 type Extracted = {
   partition: string;
   partial: boolean;
   mentions: Mention[];
+  relations: Relation[];
 } | null;
 
 /** `text` in pieces the extractor reads, and whether any is left over. */
@@ -484,6 +589,85 @@ export const mentionsOf = (
     ...mention,
     identifiers: mention.identifiers.filter((id) => claims.get(id) === 1),
   }));
+};
+
+/** The most relations one source keeps. */
+const relationsPerSource = 50;
+
+/** The longest passage a relation keeps as its evidence. */
+const evidenceMaxLength = 500;
+
+const isoDate = /^\d{4}-\d{2}-\d{2}$/u;
+
+/** `value` as an ISO date, if it is a real one; `null` for none. */
+const dateOf = (value: string | null | undefined): string | null | false => {
+  if (value === null || value === undefined || value.trim() === "") {
+    return null;
+  }
+  const date = value.trim();
+  if (!isoDate.test(date)) {
+    return false;
+  }
+  // A month or day out of range parses to no date at all, or rolls over.
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) &&
+    parsed.toISOString().startsWith(date)
+    ? date
+    : false;
+};
+
+/**
+ * The relations in `answers` that `text` and `mentions` bear out: a
+ * passage the text holds whole, a subject and an object each the name of
+ * exactly one of the source's mentions, a predicate, and real ISO dates in
+ * order, if any; one per subject, predicate, object and dates, at most
+ * `relationsPerSource`. The extractor's word is never more than that.
+ */
+export const relationsOf = (
+  text: string,
+  answers: readonly z.output<typeof extractedEntitiesSchema>[],
+  mentions: readonly Mention[]
+): Relation[] => {
+  const named = new Map<string, number>();
+  for (const { alias } of mentions) {
+    named.set(alias, (named.get(alias) ?? 0) + 1);
+  }
+  const found = new Map<string, Relation>();
+  for (const relation of answers.flatMap(({ relations = [] }) => relations)) {
+    const subject = fold(relation.subject);
+    const object = fold(relation.object);
+    const predicate = kindOf(relation.predicate);
+    // The passage as the text itself has it, byte for byte: never the
+    // extractor's copy, whose case or spacing may differ.
+    const evidence = spanOf(text, relation.evidence) ?? "";
+    const validFrom = dateOf(relation.validFrom);
+    const validTo = dateOf(relation.validTo);
+    if (
+      named.get(subject) !== 1 ||
+      named.get(object) !== 1 ||
+      subject === object ||
+      predicate === "" ||
+      evidence === "" ||
+      evidence.length > evidenceMaxLength ||
+      validFrom === false ||
+      validTo === false ||
+      (validFrom !== null && validTo !== null && validFrom > validTo)
+    ) {
+      continue;
+    }
+    const key = [subject, predicate, object, validFrom, validTo].join("\u0000");
+    if (!found.has(key) && found.size < relationsPerSource) {
+      found.set(key, {
+        subject,
+        object,
+        predicate,
+        validFrom,
+        validTo,
+        evidence,
+      });
+    }
+  }
+  return [...found.values()];
 };
 
 /** The job row of `source`, if it has one. */
@@ -586,10 +770,12 @@ const extract = async <C>(
     }
     answers.push(parsed.data);
   }
+  const mentions = mentionsOf(found.text, answers);
   return {
     partition: found.partition,
     partial,
-    mentions: mentionsOf(found.text, answers),
+    mentions,
+    relations: relationsOf(found.text, answers, mentions),
   };
 };
 
@@ -893,7 +1079,7 @@ const commit = async <C>(
   brain: Brain<C>,
   source: string,
   version: number,
-  { partition, partial, mentions }: NonNullable<Extracted>
+  { partition, partial, mentions, relations }: NonNullable<Extracted>
 ): Promise<void> => {
   const { db } = brain;
   const job = await jobOf(db, source);
@@ -944,6 +1130,49 @@ const commit = async <C>(
       db.insert(brainMentions).values(rows.slice(at, at + mentionsPerInsert))
     );
   }
+  // Its relations, between entities it linked: superseding the version
+  // before's, which stay as what was known until now (relations.ts).
+  const recordedAt = brain.ports.clock();
+  const linked = new Map(
+    resolved.flatMap(({ alias, entityId, name }) =>
+      entityId === null ? [] : [[alias, { entityId, name }] as const]
+    )
+  );
+  const assertions = relations.flatMap((relation) => {
+    const subject = linked.get(relation.subject);
+    const object = linked.get(relation.object);
+    return subject === undefined || object === undefined
+      ? []
+      : [
+          {
+            id: crypto.randomUUID(),
+            source,
+            documentId: of.kind === "document" ? of.id : null,
+            memoryId: of.kind === "memory" ? of.id : null,
+            version: sql<number>`(SELECT ${version} WHERE ${guard(source, version)})`,
+            partition,
+            subjectEntityId: subject.entityId,
+            subjectName: subject.name,
+            predicate: relation.predicate,
+            objectEntityId: object.entityId,
+            objectName: object.name,
+            validFrom: relation.validFrom,
+            validTo: relation.validTo,
+            evidence: relation.evidence,
+            state: "observed" as const,
+            recordedAt,
+            supersededAt: null,
+          },
+        ];
+  });
+  const assertionInserts: BatchItem<"sqlite">[] = [];
+  for (let at = 0; at < assertions.length; at += assertionsPerInsert) {
+    assertionInserts.push(
+      db
+        .insert(brainAssertions)
+        .values(assertions.slice(at, at + assertionsPerInsert))
+    );
+  }
   // The new entities and their keys in the commit's own batch, so a
   // commit fenced out (a purge landed meanwhile) leaves none behind. A key
   // another run took first refuses the batch, and the retry links to its
@@ -963,6 +1192,17 @@ const commit = async <C>(
         .where(and(eq(brainMentions.source, source), guard(source, version))),
       ...made,
       ...inserts,
+      db
+        .update(brainAssertions)
+        .set({ supersededAt: recordedAt })
+        .where(
+          and(
+            eq(brainAssertions.source, source),
+            sql`${brainAssertions.supersededAt} IS NULL`,
+            guard(source, version)
+          )
+        ),
+      ...assertionInserts,
       // Entities nothing names any more (another run's entity won a key
       // this one also made, say), with their keys.
       db
@@ -971,6 +1211,7 @@ const commit = async <C>(
           and(
             inList(brainEntities.id, named),
             sql`NOT EXISTS (SELECT 1 FROM ${brainMentions} WHERE ${brainMentions.entityId} = ${brainEntities.id})`,
+            sql`NOT EXISTS (SELECT 1 FROM ${brainAssertions} WHERE ${brainAssertions.subjectEntityId} = ${brainEntities.id} OR ${brainAssertions.objectEntityId} = ${brainEntities.id})`,
             guard(source, version)
           )
         ),
