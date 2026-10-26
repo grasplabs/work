@@ -891,7 +891,7 @@ msgstr "{name} ist überall abgemeldet."
 msgid "{name} logo"
 msgstr "Logo von {name}"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} darf schreiben. Auf Lesen ändern"
 
@@ -903,7 +903,7 @@ msgstr "{name} ändert die Daten der Domäne nicht mehr (schreiben → lesen)"
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} ändert jetzt die Daten der Domäne (lesen → schreiben)"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
 msgstr "{name} liest nur. Auf Schreiben ändern"
 
@@ -1806,6 +1806,10 @@ msgstr "Eine Vorschau behält keine Dateien."
 #: src/chat/project-dialog.tsx
 msgid "A project takes Markdown, text, CSV and JSON files."
 msgstr "Ein Projekt nimmt Markdown-, Text-, CSV- und JSON-Dateien an."
+
+#: src/connections/tool-permissions.tsx
+msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Ein Tool mit Lesen läuft ohne Nachfrage. Ein Aufruf eines Tools mit Schreiben aus dem Chat oder von einer Person, die eine Domäne nutzt, wartet, bis diese Person ihn bestätigt. Drücke auf das Badge eines Tools, um das zu ändern. Setze ein Tool nur auf Lesen, wenn es nichts ändert: Falsch markiert, ändert es Dinge ohne Nachfrage."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
@@ -3728,6 +3732,7 @@ msgstr "Geändert: Er handelt für jeden, der die Domäne nutzt, mit allem, was 
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Geändert: liest und überschreibt jeden Datensatz von {table}, egal wem er gehört"
 
+#: src/connections/tool-permissions.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
 msgstr "Ändert"
@@ -8153,7 +8158,7 @@ msgstr "Braucht eigene Anmelde-App"
 msgid "Never"
 msgstr "Nie"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Nie"
@@ -10549,7 +10554,7 @@ msgctxt "a document, done reading"
 msgid "Read"
 msgstr "Gelesen"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Lesen"
@@ -10666,6 +10671,7 @@ msgctxt "Grasp is reading an uploaded policy"
 msgid "Reading…"
 msgstr "Wird gelesen…"
 
+#: src/connections/tool-permissions.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reads"
 msgstr "Liest"
@@ -15866,7 +15872,7 @@ msgstr "Würde greifen"
 msgid "Would run after approval"
 msgstr "Würde nach der Genehmigung laufen"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Schreiben"

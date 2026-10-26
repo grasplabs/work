@@ -21,7 +21,9 @@ export const connectionEvent = (
     | "connection.reconnected"
     | "connection.disconnect"
     | "connection.consent"
-    | "connection.consent.read_tools",
+    | "connection.consent.read_tools"
+    | "connection.tools"
+    | "connection.tools.read_tools",
   connectionId: string | undefined,
   detail: Record<string, AuditDetailValue>
 ): AuditEntry => ({
@@ -97,7 +99,7 @@ export const packedNames = (
 export const auditRefusal = async (
   env: Env,
   person: ConnectionPerson,
-  action: "connection.connect" | "connection.disconnect",
+  action: "connection.connect" | "connection.disconnect" | "connection.tools",
   detail: Record<string, AuditDetailValue>,
   connectionId?: string
 ): Promise<void> => {

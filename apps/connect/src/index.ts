@@ -38,6 +38,7 @@ import type {
   StartConnection,
   ConnectWithKey,
   StartToolkitConnection,
+  ChangeToolkitTools,
   UnknownOutcome,
   UnknownOutcomeListing,
 } from "@grasp-os/shared/connect";
@@ -80,6 +81,7 @@ import { requireClassRights } from "./class-rights.ts";
 import { clock } from "./clock.ts";
 import {
   finishToolkitFlow,
+  changeToolkitTools,
   startToolkitConnection,
 } from "./composio-connections.ts";
 import { connectionOwners } from "./connections.ts";
@@ -385,6 +387,12 @@ export default class Connect
     request: StartToolkitConnection
   ): Promise<{ url: string }> {
     return await startToolkitConnection(this.env, request);
+  }
+
+  async changeToolkitTools(
+    request: ChangeToolkitTools
+  ): Promise<{ tools: string[] }> {
+    return await changeToolkitTools(this.env, request);
   }
 
   // The npm registry (src/npm.ts): a package's metadata, and one

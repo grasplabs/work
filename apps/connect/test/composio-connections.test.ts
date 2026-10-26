@@ -912,3 +912,225 @@ describe("a Composio connection", () => {
     expect(composio.state.mcp.requests).toBe(0);
   });
 });
+
+/** Changes the tools of `connectionId` for `person`, as core does. */
+const change = async (
+  person: ConnectionPerson,
+  connectionId: string,
+  tools: (string | { name: string; read?: boolean })[]
+) => await exports.default.changeToolkitTools({ person, connectionId, tools });
+
+/** The allowlist of the one server connect made at Composio. */
+const serverTools = () =>
+  [...composio.state.holds.servers.values()].map(
+    ({ allowedTools }) => allowedTools
+  );
+
+/** The stored allowlist of `connectionId`, as connect's registry holds it. */
+const toolsNow = async (connectionId: string) => {
+  const row = await stored(connectionId);
+  return row?.tools;
+};
+
+/** Composio updates connect asked for. */
+const updates = () =>
+  composio.state.requests.filter(({ method }) => method === "PATCH");
+
+describe("changing what a connected Composio toolkit may do", () => {
+  const workflow = agentFor("user-anna");
+
+  it("changes the tools at Composio and in connect for an admin, audited, and calls follow at once", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const changed = await change(admin, connectionId, [
+      { name: "HUBSPOT_LIST_CONTACTS", read: true },
+      "HUBSPOT_UPDATE_CONTACT",
+    ]);
+    const listed = await exports.default.listConnections(admin);
+    const recorded = await events();
+    const event = recorded.find(({ action }) => action === "connection.tools");
+    const storedNow: unknown = JSON.parse(
+      (await toolsNow(connectionId)) ?? "null"
+    );
+
+    expect({
+      changed,
+      stored: storedNow,
+      composio: serverTools(),
+      update: await outcome(
+        callAs(workflow, call(connectionId, "HUBSPOT_UPDATE_CONTACT"))
+      ),
+      taken: await outcome(
+        callAs(workflow, call(connectionId, "HUBSPOT_CREATE_CONTACT"))
+      ),
+      listed: listed.find(({ id }) => id === connectionId)?.readTools,
+      event: event?.detail,
+      // Marked a read on the admin's word alone: named.
+      named: recorded
+        .filter(({ action }) => action === "connection.tools.read_tools")
+        .map(
+          ({ detail }) =>
+            Object.values(detail).filter(
+              (value) => value === "HUBSPOT_LIST_CONTACTS"
+            ).length
+        ),
+    }).toMatchObject({
+      changed: { tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"] },
+      stored: [
+        { name: "HUBSPOT_LIST_CONTACTS", read: true },
+        "HUBSPOT_UPDATE_CONTACT",
+      ],
+      composio: [["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"]],
+      update: "ok",
+      taken: "connect.action_not_found",
+      listed: ["HUBSPOT_LIST_CONTACTS"],
+      event: {
+        outcome: "ok",
+        toolCount: 2,
+        readCount: 1,
+        added: 1,
+        removed: 1,
+      },
+      named: [1],
+    });
+  });
+
+  it("is only for admins, never Grasp staff, recorded, and asks Composio nothing for anyone else", async () => {
+    const connectionId = await connectHubSpot(someone("admin"));
+    const before = await toolsNow(connectionId);
+    const people = [someone("user"), { ...someone("admin"), staff: true }];
+    const ends = await Promise.all(
+      people.map(
+        async (person) =>
+          await outcome(
+            change(person, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+          )
+      )
+    );
+    const all = await events();
+    const refused = all.filter(({ action }) => action === "connection.tools");
+
+    expect({
+      ends,
+      updates: updates(),
+      unchanged: (await toolsNow(connectionId)) === before,
+      refused: refused
+        .map(({ detail }) => String(detail.reason))
+        .toSorted((a, b) => a.localeCompare(b)),
+    }).toStrictEqual({
+      ends: ["role.forbidden", "connection.staff_not_allowed"],
+      updates: [],
+      unchanged: true,
+      refused: ["connection.staff_not_allowed", "role.forbidden"],
+    });
+  });
+
+  it("allows only tools the toolkit has, of a connection it can change, and changes nothing at Composio otherwise", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const ends = [
+      await outcome(change(admin, connectionId, ["HUBSPOT_EXPORT_EVERYTHING"])),
+      await outcome(change(admin, connectionId, [])),
+      await outcome(
+        change(admin, "no-such-connection", ["HUBSPOT_LIST_CONTACTS"])
+      ),
+    ];
+    await exports.default.disconnect({ person: admin, connectionId });
+    ends.push(
+      await outcome(change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]))
+    );
+
+    expect({ ends, updates: updates() }).toStrictEqual({
+      ends: [
+        "connection.invalid",
+        "connection.invalid",
+        "connect.connection_not_found",
+        "connect.connection_not_found",
+      ],
+      updates: [],
+    });
+  });
+
+  it("changes nothing when Composio doesn't take the change, and records that it failed", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const before = await toolsNow(connectionId);
+    composio.state.failing = "PATCH /mcp/";
+    const end = await outcome(
+      change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+    );
+    const recorded = await events();
+    const failed = recorded.find(({ action }) => action === "connection.tools");
+
+    expect({
+      end,
+      unchanged: (await toolsNow(connectionId)) === before,
+      failed: failed?.detail,
+    }).toMatchObject({
+      end: "connection.provider_refused",
+      unchanged: true,
+      failed: { outcome: "failed", reason: "connection.provider_refused" },
+    });
+  });
+
+  it("refuses a change another one beat, and sets Composio back to what connect holds", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const theirs = JSON.stringify(["HUBSPOT_LIST_CONTACTS"]);
+    // Another admin's change lands while this one is at Composio.
+    composio.state.beforeUpdate = async () => {
+      await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+        .bind(theirs, connectionId)
+        .run();
+    };
+    const end = await outcome(
+      change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+    );
+    const afterwards = await events();
+
+    expect({
+      end,
+      stored: await toolsNow(connectionId),
+      composio: serverTools(),
+      ok: afterwards.filter(
+        ({ action, detail }) =>
+          action === "connection.tools" && detail.outcome === "ok"
+      ).length,
+    }).toStrictEqual({
+      end: "connection.tools_changed",
+      stored: theirs,
+      composio: [["HUBSPOT_LIST_CONTACTS"]],
+      ok: 0,
+    });
+  });
+
+  it("drops a held action of a tool taken away, so nobody is asked to confirm it", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const inChat = agentFor("user-anna", "agent-chat", "interactive");
+    const held = await callAs(
+      inChat,
+      call(connectionId, "HUBSPOT_CREATE_CONTACT")
+    );
+    await change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]);
+    const left = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM pending_actions WHERE id = ?"
+    )
+      .bind(held.pending?.id ?? "")
+      .first<{ n: number }>();
+    const recorded = await events();
+    const dropped = recorded.find(
+      ({ action }) => action === "connection.action.dropped"
+    );
+
+    expect({
+      held: typeof held.pending?.id,
+      left: left?.n,
+      reason: dropped?.detail.reason,
+    }).toStrictEqual({
+      held: "string",
+      left: 0,
+      reason: "connection.tools_changed",
+    });
+  });
+});

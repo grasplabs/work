@@ -891,7 +891,7 @@ msgstr "{name} ha cerrado sesión en todas partes."
 msgid "{name} logo"
 msgstr "Logotipo de {name}"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} puede escribir. Cambiar a Lectura"
 
@@ -903,7 +903,7 @@ msgstr "{name} ya no cambia los datos del dominio (escritura → lectura)"
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} ahora cambia los datos del dominio (lectura → escritura)"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
 msgstr "{name} solo lee. Cambiar a Escritura"
 
@@ -1806,6 +1806,10 @@ msgstr "Una vista previa no guarda archivos."
 #: src/chat/project-dialog.tsx
 msgid "A project takes Markdown, text, CSV and JSON files."
 msgstr "Un proyecto admite archivos Markdown, de texto, CSV y JSON."
+
+#: src/connections/tool-permissions.tsx
+msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Una herramienta de Lectura se ejecuta sin preguntar. Una llamada a una herramienta de Escritura desde el chat, o de una persona que usa un dominio, espera a que esa persona la confirme. Pulsa la insignia de una herramienta para cambiarla. Marca una herramienta como Lectura solo si no cambia nada: si está mal marcada, cambia cosas sin preguntar."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
@@ -3728,6 +3732,7 @@ msgstr "Cambiado: actúa en nombre de quien use el dominio, con todo lo que el d
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Cambiada: lee y reescribe todos los registros de {table}, sea quien sea su propietario"
 
+#: src/connections/tool-permissions.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
 msgstr "Cambia"
@@ -8153,7 +8158,7 @@ msgstr "Necesita tu propia app de inicio de sesión"
 msgid "Never"
 msgstr "Nunca"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Nunca"
@@ -10549,7 +10554,7 @@ msgctxt "a document, done reading"
 msgid "Read"
 msgstr "Leído"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Lectura"
@@ -10666,6 +10671,7 @@ msgctxt "Grasp is reading an uploaded policy"
 msgid "Reading…"
 msgstr "Leyendo…"
 
+#: src/connections/tool-permissions.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reads"
 msgstr "Lee"
@@ -15866,7 +15872,7 @@ msgstr "Se aplicaría"
 msgid "Would run after approval"
 msgstr "Se ejecutaría tras la aprobación"
 
-#: src/connections/connect-dialog.tsx
+#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Escritura"
