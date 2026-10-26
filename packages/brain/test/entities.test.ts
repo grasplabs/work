@@ -5,6 +5,7 @@ import { ensureCollection } from "../src/collections.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
   entitiesFor,
+  entityMatchProposals,
   entitySources,
   linkCoverage,
   linkProposals,
@@ -39,6 +40,10 @@ import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 //    suggestions or ambiguity.
 // 5. A failed job is lost: nothing runs it again, or its progress can't
 //    be seen.
+// 6. A match across collections (GRA-1080) is made, shown or counted for
+//    a reader who can't read both sides, so a member learns whether a
+//    collection hidden from them holds a name (the probe #1203 closed); or
+//    two of a name are merged on the name alone.
 
 /** An entity as the fake model knows it. */
 interface Known {
@@ -154,6 +159,9 @@ const link = async (
 ): Promise<void> => {
   await runLinking(host.brain, { source: `doc:${documentId}`, version }, once);
 };
+
+/** Text in its order, as `toSorted` takes a comparison. */
+const byText = (a: string, b: string) => a.localeCompare(b);
 
 describe("entity linking", () => {
   it("links a saved document's entities without any relationship call", async () => {
@@ -920,6 +928,111 @@ describe("entity linking", () => {
       fenced: [],
       back: 1,
       madeBeforeThePurge: false,
+    });
+  });
+
+  it("proposes entities of one kind and name in two collections to a reader of both, never merging them, and to no one else", async () => {
+    const concept = `Onboarding ${word()}`;
+    const person = `Eva ${word()}`;
+    const host = testHost(async (text) => {
+      await Promise.resolve();
+      return {
+        entities: [
+          ...(text.includes(concept)
+            ? [{ kind: "concept", name: concept }]
+            : []),
+          ...(text.includes(person) ? [{ kind: "person", name: person }] : []),
+          // The same name as another kind: never the same thing.
+          ...(text.includes("as a team")
+            ? [{ kind: "team", name: concept }]
+            : []),
+        ],
+      };
+    });
+    const sales = await newCollection(host.brain, "Sales");
+    const support = await newCollection(host.brain, "Support");
+    const saved = [
+      await save(host, sales, "a.md", `${concept} with ${person}.`),
+      await save(host, support, "b.md", `${concept} with ${person}.`),
+      await save(host, support, "c.md", `${concept} as a team.`),
+    ];
+    for (const { id } of saved) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, on purpose
+      await link(host, id, 1);
+    }
+    const both: Caller = { userId: "admin", reads: [sales.id, support.id] };
+    const proposals = await entityMatchProposals(host.brain, both);
+    const linked = await entitiesFor(host.brain, both, { query: person });
+
+    expect({
+      proposals: proposals.map(({ kind, name, basis, entities }) => ({
+        kind,
+        name,
+        basis,
+        sides: entities
+          .flatMap(({ collectionIds }) => collectionIds)
+          .toSorted(byText),
+      })),
+      salesOnly: await entityMatchProposals(host.brain, {
+        userId: "member",
+        reads: [sales.id],
+      }),
+      // Proposed, never merged: still two of her.
+      people: linked.length,
+    }).toStrictEqual({
+      proposals: [
+        {
+          kind: "concept",
+          name: concept,
+          basis: "name",
+          sides: [sales.id, support.id].toSorted(byText),
+        },
+        {
+          kind: "person",
+          name: person,
+          basis: "name",
+          sides: [sales.id, support.id].toSorted(byText),
+        },
+      ].toSorted((a, b) => a.name.localeCompare(b.name)),
+      salesOnly: [],
+      people: 2,
+    });
+  });
+
+  it("never lets a member learn whether a collection they can't read holds a name they know", async () => {
+    const name = `Zed ${word()}`;
+    const host = testHost(gazetteer([{ kind: "person", name }]));
+    const own = await newCollection(host.brain, "Own");
+    const hidden = await newCollection(host.brain, "Hidden");
+    const member: Caller = { userId: "prober", reads: [own.id] };
+    const seen = async () => ({
+      proposals: await entityMatchProposals(host.brain, member),
+      entities: await entitiesFor(host.brain, member),
+      suggested: await entitiesFor(host.brain, member, { query: name }),
+    });
+    const mine = await save(host, own, "zed.md", `${name} joined.`);
+    await link(host, mine.id, 1);
+    const before = await seen();
+    // The collection hidden from them gains the name they asked about.
+    const theirs = await save(host, hidden, "zed.md", `${name} left.`);
+    await link(host, theirs.id, 1);
+    const after = await seen();
+    const admin = await entityMatchProposals(host.brain, {
+      userId: "admin",
+      reads: [own.id, hidden.id],
+    });
+
+    expect({
+      same: after,
+      before: before.proposals,
+      admin: admin.map(({ name: proposed, entities }) => ({
+        name: proposed,
+        sides: entities.length,
+      })),
+    }).toStrictEqual({
+      same: before,
+      before: [],
+      admin: [{ name, sides: 2 }],
     });
   });
 });
