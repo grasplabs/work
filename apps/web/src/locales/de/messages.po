@@ -12060,6 +12060,10 @@ msgid "Teams and roles"
 msgstr "Teams und Rollen"
 
 #: src/settings/stephen-settings.tsx
+msgid "Teams chats and meetings they were in: what others wrote and said there, summarised for them alone."
+msgstr "Teams-Chats und Besprechungen, an denen die Person teilgenommen hat: was andere dort geschrieben und gesagt haben, nur für sie selbst zusammengefasst."
+
+#: src/settings/stephen-settings.tsx
 msgid "Teams for {label}"
 msgstr "Teams für {label}"
 
@@ -14421,10 +14425,6 @@ msgstr "Was auf Sie wartet"
 #: src/chat/builds.tsx
 msgid "What other domains may call"
 msgstr "Was andere Domänen aufrufen dürfen"
-
-#: src/settings/stephen-settings.tsx
-msgid "What others wrote and said in their own Teams chats and meetings, summarised for them alone."
-msgstr "Was andere in ihren eigenen Teams-Chats und Besprechungen geschrieben und gesagt haben, nur für sie selbst zusammengefasst."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "What people thought of {name}"

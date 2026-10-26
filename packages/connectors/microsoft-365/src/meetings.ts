@@ -316,26 +316,35 @@ const readTranscript = defineTool({
       graphUrl(`${meetingPath}/transcripts`),
       pageOf(graphTranscript)
     );
-    const read = await Promise.all(
-      transcripts
-        .filter((transcript) => ofOccurrence(event, transcript))
-        .slice(0, maxTranscripts)
-        .map(async (transcript) => {
-          const response = await graphFetch(
-            graphUrl(
-              `${meetingPath}/transcripts/${segment(transcript.id)}/content`,
-              { $format: "text/vtt" }
-            )
-          );
-          const bytes = new Uint8Array(await response.arrayBuffer());
-          checkReadable(bytes.byteLength);
-          return {
-            id: transcript.id,
-            createdAt: transcript.createdDateTime ?? null,
-            lines: transcriptLines(new TextDecoder().decode(bytes)),
-          };
-        })
-    );
+    // One at a time, within one read's limit for all of them together: a
+    // meeting transcribed in parts never holds more than one part's answer
+    // and the limit's worth of words at once.
+    const read: {
+      id: string;
+      createdAt: string | null;
+      lines: Line[];
+    }[] = [];
+    let total = 0;
+    for (const transcript of transcripts
+      .filter((each) => ofOccurrence(event, each))
+      .slice(0, maxTranscripts)) {
+      // oxlint-disable-next-line no-await-in-loop -- one part read at a time
+      const response = await graphFetch(
+        graphUrl(
+          `${meetingPath}/transcripts/${segment(transcript.id)}/content`,
+          { $format: "text/vtt" }
+        )
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one part read at a time
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      total += bytes.byteLength;
+      checkReadable(total);
+      read.push({
+        id: transcript.id,
+        createdAt: transcript.createdDateTime ?? null,
+        lines: transcriptLines(new TextDecoder().decode(bytes)),
+      });
+    }
     return {
       output: { mailbox, meeting: meetingOf(event), transcripts: read },
       provenance: [event.id, ...read.map((transcript) => transcript.id)],
