@@ -38,6 +38,19 @@ const failing = (id: string) =>
 const failedRun = async (person: Person, app: string, workflow: string) => {
   const run = await person.api.workflows.start(app, workflow);
   await finished(run.id);
+  // Ended in the engine first; core records the failure, and its notice in
+  // the same batch, once the engine tells it (runs.ts): waited for too.
+  await vi.waitFor(
+    async () => {
+      const row = await env.DB.prepare(
+        "SELECT status FROM workflow_runs WHERE id = ?"
+      )
+        .bind(run.id)
+        .first<{ status: string }>();
+      expect(row?.status).toBe("failed");
+    },
+    { timeout: 20_000, interval: 100 }
+  );
   return run.id;
 };
 

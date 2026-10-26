@@ -16,8 +16,11 @@
  *   inbox's limits on senders don't count (run.ts, `sendEvent`).
  * - 12: `events.sender`, who sent an event, for each sender's share of
  *   the inbox (run.ts, `sendEvent`).
+ * - 13: `steps.settled`, the order the definition's steps' outcomes were
+ *   journaled in, which a replay hands them back in (journal.ts,
+ *   `createSettledOrder`).
  */
-export const journalSchemaVersion = 12;
+export const journalSchemaVersion = 13;
 
 /**
  * The oldest journal this engine reads, upgrading it as it first reads
