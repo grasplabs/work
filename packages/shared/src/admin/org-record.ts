@@ -570,7 +570,7 @@ export interface GivenNumbers {
   busy: number | null;
   /** Whether quiet and busy are a week's or a month's. */
   per: "week" | "month" | null;
-  /** How long one whole one takes them, in the drawing's unit: quickest, normal, longest. */
+  /** How long one whole one takes them, in minutes exactly as given, never rounded: quickest, normal, longest. */
   takes: [number | null, number | null, number | null];
 }
 

@@ -1294,10 +1294,10 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
       async () => await onboardingStore(env).drawNext()
     );
     // The checker says yes to a number only when a fact is about its work.
-    await intake(ids, [zendeskClaim], (text, facts, work) =>
-      work === undefined
-        ? true
-        : facts.some((each) => each.includes(work.split(" (")[0] ?? work))
+    await intake(ids, [zendeskClaim], (text, facts, work, kind) =>
+      kind === undefined
+        ? facts.some((each) => each.includes(work.split(" (")[0] ?? work))
+        : true
     );
     const member = await signedInApi(idp, "user");
     const read = await ticketsDrawingFor(member.api, ids);
@@ -1381,8 +1381,8 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
     );
     // The checker says yes to a number only when the person's facts give
     // every value it names, and each kind of value it names.
-    await intake(ids, [zendeskClaim], (text, facts, work) => {
-      if (work === undefined) {
+    await intake(ids, [zendeskClaim], (text, facts, _work, kind) => {
+      if (kind !== undefined) {
         return true;
       }
       const said = facts.join(" ");
@@ -1390,7 +1390,7 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
       return (
         values.every((value) => said.includes(value)) &&
         ["quiet", "quickest", "longest"].every(
-          (kind) => !text.includes(kind) || said.includes(kind)
+          (word) => !text.includes(word) || said.includes(word)
         )
       );
     });
@@ -1413,6 +1413,101 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
       volumes: [[52, 52, 5]],
       takes: [14, 14],
     });
+  });
+
+  it("keeps a part only for the work it is of: five who tell a step of the rota never back it for tickets", async () => {
+    const ids = await team();
+    await mapped(ids);
+    await told(ids);
+    const five = [ids.max, ids.mia, ids.mo, ids.noor, ids.pim];
+    for (const [index, person] of five.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+      await agree(
+        person,
+        [
+          fact(`t${index}`, "step", "Opens the ticket first."),
+          fact(`r${index}`, "step", "For the rota, opens the planning sheet."),
+        ],
+        1
+      );
+    }
+    await answering(
+      [
+        drawingReply({
+          steps: [
+            { text: "Open the ticket.", by: five },
+            // What the five said of the rota, drawn into tickets.
+            { text: "Open the planning sheet.", by: five },
+          ],
+        }),
+      ],
+      async () => await onboardingStore(env).drawNext()
+    );
+    // The checker says yes to a part only when a fact says it of the work
+    // it is checked for: a fact of the rota backs nothing of tickets.
+    await intake(ids, [zendeskClaim], (text, facts, work, kind) => {
+      if (kind === undefined) {
+        return true;
+      }
+      const key = text.includes("planning") ? "planning sheet" : "ticket";
+      return facts.some(
+        (each) =>
+          each.includes(key) &&
+          work.includes(each.includes("rota") ? "rota" : "tickets")
+      );
+    });
+    const member = await signedInApi(idp, "user");
+    const read = await ticketsDrawingFor(member.api, ids);
+    expect(read.steps).toStrictEqual(["Open the ticket."]);
+  });
+
+  it("checks a time as each gave it, never rounded first: five who take 130 minutes show as 2 hours", async () => {
+    const ids = await team();
+    await mapped(ids);
+    await told(ids);
+    const five = [ids.max, ids.mia, ids.mo, ids.noor, ids.pim];
+    for (const [index, person] of five.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+      await agree(
+        person,
+        [fact(`n${index}`, "number", "A normal one takes me 130 minutes.")],
+        1
+      );
+    }
+    await answering(
+      [
+        drawingReply({
+          steps: [{ text: "Open the ticket.", by: five }],
+          numbers: five.map((person) => ({
+            person,
+            minutes: [-1, 130, -1],
+          })),
+        }),
+      ],
+      async () => await onboardingStore(env).drawNext()
+    );
+    // The checker says yes to a number only when the person's facts give
+    // every value it names, in the unit it names.
+    await intake(ids, [zendeskClaim], (text, facts, _work, kind) => {
+      if (kind !== undefined) {
+        return true;
+      }
+      const said = facts.join(" ");
+      return (text.match(/\d+ \w+/gu) ?? []).every((value) =>
+        said.includes(value)
+      );
+    });
+    const member = await signedInApi(idp, "user");
+    const brain = await member.api.brain.read();
+    const takes = brain.workflows
+      .find(({ teamId }) => teamId === `team-${ids.team}`)
+      ?.drawings?.at(-1)?.takes;
+    expect({
+      unit: takes?.unit,
+      quickest: takes?.quickest,
+      longest: takes?.longest,
+      people: takes?.people,
+    }).toStrictEqual({ unit: "hours", quickest: 2, longest: 2, people: 5 });
   });
 
   it("shows each count's median on its own: five giving their own count are enough, however one other counts", async () => {

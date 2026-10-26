@@ -205,6 +205,16 @@ const timesOf = (
   ];
 };
 
+/**
+ * A number exactly as a person gave it, for checking it against what they
+ * said and counting it: none when it is out of range, never clamped or
+ * rounded into one they didn't give.
+ */
+const givenOf = (value: number | undefined, most = 100_000): number | null =>
+  value !== undefined && Number.isFinite(value) && value >= 0 && value <= most
+    ? value
+    : null;
+
 /** The median of some numbers; none of none. */
 const medianOf = (values: readonly number[]): number | undefined =>
   values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)];
@@ -212,6 +222,12 @@ const medianOf = (values: readonly number[]): number | undefined =>
 type Note = NonNullable<RawDrawing["notes"]>[number];
 type Step = NonNullable<RawDrawing["steps"]>[number];
 type Numbers = NonNullable<RawDrawing["numbers"]>[number];
+
+/** Minutes in a drawing's unit, as shown: whole minutes, or whole and half hours. */
+export const inUnitOf =
+  (unit: DrawnWork["unit"]) =>
+  (minutes: number): number =>
+    unit === "hours" ? Math.round((minutes / 60) * 2) / 2 : Math.round(minutes);
 
 /** Hours of work for a normal one, from two on: whole and half hours. */
 const unitOf = (numbers: readonly Numbers[]): DrawnWork["unit"] => {
@@ -227,37 +243,38 @@ const whyOf = (why: string | undefined): "condition" | "place" | "conflict" => {
 const whoseOf = (of: string | undefined): "me" | "team" | "unknown" =>
   of === "me" || of === "team" ? of : "unknown";
 
-/** One person's own numbers, never another's: how many, how long and how many wrong. */
 /**
- * The quickest, a normal and the longest time as they were given, none
- * filled in from another: a single one is the normal one.
+ * The quickest, a normal and the longest time as they were given, in
+ * minutes, none filled in from another or rounded: a single one is the
+ * normal one.
  */
 const givenTimesOf = (
   value: readonly number[] | undefined
 ): [number | null, number | null, number | null] => {
-  const given = (value ?? []).slice(0, 3).map((each) => countOf(each));
+  const given = (value ?? []).slice(0, 3).map((each) => givenOf(each));
   const [quickest = null, normal = null, longest = null] =
     given.length === 1 ? [null, given[0] ?? null, null] : given;
   return [quickest, normal, longest];
 };
 
+/** One person's own numbers, never another's: how many, how long and how many wrong. */
 const numbersOf = (
   own: Numbers | undefined,
   inUnit: (minutes: number) => number
 ): Pick<Told, "volume" | "volumeOf" | "takes" | "wrong" | "gave"> => {
-  const quiet = countOf(own?.quiet);
-  const busy = countOf(own?.busy);
+  const quiet = givenOf(own?.quiet);
+  const busy = givenOf(own?.busy);
   const took = timesOf(own?.minutes);
   const counted = quiet !== null || busy !== null;
   const said = lineOf(own?.per, 10);
-  const [quickest, normal, longest] = givenTimesOf(own?.minutes);
-  const unit = (each: number | null) => (each === null ? null : inUnit(each));
   return {
+    // Exactly as they gave them, times in minutes: checked against what
+    // they said, and rounded to the drawing's unit only once shown.
     gave: {
       quiet,
       busy,
       per: said === "month" || said === "week" ? said : null,
-      takes: [unit(quickest), unit(normal), unit(longest)],
+      takes: givenTimesOf(own?.minutes),
     },
     // A normal week, when no quiet one was given, is the low end.
     volume: counted
@@ -268,7 +285,7 @@ const numbersOf = (
       took === null
         ? null
         : [inUnit(took[0]), inUnit(took[1]), inUnit(took[2])],
-    wrong: countOf(own?.wrong, 10),
+    wrong: givenOf(own?.wrong, 10),
   };
 };
 
@@ -308,8 +325,7 @@ export const drawnOf = (
   const firstOther = steps.findIndex(({ step }) => lineOf(step.other) !== "");
   const otherStep = steps[firstOther]?.step;
   const unit = unitOf(numbers);
-  const inUnit = (minutes: number) =>
-    unit === "hours" ? Math.round((minutes / 60) * 2) / 2 : Math.round(minutes);
+  const inUnit = inUnitOf(unit);
   const monthly = numbers.filter(({ per }) => per === "month").length;
   const told: Record<string, Told> = {};
   for (const { person, example } of brief.tellers) {
@@ -360,7 +376,7 @@ export const drawnOf = (
         const given = (each.out_of_ten_by ?? []).find(
           (own) => lineOf(own.person, 40) === person
         );
-        const outOfTen = countOf(given?.out_of_ten, 10);
+        const outOfTen = givenOf(given?.out_of_ten, 10);
         return outOfTen === null ? [] : [{ case: index, outOfTen }];
       }),
     };

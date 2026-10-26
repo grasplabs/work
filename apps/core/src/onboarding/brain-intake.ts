@@ -20,6 +20,7 @@ import { minTeamShown } from "@grasp-os/shared/onboarding";
 import type { Support } from "./drawing-support.ts";
 import { plainPart } from "./plain-text.ts";
 import type { TeamClaim } from "./team-claims.ts";
+import { inUnitOf } from "./work-drawing.ts";
 
 // What the onboarding learned, as the brain's records (GRA-367): each
 // team as a team record, one source for all its interviews, what five or
@@ -202,7 +203,8 @@ const volumesOf = (
 /**
  * How long one whole one takes, in the drawing's unit: a median of the
  * quickest and of the longest, each over five or more who gave that one
- * themselves and were checked to; one end alone stands for both, and a
+ * themselves and were checked to, taken of the minutes as they gave them
+ * and rounded to the unit only then; one end alone stands for both, and a
  * normal one alone for both too. None with none of them.
  */
 const takesOf = (
@@ -218,9 +220,15 @@ const takesOf = (
   const quickests = given(numbers.quickest, 0);
   const normals = given(numbers.normal, 1);
   const longests = given(numbers.longest, 2);
-  const quickestShown = shownMedian(quickests);
-  const longestShown = shownMedian(longests);
-  const normalShown = shownMedian(normals);
+  // Medians of the minutes as each gave them, rounded to the unit only now.
+  const inUnit = inUnitOf(unit);
+  const shownIn = (values: readonly number[]) => {
+    const median = shownMedian(values);
+    return median === null ? null : inUnit(median);
+  };
+  const quickestShown = shownIn(quickests);
+  const longestShown = shownIn(longests);
+  const normalShown = shownIn(normals);
   const quickest = quickestShown ?? longestShown ?? normalShown;
   const longest = longestShown ?? quickestShown ?? normalShown;
   return quickest === null || longest === null

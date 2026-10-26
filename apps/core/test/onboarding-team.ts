@@ -420,7 +420,12 @@ const shownSchema = z.array(
   })
 );
 const checkSchema = z.object({ claim: z.string(), fact: z.string() });
-const partSchema = z.object({ part: z.string(), facts: z.array(z.string()) });
+const partSchema = z.object({
+  work: z.string(),
+  kind: z.string(),
+  part: z.string(),
+  facts: z.array(z.string()),
+});
 const numberSchema = z.object({
   work: z.string(),
   number: z.string(),
@@ -434,8 +439,10 @@ const numberSchema = z.object({
 export type PartJudge = (
   part: string,
   facts: readonly string[],
-  /** For a number: the piece of work it is said to be for. */
-  work?: string
+  /** The piece of work the part or number is said to be of. */
+  work: string,
+  /** For a part: what kind of part it is; none for a number. */
+  kind?: string
 ) => boolean;
 
 /** The fake checker's answer for parts, unless a test gives one: yes. */
@@ -483,7 +490,12 @@ const claimsOrCheck =
     if (check.success) {
       answer = says(check.data.claim, check.data.fact);
     } else if (ofPart.success) {
-      answer = part(ofPart.data.part, ofPart.data.facts);
+      answer = part(
+        ofPart.data.part,
+        ofPart.data.facts,
+        ofPart.data.work,
+        ofPart.data.kind
+      );
     } else if (ofNumber.success) {
       answer = part(
         ofNumber.data.number,
