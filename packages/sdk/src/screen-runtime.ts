@@ -255,6 +255,13 @@ export const bridgeTransport = (
     };
   },
   cancelStream: async (request) => await page().cancelStream(request),
+  // The page asks the person to confirm in its own dialog, then answers
+  // with the confirmation it minted (screen-host.ts): the frame never
+  // holds one.
+  decisions: {
+    respond: async (run, decision, answer) =>
+      await page().decide(run, decision, answer),
+  },
   navigation: {
     navigate: async (request) => {
       await page().navigate(request);

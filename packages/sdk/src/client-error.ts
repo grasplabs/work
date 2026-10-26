@@ -192,6 +192,16 @@ const clientErrors = {
     message: "Links can't be opened here.",
     category: "operational",
   },
+  "decision.unavailable": {
+    message:
+      "Decisions can't be answered here: this screen isn't running in Grasp's shell.",
+    category: "contract",
+  },
+  "decision.outcome_unknown": {
+    message:
+      "Whether your answer was recorded is unknown: no answer came back. Give the same answer again to find out; it is never recorded twice.",
+    category: "uncertain",
+  },
 } as const satisfies Record<
   string,
   { message: string; category: ErrorCategory }
