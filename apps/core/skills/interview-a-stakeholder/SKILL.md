@@ -1,6 +1,8 @@
 ---
 name: interview-a-stakeholder
 description: Guides a short chat with someone on the team about how their work is done today, so their answers can become statements for a baseline. Use in a guest chat the intake App invites a stakeholder to.
+tasks: [stakeholder.interview]
+status: accepted
 ---
 
 # Interview a stakeholder

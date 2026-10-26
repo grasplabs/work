@@ -578,7 +578,7 @@ describe(
 /** A recall in a step, through the run's Brain binding, once armed. */
 const recallNote = async (attempt: AttemptHost, arm: () => void) => {
   arm();
-  return await attempt.callBrain("BRAIN", { query: "note" });
+  return await attempt.callBrain("BRAIN", "recall", { query: "note" });
 };
 
 describe(
@@ -664,7 +664,7 @@ describe(
         async (attempt) => {
           // Its binding came with the run's start; the grant goes after.
           await admin.api.permissions.revoke(brainGrant);
-          return await attempt.callBrain("BRAIN", { query: "note" });
+          return await attempt.callBrain("BRAIN", "recall", { query: "note" });
         }
       );
 

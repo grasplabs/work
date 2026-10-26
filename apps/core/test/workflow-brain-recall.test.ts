@@ -77,6 +77,49 @@ const recaller = (word: string, other: string): Record<string, string> =>
     )
   );
 
+/**
+ * A workflow that selects a skill for `type` in one step and reads it at
+ * the pin, answering the skill's name and whether its text came, or why
+ * none; and selects for `other`, which only a collection it wasn't
+ * granted holds.
+ */
+const selector = (type: string, other: string): Record<string, string> =>
+  withBrain(
+    workflowFiles(
+      "recaller",
+      `  return await step.do("skill", { description: "Pick the skill" }, async () => {
+    const granted = await brain(env.BRAIN).skills.select({ task: { type: ${JSON.stringify(type)} } });
+    const other = await brain(env.BRAIN).skills.select({ task: { type: ${JSON.stringify(other)} } });
+    const otherResult = other.result.kind === "none" ? other.result.reason : other.result.skill.name;
+    if (granted.result.kind === "none") {
+      return { granted: granted.result.reason, other: otherResult } as Json;
+    }
+    const read = await brain(env.BRAIN).skills.read({ documentId: granted.result.skill.documentId, version: granted.result.skill.version });
+    return { granted: [read.skill.name, read.text.includes("Check the order first")], other: otherResult } as Json;
+  });`,
+      { skill: { granted: [], other: "" } }
+    )
+  );
+
+/** A collection everyone reads, an admin's, holding a skill for `task`. */
+const collectionWithSkill = async (
+  admin: Admin,
+  name: string,
+  task: string
+) => {
+  const { id } = await admin.api.knowledge.createCollection({
+    name: `${name} ${crypto.randomUUID()}`,
+    access: "everyone",
+  });
+  await admin.api.knowledge.saveDocument({
+    collectionId: id,
+    path: `${task}/SKILL.md`,
+    text: `---\nname: ${task}\ndescription: Handles ${task}.\ntasks: [${task}]\nrequires: [platform:brain]\n---\n\n# ${task}\n\nCheck the order first.\n`,
+    ifVersion: 0,
+  });
+  return id;
+};
+
 /** The App's `brain` permission, under `BRAIN`. */
 const brainFor = (app: string): PermissionRequest => ({
   subject: { type: "app", appId: appIdSchema.parse(app) },
@@ -128,6 +171,38 @@ describe("a workflow's recall through the Brain binding", () => {
       // The collection it may read, never the one it wasn't granted.
       output: { granted: [handbook], widened: "brain.not_found" },
       recorded: true,
+    });
+  });
+
+  it("selects and reads a skill as the run, only from the collections its App was granted, and records the selection with the run", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const task = `refund${crypto.randomUUID().replaceAll("-", "").slice(0, 8)}`;
+    const other = `${task}x`;
+    const skills = await collectionWithSkill(admin, "Skills", task);
+    await collectionWithSkill(admin, "Other skills", other);
+    const { id: app } = await admin.api.apps.create({ name: "Skills" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    await requestGranted(idp, admin, readCollection(app_, skills));
+    await requestGranted(idp, admin, brainFor(app));
+    await release(admin, app, { ...sampleApp(), ...selector(task, other) });
+
+    const run = await ranOnce(admin, app);
+    const events = await allEvents();
+
+    expect({
+      status: run.status,
+      output: run.output,
+      recorded: events
+        .filter(
+          ({ action, detail }) =>
+            action === "knowledge.skill.select" && detail.run === run.id
+        )
+        .map(({ detail }) => detail.result),
+    }).toStrictEqual({
+      status: "completed",
+      // Never the skill in the collection it wasn't granted.
+      output: { granted: [task, true], other: "no_match" },
+      recorded: ["skill", "none"],
     });
   });
 
