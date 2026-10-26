@@ -120,6 +120,12 @@ const queryPath =
 export const isWorkflowQueryPath = (contractId: string): boolean =>
   queryPath.test(contractId);
 
+/** Whether `contractId` names a workflow reference's decision queries. */
+export const isDecisionQueryPath = (contractId: string): boolean => {
+  const name = queryPath.exec(contractId)?.groups?.name;
+  return name === "decisions" || name === "decision";
+};
+
 const names: ReadonlySet<string> = new Set([
   "runs",
   "history",
@@ -204,6 +210,8 @@ export const workflowQueryOf = async (
 export interface WorkflowQueryCaller {
   readonly app: string;
   readonly userId: string;
+  /** Grasp staff: asked no client's decision, so listed none. */
+  readonly staff?: boolean;
 }
 
 /** A run's status as a screen sees it, from what core keeps of it. */
@@ -852,6 +860,8 @@ const decisionScope = (
 ) => {
   const db = drizzle(env.DB);
   return and(
+    // Staff answer no client's decision (decisions.ts), members or not.
+    ...(caller.staff === true ? [sql`0`] : []),
     eq(workflowResourceRuns.workflowResourceId, pinned.workflowId),
     eq(workflowResourceRuns.version, pinned.version),
     eq(workflowStartReceipts.invokerType, "app"),

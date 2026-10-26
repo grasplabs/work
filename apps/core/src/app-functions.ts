@@ -68,11 +68,15 @@ import {
 import { appWorkflowNotifications } from "./workflow-notifications.ts";
 import {
   callWorkflowQuery,
+  isDecisionQueryPath,
   isWorkflowQueryPath,
   readWorkflowWindow,
   workflowQueryOf,
 } from "./workflow-reference-queries.ts";
-import type { ResolvedWorkflowQuery } from "./workflow-reference-queries.ts";
+import type {
+  ResolvedWorkflowQuery,
+  WorkflowQueryCaller,
+} from "./workflow-reference-queries.ts";
 import { appWorkflowStarts } from "./workflow-start-intents.ts";
 import type { CallingAgent } from "./workflow-start-intents.ts";
 
@@ -881,7 +885,7 @@ const answeredWorkflowQuery = async (
   }: {
     by: Pick<Identity, "userId" | "role">;
     deadline: number;
-    caller: { app: string; userId: string };
+    caller: WorkflowQueryCaller;
     query: ResolvedWorkflowQuery;
     call: FunctionRequest;
     release: Release;
@@ -1028,7 +1032,8 @@ const toldAdmitted = async (
 
 const callFunction = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams">,
+  by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>,
   app: unknown,
   request: unknown,
   options: FunctionCallOptions
@@ -1112,7 +1117,9 @@ const callFunction = async (
   if (workflowQuery !== undefined) {
     return await answeredWorkflowQuery(env, {
       by,
-      caller: { app: appId, userId: by.userId },
+      // Staff are asked no client's decision (decisions.ts), whatever
+      // membership they hold.
+      caller: { app: appId, userId: by.userId, staff: by.staff === true },
       query: workflowQuery,
       call,
       release,
@@ -1198,7 +1205,8 @@ const callFunction = async (
  */
 export const callAppFunction = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams">,
+  by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>,
   app: unknown,
   request: unknown,
   deadline = Date.now() + platformLimits.serverInvocationWallMs,
@@ -1221,7 +1229,8 @@ export const callAppFunction = async (
  */
 const workflowCommandAnswer = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams">,
+  by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>,
   app: unknown,
   request: unknown
 ): Promise<FunctionAnswer> => {
@@ -1260,7 +1269,8 @@ const workflowCommandAnswer = async (
  */
 const workflowWatchRead = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams">,
+  by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>,
   app: unknown,
   request: string
 ): Promise<EvaluatedQuery> => {
@@ -1306,7 +1316,8 @@ const workflowWatchRead = async (
  */
 export const callScreenFunction = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams">,
+  by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>,
   app: unknown,
   request: unknown,
   deadline: number,
@@ -1372,6 +1383,21 @@ export const callsWorkflowQuery = (request: unknown): boolean => {
   }
 };
 
+/**
+ * Whether `request` calls a workflow reference's decision queries: read
+ * again when a decision of one of the App's runs changes, for whomever it
+ * asks (run-changes.ts, `tellDecisionFollowers`).
+ */
+export const callsDecisionQuery = (request: unknown): boolean => {
+  try {
+    return isDecisionQueryPath(
+      readFunctionRequest(request).reference.contractId
+    );
+  } catch {
+    return false;
+  }
+};
+
 /** What a live query's evaluation answered, and what it read. */
 export interface EvaluatedQuery {
   readonly answer: FunctionAnswer;
@@ -1398,7 +1424,8 @@ export interface EvaluatedQuery {
  */
 export const evaluateAppQuery = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams">,
+  by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>,
   app: unknown,
   request: string,
   deadline: number,
@@ -1432,7 +1459,8 @@ export const evaluateAppQuery = async (
  */
 export const invokeAppAction = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams">,
+  by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>,
   app: string,
   call: FunctionRequest,
   {

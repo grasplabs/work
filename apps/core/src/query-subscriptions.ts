@@ -16,6 +16,7 @@ import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 
 import { operationRoles } from "./app-access.ts";
 import {
+  callsDecisionQuery,
   callsWorkflowQuery,
   evaluateAppQuery,
   refusalOf,
@@ -298,6 +299,11 @@ interface Evaluation {
    * person's runs of the App change (`#runsChanged`): it reads no store.
    */
   readonly followsRuns: boolean;
+  /**
+   * Whether it is a workflow reference's decision query, read again when
+   * a decision of the App's runs changes (`#decisionsChanged`).
+   */
+  readonly followsDecisions: boolean;
   /** How long it waited for budget last, to wait longer next time. */
   budgetWaitMs: number;
   /** Reads in a row that writes tore (`maxTornReads`). */
@@ -670,6 +676,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       cost: costOf(request),
       window: windowExtentOf(request) !== undefined,
       followsRuns: callsWorkflowQuery(request),
+      followsDecisions: callsDecisionQuery(request),
       budgetWaitMs: 0,
       torn: 0,
       reads: 0,
@@ -1561,7 +1568,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       }
     };
     const watcher = Object.assign(
-      (revoked: boolean, runsChanged = false, versionChanged = false): void => {
+      (
+        revoked: boolean,
+        runsChanged = false,
+        versionChanged = false,
+        decisionsChanged = false
+      ): void => {
         // Once it no longer follows, it says it is gone, so the host drops
         // it even if core's word that it let go never arrived.
         if (!current()) {
@@ -1575,6 +1587,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         }
         if (versionChanged) {
           this.#versionChanged(app);
+        }
+        if (decisionsChanged) {
+          this.#decisionsChanged(app);
         }
       },
       {
@@ -1706,6 +1721,19 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   #runsChanged(app: AppId): void {
     for (const evaluation of this.#evaluations.values()) {
       if (evaluation.app === app && evaluation.followsRuns) {
+        this.#changed(evaluation);
+      }
+    }
+  }
+
+  /**
+   * A decision of a run `app` started changed (run-changes.ts): each of
+   * the App's decision queries followed here is read again, gathered and
+   * charged as `#runsChanged`'s are.
+   */
+  #decisionsChanged(app: AppId): void {
+    for (const evaluation of this.#evaluations.values()) {
+      if (evaluation.app === app && evaluation.followsDecisions) {
         this.#changed(evaluation);
       }
     }
