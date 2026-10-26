@@ -19,6 +19,7 @@ import type {
   CatalogLogo,
   CatalogTool,
   ConnectorContract,
+  NativeOperation,
   ConnectApi,
   ConnectCall,
   ConnectionOwner,
@@ -82,7 +83,11 @@ import {
   startToolkitConnection,
 } from "./composio-connections.ts";
 import { connectionOwners } from "./connections.ts";
-import { actionShape, connectorContract } from "./contracts.ts";
+import {
+  actionShape,
+  connectorContract,
+  nativeOperation,
+} from "./contracts.ts";
 import { requireDecision } from "./decisions.ts";
 import {
   directoryConnections,
@@ -512,6 +517,18 @@ export default class Connect
    */
   async actionShape(request: unknown): Promise<ActionShape> {
     return await actionShape(this.env, request);
+  }
+
+  // A native action a host catalog contract describes by JSON Schema
+  // (GRA-982): confirmed from the release's manifests.
+
+  // RPC exposes prototype methods only, so this can't be static.
+  // oxlint-disable-next-line class-methods-use-this
+  async nativeOperation(request: unknown): Promise<NativeOperation> {
+    // Read from the manifests at once; awaited first, so what it throws
+    // is a rejection, as every other method's refusal is.
+    await Promise.resolve();
+    return nativeOperation(request);
   }
 
   // Held actions (src/pending.ts). Core names the person from their

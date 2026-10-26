@@ -3,16 +3,20 @@ import {
   actionShapeRequestSchema,
   connectErrors,
   connectorContractRequestSchema,
+  nativeOperationRequestSchema,
 } from "@grasp-os/shared/connect";
 import type {
   ActionShape,
   ConnectorContract,
   ConnectorContractAction,
+  NativeOperation,
 } from "@grasp-os/shared/connect";
+import { canonicalJson } from "@grasp-os/shared/json";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
-import { nativeConnector } from "./bundled-connectors.ts";
+import { nativeConnector, nativeConnectors } from "./bundled-connectors.ts";
 import {
   composioContract,
   composioContractPrefix,
@@ -184,4 +188,47 @@ export const actionShape = async (
     throw connectErrors.create("connect.action_not_found");
   }
   return { readOnly: declared.readOnly, inputs: [...declared.input], provider };
+};
+
+/** `text` (JSON) canonically, or undefined if it isn't JSON. */
+const canonicalOf = (text: string): string | undefined => {
+  try {
+    const parsed = z.json().safeParse(JSON.parse(text));
+    return parsed.success ? canonicalJson(parsed.data) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The native action of this release `request` describes exactly (GRA-982):
+ * its tool, and the input and output JSON Schemas its connector generates,
+ * canonically equal. What lets a host catalog contract carry a schema with
+ * patterns: only ones a connector reviewed in this repository makes. Read
+ * from the manifests alone; a Composio tool never qualifies.
+ */
+export const nativeOperation = (request: unknown): NativeOperation => {
+  const parsed = nativeOperationRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const { tool } = parsed.data;
+  const input = canonicalOf(parsed.data.input);
+  const output = canonicalOf(parsed.data.output);
+  if (input !== undefined && output !== undefined) {
+    for (const { manifest } of nativeConnectors()) {
+      for (const [contract, served] of generatedContracts(manifest)) {
+        for (const action of served.values()) {
+          if (
+            action.tool === tool &&
+            canonicalJson(action.declared.contract.input) === input &&
+            canonicalJson(action.declared.contract.output) === output
+          ) {
+            return { contract, readOnly: action.declared.readOnly };
+          }
+        }
+      }
+    }
+  }
+  throw connectErrors.create("connect.contract_not_found");
 };
