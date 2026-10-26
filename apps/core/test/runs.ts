@@ -368,20 +368,33 @@ export const admittedFreely = async (): Promise<AttemptAdmission> =>
  * What `run` returns, with core's database failing one read of the quota
  * policy meanwhile, as D1 can for a moment, and whether one failed: the
  * first, or the one after `skip` reads went through (a run's load may
- * read the policy for more than its step limit).
+ * read the policy for more than its step limit). With `by`, the first
+ * read made by that function of core's alone (`stepLimitOf`): while runs
+ * wait and wake, other reads of the policy come and go in their own time
+ * (a share's wake, an attempt's admission), so counting reads to reach
+ * one in particular races them.
  */
 export const withPolicyReadFailingOnce = async <Result>(
   run: () => Promise<Result>,
-  { skip = 0 }: { skip?: number } = {}
+  { skip = 0, by }: { skip?: number; by?: string } = {}
 ): Promise<{ failed: boolean; value: Result }> => {
   const database = env.DB;
   let failed = false;
   let passed = 0;
+  // A frame of `by`'s own, as V8 names it in a stack, awaited or not.
+  const frame =
+    by === undefined
+      ? undefined
+      : new RegExp(`\\bat (?:async )?${by} \\(`, "u");
   env.DB = new Proxy(database, {
     get: (target, property) => {
       if (property === "prepare") {
         return (query: string) => {
-          if (!failed && query.includes("quota_policies")) {
+          if (
+            !failed &&
+            query.includes("quota_policies") &&
+            (frame === undefined || frame.test(new Error("probe").stack ?? ""))
+          ) {
             if (passed < skip) {
               passed += 1;
               return target.prepare(query);
