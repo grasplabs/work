@@ -447,8 +447,15 @@ const heardKey = (who: string): string => `${who}:heard`;
 export interface DrawInput {
   person: string;
   kind: "own" | "lead";
-  /** When they last agreed to something new: what `drawn` is told once it is drawn. */
+  /** When they last agreed to something new. */
   agreedAt: string;
+  /**
+   * Their agreement's generation as it was drawn from (`agreedAt` and how
+   * often something they approved stopped counting, `#drawGeneration`):
+   * what `drawn` is told once it is drawn and a map keeps as `mappedFrom`,
+   * so two take-backs in one millisecond still differ.
+   */
+  generation: string;
   facts: { tag: FactTag; record: string }[];
 }
 
@@ -1871,9 +1878,11 @@ export class Onboarding extends DurableObject<Env> {
       .where(
         and(
           isNotNull(interviewStates.agreedAt),
+          // Drawn from another generation than theirs now: a later
+          // agreement, or a take-back, however close in time.
           or(
             isNull(interviewStates.drawnAt),
-            lt(interviewStates.drawnAt, interviewStates.agreedAt)
+            sql`${interviewStates.drawnAt} IS NOT ${interviewStates.agreedAt} || '|' || ${interviewStates.revocations}`
           )
         )
       )
@@ -1901,18 +1910,20 @@ export class Onboarding extends DurableObject<Env> {
       person,
       kind: state.kind,
       agreedAt: state.agreedAt,
+      generation: `${state.agreedAt}|${state.revocations}`,
       facts: facts.map(({ tag, record }) => ({ tag, record })),
     };
   }
 
   /**
-   * Notes that what someone agreed to by `agreedAt` was drawn: what they
-   * agree to after that is due again.
+   * Notes that what someone agreed to, as of their agreement's generation
+   * `generation` (`DrawInput.generation`), was drawn: what they agree to
+   * or take back after that is due again.
    */
-  drawn(person: string, agreedAt: string): void {
+  drawn(person: string, generation: string): void {
     this.#db
       .update(interviewStates)
-      .set({ drawnAt: agreedAt })
+      .set({ drawnAt: generation })
       .where(eq(interviewStates.person, person))
       .run();
   }
@@ -4852,7 +4863,9 @@ export class Onboarding extends DurableObject<Env> {
         !waiting.some((work) => person in work.agreed) &&
         this.#agreedAt(person) === agreedAt
       ) {
-        this.drawn(person, agreedAt);
+        // As of their generation now: a take-back since the drawing began
+        // kept it from being kept (`#goneSince`).
+        this.drawn(person, this.#drawGeneration(person) ?? agreedAt);
       }
     }
     if (drawn !== null) {
@@ -4992,7 +5005,7 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Whether a team's map stands on what its lead's facts are now: drawn
    * from their agreement, and nothing they approved stopped counting since
-   * (an edit or a withdrawal, `revokedAt`). A team without a lead has no
+   * (an edit or a withdrawal, `revocations`). A team without a lead has no
    * map of anyone's.
    */
   #mapBacked(teamId: string): boolean {
@@ -5008,18 +5021,19 @@ export class Onboarding extends DurableObject<Env> {
     const [state] = this.#db
       .select({
         agreedAt: interviewStates.agreedAt,
-        revokedAt: interviewStates.revokedAt,
+        revocations: interviewStates.revocations,
       })
       .from(interviewStates)
       .where(eq(interviewStates.person, team.lead))
       .all();
     const from = row?.mappedFrom ?? null;
-    const agreedAt = state?.agreedAt ?? null;
-    const revokedAt = state?.revokedAt ?? null;
+    // Drawn from the generation whose take-backs are all there are: their
+    // count, not a time, so two in one millisecond still tell apart.
     return (
       from !== null &&
-      agreedAt !== null &&
-      (revokedAt === null || from >= revokedAt)
+      state !== undefined &&
+      state.agreedAt !== null &&
+      from.slice(from.lastIndexOf("|") + 1) === String(state.revocations)
     );
   }
 
@@ -5512,9 +5526,10 @@ export class Onboarding extends DurableObject<Env> {
     if (input === null) {
       // Due with nothing agreed to draw from (agreed before facts were
       // marked agreed): drawn as it is, so it isn't due again and again.
-      const agreedAt = team.lead === null ? null : this.#agreedAt(team.lead);
-      if (team.lead !== null && agreedAt !== null) {
-        this.drawn(team.lead, agreedAt);
+      const generation =
+        team.lead === null ? null : this.#drawGeneration(team.lead);
+      if (team.lead !== null && generation !== null) {
+        this.drawn(team.lead, generation);
       }
       return;
     }
@@ -5625,16 +5640,16 @@ export class Onboarding extends DurableObject<Env> {
             .run();
         }
       }
-      const agreedAt = this.#agreedAt(input.person);
-      this.drawn(input.person, input.agreedAt);
+      const generation = this.#drawGeneration(input.person);
+      this.drawn(input.person, input.generation);
       this.#db
         .update(teams)
         .set({
           does: map.does === "" ? still.does : map.does,
-          ...(agreedAt === input.agreedAt
+          ...(generation === input.generation
             ? {
                 mappedAt: sql`coalesce(${teams.mappedAt}, ${at})`,
-                mappedFrom: input.agreedAt,
+                mappedFrom: input.generation,
               }
             : {}),
         })
@@ -5656,9 +5671,9 @@ export class Onboarding extends DurableObject<Env> {
         .delete(drawFailures)
         .where(eq(drawFailures.item, `team:${teamId}`))
         .run();
-      const agreedAt = this.#agreedAt(lead);
-      if (agreedAt !== null) {
-        this.drawn(lead, agreedAt);
+      const generation = this.#drawGeneration(lead);
+      if (generation !== null) {
+        this.drawn(lead, generation);
       }
       this.#db
         .update(teams)
@@ -5667,6 +5682,25 @@ export class Onboarding extends DurableObject<Env> {
         .run();
       this.#noted(lead, "map.gave_up", at, "grasp");
     });
+  }
+
+  /**
+   * Someone's agreement's generation (`DrawInput.generation`): when they
+   * last agreed, and how often something they approved stopped counting.
+   * Null while nothing they agreed to counts.
+   */
+  #drawGeneration(person: string): string | null {
+    const [state] = this.#db
+      .select({
+        agreedAt: interviewStates.agreedAt,
+        revocations: interviewStates.revocations,
+      })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, person))
+      .all();
+    return state?.agreedAt === null || state === undefined
+      ? null
+      : `${state.agreedAt}|${state.revocations}`;
   }
 
   #agreedAt(person: string): string | null {

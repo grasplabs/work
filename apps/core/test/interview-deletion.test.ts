@@ -377,6 +377,21 @@ const goneFromStore = async (person: string): Promise<void> => {
   throw new Error("The interview was not deleted");
 };
 
+/** Lea's interview as she saves it at the read-back, with `facts`. */
+const leaSaves = (facts: InterviewFact[]): InterviewProgress => ({
+  person: "completed",
+  told: true,
+  mode: "type",
+  lines: [{ from: "stephen", text: "What starts one?" }],
+  facts,
+  phase: "readback",
+  wants: "end",
+  startedAt: Date.now(),
+  confirmed: facts.length,
+  adding: false,
+  addedAt: 0,
+});
+
 describe("deleting an interview", { timeout: 180_000 }, () => {
   beforeEach(holdAlarm);
 
@@ -956,6 +971,56 @@ describe(
         statements: edited.statements.length,
         redrawn: redrawn.drawings !== null,
       }).toStrictEqual({ edited: null, statements: 2, redrawn: true });
+    });
+
+    it("a lead's second take-back in the millisecond their map was drawn from makes it due again, and keeps the team's work out of the brain until then (T2, maps)", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      const said = sentinels();
+      await inTheBrain(ids, said);
+      const lea = await openLink(ids.lea);
+      const once = [
+        fact("l1", "work", "Max, Mia and Mo handle new tickets."),
+        fact("l2", "system", "The team lives in Zendesk and a shared rota."),
+      ];
+      // Every clock from here reads the same millisecond.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.parse("2026-10-26T09:00:00.000Z"));
+      try {
+        // Lea puts a line right and approves it: the map is drawn again
+        // from that, in this millisecond.
+        await onLink({
+          action: "save",
+          ...lea,
+          version: 1,
+          progress: leaSaves(once),
+        });
+        await approve(lea, once);
+        await answering([mapReply(ids)], async () => await store.drawNext());
+        // She puts the same line right again, in the same millisecond:
+        // what the map was drawn from no longer counts.
+        const twice = [
+          once[0] ?? fact("l1", "work", ""),
+          fact("l2", "system", "The team lives in Zendesk alone."),
+        ];
+        await onLink({
+          action: "save",
+          ...lea,
+          version: 2,
+          progress: leaSaves(twice),
+        });
+        await store.purgeBrain();
+      } finally {
+        vi.useRealTimers();
+      }
+      const records = await kept(ids);
+      const due = await store.drawsDue();
+      expect({
+        // Drawn from what no longer counts: due to be drawn again, and
+        // the team's work kept out of the brain until it is.
+        due: due.includes(ids.lea),
+        workflows: records.some(({ type }) => type === "workflow"),
+      }).toStrictEqual({ due: true, workflows: false });
     });
 
     it("keeps the voice's lines of a withdrawn interview waiting while the cache can't be reached, and takes them out once it can (T5)", async () => {
