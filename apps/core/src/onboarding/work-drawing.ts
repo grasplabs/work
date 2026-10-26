@@ -228,15 +228,37 @@ const whoseOf = (of: string | undefined): "me" | "team" | "unknown" =>
   of === "me" || of === "team" ? of : "unknown";
 
 /** One person's own numbers, never another's: how many, how long and how many wrong. */
+/**
+ * The quickest, a normal and the longest time as they were given, none
+ * filled in from another: a single one is the normal one.
+ */
+const givenTimesOf = (
+  value: readonly number[] | undefined
+): [number | null, number | null, number | null] => {
+  const given = (value ?? []).slice(0, 3).map((each) => countOf(each));
+  const [quickest = null, normal = null, longest = null] =
+    given.length === 1 ? [null, given[0] ?? null, null] : given;
+  return [quickest, normal, longest];
+};
+
 const numbersOf = (
   own: Numbers | undefined,
   inUnit: (minutes: number) => number
-): Pick<Told, "volume" | "volumeOf" | "takes" | "wrong"> => {
+): Pick<Told, "volume" | "volumeOf" | "takes" | "wrong" | "gave"> => {
   const quiet = countOf(own?.quiet);
   const busy = countOf(own?.busy);
   const took = timesOf(own?.minutes);
   const counted = quiet !== null || busy !== null;
+  const said = lineOf(own?.per, 10);
+  const [quickest, normal, longest] = givenTimesOf(own?.minutes);
+  const unit = (each: number | null) => (each === null ? null : inUnit(each));
   return {
+    gave: {
+      quiet,
+      busy,
+      per: said === "month" || said === "week" ? said : null,
+      takes: [unit(quickest), unit(normal), unit(longest)],
+    },
     // A normal week, when no quiet one was given, is the low end.
     volume: counted
       ? [quiet ?? busy ?? 0, Math.max(busy ?? quiet ?? 0, quiet ?? 0)]
@@ -331,7 +353,8 @@ export const drawnOf = (
           (each) => lineOf(each.person, 40) === person
         );
         const minutes = timesOf(given?.minutes);
-        return minutes === null ? [] : [{ step: index, minutes }];
+        const [, normal] = givenTimesOf(given?.minutes);
+        return minutes === null ? [] : [{ step: index, minutes, normal }];
       }),
       caseShares: differently.flatMap((each, index) => {
         const given = (each.out_of_ten_by ?? []).find(
@@ -543,7 +566,25 @@ export const drawnWorkSchema = z.object({
       term: z.boolean(),
       out: z.array(z.string()),
       stepMinutes: z
-        .array(z.object({ step: z.number(), minutes: triple }))
+        .array(
+          z.object({
+            step: z.number(),
+            minutes: triple,
+            normal: z.number().nullable().optional(),
+          })
+        )
+        .optional(),
+      gave: z
+        .object({
+          quiet: z.number().nullable(),
+          busy: z.number().nullable(),
+          per: z.enum(["week", "month"]).nullable(),
+          takes: z.tuple([
+            z.number().nullable(),
+            z.number().nullable(),
+            z.number().nullable(),
+          ]),
+        })
         .optional(),
       caseShares: z
         .array(z.object({ case: z.number(), outOfTen: z.number() }))

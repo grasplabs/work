@@ -161,17 +161,30 @@ const medianOf = (values: readonly number[]): number | undefined =>
 const shownMedian = (values: readonly number[]): number | null =>
   values.length >= minTeamShown ? (medianOf(values) ?? null) : null;
 
-/** How often, by whose count it is: a median of quiet and of busy, each over five or more. */
+/**
+ * How often, by whose count it is: a median of the quiet weeks (or months)
+ * and of the busy ones, each over five or more who gave that one
+ * themselves and were checked to (`numbers.volume`); one side alone
+ * stands for both. None for a count with neither.
+ */
 const volumesOf = (
-  told: readonly Told[],
+  told: readonly (readonly [string, Told])[],
+  numbers: Support["numbers"]["volume"],
   per: DrawnWork["per"]
 ): WorkflowVersionRecord["volumes"] =>
   (["me", "team", "unknown"] as const).flatMap((of) => {
-    const said = told.flatMap(({ volume, volumeOf }) =>
-      volume !== null && (volumeOf ?? "unknown") === of ? [volume] : []
-    );
-    const low = shownMedian(said.map(([quiet]) => quiet));
-    const high = shownMedian(said.map(([, busy]) => busy));
+    const counted = numbers[of];
+    const given = (people: readonly string[], value: "quiet" | "busy") =>
+      told.flatMap(([person, { gave }]) => {
+        const own = gave?.[value] ?? null;
+        return people.includes(person) && own !== null ? [own] : [];
+      });
+    const quiets = given(counted.quiet, "quiet");
+    const busies = given(counted.busy, "busy");
+    const quiet = shownMedian(quiets);
+    const busy = shownMedian(busies);
+    const low = quiet ?? busy;
+    const high = busy ?? quiet;
     return low === null || high === null
       ? []
       : [
@@ -180,11 +193,46 @@ const volumesOf = (
             per,
             low,
             high: Math.max(low, high),
-            people: said.length,
+            people: Math.max(quiets.length, busies.length),
             basis: "estimated" as const,
           },
         ];
   });
+
+/**
+ * How long one whole one takes, in the drawing's unit: a median of the
+ * quickest and of the longest, each over five or more who gave that one
+ * themselves and were checked to; one end alone stands for both, and a
+ * normal one alone for both too. None with none of them.
+ */
+const takesOf = (
+  toldOf: (people: readonly string[]) => Told[],
+  numbers: Support["numbers"]["takes"],
+  unit: DrawnWork["unit"]
+): WorkflowVersionRecord["takes"] => {
+  const given = (people: readonly string[], at: 0 | 1 | 2) =>
+    toldOf(people).flatMap(({ gave }) => {
+      const own = gave?.takes[at] ?? null;
+      return own === null ? [] : [own];
+    });
+  const quickests = given(numbers.quickest, 0);
+  const normals = given(numbers.normal, 1);
+  const longests = given(numbers.longest, 2);
+  const quickestShown = shownMedian(quickests);
+  const longestShown = shownMedian(longests);
+  const normalShown = shownMedian(normals);
+  const quickest = quickestShown ?? longestShown ?? normalShown;
+  const longest = longestShown ?? quickestShown ?? normalShown;
+  return quickest === null || longest === null
+    ? null
+    : {
+        unit,
+        quickest,
+        longest: Math.max(quickest, longest),
+        people: Math.max(quickests.length, longests.length, normals.length),
+        basis: "estimated",
+      };
+};
 
 /**
  * A drawing as the brain keeps it (GRA-1084): only the parts five or more
@@ -228,16 +276,13 @@ const versionOf = (
     const before = kept.filter((each) => each.index <= index).length;
     return before === 0 ? null : before - 1;
   };
-  // Each number only from the people checked to have given it.
-  const takes = toldOf(numbers.takes).flatMap(({ takes: own }) =>
-    own === null ? [] : [own]
-  );
+  // Each number only from the people checked to have given it, and only
+  // as they gave it themselves: never a part filled in from another.
   const wrongs = toldOf(numbers.wrong).flatMap(({ wrong: own }) =>
     own === null ? [] : [own]
   );
   const wrong = shownMedian(wrongs);
-  const quickest = shownMedian(takes.map(([each]) => each));
-  const longest = shownMedian(takes.map((each) => each[2]));
+  const takes = takesOf(toldOf, numbers.takes, drawn.unit);
   const { differs } = drawn;
   const differsKept =
     differs !== null &&
@@ -252,8 +297,10 @@ const versionOf = (
     steps: kept.map(({ step: { text, documented }, index }) => {
       const minutes = shownMedian(
         toldOf(numbers.stepMinutes[index] ?? []).flatMap(({ stepMinutes }) =>
-          (stepMinutes ?? []).flatMap(({ step, minutes: own }) =>
-            step === index ? [own[1]] : []
+          (stepMinutes ?? []).flatMap(({ step, normal }) =>
+            step === index && normal !== undefined && normal !== null
+              ? [normal]
+              : []
           )
         )
       );
@@ -313,17 +360,8 @@ const versionOf = (
             why: differs.why,
             because: "",
           },
-    volumes: volumesOf(toldOf(numbers.volume), drawn.per),
-    takes:
-      quickest === null || longest === null
-        ? null
-        : {
-            unit: drawn.unit,
-            quickest,
-            longest: Math.max(quickest, longest),
-            people: takes.length,
-            basis: "estimated",
-          },
+    volumes: volumesOf(tellers, numbers.volume, drawn.per),
+    takes,
     wrong:
       wrong === null
         ? null

@@ -601,10 +601,46 @@ describe("the work as drawn", () => {
       // The case's text holds no number of anyone's.
       when: drawn.differently.map(({ when }) => when),
     }).toStrictEqual({
-      lisa: [{ step: 0, minutes: [2, 4, 9] }],
+      lisa: [{ step: 0, minutes: [2, 4, 9], normal: 4 }],
       tim: [{ case: 0, outOfTen: 2 }],
       bram: [[], []],
       when: ["the client number is missing"],
+    });
+  });
+
+  it("keeps each person's numbers as they gave them, no part filled in from another", () => {
+    const drawn = drawnOf(
+      {
+        steps: [
+          step("Look it up.", {
+            minutes_by: [{ person: "lisa", minutes: [-1, 12, -1] }],
+          }),
+        ],
+        numbers: [
+          {
+            person: "lisa",
+            quiet: -1,
+            busy: 50,
+            of: "me",
+            per: "week",
+            minutes: [-1, 12, -1],
+          },
+          { person: "tim", quiet: 30, of: "team", per: "month", minutes: [5] },
+        ],
+      },
+      tellers,
+      "2026-10-22T00:00:00.000Z"
+    );
+    expect({
+      lisa: [drawn.told.lisa?.gave, drawn.told.lisa?.stepMinutes?.[0]?.normal],
+      tim: drawn.told.tim?.gave,
+    }).toStrictEqual({
+      lisa: [
+        { quiet: null, busy: 50, per: "week", takes: [null, 12, null] },
+        12,
+      ],
+      // A single time is a normal one.
+      tim: { quiet: 30, busy: null, per: "month", takes: [null, 5, null] },
     });
   });
 

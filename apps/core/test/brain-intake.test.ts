@@ -1300,6 +1300,106 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
     });
   });
 
+  it("never counts a month's count towards a week's five", async () => {
+    const ids = await givenWith((each) => {
+      const five = [each.max, each.mia, each.mo, each.noor, each.pim];
+      return drawingReply({
+        steps: [{ text: "Open the ticket.", by: five }],
+        // Max counts a month; the other four, a week: four, not five.
+        numbers: five.map((person, index) => ({
+          person,
+          quiet: index === 0 ? 400 : 30 + index,
+          busy: index === 0 ? 600 : 50 + index,
+          of: "me",
+          per: index === 0 ? "month" : "week",
+        })),
+      });
+    });
+    const member = await signedInApi(idp, "user");
+    const read = await ticketsDrawingFor(member.api, ids);
+    expect(read.volumes).toStrictEqual([]);
+  });
+
+  it("counts a number someone gave only in part: a busy week alone, a normal time alone", async () => {
+    const ids = await team();
+    await mapped(ids);
+    await told(ids);
+    const five = [ids.max, ids.mia, ids.mo, ids.noor, ids.pim];
+    for (const [index, person] of five.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+      await agree(
+        person,
+        [
+          fact(
+            `n${index}`,
+            "number",
+            `In a busy week I do about ${50 + index}. A normal one takes me ${12 + index} minutes, opening it ${4 + index}.`
+          ),
+        ],
+        1
+      );
+    }
+    await answering(
+      [
+        drawingReply({
+          steps: [
+            {
+              text: "Open the ticket.",
+              by: five,
+              minutes_by: five.map((person, index) => ({
+                person,
+                minutes: [-1, 4 + index, -1],
+              })),
+            },
+          ],
+          numbers: five.map((person, index) => ({
+            person,
+            quiet: -1,
+            busy: 50 + index,
+            of: "me",
+            per: "week",
+            minutes: [-1, 12 + index, -1],
+          })),
+        }),
+      ],
+      async () => await onboardingStore(env).drawNext()
+    );
+    // The checker says yes to a number only when the person's facts give
+    // every value it names, and each kind of value it names.
+    await intake(ids, [zendeskClaim], (text, facts, work) => {
+      if (work === undefined) {
+        return true;
+      }
+      const said = facts.join(" ");
+      const values = text.match(/\d+/gu) ?? [];
+      return (
+        values.every((value) => said.includes(value)) &&
+        ["quiet", "quickest", "longest"].every(
+          (kind) => !text.includes(kind) || said.includes(kind)
+        )
+      );
+    });
+    const member = await signedInApi(idp, "user");
+    const brain = await member.api.brain.read();
+    const drawing = brain.workflows
+      .find(({ teamId }) => teamId === `team-${ids.team}`)
+      ?.drawings?.at(-1);
+    expect({
+      minutes: drawing?.steps.map(({ minutes }) => minutes?.normal ?? null),
+      volumes: drawing?.volumes.map(({ low, high, people }) => [
+        low,
+        high,
+        people,
+      ]),
+      takes: [drawing?.takes?.quickest, drawing?.takes?.longest],
+    }).toStrictEqual({
+      // The medians of what they gave: 4 to 8, 50 to 54, 12 to 16.
+      minutes: [6],
+      volumes: [[52, 52, 5]],
+      takes: [14, 14],
+    });
+  });
+
   it("shows each count's median on its own: five giving their own count are enough, however one other counts", async () => {
     // Max gives the whole team's count; the other five, their own.
     const ids = await givenWith((each) =>

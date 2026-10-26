@@ -544,10 +544,34 @@ export interface Told {
   example: string | null;
   term: boolean;
   out: string[];
-  /** Their own minutes for each step they gave them for, by step: quickest, normal, longest. */
-  stepMinutes?: { step: number; minutes: [number, number, number] }[];
+  /**
+   * Their own minutes for each step they gave them for, by step: quickest,
+   * normal, longest, filled in from each other; and the normal one only
+   * as they gave it themselves, none when they didn't (`normal`).
+   */
+  stepMinutes?: {
+    step: number;
+    minutes: [number, number, number];
+    normal?: number | null;
+  }[];
   /** Their own share out of ten of each case off the normal path they gave one for, by case. */
   caseShares?: { case: number; outOfTen: number }[];
+  /**
+   * Their numbers as they gave them themselves, each part on its own and
+   * never filled in from another (GRA-1084): what a median over five or
+   * more is taken from. Missing on a drawing from before it was kept.
+   */
+  gave?: GivenNumbers;
+}
+
+/** One person's own numbers for a piece of work, each part only as they gave it (`Told.gave`). */
+export interface GivenNumbers {
+  quiet: number | null;
+  busy: number | null;
+  /** Whether quiet and busy are a week's or a month's. */
+  per: "week" | "month" | null;
+  /** How long one whole one takes them, in the drawing's unit: quickest, normal, longest. */
+  takes: [number | null, number | null, number | null];
 }
 
 /** A step as drawn: one instruction, who does it, where, and how long people said one takes. */
