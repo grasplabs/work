@@ -969,15 +969,29 @@ const stepConfig = {
 };
 
 /**
- * `error`, an attempt's failure, as the engine takes it once the attempt
- * was the step's last that may run (`ran` past {@link stepRetries}): never
- * retried, whatever the engine has left of its own attempts, its name the
- * engine's for that (`toStepError`) and its message and code kept.
+ * Which of its step's attempts that ran an attempt is: as its admission
+ * counted it, or, with nothing to admit it (an App's test run), the
+ * engine's number. None for one core cut off unadmitted, which ran nothing.
  */
+const ranOf = (
+  admission: { readonly ran?: number } | undefined,
+  told: { readonly attempt: number }
+): number | undefined =>
+  admission === undefined ? undefined : (admission.ran ?? told.attempt);
+
 /** Whether attempt `ran` of a step is past those that may run. */
 const overRetries = (ran: number | undefined): boolean =>
   ran !== undefined && ran > stepRetries + 1;
 
+/**
+ * `error`, an attempt's failure, as the engine takes it once the attempt
+ * was the step's last that may run (`ran` past {@link stepRetries}): never
+ * retried, whatever the engine has left of its own attempts, its name the
+ * engine's for that (`toStepError`), its message and code kept. A timeout
+ * stays one: one with no code of its own is `operation.deadline_exceeded`,
+ * which a catch reads as a timeout as it does the name (resource-errors.ts),
+ * so a once-effect call that timed out stays one no catch takes (#889).
+ */
 const lastRetry = (error: unknown, ran: number | undefined): unknown => {
   if (
     ran === undefined ||
@@ -987,12 +1001,12 @@ const lastRetry = (error: unknown, ran: number | undefined): unknown => {
   ) {
     return error;
   }
-  const code: unknown = Reflect.get(error, "code");
-  return namedError(
-    "NonRetryableError",
-    error.message,
-    typeof code === "string" ? code : undefined
-  );
+  const own: unknown = Reflect.get(error, "code");
+  let code = typeof own === "string" ? own : undefined;
+  if (code === undefined && error.name === "TimeoutError") {
+    code = "operation.deadline_exceeded";
+  }
+  return namedError("NonRetryableError", error.message, code);
 };
 
 /**
@@ -2047,7 +2061,7 @@ export class ResourceRunHost
       // Past the step's attempts that may run: the last of them ended with
       // no outcome core saw (the engine timed it out, or its activation
       // stopped), and the engine tries again, as its own count allows.
-      if (admission !== undefined && overRetries(admission.ran)) {
+      if (overRetries(ranOf(admission, told))) {
         throw workflowErrors.create("workflow.too_many_attempts", {
           max: stepRetries + 1,
         });
@@ -2098,7 +2112,7 @@ export class ResourceRunHost
       }
       return this.#outcomeOf(run, attempt, result, hostMade);
     } catch (error) {
-      throw lastRetry(error, admission?.ran);
+      throw lastRetry(error, ranOf(admission, told));
     } finally {
       // Settled last, however it ended: what it held of its lineage's time
       // turns into what it used, its evaluations' and its record's checks'

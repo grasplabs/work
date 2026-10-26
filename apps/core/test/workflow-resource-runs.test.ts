@@ -2040,7 +2040,11 @@ describe(
         // Each that ran, in its own activation: the third is the last.
         ran: new Set(receipts.map(({ attempt }) => attempt)).size,
         settled: receipts.every(({ settled }) => settled === 1),
-      }).toStrictEqual({ status: "failed", ran: 3, settled: true });
+      }).toStrictEqual({
+        status: "failed",
+        ran: 3,
+        settled: true,
+      });
     });
 
     it("fails a run whose expressions would take its lineage past its host calls, counting on across a CPU kill and the retry under the same key", async () => {

@@ -2467,8 +2467,12 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
       requests: gateway.requests.length,
     }).toStrictEqual({
       // Nothing kept says attempt 1 never started: refused, as left open,
-      // and never tried again: its call was tried.
-      retried: { name: "NonRetryableError", code: null },
+      // and never tried again: its call was tried. Still a timeout, which
+      // no catch takes (#889).
+      retried: {
+        name: "NonRetryableError",
+        code: "operation.deadline_exceeded",
+      },
       ran: ["first attempt"],
       requests: 1,
     });
@@ -2540,7 +2544,10 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
       refused: { name: "Error", code: "model.failed" },
       // As the attempt that ran failed, and never tried again after it.
       retried: { name: "NonRetryableError", code: "model.failed" },
-      leftOpen: { name: "NonRetryableError", code: null },
+      leftOpen: {
+        name: "NonRetryableError",
+        code: "operation.deadline_exceeded",
+      },
       ran: ["first attempt"],
       requests: 1,
     });
