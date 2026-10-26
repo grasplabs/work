@@ -1,9 +1,6 @@
 import { signCapability } from "@grasp-os/shared/capability";
-import type { PendingKey } from "@grasp-os/shared/connect";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { workContextSchema } from "@grasp-os/shared/permissions";
-import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -12,26 +9,28 @@ import { appHost } from "../src/durable-objects.ts";
 import { waitKeyOf } from "../src/workflows/host.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import {
-  consentCode,
-  graphDraftsUrl,
-  graphLoseUrl,
-  graphSentUrl,
-} from "./connect-providers.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { endLiveRuns, finished, liveStatus, runInstance } from "./runs.ts";
-import { acmeTenant } from "./sign-in-config.ts";
+import { outcome as codeOf } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 import {
-  openRpc,
-  outcome as codeOf,
-  routed,
-  signedIn,
-  signedInWithRole,
-  staffPerson,
-} from "./sign-in.ts";
-import { connectDb, testBinding } from "./test-env.ts";
+  day,
+  connectShared,
+  mailboxOf,
+  sentFrom,
+  receiptsFrom,
+  exportedObligations,
+  mailer,
+  withResolvedDone,
+  resolutions,
+  callReceipts,
+  listedFor,
+  statusOf,
+  asleep,
+  unknownOutcomesOf,
+} from "./unknown-outcome-runs.ts";
 import {
   appWith,
   invoiceMail,
@@ -54,267 +53,12 @@ import {
 // before. (Apart from held-runs.test.ts: one file holds only so many runs'
 // worth of workers.)
 
+// Here: what its person, or anyone else, says of it, and what each answer
+// does; how a hold ends by its deadline or by connect's recovery is
+// unknown-outcome-holds.test.ts's.
+
 const idp = mockIdp();
-
-const day = 24 * 60 * 60 * 1000;
-
-/** A signed-in person's API, on a connection of their own. */
-const personApi = async (role: Role) => {
-  const person = await signedInWithRole(idp, role);
-  const { core } = await openRpc(person.session);
-  return { ...person, api: core.authenticate() };
-};
-
-type Api = Awaited<ReturnType<typeof personApi>>;
-
-const isFetcher = (value: unknown): value is Fetcher =>
-  typeof value === "object" && value !== null && "fetch" in value;
-
-/** The outside systems connect reaches (test/connect-providers.ts). */
-const providers = (): Fetcher => {
-  const fetcher = testBinding("CONNECT_PROVIDERS");
-  if (!isFetcher(fetcher)) {
-    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
-  }
-  return fetcher;
-};
-
-/** A shared Microsoft 365 account, connected by `admin`: its ID. */
-const connectShared = async (admin: Api): Promise<string> => {
-  const { url } = await admin.api.connections.start({
-    provider: "microsoft",
-    scope: "shared",
-  });
-  const authorization = new URL(url);
-  const query = new URLSearchParams({
-    code: consentCode(authorization, acmeTenant, `team-${crypto.randomUUID()}`),
-    state: authorization.searchParams.get("state") ?? "",
-  });
-  await routed(`/api/connections/callback?${query.toString()}`, {
-    headers: { cookie: admin.session },
-  });
-  const listed = await admin.api.connections.list();
-  const shared = listed.find((connection) => connection.scope === "shared");
-  if (shared === undefined) {
-    throw new Error("Expected the shared connection");
-  }
-  return shared.id;
-};
-
-/** A mailbox of each test's own, so what Graph does for it is the test's. */
-const mailboxOf = (): string => `invoices-${crypto.randomUUID()}@acme.test`;
-
-/** Has Graph lose the answers of the mailbox's next `writes` writes. */
-const loseAnswers = async (mailbox: string, writes = 1): Promise<void> => {
-  await providers().fetch(graphLoseUrl, {
-    method: "POST",
-    body: JSON.stringify({ mailbox, writes }),
-  });
-};
-
-/** How many mails Graph sent from `mailbox`. */
-const sentFrom = async (mailbox: string): Promise<number> => {
-  const response = await providers().fetch(graphSentUrl);
-  const sent = z
-    .array(z.object({ mailbox: z.string() }))
-    .parse(await response.json());
-  return sent.filter((message) => message.mailbox === mailbox).length;
-};
-
-/**
- * What an auditor names each send from `mailbox` by: the SHA-256 of the tag
- * Graph keeps on the message, its effect key.
- */
-const receiptsFrom = async (mailbox: string): Promise<string[]> => {
-  const response = await providers().fetch(graphSentUrl);
-  const sent = z
-    .array(z.object({ mailbox: z.string(), effectKey: z.string().nullable() }))
-    .parse(await response.json());
-  return await Promise.all(
-    sent
-      .filter((message) => message.mailbox === mailbox)
-      .map(async ({ effectKey }) => await sha256Hex(effectKey ?? ""))
-  );
-};
-
-/** The open obligations a JSON export of the log holds, for `api`. */
-const exportedObligations = async (api: Api["api"]) => {
-  const stream = await api.audit.export(
-    { from: new Date(Date.now() - 60_000).toISOString() },
-    "json"
-  );
-  const exported = z
-    .object({
-      openObligations: z
-        .object({
-          complete: z.boolean(),
-          obligations: z.array(z.record(z.string(), z.unknown())),
-        })
-        .nullable(),
-    })
-    .parse(JSON.parse(await new Response(stream).text()));
-  return exported.openObligations;
-};
-
-/**
- * The open obligations a JSON export holds for Grasp staff, signed in from
- * Grasp's tenant, who read the log as admins.
- */
-const staffExport = async () => {
-  const session = await signedIn(idp, "grasp-staff", staffPerson());
-  const { core } = await openRpc(session);
-  return await exportedObligations(core.authenticate());
-};
-
-/** How many drafts Graph made in `mailbox`. */
-const draftsIn = async (mailbox: string): Promise<number> => {
-  const response = await providers().fetch(
-    `${graphDraftsUrl}?mailbox=${encodeURIComponent(mailbox)}`
-  );
-  return z.object({ drafts: z.number() }).parse(await response.json()).drafts;
-};
-
-/**
- * A workflow `mailer` that calls `action` in its side-effect step, from
- * `mailbox`, under the step's key, with no retries; a call its person said
- * happened answers `{ resolved: true }`, as it has no answer of its own.
- */
-const mailer = (mailbox: string, action = "mail.send") =>
-  workflowFiles(
-    "mailer",
-    `  return await step.do(
-    "send",
-    { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify({ mailbox, subject: invoiceMail.subject, body: "Attached.", to: [invoiceMail.to] })}, retries: { limit: 0 } },
-    async ({ idempotencyKey, input: mail }) => {
-      try {
-        return JSON.parse(((await env.MAIL.call(${JSON.stringify(action)}, mail, { idempotencyKey })) as { output: string }).output);
-      } catch (error) {
-        if ((error as { code?: string }).code === resolvedDone) {
-          return { resolved: true };
-        }
-        throw error;
-      }
-    }
-  );`,
-    { send: { mailbox, sent: true } }
-  );
-
-/** The workflow file, importing what it catches from the SDK. */
-const withResolvedDone = (files: Record<string, string>) =>
-  Object.fromEntries(
-    Object.entries(files).map(([path, source]) => [
-      path,
-      path.endsWith("mailer.ts")
-        ? source.replace(" workflow, z }", " resolvedDone, workflow, z }")
-        : source,
-    ])
-  );
-
-/**
- * An App with `mailer`, allowed `action` on a shared Microsoft 365
- * connection, whose first write from its mailbox Graph carries out and
- * then loses the answer of: the run, started, and the permission's ID.
- */
-const lostRun = async (admin: Api, action = "mail.send") => {
-  const mailbox = mailboxOf();
-  const connectionId = await connectShared(admin);
-  const app = await appWith(admin, withResolvedDone(mailer(mailbox, action)));
-  const permission = await requestGranted(idp, admin, {
-    subject: { type: "app", appId: app },
-    object: { type: "connection", connectionId },
-    actions: [action],
-    binding: "MAIL",
-  });
-  await loseAnswers(mailbox);
-  const run = await admin.api.workflows.start(app, "mailer");
-  return { mailbox, connectionId, app, permission, run };
-};
-
-/** `lostRun`, once its run waits, with the one call of unknown outcome. */
-const waitingRun = async (admin: Api, action = "mail.send") => {
-  const lost = await lostRun(admin, action);
-  await runEvents(lost.run.id, "workflow.run.waiting");
-  const [unknown, ...others] = await admin.api.unknownOutcomes.list();
-  if (unknown === undefined || others.length > 0) {
-    throw new Error("Expected one call of unknown outcome");
-  }
-  return { ...lost, unknown };
-};
-
-/** The resolution events of the log, for the connection `connectionId`. */
-const resolutions = async (connectionId: string) => {
-  const events = await allEvents();
-  return events
-    .filter(
-      ({ action, target }) =>
-        action.startsWith("connection.call.resolve") &&
-        target?.id === connectionId
-    )
-    .map(({ action, actor, detail }) => ({
-      action,
-      actor: actor.type,
-      choice: detail.choice,
-      reason: detail.reason,
-      // Only where the resolution read the call it names.
-      ...(detail.effectKeyHash === undefined
-        ? {}
-        : { effectKeyHash: detail.effectKeyHash }),
-    }));
-};
-
-/** How many calls the log records on the connection `connectionId`. */
-const callsOn = async (connectionId: string): Promise<number> => {
-  const events = await allEvents();
-  return events.filter(
-    ({ action, target }) =>
-      action === "connection.call" && target?.id === connectionId
-  ).length;
-};
-
-/** How each call the log records on `connectionId` ended, and its receipt. */
-const callReceipts = async (connectionId: string) => {
-  const events = await allEvents();
-  return events
-    .filter(
-      ({ action, target }) =>
-        action === "connection.call" && target?.id === connectionId
-    )
-    .map(({ detail }) => ({
-      outcome: detail.outcome,
-      effectKeyHash: detail.effectKeyHash,
-    }));
-};
-
-/** How many calls of unknown outcome are listed for `person`. */
-const listedFor = async (person: Api) => {
-  const listed = await person.api.unknownOutcomes.list();
-  return listed.length;
-};
-
-/** How the run `run` stands, as its person sees it. */
-const statusOf = async (person: Api, run: string) => {
-  const { status } = await person.api.workflows.status(run);
-  return status;
-};
-
-/** Waits `ms` of real time. */
-const elapse = async (ms: number): Promise<void> => {
-  await scheduler.wait(ms);
-};
-
-/**
- * Run `runId`'s status once it is asleep between its checks: `waiting`.
- * A check that comes due runs it for a moment, and it waits on.
- */
-const asleep = async (runId: string): Promise<string> =>
-  await vi.waitFor(
-    async () => {
-      const status = await liveStatus(runId);
-      expect(status).toBe("waiting");
-      return status;
-    },
-    { timeout: 10_000, interval: 100 }
-  );
+const { personApi, staffExport, lostRun, waitingRun } = unknownOutcomesOf(idp);
 
 describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
@@ -878,33 +622,6 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     });
   });
 
-  it("fails the step, saying so, once nobody resolved it by its deadline", async () => {
-    const admin = await personApi("admin");
-    const deadline = env.WORKFLOW_UNKNOWN_HOLD_MS;
-    env.WORKFLOW_UNKNOWN_HOLD_MS = "1000";
-    try {
-      const { mailbox, run } = await lostRun(admin);
-      await finished(run.id);
-      expect({
-        run: await admin.api.workflows.status(run.id),
-        sent: await sentFrom(mailbox),
-        // Still theirs to resolve.
-        listed: await listedFor(admin),
-      }).toMatchObject({
-        run: {
-          status: "failed",
-          failure: {
-            error: { code: "connect.outcome_unknown_unresolved" },
-          },
-        },
-        sent: 1,
-        listed: 1,
-      });
-    } finally {
-      env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
-    }
-  });
-
   it("fails the step as declined, sending nothing, when its one more send is held for its person and they decline it", async () => {
     const admin = await personApi("admin");
     const { mailbox, app, run, unknown } = await waitingRun(admin);
@@ -940,265 +657,6 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       // The lost send only.
       sent: 1,
     });
-  });
-
-  it("runs the step again as its person said, when they resolve it during the last wait before its deadline", async () => {
-    const admin = await personApi("admin");
-    const { WORKFLOW_UNKNOWN_HOLD_MS: deadline, WORKFLOW_OFF_WAIT_MS: wait } =
-      env;
-    // Its deadline passes during its first wait, two seconds long: the
-    // person resolves it then, and the check after it is past the deadline.
-    env.WORKFLOW_UNKNOWN_HOLD_MS = "1";
-    env.WORKFLOW_OFF_WAIT_MS = "2000";
-    try {
-      const outcomes = [];
-      for (const choice of ["happened", "not_happened"] as const) {
-        // oxlint-disable-next-line no-await-in-loop -- one run at a time
-        const { mailbox, run } = await lostRun(admin);
-        // oxlint-disable-next-line no-await-in-loop -- once it is listed
-        const unknown = await vi.waitFor(
-          async () => {
-            const [listed] = await admin.api.unknownOutcomes.list();
-            if (listed === undefined) {
-              throw new Error("Not listed yet");
-            }
-            return listed;
-          },
-          { timeout: 10_000, interval: 50 }
-        );
-        // oxlint-disable-next-line no-await-in-loop -- one run at a time
-        await admin.api.unknownOutcomes.resolve(
-          unknown.key,
-          choice,
-          unknown.claim
-        );
-        // oxlint-disable-next-line no-await-in-loop -- one run at a time
-        await finished(run.id);
-        // oxlint-disable-next-line no-await-in-loop -- one run at a time
-        const { status, output } = await admin.api.workflows.status(run.id);
-        // oxlint-disable-next-line no-await-in-loop -- one run at a time
-        outcomes.push({ status, output, sent: await sentFrom(mailbox) });
-      }
-      expect(outcomes).toMatchObject([
-        { status: "completed", output: { resolved: true }, sent: 1 },
-        { status: "completed", output: { sent: true }, sent: 2 },
-      ]);
-    } finally {
-      env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
-      env.WORKFLOW_OFF_WAIT_MS = wait;
-    }
-  });
-
-  it("ends by its deadline, not the run's step allowance, however many rounds the hold takes", async () => {
-    const admin = await personApi("admin");
-    const { CONNECT: connect } = env;
-    const deadline = env.WORKFLOW_UNKNOWN_HOLD_MS;
-    // Each round runs the step again (connect says nothing waits), some
-    // four steps every first wait: past the tests' allowance of 60 steps
-    // long before the deadline.
-    env.WORKFLOW_UNKNOWN_HOLD_MS = "8000";
-    env.CONNECT = new Proxy(connect, {
-      get: (target, name) => {
-        // Asked past the deadline, connect answers as it is.
-        if (name === "anyPending") {
-          return async (request: PendingKey) =>
-            request.orRecoverable === true
-              ? await target.anyPending(request)
-              : false;
-        }
-        const real: unknown = Reflect.get(target, name);
-        return real;
-      },
-    });
-    try {
-      const { mailbox, run } = await lostRun(admin);
-      await finished(run.id);
-      expect({
-        run: await admin.api.workflows.status(run.id),
-        sent: await sentFrom(mailbox),
-      }).toMatchObject({
-        run: {
-          status: "failed",
-          failure: { error: { code: "connect.outcome_unknown_unresolved" } },
-        },
-        sent: 1,
-      });
-    } finally {
-      env.CONNECT = connect;
-      env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
-    }
-  });
-
-  it("gives each call of unknown outcome on a step its own deadline, however long the step's last one waited", async () => {
-    const admin = await personApi("admin");
-    const deadline = env.WORKFLOW_UNKNOWN_HOLD_MS;
-    env.WORKFLOW_UNKNOWN_HOLD_MS = "6000";
-    try {
-      const { mailbox, run, unknown } = await waitingRun(admin);
-      // Its one more send loses its answer too.
-      await loseAnswers(mailbox);
-      await elapse(3000);
-      await admin.api.unknownOutcomes.resolve(
-        unknown.key,
-        "not_happened",
-        unknown.claim
-      );
-      const second = await vi.waitFor(
-        async () => {
-          const listed = await admin.api.unknownOutcomes.list();
-          await expect(sentFrom(mailbox)).resolves.toBe(2);
-          expect(listed).toHaveLength(1);
-          return listed[0];
-        },
-        { timeout: 15_000, interval: 100 }
-      );
-      // Past the first's deadline, well within its own.
-      await elapse(5000);
-      if (second !== undefined) {
-        await admin.api.unknownOutcomes.resolve(
-          second.key,
-          "happened",
-          second.claim
-        );
-      }
-      await finished(run.id);
-      expect({
-        run: await admin.api.workflows.status(run.id),
-        sent: await sentFrom(mailbox),
-      }).toMatchObject({
-        run: { status: "completed", output: { resolved: true } },
-        sent: 2,
-      });
-    } finally {
-      env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
-    }
-  });
-
-  it("runs the step again once connect may recover its call, with nobody resolving it, and completes it as connect recovered it", async () => {
-    const admin = await personApi("admin");
-    // A draft, which connect recovers by looking it up.
-    const { mailbox, connectionId, run } = await waitingRun(
-      admin,
-      "mail.createDraft"
-    );
-    // Its call's claim is past the claim timeout: connect may recover it.
-    await connectDb()
-      .prepare(
-        "UPDATE idempotent_calls SET claimed_at = claimed_at - ?1, created_at = created_at - ?1 WHERE connection_id = ?2"
-      )
-      .bind(6 * 60 * 1000, connectionId)
-      .run();
-    await finished(run.id);
-    expect({
-      run: await statusOf(admin, run.id),
-      // Connect looked the draft up, and Graph here finds none: so it
-      // made it once more, under the same key, as a call that didn't
-      // happen.
-      drafts: await draftsIn(mailbox),
-      listed: await listedFor(admin),
-    }).toStrictEqual({ run: "completed", drafts: 2, listed: 0 });
-  });
-
-  it("ends a hold by its deadline once connect can no longer recover the call, a day after its first claim", async () => {
-    const admin = await personApi("admin");
-    const deadline = env.WORKFLOW_UNKNOWN_HOLD_MS;
-    env.WORKFLOW_UNKNOWN_HOLD_MS = "4000";
-    try {
-      const { mailbox, connectionId, run } = await waitingRun(
-        admin,
-        "mail.createDraft"
-      );
-      // First claimed more than a day ago: past connect's recovery
-      // horizon, so nothing clears the hold but its person.
-      await connectDb()
-        .prepare(
-          "UPDATE idempotent_calls SET claimed_at = claimed_at - ?1, created_at = created_at - ?1 WHERE connection_id = ?2"
-        )
-        .bind(day + 6 * 60 * 1000, connectionId)
-        .run();
-      await finished(run.id);
-      expect({
-        run: await admin.api.workflows.status(run.id),
-        drafts: await draftsIn(mailbox),
-        listed: await listedFor(admin),
-      }).toMatchObject({
-        run: {
-          status: "failed",
-          failure: { error: { code: "connect.outcome_unknown_unresolved" } },
-        },
-        drafts: 1,
-        listed: 1,
-      });
-    } finally {
-      env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
-    }
-  });
-
-  it("never runs the step again at once, even when connect says it may be recovered and the call says otherwise", async () => {
-    const admin = await personApi("admin");
-    const { CONNECT: connect } = env;
-    // Connect always says nothing waits: the step comes back held each
-    // time it runs.
-    env.CONNECT = new Proxy(connect, {
-      get: (target, name) => {
-        if (name === "anyPending") {
-          return async () => await Promise.resolve(false);
-        }
-        const real: unknown = Reflect.get(target, name);
-        return real;
-      },
-    });
-    try {
-      const { mailbox, connectionId, run } = await lostRun(admin);
-      await vi.waitFor(
-        async () => {
-          await expect(callsOn(connectionId)).resolves.toBeGreaterThan(0);
-        },
-        { timeout: 15_000, interval: 200 }
-      );
-      await elapse(1500);
-      const live = await liveStatus(run.id);
-      expect({
-        live: live === "waiting" || live === "running",
-        sent: await sentFrom(mailbox),
-        // A first wait of 250 ms before each run of the step: a handful,
-        // never the run's steps used up at once.
-        calls: (await callsOn(connectionId)) <= 8,
-      }).toStrictEqual({ live: true, sent: 1, calls: true });
-    } finally {
-      env.CONNECT = connect;
-    }
-  });
-
-  it("keeps waiting, without running the step again and again, when its App turns restricted and its recovery would need the person to confirm it", async () => {
-    const admin = await personApi("admin");
-    // A draft, which connect recovers by looking it up.
-    const { mailbox, connectionId, app, run } = await waitingRun(
-      admin,
-      "mail.createDraft"
-    );
-    await appHost(env, appIdSchema.parse(app)).restrict();
-    // Its call can no longer be out: connect may recover it, but only for
-    // a call nobody must confirm.
-    await connectDb()
-      .prepare(
-        "UPDATE idempotent_calls SET claimed_at = claimed_at - ?1, created_at = created_at - ?1 WHERE connection_id = ?2"
-      )
-      .bind(6 * 60 * 1000, connectionId)
-      .run();
-    // Run again once, refused for the confirmation it now needs.
-    await vi.waitFor(
-      async () => {
-        await expect(callsOn(connectionId)).resolves.toBeGreaterThanOrEqual(2);
-      },
-      { timeout: 15_000, interval: 200 }
-    );
-    await elapse(2000);
-    expect({
-      live: await liveStatus(run.id),
-      drafts: await draftsIn(mailbox),
-      calls: await callsOn(connectionId),
-    }).toStrictEqual({ live: "waiting", drafts: 1, calls: 2 });
   });
 
   it("fails as before on a Composio tool's error, which stays listed for its person", async () => {

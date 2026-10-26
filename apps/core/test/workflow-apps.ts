@@ -3,7 +3,7 @@
  * they are split across: one file holds only so many runs' worth of
  * workers.
  */
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { ModelBindingBudgetInput } from "@grasp-os/shared/resource-bindings";
 import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
@@ -12,6 +12,7 @@ import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { findApp } from "../src/apps.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
+import { startRun } from "../src/workflows/runs.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { Idp } from "./idp.ts";
@@ -480,6 +481,16 @@ export const workflowsApp = async (
   await release(builder, id, files);
   return id;
 };
+
+/** A run a trigger started, which acts for the App's owner. */
+export const triggered = async (app: string, workflow: string) =>
+  await startRun(env, {
+    app: appIdSchema.parse(app),
+    workflow: workflowIdSchema.parse(workflow),
+    input: undefined,
+    startedBy: null,
+    actor: { type: "system" },
+  });
 
 /**
  * A run's audit events, once the log has `last` of them, each as its

@@ -18,6 +18,11 @@ import { recordCspViolations } from "./csp.ts";
 // A trace of every failing page, kept as the run's artifact.
 test.use({ trace: "retain-on-failure" });
 
+// Its pages share nothing, so their tests run apart, on any worker and in
+// any CI part: one after another they took about 3.5 minutes, longer
+// than any part's other tests (October 2026, GRA-1094).
+test.describe.configure({ mode: "parallel" });
+
 const phone = { width: 390, height: 844 };
 const desktop = { width: 1280, height: 800 };
 

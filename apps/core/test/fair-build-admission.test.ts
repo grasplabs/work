@@ -1,21 +1,30 @@
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
 
 import {
   admitBuild,
   buildQueuedPerPerson,
-  buildSeqOf,
   holding,
   maxBuildWaitMs,
   queuedJob,
   renewEveryMs,
   renewedForMs,
 } from "../src/build-admission.ts";
-import type { BuildLease, BuildOwner } from "../src/build-admission.ts";
 import { queueLiveMs } from "../src/workflows/admission.ts";
 import { quotaPolicy } from "../src/workflows/quotas.ts";
+import {
+  admit,
+  admitEach,
+  aged,
+  anApp,
+  checkAt,
+  fenced,
+  jobOf,
+  leasesHeld,
+  policyWith,
+  settle,
+  shown,
+} from "./fair-build-admission.ts";
 
 // Fair admission of the client's build jobs (build-admission.ts): how many
 // build at once, in all and of one App, each held to its share in the
@@ -25,138 +34,6 @@ import { quotaPolicy } from "../src/workflows/quotas.ts";
 // database is real; steps are admitted as a build job's step admits them
 // (build-jobs.ts), each test with Apps of its own. Time passes for a lease
 // or a place by moving what the database recorded into the past.
-
-/** The generation of the next policy a test sets: each higher than before. */
-let generations = 300;
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
-
-/** Sets the operator's policy to the deployment's, with `limits` lowered. */
-const policyWith = (limits: Record<string, number>): void => {
-  generations += 1;
-  env.QUOTA_LIMITS = {
-    generation: generations,
-    limits: { ...configuredLimits, ...limits },
-  };
-};
-
-/** A job of `person`'s (someone new, unless named) on the App `app`. */
-const jobOf = (
-  app: string,
-  person = `person-${crypto.randomUUID()}`
-): BuildOwner => ({
-  job: crypto.randomUUID(),
-  subject: person,
-  resource: app,
-});
-
-/** A fresh App's key. */
-const anApp = (): string => `app-${crypto.randomUUID()}`;
-
-/** The sequence of a job's check in `round`, at `attempt`. */
-const checkAt = (round = 1, attempt = 1): number =>
-  buildSeqOf("check", round, attempt);
-
-/** What `admit` answered. */
-type Answer =
-  | { lease: BuildLease }
-  | { waiting: string; joined: boolean; retryAfterSeconds: number }
-  | { refused: string };
-
-/** The code of a refusal, or what else was thrown. */
-const codeOf = (error: unknown): string =>
-  z.object({ code: z.string() }).safeParse(error).data?.code ?? String(error);
-
-/** Admits `owner`'s step at `seq`, as a job's step asks. */
-const admit = async (
-  owner: BuildOwner,
-  seq = checkAt(),
-  waitedMs = 0
-): Promise<Answer> => {
-  try {
-    const admitted = await admitBuild(env, owner, {
-      seq,
-      waited: 0,
-      waitedMs,
-    });
-    if ("lease" in admitted) {
-      return { lease: admitted.lease };
-    }
-    return {
-      waiting: admitted.wait.waitingFor,
-      joined: admitted.wait.joined,
-      retryAfterSeconds: admitted.wait.retryAfterSeconds,
-    };
-  } catch (error) {
-    return { refused: codeOf(error) };
-  }
-};
-
-/** What `admit` answered, as a word: `ok`, `wait:<share>`, or the refusal. */
-const shown = (answer: Answer): string => {
-  if ("lease" in answer) {
-    return "ok";
-  }
-  return "waiting" in answer ? `wait:${answer.waiting}` : answer.refused;
-};
-
-/** Admits each of `owners` in turn, answering as `shown`. */
-const admitEach = async (...owners: BuildOwner[]): Promise<string[]> => {
-  const answers: string[] = [];
-  for (const owner of owners) {
-    // oxlint-disable-next-line no-await-in-loop -- in order: the queue's
-    answers.push(shown(await admit(owner)));
-  }
-  return answers;
-};
-
-/** The lease `answer` holds, settled. */
-const settle = async (answer: Answer): Promise<void> => {
-  if (!("lease" in answer)) {
-    throw new Error(`Not admitted: ${shown(answer)}`);
-  }
-  await answer.lease.settle();
-};
-
-/** Moves `column` of `table`'s rows of job `job` `ms` into the past. */
-const aged = async (
-  table: "build_leases" | "build_admission_queue",
-  column: string,
-  job: string,
-  ms: number
-): Promise<void> => {
-  await env.DB.prepare(
-    `UPDATE ${table} SET ${column} = ${column} - ? WHERE job_id = ?`
-  )
-    .bind(ms, job)
-    .run();
-};
-
-/** The leases held now, in all. */
-const leasesHeld = async (): Promise<number> =>
-  (await env.DB.prepare(
-    "SELECT count(*) AS held FROM build_leases WHERE settled_at IS NULL AND admitted_at + reserved_ms > ?"
-  )
-    .bind(Date.now())
-    .first<number>("held")) ?? 0;
-
-/** Writes a commit's fence for the lease of `job`'s step at `seq`: whether the database took it. */
-const fenced = async (job: string, seq: number): Promise<string> => {
-  try {
-    await env.DB.prepare(
-      "INSERT INTO build_commit_fences (job_id, seq) VALUES (?, ?)"
-    )
-      .bind(job, seq)
-      .run();
-    await env.DB.prepare("DELETE FROM build_commit_fences WHERE job_id = ?")
-      .bind(job)
-      .run();
-    return "fenced";
-  } catch {
-    return "refused";
-  }
-};
 
 describe("fair build admission", { timeout: 60_000 }, () => {
   afterEach(async () => {
@@ -550,42 +427,6 @@ describe("fair build admission", { timeout: 60_000 }, () => {
       after: false,
     });
   });
-
-  it(
-    "stops a step's build once a renewal hangs past its lease's end",
-    { timeout: 120_000 },
-    async () => {
-      const job = jobOf(anApp());
-      const lease = await admit(job);
-      if (!("lease" in lease)) {
-        throw new Error("Not admitted");
-      }
-      // The database never answers its renewals.
-      const stalled: BuildLease = {
-        ...lease.lease,
-        renew: async () => await Promise.withResolvers<never>().promise,
-      };
-      const building = Promise.withResolvers<string>();
-      const started = Date.now();
-      let stopped: string;
-      try {
-        await holding(stalled, async () => await building.promise);
-        stopped = "ran to its end";
-      } catch (error) {
-        stopped = error instanceof Error ? error.message : String(error);
-      }
-      building.resolve("built");
-      expect({
-        stopped,
-        byItsEnd: Date.now() - started < renewedForMs + 5000,
-        settled: await lease.lease.held(),
-      }).toStrictEqual({
-        stopped: "The build job's step lost its lease",
-        byItsEnd: true,
-        settled: false,
-      });
-    }
-  );
 
   it("builds nothing under a lease that ended before its step began", async () => {
     const job = jobOf(anApp());

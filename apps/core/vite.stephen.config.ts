@@ -6,7 +6,8 @@ import { coreProject } from "./vite.config.ts";
 // its cases one at a time, each a whole turn through the Workspace object,
 // connect and the gateway, and beside a shard's other heavy core files it
 // would crowd them and they it. Projects run in groups, lowest first: this
-// one after all the others.
+// one after all the others, and in CI on a shard of its own
+// (scripts/test-shards.ts).
 export default coreProject({
   name: "@grasp-os/core:stephen",
   include: ["test/stephen-eval.test.ts", "test/stephen-eval-google.test.ts"],
