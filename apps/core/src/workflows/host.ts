@@ -28,6 +28,7 @@ import {
   coreStepPrefix,
   executionErrors,
   reviewerChosenAtRun,
+  modelReviewed,
   stepReviewed,
   stepRunsAs,
   isRetryable,
@@ -1453,7 +1454,7 @@ export class RunHost extends RpcTarget {
    * The attempts whose functions run now, in the order they began: the
    * last is the step running now, which every reviewed call and kind is
    * checked against as well as the step whose host it came through
-   * (`#requireReviewed`, `#requireKindIn`).
+   * (`#requireReviewed`, `#requireKindIn`, `#requireModelReviewed`).
    *
    * The SDK runs steps one after another, never inside or next to one
    * another (`exclusive`, workflow.ts), so a workflow it runs has one
@@ -2239,6 +2240,7 @@ export class RunHost extends RpcTarget {
         modelRequestSchema,
         request
       );
+      await this.#requireModelReviewed(attempt, binding);
       let schema: z.ZodType;
       try {
         schema = z.fromJSONSchema(outputSchema);
@@ -2519,6 +2521,29 @@ export class RunHost extends RpcTarget {
   }
 
   /**
+   * Refuses a model call of `attempt` naming a binding its review doesn't
+   * show its AI step calling (`modelReviewed`), for both it and the
+   * attempt running now (a step nested in it may borrow its host), as
+   * `#requireKindIn` holds both: code past the SDK asking another of the
+   * App's models from a reviewed AI step. Tampering, as a kind refusal is:
+   * both fail, caught or not, and the run ends.
+   */
+  async #requireModelReviewed(
+    attempt: StepAttempt,
+    binding: string
+  ): Promise<void> {
+    const running = this.#live.at(-1) ?? attempt;
+    const other = [running, attempt].find(
+      ({ step }) => !modelReviewed(this.#run.calls, step, binding)
+    );
+    if (other !== undefined) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${other.step}" asked model ${binding}, which the review of this version doesn't show it asking: ask each AI step's model only as its \`step.llm\` names it.`;
+      await this.#refuseIn(attempt, error, "model", other.step, binding);
+    }
+  }
+
+  /**
    * Fails `attempt` (and the one running now) with `error`, as tampering
    * audited under `step`.
    */
@@ -2526,12 +2551,13 @@ export class RunHost extends RpcTarget {
     attempt: StepAttempt,
     error: Error,
     call: string,
-    step = attempt.step
+    step = attempt.step,
+    binding?: string
   ): Promise<never> {
     const running = this.#live.at(-1) ?? attempt;
     running.refused = error;
     attempt.refused = error;
-    return await this.#refuseTampering(error, { step, call });
+    return await this.#refuseTampering(error, { step, call, binding });
   }
 
   /**
@@ -2547,7 +2573,16 @@ export class RunHost extends RpcTarget {
    */
   async #refuseTampering(
     error: Error,
-    { step, call }: { step: string | null; call: string | null }
+    {
+      step,
+      call,
+      binding,
+    }: {
+      step: string | null;
+      call: string | null;
+      /** The model binding a refused model call named. */
+      binding?: string | undefined;
+    }
   ): Promise<never> {
     if (this.#tampered === undefined) {
       this.#tampered = error;
@@ -2557,6 +2592,7 @@ export class RunHost extends RpcTarget {
         step,
         call,
         errorCode: refusal.code ?? "workflow.invalid",
+        ...(binding === undefined ? {} : { binding }),
       });
     }
     throw error;
@@ -2571,6 +2607,7 @@ export class RunHost extends RpcTarget {
     step: string | null;
     call: string | null;
     errorCode: string;
+    binding?: string;
   }): Promise<void> {
     const { app, workflow, version, runId } = this.#run;
     const db = drizzle(this.#env.DB);

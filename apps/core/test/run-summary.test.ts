@@ -339,6 +339,8 @@ export default workflowTests(definition, [
         routed: {
           steps: { fetch: [], review: [] },
           kinds: { fetch: "exact", review: "decision" },
+          models: {},
+          keyed: [],
           all: [],
           dynamic: { review: ["from", "timeout"] },
         },

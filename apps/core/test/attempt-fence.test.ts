@@ -300,6 +300,8 @@ describe(
       const calls: WorkflowCalls = {
         steps: { tidy: [] },
         kinds: { tidy: "decision" },
+        models: {},
+        keyed: [],
         all: [],
       };
       // Opens the decision, then asks who it asks in its `#ask` part, as
@@ -377,6 +379,8 @@ describe(
       const calls: WorkflowCalls = {
         steps: { tidy: [] },
         kinds: { tidy: "decision" },
+        models: {},
+        keyed: [],
         all: [],
       };
       const open = async (attempt: AttemptHost, arm: () => void) => {
@@ -455,6 +459,8 @@ describe(
       const calls: WorkflowCalls = {
         steps: { tidy: [] },
         kinds: { tidy: "exact" },
+        models: {},
+        keyed: [],
         all: [],
       };
       const read = async (attempt: AttemptHost, arm: () => void) => {
@@ -522,6 +528,8 @@ describe(
       const calls: WorkflowCalls = {
         steps: { tidy: ["HANDBOOK"] },
         kinds: { tidy: "exact" },
+        models: {},
+        keyed: [],
         all: ["HANDBOOK"],
       };
       const read = async (attempt: AttemptHost, arm: () => void) => {
@@ -597,6 +605,8 @@ describe(
       const calls: WorkflowCalls = {
         steps: { tidy: ["BRAIN"] },
         kinds: { tidy: "exact" },
+        models: {},
+        keyed: [],
         all: ["BRAIN"],
       };
       return { app, brainGrant, calls };
@@ -667,7 +677,13 @@ describe(
       const { answered } = await cancelledAt(
         app,
         admin.userId,
-        { steps: { tidy: [] }, kinds: { tidy: "exact" }, all: [] },
+        {
+          steps: { tidy: [] },
+          kinds: { tidy: "exact" },
+          models: {},
+          keyed: [],
+          all: [],
+        },
         undefined,
         recallNote
       );
