@@ -31,6 +31,11 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import {
+  confirmScreenDecision,
+  decideScreenRun,
+  reviewScreenDecision,
+} from "../src/workflows/screen-runs.ts";
 import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
@@ -282,6 +287,18 @@ const screenErrors = async (
         .map(({ file, line, message }) => `${file}:${line}: ${message}`);
 };
 
+/** "answered" when `call` succeeds, else the code it was refused with. */
+const codeOf = async (call: () => Promise<unknown>): Promise<unknown> => {
+  try {
+    await call();
+    return "answered";
+  } catch (error) {
+    return error instanceof Error && "code" in error
+      ? error.code
+      : String(error);
+  }
+};
+
 /** What a call answered, or its refusal's code. */
 const answerOf = (result: OperationResult): unknown =>
   result.ok ? result.value : result.error.code;
@@ -293,7 +310,7 @@ const answerOf = (result: OperationResult): unknown =>
  * of its decision queries, as whoever calls.
  */
 const decisionInbox = async () => {
-  const { fixture, workflowId } = await boundApp();
+  const { fixture, workflowId, binding } = await boundApp();
   const release = await seal(fixture);
   await setCurrentVersion(env, fixture.owner, fixture.app, 1);
   const [reviewer, starter, outsider] = await Promise.all([
@@ -386,6 +403,7 @@ const decisionInbox = async () => {
   };
   return {
     fixture,
+    binding,
     workflowId,
     manifestHash,
     opened,
@@ -635,6 +653,141 @@ describe(
         removedWritten: true,
         removedListed: [],
         removedDetail: "workflow.decision_unavailable",
+      });
+    });
+
+    it("answer an independent run's decision from the App's screen once, after the page's confirmation, and refuse every decision the App may not answer alike", async () => {
+      const { fixture, binding, opened, reviewer, outsider, runAsking } =
+        await decisionInbox();
+      const { app } = fixture;
+      const asked = await runAsking(app, opened);
+      const restricted = await runAsking(app, opened + 1000, {
+        restricted: true,
+      });
+      const elsewhere = await runAsking(`other-${unique()}`, opened + 2000);
+      const answer = { approved: true, payload: { comment: "Looks right" } };
+      const review = async (
+        who: typeof reviewer,
+        of: typeof asked
+      ): Promise<unknown> =>
+        await codeOf(
+          async () =>
+            await reviewScreenDecision(
+              env,
+              who,
+              app,
+              of.runId,
+              of.decisionId,
+              answer
+            )
+        );
+      const refusals = {
+        restricted: await review(reviewer, restricted),
+        elsewhere: await review(reviewer, elsewhere),
+        // Its ID with another run of the App's: never the decision's.
+        mismatched: await review(reviewer, {
+          runId: restricted.runId,
+          decisionId: asked.decisionId,
+        }),
+        outsider: await review(outsider, asked),
+      };
+      const reviewed = await reviewScreenDecision(
+        env,
+        reviewer,
+        app,
+        asked.runId,
+        asked.decisionId,
+        answer
+      );
+      if (reviewed.state !== "review") {
+        throw new Error("Nothing to review");
+      }
+      // The screen alone can't answer: only with the page's confirmation.
+      const unconfirmed = await codeOf(
+        async () =>
+          await decideScreenRun(
+            env,
+            reviewer,
+            app,
+            asked.runId,
+            asked.decisionId,
+            reviewed.response,
+            null
+          )
+      );
+      const { confirmation } = await confirmScreenDecision(
+        env,
+        reviewer,
+        app,
+        asked.runId,
+        asked.decisionId,
+        reviewed.decision.revision,
+        reviewed.response
+      );
+      const decided = await decideScreenRun(
+        env,
+        reviewer,
+        app,
+        asked.runId,
+        asked.decisionId,
+        reviewed.response,
+        confirmation
+      );
+      // Exactly that answer again is the recorded decision; another isn't.
+      const again = await decideScreenRun(
+        env,
+        reviewer,
+        app,
+        asked.runId,
+        asked.decisionId,
+        reviewed.response,
+        confirmation
+      );
+      const changed = await codeOf(
+        async () =>
+          await decideScreenRun(
+            env,
+            reviewer,
+            app,
+            asked.runId,
+            asked.decisionId,
+            { approved: false },
+            confirmation
+          )
+      );
+      const stored = await env.DB.prepare(
+        "SELECT status, decided_by AS decidedBy, payload FROM workflow_decisions WHERE id = ?"
+      )
+        .bind(asked.decisionId)
+        .first();
+      // The App no longer binds the workflow: its runs' decisions aren't
+      // its screens' to answer.
+      const later = await runAsking(app, opened + 3000);
+      await unbindWorkflowFromApp(env, fixture.owner, binding);
+
+      expect({
+        ...refusals,
+        unconfirmed,
+        decided: decided.status,
+        again: again.status,
+        changed,
+        stored,
+        unbound: await review(reviewer, later),
+      }).toStrictEqual({
+        restricted: "decision.not_found",
+        elsewhere: "decision.not_found",
+        mismatched: "decision.not_found",
+        outsider: "decision.forbidden",
+        unconfirmed: "decision.unconfirmed",
+        decided: "approved",
+        again: "approved",
+        changed: "decision.closed",
+        stored: {
+          status: "approved",
+          decidedBy: reviewer.userId,
+          payload: JSON.stringify({ comment: "Looks right" }),
+        },
+        unbound: "decision.not_found",
       });
     });
 

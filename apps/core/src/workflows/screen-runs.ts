@@ -10,19 +10,26 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenRun, WaitingDecision } from "@grasp-os/shared/screens";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { RunStatus, WorkflowRun } from "@grasp-os/shared/workflows";
-import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, exists, gt, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { appFor } from "../apps.ts";
-import { workflowDecisions, workflowRuns } from "../db/core/schema.ts";
+import {
+  appWorkflowBindings,
+  workflowDecisions,
+  workflowResourceRuns,
+  workflowRuns,
+  workflowStartReceipts,
+} from "../db/core/schema.ts";
 import {
   answerableBy,
   answerDecision,
   confirmDecision,
   reviewDecision,
 } from "../decisions/decisions.ts";
+import { appHost } from "../durable-objects.ts";
 import { queuedRuns } from "./admission.ts";
 import {
   findRun,
@@ -279,8 +286,19 @@ export const screenRun = async (
 };
 
 /**
- * The ID of the decision `decision` (its name in the workflow) of the
- * App's run `run`; `decision.not_found` for any other.
+ * The ID of the decision `decision` of the App's run `run`, as a screen
+ * names it: an App run's decision by its name in the workflow; an
+ * independent run's (workflows.<alias>.queries.decisions, its wait's
+ * `id`) by its ID. `decision.not_found` for any other, alike.
+ *
+ * An independent run's decision is the App's to answer only while:
+ * - the App started its run (its start receipt names the App);
+ * - the App's binding still names the run's workflow and version, as the
+ *   reference's inbox lists it (workflow-reference-queries.ts);
+ * - a restricted run's, only while the App is restricted itself.
+ * Who may answer, until when, against which context and with which
+ * confirmation is the decision service's (`answerDecision`), as on the
+ * decision's own page.
  */
 const appDecision = async (
   env: Env,
@@ -297,7 +315,8 @@ const appDecision = async (
     decisionNameSchema,
     decision
   );
-  const found = await drizzle(env.DB)
+  const db = drizzle(env.DB);
+  const found = await db
     .select({ id: workflowDecisions.id })
     .from(workflowDecisions)
     .innerJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
@@ -309,10 +328,58 @@ const appDecision = async (
       )
     )
     .get();
-  if (!found) {
+  if (found) {
+    return found.id;
+  }
+  const independent = await db
+    .select({
+      id: workflowDecisions.id,
+      restricted: workflowResourceRuns.restricted,
+    })
+    .from(workflowDecisions)
+    .innerJoin(
+      workflowResourceRuns,
+      eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
+    )
+    .innerJoin(
+      workflowStartReceipts,
+      eq(workflowStartReceipts.id, workflowResourceRuns.id)
+    )
+    .where(
+      and(
+        eq(workflowDecisions.id, name),
+        eq(workflowResourceRuns.id, runId.data),
+        eq(workflowStartReceipts.invokerType, "app"),
+        eq(workflowStartReceipts.invokerId, app),
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(appWorkflowBindings)
+            .where(
+              and(
+                eq(appWorkflowBindings.appId, app),
+                eq(appWorkflowBindings.status, "active"),
+                eq(
+                  appWorkflowBindings.workflowResourceId,
+                  workflowResourceRuns.workflowResourceId
+                ),
+                eq(
+                  appWorkflowBindings.workflowResourceVersion,
+                  workflowResourceRuns.version
+                )
+              )
+            )
+        )
+      )
+    )
+    .get();
+  if (
+    independent === undefined ||
+    (independent.restricted && !(await appHost(env, app).isRestricted()))
+  ) {
     throw decisionErrors.create("decision.not_found");
   }
-  return found.id;
+  return independent.id;
 };
 
 /**
