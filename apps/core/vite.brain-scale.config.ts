@@ -6,7 +6,7 @@ import { coreProject } from "./vite.config.ts";
 //
 //   BRAIN_SCALE_CHUNKS=100000 vp -C apps/core test -c vite.brain-scale.config.ts
 //
-// CI runs the smallest size in test/brain-scale.test.ts.
+// CI runs the smallest size in test/brain-scale*.test.ts, an arm per file.
 
 /** Distractor chunks to grow the company by: 100,000 unless asked. */
 const chunks = Number(process.env.BRAIN_SCALE_CHUNKS ?? "100000");

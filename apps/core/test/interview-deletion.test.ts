@@ -17,7 +17,13 @@ import type { SpokenKey } from "../src/speech-cache.ts";
 import { answeringGateway } from "./ai-gateway.ts";
 import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, approve, gatewayConfig, onLink } from "./interview-link.ts";
+import {
+  answering,
+  approve,
+  gatewayConfig,
+  holdAlarm,
+  onLink,
+} from "./interview-link.ts";
 import {
   agree,
   fact,
@@ -185,21 +191,6 @@ const inTheBrain = async (ids: Ids, said: Said) => {
   await toldWith(ids, said);
   await drawAll(ids);
   await givenToBrain(ids);
-};
-
-/**
- * Holds the store's own alarm for the test: each test draws what is due
- * and gives the team to the brain itself, step by step, as the alarm would
- * (`drawAll`, `intakeNext`). A delete or a drawing sets the alarm half a
- * second on, and on a slow runner it got there first: its drawing's
- * `model.call` landed amid a delete's audit events, or it gave the team to
- * the brain before the test did. Deleting the alarm isn't enough: the next
- * delete or drawing sets it again, and one already going runs on.
- */
-const holdAlarm = async (): Promise<void> => {
-  await runInDurableObject(onboardingStore(env), (instance) => {
-    vi.spyOn(instance, "alarm").mockResolvedValue();
-  });
 };
 
 /** Every value in the store's tables, by table, as text. */

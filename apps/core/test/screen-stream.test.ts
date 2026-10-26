@@ -372,7 +372,7 @@ const pageTransport = (app: string, seat: Seat) => {
   let refusingAttaches = 0;
   const opened: string[] = [];
   const transport: ClientTransport = {
-    // Live queries are screen-client.test.ts's: these only call and stream.
+    // Live queries are screen-client-live.test.ts's: these only call and stream.
     watch: async () => {
       await Promise.resolve();
       throw new Error("Nothing here follows a query.");

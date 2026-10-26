@@ -16,7 +16,12 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { claimChecksMax } from "../src/onboarding/team-claims.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, answeringWith, onLink } from "./interview-link.ts";
+import {
+  answering,
+  answeringWith,
+  holdAlarm,
+  onLink,
+} from "./interview-link.ts";
 import {
   agree,
   claimsReply,
@@ -150,6 +155,10 @@ describe(
   "what the onboarding learned, in the brain",
   { timeout: 120_000 },
   () => {
+    // The test draws and gives the brain each team itself, with a model
+    // faked: the store's own alarm, which has none, would try first.
+    beforeEach(holdAlarm);
+
     it("is the team, one source, its statements and the drawn workflow, read by every member, and no record names a person", async () => {
       const store = onboardingStore(env);
       const ids = await team();
@@ -544,11 +553,7 @@ const drawnTeam = async () => {
 describe("what a team said, put together", { timeout: 120_000 }, () => {
   // The test gives the brain each team itself, step by step, with a model
   // faked: the store's own alarm, which has none, would try first.
-  beforeEach(async () => {
-    await runInDurableObject(onboardingStore(env), (instance) => {
-      vi.spyOn(instance, "alarm").mockResolvedValue();
-    });
-  });
+  beforeEach(holdAlarm);
 
   it("keeps only claims five or more distinct people made, of facts of their kind, without a name, and shows the model no one", async () => {
     const ids = await drawnTeam();

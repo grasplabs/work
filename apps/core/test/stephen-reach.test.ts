@@ -91,6 +91,7 @@ describe("Settings › Stephen", setUpTime, () => {
         "change-own",
         "change-company",
         "reach-others",
+        "read-others",
       ].map((toolClass) => ({
         toolClass,
         audience: { who: "asClass" },

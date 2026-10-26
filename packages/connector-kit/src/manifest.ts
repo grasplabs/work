@@ -200,11 +200,13 @@ const literalSegment = /^[\w.~$:@()'-]+$/u;
 /**
  * A path segment an action leaves open, such as `{mailbox}`, maybe inside
  * literal text: a suffix after a colon, as Google's custom methods have it
- * (`{id}:batchUpdate`), or an OData function call around it, as Graph's
- * search has it (`search(q='{query}')`). One parameter per segment.
+ * (`{id}:batchUpdate`), an OData function call around it, as Graph's
+ * search has it (`search(q='{query}')`), or a prefix that ends in a colon,
+ * as every Teams chat's ID starts (`19:{chat}`). One parameter per segment;
+ * the colon is the template's own, never the value's.
  */
 const parameterSegment =
-  /^(?<prefix>[\w.~$@()'=-]*)\{(?<name>[A-Za-z_]\w*)\}(?<suffix>[\w.~$:@()'=-]*)$/u;
+  /^(?<prefix>[\w.~$@()'=-]*:?)\{(?<name>[A-Za-z_]\w*)\}(?<suffix>[\w.~$:@()'=-]*)$/u;
 
 /**
  * Batch endpoints (Graph's `/$batch`, Google's `/batch/...`) carry any

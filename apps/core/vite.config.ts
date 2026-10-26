@@ -19,6 +19,7 @@ import {
   documentsClient,
   gmailAccount,
   gmailPush,
+  googleConnectClient,
   landscapeClient,
   slackApp,
   teamsBot,
@@ -74,7 +75,9 @@ export const screenTests = [
   "test/app-test-live.test.ts",
   "test/app-function-route.test.ts",
   "test/portable-client.test.ts",
-  "test/app-files.test.ts",
+  "test/app-files-uploads.test.ts",
+  "test/app-files-downloads.test.ts",
+  "test/app-files-records.test.ts",
   "test/resource-bindings.test.ts",
   "test/brain-app-recall.test.ts",
   "test/resource-connectors.test.ts",
@@ -87,15 +90,20 @@ export const screenTests = [
   "test/agent-apps.test.ts",
   "test/agent-app-functions.test.ts",
   "test/agent-builds.test.ts",
-  "test/build-jobs.test.ts",
+  "test/build-job-runs.test.ts",
+  "test/build-job-commits.test.ts",
+  "test/build-job-queue.test.ts",
   "test/app-preview.test.ts",
   "test/preview-repairs.test.ts",
   "test/workflows.test.ts",
+  "test/workflow-ai-steps.test.ts",
+  "test/workflow-run-permissions.test.ts",
   "test/workflow-chaos.test.ts",
   "test/reviewed-calls.test.ts",
   "test/held-runs.test.ts",
   "test/held-wakes.test.ts",
-  "test/unknown-outcome-runs.test.ts",
+  "test/unknown-outcome-resolutions.test.ts",
+  "test/unknown-outcome-holds.test.ts",
   "test/decisions.test.ts",
   "test/decision-confirmations.test.ts",
   "test/decision-deadlines.test.ts",
@@ -104,6 +112,9 @@ export const screenTests = [
   "test/workflow-overview.test.ts",
   "test/triggers.test.ts",
   "test/email-triggers.test.ts",
+  "test/email-trigger-messages.test.ts",
+  "test/email-attachments.test.ts",
+  "test/mail-ingress.test.ts",
   "test/event-triggers.test.ts",
   "test/event-sources.test.ts",
   "test/orphaned-runs.test.ts",
@@ -336,6 +347,10 @@ export const coreProject = (
                 MICROSOFT_DIRECTORY_CLIENT_SECRET: directoryClient.secret,
                 MICROSOFT_DOCUMENTS_CLIENT_ID: documentsClient.id,
                 MICROSOFT_DOCUMENTS_CLIENT_SECRET: documentsClient.secret,
+                // Google Workspace's, which the fake Google there knows:
+                // Stephen's eval on Google connects through it.
+                GOOGLE_CLIENT_ID: googleConnectClient.id,
+                GOOGLE_CLIENT_SECRET: googleConnectClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
                 // The client's Teams bot, which Entra and the Bot Connector
                 // in test/connect-providers.ts know.
@@ -391,10 +406,15 @@ export default coreProject({
     // The Brain baseline against a real model, which costs money, on
     // request only: vite.brain-model.config.ts.
     "test/brain-real-model.test.ts",
-    // The Brain baseline, in a group of its own: vite.brain.config.ts.
+    // The Brain baseline and its CI scale size, in a group of their own:
+    // vite.brain.config.ts.
     "test/brain-baseline.test.ts",
+    "test/brain-scale.test.ts",
+    "test/brain-scale-agent.test.ts",
+    "test/brain-scale-full-context.test.ts",
     // Stephen's eval, in a group of its own: vite.stephen.config.ts.
     "test/stephen-eval.test.ts",
+    "test/stephen-eval-google.test.ts",
     // Stephen's eval against a real model, which costs money, on request
     // only: vite.stephen-model.config.ts.
     "test/stephen-real-model.test.ts",

@@ -10207,6 +10207,10 @@ msgstr "De aanroepen met onbekende uitkomst van iedereen gelezen"
 msgid "Read how knowledge is used"
 msgstr "Gelezen hoe kennis wordt gebruikt"
 
+#: src/settings/stephen-settings.tsx
+msgid "Read others' words"
+msgstr "Woorden van anderen lezen"
+
 #: src/activity/audit-words.ts
 msgid "Read restricted sources, and is held to them"
 msgstr "Beperkte bronnen gelezen en is daar nu aan gebonden"
@@ -12185,6 +12189,10 @@ msgstr "Teams"
 #: src/brain/brain-source-contents.tsx
 msgid "Teams and roles"
 msgstr "Teams en rollen"
+
+#: src/settings/stephen-settings.tsx
+msgid "Teams chats and meetings they were in: what others wrote and said there, summarised for them alone."
+msgstr "Teams-chats en vergaderingen waarin ze zaten: wat anderen daar schreven en zeiden, alleen voor hen samengevat."
 
 #: src/settings/stephen-settings.tsx
 msgid "Teams for {label}"

@@ -552,6 +552,11 @@ describe("a native connector", () => {
       "onenote.pages": "read-own",
       "onenote.read": "read-own",
       "onenote.create": "change-own",
+      // Other people's words in the person's own chats and meetings.
+      "chats.list": "read-others",
+      "chats.messages": "read-others",
+      "meetings.list": "read-others",
+      "meetings.transcript": "read-others",
     });
     expect(classesOf("google-workspace")).toStrictEqual({
       "mail.list": "read-own",

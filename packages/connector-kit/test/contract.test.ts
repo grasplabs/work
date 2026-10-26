@@ -686,6 +686,22 @@ describe("a route's path", () => {
       expect(pathMatches(custom, path)).toBeFalsy();
     }
   });
+
+  it("takes a literal prefix ending in a colon only as declared", () => {
+    const chat = "/v1/chats/19:{chat}/messages";
+    expect(
+      pathMatches(chat, "/v1/chats/19:a1b2%40thread.v2/messages")
+    ).toBeTruthy();
+    for (const path of [
+      "/v1/chats/a1b2%40thread.v2/messages",
+      "/v1/chats/19%3Aa1b2%40thread.v2/messages",
+      "/v1/chats/19:/messages",
+      "/v1/chats/19:a:b/messages",
+      "/v1/chats/20:a1b2/messages",
+    ]) {
+      expect(pathMatches(chat, path)).toBeFalsy();
+    }
+  });
 });
 
 describe("generated contracts", () => {

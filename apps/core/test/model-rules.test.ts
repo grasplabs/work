@@ -1,34 +1,41 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { runActorOf } from "@grasp-os/shared/audit";
-import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
-import type { ModelCall, ModelsEnv } from "../src/models.ts";
+import type { ModelCall } from "../src/models.ts";
 import {
   listResourceBindings,
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import {
-  release as nextVersion,
-  requestGranted,
-  verifiedCandidate,
-} from "./apps.ts";
-import { allEvents } from "./audit-events.ts";
+import { release as nextVersion, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
+import {
+  appWith,
+  llm,
+  currentPastActivation,
+  workersAi,
+  anthropic,
+  euModel,
+  gateway,
+  allowed,
+  cheapAnswer,
+  withRules,
+  withDeploymentRules,
+  modelActions,
+  runOf,
+  eventsOf,
+  callsInAnApp,
+} from "./model-rules.ts";
 import { finished, sleeping, woken } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import {
-  appWith as serverAppWith,
   bindModel,
   grantMail,
   modelRegistration,
@@ -36,176 +43,13 @@ import {
 } from "./workflow-apps.ts";
 
 // The client's rules for model calls, checked on every call before
-// anything is sent. AI Gateway is the outside system: a fake behind the AI
+// anything is sent: which models, where, for which data, and through
+// which binding. AI Gateway is the outside system: a fake behind the AI
 // binding. Everything else is real, down to the audit log and, for the
-// rules a workflow run meets, the run.
-
-/**
- * A new App with the sample server and `files`, declaring the model
- * resources its workflows' AI steps go through, which a test binds.
- */
-const appWith = async (
-  builder: Parameters<typeof serverAppWith>[0],
-  files: Record<string, string>
-): Promise<string> =>
-  await serverAppWith(builder, {
-    ...modelRegistration({ reader: 32_768, anywhere: 6000, eu: 32_768 }),
-    ...files,
-  });
-
-/** An AI step reading a total through the App's `reader`, with `retries`. */
-const llm = (retries: string) => `  return await step.llm("extract", {
-    description: "Read the total",
-    binding: "reader",
-    instructions: "Read the total in cents.",
-    input: "Total 12.34 EUR",
-    schema: z.object({ total: z.int() }),
-    ${retries}
-  });`;
-
-/**
- * Commits `files` over App `app` and makes them current behind
- * activation's back, as no API does: activation seals the release, then
- * refuses AI steps through models it doesn't declare. What activation
- * said, for the run-time gate to be tested past it.
- */
-const currentPastActivation = async (
-  builder: Awaited<ReturnType<typeof signedInApi>>,
-  app: string,
-  files: Record<string, string>
-): Promise<string> => {
-  const { version } = await builder.api.apps.files.commit(app, files, "Past");
-  const activation = await outcome(
-    builder.api.apps.versions.setCurrent(app, version)
-  );
-  await verifiedCandidate(app, version);
-  await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
-    .bind(version, app)
-    .run();
-  return activation;
-};
+// rules a workflow run meets, the run. The budgets' tests are in
+// model-rules-budgets.test.ts, to run apart from these.
 
 const idp = mockIdp();
-
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-const anthropic = "anthropic/claude-sonnet-4-5";
-/** Hosted in the EU, as the tests' config says: its provider's EU region. */
-const euModel = "openai/gpt-5.4";
-
-const gateway = "grasp-os-test";
-const allowed = [workersAi, anthropic, euModel];
-
-/** An answer that costs next to nothing. */
-const cheapAnswer = { text: "Hi.", inputTokens: 10, outputTokens: 5 };
-
-let monthsUsed = 0;
-
-/**
- * A month no other test counts budgets in, so none depends on the real
- * month or another test's spend.
- */
-const newMonth = (): string => {
-  monthsUsed += 1;
-  const year = 2100 + Math.floor(monthsUsed / 12);
-  return `${year}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
-};
-
-/**
- * Core's env with the fake gateway answering up to eight calls with
- * `answer`, and the rules `config` adds; budgets count in `month`.
- */
-const withRules = (
-  config: Record<string, unknown>,
-  answer: GatewayReply = cheapAnswer,
-  month = newMonth()
-) => {
-  const fake = fakeGateway(...Array.from({ length: 8 }, () => answer));
-  const rulesEnv: ModelsEnv = {
-    ...env,
-    AI: fake.binding,
-    MODEL_GATEWAY: { gateway, models: allowed, ...config },
-    MODEL_BUDGET_MONTH: month,
-  };
-  const { call, agent } = models(rulesEnv);
-  return { fake, call, agent };
-};
-
-/** A person no other test uses, so their audit events are this test's. */
-const newPerson = () =>
-  ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
-
-/**
- * Where the calls here work unless a test says otherwise: an App of its
- * own, never restricted, made before the first test (once the IdP mock
- * is up) and kept for the rest.
- */
-let appWork: ModelCall<undefined>["work"] | undefined;
-
-const requireWork = (): ModelCall<undefined>["work"] => {
-  if (appWork === undefined) {
-    throw new Error("The tests' App isn't made yet");
-  }
-  return appWork;
-};
-
-const hello = (
-  model: string,
-  more: Partial<ModelCall<undefined>> = {}
-): ModelCall<undefined> => ({
-  model,
-  input: "Hello.",
-  purpose: "chat.turn",
-  trigger: newPerson(),
-  work: requireWork(),
-  ...more,
-});
-
-/**
- * What `run` returns, with `config` as the deployment's gateway config for
- * the workflow runs it starts, and the fake gateway answering with
- * `replies`.
- */
-const withDeploymentRules = async <Result>(
-  config: unknown,
-  replies: GatewayReply[],
-  run: () => Promise<Result>
-) => {
-  const { MODEL_GATEWAY: before, MODEL_BUDGET_MONTH: month } = env;
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const sending = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  try {
-    env.MODEL_GATEWAY = config;
-    env.MODEL_BUDGET_MONTH = newMonth();
-    return { fake, result: await run() };
-  } finally {
-    env.MODEL_GATEWAY = before;
-    env.MODEL_BUDGET_MONTH = month;
-    sending.mockRestore();
-  }
-};
-
-/** The model gateway's actions among `events`, in order. */
-const modelActions = (events: AuditEvent[]): string[] =>
-  events
-    .map(({ action }) => action)
-    .filter((action) => action.startsWith("model."));
-
-/** A run of `workflow` in `app` no other test uses. */
-const runOf = (app: string, workflow: string) =>
-  runActorOf({ runId: `run-${crypto.randomUUID()}`, app, workflow });
-
-/**
- * The audit events `actor` triggered, the model ledger's alerts included:
- * its alarm delivers what its outbox holds.
- */
-const eventsOf = async (actor: unknown): Promise<AuditEvent[]> => {
-  await runDurableObjectAlarm(modelLedger(env));
-  const events = await allEvents();
-  return events.filter(
-    (event) => JSON.stringify(event.actor) === JSON.stringify(actor)
-  );
-};
 
 // The tests that run a workflow release an App of their own, which runs
 // its workflow tests to activate it, have permissions granted where they
@@ -216,23 +60,7 @@ const eventsOf = async (actor: unknown): Promise<AuditEvent[]> => {
 // Sixty seconds fits two runs' waits with room for the setup, as
 // app-roles.test.ts and knowledge-access.test.ts give theirs.
 describe("model rules", { timeout: 60_000 }, () => {
-  beforeEach(async () => {
-    if (appWork !== undefined) {
-      return;
-    }
-    const builder = await signedInApi(idp, "builder");
-    const { id } = await builder.api.apps.create({ name: "Model rules" });
-    const appId = appIdSchema.parse(id);
-    appWork = {
-      authority: {
-        subject: { type: "app", appId },
-        onBehalfOf: builder.userId,
-        mode: "interactive",
-        appVersion: 1,
-      },
-      context: { type: "app", appId },
-    };
-  });
+  const hello = callsInAnApp(idp);
 
   it("keep every call of an EU-only deployment with a model hosted in the EU, still through AI Gateway, and audit each refusal", async () => {
     const { fake, call } = withRules({
@@ -565,419 +393,6 @@ describe("model rules", { timeout: 60_000 }, () => {
       {
         action: "model.refused",
         detail: { reason: "permission.context_invalid", because: null },
-      },
-    ]);
-  });
-
-  it("retry a workflow's AI step the budget turned away while other calls hold it, no sooner than 15 seconds on, however tight its retries", async () => {
-    const builder = await signedInApi(idp, "builder");
-    // One retry, a millisecond on: the step's own delay.
-    const app = await appWith(
-      builder,
-      workflowFiles(
-        "reader",
-        `  return await step.llm("extract", {
-    description: "Read the total",
-    binding: "reader",
-    instructions: "Read the total in cents.",
-    input: "Total 12.34 EUR",
-    schema: z.object({ total: z.int() }),
-    retries: { limit: 1, delay: 1 },
-  });`,
-        { extract: { total: 1234 } }
-      )
-    );
-    const release = Promise.withResolvers<boolean>();
-    const actor = (runId: string) =>
-      runActorOf({ runId, app, workflow: "reader" });
-
-    // Sonnet 4.5 reserves some $0.56: another of the workflow's runs holds
-    // its $1 budget while it answers, until released.
-    const { result } = await withDeploymentRules(
-      {
-        gateway,
-        models: [workersAi, anthropic],
-        budgets: { workflow: { limit: 1 } },
-      },
-      [
-        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
-        { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
-      ],
-      async () => {
-        await bindModel(app, "reader", anthropic);
-        const holding = outcome(
-          models(env).call(
-            hello(anthropic, {
-              purpose: "workflow.step",
-              trigger: actor(`run-${crypto.randomUUID()}`),
-            })
-          )
-        );
-        await vi.waitFor(async () => {
-          const read = await modelLedger(env).spendOf(
-            env.MODEL_BUDGET_MONTH ?? "",
-            ["workflow"],
-            10
-          );
-          expect(read.workflow?.[0]?.reservedMicros).toBeGreaterThan(0);
-        });
-        const run = await builder.api.workflows.start(app, "reader");
-        await vi.waitFor(
-          async () => {
-            const events = await eventsOf(actor(run.id));
-            expect(events.map(({ action }) => action)).toContain(
-              "model.refused"
-            );
-          },
-          { timeout: 10_000, interval: 200 }
-        );
-        // Still held a while after the refusal: a retry a millisecond on
-        // would be turned away again, and spend the step's last.
-        await scheduler.wait(3000);
-        release.resolve(true);
-        await finished(run.id);
-        return {
-          held: await holding,
-          run: await builder.api.workflows.status(run.id),
-          events: await eventsOf(actor(run.id)),
-        };
-      }
-    );
-
-    const timeOf = (action: string) =>
-      Date.parse(
-        result.events.find((event) => event.action === action)?.at ?? ""
-      );
-    expect({
-      held: result.held,
-      run: result.run,
-      refused: result.events
-        .filter(({ action }) => action === "model.refused")
-        .map(({ detail }) => detail),
-      waited: timeOf("model.call") - timeOf("model.refused") >= 15_000,
-    }).toMatchObject({
-      held: "ok",
-      run: { status: "completed", output: { total: 1234 } },
-      // A shared budget: a fixed wait, nothing of the other run's timing.
-      refused: [
-        {
-          reason: "model.budget_busy",
-          because: "workflow",
-          retryAfterSeconds: 60,
-        },
-      ],
-      waited: true,
-    });
-  });
-
-  it("ask the ledger for a busy step at most every 15 seconds, however short its attempts' timeout, and fail a step with no retry left at once", async () => {
-    const builder = await signedInApi(idp, "builder");
-    // Attempts that time out after four seconds, retried a millisecond on:
-    // the five a step may have span past the 15 seconds; and a step with
-    // no retry at all.
-    const app = await appWith(builder, {
-      ...workflowFiles(
-        "reader",
-        llm("timeout: 4000, retries: { limit: 4, delay: 1 },"),
-        {
-          extract: { total: 1234 },
-        }
-      ),
-      ...workflowFiles("once", llm("retries: { limit: 0 },"), {
-        extract: { total: 1234 },
-      }),
-    });
-    const release = Promise.withResolvers<boolean>();
-    const actor = (runId: string, workflow = "reader") =>
-      runActorOf({ runId, app, workflow });
-
-    // Another run of each workflow holds its $1 budget while it answers,
-    // until released.
-    const { result } = await withDeploymentRules(
-      {
-        gateway,
-        models: [workersAi, anthropic],
-        budgets: { workflow: { limit: 1 } },
-      },
-      [
-        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
-        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
-        { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
-      ],
-      async () => {
-        await bindModel(app, "reader", anthropic);
-        const holding = Promise.all(
-          ["reader", "once"].map(
-            async (workflow) =>
-              await outcome(
-                models(env).call(
-                  hello(anthropic, {
-                    purpose: "workflow.step",
-                    trigger: actor(`run-${crypto.randomUUID()}`, workflow),
-                  })
-                )
-              )
-          )
-        );
-        await vi.waitFor(async () => {
-          const read = await modelLedger(env).spendOf(
-            env.MODEL_BUDGET_MONTH ?? "",
-            ["workflow"],
-            10
-          );
-          expect(
-            read.workflow?.filter(({ reservedMicros }) => reservedMicros > 0)
-          ).toHaveLength(2);
-        });
-        const once = await builder.api.workflows.start(app, "once");
-        const startedOnce = Date.now();
-        await finished(once.id);
-        const onceTook = Date.now() - startedOnce;
-        const run = await builder.api.workflows.start(app, "reader");
-        // Eight seconds of attempts four seconds apart, all while held.
-        await scheduler.wait(8000);
-        const whileHeld = await eventsOf(actor(run.id));
-        release.resolve(true);
-        await finished(run.id);
-        return {
-          held: await holding,
-          onceTook,
-          once: await builder.api.workflows.status(once.id),
-          whileHeld,
-          run: await builder.api.workflows.status(run.id),
-          events: await eventsOf(actor(run.id)),
-        };
-      }
-    );
-
-    expect({
-      held: result.held,
-      once: result.once,
-      onceQuick: result.onceTook < 10_000,
-      whileHeld: modelActions(result.whileHeld),
-      run: result.run,
-      after: modelActions(result.events),
-    }).toMatchObject({
-      held: ["ok", "ok"],
-      // No retry left: it fails at once, with the reason.
-      once: {
-        status: "failed",
-        error: {
-          message:
-            "Model calls still under way hold what's left of this workflow's model budget for the month. Try again once they finish.",
-        },
-      },
-      onceQuick: true,
-      // Asked once in eight seconds of attempts; the next answered by the
-      // host from that refusal.
-      whileHeld: ["model.refused"],
-      run: { status: "completed", output: { total: 1234 } },
-      after: ["model.refused", "model.call"],
-    });
-  });
-
-  it("give an AI step's next attempt the answer its timed-out attempt was still waiting for, asking and paying once", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(
-      builder,
-      workflowFiles(
-        "reader",
-        `  return await step.llm("extract", {
-    description: "Read the total",
-    binding: "reader",
-    instructions: "Read the total in cents.",
-    input: "Total 12.34 EUR",
-    schema: z.object({ total: z.int() }),
-    timeout: 1000,
-    retries: { limit: 3, delay: 1 },
-  });`,
-        { extract: { total: 1234 } }
-      )
-    );
-    const release = Promise.withResolvers<boolean>();
-
-    // The gateway answers the first attempt only after its second.
-    const { result } = await withDeploymentRules(
-      { gateway, models: [workersAi, anthropic] },
-      [
-        {
-          text: '{ "total": 1234 }',
-          inputTokens: 10,
-          outputTokens: 5,
-          pause: { at: 1, until: release.promise },
-        },
-        { text: '{ "total": 9999 }', inputTokens: 10, outputTokens: 5 },
-      ],
-      async () => {
-        await bindModel(app, "reader", anthropic);
-        const run = await builder.api.workflows.start(app, "reader");
-        await scheduler.wait(2500);
-        release.resolve(true);
-        await finished(run.id);
-        return {
-          run: await builder.api.workflows.status(run.id),
-          events: await eventsOf(
-            runActorOf({ runId: run.id, app, workflow: "reader" })
-          ),
-        };
-      }
-    );
-
-    expect({
-      run: result.run,
-      models: modelActions(result.events),
-    }).toMatchObject({
-      run: { status: "completed", output: { total: 1234 } },
-      models: ["model.call"],
-    });
-  });
-
-  it("ask the ledger again once 15 seconds passed since a busy step's refusal, on its last attempt too, when the budget freed meanwhile", async () => {
-    const builder = await signedInApi(idp, "builder");
-    // Attempts at about 0, 6 and 12 seconds: the third, the last, runs
-    // past the 15 seconds since the first was turned away.
-    const app = await appWith(
-      builder,
-      workflowFiles(
-        "reader",
-        `  return await step.llm("extract", {
-    description: "Read the total",
-    binding: "reader",
-    instructions: "Read the total in cents.",
-    input: "Total 12.34 EUR",
-    schema: z.object({ total: z.int() }),
-    timeout: 6000,
-    retries: { limit: 2, delay: 1 },
-  });`,
-        { extract: { total: 1234 } }
-      )
-    );
-    const release = Promise.withResolvers<boolean>();
-    const actor = (runId: string) =>
-      runActorOf({ runId, app, workflow: "reader" });
-
-    const { result } = await withDeploymentRules(
-      {
-        gateway,
-        models: [workersAi, anthropic],
-        budgets: { workflow: { limit: 1 } },
-      },
-      [
-        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
-        { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
-      ],
-      async () => {
-        await bindModel(app, "reader", anthropic);
-        const holding = outcome(
-          models(env).call(
-            hello(anthropic, {
-              purpose: "workflow.step",
-              trigger: actor(`run-${crypto.randomUUID()}`),
-            })
-          )
-        );
-        await vi.waitFor(async () => {
-          const read = await modelLedger(env).spendOf(
-            env.MODEL_BUDGET_MONTH ?? "",
-            ["workflow"],
-            10
-          );
-          expect(read.workflow?.[0]?.reservedMicros).toBeGreaterThan(0);
-        });
-        const run = await builder.api.workflows.start(app, "reader");
-        await vi.waitFor(
-          async () => {
-            const events = await eventsOf(actor(run.id));
-            expect(modelActions(events)).toContain("model.refused");
-          },
-          { timeout: 10_000, interval: 100 }
-        );
-        // Free half a second after the refusal, well within the 15 seconds.
-        await scheduler.wait(500);
-        release.resolve(true);
-        await finished(run.id);
-        return {
-          held: await holding,
-          run: await builder.api.workflows.status(run.id),
-          events: await eventsOf(actor(run.id)),
-        };
-      }
-    );
-
-    expect({
-      held: result.held,
-      run: result.run,
-      actions: modelActions(result.events),
-    }).toMatchObject({
-      held: "ok",
-      run: { status: "completed", output: { total: 1234 } },
-      actions: ["model.refused", "model.call"],
-    });
-  });
-
-  it("stop a workflow's AI steps with a readable error once its budget is used up, and alert admins", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(
-      builder,
-      workflowFiles(
-        "reader",
-        `  return await step.llm("extract", {
-    description: "Read the total",
-    binding: "reader",
-    instructions: "Read the total in cents.",
-    input: "Total 12.34 EUR",
-    schema: z.object({ total: z.int() }),
-  });`,
-        { extract: { total: 1234 } }
-      )
-    );
-
-    // One answer of a million tokens in costs $3: well past the budget.
-    const { result: runs } = await withDeploymentRules(
-      {
-        gateway,
-        models: [workersAi, anthropic],
-        budgets: { workflow: { limit: 1 } },
-      },
-      [{ text: '{ "total": 1234 }', inputTokens: 1_000_000, outputTokens: 10 }],
-      async () => {
-        await bindModel(app, "reader", anthropic);
-        const paid = await builder.api.workflows.start(app, "reader");
-        await finished(paid.id);
-        const stopped = await builder.api.workflows.start(app, "reader");
-        await finished(stopped.id);
-        return { paid: paid.id, stopped: stopped.id };
-      }
-    );
-
-    await expect(
-      Promise.all([
-        builder.api.workflows.status(runs.paid),
-        builder.api.workflows.status(runs.stopped),
-      ])
-    ).resolves.toMatchObject([
-      { status: "completed", output: { total: 1234 } },
-      {
-        status: "failed",
-        error: {
-          message:
-            "This workflow's model budget for the month is used up, so it can make no more model calls until the budget resets at the start of next month (UTC). Ask your admin to have Grasp raise the budget.",
-        },
-      },
-    ]);
-    const alerts = await eventsOf(
-      runActorOf({ runId: runs.paid, app, workflow: "reader" })
-    );
-    expect(
-      alerts.filter(({ action }) => action.startsWith("model.budget."))
-    ).toMatchObject([
-      {
-        action: "model.budget.alert",
-        detail: { scope: "workflow", app, workflow: "reader", limit: 1 },
-      },
-      {
-        action: "model.budget.exhausted",
-        detail: { scope: "workflow", app, workflow: "reader", limit: 1 },
       },
     ]);
   });

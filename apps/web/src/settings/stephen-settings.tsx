@@ -169,6 +169,7 @@ const classNames = {
   "change-own": msg`Change their own`,
   "change-company": msg`Change the company's`,
   "reach-others": msg`Reach others`,
+  "read-others": msg`Read others' words`,
 } as const satisfies Record<CompanyToolClass, MessageDescriptor>;
 
 const classDescriptions = {
@@ -177,6 +178,7 @@ const classDescriptions = {
   "change-own": msg`Drafts, events and files of their own, after they press a card.`,
   "change-company": msg`Shared mailboxes, registers and the company's records, after they press a card.`,
   "reach-others": msg`Mail and messages to other people, after they press a card with every recipient.`,
+  "read-others": msg`Teams chats and meetings they were in: what others wrote and said there, summarised for them alone.`,
 } as const satisfies Record<CompanyToolClass, MessageDescriptor>;
 
 /** Apps by their connector's provider, as people know them. */
