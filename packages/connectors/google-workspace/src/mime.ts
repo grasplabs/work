@@ -83,6 +83,51 @@ const encodedName = (name: string): string =>
       `%${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()}`
   );
 
+/**
+ * The most of an encoded name one parameter line carries: with its
+ * parameter's name and charset, a line within RFC 5322's 78 characters.
+ */
+const nameChunk = 54;
+
+/**
+ * An encoded name (`encodedName`) in pieces of at most {@link nameChunk}
+ * characters, none cut inside a percent escape.
+ */
+const nameChunks = (encoded: string): string[] => {
+  const chunks: string[] = [];
+  for (let at = 0; at < encoded.length;) {
+    let end = Math.min(at + nameChunk, encoded.length);
+    if (encoded[end - 1] === "%") {
+      end -= 1;
+    } else if (encoded[end - 2] === "%") {
+      end -= 2;
+    }
+    chunks.push(encoded.slice(at, end));
+    at = end;
+  }
+  return chunks;
+};
+
+/**
+ * An attachment's `Content-Disposition`, each parameter folded onto a line
+ * of its own (RFC 5322): its name in UTF-8, percent-encoded (RFC 2231),
+ * split into numbered continuations when long, so no line passes the
+ * limit however long a name in any script; with a plain ASCII name for
+ * readers that don't read that.
+ */
+const dispositionOf = (name: string): string => {
+  const encoded = encodedName(name);
+  const utf8 =
+    encoded.length <= nameChunk
+      ? [`filename*=UTF-8''${encoded}`]
+      : nameChunks(encoded).map(
+          (chunk, index) =>
+            `filename*${String(index)}*=${index === 0 ? "UTF-8''" : ""}${chunk}`
+        );
+  const parameters = [`filename="${asciiName(name)}"`, ...utf8];
+  return `Content-Disposition: attachment;${crlf} ${parameters.join(`;${crlf} `)}`;
+};
+
 /** One attachment as a MIME part: its headers, then its base64 content. */
 const attachmentPart = ({
   name,
@@ -95,9 +140,7 @@ const attachmentPart = ({
 }): string[] => [
   // The type is one of a closed list, with no parameter in it.
   `Content-Type: ${type}`,
-  // RFC 2231: the name in UTF-8, percent-encoded, with a plain ASCII one
-  // for readers that don't read that.
-  `Content-Disposition: attachment; filename="${asciiName(name)}"; filename*=UTF-8''${encodedName(name)}`,
+  dispositionOf(name),
   "Content-Transfer-Encoding: base64",
   "",
   folded(toBase64(bytes)),
