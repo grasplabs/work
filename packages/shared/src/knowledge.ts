@@ -285,6 +285,32 @@ export interface KnowledgeTools {
  * session and what the person may see and change, on the server, and
  * every read of documents is recorded in the audit log.
  */
+/** How many entity match proposals to show. */
+export interface EntityMatchesOptions {
+  limit?: number;
+}
+
+/** Entities of different collections that may be one, on their name alone. */
+export interface EntityMatch {
+  kind: string;
+  name: string;
+  basis: "name";
+  entities: { id: string; collectionIds: string[]; sources: number }[];
+}
+
+/** A decision on two entities, and the evidence for `same`. */
+export interface EntityMatchDecisionInput {
+  entities: [string, string];
+  decision: "same" | "different";
+  evidence?: { documentId: string; version: number };
+}
+
+/** A decision as recorded. */
+export interface EntityMatchDecision {
+  entities: [string, string];
+  decision: "same" | "different";
+}
+
 export interface KnowledgeApi {
   /** The collections the person may read. */
   listCollections: () => Promise<Collection[]>;
@@ -378,6 +404,21 @@ export interface KnowledgeApi {
     lessonId: string;
     expectedRevision: number;
   }) => Promise<void>;
+  /**
+   * Entities of different collections the person reads that may be one
+   * (GRA-1080): of one kind and name, worked out from what they read now,
+   * never kept, and never merged. A collection they can't read is never a
+   * side, nor shapes what they see.
+   */
+  entityMatches: (options?: EntityMatchesOptions) => Promise<EntityMatch[]>;
+  /**
+   * Decides whether two entities are one: by a person who reads both
+   * sides, `same` only with a document they read as evidence, audited. It
+   * rewrites no ID, and shows only to readers of both sides.
+   */
+  decideEntityMatch: (
+    input: EntityMatchDecisionInput
+  ) => Promise<EntityMatchDecision>;
   /**
    * Publishes a record into a team's, the company's or a chat's memory,
    * where the person may (GRA-298): retry-safe, as `remember`.
