@@ -63,6 +63,10 @@ const summary = (selection: SkillSelection) => ({
   ),
 });
 
+/** `pairs`, by their first item. */
+const sorted = (pairs: string[][]) =>
+  pairs.toSorted(([a = ""], [b = ""]) => a.localeCompare(b));
+
 /** Where a selection's skill came from, or why none, with where each considered one is. */
 const where = (selection: SkillSelection) => ({
   result:
@@ -596,14 +600,44 @@ describe("who can make a skill selectable", () => {
       task: { type: "onboard" },
     });
 
-    expect([where(byTeam), where(byCompany)]).toStrictEqual([
+    // Narrowed to the EU, and then retired: either way the shipped one
+    // stays out, and nothing is selected in its place.
+    await saved(company, "onboarding", "tasks: [onboard]\nwhen: [eu]", 1);
+    const narrowed = await selectSkill(brain, everyone, {
+      task: { type: "onboard" },
+    });
+    await saved(company, "onboarding", "tasks: [onboard]\nstatus: retired", 2);
+    const retired = await selectSkill(brain, everyone, {
+      task: { type: "onboard" },
+    });
+
+    expect([
+      where(byTeam),
+      where(byCompany),
+      where(narrowed),
+      where(retired),
+    ]).toStrictEqual([
       { result: shipped.id, considered: [[shipped.id, "selected"]] },
       {
         result: company.id,
-        considered: [
+        considered: sorted([
           [company.id, "selected"],
           [shipped.id, "replaced"],
-        ].toSorted(([a = ""], [b = ""]) => a.localeCompare(b)),
+        ]),
+      },
+      {
+        result: "no_match",
+        considered: sorted([
+          [company.id, "precondition_unmet"],
+          [shipped.id, "replaced"],
+        ]),
+      },
+      {
+        result: "no_match",
+        considered: sorted([
+          [company.id, "retired"],
+          [shipped.id, "replaced"],
+        ]),
       },
     ]);
   });
@@ -968,7 +1002,14 @@ describe("reading a pinned skill", () => {
       0
     );
     await written("audits/SKILL.md", skillText("audits", "tasks: [audit]"), 1);
-    const caller: Caller = { userId: "ann", reads: [skills.id] };
+    // A skill a team writes, "accepted" or not: never read as a vetted one.
+    const team = await newCollection(brain, "Team skills", "team");
+    const teams = await saved(
+      team,
+      "shortcut",
+      "tasks: [refund]\nstatus: accepted"
+    );
+    const caller: Caller = { userId: "ann", reads: [skills.id, team.id] };
     const pinned = await readSkill(brain, caller, {
       documentId: became.id,
       version: 1,
@@ -985,11 +1026,15 @@ describe("reading a pinned skill", () => {
       notYet: await outcome(
         readSkill(brain, caller, { documentId: was.id, version: 1 })
       ),
+      team: await outcome(
+        readSkill(brain, caller, { documentId: teams.id, version: 1 })
+      ),
     }).toStrictEqual({
       note: "brain.not_found",
       later: "brain.not_found",
       pinnedSince: { name: "payouts", version: 1 },
       notYet: "brain.not_found",
+      team: "brain.not_found",
     });
   });
 });

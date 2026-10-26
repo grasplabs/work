@@ -30,7 +30,9 @@ import type { Fixture } from "./sealed-apps.ts";
 // 2. A selection or read reaches past the binding: a skill in a collection
 //    the App was granted for something else is weighed or read.
 // 3. A skill is selected for a capability the App doesn't hold.
-// 4. A skill from a sensitive collection leaves without restricting the App.
+// 4. A team's skill, "accepted" by its own members, is weighed or read as a
+//    vetted one (only team collections can be sensitive, so none of a
+//    sensitive collection's skills is ever handed over).
 // 5. A retained binding keeps selecting after the Brain's grant is gone.
 
 /** An App whose actions select a skill and read a pinned one. */
@@ -311,8 +313,8 @@ describe("an App's skills", setUpTime, () => {
     });
   });
 
-  it("never selects a team's skill, and restricts the App once it reads one pinned from a sensitive collection", async () => {
-    const { sealed, saved, grantBrain, ids } = await skillsApp();
+  it("never selects or reads a team's skill, whatever its status says, and so nothing of a sensitive team collection", async () => {
+    const { sealed, saved, grantBrain } = await skillsApp();
     await grantBrain();
     const authority = {
       subject: { type: "app" as const, appId: sealed.app },
@@ -322,28 +324,21 @@ describe("an App's skills", setUpTime, () => {
     };
     const context = { type: "app" as const, appId: sealed.app };
     const salary = await called(sealed, "pick", { type: "salary" });
-    const afterPick = await isRestricted(env, authority, context);
     const opened = await called(sealed, "open", {
       documentId: saved.salaries ?? "",
       version: 1,
     });
 
     expect({
-      // Its members write it: none of its skills is vouched for.
+      // Its members write it: none of its skills is vouched for, so none
+      // is weighed, and a pinned read of one isn't found.
       salary: pickOf(salary.result),
-      afterPick,
       opened: openOf(opened.result),
-      provenance: {
-        collectionIds: opened.provenance?.collectionIds,
-        sensitive: opened.provenance?.sensitive,
-      },
-      afterRead: await isRestricted(env, authority, context),
+      restricted: await isRestricted(env, authority, context),
     }).toStrictEqual({
       salary: { picked: "no_match", read: false },
-      afterPick: false,
-      opened: "salaries",
-      provenance: { collectionIds: [ids.secret], sensitive: true },
-      afterRead: true,
+      opened: { failed: "resource.item_not_found" },
+      restricted: false,
     });
   });
 

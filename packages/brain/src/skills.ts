@@ -55,8 +55,9 @@ import { asBrainError } from "./recall.ts";
 //   across collections; a name twice there is ambiguous, never "the one
 //   the caller reads". `replaces` reaches a skill in the same collection,
 //   or, from a collection only admins write, a shipped skill. A skill
-//   there with a shipped skill's name takes its place without naming it:
-//   it is the client's adapted copy, which can't name itself.
+//   there with a shipped skill's name takes it out of selection without
+//   naming it (the client's adapted copy, which can't name itself),
+//   whether or not the copy applies: how admins switch one off.
 // - A missing prerequisite or dependency: each must be accepted and usable
 //   by the caller (a prerequisite: its own capabilities, prerequisites and
 //   dependencies in turn, never through a cycle), or that one
@@ -71,7 +72,8 @@ import { asBrainError } from "./recall.ts";
 //   `skillsVisitMax` visits through prerequisites, it selects none.
 // - A pin changing under a run: the selection pins the version it read;
 //   `readSkill` returns exactly that version, retired or superseded since,
-//   while the caller may still read it.
+//   while the caller may still read it, and only from a collection the
+//   host vouches for: a team's "accepted" skill is never read as vetted.
 // - Unrecorded selections: every one, a no-skill one too, is recorded by
 //   the host's `onRead` port with its result and counts, never a skill's
 //   text.
@@ -457,30 +459,33 @@ const mayReplace = (by: Candidate, target: Candidate): boolean =>
 
 /**
  * The skills `by` takes the place of: for each name in its `replaces`, the
- * one selectable skill of that name it may replace (`mayReplace`); and,
- * for an admins' skill, the one shipped skill of its own name, which it is
- * the client's adapted copy of (and can't name itself). A name that is no
- * skill, or more than one, replaces nothing: which one is meant is
- * ambiguous, and a replacement never settles an ambiguity.
+ * one selectable skill of that name it may replace (`mayReplace`). A name
+ * that is no skill, or more than one, replaces nothing: which one is meant
+ * is ambiguous, and a replacement never settles an ambiguity.
  */
-const replacedBy = (by: Candidate, all: readonly Candidate[]): Candidate[] => {
-  const named = (name: string, may: (target: Candidate) => boolean) => {
-    const found = all.filter(
-      (target) => target !== by && target.ref.name === name && may(target)
+const replacedBy = (by: Candidate, all: readonly Candidate[]): Candidate[] =>
+  by.manifest.replaces.flatMap((name) => {
+    const named = all.filter(
+      (target) =>
+        target !== by && target.ref.name === name && mayReplace(by, target)
     );
-    return found.length === 1 ? found : [];
-  };
-  const copied =
-    by.authority === "admins"
-      ? named(by.ref.name, (target) => target.authority === "shipped")
-      : [];
-  return [
-    ...by.manifest.replaces.flatMap((name) =>
-      named(name, (target) => mayReplace(by, target))
-    ),
-    ...copied,
-  ];
-};
+    return named.length === 1 ? named : [];
+  });
+
+/**
+ * Whether `candidate` is a shipped skill an admins' skill the caller reads
+ * has the name of: the client's copy of it, adapted (which can't name
+ * itself in `replaces`). The copy takes it out of selection whatever the
+ * copy's own state, so a copy that doesn't apply, can't be used or is
+ * retired selects nothing in its place: how admins switch a shipped skill
+ * off.
+ */
+const copiedOver = (candidate: Candidate, all: readonly Candidate[]) =>
+  candidate.authority === "shipped" &&
+  all.some(
+    (copy) =>
+      copy.authority === "admins" && copy.ref.name === candidate.ref.name
+  );
 
 /**
  * Each of the skills `relevant` to the task, with why it was or wasn't
@@ -502,6 +507,10 @@ const outcomesOf = async <C>(
   const applicable: { candidate: Candidate; pins: SkillRef[] }[] = [];
   const walk: Walk = { known: new Map(), visited: 0, exceeded: false };
   for (const candidate of relevant) {
+    if (copiedOver(candidate, all)) {
+      outcomes.set(candidate, "replaced");
+      continue;
+    }
     // oxlint-disable-next-line no-await-in-loop -- in order, bounded by skillsReadMax
     const checked = await checkedOf(brain, candidate, traits, held, all, walk);
     if ("blocked" in checked) {
@@ -659,20 +668,31 @@ export const readSkillWithSources = async <C>(
       input
     );
     await brain.ports.recall.require(reader);
-    if (within !== undefined) {
-      // Located before it is read, so a skill outside them is never read,
-      // nor recorded as read: not found, as one the reader can't see.
-      const located = await brain.db
-        .select({ collectionId: documents.collectionId })
-        .from(documents)
-        .where(eq(documents.id, documentId))
-        .get();
-      if (
-        located === undefined ||
-        !within.some((id) => id === located.collectionId)
-      ) {
-        throw brainErrors.create("brain.not_found");
-      }
+    // Located before it is read, so a skill elsewhere is never read, nor
+    // recorded as read: not found, as one the reader can't see. Only in a
+    // collection the host vouches for, as selection weighs (a skill a team
+    // writes is never read as a vetted one), and within the caller's bound.
+    const located = await brain.db
+      .select({
+        id: collections.id,
+        access: collections.access,
+        owner: collections.owner,
+        source: collections.source,
+      })
+      .from(documents)
+      .innerJoin(collections, eq(collections.id, documents.collectionId))
+      .where(eq(documents.id, documentId))
+      .get();
+    const vouched =
+      located === undefined
+        ? {}
+        : await brain.ports.skills.authorityOf([located]);
+    if (
+      located === undefined ||
+      vouched[located.id] === undefined ||
+      (within !== undefined && !within.some((id) => id === located.id))
+    ) {
+      throw brainErrors.create("brain.not_found");
     }
     const read = await getDocument(brain, reader, documentId, version);
     // A skill at the pinned version itself, whatever the document is now:
