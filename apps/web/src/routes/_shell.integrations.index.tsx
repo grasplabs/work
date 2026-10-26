@@ -1,6 +1,7 @@
 import { catalogGroups } from "@grasp-os/shared/connect";
 import type { CatalogGroup } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   InputGroup,
@@ -34,6 +35,7 @@ import {
   keeps,
   roundedDown,
   sectionsOf,
+  workflowsOf,
 } from "../connections/integrations.ts";
 import type {
   Integration,
@@ -57,6 +59,7 @@ import { PageLoading } from "../frame/page-states.tsx";
 import { PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 
 // Integrations, as in the prototype (`routes/integrations/index.tsx`):
 // every app Grasp can work in. The page sidebar filters: everything, what
@@ -334,10 +337,14 @@ const upTo = (
 const Kinds = ({
   sections,
   identity,
+  uses,
 }: {
   sections: readonly IntegrationSection[];
   identity: Identity;
+  /** Which workflows use each connection: none shown while they can't be read. */
+  uses: Loaded<ConnectionWorkflows[]>;
 }) => {
+  const using = uses.state === "ready" ? uses.data : [];
   const { i18n } = useLingui();
   const [drawn, setDrawn] = useState(step);
   const total = sections.reduce(
@@ -390,6 +397,7 @@ const Kinds = ({
                 identity={identity}
                 integration={integration}
                 key={integration.key}
+                workflows={workflowsOf(integration, using)}
               />
             ))}
           </ul>
@@ -505,7 +513,7 @@ const FilterSelect = ({
 };
 
 const Integrations = () => {
-  const { catalog, connections, requests } = Route.useLoaderData();
+  const { catalog, connections, uses, requests } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const search = Route.useSearch();
   const { q, connectionError, connection } = search;
@@ -623,6 +631,7 @@ const Integrations = () => {
               identity={identity}
               key={`${JSON.stringify(filter)}·${q ?? ""}`}
               sections={sections}
+              uses={uses}
             />
             {/* Under the whole catalog only: not a kind, nor a search's match. */}
             {wholeCatalog ? <RequestedApps requests={requests} /> : null}

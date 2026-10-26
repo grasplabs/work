@@ -8,8 +8,9 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { HeldPermissions } from "./connection-list.tsx";
 
 // What the Integrations pages read: the catalog, the connections this
-// person can see and, for those who may list them (admins and builders),
-// the permissions Apps and agents hold. Each part is read on its own, and
+// person can see, which of the workflows they can open use each, and,
+// for those who may list them (admins and builders), the permissions Apps
+// and agents hold. Each part is read on its own, and
 // says on its own why it failed: one read that fails or hangs leaves the
 // others.
 
@@ -33,18 +34,22 @@ const heldPermissions = async (session: Session): Promise<HeldPermissions> => {
   return { permissions, appNames };
 };
 
-/** The catalog and the connections; with `held`, the permissions too. */
+/** The catalog, the connections and their workflows; with `held`, the permissions too. */
 export const loadIntegrations = async (
   core: CoreConnection,
   identity: Identity,
   { held }: { held: boolean }
 ) => {
-  const [catalog, connections, permissions] = await Promise.all([
+  const [catalog, connections, uses, permissions] = await Promise.all([
     loadFromCore(core, async (session) => await session.connections.catalog()),
     loadFromCore(core, async (session) => await session.connections.list()),
+    loadFromCore(
+      core,
+      async (session) => await session.workflows.byConnection()
+    ),
     held && canBuild(identity.role)
       ? loadFromCore(core, heldPermissions)
       : undefined,
   ]);
-  return { catalog, connections, held: permissions };
+  return { catalog, connections, uses, held: permissions };
 };

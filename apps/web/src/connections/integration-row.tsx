@@ -1,4 +1,5 @@
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { ConnectionWorkflow } from "@grasp-os/shared/workflows";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -10,6 +11,7 @@ import { AppLogo } from "./app-logo.tsx";
 import { canConnect, canReconnect, ConnectDialog } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
 import { kindOf, stateOf } from "./integrations.ts";
+import { UsedBy } from "./workflows-using.tsx";
 
 // One app in the Integrations list, as the prototype's row
 // (`components/integration-row.tsx`, `integration-button.tsx`): its tile,
@@ -196,16 +198,20 @@ const IntegrationButton = ({
 
 /**
  * One app, as the prototype's row: its logo, its name to open it, what kind
- * of app it is, and its button. What it does, in a sentence, shows when it
+ * of app it is, how many of the workflows the person can open use it, and
+ * its button. What it does, in a sentence, shows when it
  * is pointed at. No frame. An app the organization doesn't offer says so to
  * the admins who see it.
  */
 export const IntegrationRow = ({
   integration,
   identity,
+  workflows,
 }: {
   integration: Integration;
   identity: Identity;
+  /** The workflows that use it; left out where the page doesn't say. */
+  workflows?: readonly ConnectionWorkflow[];
 }) => (
   <li className="flex h-14 min-w-0 items-center gap-3">
     <AppLogo logo={integration.logo} name={integration.name} />
@@ -222,6 +228,7 @@ export const IntegrationRow = ({
       </Link>
       <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
         <span className="truncate">{kindOf(integration)}</span>
+        {workflows === undefined ? null : <UsedBy workflows={workflows} />}
         {integration.listed && !integration.offered ? (
           <Badge variant="outline">
             <Trans>Not offered</Trans>
