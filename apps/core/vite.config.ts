@@ -398,8 +398,12 @@ export default coreProject({
     // The Brain baseline against a real model, which costs money, on
     // request only: vite.brain-model.config.ts.
     "test/brain-real-model.test.ts",
-    // The Brain baseline, in a group of its own: vite.brain.config.ts.
+    // The Brain baseline and its CI scale size, in a group of their own:
+    // vite.brain.config.ts.
     "test/brain-baseline.test.ts",
+    "test/brain-scale.test.ts",
+    "test/brain-scale-agent.test.ts",
+    "test/brain-scale-full-context.test.ts",
     // Stephen's eval, in a group of its own: vite.stephen.config.ts.
     "test/stephen-eval.test.ts",
     "test/stephen-eval-google.test.ts",
