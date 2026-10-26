@@ -10,6 +10,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import onboardingMigrations from "../src/db/onboarding/migrations/migrations.js";
 import { intakeIds } from "../src/onboarding/brain-intake.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { claimChecksMax } from "../src/onboarding/team-claims.ts";
@@ -1218,6 +1219,20 @@ const isNumber = (text: string): boolean =>
     text
   );
 
+/** A drawing as the store keeps it, read only as far as a test rewrites it. */
+const keptDrawing = z.looseObject({
+  heard: z.unknown(),
+  told: z.record(
+    z.string(),
+    z.looseObject({
+      gave: z.unknown(),
+      stepMinutes: z
+        .array(z.looseObject({ step: z.number(), minutes: z.unknown() }))
+        .optional(),
+    })
+  ),
+});
+
 /** A drawing the model answers with. */
 const drawingReply = (value: unknown): GatewayReply => ({
   text: JSON.stringify(value),
@@ -1487,6 +1502,66 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
       volumes: [5],
       takes: 5,
       wrong: 5,
+    });
+  });
+
+  it("draws a drawing from before the checks again once migrated, and what five told comes back", async () => {
+    const ids = await givenWith(fiveToldReply);
+    const store = onboardingStore(env);
+    // As a drawing was kept before the checks: no `heard`, no numbers as
+    // each gave them, no step's own normal minutes; given to the brain.
+    await runInDurableObject(store, (_instance, state) => {
+      for (const row of state.storage.sql
+        .exec<{ work: string; drawn: string }>(
+          "SELECT work, drawn FROM drawn_works WHERE drawn IS NOT NULL"
+        )
+        .toArray()) {
+        const {
+          heard: _heard,
+          told: tellers,
+          ...rest
+        } = keptDrawing.parse(JSON.parse(row.drawn));
+        const before = Object.fromEntries(
+          Object.entries(tellers).map(([person, each]) => {
+            const { gave: _gave, stepMinutes, ...others } = each;
+            return [
+              person,
+              {
+                ...others,
+                stepMinutes: stepMinutes?.map(({ step, minutes }) => ({
+                  step,
+                  minutes,
+                })),
+              },
+            ];
+          })
+        );
+        state.storage.sql.exec(
+          "UPDATE drawn_works SET drawn = ? WHERE work = ?",
+          JSON.stringify({ ...rest, told: before }),
+          row.work
+        );
+      }
+      // The onboarding's migration for the checks, as a wake runs it.
+      const sql = onboardingMigrations.migrations.m0024 ?? "";
+      for (const statement of sql.split("--> statement-breakpoint")) {
+        state.storage.sql.exec(statement);
+      }
+    });
+    await answering([fiveToldReply(ids)], async () => await store.drawNext());
+    await intake(ids, [zendeskClaim]);
+    const member = await signedInApi(idp, "user");
+    const read = await ticketsDrawingFor(member.api, ids);
+    expect({
+      decides: read.decides,
+      minutes: read.minutes,
+      volumes: read.volumes,
+      takes: read.takes,
+    }).toStrictEqual({
+      decides: "The priority of the ticket.",
+      minutes: [4, null],
+      volumes: [5],
+      takes: 5,
     });
   });
 
