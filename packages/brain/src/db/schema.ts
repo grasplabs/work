@@ -535,10 +535,29 @@ export const brainEpisodes = sqliteTable(
      * a personal purge took out (../outcomes.ts).
      */
     delivery: text().notNull(),
+    /**
+     * Its place in the order events were recorded, from one counter moved
+     * in the batch that records it (`brain_sequences`): what consolidation
+     * reads in, so an event recorded late is never behind its watermark
+     * (../lessons.ts). None for events recorded before it was kept.
+     */
+    seq: integer(),
   },
   (table) => [
     // A personal purge's delete by owner, and a person's events by time.
     index("brain_episodes_owner_idx").on(table.ownerId, table.occurredAt),
+    // A scope's events in recorded order, past a watermark: a person's,
+    // and a shared session's (../lessons.ts).
+    index("brain_episodes_person_seq_idx").on(
+      table.scope,
+      table.ownerId,
+      table.seq
+    ),
+    index("brain_episodes_session_seq_idx").on(
+      table.scope,
+      table.audience,
+      table.seq
+    ),
     // Erasing the events of an execution record (`eraseOutcomes`).
     index("brain_episodes_evidence_idx").on(table.evidenceId),
   ]
@@ -588,6 +607,146 @@ export const brainErasedEvidence = sqliteTable("brain_erased_evidence", {
 export const brainForgottenPeople = sqliteTable("brain_forgotten_people", {
   userId: text("user_id").primaryKey(),
   forgottenAt: timestamp("forgotten_at").notNull(),
+});
+
+/**
+ * A lesson candidate (GRA-301), consolidated from a scope's verified
+ * episodes (../lessons.ts): its current revision. A lesson is always in
+ * exactly its episodes' scope, `person` (its owner's own) or `session` (a
+ * shared chat's audience), and consolidation only ever writes candidates:
+ * nothing here is accepted, published or read into a prompt.
+ */
+export const brainLessons = sqliteTable(
+  "brain_lessons",
+  {
+    id: text().primaryKey(),
+    revision: integer().notNull(),
+    scope: text({ enum: ["person", "session"] }).notNull(),
+    /** The owner's user ID for `person`, the audience's ID for `session`. */
+    scopeId: text("scope_id").notNull(),
+    /** What the lesson is about, from its episodes: its group's key. */
+    groupKey: text("group_key").notNull(),
+    kind: text({ enum: ["failure_pattern"] }).notNull(),
+    /** JSON: the task type and versions it applies to. */
+    applicability: text().notNull(),
+    /** JSON array: where it doesn't apply, as far as known. */
+    exclusions: text().notNull(),
+    /** Built from identifiers and counts only: never model or source text. */
+    instruction: text().notNull(),
+    evidenceStatus: text("evidence_status", {
+      enum: ["supported", "contested"],
+    }).notNull(),
+    state: text({ enum: ["candidate", "retired"] }).notNull(),
+    /** Who retired it: its owner's correction outranks repetition. */
+    retiredBy: text("retired_by", { enum: ["owner", "evidence"] }),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    // One lesson per scope and group: a retired one too, which keeps the
+    // group from being recreated past its owner's correction.
+    uniqueIndex("brain_lessons_group_idx").on(
+      table.scope,
+      table.scopeId,
+      table.groupKey
+    ),
+  ]
+);
+
+/**
+ * Every revision of a lesson, the current one too: what it said, and the
+ * revision it superseded, so older versions stay inspectable. A patch's
+ * key is unique: one made again (a retried job) writes nothing.
+ */
+export const brainLessonVersions = sqliteTable(
+  "brain_lesson_versions",
+  {
+    lessonId: text("lesson_id")
+      .notNull()
+      .references(() => brainLessons.id, { onDelete: "cascade" }),
+    revision: integer().notNull(),
+    supersedes: integer(),
+    /** JSON: the lesson's content at this revision. */
+    content: text().notNull(),
+    patchKey: text("patch_key").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.lessonId, table.revision] }),
+    uniqueIndex("brain_lesson_versions_patch_idx").on(table.patchKey),
+  ]
+);
+
+/**
+ * The episodes a lesson's revision rests on: supporting it, or
+ * contradicting it. Goes with its episode, so an erased episode is no
+ * longer evidence of anything.
+ */
+export const brainLessonEvidence = sqliteTable(
+  "brain_lesson_evidence",
+  {
+    lessonId: text("lesson_id").notNull(),
+    revision: integer().notNull(),
+    episodeId: text("episode_id")
+      .notNull()
+      .references(() => brainEpisodes.id, { onDelete: "cascade" }),
+    role: text({ enum: ["supporting", "contradicting"] }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.lessonId, table.revision, table.episodeId],
+    }),
+    index("brain_lesson_evidence_episode_idx").on(table.episodeId),
+    foreignKey({
+      columns: [table.lessonId, table.revision],
+      foreignColumns: [
+        brainLessonVersions.lessonId,
+        brainLessonVersions.revision,
+      ],
+    }).onDelete("cascade"),
+  ]
+);
+
+/**
+ * How far consolidation got in each scope: the last episode it read, by
+ * recorded time and ID. A job starts from a watermark and moves it only
+ * forward, in the batch of its patches.
+ */
+export const brainConsolidationMarks = sqliteTable(
+  "brain_consolidation_marks",
+  {
+    /** `<scope>:<scopeId>`. */
+    scopeKey: text("scope_key").primaryKey(),
+    /** The last event read, by its `seq`. */
+    seq: integer().notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  }
+);
+
+/**
+ * Scopes with consolidation due: an event recorded in them, or an erasure
+ * that changed what one of their lessons rests on. What the host's clock
+ * sweeps, a bounded few at a time, instead of all history; a job that read
+ * everything clears its scope's mark if nothing touched it since.
+ */
+export const brainConsolidationDue = sqliteTable(
+  "brain_consolidation_due",
+  {
+    scopeKey: text("scope_key").primaryKey(),
+    scope: text({ enum: ["person", "session"] }).notNull(),
+    scopeId: text("scope_id").notNull(),
+    /** Since when it is due: 0 for at once (an erasure). */
+    since: timestamp("since").notNull(),
+    /** When it was last touched: a job clears it only if not since. */
+    touchedAt: timestamp("touched_at").notNull(),
+  },
+  (table) => [index("brain_consolidation_due_since_idx").on(table.since)]
+);
+
+/** Counters the Brain moves in the batch of what they number. */
+export const brainSequences = sqliteTable("brain_sequences", {
+  name: text().primaryKey(),
+  value: integer().notNull(),
 });
 
 /**

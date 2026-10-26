@@ -1,5 +1,7 @@
+import type { Brain } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
 import { recall } from "@grasp-os/brain/recall";
+import { readSkill, selectSkill } from "@grasp-os/brain/skills";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { connectErrors } from "@grasp-os/shared/connect";
@@ -74,6 +76,7 @@ import type {
   DecisionOutcome,
   DecisionRecipient,
 } from "../decisions/decisions.ts";
+import type { Reader } from "../knowledge/access.ts";
 import { readAsDelegate } from "../knowledge/binding.ts";
 import type { CollectionBinding } from "../knowledge/binding.ts";
 import { brainOf } from "../knowledge/ports.ts";
@@ -709,6 +712,25 @@ const checked = <Schema extends z.ZodType>(
     throw workflowErrors.create("workflow.invalid");
   }
   return parsed.data;
+};
+
+/** The Brain operations a run's Brain binding calls (`#callBrain`). */
+const brainCallSchema = z.enum(["recall", "skillsSelect", "skillsRead"]);
+
+/**
+ * Each, as the Brain serves every caller: a recall, a skill's selection,
+ * a pinned skill's read; the same service and checks.
+ */
+const brainCalls: Record<
+  z.infer<typeof brainCallSchema>,
+  (brain: Brain<Reader>, reader: Reader, request: unknown) => Promise<unknown>
+> = {
+  recall: async (brain, reader, request) =>
+    await recall(brain, reader, request),
+  skillsSelect: async (brain, reader, request) =>
+    await selectSkill(brain, reader, request),
+  skillsRead: async (brain, reader, request) =>
+    await readSkill(brain, reader, request),
 };
 
 /**
@@ -2385,8 +2407,8 @@ export class RunHost extends RpcTarget {
           await this.#callCollection(attempt, binding, method, args),
         callConnection: async (binding, call) =>
           await this.#callConnection(attempt, binding, call),
-        callBrain: async (binding, request) =>
-          await this.#callBrain(attempt, binding, request),
+        callBrain: async (binding, operation, request) =>
+          await this.#callBrain(attempt, binding, operation, request),
         callFunction: async (reference, input) =>
           await this.#callFunction(attempt, reference, input),
         openDecision: async (request) =>
@@ -2724,8 +2746,9 @@ export class RunHost extends RpcTarget {
   }
 
   /**
-   * Recalls from the Brain through the run's Brain binding (`binding`,
-   * `brain(env.BRAIN).recall(request)`), only inside a step whose code its
+   * Calls the Brain through the run's Brain binding (`binding`): a recall
+   * (`brain(env.BRAIN).recall(request)`), or a skill's selection or pinned
+   * read (`.skills.select`, `.skills.read`, GRA-310), only inside a step whose code its
    * review shows calling it (`#requireReviewed`), as the run: its App on
    * behalf of its person, under the App's collection grants and `brain`
    * permission as they are now (GRA-1067; the threat model is on the
@@ -2737,10 +2760,12 @@ export class RunHost extends RpcTarget {
   async #callBrain(
     attempt: StepAttempt,
     binding: unknown,
+    operation: unknown,
     request: unknown
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
       this.#requireUntampered();
+      const call = checked(brainCallSchema, operation);
       await this.#requireCurrent(attempt, "brain");
       const { brains, authority } = this.#run;
       const name = checked(z.string(), binding);
@@ -2779,7 +2804,8 @@ export class RunHost extends RpcTarget {
         authority,
         context,
         undefined,
-        async (reader) => await recall(brainOf(this.#env), reader, request)
+        async (reader) =>
+          await brainCalls[call](brainOf(this.#env), reader, request)
       );
     });
   }

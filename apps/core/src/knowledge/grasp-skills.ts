@@ -57,6 +57,12 @@ import { portsOf, brainOf } from "./ports.ts";
 // - the client's skills: a collection for everyone that its admins write,
 //   like any other, and where a Grasp skill is copied to be adapted.
 //
+// Each Grasp skill's frontmatter carries its manifest (GRA-310): the task
+// types it applies to, and the skills it builds on, named in this
+// collection (`grasp-skills`) so a copy adapted in the client's skills
+// still finds them. The copy, under the same name, takes the shipped
+// skill's place where both apply (the Brain's skills.ts).
+//
 // Each sync reads every Grasp skill's current text in one query and
 // writes only the ones that differ from the release, each as its next
 // version from the version it read: two syncs at once both try the same

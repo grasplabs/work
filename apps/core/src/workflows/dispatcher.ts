@@ -1,5 +1,6 @@
 import { runLinking } from "@grasp-os/brain/entities";
 import { runIndexing } from "@grasp-os/brain/indexing";
+import { runConsolidation } from "@grasp-os/brain/lessons";
 import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
@@ -414,6 +415,9 @@ const internalRuns: Record<
   },
   linking: async (env, input, step) => {
     await runLinking(brainOf(env), input, step);
+  },
+  consolidation: async (env, input, step) => {
+    await runConsolidation(brainOf(env), input, step);
   },
 };
 
