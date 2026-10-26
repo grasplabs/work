@@ -111,22 +111,6 @@ export const discrepancies = {
     reference: "accepted, as no sleep",
     resolution: toOracle,
   },
-  "parallel-sleeps": {
-    family: "sleeps",
-    verdict: "failed",
-    workerflow:
-      "sleeps raced or awaited together end the run with WorkflowParallelWaitError",
-    reference: "both sleeps run, and the run completes",
-    resolution: "GRA-274 builds parallel sleeps and waits",
-  },
-  "wait-race": {
-    family: "events",
-    verdict: "failed",
-    workerflow:
-      "a wait raced against a sleep ends the run with WorkflowParallelWaitError",
-    reference: "the event wins the race, and the run completes with it",
-    resolution: "GRA-274 builds parallel sleeps and waits",
-  },
   "wait-timeout-name": {
     family: "events",
     verdict: "unresolved",
