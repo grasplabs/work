@@ -319,7 +319,11 @@ export const readingOf = (
   return reading;
 };
 
-/** How the company names each suite and place, for finding them in what it said; lower case, as `plain` makes it. */
+/**
+ * How the company names each suite, apart from its places, lower case as
+ * `plain` makes it. Only the suite's own products: "google" alone is no
+ * sign of Google Workspace ("Google Analytics", "we google it").
+ */
 const suiteNames: Record<OAuthProvider, readonly string[]> = {
   microsoft: [
     "microsoft",
@@ -328,40 +332,40 @@ const suiteNames: Record<OAuthProvider, readonly string[]> = {
     "m365",
     "o365",
     "outlook",
-    "sharepoint",
-    "onedrive",
-    "one drive",
-    "ms teams",
-    "microsoft teams",
     "entra",
     "azure ad",
   ],
   google: [
-    "google",
     "gmail",
     "g suite",
     "gsuite",
     "google workspace",
-    "google drive",
     "google docs",
     "google sheets",
+    "google calendar",
+    "google meet",
   ],
 };
 
-const sourceNames: Record<DocumentSourceId, readonly string[]> = {
-  sharepoint: ["sharepoint"],
-  onedrive: ["onedrive", "one drive"],
-  teams: ["ms teams", "microsoft teams"],
-  drive: ["google drive", "gdrive"],
-  confluence: ["confluence"],
-  notion: ["notion"],
+/** How the company names each place for documents, and the suite it comes with, if any: a place named is its suite named too. */
+const sources: Record<
+  DocumentSourceId,
+  { names: readonly string[]; suite: OAuthProvider | null }
+> = {
+  sharepoint: { names: ["sharepoint"], suite: "microsoft" },
+  onedrive: { names: ["onedrive", "one drive"], suite: "microsoft" },
+  teams: { names: ["ms teams", "microsoft teams"], suite: "microsoft" },
+  drive: { names: ["google drive", "gdrive"], suite: "google" },
+  confluence: { names: ["confluence"], suite: null },
+  notion: { names: ["notion"], suite: null },
 };
 
 /**
  * What the admin's onboarding knows of the company from the kickoff:
  * the suites and places named where it says which tools they use (or in
- * the sponsor's answer to that), and Stephen's words about it. Before the
- * kickoff is in, nothing.
+ * the sponsor's answer to that), and Stephen's words about it. A place
+ * named counts for its suite too, so a company on Microsoft 365 and Google
+ * Drive is offered both. Before the kickoff is in, nothing.
  */
 export const contextOf = (
   reading: KickoffReading | null,
@@ -376,13 +380,15 @@ export const contextOf = (
   );
   const names = (each: readonly string[]) =>
     each.some((name) => ` ${systems} `.includes(` ${name} `));
-  const suites = oauthProviderSchema.options.filter((suite) =>
-    names(suiteNames[suite])
+  const named = documentSourceIds.filter((source) =>
+    names(sources[source].names)
   );
-  const sources = documentSourceIds.filter((source) =>
-    names(sourceNames[source])
+  const suites = oauthProviderSchema.options.filter(
+    (suite) =>
+      names(suiteNames[suite]) ||
+      named.some((source) => sources[source].suite === suite)
   );
-  return { suites, sources, words: reading?.words ?? {} };
+  return { suites, sources: named, words: reading?.words ?? {} };
 };
 
 /** A header or note line, or a cue's timing line, in a `.vtt` or `.srt` file. */

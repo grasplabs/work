@@ -417,9 +417,24 @@ describe("the kickoff", { timeout: 60_000 }, () => {
       "Google Workspace, with our procedures in Notion."
     );
     const { context } = await admin.onboarding.view();
-    expect({ before: [before.suites, before.sources], context }).toStrictEqual({
+    /** The suites and places named once the sponsor's answer about their tools is `said`. */
+    const namedBy = async (said: string) => {
+      await staff.onboardingStaff.answerKickoff("systems", said);
+      const { context: named } = await admin.onboarding.view();
+      return [named.suites, named.sources];
+    };
+    expect({
+      before: [before.suites, before.sources],
+      context,
+      // A place named counts for its suite: both suites, Drive kept.
+      mixed: await namedBy("Microsoft 365 for mail, our files in gdrive."),
+      // "Google" alone names no suite.
+      analytics: await namedBy("Google Analytics and Microsoft 365."),
+    }).toStrictEqual({
       // Salesforce and Excel name no suite and no place.
       before: [[], []],
+      mixed: [["microsoft", "google"], ["drive"]],
+      analytics: [["microsoft"], []],
       context: {
         suites: ["google"],
         sources: ["notion"],
