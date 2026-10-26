@@ -454,7 +454,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
   });
 
-  it("shows a warning its preview reports, such as React's development warnings, and fails only on a problem", async () => {
+  it("shows a warning its preview reports, such as React's development warnings, and fails only on a problem, however many warnings came first", async () => {
     const kinds = `export default async (self, env) => {
       const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
       const checked = await env.build.check(app.id);
@@ -491,7 +491,12 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       'Each child in a list should have a unique "key" prop.'
     );
     await stub.ask(id, { text: "Check the desk", model });
-    // Then the draft's own console.error.
+    // More warnings than a revision keeps, then the draft's own
+    // console.error: the warnings never take its place.
+    for (let count = 0; count < 10; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one report after another, as a screen sends them
+      await reported("warning", `Warning number ${count}`);
+    }
     await reported("console", "The desk couldn't be drawn.");
     await stub.ask(id, { text: "Check it again", model });
 
@@ -501,7 +506,11 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       failed: returned(failed?.text),
     }).toStrictEqual({
       warned: { passed: true, kinds: ["warning"] },
-      failed: { passed: false, kinds: ["warning", "console"] },
+      // Ten warnings kept, the eleventh dropped, and the problem kept.
+      failed: {
+        passed: false,
+        kinds: [...Array.from({ length: 10 }, () => "warning"), "console"],
+      },
     });
   });
 
