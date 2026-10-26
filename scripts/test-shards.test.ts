@@ -4,7 +4,12 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 
-import { shardSeconds, splitIntoShards, startsFirst } from "./test-shards.ts";
+import {
+  shardSeconds,
+  splitIntoShards,
+  spreadOver,
+  startsFirst,
+} from "./test-shards.ts";
 import type { ShardFile, TimedFile } from "./test-shards.ts";
 
 const file = (
@@ -46,22 +51,40 @@ describe("splitting the test files between shards", () => {
     );
   });
 
-  it("puts the longest files in different shards", () => {
-    const longest = new Set([
-      "core fair-admission",
-      "core brain-baseline",
-      "screens client",
-      "on-prem runs",
-    ]);
-    const shards = keysOf(splitIntoShards(suite, 4));
+  it("puts the longest files of a group in different shards", () => {
+    const shards = keysOf(splitIntoShards(suite, 5));
+    const longest = new Set(["core fair-admission", "core brain-baseline"]);
 
     for (const shard of shards) {
-      expect(shard.filter((key) => longest.has(key))).toHaveLength(1);
+      expect(
+        shard.filter((key) => longest.has(key)).length
+      ).toBeLessThanOrEqual(1);
     }
   });
 
-  it("ends the shards close together: the longest within a fifth of the shortest", () => {
-    const seconds = splitIntoShards(suite, 4).map(shardSeconds);
+  it("never runs two groups in one shard", () => {
+    for (const shard of splitIntoShards(suite, 6)) {
+      expect(new Set(shard.map(({ group }) => group)).size).toBe(1);
+    }
+  });
+
+  it("gives the shards left over to the group whose shards would end last", () => {
+    const groups = splitIntoShards(suite, 6).map((shard) => shard[0]?.group);
+
+    expect(groups).toStrictEqual([0, 0, 0, 0, 1, 2]);
+  });
+
+  it("refuses fewer shards than groups, which would have to run two together", () => {
+    expect(() => splitIntoShards(suite, 2)).toThrow(
+      "2 shards can't hold the tests' 3 groups apart: run at least 3."
+    );
+  });
+
+  it("ends a group's shards close together: the longest within a fifth of the shortest", () => {
+    const seconds = spreadOver(
+      suite.filter(({ group }) => group === 0),
+      2
+    ).map(shardSeconds);
 
     expect(Math.max(...seconds)).toBeLessThan(Math.min(...seconds) * 1.2);
   });
@@ -102,7 +125,7 @@ describe("splitting the test files between shards", () => {
     const instant = Array.from({ length: 40 }, (_, index) =>
       file(`instant ${index}`, 0)
     );
-    const counts = splitIntoShards(instant, 4).map((shard) => shard.length);
+    const counts = spreadOver(instant, 4).map((shard) => shard.length);
 
     expect(counts).toStrictEqual([10, 10, 10, 10]);
   });
@@ -114,7 +137,7 @@ describe("splitting the test files between shards", () => {
     const short = Array.from({ length: 20 }, (_, index) =>
       file(`short ${index}`, 2)
     );
-    const counts = splitIntoShards([...long, ...short], 4).map(
+    const counts = spreadOver([...long, ...short], 4).map(
       (shard) => shard.length
     );
 

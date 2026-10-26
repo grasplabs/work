@@ -74,12 +74,11 @@ export const shardSeconds = (files: readonly ShardFile[]): number => {
 };
 
 /**
- * `files` split into `count` shards: the longest first, each into the
+ * `files` spread over `count` shards: the longest first, each into the
  * shard it lengthens least, and of shards it lengthens alike, the one
- * with the least work. The same files always split the same way, on every
- * runner.
+ * with the least work.
  */
-export const splitIntoShards = (
+export const spreadOver = (
   files: readonly ShardFile[],
   count: number
 ): ShardFile[][] => {
@@ -106,6 +105,55 @@ export const splitIntoShards = (
     shards[best]?.push(file);
   }
   return shards;
+};
+
+/**
+ * `files` split into `count` shards of one group each, the group's files
+ * spread over its shards with `spreadOver`. A shard that held two groups
+ * ran them one after another, each starting its projects' pools after the
+ * last file of the one before had ended: up to two minutes of start-up
+ * per group on a CI runner, for a group of one file (October 2026,
+ * GRA-1094). Of one group each, a shard starts only its own, and a group
+ * kept apart to run alone (vite.brain.config.ts) has its runner to itself.
+ * Each group gets one shard, and each shard left over goes to the group
+ * whose shards would end last. The same files always split the same way,
+ * on every runner.
+ */
+export const splitIntoShards = (
+  files: readonly ShardFile[],
+  count: number
+): ShardFile[][] => {
+  const groups = Map.groupBy(files, ({ group }) => group);
+  const order = [...groups.keys()].toSorted((a, b) => a - b);
+  if (count < order.length) {
+    throw new Error(
+      `${count} shards can't hold the tests' ${order.length} groups apart: run at least ${order.length}.`
+    );
+  }
+  const shardsOf = new Map(
+    order.map((group) => [group, spreadOver(groups.get(group) ?? [], 1)])
+  );
+  const longestOf = (shards: readonly ShardFile[][]): number =>
+    Math.max(...shards.map(shardSeconds));
+  for (let left = count - order.length; left > 0; left -= 1) {
+    let slowest = order[0] ?? 0;
+    for (const group of order) {
+      if (
+        longestOf(shardsOf.get(group) ?? []) >
+        longestOf(shardsOf.get(slowest) ?? [])
+      ) {
+        slowest = group;
+      }
+    }
+    shardsOf.set(
+      slowest,
+      spreadOver(
+        groups.get(slowest) ?? [],
+        (shardsOf.get(slowest)?.length ?? 0) + 1
+      )
+    );
+  }
+  return order.flatMap((group) => shardsOf.get(group) ?? []);
 };
 
 /** A file as the order within its project sees it: its time, if anyone took it. */
