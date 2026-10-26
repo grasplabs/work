@@ -1,3 +1,4 @@
+import { expectedMessageOf } from "@grasp-os/shared/errors";
 import type { ScreenRun } from "@grasp-os/shared/screens";
 import type { RunStatus, WorkflowRun } from "@grasp-os/shared/workflows";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -7,7 +8,8 @@ import { allEvents } from "./audit-events.ts";
 import { approvalApp, confirmedDecide, week } from "./decisions.ts";
 import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveRuns, finished, sleeping } from "./runs.ts";
+import { gate, rollingBackRun, withRollbacks } from "./rollbacks.ts";
+import { endLiveRuns, finished, runInstance, sleeping, woken } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
 
@@ -529,6 +531,140 @@ describe(toScreenRun, () => {
       completed: "completed 0",
       failed: "failed 0",
       cancelled: "cancelled 0",
+    });
+  });
+});
+
+// An App run whose engine rolls its steps back (spec 10.7.3), on the real
+// engine with a test's definition (rollbacks.ts): no definition Grasp
+// builds registers a rollback yet (GRA-984).
+describe("an App run while it compensates", { timeout: 120_000 }, () => {
+  withRollbacks();
+  afterEach(endLiveRuns);
+
+  /**
+   * A run of an App's napping workflow, its next activation the test's
+   * (`compensated`): its summary while the engine rolls it back, and once
+   * it ended.
+   */
+  const compensatedRun = async (
+    compensated: Omit<Parameters<typeof rollingBackRun>[1], "holds" | "held">,
+    end?: (runId: string) => Promise<void>
+  ) => {
+    const builder = await personApi("builder");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "napping",
+        `  await step.sleep("nap", { description: "Wait a day", duration: "1 day" });
+  return 1;`
+      )
+    );
+    const frame = builder.api.screens.frame(app, "");
+    const run = await frame.startRun("napping");
+    await sleeping(run.id, "nap");
+    const holds = gate();
+    rollingBackRun(run.id, {
+      ...compensated,
+      holds,
+      held: { name: "nap", ms: 86_400_000 },
+    });
+    await woken(run.id, "nap");
+    await end?.(run.id);
+    const compensating = await vi.waitFor(
+      async () => {
+        const summary = await frame.summary(run.id);
+        expect(summary.status).toBe("compensating");
+        return summary;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    holds.open();
+    await finished(run.id);
+    const ended = await vi.waitFor(
+      async () => {
+        const summary = await frame.summary(run.id);
+        expect(summary.finishedAt).not.toBeNull();
+        return summary;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    const { items } = await builder.api.workflows.history(run.id, {
+      pageSize: 100,
+    });
+    return {
+      // Its history's failures: its step's, and its compensation's.
+      failures: items.flatMap((item) =>
+        "error" in item ? [`${item.kind} ${item.error.code}`] : []
+      ),
+      compensating: {
+        status: compensating.status,
+        compensation: compensating.compensation,
+        finishedAt: compensating.finishedAt,
+        control: compensating.control,
+      },
+      ended: { status: ended.status, error: ended.error?.code },
+    };
+  };
+
+  it("summarizes a failed run as compensating for its failure, with what it failed with, and failed once it's done", async () => {
+    await expect(
+      compensatedRun({ ends: { fails: "resource.declined" } })
+    ).resolves.toStrictEqual({
+      failures: ["step resource.declined"],
+      compensating: {
+        status: "compensating",
+        compensation: {
+          cause: "failure",
+          activity: "running",
+          originalError: {
+            code: "resource.declined",
+            message: expectedMessageOf("resource.declined"),
+          },
+        },
+        finishedAt: null,
+        // Nothing cuts a compensation short from an App.
+        control: {
+          canPause: false,
+          canResume: false,
+          canCancel: false,
+          pendingControl: null,
+        },
+      },
+      // The test's definition skips the run's own failure report, which
+      // core's run code keeps as a run fails: its stop is said instead.
+      ended: { status: "failed", error: "workflow.run_failed" },
+    });
+  });
+
+  it("ends a run whose compensation failed as workflow.compensation_failed, and a cancellation's as cancelled", async () => {
+    const failed = await compensatedRun({
+      ends: { fails: "resource.declined" },
+      rollbackFails: true,
+    });
+    const cancelled = await compensatedRun(
+      { ends: "sleeps" },
+      async (runId) => {
+        await sleeping(runId, "after-charge");
+        await runInstance(runId).terminate({ rollback: true });
+      }
+    );
+    expect({
+      failed: { ended: failed.ended, failures: failed.failures },
+      cancelled: {
+        compensation: cancelled.compensating.compensation,
+        ended: cancelled.ended,
+      },
+    }).toStrictEqual({
+      // Both errors kept in its history: its step's and its compensation's.
+      failed: {
+        ended: { status: "failed", error: "workflow.compensation_failed" },
+        failures: ["step resource.declined", "compensation connect.declined"],
+      },
+      cancelled: {
+        compensation: { cause: "cancellation", activity: "running" },
+        ended: { status: "cancelled", error: undefined },
+      },
     });
   });
 });
