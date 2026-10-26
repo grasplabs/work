@@ -899,14 +899,19 @@ describe("a chat's Knowledge", setUpTime, () => {
     await ask("And now?");
     expect(JSON.stringify(gateway.requests.at(-1)?.body)).toContain(secret);
 
-    // Audited once, by the agent for its person: the run and the source,
-    // never what it read.
-    const events = await eventsOf(agent.agentId, (all) =>
-      all.some(({ action }) => action === "chat.history_withheld")
+    // Audited once, by the agent for its person: the run and each source
+    // (its collection, and the document it read there), never what it read.
+    const events = await eventsOf(
+      agent.agentId,
+      (all) =>
+        all.filter(({ action }) => action === "chat.history_withheld").length >=
+        2
     );
-    const withheld = events.filter(
-      ({ action }) => action === "chat.history_withheld"
-    );
+    const withheld = events
+      .filter(({ action }) => action === "chat.history_withheld")
+      .toSorted((a, b) =>
+        String(a.detail.source).localeCompare(String(b.detail.source))
+      );
     expect(
       withheld.map((event) => ({
         target: event.target,
@@ -914,14 +919,100 @@ describe("a chat's Knowledge", setUpTime, () => {
         run: typeof event.detail.run,
         holdsSecret: JSON.stringify(event).includes(secret),
       }))
-    ).toStrictEqual([
-      {
-        target: { type: "chat", id: chat.id },
-        source: plans?.collectionId,
-        run: "string",
-        holdsSecret: false,
+    ).toStrictEqual(
+      [
+        plans?.collectionId ?? "",
+        `brain-document:${plans?.collectionId}/${plans?.documentId}`,
+      ]
+        .toSorted((a, b) => a.localeCompare(b))
+        .map((source) => ({
+          target: { type: "chat", id: chat.id },
+          source,
+          run: "string",
+          holdsSecret: false,
+        }))
+    );
+  });
+
+  it("withholds what a read or a search handed over once its document is gone, though its collection may still be read", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const readSecret = `READ-${unique()}`;
+    const searchWord = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const foundSecret = `FOUND-${unique()}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    const [readDoc, searchedDoc] = await Promise.all(
+      [
+        { path: "read.md", text: `# Read\n\nThe code is ${readSecret}.` },
+        {
+          path: "found.md",
+          text: `# Found\n\n${searchWord} is ${foundSecret}.`,
+        },
+      ].map(
+        async ({ path, text }) =>
+          await admin.knowledge.saveDocument({
+            collectionId,
+            path,
+            text,
+            ifVersion: 0,
+          })
+      )
+    );
+    const { ask, agent, chat, gateway } = await chatOf(
+      person.userId,
+      codeStep(readCode(readDoc?.id ?? "")),
+      says("Read it."),
+      codeStep(
+        `export default async (self, env) => (await env.knowledge.search(${JSON.stringify(searchWord)})).hits.map(({ snippet }) => snippet);`
+      ),
+      says("Found it."),
+      says("Gone.")
+    );
+    await grantRead(admin, agent, collectionId);
+    await ask("What's the code?");
+    await ask("Find the word.");
+    const before = JSON.stringify(gateway.requests.at(-1)?.body);
+    // Erased from Knowledge, as a purge erases them: the collection stays.
+    for (const document of [readDoc, searchedDoc]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await env.KNOWLEDGE.prepare("DELETE FROM documents WHERE id = ?")
+        .bind(document?.id ?? "")
+        .run();
+    }
+    await ask("And now?");
+    const after = JSON.stringify(gateway.requests.at(-1)?.body);
+    const events = await eventsOf(agent.agentId, (all) =>
+      all.some(({ action }) => action === "chat.history_withheld")
+    );
+
+    expect({
+      before: {
+        read: before.includes(readSecret),
+        // What it found, never the search the code asked for.
+        searched: before.includes(foundSecret),
       },
-    ]);
+      after: {
+        read: after.includes(readSecret),
+        searched: after.includes(foundSecret),
+      },
+      sources: events
+        .filter(
+          ({ action, target }) =>
+            action === "chat.history_withheld" && target?.id === chat.id
+        )
+        .map(({ detail }) => String(detail.source))
+        .toSorted((a, b) => a.localeCompare(b)),
+    }).toStrictEqual({
+      before: { read: true, searched: true },
+      after: { read: false, searched: false },
+      sources: [
+        `brain-document:${collectionId}/${readDoc?.id}`,
+        `brain-document:${collectionId}/${searchedDoc?.id}`,
+      ].toSorted((a, b) => a.localeCompare(b)),
+    });
   });
 
   it("stops a turn under way once something it read can't be read any more, before its next request", async () => {
@@ -975,7 +1066,8 @@ describe("a chat's Knowledge", setUpTime, () => {
     const asked = outcome(ask("When does the route plan depart?"));
     await vi.waitFor(
       async () => {
-        await expect(recorded()).resolves.toBe(1);
+        // Its collection, and the document it read there.
+        await expect(recorded()).resolves.toBe(2);
       },
       { timeout: 10_000, interval: 50 }
     );
