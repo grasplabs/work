@@ -6,6 +6,7 @@ import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, PermissionId, RunId } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -54,7 +55,7 @@ export const runEvidenceMaxRows = 1000;
  */
 export const recordRunEvidence = async (
   env: Env,
-  run: EvidenceRun,
+  run: { readonly runId: string },
   permissionId: PermissionId,
   pack: MemoryPack
 ): Promise<void> => {
@@ -91,11 +92,23 @@ export const recordRunEvidence = async (
   }
 };
 
+/** What run `runId` has recalled, as its evidence keeps it. */
+export const evidenceOf = async (env: Env, runId: string) =>
+  await drizzle(env.DB)
+    .select({
+      documentId: runBrainEvidence.documentId,
+      collectionId: runBrainEvidence.collectionId,
+      permissionId: runBrainEvidence.permissionId,
+    })
+    .from(runBrainEvidence)
+    .where(eq(runBrainEvidence.runId, runId));
+
 /** Whether `error` is a refusal of access, rather than a passing failure. */
-const isAccessRefusal = (error: unknown): boolean => {
+export const isAccessRefusal = (error: unknown): boolean => {
   const brain = brainErrors.codeOf(error);
   const knowledge = knowledgeErrors.codeOf(error);
   return (
+    workflowResourceErrors.codeOf(error) === "workflow.call_denied" ||
     brain === "brain.denied" ||
     brain === "brain.not_found" ||
     knowledge === "knowledge.not_found" ||
@@ -113,14 +126,7 @@ export const requireRunEvidenceReadable = async (
   env: Env,
   run: EvidenceRun
 ): Promise<void> => {
-  const rows = await drizzle(env.DB)
-    .select({
-      documentId: runBrainEvidence.documentId,
-      collectionId: runBrainEvidence.collectionId,
-      permissionId: runBrainEvidence.permissionId,
-    })
-    .from(runBrainEvidence)
-    .where(eq(runBrainEvidence.runId, run.runId));
+  const rows = await evidenceOf(env, run.runId);
   if (rows.length === 0) {
     return;
   }

@@ -1,3 +1,4 @@
+import { brainErrors } from "@grasp-os/brain/contract";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
@@ -75,6 +76,7 @@ import type { RunStep } from "./host.ts";
 import { admitAttempt, quotaPolicy } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import { callingRunOf } from "./resource-authority.ts";
+import type { CallingRun } from "./resource-authority.ts";
 import {
   maxResultBytes,
   openRunMain,
@@ -83,6 +85,7 @@ import {
   ResourceRunHost,
 } from "./resource-host.ts";
 import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
+import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import type { EngineStatus } from "./runs.ts";
@@ -878,6 +881,27 @@ const acceptedOutput = (descriptor: string, value: unknown): unknown => {
   return checked.value;
 };
 
+/**
+ * The refusal of a run's end once it may no longer read what it recalled
+ * (`requireResourceRunEvidenceReadable`), as the isolate's errors are
+ * reported; undefined when it may. A passing failure propagates, so the
+ * engine tries the activation again.
+ */
+const evidenceRefusal = async (
+  env: Env,
+  run: CallingRun
+): Promise<StepError | undefined> => {
+  try {
+    await requireResourceRunEvidenceReadable(env, run);
+    return undefined;
+  } catch (error) {
+    if (brainErrors.codeOf(error) !== "brain.revoked") {
+      throw error;
+    }
+    return forIsolate(error);
+  }
+};
+
 /** What one activation of a hosted run runs, and what holds it to account. */
 export interface HostedActivation {
   readonly run: HostedResourceRun;
@@ -1000,7 +1024,19 @@ export const runActivation = async (
     result.ok && host.failureUntaken
       ? forIsolate(workflowErrors.create("workflow.invalid"))
       : undefined;
-  const failed = tampered ?? untaken ?? (result.ok ? undefined : result.error);
+  // Its output leaves the run (its parent, its screens, its details), and
+  // so does its failure: neither once it may no longer read what it
+  // recalled (resource-reads.ts). A run caught tampering fails with that
+  // refusal, checked or not.
+  const evidenceRefused =
+    tampered === undefined
+      ? await evidenceRefusal(env, run.calling)
+      : undefined;
+  const failed =
+    tampered ??
+    evidenceRefused ??
+    untaken ??
+    (result.ok ? undefined : result.error);
   if (failed !== undefined) {
     throw namedError(failed.name, failed.message, failed.code);
   }

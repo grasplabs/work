@@ -440,6 +440,8 @@ export const sweepWorkflowStartDetails = async (
     // Its own files go with its details (GRA-724): marked here, their
     // chunks deleted by `sweepRunFiles`.
     runFilesRemoved(db, due),
+    // What its recalls cited (resource-reads.ts): no new call of its to gate.
+    db.delete(runBrainEvidence).where(inArray(runBrainEvidence.runId, due)),
     // What its decisions asked, about what, and what was answered
     // (GRA-941), as an App run's go with its details (`marked`): who
     // answered, when and how stay.

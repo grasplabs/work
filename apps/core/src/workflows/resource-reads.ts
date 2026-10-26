@@ -1,5 +1,6 @@
-import { recallInputSchema } from "@grasp-os/brain/contract";
+import { brainErrors, recallInputSchema } from "@grasp-os/brain/contract";
 import { recall } from "@grasp-os/brain/recall";
+import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import { documents } from "@grasp-os/brain/schema";
 import { search } from "@grasp-os/brain/search";
 import { read } from "@grasp-os/brain/tools";
@@ -20,6 +21,11 @@ import { brainOf } from "../knowledge/ports.ts";
 import { pinnedTemplate } from "../resource-templates.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
+import {
+  evidenceOf,
+  isAccessRefusal,
+  recordRunEvidence,
+} from "./run-evidence.ts";
 
 // A run's reads of Knowledge and of published templates, for its
 // workflow's own actions (GRA-700; the threat model is on the issue). Each
@@ -81,7 +87,7 @@ export interface KnowledgeCall {
  * The collection a knowledge binding reads through its permission, read
  * now: the workflow's own, active, allowing `read`, or the call is denied.
  */
-const boundCollection = async (
+export const boundCollection = async (
   env: Env,
   run: CallingRun,
   permissionId: string
@@ -195,6 +201,10 @@ const recalled = async (
     async (reader) =>
       await recall(brainOf(env), reader, request, [bound.collectionId])
   );
+  // What it cites, pinned to the run under the binding's permission
+  // (run-evidence.ts): checked before anything leaves the run from now on.
+  // A replayed step answers its record and pins nothing more.
+  await recordRunEvidence(env, run, bound.permissionId, pack);
   // A memory pack is plain data: what the contract's schemas parse.
   return z.json().parse(pack);
 };
@@ -294,4 +304,50 @@ export const callTemplate = async (
     version: pinned.version,
     content: pinned.content,
   };
+};
+
+/**
+ * `requireRunEvidenceReadable` for a run of a JSON workflow
+ * (resource-host.ts, GRA-299): its recalls are each through a knowledge
+ * binding, one collection under one permission of the workflow's, so each
+ * binding's documents are checked under that permission, as the run
+ * reads now: the permission still the workflow's and active
+ * (`boundCollection`), the Brain still admitting the run, each document
+ * still in its collection and readable there. A test run recalls nothing,
+ * so has nothing to check.
+ */
+export const requireResourceRunEvidenceReadable = async (
+  env: Env,
+  run: CallingRun
+): Promise<void> => {
+  const rows = await evidenceOf(env, run.runId);
+  if (rows.length === 0) {
+    return;
+  }
+  const store = d1BrainStore(brainOf(env));
+  try {
+    for (const permissionId of new Set(rows.map((row) => row.permissionId))) {
+      // oxlint-disable-next-line no-await-in-loop -- one per binding, few
+      const bound = await boundCollection(env, run, permissionId);
+      // oxlint-disable-next-line no-await-in-loop -- one per binding, few
+      await readAsDelegate(
+        env,
+        runAuthority(run),
+        runContext(run),
+        bound.permissionId,
+        async (reader) => {
+          await store.requireBrainGrant(reader);
+          await store.requireDocumentsReadable(
+            reader,
+            rows.filter((row) => row.permissionId === permissionId)
+          );
+        }
+      );
+    }
+  } catch (error) {
+    if (isAccessRefusal(error)) {
+      throw brainErrors.create("brain.revoked");
+    }
+    throw error;
+  }
 };

@@ -98,6 +98,7 @@ import {
   raisedCode,
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
+import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
 import { heldWakeType } from "./wakes.ts";
 
@@ -3646,7 +3647,7 @@ export class ResourceRunHost
     if (this.#run.calling.candidate !== undefined) {
       return frame.input;
     }
-    this.#requireCurrent(attempt);
+    await this.#requireEvidenceReadable(attempt);
     await emitEvent(
       this.#env,
       this.#run.calling,
@@ -3970,7 +3971,7 @@ export class ResourceRunHost
       attempt.until = Date.now();
       return attempt.until;
     }
-    this.#requireCurrent(attempt);
+    await this.#requireEvidenceReadable(attempt);
     const opened = await openRunDecision(
       this.#env,
       { ...this.#run.calling, createdAt: this.#run.createdAt },
@@ -4174,6 +4175,18 @@ export class ResourceRunHost
   }
 
   /**
+   * Refuses, as `brain.revoked`, anything leaving this run (an event it
+   * emits, a decision it opens, a child it starts) once it may no longer
+   * read what it recalled (`requireResourceRunEvidenceReadable`), its lease
+   * asked again after: a stale attempt sends nothing.
+   */
+  async #requireEvidenceReadable(attempt: StepAttempt): Promise<void> {
+    this.#requireCurrent(attempt);
+    await requireResourceRunEvidenceReadable(this.#env, this.#run.calling);
+    this.#requireCurrent(attempt);
+  }
+
+  /**
    * Starts the child of run task `task`, for `attempt`'s enter step, once:
    * its input built from what the build sealed on the task's transformed
    * input (`frame`), the binding the build sealed, the version the run's
@@ -4194,6 +4207,8 @@ export class ResourceRunHost
     // nothing.
     this.#requireCurrent(attempt);
     await ResourceRunHost.#hostCall(attempt);
+    // Its input may carry what it recalled (resource-reads.ts).
+    await this.#requireEvidenceReadable(attempt);
     // Keyed by its step's name, not its task's: a step the same task runs
     // again under another name (a loop's item, a retry of its scope) starts
     // a child of its own.
