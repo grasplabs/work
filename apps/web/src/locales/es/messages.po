@@ -45,11 +45,6 @@ msgstr "(tuya)"
 msgid "{0, plural, one {{requester} asks for # package} other {{requester} asks for # packages}}"
 msgstr "{0, plural, one {{requester} pide # paquete} other {{requester} pide # paquetes}}"
 
-#. placeholder {0}: draft.changed.length
-#: src/chat/studio.tsx
-msgid "{0, plural, one {# file changed in this chat, not proposed yet} other {# files changed in this chat, not proposed yet}}"
-msgstr "{0, plural, one {# archivo cambiado en este chat, aún sin proponer} other {# archivos cambiados en este chat, aún sin proponer}}"
-
 #. placeholder {0}: request.counts.findings
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {# finding reported} other {# findings reported}}"
@@ -869,10 +864,6 @@ msgstr "{name} está invitado, pero aún no entrevistado."
 msgid "{name} is named, but not seen in use yet."
 msgstr "{name} se nombra, pero aún no se ha visto en uso."
 
-#: src/connections/connect-dialog.tsx
-msgid "{name} is read-only"
-msgstr "{name} es de solo lectura"
-
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
 msgstr "Se ha eliminado a {name}. {count, plural, one {Se ha desconectado # conexión personal.} other {Se han desconectado # conexiones personales.}}"
@@ -885,6 +876,10 @@ msgstr "{name} ha cerrado sesión en todas partes."
 msgid "{name} logo"
 msgstr "Logotipo de {name}"
 
+#: src/connections/connect-dialog.tsx
+msgid "{name} may write. Change to Read"
+msgstr "{name} puede escribir. Cambiar a Lectura"
+
 #: src/chat/builds-state.ts
 msgid "{name} no longer changes the domain's data (write → read)"
 msgstr "{name} ya no cambia los datos del dominio (escritura → lectura)"
@@ -892,6 +887,10 @@ msgstr "{name} ya no cambia los datos del dominio (escritura → lectura)"
 #: src/chat/builds-state.ts
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} ahora cambia los datos del dominio (lectura → escritura)"
+
+#: src/connections/connect-dialog.tsx
+msgid "{name} reads only. Change to Write"
+msgstr "{name} solo lee. Cambiar a Escritura"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
@@ -917,6 +916,10 @@ msgstr "{name}, por {key}"
 #: src/dashboard/report.ts
 msgid "{name}: {count}"
 msgstr "{name}: {count}"
+
+#: src/onboarding/work-record.tsx
+msgid "{name}: {outOfTen} in 10"
+msgstr "{name}: {outOfTen} de 10"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "{name}: {shown} of the limit"
@@ -1834,6 +1837,10 @@ msgstr "Un equipo que ya no está en tu organización"
 msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
 msgstr "Un equipo sin responsable recibe sus enlaces el primer día, y pregunto a cada persona qué hace."
 
+#: src/connections/connect-dialog.tsx
+msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Una herramienta activada empieza en Lectura donde Composio dice que solo lee; Grasp no lo comprueba. Una herramienta en Lectura se ejecuta sin preguntar. La llamada a una herramienta en Escritura desde un chat, o por una persona que usa un dominio, espera a que esa persona la confirme; la ejecución de un flujo de trabajo la hace como uno de sus pasos. Pulsa la etiqueta de una herramienta para cambiarla. Pon una herramienta en Lectura solo si no cambia nada: mal marcada, cambia cosas sin preguntar."
+
 #: src/dashboard/standard-widgets.tsx
 msgid "A workflow is redesigned with AI and waits for its test."
 msgstr "Un flujo está rediseñado con IA y espera su prueba."
@@ -1897,6 +1904,11 @@ msgstr "Sobre los equipos"
 #: src/brain/brain.ts
 msgid "About tools"
 msgstr "Sobre herramientas"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record state"
+msgid "Accepted"
+msgstr "Aceptado"
 
 #: src/landscape/landscape-audit.ts
 msgctxt "category of an audit event"
@@ -2163,6 +2175,10 @@ msgstr "Acordado"
 msgid "Agreed before the first interview"
 msgstr "Acordado antes de la primera entrevista"
 
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "Agreed to take part on {on}."
+msgstr "Aceptó participar el {on}."
+
 #: src/routes/_shell.onboarding.tsx
 msgctxt "onboarding area section"
 msgid "Agreements"
@@ -2306,6 +2322,10 @@ msgstr "Todas las llamadas juntas"
 msgid "All interviewed"
 msgstr "Todos entrevistados"
 
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "All interviews"
+msgstr "Todas las entrevistas"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "All invoices"
 msgstr "Todas las facturas"
@@ -2318,10 +2338,6 @@ msgstr "Todos los equipos"
 #: src/settings/pulse.ts
 msgid "All the time"
 msgstr "Siempre"
-
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "All transcripts"
-msgstr "Todas las transcripciones"
 
 #: src/chat/builds.tsx
 msgid "All workflow tests pass."
@@ -2362,7 +2378,7 @@ msgstr "Bien, este es el plan."
 
 #: src/onboarding/work-record.tsx
 msgid "Always the range people gave, never an average, and each person's own."
-msgstr "Siempre el rango que dio la gente, nunca una media, y los de cada persona."
+msgstr "Siempre el rango que dio la gente, nunca una media, y el de cada persona."
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -2508,6 +2524,7 @@ msgid "Answered: {question}"
 msgstr "Respondida: {question}"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
+#: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Answers"
 msgstr "Respuestas"
 
@@ -2691,6 +2708,7 @@ msgstr "¿Aprobar los paquetes para {domain}?"
 #: src/dashboard/runs-widget.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
+#: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Approved"
 msgstr "Aprobado"
 
@@ -2837,14 +2855,6 @@ msgstr "Como debería tenerlos la lista de la empresa. Su enlace sigue siendo el
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "As the kickoff suggests"
 msgstr "Como propone el arranque"
-
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "As the record keeps it so far. Nothing counts until the person has agreed to it."
-msgstr "Tal como consta hasta ahora. Nada cuenta hasta que la persona lo haya aceptado."
-
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "As the record keeps it. What they took out is struck through and does not count."
-msgstr "Tal como consta. Lo que la persona quitó aparece tachado y no cuenta."
 
 #. placeholder {0}: gap.owner
 #: src/chat/brain-questions.tsx
@@ -3078,6 +3088,10 @@ msgstr "Vuelve a ser un borrador, solo para quienes la crean"
 msgid "Back to how it began"
 msgstr "Volver a como empezó"
 
+#: src/chat/draft-versions.tsx
+msgid "Back to latest"
+msgstr "Volver a la más reciente"
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "Back to policies"
@@ -3299,6 +3313,10 @@ msgctxt "column of the audit trail export: who recorded the event"
 msgid "By"
 msgstr "Autor"
 
+#: src/brain/memory-page.tsx
+msgid "By {by}"
+msgstr "Por {by}"
+
 #. Column value: a team named this application
 #: src/brain/brain-source-contents.tsx
 msgid "By a team"
@@ -3402,8 +3420,10 @@ msgstr "Puede {verbs} datos de la empresa"
 msgid "Can’t be read"
 msgstr "No se puede leer"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
+#: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
@@ -3801,6 +3821,12 @@ msgstr "Se elige durante la ejecución: {options}"
 msgid "Chosen teams"
 msgstr "Equipos elegidos"
 
+#. placeholder {0}: node.citedRevision
+#. placeholder {1}: node.record.revision
+#: src/brain/memory-page.tsx
+msgid "Cited at revision {0}; it is at revision {1} now."
+msgstr "Citado en la revisión {0}; ahora está en la revisión {1}."
+
 #: src/activity/audit-log.tsx
 msgid "Clear"
 msgstr "Borrar"
@@ -3865,6 +3891,7 @@ msgstr "Cerrado sin hablar"
 msgid "Closes {closes}"
 msgstr "Cierra el {closes}"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
 msgid "Code"
 msgstr "Código"
@@ -3950,6 +3977,11 @@ msgstr "Compacta"
 
 #: src/brain/brain.ts
 #: src/routes/_shell.settings.billing.tsx
+msgid "Company"
+msgstr "Empresa"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
 msgid "Company"
 msgstr "Empresa"
 
@@ -4226,6 +4258,7 @@ msgstr "Conversaciones"
 msgid "Copenhagen"
 msgstr "Copenhague"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/review-parts.tsx
@@ -4246,9 +4279,29 @@ msgstr "Copiar dirección"
 msgid "Copy app ID"
 msgstr "Copiar el ID de la aplicación"
 
+#: src/chat/answer-markdown.tsx
+msgid "Copy code"
+msgstr "Copiar código"
+
 #: src/landscape/audit-trail.tsx
 msgid "Copy fingerprint"
 msgstr "Copiar huella"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table"
+msgstr "Copiar tabla"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as CSV"
+msgstr "Copiar tabla como CSV"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as Markdown"
+msgstr "Copiar tabla como Markdown"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as TSV"
+msgstr "Copiar tabla como TSV"
 
 #: src/chat/thread.tsx
 msgid "Copy the answer"
@@ -4262,9 +4315,21 @@ msgstr "Copiar el enlace"
 msgid "Copy the link for {name}"
 msgstr "Copiar el enlace de {name}"
 
+#: src/chat/answer-markdown.tsx
+msgid "Copying didn't work"
+msgstr "No se ha podido copiar"
+
 #: src/landscape/landscape.ts
 msgid "Core AI"
 msgstr "IA principal"
+
+#: src/brain/memory-page.tsx
+msgid "Correct it"
+msgstr "Corregir"
+
+#: src/brain/memory-page.tsx
+msgid "Corrected by"
+msgstr "Corregido por"
 
 #: src/dashboard/signals.tsx
 #: src/dashboard/widget-board.tsx
@@ -4835,6 +4900,10 @@ msgstr "Dominios"
 msgid "Domains and agents with a permission"
 msgstr "Dominios y agentes con un permiso"
 
+#: src/knowledge/uploads.tsx
+msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
+msgstr "No subas grabaciones de entrevistas ni sus subtítulos: las entrevistas van por el flujo de entrevistas."
+
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
 msgid "done"
@@ -4845,6 +4914,11 @@ msgstr "hecho"
 #: src/routes/_shell.workflows.index.tsx
 msgid "Done"
 msgstr "Listo"
+
+#: src/connections/connect-dialog.tsx
+msgctxt "a step that is finished"
+msgid "Done"
+msgstr "Hecho"
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox tab: what someone dealt with"
@@ -4881,6 +4955,18 @@ msgstr "Descargar {name}"
 #: src/dashboard/report-dialog.tsx
 msgid "Download Markdown"
 msgstr "Descargar Markdown"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table"
+msgstr "Descargar tabla"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table as CSV"
+msgstr "Descargar tabla como CSV"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table as Markdown"
+msgstr "Descargar tabla como Markdown"
 
 #: src/landscape/landscape-overview.ts
 msgid "DPA status"
@@ -4975,6 +5061,10 @@ msgstr "Cada persona"
 msgid "Each person's numbers"
 msgstr "Las cifras de cada persona"
 
+#: src/onboarding/work-record.tsx
+msgid "Each person's share"
+msgstr "La proporción de cada persona"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Each workflow"
 msgstr "Cada flujo de trabajo"
@@ -4991,6 +5081,10 @@ msgstr "Cada ejecución de flujo de trabajo, con las ejecuciones que inicia, pue
 msgctxt "older chats"
 msgid "Earlier"
 msgstr "Anteriores"
+
+#: src/chat/draft-versions.tsx
+msgid "Earlier version"
+msgstr "Versión anterior"
 
 #: src/engines/screen-approval.tsx
 msgid "Earlier versions"
@@ -5148,8 +5242,8 @@ msgid "Every interview Stephen and Claire held, by voice or typed."
 msgstr "Cada entrevista que hicieron Stephen y Claire, por voz o por escrito."
 
 #: src/onboarding/interview-list.tsx
-msgid "Every interview, finished or stopped halfway. A name opens what was said, and every transcript read is in the audit log; the company never sees anyone's words."
-msgstr "Cada entrevista, terminada o interrumpida a medias. Un nombre abre lo que se dijo, y cada transcripción leída queda en el registro de auditoría; la empresa nunca ve las palabras de nadie."
+msgid "Every interview, finished or stopped halfway. A name opens where it stands and its numbers; what was said stays with the person who said it, and every look is in the audit log."
+msgstr "Cada entrevista, terminada o interrumpida a medias. Un nombre abre en qué punto está y sus cifras; lo que se dijo se queda con quien lo dijo, y cada consulta queda en el registro de auditoría."
 
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
@@ -5783,6 +5877,10 @@ msgstr "Puesta en marcha"
 msgid "Go on without sound"
 msgstr "Seguir sin sonido"
 
+#: src/frame/page-states.tsx
+msgid "Go to Chat"
+msgstr "Ir al chat"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Go to Grasp"
 msgstr "Ir a Grasp"
@@ -6023,6 +6121,10 @@ msgstr "Traspasos"
 #: src/policies/policy.ts
 msgid "Has no owner"
 msgstr "Sin responsable"
+
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "Has not agreed to take part yet."
+msgstr "Todavía no ha aceptado participar."
 
 #: src/onboarding/organization-words.ts
 msgctxt "where someone stands"
@@ -6671,6 +6773,10 @@ msgstr "Ya no se ejecuta (podía cambiar cosas)."
 msgid "It no longer runs."
 msgstr "Ya no se ejecuta."
 
+#: src/brain/memory-page.tsx
+msgid "It rests on nothing you can see."
+msgstr "No se basa en nada que puedas ver."
+
 #: src/landscape/overview-tab.tsx
 msgid "It shows once the desktop agent or single sign-on sees someone use the app."
 msgstr "Aparece en cuanto el agente de escritorio o el inicio de sesión único detectan que alguien usa la aplicación."
@@ -6678,6 +6784,10 @@ msgstr "Aparece en cuanto el agente de escritorio o el inicio de sesión único 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "It starts when Stephen reads the kickoff, and grows with every interview."
 msgstr "Empieza cuando Stephen lee el kickoff, y crece con cada entrevista."
+
+#: src/interview/page.tsx
+msgid "It stays here for you to read. You can still delete it."
+msgstr "Se queda aquí para que lo leas. Todavía puedes borrarlo."
 
 #: src/interview/words.ts
 msgid "It still does not work. You can stop for now and come back later. Your place is kept."
@@ -7029,6 +7139,10 @@ msgstr "Últimamente el registro solo recoge sus propias búsquedas: los eventos
 msgctxt "onboarding stage status"
 msgid "later"
 msgstr "después"
+
+#: src/chat/draft-versions.tsx
+msgid "Later version"
+msgstr "Versión posterior"
 
 #: src/dashboard/activity.tsx
 #: src/inbox/inbox-page.tsx
@@ -7439,6 +7553,8 @@ msgstr "Miembros"
 msgid "Members and roles"
 msgstr "Miembros y roles"
 
+#: src/brain/brain-nav.tsx
+#: src/brain/memory-page.tsx
 #: src/labels.ts
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Memory"
@@ -7773,6 +7889,11 @@ msgstr "Necesita tu propia app de inicio de sesión"
 
 #: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
+msgid "Never"
+msgstr "Nunca"
+
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Nunca"
 
@@ -8178,6 +8299,10 @@ msgstr "Sin Pulse"
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
 msgstr "Ningún registro tiene la culpa, así que un administrador solo puede abandonar el cambio, en la página del dominio."
+
+#: src/brain/memory-page.tsx
+msgid "No records yet"
+msgstr "Aún no hay registros"
 
 #: src/landscape/data-tab.tsx
 msgid "No residency disclosed"
@@ -8876,10 +9001,6 @@ msgstr "No tienes nada pendiente"
 msgid "Nothing waits on you."
 msgstr "No tienes nada pendiente."
 
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "Nothing was said yet, or it was deleted because {first} asked."
-msgstr "Aún no se ha dicho nada, o se eliminó a petición de {first}."
-
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nada aún"
@@ -9059,6 +9180,15 @@ msgstr "Pasos del onboarding"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "En cuanto tenga cerca del {threshold} % del panorama, tu equipo puede empezar. El resto lo completo sobre la marcha."
 
+#: src/onboarding/interview-list.tsx
+msgid "One by one"
+msgstr "Una por una"
+
+#: src/routes/_shell.onboarding.interviews.index.tsx
+msgctxt "view of the interviews"
+msgid "One by one"
+msgstr "Una por una"
+
 #: src/interview/voice-bar.tsx
 msgid "One moment"
 msgstr "Un momento"
@@ -9211,6 +9341,10 @@ msgstr "Abrir al lado"
 msgid "Open Chat"
 msgstr "Abrir el chat"
 
+#: src/chat/answer-markdown.tsx
+msgid "Open external link?"
+msgstr "¿Abrir enlace externo?"
+
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 msgid "Open full page"
 msgstr "Abrir a página completa"
@@ -9234,6 +9368,10 @@ msgstr "Abrir en el mapa de aplicaciones"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open it anyway"
 msgstr "Abrir de todos modos"
+
+#: src/chat/answer-markdown.tsx
+msgid "Open link"
+msgstr "Abrir enlace"
 
 #: src/dashboard/runs-widget.tsx
 msgid "Open now"
@@ -9339,6 +9477,10 @@ msgstr "Operaciones"
 #: src/onboarding/document-drop.tsx
 msgid "or choose them from your computer"
 msgstr "o elígelos en tu ordenador"
+
+#: src/interview/closed.tsx
+msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
+msgstr "O retírate: nada de lo que dijiste se usa a partir de ahora, y todavía puedes leerlo aquí."
 
 #: src/routes/_shell.onboarding.tsx
 msgctxt "onboarding area section"
@@ -9559,6 +9701,11 @@ msgstr "En pausa"
 
 #: src/policies/policy.ts
 msgctxt "status of a policy rule"
+msgid "Paused"
+msgstr "En pausa"
+
+#: src/workflows/resource-runs.tsx
+msgctxt "status of a workflow run"
 msgid "Paused"
 msgstr "En pausa"
 
@@ -9904,6 +10051,11 @@ msgctxt "kind of app"
 msgid "Projects and tasks"
 msgstr "Proyectos y tareas"
 
+#: src/brain/memory-page.tsx
+msgctxt "memory record state"
+msgid "Proposed"
+msgstr "Propuesto"
+
 #: src/chat/builds.tsx
 msgid "Proposed by the agent in chat \"{chatTitle}\"."
 msgstr "Propuesta por el agente en el chat «{chatTitle}»."
@@ -10072,11 +10224,10 @@ msgctxt "a document, done reading"
 msgid "Read"
 msgstr "Leído"
 
-#: src/onboarding/interview-people.tsx
-#: src/onboarding/work-record.tsx
-msgctxt "button: read a transcript"
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
 msgid "Read"
-msgstr "Leer"
+msgstr "Lectura"
 
 #: src/activity/audit-words.ts
 msgid "Read a domain's statistics"
@@ -10130,16 +10281,6 @@ msgstr "Leer lo de la empresa"
 msgid "Read the leads from {name} again"
 msgstr "Volver a leer los responsables de {name}"
 
-#: src/onboarding/interview-people.tsx
-msgid "Read the transcript"
-msgstr "Leer la transcripción"
-
-#: src/onboarding/interview-list.tsx
-#: src/onboarding/interview-people.tsx
-#: src/onboarding/work-record.tsx
-msgid "Read the transcript of {name}"
-msgstr "Leer la transcripción de {name}"
-
 #: src/settings/stephen-settings.tsx
 msgid "Read their own"
 msgstr "Leer lo suyo"
@@ -10156,14 +10297,10 @@ msgstr "Leyó lo que cambió en una conexión"
 msgid "Read what could be improved"
 msgstr "Leyó lo que podría mejorarse"
 
-#: src/connections/connect-dialog.tsx
+#: src/chat/draft-versions.tsx
 #: src/knowledge/collection-markers.tsx
 msgid "Read-only"
 msgstr "Solo lectura"
-
-#: src/connections/connect-dialog.tsx
-msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "«Solo lectura» está marcado donde Composio dice que una herramienta solo lee; Grasp no lo comprueba. Una herramienta de solo lectura se ejecuta sin preguntar. La llamada a cualquier otra herramienta desde un chat, o por una persona que usa un dominio, espera a que esa persona la confirme; la ejecución de un flujo de trabajo la hace como uno de sus pasos. Marca una herramienta como de solo lectura solo si no cambia nada: si se marca mal, cambia cosas sin preguntar."
 
 #: src/onboarding/document-drop.tsx
 msgid "Reading"
@@ -10496,6 +10633,10 @@ msgstr "Plazo de conservación"
 msgid "Retire"
 msgstr "Dar de baja"
 
+#: src/brain/memory-page.tsx
+msgid "Retire it"
+msgstr "Retirar"
+
 #: src/engines/package-approvals.tsx
 msgid "Retire the packages for {domain}"
 msgstr "Dar de baja los paquetes de {domain}"
@@ -10507,6 +10648,11 @@ msgstr "¿Dar de baja los paquetes de {domain}?"
 #: src/engines/package-approvals.tsx
 msgid "Retired"
 msgstr "Dado de baja"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record state"
+msgid "Retired"
+msgstr "Retirado"
 
 #: src/engines/package-approvals.tsx
 msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
@@ -10546,6 +10692,11 @@ msgstr "Revisión vencida"
 #: src/dashboard/to-do.tsx
 msgid "Review the apps of {name}"
 msgstr "Revisar las aplicaciones de {name}"
+
+#. placeholder {0}: record.revision
+#: src/brain/memory-page.tsx
+msgid "Revision {0}"
+msgstr "Revisión {0}"
 
 #: src/workflows/definition-editor.tsx
 msgid "Revision {revision} doesn't pass yet, and no revision has."
@@ -10876,6 +11027,10 @@ msgstr "Guardar primero"
 msgid "Save the agreements"
 msgstr "Guardar los acuerdos"
 
+#: src/brain/memory-page.tsx
+msgid "Save the correction"
+msgstr "Guardar la corrección"
+
 #: src/interview/composer.tsx
 msgid "Saved"
 msgstr "Guardado"
@@ -10995,9 +11150,25 @@ msgctxt "kind of finding"
 msgid "Security"
 msgstr "Seguridad"
 
+#: src/onboarding/interview-people.tsx
+#: src/onboarding/work-record.tsx
+msgctxt "button: see an interview"
+msgid "See"
+msgstr "Ver"
+
 #: src/onboarding/setup-steps.tsx
 msgid "See an example"
 msgstr "Ver un ejemplo"
+
+#: src/onboarding/interview-people.tsx
+msgid "See the interview"
+msgstr "Ver la entrevista"
+
+#: src/onboarding/interview-list.tsx
+#: src/onboarding/interview-people.tsx
+#: src/onboarding/work-record.tsx
+msgid "See the interview of {name}"
+msgstr "Ver la entrevista de {name}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "See the models, AI spend and the audit trail"
@@ -11141,6 +11312,11 @@ msgstr "Buzones compartidos, registros y los datos de la empresa, después de pu
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Shared with"
 msgstr "Compartida con"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory records: others' that you read"
+msgid "Shared with you"
+msgstr "Compartidos contigo"
 
 #: src/brain/atlas-overlays.tsx
 #: src/onboarding/work-record.tsx
@@ -11897,6 +12073,10 @@ msgstr "Repetir el recorrido"
 msgid "Take theirs"
 msgstr "Quedarme con la suya"
 
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "Taken out"
+msgstr "Quitado"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Takes part in the interviews"
 msgstr "Participa en las entrevistas"
@@ -11904,6 +12084,10 @@ msgstr "Participa en las entrevistas"
 #: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
 msgstr "Admite datos sensibles"
+
+#: src/connections/connect-dialog.tsx
+msgid "Taking long? <0>Try again</0>"
+msgstr "¿Tarda mucho? <0>Inténtalo de nuevo</0>"
 
 #: src/onboarding/organization-words.ts
 msgctxt "filter: teams that take part in the interviews"
@@ -11977,6 +12161,11 @@ msgstr "Equipo"
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
+msgid "Team"
+msgstr "Equipo"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
 msgid "Team"
 msgstr "Equipo"
 
@@ -12276,6 +12465,10 @@ msgstr "Los {top} que más gastaron; otros gastaron menos."
 msgid "The account you signed in with."
 msgstr "La cuenta con la que has iniciado sesión."
 
+#: src/frame/page-states.tsx
+msgid "The address may be wrong, or the page was moved or removed."
+msgstr "Puede que la dirección sea incorrecta, o que la página se haya movido o eliminado."
+
 #: src/activity/audit-words.ts
 msgid "The agent looked something up"
 msgstr "El agente consultó algo"
@@ -12391,10 +12584,6 @@ msgstr "La plataforma de la empresa sigue cerrada hasta que Grasp dé su visto b
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
 msgstr "La conexión ha dejado de funcionar. Los flujos que la usan esperan hasta que alguien vuelva a iniciar sesión."
-
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "The conversation"
-msgstr "La conversación"
 
 #: src/onboarding/kickoff-errors.ts
 msgid "The conversation couldn't be read just now. Try again in a moment."
@@ -12831,6 +13020,10 @@ msgid "The run is going."
 msgstr "La ejecución está en curso."
 
 #: src/workflows/test-run.tsx
+msgid "The run is paused."
+msgstr "La ejecución está en pausa."
+
+#: src/workflows/test-run.tsx
 msgid "The run is starting."
 msgstr "La ejecución se está iniciando."
 
@@ -12966,6 +13159,10 @@ msgstr "Su propio límite"
 #: src/settings/stephen-settings.tsx
 msgid "Their own mail, calendar and files. Runs at once."
 msgstr "Su propio correo, calendario y archivos. Se ejecuta al momento."
+
+#: src/onboarding/work-record.tsx
+msgid "Their own: {minutes}"
+msgstr "Lo suyo: {minutes}"
 
 #: src/onboarding/interview-people.tsx
 msgid "Their rating"
@@ -13129,6 +13326,11 @@ msgstr "Este cambio se está aplicando de nuevo, así que ahora no se puede aban
 #: src/engines/store-change-errors.ts
 msgid "This change was already abandoned."
 msgstr "Este cambio ya se abandonó."
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
+msgid "This chat"
+msgstr "Este chat"
 
 #: src/settings/chat-accounts.tsx
 msgid "This chat account is linked to someone else. They need to unlink it first."
@@ -13303,6 +13505,10 @@ msgstr "Este solo se puede liberar: un registro de presupuesto en el que cuenta 
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Esta página no se ha cargado"
+
+#: src/frame/page-states.tsx
+msgid "This page is not here"
+msgstr "Esta página no está aquí"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "This policy is not here any more"
@@ -13560,15 +13766,6 @@ msgctxt "tab: the whole conversation word for word"
 msgid "Transcript"
 msgstr "Transcripción"
 
-#: src/onboarding/interview-list.tsx
-msgid "Transcripts"
-msgstr "Transcripciones"
-
-#: src/routes/_shell.onboarding.interviews.index.tsx
-msgctxt "view of the interviews"
-msgid "Transcripts"
-msgstr "Transcripciones"
-
 #: src/activity/pending.tsx
 msgid "Trigger {trigger}"
 msgstr "Disparador {trigger}"
@@ -13800,8 +13997,8 @@ msgid "Upload"
 msgstr "Subir"
 
 #: src/knowledge/uploads.tsx
-msgid "Upload a PDF, Word or Excel file"
-msgstr "Sube un archivo PDF, Word o Excel"
+msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
+msgstr "Sube un archivo PDF, Word o Excel, o subtítulos (.vtt)"
 
 #: src/policies/policies-table.tsx
 msgctxt "column: who uploaded a policy, and when"
@@ -13954,6 +14151,17 @@ msgstr "Verificado"
 msgid "Version"
 msgstr "Versión"
 
+#. placeholder {0}: node.version
+#: src/brain/memory-page.tsx
+msgid "version {0}, the current one"
+msgstr "versión {0}, la actual"
+
+#. placeholder {0}: node.version
+#. placeholder {1}: node.currentVersion
+#: src/brain/memory-page.tsx
+msgid "version {0}; it is at version {1} now"
+msgstr "versión {0}; ahora está en la versión {1}"
+
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Version {currentVersion}"
 msgstr "Versión {currentVersion}"
@@ -13961,6 +14169,10 @@ msgstr "Versión {currentVersion}"
 #: src/knowledge/timeline.tsx
 msgid "Version {number}"
 msgstr "Versión {number}"
+
+#: src/chat/draft-versions.tsx
+msgid "Version {number} of {latest}"
+msgstr "Versión {number} de {latest}"
 
 #: src/knowledge/timeline.tsx
 msgid "Version {number}, current"
@@ -13977,6 +14189,10 @@ msgstr "Versión {version}"
 #: src/workflows/test-run.tsx
 msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
 msgstr "La versión {version} no tiene una compilación que se ejecute, así que no se ejecutó nada: una de sus tareas usa algo que Grasp aún no puede ejecutar."
+
+#: src/screens/screen-frame.tsx
+msgid "Version {version}: read-only preview"
+msgstr "Versión {version}: vista previa de solo lectura"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Version to review: {version}"
@@ -14060,6 +14276,10 @@ msgstr "Espera"
 msgctxt "dashboard: what waits on you, settled on its own page"
 msgid "Waiting elsewhere"
 msgstr "Pendiente en otro lugar"
+
+#: src/connections/connect-dialog.tsx
+msgid "Waiting for {app}"
+msgstr "Esperando a {app}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Waiting for {signIn}"
@@ -14243,10 +14463,6 @@ msgstr "Qué"
 msgid "What {name} is told changes only through the Stephen Lab, a version at a time. Each version has a mark, the same here and in the lab."
 msgstr "Lo que se le indica a {name} solo cambia a través del Stephen Lab, una versión cada vez. Cada versión tiene una marca, la misma aquí y en el lab."
 
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "What {who} wrote down"
-msgstr "Lo que {who} anotó"
-
 #: src/routes/_shell.settings.billing.tsx
 msgid "What appears on every invoice."
 msgstr "Lo que aparece en cada factura."
@@ -14349,10 +14565,6 @@ msgstr "Lo que puede hacer"
 msgid "What he may do in {appName}: as for the whole company, or for fewer people."
 msgstr "Lo que puede hacer en {appName}: como para toda la empresa, o para menos personas."
 
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "What is marked is what {who} wrote down."
-msgstr "Lo marcado es lo que {who} anotó."
-
 #: src/interview/transcript.tsx
 msgid "What is marked is what I wrote down. You check it at the end."
 msgstr "Lo marcado es lo que he anotado. Lo revisas al final."
@@ -14401,6 +14613,14 @@ msgstr "Aquello a lo que está vinculado ya no puede servirlo: se revocó su per
 #: src/engines/resource-bindings.tsx
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "Aquello a lo que está vinculado ha cambiado desde que se aprobó la vinculación. Vincúlalo de nuevo cuando hayas comprobado que sigue encajando."
+
+#: src/brain/memory-page.tsx
+msgid "What it rests on"
+msgstr "En qué se basa"
+
+#: src/brain/memory-page.tsx
+msgid "What it should say"
+msgstr "Lo que debería decir"
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "What it was for, and which model did it."
@@ -14532,6 +14752,10 @@ msgstr "Lo que se oyó, se escribió y se conectó"
 msgid "What was said"
 msgstr "Lo que se dijo"
 
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "What was said stays with the person who said it. Nobody at Grasp reads it."
+msgstr "Lo que se dijo se queda con quien lo dijo. Nadie en Grasp lo lee."
+
 #: src/dashboard/outcome-card.tsx
 msgid "What was sent is no longer kept."
 msgstr "Lo que se envió ya no se conserva."
@@ -14547,6 +14771,10 @@ msgstr "Qué hacemos"
 #: src/interview/closed.tsx
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
 msgstr "Lo que has confirmado queda guardado. ¿Se te olvidó algo? Este enlace funciona hasta el {closes}."
+
+#: src/brain/memory-page.tsx
+msgid "What you and your agents remember, and what others share with you, shows here."
+msgstr "Lo que tú y tus agentes recordáis, y lo que otros comparten contigo, aparece aquí."
 
 #: src/landscape/data-tab.tsx
 msgid "What your identity provider granted {appName}."
@@ -14907,6 +15135,10 @@ msgstr "Con la dirección"
 msgid "Withdraw"
 msgstr "Retirar"
 
+#: src/interview/closed.tsx
+msgid "Withdraw instead"
+msgstr "Mejor retirarme"
+
 #: src/settings/invitations.tsx
 msgid "Withdraw the invitation of {email}"
 msgstr "Retirar la invitación de {email}"
@@ -14918,6 +15150,10 @@ msgstr "Retiró una solicitud de paquetes"
 #: src/activity/audit-words.ts
 msgid "Withdrew an invitation"
 msgstr "Retiró una invitación"
+
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "Withdrew on {on}: nothing of it is used."
+msgstr "Se retiró el {on}: no se usa nada de ello."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."
@@ -15123,6 +15359,11 @@ msgstr "Se aplicaría"
 msgid "Would run after approval"
 msgstr "Se ejecutaría tras la aprobación"
 
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
+msgid "Write"
+msgstr "Escritura"
+
 #: src/routes/guest.tsx
 msgid "Write your answer"
 msgstr "Escribe tu respuesta"
@@ -15138,6 +15379,10 @@ msgstr "Escrituras que un modelo puede dirigir: {target}"
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Escribiendo"
+
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "Written down"
+msgstr "Anotado"
 
 #: src/onboarding/work-record.tsx
 msgid "Wrong"
@@ -15226,6 +15471,11 @@ msgstr "Has terminado este chat. Gracias por tu tiempo."
 msgid "You show me who’s who, where the documents are, and which tools people use."
 msgstr "Tú me enseñas quién es quién, dónde están los documentos y qué herramientas usa la gente."
 
+#. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
+#: src/connections/connect-dialog.tsx
+msgid "You sign in at <0>{host}</0>"
+msgstr "Inicias sesión en <0>{host}</0>"
+
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."
 msgstr "Inicias sesión en la propia página de {app}."
@@ -15234,10 +15484,18 @@ msgstr "Inicias sesión en la propia página de {app}."
 msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
 msgstr "Te lo preguntaron como {owner}. Respóndelo en el cerebro: todos en la empresa leen la respuesta, con tu nombre."
 
+#: src/interview/page.tsx
+msgid "You withdrew. Nothing you said is used from now on."
+msgstr "Te retiraste. Nada de lo que dijiste se usa a partir de ahora."
+
 #: src/interview/transcript.tsx
 #: src/routes/guest.tsx
 msgid "You:"
 msgstr "Tú:"
+
+#: src/chat/answer-markdown.tsx
+msgid "You’re about to visit an external website."
+msgstr "Vas a visitar un sitio web externo."
 
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
@@ -15375,6 +15633,16 @@ msgstr "Tus palabras"
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Tu espacio de trabajo, quién puede hacer qué en él y tu propia cuenta."
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
+msgid "Yours"
+msgstr "Tuyos"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory records: the person's own"
+msgid "Yours"
+msgstr "Tuyos"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Zoom in"

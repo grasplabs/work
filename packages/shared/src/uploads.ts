@@ -4,8 +4,10 @@ import { defineErrorFamily } from "./errors.ts";
 import { collectionIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
 
-// Uploads: a file (PDF, Word or Excel) uploaded into a Knowledge collection
-// becomes a document there, at the file's name, holding the file's text.
+// Uploads: a file (PDF, Word, Excel or WebVTT captions) uploaded into a
+// Knowledge collection becomes a document there, at the file's name,
+// holding the file's text; a WebVTT file's turns become the document's
+// transcript too.
 // Core keeps the original and extracts its text in the background; the
 // person who uploaded it follows its status until it is ready or failed. The
 // same name uploaded again becomes the next version of the same document.
@@ -15,6 +17,7 @@ export const uploadTypes = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  vtt: "text/vtt",
 } as const;
 export type UploadExtension = keyof typeof uploadTypes;
 export type UploadMediaType = (typeof uploadTypes)[UploadExtension];
@@ -24,6 +27,7 @@ export const uploadMediaTypeSchema = z.enum([
   uploadTypes.pdf,
   uploadTypes.docx,
   uploadTypes.xlsx,
+  uploadTypes.vtt,
 ]);
 
 /** Largest file one upload takes, in bytes: 10 MB. */
@@ -131,7 +135,7 @@ export const uploadErrors = defineErrorFamily({
   "upload.invalid": "That isn't a valid upload.",
   "upload.too_large": "This file is over the upload limit of 10 MB.",
   "upload.unsupported":
-    "Only PDF, Word (.docx) and Excel (.xlsx) files can be uploaded, with a name that ends in .pdf, .docx or .xlsx.",
+    "Only PDF, Word (.docx), Excel (.xlsx) and WebVTT captions (.vtt) can be uploaded, with a name that ends in .pdf, .docx, .xlsx or .vtt.",
   "upload.unreadable":
     "The file's text couldn't be read. Check that it opens, then upload it again.",
   "upload.too_complex":

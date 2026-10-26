@@ -8,6 +8,55 @@
       "when": 1792749059418,
       "tag": "0000_brain",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792930616699,
+      "tag": "0001_memory_scopes",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792937879329,
+      "tag": "0002_memory_search",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792947373086,
+      "tag": "0003_brain_episodes",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792949435690,
+      "tag": "0004_transcripts",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792956114988,
+      "tag": "0005_brain_entities",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792957353354,
+      "tag": "0006_memory_cites",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792968410028,
+      "tag": "0007_brain_lessons",
+      "breakpoints": true
     }
   ]
 }

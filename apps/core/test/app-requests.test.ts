@@ -100,35 +100,42 @@ describe("app requests", { timeout: 60_000 }, () => {
     );
     const nobody = await openRpc();
 
-    const audited = await auditedDuring(async () => {
-      await expect(
-        Promise.all(
-          [
-            { name: "" },
-            { name: "   " },
-            { name: "x".repeat(129) },
-            { name: "Exact", url: ["javascript", "alert(1)"].join(":") },
-            { name: "Exact", url: "not a link" },
-            { name: "Exact", why: "x".repeat(2001) },
-            { name: "Exact", extra: true },
-          ].map(
-            async (request) =>
-              await outcome(person.api.connections.requestApp(request))
+    const audited = await auditedDuring(
+      async () => {
+        await expect(
+          Promise.all(
+            [
+              { name: "" },
+              { name: "   " },
+              { name: "x".repeat(129) },
+              { name: "Exact", url: ["javascript", "alert(1)"].join(":") },
+              { name: "Exact", url: "not a link" },
+              { name: "Exact", why: "x".repeat(2001) },
+              { name: "Exact", extra: true },
+            ].map(
+              async (request) =>
+                await outcome(person.api.connections.requestApp(request))
+            )
           )
-        )
-      ).resolves.toStrictEqual(
-        Array.from({ length: 7 }, () => "connection.invalid")
-      );
-      await expect(
-        outcome(
-          staff.core
-            .authenticate()
-            .connections.requestApp({ name: `Staff ${unique()}` })
-        )
-      ).resolves.toBe("role.forbidden");
-    });
+        ).resolves.toStrictEqual(
+          Array.from({ length: 7 }, () => "connection.invalid")
+        );
+        await expect(
+          outcome(
+            staff.core
+              .authenticate()
+              .connections.requestApp({ name: `Staff ${unique()}` })
+          )
+        ).resolves.toBe("role.forbidden");
+      },
+      { staffAccesses: true }
+    );
 
-    expect(audited).toStrictEqual([]);
+    // Nothing of any request is kept; Grasp staff's attempt is on record
+    // as theirs, by where it was made (staff-audit.ts).
+    expect(
+      audited.map(({ action, detail }) => [action, detail.surface])
+    ).toStrictEqual([["staff.accessed", "connections.requestApp"]]);
     await expect(
       outcome(nobody.core.authenticate().connections.appRequests())
     ).resolves.toBe("auth.unauthenticated");

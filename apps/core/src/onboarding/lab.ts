@@ -5,6 +5,7 @@ import type {
   LabAnswer,
   LabContext,
   LabDrawings,
+  LabInterview,
   LabLinks,
   LabRequest,
   LabVia,
@@ -19,6 +20,7 @@ import { gatewaySettings, modelForRole, models } from "../models.ts";
 import { readOrganization } from "../organization.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { isLocalDevRequest } from "../router-secret.ts";
+import { auditStaffRoute } from "../staff-audit.ts";
 import { turnStream } from "./interview.ts";
 import { onboardingStore } from "./store.ts";
 
@@ -39,7 +41,9 @@ import { onboardingStore } from "./store.ts";
 // It answers on a local stack only (`vp run dev`, the same requests the
 // router-secret check lets through there), and only Grasp's staff: on a
 // deployed core the route isn't there, so no one can spend a client's
-// models on the lab, or read the links it gives out.
+// models on the lab, or read the links it gives out, or what the practice
+// people it played said (`interview`): Grasp's staff read no word of a
+// client's interviews (GRA-329).
 
 /** Why the gateway is asked, for the audit log. */
 const purpose = "onboarding.lab";
@@ -226,6 +230,8 @@ export const labResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "onboarding.lab");
   if (!person.staff) {
     return errorResponse(
       403,
@@ -259,6 +265,12 @@ export const labResponse = async (
   }
   if (asked.action === "draw") {
     return await drawings(env, requestId);
+  }
+  if (asked.action === "interview") {
+    const answered: LabInterview = {
+      interview: await onboardingStore(env).practiceInterviewOf(asked.person),
+    };
+    return Response.json(answered);
   }
   return await ask(env, person, asked, requestId);
 };

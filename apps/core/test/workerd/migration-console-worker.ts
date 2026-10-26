@@ -9,7 +9,7 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 // runs a batch in (migration-transform.ts, `transformIsolate`), with
 // `SANDBOX_HOST` bound to the sandbox supervisor as on-prem binds it, and
 // an isolate of its own that logs, which the sandbox host silences too
-// (GRA-776, on-prem/quiet-isolate.ts).
+// (GRA-776, @grasp-os/shared/quiet-isolate).
 
 /** The value a record holds that no log may carry. */
 const recordValue = "record-value-7f3a";

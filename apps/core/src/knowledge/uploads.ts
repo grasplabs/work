@@ -44,10 +44,12 @@ import {
 } from "../auth/identity.ts";
 import { uploadCleanups, uploads } from "../db/core/schema.ts";
 import { errorResponse } from "../errors.ts";
+import { auditStaffRoute } from "../staff-audit.ts";
 import { runEngine } from "../workflows/engine.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
 import { requireWritable } from "./collection-rules.ts";
 import { ExtractorUnavailableError, extractorFor } from "./extract.ts";
+import type { Extracted } from "./extract.ts";
 import { brainOf } from "./ports.ts";
 
 // Files uploaded into Knowledge (see @grasp-os/shared/uploads). An upload
@@ -90,11 +92,47 @@ type UploadRow = typeof uploads.$inferSelect;
 /** The states of an upload that hasn't ended. */
 const unended = ["pending", "extracting", "saving"] as const;
 
-/** The first bytes of each type: a PDF's header, a ZIP's for Office files. */
-const signatures: Readonly<Record<UploadExtension, readonly number[]>> = {
-  pdf: [0x25, 0x50, 0x44, 0x46, 0x2d],
-  docx: [0x50, 0x4b, 0x03, 0x04],
-  xlsx: [0x50, 0x4b, 0x03, 0x04],
+/** Bytes, as the first bytes of a file are compared. */
+const bytesOf = (text: string): number[] => [...new TextEncoder().encode(text)];
+
+/** Whether `bytes` start with `prefix`. */
+const startsWith = (bytes: Uint8Array, prefix: readonly number[]): boolean =>
+  prefix.every((byte, index) => bytes[index] === byte);
+
+/** UTF-8's byte order mark. */
+const byteOrderMark = [0xef, 0xbb, 0xbf];
+
+/** What ends WebVTT's signature: a space, a tab, a line break, or the file. */
+const afterVttSignature: ReadonlySet<number | undefined> = new Set([
+  0x20,
+  0x09,
+  0x0a,
+  0x0d,
+  undefined,
+]);
+
+const vttSignature = bytesOf("WEBVTT");
+
+/**
+ * Whether a file starts as its type does: a PDF's header, a ZIP's for
+ * Office files, and WebVTT's signature (after a byte order mark, if any)
+ * as the WebVTT spec defines it.
+ */
+const signatures: Readonly<
+  Record<UploadExtension, (bytes: Uint8Array) => boolean>
+> = {
+  pdf: (bytes) => startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]),
+  docx: (bytes) => startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]),
+  xlsx: (bytes) => startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]),
+  vtt: (bytes) => {
+    const text = startsWith(bytes, byteOrderMark)
+      ? bytes.subarray(byteOrderMark.length)
+      : bytes;
+    return (
+      startsWith(text, vttSignature) &&
+      afterVttSignature.has(text[vttSignature.length])
+    );
+  },
 };
 
 const hex = (buffer: ArrayBuffer): string =>
@@ -232,10 +270,7 @@ export const uploadFile = async (
     });
   }
   const extension = uploadExtensionOf(name);
-  if (
-    extension === undefined ||
-    !signatures[extension].every((byte, index) => bytes[index] === byte)
-  ) {
+  if (extension === undefined || !signatures[extension](bytes)) {
     throw uploadErrors.create("upload.unsupported");
   }
   const knowledge = drizzle(env.KNOWLEDGE);
@@ -516,7 +551,7 @@ export const extractUpload = async (
     throw uploadErrors.create("upload.original_missing");
   }
   const bytes = new Uint8Array(await original.arrayBuffer());
-  const extractor = extractorFor(env, collection);
+  const extractor = extractorFor(env, collection, mediaTypeOf(row));
   if (extractor.name === "workers-ai") {
     // Recorded before the file leaves the Worker, so a failure after it
     // left is on record too; one that can't be recorded fails the step,
@@ -530,9 +565,9 @@ export const extractUpload = async (
       }),
     ]);
   }
-  let markdown: string;
+  let extracted: Extracted;
   try {
-    markdown = await extractor.extract({
+    extracted = await extractor.extract({
       name: row.path,
       mediaType: mediaTypeOf(row),
       bytes,
@@ -540,6 +575,7 @@ export const extractUpload = async (
   } catch (error) {
     throw extractionError(uploadId, error);
   }
+  const { markdown, transcript } = extracted;
   if (!hasText(markdown)) {
     throw uploadErrors.create("upload.no_text");
   }
@@ -576,6 +612,9 @@ export const extractUpload = async (
       ifVersion,
       message: `Uploaded ${row.path}`,
       restoredFrom: null,
+      // A WebVTT file's turns: the version's own, which a later upload or
+      // edit without one takes away.
+      ...(transcript === undefined ? {} : { transcript }),
     }
   );
   await auditedBatch(env, db, [
@@ -811,6 +850,8 @@ export const originalResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "uploads.original", { uploadId });
   const knowledge = drizzle(env.KNOWLEDGE);
   const reader = { type: "person", person } as const;
   const ready = await drizzle(env.DB)

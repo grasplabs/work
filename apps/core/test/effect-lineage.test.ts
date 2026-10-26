@@ -14,7 +14,7 @@ import { endLiveRuns, finished } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
-import { appWith, hitCall } from "./workflow-apps.ts";
+import { appWith, hitsCall, openGate } from "./workflow-apps.ts";
 
 // The runs a run's own mail starts, as its descendants: mail it sends
 // through a native mail connector to its App's own address starts its
@@ -514,8 +514,11 @@ const outcomeOf = async (
 
 /**
  * The `fresh` workflow: from `mailbox`, it mails `to` with `subject`,
- * then runs its step's first attempt out of time, so its retry, five
- * seconds on, makes the same call again under its key.
+ * under its step's key each attempt. Until the App's gate is open
+ * (`openGate`), each attempt then runs out of time, so the step is tried
+ * again; the first attempt to find it open calls once more and is done.
+ * Only an attempt held on purpose runs out of time: the one that finishes
+ * has ten seconds for its call, as a loaded runner can take more than one.
  */
 const fresh = (
   mailbox: string,
@@ -527,12 +530,14 @@ const fresh = (
 export default workflow("fresh", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do(
     "send",
-    { description: "Mail a new domain", sideEffect: true, timeout: "1 second", retries: { limit: 1, delay: "5 seconds" }, input: { mailbox: "${mailbox}", subject: "${subject}", body: "Hi.", to: ["${to}"] } },
+    { description: "Mail a new domain", sideEffect: true, timeout: "10 seconds", retries: { limit: 4, delay: "1 second", backoff: "constant" }, input: { mailbox: "${mailbox}", subject: "${subject}", body: "Hi.", to: ["${to}"] } },
     async ({ idempotencyKey, input: mail }) => {
+      // Read before the call: open, the call is made after it opened.
+      const open = (await ${hitsCall(`"gate"`)}) > 0;
       await env.MAIL.call("mail.send", mail, { idempotencyKey });
-      if ((await ${hitCall(`"${subject}"`)}) === 1) {
+      if (!open) {
         // Runs out of time, so the step is tried again.
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await new Promise((resolve) => setTimeout(resolve, 60_000));
       }
       return "sent";
     }
@@ -1030,8 +1035,10 @@ export default workflowTests(definition, [{ name: "runs", mocks: { send: null },
     const run = await admin.api.workflows.start(looping.app, "fresh");
     // Its first attempt has sent, to a domain core doesn't know yet.
     await sentTo(subject, 0);
-    // Mail for the domain arrives: core knows it now.
+    // Mail for the domain arrives: core knows it now. The step's next
+    // attempt calls again.
     await deliver(to, message(to, { from: "ann@acme.test", subject: "Hi" }));
+    await openGate(admin, looping.app);
     await finished(run.id);
     const { status } = await admin.api.workflows.status(run.id);
     const sent = await sentWith(subject);

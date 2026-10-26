@@ -2,7 +2,13 @@ import { env } from "cloudflare:workers";
 
 import type { ReadRecord } from "../src/authorize.ts";
 import { createBrain } from "../src/brain.ts";
-import type { Brain, BrainPorts } from "../src/brain.ts";
+import type {
+  Brain,
+  BrainPorts,
+  IndexJob,
+  LinkJob,
+  SkillAuthority,
+} from "../src/brain.ts";
 import { ensureCollection } from "../src/collections.ts";
 import type { CollectionRow } from "../src/collections.ts";
 import type { Writer } from "../src/documents.ts";
@@ -18,19 +24,45 @@ import type { OnErase } from "../src/purge.ts";
 export interface Caller {
   userId: string;
   reads: readonly string[];
+  /** The audiences the host counts them in now. */
+  audiences?: readonly string[];
+  /** Of those collections, only these paths (`Readable.only`). */
+  only?: Readonly<Record<string, readonly string[]>>;
+  /** The capabilities the host says they hold. */
+  capabilities?: readonly string[];
 }
 
-/** The Brain over the test database, and what its ports were told. */
-export const testHost = (): {
+/** A job the Brain asked its host to start. */
+export interface StartedJob {
+  id: string;
+  job: IndexJob | LinkJob;
+}
+
+/**
+ * The Brain over the test database, and what its ports were told. The
+ * host's model gateway is `extract`: the only outside provider, which a
+ * test stands in for (none by default: a call fails).
+ */
+export const testHost = (
+  extract: (text: string) => Promise<unknown> = async () => {
+    await Promise.resolve();
+    throw new Error("No model in this test");
+  }
+): {
   brain: Brain<Caller>;
   reads: { caller: string; record: ReadRecord }[];
   events: BrainEvent[];
+  started: StartedJob[];
 } => {
   const reads: { caller: string; record: ReadRecord }[] = [];
   const events: BrainEvent[] = [];
+  const started: StartedJob[] = [];
   const ports: BrainPorts<Caller> = {
     authorize: async (caller) =>
-      await Promise.resolve({ collections: caller.reads }),
+      await Promise.resolve({
+        collections: caller.reads,
+        ...(caller.only === undefined ? {} : { only: caller.only }),
+      }),
     onRead: async (caller, record, ...sources) => {
       reads.push({ caller: caller.userId, record });
       return await Promise.resolve({
@@ -52,7 +84,59 @@ export const testHost = (): {
       isRefusal: () => false,
     },
     actorOf: (caller) => ({ type: "person", userId: caller.userId }),
+    skills: {
+      capabilities: async (caller) =>
+        await Promise.resolve(caller.capabilities ?? []),
+      // This host's vouching: a collection made with `source: "grasp"` is
+      // shipped; one for everyone or admins is written by admins alone;
+      // a team's or a person's is written by its members.
+      authorityOf: async (skillCollections) =>
+        await Promise.resolve(
+          Object.fromEntries(
+            skillCollections.flatMap(
+              ({ id, access, source }): [string, SkillAuthority][] => {
+                if (source === "grasp") {
+                  return [[id, "shipped"]];
+                }
+                return access === "everyone" || access === "admins"
+                  ? [[id, "admins"]]
+                  : [];
+              }
+            )
+          )
+        ),
+    },
     ownerOf: (caller) => caller.userId,
+    mayPublish: async () => {
+      await Promise.resolve();
+    },
+    mayRetire: async () => {
+      await Promise.resolve();
+    },
+    memories: {
+      // A caller's own records, read by them alone.
+      audienceOf: async (caller) =>
+        await Promise.resolve({
+          audience: {
+            owners: [caller.userId],
+            teams: [],
+            company: false,
+            sessions: [],
+          },
+          people: [caller.userId],
+        }),
+      // What the caller reads, as the collections everyone reading may.
+      readableBy: async (caller) => await Promise.resolve([...caller.reads]),
+      keep: async (caller, _people, records) =>
+        await Promise.resolve(
+          records.map((record) => ({
+            ...record,
+            by: record.ownerId === caller.userId ? null : record.ownerId,
+            cites: [],
+          }))
+        ),
+    },
+    audiences: async (caller) => await Promise.resolve(caller.audiences ?? []),
     blobs: env.BLOBS,
     audit: {
       eventOf: (entry) => {
@@ -74,17 +158,23 @@ export const testHost = (): {
           usages
         ),
     },
+    extractEntities: extract,
     jobs: {
-      start: async () => {
+      start: async (id, job) => {
         await Promise.resolve();
+        if (!started.some((known) => known.id === id)) {
+          started.push({ id, job });
+        }
       },
-      status: async () => {
+      // A job this host started has ended: the test ran it, or never will.
+      status: async (id) => {
         await Promise.resolve();
+        return started.some((known) => known.id === id) ? "ended" : undefined;
       },
     },
     clock: () => new Date(),
   };
-  return { brain: createBrain(env.BRAIN, ports), reads, events };
+  return { brain: createBrain(env.BRAIN, ports), reads, events, started };
 };
 
 /** A person writing as themselves. */
@@ -93,10 +183,11 @@ export const writerOf = (userId: string): Writer => ({
   userId,
 });
 
-/** A new collection, read by whoever the host's callers say. */
+/** A new collection, read by whoever the host's callers say: one for everyone unless `kind` says otherwise. */
 export const newCollection = async (
   brain: Brain<Caller>,
-  name: string
+  name: string,
+  kind: "everyone" | "team" | "shipped" = "everyone"
 ): Promise<CollectionRow> =>
   await ensureCollection(
     brain,
@@ -105,9 +196,9 @@ export const newCollection = async (
       name,
       description: "",
       owner: "owner",
-      access: "everyone",
+      access: kind === "team" ? "teams" : "everyone",
       sensitive: false,
-      source: "here",
+      source: kind === "shipped" ? "grasp" : "here",
       createdAt: new Date(),
     },
     { type: "person", userId: "owner" }

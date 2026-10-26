@@ -118,6 +118,7 @@ import type {
   ModuleContracts,
   ModulePackages,
 } from "./workflow-modules.ts";
+import { forValidation } from "./workflows/connector-schemas.ts";
 import {
   packagesHoldSql,
   packagesRefusal,
@@ -1041,7 +1042,12 @@ const inspectDefinition = async (
   }
   const policy = await quotaPolicy(env);
   const result = await validateWorkflow(definition, {
-    catalog: (key) => resolved.get(key)?.contract ?? catalog.get(key)?.contract,
+    catalog: (key) => {
+      const contract =
+        resolved.get(key)?.contract ?? catalog.get(key)?.contract;
+      // A connector's own schemas, read as their descriptors.
+      return contract === undefined ? undefined : forValidation(contract);
+    },
     // `local:` keys resolve against the workflow's own modules only.
     modules: moduleLookup(modules),
     ceilings: {
@@ -2982,7 +2988,7 @@ const pinningAppsSql = (id: string) => sql`SELECT pinned.id AS id,
 const liveRunsSql = (id: string) => sql`(SELECT COUNT(*)
     FROM workflow_resource_runs AS run
     WHERE run.workflow_resource_id = ${id}
-      AND run.status IN ('starting', 'running'))`;
+      AND run.status IN ('starting', 'running', 'paused'))`;
 
 /**
  * That something still pins a version of `id`, as SQL: the current version

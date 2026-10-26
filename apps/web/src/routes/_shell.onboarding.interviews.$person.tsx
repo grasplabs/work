@@ -1,70 +1,30 @@
-import type { InterviewLine } from "@grasp-os/shared/interview-links";
-import { markedPieces } from "@grasp-os/shared/interview-turn";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
-import type { StaffTranscript } from "@grasp-os/shared/onboarding-staff";
+import type { StaffInterview } from "@grasp-os/shared/onboarding-staff";
 import { Button } from "@grasp-os/ui/components/button";
 import type { I18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeftIcon, FileIcon } from "lucide-react";
+import { ArrowLeftIcon } from "lucide-react";
 
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
-import { tagTitles } from "../onboarding/interview-words.ts";
 import { SettingsError } from "../settings/settings-parts.tsx";
 
-// One transcript (prototype `org-transcripts.tsx`, its reader): the
-// conversation, with what the interviewer wrote down marked in what the
-// person said, beside the facts as the record keeps them; who held it, and
-// on which version of their text. Opening it reads it from core, and every
-// read is in the audit log first (core's staff-rpc.ts), by the interview's
-// own id, without the person or their words.
+// One interview, as Grasp's staff see it (GRA-329): where it stands, who
+// held it and on which version of their text, and its numbers. Never a
+// word of it: nobody at Grasp reads what anyone said, so core sends none.
+// Opening it is in the audit log first (core's staff-rpc.ts), by the
+// interview's own id, without the person.
 
 /** How many characters of a text's mark name it: as a commit's short hash does. */
 const shortMark = 12;
 
-const markClass =
-  "bg-muted text-foreground -mx-0.5 rounded-sm box-decoration-clone px-0.5 underline decoration-dotted underline-offset-4";
-
-/** Something the person said, with what was written down from it marked. */
-const Said = ({ line }: { line: InterviewLine }) => {
-  const { i18n } = useLingui();
-  if (line.file !== undefined) {
-    return (
-      <span className="flex items-center gap-2">
-        <FileIcon
-          aria-hidden="true"
-          className="text-muted-foreground size-4 flex-none"
-        />
-        {line.file}
-      </span>
-    );
-  }
-  return (
-    <>
-      {markedPieces(line.text, line.marks).map((piece, index) =>
-        piece.tag === null ? (
-          <span key={index}>{piece.text}</span>
-        ) : (
-          <mark
-            className={markClass}
-            key={index}
-            title={i18n._(tagTitles[piece.tag])}
-          >
-            {piece.text}
-          </mark>
-        )
-      )}
-    </>
-  );
-};
-
 /** How it was held: by voice or typed, how long, and when it ended. */
-const howText = (i18n: I18n, read: StaffTranscript): string => {
-  const { progress, startedAt, completedAt } = read;
-  const typed = progress?.mode === "type";
+const howText = (i18n: I18n, read: StaffInterview): string => {
+  const { mode, startedAt, completedAt } = read;
+  const typed = mode === "type";
   if (startedAt === null) {
     return typed
       ? i18n._(msg`Typed, not started yet.`)
@@ -86,126 +46,79 @@ const howText = (i18n: I18n, read: StaffTranscript): string => {
     : i18n._(msg`By voice, ${minutes} minutes, agreed to on ${agreedOn}.`);
 };
 
-const Reader = ({ read }: { read: StaffTranscript }) => {
+/** Whether they took part, and withdrew. */
+const takingPartText = (i18n: I18n, read: StaffInterview): string => {
+  if (read.withdrawnAt !== null) {
+    const on = formatDateTime(read.withdrawnAt);
+    return i18n._(msg`Withdrew on ${on}: nothing of it is used.`);
+  }
+  if (read.participatedAt === null) {
+    return i18n._(msg`Has not agreed to take part yet.`);
+  }
+  const on = formatDateTime(read.participatedAt);
+  return i18n._(msg`Agreed to take part on ${on}.`);
+};
+
+const Reader = ({ read }: { read: StaffInterview }) => {
   const { t, i18n } = useLingui();
-  const { progress } = read;
   const who =
     read.interviewer === null ? "Stephen" : interviewerNames[read.interviewer];
-  const first = read.name.split(" ")[0] ?? read.name;
-  const agreed = progress?.person === "completed";
-  const rating = progress?.rating;
+  const { said, facts, out, approved } = read.counts;
+  const { rating } = read;
   return (
-    <>
-      <section
-        aria-labelledby="transcript-heading"
-        className="bg-card overflow-hidden rounded-xl border text-sm"
-      >
-        <div className="flex flex-col gap-0.5 px-5 py-4">
-          <h2 className="font-medium" id="transcript-heading">
-            {read.name}
-          </h2>
-          <p className="text-muted-foreground">{read.team}</p>
-          <p className="text-muted-foreground">
-            {howText(i18n, read)} {t`With ${who}.`}{" "}
-            {rating === undefined ? null : t`Rated ${rating} of 5.`}
-          </p>
-          <p className="text-muted-foreground">
-            {read.texts.length === 0 ? (
-              <Trans>
-                No turn of this interview has a text version on record.
-              </Trans>
-            ) : (
-              <>
-                {t`${who}'s text:`}{" "}
-                {read.texts.map((mark, index) => (
-                  <code className="mr-2 text-xs" key={mark} title={mark}>
-                    {index > 0 ? "→ " : ""}
-                    {mark.slice(0, shortMark)}
-                  </code>
-                ))}
-              </>
-            )}
-          </p>
-        </div>
-      </section>
-      {progress === null ? (
-        <p className="bg-card text-muted-foreground rounded-xl border px-5 py-4 text-sm">
-          <Trans>
-            Nothing was said yet, or it was deleted because {first} asked.
-          </Trans>
+    <section
+      aria-labelledby="interview-heading"
+      className="bg-card overflow-hidden rounded-xl border text-sm"
+    >
+      <div className="flex flex-col gap-0.5 px-5 py-4">
+        <h2 className="font-medium" id="interview-heading">
+          {read.name}
+        </h2>
+        <p className="text-muted-foreground">{read.team}</p>
+        <p className="text-muted-foreground">
+          {howText(i18n, read)} {t`With ${who}.`}{" "}
+          {rating === null ? null : t`Rated ${rating} of 5.`}
         </p>
-      ) : (
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
-          <section
-            aria-label={t`The conversation`}
-            className="bg-card overflow-hidden rounded-xl border text-sm"
-          >
-            <div className="flex flex-col gap-0.5 px-5 py-4">
-              <h2 className="font-medium">{t`The conversation`}</h2>
-              <p className="text-muted-foreground">
-                {t`What is marked is what ${who} wrote down.`}
-              </p>
-            </div>
-            <ol className="flex flex-col gap-3 border-t px-5 py-4">
-              {progress.lines.map((line, index) =>
-                line.from === "stephen" ? (
-                  <li className="max-w-[85%] self-start" key={index}>
-                    <span className="sr-only">{`${who}: `}</span>
-                    {line.text}
-                  </li>
-                ) : (
-                  <li
-                    className="bg-muted max-w-[85%] self-end rounded-2xl px-3.5 py-2"
-                    key={index}
-                  >
-                    <span className="sr-only">{`${first}: `}</span>
-                    <Said line={line} />
-                  </li>
-                )
-              )}
-            </ol>
-          </section>
-          <section
-            aria-label={t`What ${who} wrote down`}
-            className="bg-card overflow-hidden rounded-xl border text-sm"
-          >
-            <div className="flex flex-col gap-0.5 px-5 py-4">
-              <h2 className="font-medium">{t`What ${who} wrote down`}</h2>
-              <p className="text-muted-foreground">
-                {agreed
-                  ? t`As the record keeps it. What they took out is struck through and does not count.`
-                  : t`As the record keeps it so far. Nothing counts until the person has agreed to it.`}
-              </p>
-            </div>
-            <ul className="flex flex-col">
-              {progress.facts.map((fact) => (
-                <li
-                  className="flex flex-col gap-0.5 border-t px-5 py-2.5"
-                  key={fact.id}
-                >
-                  <span className="text-muted-foreground text-xs">
-                    {i18n._(tagTitles[fact.tag])}
-                  </span>
-                  <span
-                    className={
-                      fact.out === true
-                        ? "text-muted-foreground line-through"
-                        : undefined
-                    }
-                  >
-                    {fact.record === "" ? fact.text : fact.record}
-                  </span>
-                </li>
+        <p className="text-muted-foreground">{takingPartText(i18n, read)}</p>
+        <p className="text-muted-foreground">
+          {read.texts.length === 0 ? (
+            <Trans>
+              No turn of this interview has a text version on record.
+            </Trans>
+          ) : (
+            <>
+              {t`${who}'s text:`}{" "}
+              {read.texts.map((mark, index) => (
+                <code className="mr-2 text-xs" key={mark} title={mark}>
+                  {index > 0 ? "→ " : ""}
+                  {mark.slice(0, shortMark)}
+                </code>
               ))}
-            </ul>
-          </section>
-        </div>
-      )}
-    </>
+            </>
+          )}
+        </p>
+      </div>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-1 border-t px-5 py-4 sm:grid-cols-4">
+        <dt className="text-muted-foreground">{t`Answers`}</dt>
+        <dd>{said}</dd>
+        <dt className="text-muted-foreground">{t`Written down`}</dt>
+        <dd>{facts}</dd>
+        <dt className="text-muted-foreground">{t`Taken out`}</dt>
+        <dd>{out}</dd>
+        <dt className="text-muted-foreground">{t`Approved`}</dt>
+        <dd>{approved}</dd>
+      </dl>
+      <p className="text-muted-foreground border-t px-5 py-4">
+        <Trans>
+          What was said stays with the person who said it. Nobody at Grasp reads
+          it.
+        </Trans>
+      </p>
+    </section>
   );
 };
 
-const Transcript = () => {
+const Interview = () => {
   const loaded = Route.useLoaderData();
   return (
     <>
@@ -218,7 +131,7 @@ const Transcript = () => {
           variant="ghost"
         >
           <ArrowLeftIcon data-icon="inline-start" />
-          <Trans>All transcripts</Trans>
+          <Trans>All interviews</Trans>
         </Button>
       </div>
       {loaded.state === "ready" ? (
@@ -236,9 +149,9 @@ export const Route = createFileRoute("/_shell/onboarding/interviews/$person")({
   loader: async ({ context: { core }, params }) =>
     await loadFromCore(
       core,
-      async (session): Promise<StaffTranscript> =>
-        await session.onboardingStaff.transcript(params.person)
+      async (session): Promise<StaffInterview> =>
+        await session.onboardingStaff.interview(params.person)
     ),
   errorComponent: SettingsError,
-  component: Transcript,
+  component: Interview,
 });

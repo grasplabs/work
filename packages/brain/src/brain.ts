@@ -3,9 +3,11 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import type { Readable, ReadRecord } from "./authorize.ts";
 import type { CollectionRow } from "./collections.ts";
+import type { BrainSourceRef, MemoryRecord } from "./contract.ts";
 import type { BrainEvent } from "./events.ts";
 import type { Json } from "./json.ts";
 import type { Provenance } from "./knowledge.ts";
+import type { MemoryAudience } from "./memories.ts";
 
 // The Brain as its modules take it: its database and its host's ports,
 // made once per request by the host (core's ports.ts `brainOf`), so no
@@ -14,9 +16,32 @@ import type { Provenance } from "./knowledge.ts";
 /** Where Knowledge keeps its payloads: an R2 bucket's calls it uses. */
 export type BlobStore = Pick<R2Bucket, "delete" | "get" | "head" | "put">;
 
+/** A collection, as the host decides whether its skills may be selected. */
+export interface SkillCollection {
+  id: string;
+  access: string;
+  owner: string;
+  source: string;
+}
+
+/**
+ * Why a collection's skills may be selected: shipped with the release
+ * (read-only to everyone), or written only by the host's admins.
+ */
+export type SkillAuthority = "shipped" | "admins";
+
 /** A document version's indexing, as Knowledge asks its host to run it. */
 export interface IndexJob {
   documentId: string;
+  version: number;
+}
+
+/**
+ * A source version's entity linking (entities.ts), as the Brain asks its
+ * host to run it: `source` is the link job's (`doc:<id>`, `mem:<id>`).
+ */
+export interface LinkJob {
+  source: string;
   version: number;
 }
 
@@ -68,13 +93,97 @@ export interface BrainPorts<C> {
      */
     key: (reader: C) => Promise<string>;
   };
+  /**
+   * The audiences `reader` is in now, by the host's IDs for them (core's:
+   * the chats others share that count them, while they are a member): a
+   * shared session's events reach only these (outcomes.ts).
+   */
+  audiences: (reader: C) => Promise<readonly string[]>;
   /** Who `reader` is, as the host's audit log names them. */
   actorOf: (reader: C) => Json;
+  /** Skills (skills.ts), as the host decides who may use them. */
+  skills: {
+    /**
+     * The capabilities `reader` holds now, by the host's names for them
+     * (core's: from its grants): a skill whose manifest requires one they
+     * lack is never selected. The Brain compares; it never grants.
+     */
+    capabilities: (reader: C) => Promise<readonly string[]>;
+    /**
+     * Which of `collections` may hold a selectable skill, and why (core's:
+     * the shipped skills, and collections only admins write): a skill
+     * anyone else can write is never selected, whatever its manifest says.
+     * A collection left out holds none.
+     */
+    authorityOf: (
+      collections: readonly SkillCollection[]
+    ) => Promise<Readonly<Record<string, SkillAuthority>>>;
+  };
   /**
    * The person whose memories `reader`'s commands are (memories.ts), or a
    * refusal (`brain.denied`) for a caller with none.
    */
   ownerOf: (reader: C) => string;
+  /**
+   * Whether `reader` may publish a record into `target`, resting on
+   * `refs` (GRA-298): the host's decision, refused as `brain.denied` (the
+   * scope isn't theirs) or `brain.not_found` (a reference the scope's
+   * whole audience couldn't read). The Brain asks; it never decides.
+   */
+  mayPublish: (
+    reader: C,
+    target: { scope: "team" | "company" | "session"; scopeId: string | null },
+    refs: readonly BrainSourceRef[]
+  ) => Promise<void>;
+  /**
+   * Whether `reader` may retire the shared record `record` (GRA-298): the
+   * host's decision, refused as `brain.not_found` (alike for one they
+   * can't see and one that isn't theirs to retire).
+   */
+  mayRetire: (
+    reader: C,
+    record: {
+      scope: "team" | "company" | "session";
+      scopeId: string | null;
+      ownerId: string;
+    }
+  ) => Promise<void>;
+  /**
+   * Memory records in a recall (GRA-298), as the host decides whom they
+   * serve: the Brain matches within what it answers and widens nothing.
+   */
+  memories: {
+    /**
+     * Whom `reader`'s recall serves: the scopes it may read (none for a
+     * reader that reads no memory) and the people who read its answer.
+     */
+    audienceOf: (
+      reader: C
+    ) => Promise<{ audience: MemoryAudience; people: readonly string[] }>;
+    /**
+     * The collections every one of `people` may read now, as the host
+     * decides it (GRA-1085): a memory record resting on any other is left
+     * out of a shared read in the query itself (memories.ts,
+     * `citesReadable`), before `keep` checks what is found again.
+     */
+    readableBy: (reader: C, people: readonly string[]) => Promise<string[]>;
+    /**
+     * Of `records`, found for `people`, those the host keeps now, in the
+     * same order: each with who published it, when that isn't the reader
+     * (null when it is), and the collections it rests on, each sensitive
+     * or not, for the read the Brain records of those it hands over.
+     */
+    keep: (
+      reader: C,
+      people: readonly string[],
+      records: readonly (MemoryRecord & { ownerId: string })[]
+    ) => Promise<
+      (MemoryRecord & {
+        by: string | null;
+        cites: { id: string; sensitive: boolean }[];
+      })[]
+    >;
+  };
   /** Payloads (payloads.ts), in a bucket whose jurisdiction the host set. */
   blobs: BlobStore;
   /**
@@ -98,12 +207,21 @@ export interface BrainPorts<C> {
     ) => Promise<CryptoKey>;
   };
   /**
-   * Runs indexing jobs (indexing.ts) durably: the host runs `runIndexing`
-   * for each, retrying as it says.
+   * Extracts the entities `text` mentions, through the host's own model
+   * gateway (its rules, budgets and audit): the Brain never calls a model
+   * provider itself. Answers what `extractedEntitiesSchema` (entities.ts)
+   * takes, which the Brain validates again and checks against the text;
+   * throws when it can't, and the linking job retries.
+   */
+  extractEntities: (text: string) => Promise<unknown>;
+  /**
+   * Runs indexing jobs (indexing.ts) and linking jobs (entities.ts)
+   * durably: the host runs `runIndexing` or `runLinking` for each,
+   * retrying as it says.
    */
   jobs: {
     /** Starts the job `id`; one started already under it is left as it is. */
-    start: (id: string, job: IndexJob) => Promise<void>;
+    start: (id: string, job: IndexJob | LinkJob) => Promise<void>;
     /** Whether the job `id` is running or has ended; undefined if unknown. */
     status: (id: string) => Promise<"running" | "ended" | undefined>;
   };

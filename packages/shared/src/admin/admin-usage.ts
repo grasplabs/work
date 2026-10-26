@@ -634,7 +634,9 @@ export const valueOf = (view: OrgView, day: string): Value => {
       const items =
         (telling.volume[0] + telling.volume[1]) /
         2 /
-        (work.per === "month" ? WEEKS_PER_MONTH : 1);
+        (work.per === "month" ? WEEKS_PER_MONTH : 1) /
+        // A count for the whole team is shared by everyone who does it.
+        (telling.volumeOf === "team" ? Math.max(1, evidence.doers) : 1);
       return [
         (items * telling.takes[1] * (work.unit === "hours" ? 60 : 1)) / 60,
       ];

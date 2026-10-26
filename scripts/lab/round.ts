@@ -44,7 +44,14 @@ import {
 } from "./check.ts";
 import type { KeptScores } from "./check.ts";
 import { compare, noiseOf, shown } from "./compare.ts";
-import { ask, drawnAgain, openCore, spentLine, turnOn } from "./core.ts";
+import {
+  ask,
+  drawnAgain,
+  interviewOf,
+  openCore,
+  spentLine,
+  turnOn,
+} from "./core.ts";
 import type { Core } from "./core.ts";
 import { keepJson, keepText, openFolder } from "./kept.ts";
 import type { CaseSet } from "./kept.ts";
@@ -124,9 +131,8 @@ const drawnOf = async (core: Core, practice: Practice): Promise<Drawn> => {
       const employee = key.employees.find(
         (each) => each.id === person.employee
       );
-      const { progress } = await core.session.api.onboardingStaff.transcript(
-        person.id
-      );
+      const held = await interviewOf(core, person.id);
+      const progress = held?.progress;
       const agreed = (progress?.facts ?? [])
         .filter((fact) => fact.agreed === true && fact.out !== true)
         .map((fact) => `(${fact.tag}) ${fact.record}`);

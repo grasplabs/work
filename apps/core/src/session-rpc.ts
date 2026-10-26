@@ -33,6 +33,7 @@ import { ScreensRpc } from "./screens-rpc.ts";
 import { fullAccess, withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
+import { staffAudited } from "./staff-audit.ts";
 import { StoresRpc } from "./stores-rpc.ts";
 import { TemplatesRpc } from "./templates-rpc.ts";
 import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
@@ -89,8 +90,11 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #onboardingGate: OnboardingGateRpc;
 
   /** `sessionId`: the session the connection is signed in with. */
-  constructor(env: Env, check: SessionCheck, sessionId: string) {
+  constructor(env: Env, connectionCheck: SessionCheck, sessionId: string) {
     super();
+    // Every view and action of Grasp's staff, on every namespace, is in
+    // the client's audit log (staff-audit.ts): the one check they all ask.
+    const check = staffAudited(env, connectionCheck);
     this.#check = check;
     // Everything but the onboarding refuses staff who reach the onboarding alone.
     const full = fullAccess(check);

@@ -87,14 +87,18 @@ export interface PinnedRun {
  * dispatcher: extracting an upload's text (knowledge/extraction.ts), a
  * build a chat's code handed to a durable job (build-jobs.ts), or filling
  * in a store's defaulted fields before its contract takes them
- * (store-backfill.ts), or publishing a document version's sections to
- * search (knowledge/indexing.ts).
+ * (store-backfill.ts), publishing a document version's sections to
+ * search (knowledge/indexing.ts), linking a Brain source's entities
+ * (packages/brain's entities.ts), or consolidating a scope's episodes into
+ * lesson candidates (brain-consolidation.ts).
  */
 export const internalWorkflows = [
   "extraction",
   "build",
   "backfill",
   "indexing",
+  "linking",
+  "consolidation",
 ] as const;
 
 export type InternalWorkflow = (typeof internalWorkflows)[number];

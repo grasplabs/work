@@ -14,7 +14,8 @@ import { interviewerSchema, interviewLocaleSchema } from "./onboarding.ts";
 // line by line, with the lines that belong together in one sentence. The
 // lines stay what the person reads, changes and agrees to; the story is
 // only how he says them, held to the same rules on the page and in core
-// (`storyOf`). Only what they agreed to counts (`agreedFacts`). Ported from
+// (`storyOf`). Only the revisions they approved count (core's onboarding
+// store, GRA-329). Ported from
 // the prototype (grasplabs/prototype, packages/grasp:
 // src/lib/interview-story.ts, and readBackParts in
 // src/lib/interview-turn.ts), which the Stephen Lab measures: change the
@@ -243,20 +244,3 @@ export const readBackParts = (facts: InterviewFact[]): ReadBackPart[] => {
     facts: [...part.facts, ...open.filter(({ pin }) => pin === index)],
   }));
 };
-
-/**
- * What counts of an interview: the facts its person agreed to and didn't
- * take out. Coming back to add something keeps what was agreed; what is
- * added counts once it is agreed to as well. Nothing else is ever drawn.
- */
-export const agreedFacts = (facts: InterviewFact[]): InterviewFact[] =>
-  facts.filter(({ agreed, out }) => agreed === true && out !== true);
-
-/**
- * What was agreed to, as it stands for the drawing: the same facts, in the
- * same words, mean nothing new to draw.
- */
-export const agreedKey = (facts: InterviewFact[]): string =>
-  agreedFacts(facts)
-    .map(({ id, tag, record }) => `${id}\u0000${tag}\u0000${record}`)
-    .join("\u0001");

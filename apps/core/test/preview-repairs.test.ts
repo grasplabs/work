@@ -10,6 +10,7 @@ import { workspace } from "../src/durable-objects.ts";
 import {
   codeResults,
   codeStep,
+  readApiStep,
   model,
   openTestRun,
   pausedReply,
@@ -333,6 +334,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
   it("fixes a runtime error the preview reports, without the person, and reads its text only as data", async () => {
     const [firstCheck, secondCheck] = [heldCheck(), heldCheck()];
     const { builder, chatId, stub, gateway } = await setUp([
+      // It reads the build API's declaration before it builds.
+      readApiStep("build"),
       codeStep(write(desk(false))),
       firstCheck.reply,
       codeStep(write(desk(true))),
@@ -366,8 +369,9 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       passedCheck,
       outsideResults,
       inResult: JSON.stringify(gateway.requests.at(-2)?.body).includes(attack),
-      // The agent reads of the preview while previews are on.
-      declared: JSON.stringify(gateway.requests[0]?.body).includes(
+      // The agent reads of the preview while previews are on: in the
+      // build API's declaration, the result of its first step.
+      declared: JSON.stringify(gateway.requests[1]?.body).includes(
         "preview (runtime errors)"
       ),
     }).toStrictEqual({

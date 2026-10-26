@@ -1296,6 +1296,67 @@ describe("live queries", { timeout: 120_000 }, () => {
     }).toStrictEqual({ value: undefined, code: "app.not_found" });
   });
 
+  it("ends a screen's live queries once its App is unpublished or archived, with nothing written to set them off", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const member = await personApi("builder");
+    await opened.builder.api.apps.members.add(opened.app, {
+      type: "person",
+      id: member.userId,
+      role: "user",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    const theirs = reading(
+      clientFor(
+        { ...opened, lease, cookie: member.session, userId: member.userId },
+        member.api.screens
+      ).client,
+      api.list,
+      { pagination: {} }
+    );
+    const builders = reading(clientFor(opened).client, api.list, {
+      pagination: {},
+    });
+    await eventually(() => {
+      expect([shown(theirs.now()), shown(builders.now())]).toStrictEqual([
+        [],
+        [],
+      ]);
+    });
+
+    // A draft is its builders' alone: its users' screens stop.
+    await opened.builder.api.apps.unpublish(opened.app);
+    await vi.waitFor(
+      () => {
+        expect(theirs.now().error).toBeDefined();
+      },
+      { timeout: 10_000, interval: 250 }
+    );
+    const draftForBuilder = builders.now().error?.code;
+    // Nobody uses an archived App, its builders included.
+    await opened.builder.api.apps.archive(opened.app);
+    await vi.waitFor(
+      () => {
+        expect(builders.now().error).toBeDefined();
+      },
+      { timeout: 10_000, interval: 250 }
+    );
+
+    expect({
+      user: { value: theirs.now().value, code: theirs.now().error?.code },
+      draftForBuilder,
+      builder: {
+        value: builders.now().value,
+        code: builders.now().error?.code,
+      },
+    }).toStrictEqual({
+      user: { value: undefined, code: "app.not_found" },
+      draftForBuilder: undefined,
+      // Cleared as for anyone who lost the App, before anything more reaches it.
+      builder: { value: undefined, code: "app.not_found" },
+    });
+  });
+
   it("lets the store drop a watch core let go of, even when telling it so failed", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);

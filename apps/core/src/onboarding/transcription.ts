@@ -28,6 +28,7 @@ import type { Listening, ListeningOutcome } from "../models.ts";
 import { jsonOf } from "../request-body.ts";
 import { isOwnOrigin } from "../rpc.ts";
 import { sessionRecheckMs } from "../session-check.ts";
+import { auditStaffRoute } from "../staff-audit.ts";
 import { gatewayTranscription } from "../transcription.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took } from "./store.ts";
@@ -234,6 +235,8 @@ const forAdmin = async (
   if (person === undefined) {
     return authErrors.create("auth.unauthenticated");
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "onboarding.transcription");
   if (!isAdmin(person.role)) {
     return roleErrors.create("role.forbidden");
   }

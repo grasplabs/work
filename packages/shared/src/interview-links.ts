@@ -1,6 +1,8 @@
 import { z } from "zod";
 
+import { sha256Hex } from "./encoding.ts";
 import { defineErrorFamily } from "./errors.ts";
+import { canonicalJson } from "./json.ts";
 import { interviewerSchema } from "./onboarding.ts";
 import type { InterviewKind } from "./onboarding.ts";
 
@@ -176,6 +178,44 @@ export const interviewProgressSchema = z.strictObject({
 });
 export type InterviewProgress = z.output<typeof interviewProgressSchema>;
 
+/**
+ * What someone agrees to before anything they say is recorded or read by
+ * a model (GRA-329): why the interview is held, who reads what comes of
+ * it, and which version of the page saying so they read. The version goes
+ * up whenever what the page says about it changes: whoever agreed to an
+ * older one is asked again before anything more is recorded.
+ */
+export const participationNotice = {
+  version: 1,
+  /** Why: how their team's work is done, for the company's Grasp. */
+  purpose: "onboarding.interview",
+  /** Who reads it: the company, their approved words by role and team, never by name. */
+  audience: "company.role_and_team",
+} as const;
+
+/** A fact's revision: the SHA-256 (hex) of exactly what was read back and what the record keeps. */
+export const interviewRevisionSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * The revision of a fact as it stands: what approving it binds to. Any
+ * change to its kind, to what was read back or to what the record keeps
+ * makes a new revision, which counts only once it is approved too.
+ */
+export const factRevision = async ({
+  id,
+  tag,
+  text,
+  record,
+}: Pick<InterviewFact, "id" | "tag" | "text" | "record">): Promise<string> =>
+  await sha256Hex(canonicalJson([id, tag, text, record]));
+
+/** One fact as read back and approved: which, at which revision. */
+export const approvedFactSchema = z.strictObject({
+  id: interviewFactSchema.shape.id,
+  revision: interviewRevisionSchema,
+});
+export type ApprovedFact = z.output<typeof approvedFactSchema>;
+
 /** The most one save may carry, as its request's bytes. */
 export const interviewRequestMaxBytes = 768 * 1024;
 
@@ -200,6 +240,33 @@ export const interviewRequestSchema = z.discriminatedUnion("action", [
     secret: interviewSecretSchema,
     key: interviewSecretSchema,
   }),
+  /** They read what the interview is for and agree to take part (`participationNotice`). */
+  z.strictObject({
+    action: z.literal("participate"),
+    secret: interviewSecretSchema,
+    key: interviewSecretSchema,
+    notice: z.int().min(1),
+  }),
+  /** They approve the facts read back, each at the revision they saw. */
+  z.strictObject({
+    action: z.literal("approve"),
+    secret: interviewSecretSchema,
+    key: interviewSecretSchema,
+    facts: z
+      .array(approvedFactSchema)
+      .min(1)
+      .max(interviewLimits.facts)
+      .refine(
+        (facts) => new Set(facts.map(({ id }) => id)).size === facts.length,
+        "Each fact once"
+      ),
+  }),
+  /** They withdraw: nothing of their interview is used from now on. */
+  z.strictObject({
+    action: z.literal("withdraw"),
+    secret: interviewSecretSchema,
+    key: interviewSecretSchema,
+  }),
 ]);
 export type InterviewRequest = z.input<typeof interviewRequestSchema>;
 
@@ -217,9 +284,15 @@ export interface InterviewSession {
   closes: string;
   /** The interviews are over: what was said can be read and deleted, no more. */
   closed: boolean;
-  /** What was said, none before anything was saved. */
+  /**
+   * What was said, none before anything was saved. Whether they read what
+   * this is (`told`) and which facts they agreed to (`agreed`) are core's,
+   * from what they agreed to there, never what the page last said.
+   */
   progress: InterviewProgress | null;
   version: number;
+  /** They withdrew: what they said is theirs to read and delete, and nothing more is taken. */
+  withdrawn: boolean;
 }
 
 /** What a link answers anyone but the device it is on: nothing that was said. */
@@ -231,6 +304,27 @@ export interface InterviewElsewhere {
 export type InterviewSaved =
   | { saved: true; version: number }
   | { saved: false; version: number; progress: InterviewProgress | null };
+
+/** What taking part answers: the notice they agreed to, and when they first did. */
+export interface InterviewParticipation {
+  notice: number;
+  at: string;
+}
+
+/**
+ * What approving answers: the receipt of exactly these revisions, the same
+ * however often it is asked, and when they were first approved; or, when
+ * what was read back isn't what is kept any more, the copy kept.
+ */
+export type InterviewApproval =
+  | { approved: true; receipt: string; at: string }
+  | { approved: false; version: number; progress: InterviewProgress | null };
+
+/** What withdrawing answers: when they withdrew, the first time they did. */
+export interface InterviewWithdrawal {
+  withdrawn: true;
+  at: string;
+}
 
 /** Why an interview link refused something. */
 export const interviewErrors = defineErrorFamily({
@@ -247,4 +341,10 @@ export const interviewErrors = defineErrorFamily({
     "You deleted this interview. Start again to talk with Stephen.",
   "interview.limited": "That was a lot at once. Wait a minute, then go on.",
   "interview.invalid": "That isn't something an interview takes.",
+  "interview.not_participating":
+    "Read what this interview is for and agree to take part first.",
+  "interview.notice_changed":
+    "What this interview is for has changed. Read it again before you go on.",
+  "interview.withdrawn":
+    "You withdrew from this interview. Nothing more is taken from it.",
 });

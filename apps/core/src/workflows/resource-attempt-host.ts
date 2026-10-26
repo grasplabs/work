@@ -9,15 +9,23 @@ export interface AttemptCalls {
   check: (which: unknown, value: unknown) => Settled<null>;
   call: (frame: unknown) => Promise<Settled<Json>>;
   until: (frame: unknown) => Promise<Settled<number>>;
-  items: (frame: unknown) => Promise<Settled<Json[]>>;
+  items: (frame: unknown) => Promise<Settled<LoopItems>>;
+  catches: () => Promise<Settled<boolean>>;
+}
+
+/** A `for` task's items, and their keys where its loop has them. */
+export interface LoopItems {
+  items: Json[];
+  keys?: (string | number)[];
 }
 
 /**
  * The host of one attempt of a step in a run of an independent workflow
  * (resource-host.ts), passed to the step's function in the run's isolate:
  * it evaluates the step's own expressions, checks its task's data against
- * the task's own schemas, and makes its task's call or resolves its
- * deadline or its items, and nothing else. Every check, and everything a call is made
+ * the task's own schemas, and makes its task's call, resolves its
+ * deadline or its items or decides whether its catch takes a failure, and
+ * nothing else. Every check, and everything a call is made
  * of, is its run host's.
  */
 export class ResourceAttemptHost extends RpcTarget {
@@ -48,8 +56,16 @@ export class ResourceAttemptHost extends RpcTarget {
     return await this.#calls.until(frame);
   }
 
-  /** Resolves a `for` task's items, as the build sealed them, on its input. */
-  async items(frame: unknown): Promise<Settled<Json[]>> {
+  /**
+   * Resolves a `for` task's items, as the build sealed them, on its input,
+   * with their keys where its loop has them.
+   */
+  async items(frame: unknown): Promise<Settled<LoopItems>> {
     return await this.#calls.items(frame);
+  }
+
+  /** Whether the try task's catch takes the failure that left its list. */
+  async catches(): Promise<Settled<boolean>> {
+    return await this.#calls.catches();
   }
 }

@@ -8,6 +8,8 @@ import {
   receiptsGetInputSchema,
   recallInputSchema,
   rememberInputSchema,
+  skillsReadInputSchema,
+  skillsSelectInputSchema,
 } from "@grasp-os/brain/contract";
 import type {
   ChangeOptions,
@@ -22,6 +24,10 @@ import type {
   ReceiptsGetInput,
   RecallInput,
   RememberInput,
+  SkillRead,
+  SkillSelection,
+  SkillsReadInput,
+  SkillsSelectInput,
 } from "@grasp-os/brain/contract";
 import type { z } from "zod";
 
@@ -37,6 +43,11 @@ export type {
   MemoryRecord,
   RecallInput,
   RememberInput,
+  SkillRead,
+  SkillRef,
+  SkillSelection,
+  SkillsReadInput,
+  SkillsSelectInput,
 } from "@grasp-os/brain/contract";
 export { brainErrors } from "@grasp-os/brain/contract";
 
@@ -65,6 +76,8 @@ export interface BrainBinding {
     input: MemoriesProposeChangeInput,
     options: ChangeOptions
   ) => Promise<CommandReceipt>;
+  skillsSelect?: (input: SkillsSelectInput) => Promise<SkillSelection>;
+  skillsRead?: (input: SkillsReadInput) => Promise<SkillRead>;
 }
 
 /** The Brain, as a caller uses it. */
@@ -88,6 +101,15 @@ export interface Brain {
       input: MemoriesProposeChangeInput,
       options: ChangeOptions
     ) => Promise<CommandReceipt>;
+  };
+  skills: {
+    /**
+     * The skill that applies to a task, pinned at the version read, or an
+     * explicit no-skill result: keep the pin for the task's whole run.
+     */
+    select: (input: SkillsSelectInput) => Promise<SkillSelection>;
+    /** A pinned skill, at exactly its version. */
+    read: (input: SkillsReadInput) => Promise<SkillRead>;
   };
 }
 
@@ -164,5 +186,15 @@ export const brain = (binding: BrainBinding): Brain => ({
         checked(memoriesProposeChangeInputSchema, input),
         checked(changeOptionsSchema, options)
       ),
+  },
+  skills: {
+    select: async (input) =>
+      await call(
+        binding,
+        "skillsSelect",
+        checked(skillsSelectInputSchema, input)
+      ),
+    read: async (input) =>
+      await call(binding, "skillsRead", checked(skillsReadInputSchema, input)),
   },
 });

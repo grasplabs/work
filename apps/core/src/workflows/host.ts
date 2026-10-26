@@ -1,5 +1,7 @@
+import type { Brain } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
 import { recall } from "@grasp-os/brain/recall";
+import { readSkill, selectSkill } from "@grasp-os/brain/skills";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { connectErrors } from "@grasp-os/shared/connect";
@@ -28,6 +30,7 @@ import {
   coreStepPrefix,
   executionErrors,
   reviewerChosenAtRun,
+  modelReviewed,
   stepReviewed,
   stepRunsAs,
   isRetryable,
@@ -73,6 +76,7 @@ import type {
   DecisionOutcome,
   DecisionRecipient,
 } from "../decisions/decisions.ts";
+import type { Reader } from "../knowledge/access.ts";
 import { readAsDelegate } from "../knowledge/binding.ts";
 import type { CollectionBinding } from "../knowledge/binding.ts";
 import { brainOf } from "../knowledge/ports.ts";
@@ -708,6 +712,25 @@ const checked = <Schema extends z.ZodType>(
     throw workflowErrors.create("workflow.invalid");
   }
   return parsed.data;
+};
+
+/** The Brain operations a run's Brain binding calls (`#callBrain`). */
+const brainCallSchema = z.enum(["recall", "skillsSelect", "skillsRead"]);
+
+/**
+ * Each, as the Brain serves every caller: a recall, a skill's selection,
+ * a pinned skill's read; the same service and checks.
+ */
+const brainCalls: Record<
+  z.infer<typeof brainCallSchema>,
+  (brain: Brain<Reader>, reader: Reader, request: unknown) => Promise<unknown>
+> = {
+  recall: async (brain, reader, request) =>
+    await recall(brain, reader, request),
+  skillsSelect: async (brain, reader, request) =>
+    await selectSkill(brain, reader, request),
+  skillsRead: async (brain, reader, request) =>
+    await readSkill(brain, reader, request),
 };
 
 /**
@@ -1453,7 +1476,7 @@ export class RunHost extends RpcTarget {
    * The attempts whose functions run now, in the order they began: the
    * last is the step running now, which every reviewed call and kind is
    * checked against as well as the step whose host it came through
-   * (`#requireReviewed`, `#requireKindIn`).
+   * (`#requireReviewed`, `#requireKindIn`, `#requireModelReviewed`).
    *
    * The SDK runs steps one after another, never inside or next to one
    * another (`exclusive`, workflow.ts), so a workflow it runs has one
@@ -2239,6 +2262,7 @@ export class RunHost extends RpcTarget {
         modelRequestSchema,
         request
       );
+      await this.#requireModelReviewed(attempt, binding);
       let schema: z.ZodType;
       try {
         schema = z.fromJSONSchema(outputSchema);
@@ -2383,8 +2407,8 @@ export class RunHost extends RpcTarget {
           await this.#callCollection(attempt, binding, method, args),
         callConnection: async (binding, call) =>
           await this.#callConnection(attempt, binding, call),
-        callBrain: async (binding, request) =>
-          await this.#callBrain(attempt, binding, request),
+        callBrain: async (binding, operation, request) =>
+          await this.#callBrain(attempt, binding, operation, request),
         callFunction: async (reference, input) =>
           await this.#callFunction(attempt, reference, input),
         openDecision: async (request) =>
@@ -2519,6 +2543,29 @@ export class RunHost extends RpcTarget {
   }
 
   /**
+   * Refuses a model call of `attempt` naming a binding its review doesn't
+   * show its AI step calling (`modelReviewed`), for both it and the
+   * attempt running now (a step nested in it may borrow its host), as
+   * `#requireKindIn` holds both: code past the SDK asking another of the
+   * App's models from a reviewed AI step. Tampering, as a kind refusal is:
+   * both fail, caught or not, and the run ends.
+   */
+  async #requireModelReviewed(
+    attempt: StepAttempt,
+    binding: string
+  ): Promise<void> {
+    const running = this.#live.at(-1) ?? attempt;
+    const other = [running, attempt].find(
+      ({ step }) => !modelReviewed(this.#run.calls, step, binding)
+    );
+    if (other !== undefined) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${other.step}" asked model ${binding}, which the review of this version doesn't show it asking: ask each AI step's model only as its \`step.llm\` names it.`;
+      await this.#refuseIn(attempt, error, "model", other.step, binding);
+    }
+  }
+
+  /**
    * Fails `attempt` (and the one running now) with `error`, as tampering
    * audited under `step`.
    */
@@ -2526,12 +2573,13 @@ export class RunHost extends RpcTarget {
     attempt: StepAttempt,
     error: Error,
     call: string,
-    step = attempt.step
+    step = attempt.step,
+    binding?: string
   ): Promise<never> {
     const running = this.#live.at(-1) ?? attempt;
     running.refused = error;
     attempt.refused = error;
-    return await this.#refuseTampering(error, { step, call });
+    return await this.#refuseTampering(error, { step, call, binding });
   }
 
   /**
@@ -2547,7 +2595,16 @@ export class RunHost extends RpcTarget {
    */
   async #refuseTampering(
     error: Error,
-    { step, call }: { step: string | null; call: string | null }
+    {
+      step,
+      call,
+      binding,
+    }: {
+      step: string | null;
+      call: string | null;
+      /** The model binding a refused model call named. */
+      binding?: string | undefined;
+    }
   ): Promise<never> {
     if (this.#tampered === undefined) {
       this.#tampered = error;
@@ -2557,6 +2614,7 @@ export class RunHost extends RpcTarget {
         step,
         call,
         errorCode: refusal.code ?? "workflow.invalid",
+        ...(binding === undefined ? {} : { binding }),
       });
     }
     throw error;
@@ -2571,6 +2629,7 @@ export class RunHost extends RpcTarget {
     step: string | null;
     call: string | null;
     errorCode: string;
+    binding?: string;
   }): Promise<void> {
     const { app, workflow, version, runId } = this.#run;
     const db = drizzle(this.#env.DB);
@@ -2687,8 +2746,9 @@ export class RunHost extends RpcTarget {
   }
 
   /**
-   * Recalls from the Brain through the run's Brain binding (`binding`,
-   * `brain(env.BRAIN).recall(request)`), only inside a step whose code its
+   * Calls the Brain through the run's Brain binding (`binding`): a recall
+   * (`brain(env.BRAIN).recall(request)`), or a skill's selection or pinned
+   * read (`.skills.select`, `.skills.read`, GRA-310), only inside a step whose code its
    * review shows calling it (`#requireReviewed`), as the run: its App on
    * behalf of its person, under the App's collection grants and `brain`
    * permission as they are now (GRA-1067; the threat model is on the
@@ -2700,10 +2760,12 @@ export class RunHost extends RpcTarget {
   async #callBrain(
     attempt: StepAttempt,
     binding: unknown,
+    operation: unknown,
     request: unknown
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
       this.#requireUntampered();
+      const call = checked(brainCallSchema, operation);
       await this.#requireCurrent(attempt, "brain");
       const { brains, authority } = this.#run;
       const name = checked(z.string(), binding);
@@ -2742,7 +2804,8 @@ export class RunHost extends RpcTarget {
         authority,
         context,
         undefined,
-        async (reader) => await recall(brainOf(this.#env), reader, request)
+        async (reader) =>
+          await brainCalls[call](brainOf(this.#env), reader, request)
       );
     });
   }

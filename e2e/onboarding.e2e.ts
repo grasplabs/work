@@ -172,7 +172,7 @@ const interviewOn = async (
   await interviewCall({ action: "save", secret, key, version: 0, progress });
 };
 
-test("staff open someone's transcript, and the audit log has the read; the company's admin reaches none of it", async ({
+test("staff open someone's interview and see where it stands, never a word of it, and the audit log has the look; the company's admin reaches none of it", async ({
   page,
   cspViolations,
 }) => {
@@ -208,36 +208,42 @@ test("staff open someone's transcript, and the audit log has the read; the compa
   ).toBeVisible();
   await page
     .getByRole("navigation", { name: "Interviews" })
-    .getByRole("link", { name: "Transcripts" })
+    .getByRole("link", { name: "One by one" })
     .click();
-  await page.getByRole("link", { name: "Read the transcript of Lea" }).click();
+  await page.getByRole("link", { name: "See the interview of Lea" }).click();
 
-  const conversation = page.getByRole("region", { name: "The conversation" });
-  await expect(conversation).toContainText(said);
-  // What Claire wrote down is marked where Lea said it, and kept as the record has it.
-  await expect(conversation.locator("mark")).toHaveText(
-    "open the invoices in Exact"
+  // Where it stands, who held it and its numbers; nothing she said, and
+  // nothing written down from it (GRA-329).
+  await expect(page.getByRole("heading", { name: "Lea" })).toBeVisible();
+  await expect(page.getByText(/With Claire\./u)).toBeVisible();
+  await expect(page.getByText(said)).toHaveCount(0);
+  await expect(page.getByText("Open the invoices in Exact first.")).toHaveCount(
+    0
   );
-  await expect(
-    page.getByRole("region", { name: "What Claire wrote down" })
-  ).toContainText("Open the invoices in Exact first.");
 
-  // The read is in the audit log, by the staff member, once the log has
-  // taken it from core's outbox.
+  // The look is in the audit log, by the staff member, once the log has
+  // taken it from core's outbox: a staff access of the interview, naming
+  // the kind of what was asked and never the person (GRA-1087).
   const reader = apiOf(staff);
   try {
     await expect
       .poll(async () => {
         const { records } = await reader.api.audit.search({
-          action: "onboarding.transcript.read",
+          action: "staff.accessed",
           from: since,
         });
-        return records.map(({ event }) => [
-          event?.actor.type,
-          event?.target?.type,
-        ]);
+        const looks = records.filter(
+          ({ event }) => event?.detail.surface === "onboardingStaff.interview"
+        );
+        return {
+          looked: looks.length > 0,
+          actors: [...new Set(looks.map(({ event }) => event?.actor.type))],
+          named: looks.some(
+            ({ event }) => event?.provenance.includes(lea) === true
+          ),
+        };
       })
-      .toStrictEqual([["staff", "interview"]]);
+      .toStrictEqual({ looked: true, actors: ["staff"], named: false });
   } finally {
     reader.core[Symbol.dispose]();
   }
@@ -253,7 +259,7 @@ test("staff open someone's transcript, and the audit log has the read; the compa
     const refused = await Promise.all(
       [
         company.api.onboardingStaff.interviews(),
-        company.api.onboardingStaff.transcript(lea),
+        company.api.onboardingStaff.interview(lea),
         company.api.onboardingStaff.link(lea),
       ].map(async (call) => {
         try {

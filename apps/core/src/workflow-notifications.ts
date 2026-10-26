@@ -161,12 +161,13 @@ const maySendSql = (
   if (!workflow.success) {
     return sql`0`;
   }
+  // A paused run too: the event waits in its inbox for the resume.
   return sql`(EXISTS (SELECT 1 FROM workflow_resource_runs AS run
       JOIN workflow_start_receipts AS receipt ON receipt.id = run.id
       WHERE run.id = ${runId}
         AND run.workflow_resource_id = ${pin.workflowId}
         AND run.version = ${pin.version}
-        AND run.status IN ('starting', 'running')
+        AND run.status IN ('starting', 'running', 'paused')
         AND receipt.invoker_type = 'app' AND receipt.invoker_id = ${app})
     AND ${appSendHoldsSql(app, appVersion, principal, workflow.data)}
     AND ${bindingPinnedSql(app, alias, pin)})`;

@@ -300,6 +300,8 @@ describe(
       const calls: WorkflowCalls = {
         steps: { tidy: [] },
         kinds: { tidy: "decision" },
+        models: {},
+        keyed: [],
         all: [],
       };
       // Opens the decision, then asks who it asks in its `#ask` part, as
@@ -377,6 +379,8 @@ describe(
       const calls: WorkflowCalls = {
         steps: { tidy: [] },
         kinds: { tidy: "decision" },
+        models: {},
+        keyed: [],
         all: [],
       };
       const open = async (attempt: AttemptHost, arm: () => void) => {
@@ -455,6 +459,8 @@ describe(
       const calls: WorkflowCalls = {
         steps: { tidy: [] },
         kinds: { tidy: "exact" },
+        models: {},
+        keyed: [],
         all: [],
       };
       const read = async (attempt: AttemptHost, arm: () => void) => {
@@ -522,6 +528,8 @@ describe(
       const calls: WorkflowCalls = {
         steps: { tidy: ["HANDBOOK"] },
         kinds: { tidy: "exact" },
+        models: {},
+        keyed: [],
         all: ["HANDBOOK"],
       };
       const read = async (attempt: AttemptHost, arm: () => void) => {
@@ -570,7 +578,7 @@ describe(
 /** A recall in a step, through the run's Brain binding, once armed. */
 const recallNote = async (attempt: AttemptHost, arm: () => void) => {
   arm();
-  return await attempt.callBrain("BRAIN", { query: "note" });
+  return await attempt.callBrain("BRAIN", "recall", { query: "note" });
 };
 
 describe(
@@ -597,6 +605,8 @@ describe(
       const calls: WorkflowCalls = {
         steps: { tidy: ["BRAIN"] },
         kinds: { tidy: "exact" },
+        models: {},
+        keyed: [],
         all: ["BRAIN"],
       };
       return { app, brainGrant, calls };
@@ -654,7 +664,7 @@ describe(
         async (attempt) => {
           // Its binding came with the run's start; the grant goes after.
           await admin.api.permissions.revoke(brainGrant);
-          return await attempt.callBrain("BRAIN", { query: "note" });
+          return await attempt.callBrain("BRAIN", "recall", { query: "note" });
         }
       );
 
@@ -667,7 +677,13 @@ describe(
       const { answered } = await cancelledAt(
         app,
         admin.userId,
-        { steps: { tidy: [] }, kinds: { tidy: "exact" }, all: [] },
+        {
+          steps: { tidy: [] },
+          kinds: { tidy: "exact" },
+          models: {},
+          keyed: [],
+          all: [],
+        },
         undefined,
         recallNote
       );

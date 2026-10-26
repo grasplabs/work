@@ -93,6 +93,7 @@ describe("an organization's Setup", () => {
     const header = textOf(sectionOf(status.html, "How it stands"));
     const checklist = textOf(sectionOf(status.html, "From contract to go"));
     const howItRuns = textOf(sectionOf(status.html, "How it runs"));
+    const quotaPolicy = textOf(sectionOf(status.html, "Quota policy"));
 
     expect({
       statuses: [status, deploys, resources, releases, settings].map(
@@ -119,6 +120,13 @@ describe("an organization's Setup", () => {
       ].map((text) =>
         sectionOf(status.html, "Its platform in numbers").includes(text)
       ),
+      // Its core asked which quota policy it applies: the platform's own,
+      // as the admin sets none.
+      quotaPolicy: [
+        "In sync",
+        "Core applies the platform's own, as the admin sets.",
+        "The admin sets no policy",
+      ].map((text) => quotaPolicy.includes(text)),
       howItRuns: [
         "Router",
         "Core",
@@ -174,6 +182,7 @@ describe("an organization's Setup", () => {
       toOldPages: false,
       needs: false,
       numbers: [true, true],
+      quotaPolicy: [true, true, true],
       howItRuns: [true, true, true, true, true, true],
       checklist: [true, true, true],
       deployed: true,

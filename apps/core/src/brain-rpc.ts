@@ -11,6 +11,7 @@ import type {
   Team,
   TeamCount,
   Tool,
+  Transcript,
   Vision,
   Workspace,
 } from "@grasp-os/shared/brain";
@@ -45,6 +46,10 @@ import {
   readBrainRecords,
 } from "./brain-records.ts";
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
+import {
+  brainTranscript,
+  knowledgeTranscriptSources,
+} from "./brain-transcripts.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { brainOf } from "./knowledge/ports.ts";
@@ -70,15 +75,24 @@ import type { SessionCheck } from "./session-check.ts";
 // |                    | interview and the documents shared in the onboarding     |
 // |                    | (admins); each team's interviews, once the brain holds   |
 // |                    | what they learned, for whoever reads records naming them |
+// |                    | (never with a transcript); Knowledge documents saved     |
+// |                    | with a transcript, for whoever may read them, by turn    |
+// |                    | count (brain-transcripts.ts)                             |
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
 // | sources, tools,    | the brain's records (brain-records.ts), for everyone     |
 // | candidates,        | signed in, after the onboarding's; a record's counts and |
 // | statements, teams, | stakeholders for an onboarding team join that team, for  |
-// | gaps               | whoever reads it; gaps with what became of them          |
+// | gaps               | whoever reads it; gaps with what became of them.         |
+// |                    | The onboarding's statements are the team's claims five   |
+// |                    | or more of its people made (GRA-1084)                    |
 // | workflows          | the brain's records, as the onboarding drew them, for    |
 // |                    | everyone signed in                                       |
+//
+// Grasp's staff are admins, and read what admins read (Nick,
+// 2026-10-25): that each of their reads is audited and visible to the
+// client is GRA-1087's.
 // | goals, landscape,  | nothing core can read holds them yet: empty              |
 // | policies           |                                                          |
 //
@@ -760,11 +774,12 @@ export const readBrain = async (
   env: Env,
   person: Identity
 ): Promise<Workspace> => {
-  const [facts, name, connections, records] = await Promise.all([
+  const [facts, name, connections, records, transcribed] = await Promise.all([
     onboardingFacts(env, person),
     organizationName(env),
     connectionsOf(env, person),
     readBrainRecords(env),
+    knowledgeTranscriptSources(env, person),
   ]);
 
   const company: Company = {
@@ -805,7 +820,7 @@ export const readBrain = async (
       documentTools(facts, teamsByName(onboarding)),
       records.tools
     ),
-    sources: [...sources, ...records.sources],
+    sources: [...sources, ...records.sources, ...transcribed],
     statements: records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),
@@ -817,10 +832,12 @@ export const readBrain = async (
 };
 
 /**
- * The company brain over `/rpc`: for anyone signed in. Its workspace isn't
- * audited itself: it reads nothing from Knowledge. Its changes are, as the
- * Knowledge read they are (brain-changes.ts). Adding records is, with the
- * records it added.
+ * The company brain over `/rpc`: for anyone signed in. Of its workspace,
+ * only the Knowledge documents it lists as transcript sources are audited,
+ * as the Knowledge read that listing is; the rest reads nothing from
+ * Knowledge. Opening a source's transcript is audited as that one read
+ * (brain-transcripts.ts). Its changes are, as the Knowledge read they are
+ * (brain-changes.ts). Adding records is, with the records it added.
  */
 export class BrainRpc extends CoreRpcTarget implements BrainApi {
   readonly #env: Env;
@@ -836,6 +853,13 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await readBrain(this.#env, person)
+    );
+  }
+
+  async transcript(sourceId: unknown): Promise<Transcript | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await brainTranscript(this.#env, person, sourceId)
     );
   }
 

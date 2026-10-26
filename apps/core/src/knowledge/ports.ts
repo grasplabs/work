@@ -6,10 +6,18 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { brainEventOf, drainKnowledgeOutboxSoon } from "../audit-outbox.ts";
 import { derivedHmacKey } from "../derived-keys.ts";
 import { runEngine } from "../workflows/engine.ts";
-import { noteProvenance, readerActor } from "./access.ts";
+import { audiencesOf, noteProvenance, readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { authorize } from "./app-entries.ts";
+import { extractEntities } from "./entities.ts";
+import {
+  keepRecalledMemories,
+  readableByEveryoneOf,
+  recallMemoryAudience,
+} from "./memory-audience.ts";
+import { mayPublish, mayRetire } from "./memory-publish.ts";
 import { recallKey, requireRecall } from "./recall-grants.ts";
+import { skillAuthorities, skillCapabilities } from "./skill-capabilities.ts";
 import { checkWrite } from "./write-rules.ts";
 
 // Core's side of the Brain's ports (brain.ts): what each port is in core.
@@ -27,11 +35,30 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
   onRead: async (reader, record, ...sources) =>
     await noteProvenance(env, reader, record, ...sources),
   actorOf: readerActor,
+  skills: {
+    capabilities: async (reader) => await skillCapabilities(env, reader),
+    authorityOf: async (skillCollections) =>
+      await skillAuthorities(env, skillCollections),
+  },
+  audiences: async (reader) => await audiencesOf(env, reader),
   ownerOf: (reader) => {
     if (reader.type !== "person") {
       throw brainErrors.create("brain.denied");
     }
     return reader.person.userId;
+  },
+  mayPublish: async (reader, target, refs) => {
+    await mayPublish(env, reader, target, refs);
+  },
+  mayRetire: async (reader, record) => {
+    await mayRetire(reader, record);
+  },
+  memories: {
+    audienceOf: async (reader) => await recallMemoryAudience(env, reader),
+    readableBy: async (_reader, people) =>
+      await readableByEveryoneOf(env, people),
+    keep: async (reader, people, records) =>
+      await keepRecalledMemories(env, reader, people, records),
   },
   recall: {
     require: async (reader) => {
@@ -53,13 +80,22 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
   keys: {
     hmac: async (purpose, usages) => await derivedHmacKey(env, purpose, usages),
   },
+  extractEntities: async (text) => await extractEntities(env, text),
   jobs: {
-    start: async (id, { documentId, version }) => {
-      await runEngine(env).createInternal({
-        id,
-        workflow: "indexing",
-        input: { documentId, version },
-      });
+    start: async (id, job) => {
+      await runEngine(env).createInternal(
+        "source" in job
+          ? {
+              id,
+              workflow: "linking",
+              input: { source: job.source, version: job.version },
+            }
+          : {
+              id,
+              workflow: "indexing",
+              input: { documentId: job.documentId, version: job.version },
+            }
+      );
     },
     status: async (id) => {
       const found = await runEngine(env).status(id);

@@ -16,7 +16,13 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { drawnOf, knownOf } from "../src/onboarding/work-drawing.ts";
 import type { RawDrawing } from "../src/onboarding/work-drawing.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import { answering, careful, modelOf } from "./interview-link.ts";
+import {
+  answering,
+  approveAgreed,
+  careful,
+  modelOf,
+  participate,
+} from "./interview-link.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // Each piece of work drawn from what its people agreed to
@@ -141,6 +147,7 @@ const agree = async (
     body: JSON.stringify({ action: "save", ...link, version, progress }),
   });
   const saved: InterviewSaved = await response.json();
+  await approveAgreed(link, facts);
   return saved.version;
 };
 
@@ -287,6 +294,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       fact("o1", "step", "Mo looks the customer up in Salesforce."),
     ]);
     const noor = await openLink(ids.noor);
+    await participate(noor);
     const contextOf = async () => {
       const context = await store.turnContext(
         await sha256Hex(noor.secret),
@@ -315,9 +323,14 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       drew: drew[1],
       models: requests.map(modelOf),
       sent: {
-        max: sent.includes(
-          `## ${ids.max} (Agent), shared an example: ticket-4411.pdf`
-        ),
+        // Each teller by a neutral label, never their id or title (GRA-1084).
+        max:
+          sent.includes("## P1") &&
+          !sent.includes(ids.max) &&
+          !sent.includes("(Agent)"),
+        // A file named in the conversation was never read back or
+        // approved: it doesn't leave the store (GRA-329).
+        example: sent.includes("ticket-4411.pdf"),
         mia: sent.includes("- (number) Mia does about 45 in a busy week."),
         mo: sent.includes("- (step) Mo looks the customer up in Salesforce."),
         // The lead's overview is context, never one of the tellers.
@@ -356,6 +369,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       models: ["claude-opus-4-8", "claude-opus-4-8"],
       sent: {
         max: true,
+        example: false,
         mia: true,
         mo: true,
         leadAsContext: true,
@@ -411,9 +425,10 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
     const works = await store.teamWorks(ids.team);
     expect({
       result,
-      teller: sent.includes(
-        `## ${ids.lea} (Team lead), asked about the work of the whole team`
-      ),
+      teller:
+        sent.includes("## P1, asked about the work of the whole team") &&
+        !sent.includes(ids.lea) &&
+        !sent.includes("(Team lead)"),
       context: sent.includes("for context only"),
       drawn: works.map(
         ({ drawn }) => drawn?.steps.map(({ text }) => text) ?? null
@@ -549,6 +564,83 @@ describe("the work as drawn", () => {
       unit: "hours",
       takes: [2.5, 4, 8],
       told: ["lisa", "tim", "bram"],
+    });
+  });
+
+  it("keeps each person's own minutes of a step and share of a case, apart from any text", () => {
+    const drawn = drawnOf(
+      {
+        steps: [
+          step("Look it up.", {
+            minutes: [2, 4, 9],
+            minutes_by: [
+              { person: "lisa", minutes: [2, 4, 9] },
+              { person: "nobody-asked", minutes: [1, 1, 1] },
+            ],
+          }),
+        ],
+        notes: [
+          {
+            kind: "differently",
+            text: "the client number is missing",
+            detail: "Ask Finance.",
+            out_of_ten: 2,
+            out_of_ten_by: [{ person: "tim", out_of_ten: 2 }],
+            by: ["tim"],
+          },
+        ],
+      },
+      tellers,
+      "2026-10-22T00:00:00.000Z"
+    );
+
+    expect({
+      lisa: drawn.told.lisa?.stepMinutes,
+      tim: drawn.told.tim?.caseShares,
+      bram: [drawn.told.bram?.stepMinutes, drawn.told.bram?.caseShares],
+      // The case's text holds no number of anyone's.
+      when: drawn.differently.map(({ when }) => when),
+    }).toStrictEqual({
+      lisa: [{ step: 0, minutes: [2, 4, 9], normal: 4 }],
+      tim: [{ case: 0, outOfTen: 2 }],
+      bram: [[], []],
+      when: ["the client number is missing"],
+    });
+  });
+
+  it("keeps each person's numbers as they gave them, no part filled in from another", () => {
+    const drawn = drawnOf(
+      {
+        steps: [
+          step("Look it up.", {
+            minutes_by: [{ person: "lisa", minutes: [-1, 12, -1] }],
+          }),
+        ],
+        numbers: [
+          {
+            person: "lisa",
+            quiet: -1,
+            busy: 50,
+            of: "me",
+            per: "week",
+            minutes: [-1, 12, -1],
+          },
+          { person: "tim", quiet: 30, of: "team", per: "month", minutes: [5] },
+        ],
+      },
+      tellers,
+      "2026-10-22T00:00:00.000Z"
+    );
+    expect({
+      lisa: [drawn.told.lisa?.gave, drawn.told.lisa?.stepMinutes?.[0]?.normal],
+      tim: drawn.told.tim?.gave,
+    }).toStrictEqual({
+      lisa: [
+        { quiet: null, busy: 50, per: "week", takes: [null, 12, null] },
+        12,
+      ],
+      // A single time is a normal one.
+      tim: { quiet: 30, busy: null, per: "month", takes: [null, 5, null] },
     });
   });
 

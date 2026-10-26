@@ -13,7 +13,7 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
-import { answering } from "./interview-link.ts";
+import { answering, approveAgreed } from "./interview-link.ts";
 import {
   auditedDuring,
   openRpc,
@@ -88,6 +88,7 @@ const agreeAs = async (
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "save", secret, key, version: 0, progress }),
   });
+  await approveAgreed({ secret, key }, facts);
 };
 
 const reply = (value: object): GatewayReply => ({
@@ -216,9 +217,12 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     const staff = await asStaff();
 
     const reads: StaffWorks[] = [];
-    const events = await auditedDuring(async () => {
-      reads.push(await staff.onboardingStaff.works());
-    });
+    const events = await auditedDuring(
+      async () => {
+        reads.push(await staff.onboardingStaff.works());
+      },
+      { staffAccesses: true }
+    );
     const works = reads[0]?.works ?? [];
     const work = works.find(({ id }) => id === booking);
     const numbers = (person: string) => {
@@ -254,7 +258,8 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
       mia: [[60, 90], null, 1],
       open: ["Who approves an invoice over 5,000 euros?"],
       rules: STARTING_ORG_RULES,
-      audited: [["onboarding.works.read", "staff", "organization"]],
+      // On record as a staff look (staff-audit.ts), naming no one.
+      audited: [["staff.accessed", "staff", undefined]],
       named: false,
     });
   });

@@ -149,7 +149,7 @@ describe("the Brain's recall", setUpTime, () => {
       second: [
         { kind: "document", documentId, collectionId, version: 2, section: 1 },
       ],
-      policy: [1, "fulltext@2"],
+      policy: [1, "fulltext@3"],
       locator: ["Onboarding", "Onboarding", "Owner"],
     });
   });

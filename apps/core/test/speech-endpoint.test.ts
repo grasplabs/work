@@ -14,6 +14,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
+import { onLink, participate } from "./interview-link.ts";
 import { routed, signedInWithRole, unique } from "./sign-in.ts";
 
 // The onboarding's lines said out loud (src/onboarding/speech.ts), over
@@ -204,14 +205,22 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
       403,
       "interview.elsewhere",
     ],
+    // Before taking part the voice reads them what this is; once they
+    // withdrew it says nothing more (GRA-329, T5).
+    ["someone who withdrew", "withdrawn", 410, "interview.withdrawn"],
   ] as const)(
     "refuses a line for %s, sending nothing",
     async (_, kind, status, code) => {
       const { link } = await opened();
-      const asked =
-        kind === "unknown"
-          ? { secret: randomToken(), key: link.key }
-          : { secret: link.secret, key: randomToken() };
+      if (kind === "withdrawn") {
+        await participate(link);
+        await onLink({ action: "withdraw", ...link });
+      }
+      const asked = {
+        unknown: { secret: randomToken(), key: link.key },
+        elsewhere: { secret: link.secret, key: randomToken() },
+        withdrawn: link,
+      }[kind];
 
       const { requests, result } = await answering(
         [said],

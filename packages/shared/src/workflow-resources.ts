@@ -134,6 +134,10 @@ export const workflowResourceErrors = defineErrorFamily({
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
   "workflow.collection_invalid":
     "A for task's collection isn't a list of at most 1,000 items, so the run failed.",
+  "workflow.item_keys_invalid":
+    "A for task's items don't each have one key, a number or text of at most 256 characters, so the run failed.",
+  "workflow.item_keys_duplicate":
+    "Two items of a for task have the same key, so the run failed before any item ran.",
   "workflow.run_unavailable": "This workflow has no such run.",
   "workflow.run_details_removed":
     "This run ended long enough ago that what it returned is no longer kept.",
@@ -157,6 +161,8 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.child_failed": "A child workflow this run started didn't complete.",
   "workflow.child_timeout":
     "A child workflow this run started didn't end while its lineage could still run.",
+  "workflow.run_paused":
+    "This run is paused. Resume it, then confirm what it holds.",
   "workflow.start_unconfirmed":
     "The run never started: the workflow engine didn't confirm its start in time, so nothing of it ran. Start the workflow again.",
   "workflow.protocol_unsupported":
@@ -228,6 +234,10 @@ export const workflowResourceErrors = defineErrorFamily({
     "This test run went on longer than a test run may, so it failed. Shorten what it waits for to test it.",
   "workflow.candidate_wait_limit":
     "This test run would wait longer than a test run may, so it failed. Shorten the wait to test it.",
+  "workflow.failed_after_effect":
+    "The task's call took effect, then the task failed. What the call did stands.",
+  "workflow.raised":
+    "The workflow raised an error of its own, and nothing in it caught that error.",
 });
 
 /**
@@ -606,6 +616,7 @@ export const maxLiveRunsPerPrincipal = 20;
 export type WorkflowRunStatus =
   | "starting"
   | "running"
+  | "paused"
   | "completed"
   | "failed"
   | "cancelled";
@@ -735,7 +746,7 @@ export interface WorkflowBinders {
  * A version built for another one doesn't run
  * (`workflow.protocol_unsupported`): its sealed SDK speaks something else.
  */
-export const openWorkflowProtocol = 7;
+export const openWorkflowProtocol = 8;
 
 /**
  * Something of a definition the code generator doesn't lower yet: its

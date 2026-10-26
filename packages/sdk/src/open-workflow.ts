@@ -51,6 +51,15 @@
  * by the host, in its task's enter step, which records it, with a listen's
  * filters beside it. A listen's events are the host's to take.
  *
+ * A `raise` task's step fails, as the host makes it fail, with the error
+ * the build sealed of the task. A `try` task's list runs in a JavaScript
+ * `try`: on a failure, its `catch:<id>` step asks the host whether its
+ * catch takes it (the host knows which step failed, and with what, from
+ * its own record of the run; nothing the isolate throws says so), and the
+ * original failure goes on unchanged when it doesn't. A wait, a pause or
+ * a cancellation never settles the call that suspended (the engine leaves
+ * it), so no catch ever sees one.
+ *
  * It imports nothing: generated code and its type check see only this
  * module.
  */
@@ -130,6 +139,9 @@ export interface SetPlan extends EnterPlan, LeavePlan {
 export interface SwitchPlan extends Omit<EnterPlan, "if">, LeavePlan {
   readonly cases: readonly Stage[];
 }
+
+/** A `raise` task: only the stages before its work, which fails. */
+export type RaisePlan = EnterPlan;
 
 /** How a task with a durable body was entered. */
 export interface Entered {
@@ -234,6 +246,22 @@ export interface Flow {
     plan: ForPlan,
     body: ScopeBody
   ) => Promise<Looped>;
+  /**
+   * Runs `raise` task `id` on `data`, as one recorded step: skipped, its
+   * input goes on; otherwise the step fails with the task's error, as the
+   * host raises it.
+   */
+  readonly raise: (
+    id: string,
+    data: TaskData,
+    plan: RaisePlan
+  ) => Promise<FlowState>;
+  /**
+   * The catch step of `try` task `id`, as a failure left its list, `data`
+   * the try's own input and the context then: whether its catch takes the
+   * failure, as the host decides it and the step records it.
+   */
+  readonly catch: (id: string, data: TaskData) => Promise<boolean>;
   /** Durably waits `milliseconds` as task `id`, holding no isolate. */
   readonly wait: (id: string, milliseconds: number) => Promise<void>;
   /**
@@ -288,9 +316,17 @@ export interface AttemptHost {
   readonly until: (frame: CallFrame) => Promise<number>;
   /**
    * Resolves a `for` task's collection, once, on its transformed input:
-   * its items, which the step records.
+   * its items, and their keys where its loop has them
+   * (`metadata.grasp.key`), which the step records.
    */
-  readonly items: (frame: CallFrame) => Promise<FlowValue[]>;
+  readonly items: (
+    frame: CallFrame
+  ) => Promise<{ items: FlowValue[]; keys?: FlowValue[] }>;
+  /**
+   * Whether a `try` task's catch takes the failure that left its list, as
+   * the host decides it from its own record of the run, once.
+   */
+  readonly catches: () => Promise<boolean>;
 }
 
 /**
@@ -361,7 +397,7 @@ const requireTaskId = (id: unknown): string => {
  * `@<for>.<index>/…`.
  */
 const stepOf = (
-  kind: "task" | "enter" | "leave" | "item",
+  kind: "task" | "enter" | "leave" | "item" | "catch",
   id: string,
   scope: string
 ): string => `${kind}:${requireTaskId(id)}${scope === "" ? "" : `@${scope}`}`;
@@ -424,7 +460,35 @@ interface StepRecord {
   readonly until?: number;
   /** The items a `for` task's enter step resolved. */
   readonly items?: readonly FlowValue[];
+  /** Whether a catch step's catch took the failure. */
+  readonly caught?: boolean;
+  /** Their keys, where its loop has them, which run history shows. */
+  readonly keys?: readonly FlowValue[];
 }
+
+/** Whether `value` is none, or a whole number from 0. */
+const isCountOrNone = (
+  value: FlowValue | undefined
+): value is number | undefined =>
+  value === undefined ||
+  (typeof value === "number" && isSafeInteger(value) && value >= 0);
+
+/** What a `for` task's enter step recorded of its items: them, and their keys. */
+const loopRecordOf = (
+  value: Record<string, FlowValue>
+): Pick<StepRecord, "items" | "keys"> => {
+  const { items, keys } = value;
+  if (items !== undefined && !isArray(items)) {
+    throw new TypeError("A for task's enter step records its items");
+  }
+  if (keys !== undefined && (!isArray(keys) || items === undefined)) {
+    throw new TypeError("A for task's enter step records keys with its items");
+  }
+  return {
+    ...(items === undefined ? {} : { items }),
+    ...(keys === undefined ? {} : { keys }),
+  };
+};
 
 const readRecord = (value: FlowValue): StepRecord => {
   if (!isRecord(value)) {
@@ -436,21 +500,16 @@ const readRecord = (value: FlowValue): StepRecord => {
   if (!hasOwn(value, "output")) {
     throw new TypeError("A task's step records its output");
   }
-  const { branch, until, items } = value;
-  if (items !== undefined && !isArray(items)) {
-    throw new TypeError("A for task's enter step records its items");
-  }
-  if (
-    branch !== undefined &&
-    (typeof branch !== "number" || !isSafeInteger(branch) || branch < 0)
-  ) {
+  const { branch, until, caught } = value;
+  const loop = loopRecordOf(value);
+  if (!isCountOrNone(branch)) {
     throw new TypeError("A switch records its case by number");
   }
-  if (
-    until !== undefined &&
-    (typeof until !== "number" || !isSafeInteger(until) || until < 0)
-  ) {
+  if (!isCountOrNone(until)) {
     throw new TypeError("A deadline is a time in milliseconds");
+  }
+  if (caught !== undefined && typeof caught !== "boolean") {
+    throw new TypeError("A catch step records whether it caught");
   }
   return {
     skipped: false,
@@ -458,7 +517,8 @@ const readRecord = (value: FlowValue): StepRecord => {
     ...(hasOwn(value, "context") ? { context: value.context ?? null } : {}),
     ...(branch === undefined ? {} : { branch }),
     ...(until === undefined ? {} : { until }),
-    ...(items === undefined ? {} : { items }),
+    ...loop,
+    ...(caught === undefined ? {} : { caught }),
   };
 };
 
@@ -528,8 +588,10 @@ const stateAfter = (data: TaskData, record: StepRecord): FlowState =>
 
 /** The flow generated code runs on, over `engine`, in scope `within`. */
 const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
-  const named = (kind: "task" | "enter" | "leave" | "item", id: string) =>
-    stepOf(kind, id, within);
+  const named = (
+    kind: "task" | "enter" | "leave" | "item" | "catch",
+    id: string
+  ) => stepOf(kind, id, within);
   const flow: Flow = {
     input: async (input, from) => {
       const record = readRecord(
@@ -616,6 +678,43 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
       );
       return stateAfter(data, record);
     },
+    raise: async (id, data, plan) => {
+      const record = readRecord(
+        await engine.do(
+          named("task", id),
+          captured(data),
+          async (attempt): Promise<FlowValue> => {
+            const frame = frameOf(data.input);
+            if ((await enterStages(attempt, frame, plan)) === null) {
+              return { skipped: true };
+            }
+            // The host fails the step with the task's error as it records
+            // this: a raise has no output of its own.
+            return { output: frame.input };
+          }
+        )
+      );
+      if (!record.skipped) {
+        throw new TypeError("A raise task's step fails unless it is skipped");
+      }
+      return stateAfter(data, record);
+    },
+    catch: async (id, data) => {
+      const record = readRecord(
+        await engine.do(
+          named("catch", id),
+          captured(data),
+          async (attempt) => ({
+            output: data.input,
+            caught: await attempt.catches(),
+          })
+        )
+      );
+      if (record.skipped || record.caught === undefined) {
+        throw new TypeError("A catch step records whether it caught");
+      }
+      return record.caught;
+    },
     enter: async (id, data, plan) => {
       const record = readRecord(
         await engine.do(
@@ -677,9 +776,13 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
             if (entered === null) {
               return { skipped: true };
             }
+            const { items, keys } = await attempt.items({
+              input: entered.input,
+            });
             return {
               output: entered.input,
-              items: await attempt.items({ input: entered.input }),
+              items,
+              ...(keys === undefined ? {} : { keys }),
             };
           }
         )

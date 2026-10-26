@@ -11,14 +11,14 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
-import { answering } from "./interview-link.ts";
+import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
+import { answering, answeringWith, approveAgreed } from "./interview-link.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // A team on its way through the onboarding into the brain, as the tests
 // of the brain's intake (brain-intake.test.ts) and of deleting an
 // interview (interview-deletion.test.ts) share it: Lea leads Ops, with
-// Max, Mia, Mo and Noor; her map, their agreements, and the drawing of
+// Max, Mia, Mo, Noor, Pim and Rik; her map, their agreements, and the drawing of
 // their tickets, with AI Gateway faked behind the AI binding.
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -26,7 +26,7 @@ const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const sessionKey = z.object({ key: z.string().optional() });
 
 /** The people of a team, by key. */
-export type Key = "lea" | "max" | "mia" | "mo" | "noor";
+export type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim" | "rik";
 
 const names: Record<Key, [string, string]> = {
   lea: ["Lea Lind", "Team lead"],
@@ -34,6 +34,8 @@ const names: Record<Key, [string, string]> = {
   mia: ["Mia Moor", "Agent"],
   mo: ["Mo Mertens", "Agent"],
   noor: ["Noor Nijs", "Agent"],
+  pim: ["Pim Peeters", "Agent"],
+  rik: ["Rik Rooms", "Agent"],
 };
 
 /** Each person's and the team's id, by key. */
@@ -44,6 +46,8 @@ const idsOf = (id: string) => ({
   mia: `mia-${id}`,
   mo: `mo-${id}`,
   noor: `noor-${id}`,
+  pim: `pim-${id}`,
+  rik: `rik-${id}`,
 });
 
 /** The staff list of Ops, led by Lea, with the people `keys`. */
@@ -67,7 +71,7 @@ export const rosterOf = (
  * a fresh onboarding that started yesterday.
  */
 export const team = async (
-  keys: readonly Key[] = ["lea", "max", "mia", "mo", "noor"]
+  keys: readonly Key[] = ["lea", "max", "mia", "mo", "noor", "pim", "rik"]
 ) => {
   const store = onboardingStore(env);
   const ids = idsOf(unique());
@@ -120,7 +124,8 @@ export const fact = (
 });
 
 /**
- * Saves someone's interview as agreed to, with `facts`, after `lines`;
+ * Saves someone's interview as agreed to, with `facts`, after `lines`, and
+ * approves on their link those of them marked agreed, as they stand;
  * returns the new version.
  */
 export const agree = async (
@@ -149,6 +154,7 @@ export const agree = async (
     body: JSON.stringify({ action: "save", ...link, version, progress }),
   });
   const saved: InterviewSaved = await response.json();
+  await approveAgreed(link, facts);
   return saved.version;
 };
 
@@ -233,6 +239,68 @@ export const ticketsReply = (
   outputTokens: 900,
 });
 
+/**
+ * Tickets as drawn, with what five who tell their own work told alike, as
+ * the brain may take it (GRA-1084): how one starts, opening the ticket
+ * (with the minutes of `minutesFrom` of them),
+ * the last step, what they decide by and their numbers; besides, what
+ * fewer told, which stays out of it: a step only Max told, naming Noor, a
+ * wait only Mo told, Max's own list, and a question for the next
+ * interviews.
+ */
+export const fiveToldReply = (
+  ids: Ids,
+  last = "Send the answer.",
+  minutesFrom = 5,
+  decides = "The priority of the ticket."
+): GatewayReply => {
+  const five = [ids.max, ids.mia, ids.mo, ids.noor, ids.pim];
+  return {
+    text: JSON.stringify({
+      starts: "A customer email arrives as a ticket in Zendesk.",
+      starts_by: five,
+      steps: [
+        {
+          text: "Open the ticket.",
+          who: "Agent",
+          tool: "Zendesk",
+          by: five,
+          minutes: [1, 2, 6],
+          // Each one's own normal minutes: 2 to 6, a median of 4.
+          minutes_by: five.slice(0, minutesFrom).map((person, index) => ({
+            person,
+            minutes: [1, 2 + index, 6],
+          })),
+        },
+        {
+          text: "Ask Noor when the customer number is missing.",
+          who: "Agent",
+          tool: "",
+          by: [ids.max],
+        },
+        { text: last, who: "Agent", tool: "Zendesk", by: five },
+      ],
+      notes: [
+        { kind: "wait", text: "Waits for the customer's reply.", by: [ids.mo] },
+        { kind: "decides", text: decides, by: five },
+        { kind: "own", text: "A sheet of open tickets.", by: [ids.max] },
+      ],
+      numbers: five.map((person, index) => ({
+        person,
+        quiet: 30 + index,
+        busy: 50 + index,
+        of: "me",
+        per: "week",
+        minutes: [3, 10 + index, 45],
+        wrong: 2,
+      })),
+      open: ["Why do some ask Noor?"],
+    }),
+    inputTokens: 4000,
+    outputTokens: 900,
+  };
+};
+
 /** Lea's map drawn, from `more` she said too, and everyone's links out. */
 export const mapped = async (
   ids: Ids,
@@ -271,7 +339,33 @@ export const mapped = async (
   );
 };
 
-/** Max, Mia and Mo agree to what they told about tickets. */
+/**
+ * Noor, Pim and Rik agree to a step each, and Noor and Pim that tickets
+ * arrive in Zendesk and wait for the customer: with Max, Mia and Mo they
+ * make six who tell their own work, one more than the five a team needs
+ * before any of it reaches the brain (`minTeamShown`; the lead isn't
+ * counted), so one interview going leaves the rest there.
+ */
+export const othersTold = async (ids: Ids) => {
+  await agree(ids.noor, [
+    fact("n1", "step", "Reads the ticket first."),
+    fact("n2", "system", "Tickets arrive in Zendesk."),
+    fact("n3", "wait", "Tickets wait for the customer."),
+  ]);
+  await agree(ids.pim, [
+    fact("p1", "step", "Tags the ticket."),
+    fact("p2", "system", "Tickets arrive in Zendesk."),
+    fact("p3", "wait", "Tickets wait for the customer."),
+  ]);
+  await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")]);
+};
+
+/**
+ * Max, Mia, Mo, Noor, Pim and Rik agree to what they told about tickets:
+ * five of them say tickets come in through Zendesk, each in their own
+ * words; Max alone hands billing questions to Noor, Mia alone wishes for
+ * the customer number and Mo alone waits for replies.
+ */
 export const told = async (ids: Ids) => {
   await agree(ids.max, [
     fact("m1", "step", "Opens the ticket in Zendesk."),
@@ -284,7 +378,251 @@ export const told = async (ids: Ids) => {
   ]);
   await agree(ids.mo, [
     fact("o1", "wait", "A ticket waits days for the customer's reply."),
+    fact("o2", "system", "New tickets come in through Zendesk."),
   ]);
+  await agree(ids.noor, [
+    fact("n1", "step", "Reads the ticket first."),
+    fact("n2", "system", "Zendesk is where the tickets land."),
+  ]);
+  await agree(ids.pim, [
+    fact("p1", "step", "Tags the ticket."),
+    fact("p2", "system", "Tickets arrive in Zendesk."),
+  ]);
+  await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")]);
+};
+
+/** What the five who spoke of Zendesk said of it, in their own words. */
+export const zendeskSaid = [
+  "Tickets arrive in Zendesk.",
+  "New tickets come in through Zendesk.",
+  "Zendesk is where the tickets land.",
+];
+
+/** A claim as the fake model makes it: its kind, its words, and the words of the facts it cites. */
+export interface FakeClaim {
+  kind: string;
+  text: string;
+  /** Every fact shown with these words is cited; a label as is (`F99`) too. */
+  cites: readonly string[];
+  /** The words of the facts that say it, as the check answers: all it cites, unless given. */
+  says?: readonly string[];
+  /** Its words as the check is asked about them, once names are taken out: `text`, unless given. */
+  checked?: string;
+  /** Every check of it fails at the gateway. */
+  fails?: true;
+}
+
+const shownSchema = z.array(
+  z.object({
+    facts: z.array(
+      z.object({ id: z.string(), kind: z.string(), text: z.string() })
+    ),
+  })
+);
+const checkSchema = z.object({ claim: z.string(), fact: z.string() });
+const partSchema = z.object({
+  work: z.string(),
+  kind: z.string(),
+  part: z.string(),
+  facts: z.array(z.string()),
+});
+const numberSchema = z.object({
+  work: z.string(),
+  number: z.string(),
+  facts: z.array(z.string()),
+});
+
+/**
+ * Whether a person's facts say a part of a drawing, or give a number the
+ * drawing says is theirs, as the fake checker answers: a plain one agrees.
+ */
+export type PartJudge = (
+  part: string,
+  facts: readonly string[],
+  /** The piece of work the part or number is said to be of. */
+  work: string,
+  /** For a part: what kind of part it is; none for a number. */
+  kind?: string
+) => boolean;
+
+/** The fake checker's answer for parts, unless a test gives one: yes. */
+const agrees: PartJudge = () => true;
+
+/** What a request gave the model as data between `<tag>` and `</tag>`, parsed; none when it gave none. */
+const dataOf = (request: GatewayRequest | undefined, tag: string): unknown => {
+  // The request as sent, read back to its text: the data is JSON in it.
+  const sent: string = JSON.stringify(request?.body ?? null);
+  const found = new RegExp(`<${tag}>\\\\n(?<data>.*?)\\\\n</${tag}>`, "u").exec(
+    sent
+  );
+  const data = found?.groups?.data;
+  if (data === undefined) {
+    return undefined;
+  }
+  const text: unknown = JSON.parse(`"${data}"`);
+  return typeof text === "string" ? JSON.parse(text) : undefined;
+};
+
+/** The facts a claims request showed the model, by label. */
+const shownIn = (request: GatewayRequest | undefined) =>
+  shownSchema
+    .parse(dataOf(request, "facts") ?? [])
+    .flatMap(({ facts }) => facts);
+
+/**
+ * The model, faked: a check of one fact against one claim answered by
+ * `says`, one of a person's facts against a drawing's part by `part`;
+ * anything else, the claims, by `claims`.
+ */
+const claimsOrCheck =
+  (
+    claims: (request: GatewayRequest | undefined) => unknown,
+    says: (claim: string, fact: string) => boolean | "fails",
+    part: PartJudge = agrees
+  ) =>
+  (requests: readonly GatewayRequest[]): GatewayReply => {
+    const request = requests.at(-1);
+    const data = dataOf(request, "data");
+    const check = checkSchema.safeParse(data);
+    const ofPart = partSchema.safeParse(data);
+    const ofNumber = numberSchema.safeParse(data);
+    let answer: boolean | "fails" | undefined;
+    if (check.success) {
+      answer = says(check.data.claim, check.data.fact);
+    } else if (ofPart.success) {
+      answer = part(
+        ofPart.data.part,
+        ofPart.data.facts,
+        ofPart.data.work,
+        ofPart.data.kind
+      );
+    } else if (ofNumber.success) {
+      answer = part(
+        ofNumber.data.number,
+        ofNumber.data.facts,
+        ofNumber.data.work
+      );
+    }
+    if (answer === "fails") {
+      return { status: 400, errorType: "invalid_request_error" };
+    }
+    return {
+      text: JSON.stringify(
+        answer === undefined ? claims(request) : { says: answer }
+      ),
+      inputTokens: 1000,
+      outputTokens: 200,
+    };
+  };
+
+/**
+ * The model putting a team's claims together, faked: `claims`, each citing
+ * the labels the prompt gave the facts it names by their words; checked,
+ * a fact says a claim when it is among those it `says`.
+ */
+export const claimsReply = (
+  claims: readonly FakeClaim[],
+  part: PartJudge = agrees
+) =>
+  claimsOrCheck(
+    (request) => {
+      const shown = shownIn(request);
+      return {
+        claims: claims.map(({ kind, text, cites }) => ({
+          kind,
+          text,
+          facts: cites.flatMap((cited) => {
+            const labels = shown
+              .filter((each) => each.text === cited)
+              .map(({ id }) => id);
+            return labels.length === 0 ? [cited] : labels;
+          }),
+        })),
+      };
+    },
+    (claim, said) => {
+      const of = claims.filter(
+        ({ text, checked }) => (checked ?? text) === claim
+      );
+      if (of.some(({ fails }) => fails === true)) {
+        return "fails";
+      }
+      return of.some(({ cites, says }) => (says ?? cites).includes(said));
+    },
+    part
+  );
+
+/**
+ * The model putting a team's claims together as a plain one would, faked:
+ * a claim for each kind of fact shown, citing every fact of it, in the
+ * words most of them used (the first, when as many used others); checked,
+ * every fact says the claim of its kind.
+ */
+export const alikeReply = claimsOrCheck(
+  (request) => {
+    const byKind = new Map<string, { id: string; text: string }[]>();
+    for (const { id, kind, text } of shownIn(request)) {
+      byKind.set(kind, [...(byKind.get(kind) ?? []), { id, text }]);
+    }
+    return {
+      claims: [...byKind].map(([kind, facts]) => {
+        const counts = new Map<string, number>();
+        let text = "";
+        for (const shown of facts) {
+          const count = (counts.get(shown.text) ?? 0) + 1;
+          counts.set(shown.text, count);
+          if (count > (counts.get(text) ?? 0)) {
+            ({ text } = shown);
+          }
+        }
+        return { kind, text, facts: facts.map(({ id }) => id) };
+      }),
+    };
+  },
+  () => true
+);
+
+/** The onboarding giving the brain its next team, with the model putting claims together as a plain one would. */
+export const intakeAlike = async (): Promise<string | null> => {
+  const { result } = await answeringWith(
+    alikeReply,
+    async () => await onboardingStore(env).intakeNext()
+  );
+  return result;
+};
+
+/** The team's claim that tickets come in through Zendesk, as the five said it. */
+export const zendeskClaim: FakeClaim = {
+  kind: "tool",
+  text: "Tickets come in through Zendesk.",
+  cites: zendeskSaid,
+};
+
+/**
+ * The onboarding giving the brain `ids`' team, with the model putting
+ * `claims` together: a team an earlier test left due goes first, as the
+ * alarm would give it. What reached the gateway for that team alone.
+ */
+export const intake = async (
+  ids: { team: string },
+  claims: readonly FakeClaim[] = [zendeskClaim],
+  part: PartJudge = agrees
+) => {
+  let given: Awaited<ReturnType<typeof answeringWith<string | null>>> = {
+    requests: [],
+    result: null,
+  };
+  for (let round = 0; round < 5; round += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+    given = await answeringWith(
+      claimsReply(claims, part),
+      async () => await onboardingStore(env).intakeNext()
+    );
+    if (given.result === null || given.result === `brain:${ids.team}`) {
+      break;
+    }
+  }
+  return { gave: given.result, requests: given.requests };
 };
 
 /** Every record the brain keeps whose id is the onboarding's, for a team: as stored. */

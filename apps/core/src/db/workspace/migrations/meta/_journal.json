@@ -141,6 +141,27 @@
       "when": 1792889028932,
       "tag": "0019_chat_thread",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1792937468477,
+      "tag": "0020_chat_draft_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1792944895228,
+      "tag": "0021_brain_capture_intents",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1792950378448,
+      "tag": "0022_chat_last_at",
+      "breakpoints": true
     }
   ]
 }

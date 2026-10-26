@@ -117,6 +117,16 @@ export interface Tool {
   ai?: AiKind;
 }
 
+/**
+ * Most Knowledge documents with a transcript `brain.read` lists as
+ * sources, the newest saved first: each by how many turns it has, never
+ * the turns, which `brain.transcript` reads when the source is opened.
+ */
+export const brainTranscriptSourcesMax = 50;
+
+/** A source's id, as `brain.transcript` takes one. */
+export const sourceIdSchema = z.string().min(1).max(200);
+
 /** One turn, answer or passage in a transcript. */
 export interface TranscriptTurn {
   /** Where it is, in the transcript's unit: "12:26", or the answer or passage number. */
@@ -164,7 +174,16 @@ export interface Source {
   teamIds?: string[];
   /** An interview written up as an article, paragraph by paragraph. */
   article?: string[];
-  /** The whole conversation, word for word; its statements are highlights in it. */
+  /**
+   * How many turns its transcript has, when it has one: `brain.read` says
+   * only this; `brain.transcript(id)` reads the turns and chapters.
+   */
+  transcriptTurns?: number;
+  /**
+   * The whole conversation, word for word; its statements are highlights
+   * in it. Never sent by `brain.read`: the page puts here what
+   * `brain.transcript` read.
+   */
   transcript?: Transcript;
 }
 
@@ -349,6 +368,12 @@ export interface Workspace {
 export interface BrainApi {
   read: () => Promise<Workspace>;
   /**
+   * One source's transcript (`brain.transcript`), as the person may read it
+   * now, or null: alike when it has none and when they may not read it.
+   * A team's interviews have none, for anyone.
+   */
+  transcript: (sourceId: string) => Promise<Transcript | null>;
+  /**
    * What changed in the brain since a moment (`brain.changes`), newest
    * first, a page at a time, as the person may read it.
    */
@@ -382,7 +407,7 @@ export interface BrainApi {
 
 /** Why a brain call was refused. */
 export const brainErrors = defineErrorFamily({
-  "brain.invalid": "That isn't a valid moment, page or page size.",
+  "brain.invalid": "That isn't a valid moment, page, page size or source.",
 });
 
 /**

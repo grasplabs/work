@@ -45,7 +45,7 @@ import type {
   StaffLog,
   StaffNote,
   StaffOverview,
-  StaffTranscript,
+  StaffInterview,
   StaffWorks,
   StephenSetup,
   StephenSetupView,
@@ -54,8 +54,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { z } from "zod";
 
 import { snapshotOf } from "../admin-snapshot.ts";
-import { appendAuditEvent } from "../audit-outbox.ts";
-import { organizationId } from "../auth/auth.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -255,7 +253,12 @@ export class OnboardingStaffRpc
     });
   }
 
-  async transcript(personId: string): Promise<StaffTranscript> {
+  /**
+   * Where someone's interview stands, and its numbers: never a word of it.
+   * Grasp's staff don't read what anyone said (GRA-329); there is no way
+   * here, or anywhere in core, for them to.
+   */
+  async interview(personId: string): Promise<StaffInterview> {
     return await withPerson(this.#check, async (person) => {
       requireStaff(person);
       const id = onboardingErrors.parse(
@@ -263,20 +266,15 @@ export class OnboardingStaffRpc
         rosterPersonSchema.shape.id,
         personId
       );
-      const found = await onboardingStore(this.#env).transcriptOf(id);
+      const found = await onboardingStore(this.#env).interviewOf(id);
       if (found === null) {
         throw onboardingErrors.create("onboarding.not_found");
       }
-      const { interviewId, ...transcript } = found;
-      // On record before it is read, by the link's random id: the company's
-      // admin reads the audit log, and the person's id would name them.
-      await appendAuditEvent(this.#env, {
-        actor: actorOf(person),
-        action: "onboarding.transcript.read",
-        target: { type: "interview", id: interviewId },
-        detail: {},
-      });
-      return transcript;
+      // On record before anything was read, by the session check, naming
+      // the kind of what was asked for alone (staff-audit.ts): the person's
+      // ID would name them to the company's admin.
+      const { interviewId: _interviewId, ...interview } = found;
+      return interview;
     });
   }
 
@@ -287,13 +285,7 @@ export class OnboardingStaffRpc
       const snapshot = adminSnapshotSchema.parse(
         await snapshotOf(this.#env, new Date().toISOString())
       );
-      // It names people: on record before it is read.
-      await appendAuditEvent(this.#env, {
-        actor: actorOf(person),
-        action: "onboarding.interviews.read",
-        target: { type: "organization", id: organizationId },
-        detail: {},
-      });
+      // On record as a staff look by the session check (staff-audit.ts).
       return snapshot;
     });
   }
@@ -311,14 +303,8 @@ export class OnboardingStaffRpc
       if (linkId === null) {
         throw onboardingErrors.create("onboarding.not_found");
       }
-      // A link is a credential: on record before it is read, by its
-      // random id, as a transcript read is.
-      await appendAuditEvent(this.#env, {
-        actor: actorOf(person),
-        action: "onboarding.link.read",
-        target: { type: "interview", id: linkId },
-        detail: {},
-      });
+      // On record before anything was read, by the session check, naming
+      // the kind of what was asked for alone (staff-audit.ts).
       const path = await store.linkOf(id);
       if (path === null) {
         throw onboardingErrors.create("onboarding.not_found");
@@ -398,13 +384,7 @@ export class OnboardingStaffRpc
     return await withPerson(this.#check, async (person) => {
       requireStaff(person);
       const organization = await onboardingStore(this.#env).staffOrganization();
-      // It names people: on record before it is read.
-      await appendAuditEvent(this.#env, {
-        actor: actorOf(person),
-        action: "onboarding.organization.read",
-        target: { type: "organization", id: organizationId },
-        detail: {},
-      });
+      // On record as a staff look by the session check (staff-audit.ts).
       return organization;
     });
   }
@@ -430,13 +410,7 @@ export class OnboardingStaffRpc
   async works(): Promise<StaffWorks> {
     return await withPerson(this.#check, async (person) => {
       requireStaff(person);
-      // What people agreed to, by name: on record before it is read.
-      await appendAuditEvent(this.#env, {
-        actor: actorOf(person),
-        action: "onboarding.works.read",
-        target: { type: "organization", id: organizationId },
-        detail: {},
-      });
+      // On record as a staff look by the session check (staff-audit.ts).
       // Only what the schema names leaves core.
       return staffWorksSchema.parse(
         await onboardingStore(this.#env).staffWorks()

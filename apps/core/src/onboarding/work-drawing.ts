@@ -9,6 +9,7 @@ import {
   STARTING_ORG_RULES,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
+import { heardAnswers } from "@grasp-os/shared/admin/org-record";
 import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
 import type { SettleChoice } from "@grasp-os/shared/onboarding";
 import { orgRulesSchema } from "@grasp-os/shared/onboarding-staff";
@@ -76,6 +77,9 @@ const drawSchema = z.object({
         why: z.string().optional(),
         because: z.string().optional(),
         minutes: z.array(z.number()).optional(),
+        minutes_by: z
+          .array(z.object({ person: z.string(), minutes: z.array(z.number()) }))
+          .optional(),
         documented: z.boolean().optional(),
       })
     )
@@ -87,6 +91,9 @@ const drawSchema = z.object({
         text: z.string(),
         detail: z.string().optional(),
         out_of_ten: z.number().optional(),
+        out_of_ten_by: z
+          .array(z.object({ person: z.string(), out_of_ten: z.number() }))
+          .optional(),
         after: z.number().optional(),
         by: by.optional(),
       })
@@ -114,8 +121,8 @@ const drawSystem = `You are Grasp's analyst. Stephen, Grasp's AI interviewer, in
 
 Answer in JSON with these fields:
 - starts: what starts one, in one sentence; empty when nobody said. starts_by: the ids of who said it.
-- steps: the steps in order, from start to done. Each: text, one action as an instruction ("Open the ticket in Zendesk."); who, the role that does it, never a name ("Customer service agent"); tool, the system, screen, file or sheet, or empty; by, the ids of who told this step; other, when some told this step another way, that way as an instruction, else empty; other_by, who told it that way; why, empty when it goes one way, else "condition" (it depends on the case), "place" (it depends on the office or person) or "conflict" (nobody could say why); because, for condition or place what it depends on, else empty; minutes, how long this step takes, as three numbers in this order: the quickest, a normal one and the longest anyone said, -1 for one nobody said, or an empty list when nobody said any; documented, true when a shared document describes this step too.
-- notes: everything else that was said, one each. kind is one of: "wait" (where it sits still, and for what), "differently" (a case off the normal path: text is when it happens, in a few words starting lower case and without a full stop, "the client number is missing"; detail is what is done then, as an instruction; out_of_ten how many out of ten, or -1 when nobody said; after the position of the step after which it happens, from 0), "decides" (what they look at to decide), "own" (a list, sheet or tool of their own), "ai" (an AI tool some use for it), "right" (what done right looks like), "ask" (when they stop and ask someone), "next" (who gets it after them: when that is one of the company's other teams, that team's name exactly as it is given, then what it does with it; otherwise a role), "term" (a word of their own: text is the word, detail its meaning). Fields a kind does not use are empty, or -1 for numbers. by: the ids of who said it.
+- steps: the steps in order, from start to done. Each: text, one action as an instruction ("Open the ticket in Zendesk."); who, the role that does it, never a name ("Customer service agent"); tool, the system, screen, file or sheet, or empty; by, the ids of who told this step; other, when some told this step another way, that way as an instruction, else empty; other_by, who told it that way; why, empty when it goes one way, else "condition" (it depends on the case), "place" (it depends on the office or person) or "conflict" (nobody could say why); because, for condition or place what it depends on, else empty; minutes, how long this step takes, as three numbers in this order: the quickest, a normal one and the longest anyone said, -1 for one nobody said, or an empty list when nobody said any; minutes_by, each person's own minutes for this step, one entry per person who gave any, never combined: person, their id, and minutes, three numbers as for minutes; documented, true when a shared document describes this step too.
+- notes: everything else that was said, one each. kind is one of: "wait" (where it sits still, and for what), "differently" (a case off the normal path: text is when it happens, in a few words starting lower case and without a full stop, "the client number is missing"; detail is what is done then, as an instruction; out_of_ten how many out of ten, or -1 when nobody said; out_of_ten_by, each person's own out of ten for this case, one entry per person who gave one: person, their id, and out_of_ten; after the position of the step after which it happens, from 0), "decides" (what they look at to decide), "own" (a list, sheet or tool of their own), "ai" (an AI tool some use for it), "right" (what done right looks like), "ask" (when they stop and ask someone), "next" (who gets it after them: when that is one of the company's other teams, that team's name exactly as it is given, then what it does with it; otherwise a role), "term" (a word of their own: text is the word, detail its meaning). Fields a kind does not use are empty, or -1 for numbers. by: the ids of who said it.
 - numbers: each person's own numbers, one entry per person who gave any, never averaged or combined. quiet: how many they do in a quiet week or month, or in a normal one when they gave no quiet one; busy: how many in a busy one; each -1 when not said. of: whose count quiet and busy are, "me" when they said it is their own, "team" when they said it is the whole team's, "unknown" when they did not say. per: "week" or "month". minutes: how long one whole one takes them in minutes of work, as three numbers in this order: the quickest, a normal one and the longest, -1 for one they did not say ("a normal one takes 12 minutes" is [-1, 12, -1]), or an empty list when they said none. wrong: how many out of ten come in wrong or incomplete, -1 when not said.
 - open: what the next interview should ask because nobody could say it yet, one short question each, at most five.
 
@@ -123,7 +130,8 @@ Rules:
 - Only what was said. Never a step, a tool, a number or a reason nobody gave. No improvements, no opinions.
 - Only what is about this piece of work. Someone asked about it may tell about other work of theirs as well: leave that out.
 - A note only for what someone said is there. When nobody said anything about a kind, there is no note of that kind: never "no AI tool is used" because nobody mentioned one.
-- One note per case, never one per person: when people gave different numbers for the same case, out_of_ten is the lowest, and the text ends with the range they gave ("(2 to 3 in 10)").
+- One note per case, never one per person: when people gave different numbers for the same case, out_of_ten is the lowest, and each person's own is in out_of_ten_by.
+- No text field holds a number: no digits and no number words for how many, how long or how often, in any text, detail, question or name of a step. Numbers go only in the number fields.
 - A step told by one person counts; a step told by several is one step.
 - People who tell a step differently are never merged: keep the way most told it as the step, and the other way in "other".
 - Convert hours to minutes; days count as work only when they said it is work, not waiting.`;
@@ -149,7 +157,7 @@ const promptOf = (brief: WorkBrief): string =>
     "",
     "What each person who does it agreed to:",
     ...brief.tellers.flatMap((teller) => [
-      `## ${teller.person}${teller.title === "" ? "" : ` (${teller.title})`}${teller.about === undefined ? "" : `, asked about ${teller.about}`}${teller.example === null ? "" : `, shared an example: ${teller.example}`}`,
+      `## ${teller.person}${teller.about === undefined ? "" : `, asked about ${teller.about}`}${teller.example === null ? "" : `, shared an example: ${teller.example}`}`,
       ...teller.facts.map(({ tag, record }) => `- (${tag}) ${record}`),
       "",
     ]),
@@ -197,6 +205,16 @@ const timesOf = (
   ];
 };
 
+/**
+ * A number exactly as a person gave it, for checking it against what they
+ * said and counting it: none when it is out of range, never clamped or
+ * rounded into one they didn't give.
+ */
+const givenOf = (value: number | undefined, most = 100_000): number | null =>
+  value !== undefined && Number.isFinite(value) && value >= 0 && value <= most
+    ? value
+    : null;
+
 /** The median of some numbers; none of none. */
 const medianOf = (values: readonly number[]): number | undefined =>
   values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)];
@@ -204,6 +222,12 @@ const medianOf = (values: readonly number[]): number | undefined =>
 type Note = NonNullable<RawDrawing["notes"]>[number];
 type Step = NonNullable<RawDrawing["steps"]>[number];
 type Numbers = NonNullable<RawDrawing["numbers"]>[number];
+
+/** Minutes in a drawing's unit, as shown: whole minutes, or whole and half hours. */
+export const inUnitOf =
+  (unit: DrawnWork["unit"]) =>
+  (minutes: number): number =>
+    unit === "hours" ? Math.round((minutes / 60) * 2) / 2 : Math.round(minutes);
 
 /** Hours of work for a normal one, from two on: whole and half hours. */
 const unitOf = (numbers: readonly Numbers[]): DrawnWork["unit"] => {
@@ -219,16 +243,39 @@ const whyOf = (why: string | undefined): "condition" | "place" | "conflict" => {
 const whoseOf = (of: string | undefined): "me" | "team" | "unknown" =>
   of === "me" || of === "team" ? of : "unknown";
 
+/**
+ * The quickest, a normal and the longest time as they were given, in
+ * minutes, none filled in from another or rounded: a single one is the
+ * normal one.
+ */
+const givenTimesOf = (
+  value: readonly number[] | undefined
+): [number | null, number | null, number | null] => {
+  const given = (value ?? []).slice(0, 3).map((each) => givenOf(each));
+  const [quickest = null, normal = null, longest = null] =
+    given.length === 1 ? [null, given[0] ?? null, null] : given;
+  return [quickest, normal, longest];
+};
+
 /** One person's own numbers, never another's: how many, how long and how many wrong. */
 const numbersOf = (
   own: Numbers | undefined,
   inUnit: (minutes: number) => number
-): Pick<Told, "volume" | "volumeOf" | "takes" | "wrong"> => {
-  const quiet = countOf(own?.quiet);
-  const busy = countOf(own?.busy);
+): Pick<Told, "volume" | "volumeOf" | "takes" | "wrong" | "gave"> => {
+  const quiet = givenOf(own?.quiet);
+  const busy = givenOf(own?.busy);
   const took = timesOf(own?.minutes);
   const counted = quiet !== null || busy !== null;
+  const said = lineOf(own?.per, 10);
   return {
+    // Exactly as they gave them, times in minutes: checked against what
+    // they said, and rounded to the drawing's unit only once shown.
+    gave: {
+      quiet,
+      busy,
+      per: said === "month" || said === "week" ? said : null,
+      takes: givenTimesOf(own?.minutes),
+    },
     // A normal week, when no quiet one was given, is the low end.
     volume: counted
       ? [quiet ?? busy ?? 0, Math.max(busy ?? quiet ?? 0, quiet ?? 0)]
@@ -238,7 +285,7 @@ const numbersOf = (
       took === null
         ? null
         : [inUnit(took[0]), inUnit(took[1]), inUnit(took[2])],
-    wrong: countOf(own?.wrong, 10),
+    wrong: givenOf(own?.wrong, 10),
   };
 };
 
@@ -278,8 +325,7 @@ export const drawnOf = (
   const firstOther = steps.findIndex(({ step }) => lineOf(step.other) !== "");
   const otherStep = steps[firstOther]?.step;
   const unit = unitOf(numbers);
-  const inUnit = (minutes: number) =>
-    unit === "hours" ? Math.round((minutes / 60) * 2) / 2 : Math.round(minutes);
+  const inUnit = inUnitOf(unit);
   const monthly = numbers.filter(({ per }) => per === "month").length;
   const told: Record<string, Told> = {};
   for (const { person, example } of brief.tellers) {
@@ -316,6 +362,23 @@ export const drawnOf = (
       example,
       term: term === undefined ? false : mine(term.by),
       out: [],
+      // Their own minutes for each step, and share of each case, as they
+      // gave them: shown only as medians over enough people.
+      stepMinutes: steps.flatMap(({ step }, index) => {
+        const given = (step.minutes_by ?? []).find(
+          (each) => lineOf(each.person, 40) === person
+        );
+        const minutes = timesOf(given?.minutes);
+        const [, normal] = givenTimesOf(given?.minutes);
+        return minutes === null ? [] : [{ step: index, minutes, normal }];
+      }),
+      caseShares: differently.flatMap((each, index) => {
+        const given = (each.out_of_ten_by ?? []).find(
+          (own) => lineOf(own.person, 40) === person
+        );
+        const outOfTen = givenOf(given?.out_of_ten, 10);
+        return outOfTen === null ? [] : [{ case: index, outOfTen }];
+      }),
     };
   }
   const lastStep = Math.max(steps.length - 1, 0);
@@ -368,6 +431,36 @@ export const drawnOf = (
       .map((question) => lineOf(question))
       .filter((question) => question !== "")
       .slice(0, 5),
+    // Whose words each one-line answer is: the first note of its kind's.
+    heard: Object.fromEntries(
+      heardAnswers.map((kind) => [kind, idsOf(of(kind)[0]?.by)])
+    ),
+  };
+};
+
+/** A drawing whose people are named by labels, with each label the person it stands for. */
+const peopleOf = (
+  drawn: DrawnWork,
+  people: ReadonlyMap<string | undefined, string>
+): DrawnWork => {
+  const personOf = (label: string): string[] => {
+    const person = people.get(label);
+    return person === undefined ? [] : [person];
+  };
+  return {
+    ...drawn,
+    from: drawn.from.flatMap(personOf),
+    told: Object.fromEntries(
+      Object.entries(drawn.told).flatMap(([label, told]) =>
+        personOf(label).map((person) => [person, told])
+      )
+    ),
+    heard: Object.fromEntries(
+      Object.entries(drawn.heard ?? {}).map(([kind, labels]) => [
+        kind,
+        labels.flatMap(personOf),
+      ])
+    ),
   };
 };
 
@@ -387,6 +480,18 @@ export const drawWork = async (
   if (model === undefined) {
     throw new NoDrawingModelError("No model may draw the work.");
   }
+  // The model knows each person by a neutral label alone (`P2`), never
+  // their id or their title (GRA-1084): it is told what was said, not by
+  // whom. Its answer names them by those labels, read back here.
+  const labels = brief.tellers.map((_, index) => `P${index + 1}`);
+  const labelled: WorkBrief = {
+    ...brief,
+    tellers: brief.tellers.map((teller, index) => ({
+      ...teller,
+      person: labels[index] ?? "",
+      title: "",
+    })),
+  };
   const { output, usage } = await models(env).call({
     model,
     purpose: "onboarding.drawing",
@@ -394,7 +499,7 @@ export const drawWork = async (
     work: { onboarding: true },
     effort: "medium",
     system: drawSystem,
-    input: promptOf(brief),
+    input: promptOf(labelled),
     schema: drawSchema,
     maxTokens: 16_000,
   });
@@ -405,7 +510,10 @@ export const drawWork = async (
     tokensCached: usage.cacheRead,
     tokensOut: usage.outputTokens,
   });
-  return drawnOf(output, brief, new Date().toISOString());
+  return peopleOf(
+    drawnOf(output, labelled, new Date().toISOString()),
+    new Map(brief.tellers.map(({ person }, index) => [labels[index], person]))
+  );
 };
 
 const triple = z.tuple([z.number(), z.number(), z.number()]);
@@ -450,6 +558,7 @@ export const drawnWorkSchema = z.object({
     .nullable(),
   per: z.enum(["week", "month"]),
   unit: z.enum(["minutes", "hours"]),
+  heard: z.partialRecord(z.enum(heardAnswers), z.array(z.string())).optional(),
   told: z.record(
     z.string(),
     z.object({
@@ -472,6 +581,30 @@ export const drawnWorkSchema = z.object({
       example: z.string().nullable(),
       term: z.boolean(),
       out: z.array(z.string()),
+      stepMinutes: z
+        .array(
+          z.object({
+            step: z.number(),
+            minutes: triple,
+            normal: z.number().nullable().optional(),
+          })
+        )
+        .optional(),
+      gave: z
+        .object({
+          quiet: z.number().nullable(),
+          busy: z.number().nullable(),
+          per: z.enum(["week", "month"]).nullable(),
+          takes: z.tuple([
+            z.number().nullable(),
+            z.number().nullable(),
+            z.number().nullable(),
+          ]),
+        })
+        .optional(),
+      caseShares: z
+        .array(z.object({ case: z.number(), outOfTen: z.number() }))
+        .optional(),
     })
   ),
   open: z.array(z.string()),

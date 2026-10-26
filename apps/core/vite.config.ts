@@ -19,6 +19,7 @@ import {
   documentsClient,
   gmailAccount,
   gmailPush,
+  googleConnectClient,
   landscapeClient,
   slackApp,
   teamsBot,
@@ -336,6 +337,10 @@ export const coreProject = (
                 MICROSOFT_DIRECTORY_CLIENT_SECRET: directoryClient.secret,
                 MICROSOFT_DOCUMENTS_CLIENT_ID: documentsClient.id,
                 MICROSOFT_DOCUMENTS_CLIENT_SECRET: documentsClient.secret,
+                // Google Workspace's, which the fake Google there knows:
+                // Stephen's eval on Google connects through it.
+                GOOGLE_CLIENT_ID: googleConnectClient.id,
+                GOOGLE_CLIENT_SECRET: googleConnectClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
                 // The client's Teams bot, which Entra and the Bot Connector
                 // in test/connect-providers.ts know.
@@ -395,6 +400,7 @@ export default coreProject({
     "test/brain-baseline.test.ts",
     // Stephen's eval, in a group of its own: vite.stephen.config.ts.
     "test/stephen-eval.test.ts",
+    "test/stephen-eval-google.test.ts",
     // Stephen's eval against a real model, which costs money, on request
     // only: vite.stephen-model.config.ts.
     "test/stephen-real-model.test.ts",

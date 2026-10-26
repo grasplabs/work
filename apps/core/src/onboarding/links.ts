@@ -46,6 +46,22 @@ import type { LinkAnswer, LinkRefusal } from "./store.ts";
 // - The company learning who talked, and when: what someone does on their
 //   link is in the onboarding's own log, which only staff read, never in
 //   the audit log, which the company's admin reads.
+//
+// And from the threat model of read-back approval (GRA-329, T1 to T8):
+//
+// - Recording or a model before they agreed to take part (T1): `participate`
+//   keeps the notice they read, its purpose and audience; every turn, story
+//   and live transcription is refused without it (the store's
+//   `#participating`).
+// - An edited fact keeping its approval (T2): `approve` names each fact's
+//   revision, a hash of exactly what was read back and kept; only a fact
+//   whose saved revision was approved counts, whatever the page says.
+// - An approval replayed or sent twice, or a lost answer (T3, T7): the
+//   receipt is made from the revisions approved, so the same approval
+//   answers the same receipt; one of a revision no longer kept is refused
+//   with the copy kept.
+// - Withdrawing (T5): `withdraw` stops recording, models, drawing and the
+//   brain at once, and takes out what the brain has that rests on them.
 
 /** The HTTP status of each refusal. */
 const statusFor: Record<LinkRefusal | "interview.invalid", number> = {
@@ -57,6 +73,9 @@ const statusFor: Record<LinkRefusal | "interview.invalid", number> = {
   "interview.deleted": 410,
   "interview.limited": 429,
   "interview.invalid": 400,
+  "interview.not_participating": 403,
+  "interview.notice_changed": 409,
+  "interview.withdrawn": 410,
 };
 
 /** Every answer here: never a referrer, never kept by a cache. */
@@ -105,7 +124,7 @@ const sessionOf = (
   return issued ? { ...session, key } : session;
 };
 
-/** The interview page's calls: session, save and delete. */
+/** The interview page's calls: session, save, delete, and taking part, approving and withdrawing. */
 export const interviewResponse = async (
   request: Request,
   env: Env,
@@ -164,6 +183,27 @@ export const interviewResponse = async (
     }
     case "delete": {
       const result = await store.deleteInterview(secretMark, keyMark ?? "");
+      done(result);
+      return answer(result, requestId, (value) => json(value));
+    }
+    case "participate": {
+      const result = await store.participate(
+        secretMark,
+        keyMark ?? "",
+        body.notice
+      );
+      done(result);
+      return answer(result, requestId, (value) => json(value));
+    }
+    case "approve": {
+      const result = await store.approve(secretMark, keyMark ?? "", body.facts);
+      done(result);
+      return answer(result, requestId, (value) =>
+        json(value, value.approved ? 200 : 409)
+      );
+    }
+    case "withdraw": {
+      const result = await store.withdraw(secretMark, keyMark ?? "");
       done(result);
       return answer(result, requestId, (value) => json(value));
     }

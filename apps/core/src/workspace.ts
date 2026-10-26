@@ -26,6 +26,7 @@ import type {
   ChatChannel,
   ChatCitedDocument,
   ChatDraft,
+  ChatDraftVersion,
   ChatMessage,
   ChatProject,
   ChatOutput,
@@ -67,6 +68,7 @@ import {
   permissionErrors,
 } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { redact } from "@grasp-os/shared/redact";
 import type { ScreenProblem, ServerLog } from "@grasp-os/shared/screens";
 import type { RunFailure } from "@grasp-os/shared/workflows";
@@ -95,6 +97,14 @@ import type { TurnContext, TurnResult } from "./agent.ts";
 import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
+import {
+  drainCaptures,
+  eraseCaptured,
+  turnEventId,
+  turnOutcome,
+  turnSource,
+} from "./brain-capture.ts";
+import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
 import { buildDequeued } from "./build-admission.ts";
 import { BuildJobRecords } from "./build-job-records.ts";
 import type {
@@ -131,6 +141,7 @@ import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/workspace/migrations/migrations.js";
 import {
   auditOutbox,
+  brainCaptureIntents,
   chatAttachments,
   chatCodeRuns,
   chatDraftFiles,
@@ -148,6 +159,7 @@ import {
   dashboards,
   emailPreferences,
 } from "./db/workspace/schema.ts";
+import { DraftVersions } from "./draft-versions.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import {
   audienceMaxMembers,
@@ -164,7 +176,6 @@ import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { PreviewUpdates } from "./preview-updates.ts";
-import { quietLoader } from "./quiet-loader.ts";
 import type { WorkContext } from "./restricted.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { SealedPreviews } from "./sealed-previews.ts";
@@ -550,6 +561,9 @@ const maxWatchers = 50;
  */
 const auditRetryMs = { first: 5000, most: 15 * 60 * 1000 };
 
+/** How long the alarm waits before delivering turns' outcomes again. */
+const captureRetryMs = 60 * 1000;
+
 /** How often a check waiting for a preview reads its reports again. */
 const previewPollMs = 100;
 
@@ -792,6 +806,8 @@ export class Workspace extends DurableObject<Env> {
 
   /** The chats' build jobs (build-jobs.ts). */
   readonly #jobs = new BuildJobRecords(this.#db);
+  /** Every version of the chats' drafts (draft-versions.ts). */
+  readonly #versions = new DraftVersions(this.#db);
 
   /** The chats' previews of their drafts of spec 8 Apps (sealed-previews.ts). */
   readonly #sealedPreviews = new SealedPreviews(
@@ -879,11 +895,11 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Stores `message` as the chat's next, and shows it to its watchers;
-   * its ID.
+   * Stores `message` as the chat's next, and marks the chat active then:
+   * every message moves it up its person's list.
    */
-  #keep(chatId: ChatId, message: Message): number {
-    const { id, createdAt } = this.#db
+  #store(chatId: ChatId, message: Message): { id: number; createdAt: Date } {
+    const stored = this.#db
       .insert(chatMessages)
       .values({
         chatId,
@@ -892,6 +908,20 @@ export class Workspace extends DurableObject<Env> {
       })
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
       .get();
+    this.#db
+      .update(chats)
+      .set({ lastAt: stored.createdAt })
+      .where(eq(chats.id, chatId))
+      .run();
+    return stored;
+  }
+
+  /**
+   * Stores `message` as the chat's next, and shows it to its watchers;
+   * its ID.
+   */
+  #keep(chatId: ChatId, message: Message): number {
+    const { id, createdAt } = this.#store(chatId, message);
     const shown = chatMessageOf(
       id,
       message,
@@ -963,12 +993,14 @@ export class Workspace extends DurableObject<Env> {
           project === null ? {} : { project }
         );
       }
+      const now = new Date();
       const made = this.#db
         .insert(chats)
         .values({
           id,
           title,
-          createdAt: new Date(),
+          createdAt: now,
+          lastAt: now,
           personId,
           agentId: agent.data,
           restricted: fix?.restricted === true,
@@ -1075,7 +1107,12 @@ export class Workspace extends DurableObject<Env> {
    */
   #outboxed(
     by: AuditActor,
-    action: "chat.created" | "chat.renamed" | "chat.deleted" | "chat.moved",
+    action:
+      | "chat.created"
+      | "chat.renamed"
+      | "chat.deleted"
+      | "chat.moved"
+      | "chat.draft_restored",
     chatId: ChatId,
     detail: Record<string, AuditDetailValue> = {}
   ): void {
@@ -1118,6 +1155,99 @@ export class Workspace extends DurableObject<Env> {
     const retryMs = this.#auditRetryMs;
     this.#auditRetryMs = Math.min(retryMs * 2, auditRetryMs.most);
     await this.#alarmBy(Date.now() + retryMs);
+  }
+
+  /**
+   * Settles a turn whose messages are all kept: its capture intent (none
+   * in a chat in restricted mode) and the end of its mark as under way
+   * (`turnKeyPrefix`), in one transaction. A turn is then either cut short,
+   * its mark left for `#closeInterruptedTurns`, or settled with its
+   * intent: never kept without either. The intent is delivered soon, the
+   * alarm set first so a delivery cut short is tried again
+   * (brain-capture.ts).
+   */
+  #captureTurn(facts: TurnFacts): void {
+    const chatId = chatIdSchema.parse(facts.chatId);
+    const eligible = this.isChatRestricted(chatId) === false;
+    this.ctx.storage.transactionSync(() => {
+      if (eligible) {
+        this.#db
+          .insert(brainCaptureIntents)
+          .values({
+            eventId: turnEventId(facts),
+            evidenceId: chatId,
+            facts: JSON.stringify(facts),
+            createdAt: new Date(),
+          })
+          .onConflictDoNothing({ target: brainCaptureIntents.eventId })
+          .run();
+      }
+      this.ctx.storage.kv.delete(`${turnKeyPrefix}${chatId}`);
+    });
+    if (eligible) {
+      this.ctx.waitUntil(this.#captureSoon());
+    }
+  }
+
+  async #captureSoon(): Promise<void> {
+    await this.#alarmBy(Date.now() + captureRetryMs);
+    await this.#deliverCaptures();
+  }
+
+  /** Delivers the turns' pending intents; the alarm tries again if any are left. */
+  async #deliverCaptures(): Promise<void> {
+    if (await drainCaptures(this.env, this.#captures())) {
+      await this.#alarmBy(Date.now() + captureRetryMs);
+    }
+  }
+
+  /** This object's store of its turns' capture intents (brain-capture.ts). */
+  #captures(): CaptureStore {
+    const db = this.#db;
+    return {
+      source: turnSource(this.ctx.id.name ?? this.ctx.id.toString()),
+      pending: async (limit) =>
+        await Promise.resolve(
+          db
+            .select({
+              seq: brainCaptureIntents.seq,
+              eventId: brainCaptureIntents.eventId,
+              evidenceId: brainCaptureIntents.evidenceId,
+              facts: brainCaptureIntents.facts,
+              attempts: brainCaptureIntents.attempts,
+            })
+            .from(brainCaptureIntents)
+            .where(eq(brainCaptureIntents.state, "pending"))
+            .orderBy(
+              asc(brainCaptureIntents.attempts),
+              asc(brainCaptureIntents.seq)
+            )
+            .limit(limit)
+            .all()
+        ),
+      settled: async (seq) => {
+        db.delete(brainCaptureIntents)
+          .where(eq(brainCaptureIntents.seq, seq))
+          .run();
+        await Promise.resolve();
+      },
+      failed: async (seq, code, dead) => {
+        db.update(brainCaptureIntents)
+          .set({
+            attempts: sql`${brainCaptureIntents.attempts} + 1`,
+            lastError: code,
+            ...(dead ? { state: "dead" as const } : {}),
+          })
+          .where(eq(brainCaptureIntents.seq, seq))
+          .run();
+        await Promise.resolve();
+      },
+      outcomeOf: async ({ facts }) =>
+        await turnOutcome(this.env, facts, (chatId) => {
+          const id = chatIdSchema.safeParse(chatId);
+          return id.success && this.isChatRestricted(id.data) === false;
+        }),
+    };
   }
 
   /** Sets the alarm to go at `time` at the latest, never later than it was. */
@@ -1315,7 +1445,8 @@ export class Workspace extends DurableObject<Env> {
       // A chat others share reads for all of them, as they were last
       // kept: one whose audience isn't kept reads nothing, so takes no turn.
       const shared = chat.thread !== null;
-      if (shared && (await audienceOf(this.env, work)) === undefined) {
+      const audience = shared ? await audienceOf(this.env, work) : undefined;
+      if (shared && audience === undefined) {
         throw permissionErrors.create("permission.context_invalid");
       }
       // Before the model is admitted: what memory reads is a source too.
@@ -1394,6 +1525,18 @@ export class Workspace extends DurableObject<Env> {
           this.#changed(chat.id);
           textSoFar?.(partialOf(partial).text);
         },
+      });
+      // Settled: its outcome's capture for the Brain (brain-capture.ts).
+      this.#captureTurn({
+        chatId: chat.id,
+        turnId: live.id,
+        personId,
+        agentId,
+        audience: audience === undefined ? null : [...audience.members],
+        outcome: result.outcome,
+        answerId: answer ?? null,
+        model: model.model.id,
+        occurredAt: new Date().toISOString(),
       });
       return {
         ...result,
@@ -1486,6 +1629,7 @@ export class Workspace extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     // Audit events the log didn't take yet go first: a turn may run long.
     await this.#drainAudit();
+    await this.#deliverCaptures();
     while (this.#sent.size > 0) {
       // oxlint-disable-next-line no-await-in-loop -- until none is left, as more may start
       await Promise.all(this.#sent);
@@ -2589,24 +2733,29 @@ export class Workspace extends DurableObject<Env> {
     return this.#transcript(this.#chat(chatId).id);
   }
 
-  /** `personId`'s chats, newest first: at most {@link listedChats}. */
+  /**
+   * `personId`'s chats, the most recently active first: at most
+   * {@link listedChats}.
+   */
   chats(personId: string): ChatSummary[] {
     return this.#db
       .select({
         id: chats.id,
         title: chats.title,
         createdAt: chats.createdAt,
+        lastAt: chats.lastAt,
         projectId: chats.projectId,
       })
       .from(chats)
       .where(eq(chats.personId, personId))
-      .orderBy(desc(chats.createdAt))
+      .orderBy(desc(chats.lastAt))
       .limit(listedChats)
       .all()
-      .map(({ id, title, createdAt, projectId }) => ({
+      .map(({ id, title, createdAt, lastAt, projectId }) => ({
         id,
         title,
         createdAt: createdAt.toISOString(),
+        lastAt: lastAt.toISOString(),
         running: this.#turns.has(id),
         projectId,
       }));
@@ -3111,9 +3260,16 @@ export class Workspace extends DurableObject<Env> {
         .from(chatDrafts)
         .where(eq(chatDrafts.chatId, id))
         .all();
+      // What the Brain captured of its turns goes before it does: should
+      // that fail, the chat stays (brain-capture.ts).
+      await eraseCaptured(this.env, [id]);
       // Their rows go with it below.
       this.ctx.storage.transactionSync(() => {
         this.#jobs.deleteChat(id);
+        this.#db
+          .delete(brainCaptureIntents)
+          .where(eq(brainCaptureIntents.evidenceId, id))
+          .run();
         this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
         this.#db.delete(chatSources).where(eq(chatSources.chatId, id)).run();
         this.#db
@@ -3137,6 +3293,7 @@ export class Workspace extends DurableObject<Env> {
           eq(chatDraftFiles.chatId, id),
           eq(chatDrafts.chatId, id)
         );
+        this.#versions.deleteChat(id);
         this.#db.delete(chats).where(eq(chats.id, id)).run();
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
         this.#outboxed(by, "chat.deleted", id, { declined });
@@ -3241,14 +3398,7 @@ export class Workspace extends DurableObject<Env> {
       content: `The change you asked for, "${action}" (pending ID ${id}), was decided. ${heldOutcomes[outcome]} Read how it ended, with what it returned, with \`env.connections.outcome("${id}")\`.`,
       timestamp: Date.now(),
     };
-    this.#db
-      .insert(chatMessages)
-      .values({
-        chatId: chat.id,
-        message: JSON.stringify(message),
-        createdAt: new Date(),
-      })
-      .run();
+    this.#store(chat.id, message);
   }
 
   /**
@@ -3272,14 +3422,7 @@ export class Workspace extends DurableObject<Env> {
           : `The connection you asked for as "${name}" was denied: this chat can't use it. Don't ask for it again unless the person says so.`,
       timestamp: Date.now(),
     };
-    this.#db
-      .insert(chatMessages)
-      .values({
-        chatId: chat.id,
-        message: JSON.stringify(message),
-        createdAt: new Date(),
-      })
-      .run();
+    this.#store(chat.id, message);
     this.heldChanged(chat.id);
   }
 
@@ -3413,7 +3556,8 @@ export class Workspace extends DurableObject<Env> {
    * base has them), only over the revision `revision` the write read (0:
    * there was none): `false`, and nothing written, when another write
    * landed since, or the chat is gone. Refused, in the same transaction,
-   * once the code run `runId` that writes it has closed.
+   * once the code run `runId` that writes it has closed. Kept as the
+   * draft's next version, too (draft-versions.ts).
    */
   saveDraft(
     chatId: ChatId,
@@ -3487,6 +3631,13 @@ export class Workspace extends DurableObject<Env> {
           )
           .run();
       }
+      this.#versions.keep(
+        chatId,
+        appId,
+        this.draft(chatId, appId),
+        { callId },
+        updatedAt
+      );
       return true;
     });
     if (saved) {
@@ -3563,6 +3714,99 @@ export class Workspace extends DurableObject<Env> {
       this.#draftsChanged(chatId);
     }
     return dropped;
+  }
+
+  /**
+   * The versions of `personId`'s own chat's draft of App `appId`, newest
+   * first (draft-versions.ts).
+   */
+  draftVersions(
+    chatId: unknown,
+    personId: string,
+    appId: string
+  ): ChatDraftVersion[] {
+    const { id } = this.#ownChat(chatId, personId);
+    return this.#versions.list(id, appId);
+  }
+
+  /**
+   * Version `number` of `personId`'s own chat's draft of App `appId`, as
+   * a draft at the revision it made: to preview, read-only.
+   */
+  draftVersion(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    number: unknown
+  ): Draft {
+    const { id } = this.#ownChat(chatId, personId);
+    return this.#versions.read(id, appId, number).draft;
+  }
+
+  /**
+   * Makes version `number` of `personId`'s own chat's draft of App
+   * `appId` the draft again, as its next version, audited as `by`'s: no
+   * version is changed. Over whatever the draft is now, as the person
+   * chose it; a write of the agent's that read the draft before lands on
+   * nothing (`saveDraft`).
+   */
+  restoreDraftVersion(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    number: unknown,
+    by: AuditActor
+  ): ChatDraftVersion {
+    const { id } = this.#ownChat(chatId, personId);
+    const restored = this.ctx.storage.transactionSync(() => {
+      const { version, draft } = this.#versions.read(id, appId, number);
+      const revision = this.draft(id, appId).revision + 1;
+      const updatedAt = new Date();
+      this.#db
+        .insert(chatDrafts)
+        .values({
+          chatId: id,
+          appId,
+          base: draft.base,
+          revision,
+          updatedAt,
+          callId: null,
+        })
+        .onConflictDoUpdate({
+          target: [chatDrafts.chatId, chatDrafts.appId],
+          set: { base: draft.base, revision, updatedAt, callId: null },
+        })
+        .run();
+      this.#db
+        .delete(chatDraftFiles)
+        .where(
+          and(eq(chatDraftFiles.chatId, id), eq(chatDraftFiles.appId, appId))
+        )
+        .run();
+      for (const [path, content] of Object.entries(draft.changes)) {
+        this.#db
+          .insert(chatDraftFiles)
+          .values({ chatId: id, appId, path, content })
+          .run();
+      }
+      const kept = this.#versions.keep(
+        id,
+        appId,
+        { ...draft, revision },
+        { restoredFrom: version.number },
+        updatedAt
+      );
+      this.#outboxed(by, "chat.draft_restored", id, {
+        app: appId,
+        version: kept.number,
+        restoredFrom: version.number,
+      });
+      return kept;
+    });
+    this.#deliverAudit();
+    this.#dropPreview(id, appId);
+    this.#draftsChanged(id);
+    return restored;
   }
 
   /** Stops the chat's preview of App `appId`, and forgets its reports. */

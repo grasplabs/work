@@ -2,8 +2,10 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { cachedFilesManifest, filesManifest } from "../src/app-inspection.ts";
 import { quarantineAfter } from "../src/build-cache.ts";
-import { buildScreens } from "../src/screens.ts";
+import { buildScreens, screenCode } from "../src/screens.ts";
+import { notesFiles } from "./notes-client-app.ts";
 
 // The compiler's builds kept in R2, served again only as the build that
 // passed its gates wrote them (build-cache.ts). From its threat model:
@@ -352,6 +354,136 @@ describe("the build cache", { timeout: 120_000 }, () => {
     expect({ same: both[0], started: started.count }).toStrictEqual({
       same: both[1],
       started: 1,
+    });
+  });
+
+  it("keeps a preview's build apart from production's: neither serves the other, and their artifacts differ", async () => {
+    const files = screen();
+    const { started, loader } = counting();
+    const counted = { ...env, LOADER: loader };
+
+    const production = await buildScreens(counted, files, "app-test");
+    // The same files, as a chat's draft builds them: not production's build.
+    const preview = await buildScreens(counted, files, "app-test", {
+      profile: "preview",
+    });
+    const compiled = started.count;
+    const built = { ...env, LOADER: noBuilds };
+    const artifacts = {
+      production: await screenCode(
+        built,
+        files,
+        "desk",
+        1,
+        "app-test",
+        "production"
+      ),
+      preview: await screenCode(
+        built,
+        files,
+        "desk",
+        null,
+        "app-test",
+        "preview"
+      ),
+    };
+
+    expect({
+      compiled,
+      // Each served from its own kept build after.
+      production: await buildScreens(built, files, "app-test"),
+      preview: await buildScreens(built, files, "app-test", {
+        profile: "preview",
+      }),
+      sameCode:
+        JSON.stringify(artifacts.production.code) ===
+        JSON.stringify(artifacts.preview.code),
+      sameArtifact:
+        artifacts.production.artifact === artifacts.preview.artifact,
+    }).toStrictEqual({
+      compiled: 2,
+      production,
+      preview,
+      sameCode: true,
+      sameArtifact: false,
+    });
+  });
+});
+
+/** The receipts of inspected manifests, by key, with the object each names. */
+const inspectionReceipts = async (): Promise<Map<string, string | null>> => {
+  const { results } = await env.DB.prepare(
+    "SELECT key, object_key AS objectKey FROM build_receipts WHERE key LIKE 'inspections/%'"
+  ).all<{ key: string; objectKey: string | null }>();
+  return new Map(results.map(({ key, objectKey }) => [key, objectKey]));
+};
+
+/** The Notes App with server code of its own, so nothing else inspected it. */
+const ownNotes = (): Record<string, string> => ({
+  ...notesFiles,
+  "operations/notes.ts": `${notesFiles["operations/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`,
+});
+
+/** What `files`' first inspection for `profile` kept: its receipt's key and object. */
+const keptInspection = async (
+  files: Record<string, string>,
+  profile: "preview" | "production"
+) => {
+  const before = await inspectionReceipts();
+  const manifest = await filesManifest(env, files, "app-test", { profile });
+  const added = [...(await inspectionReceipts())].filter(
+    ([key]) => !before.has(key)
+  );
+  const [kept] = added;
+  if (added.length !== 1 || kept === undefined || kept[1] === null) {
+    throw new Error("The inspection kept no one receipt");
+  }
+  return { manifest, key: kept[0], objectKey: kept[1] };
+};
+
+describe("the inspection cache", { timeout: 120_000 }, () => {
+  it("reads back no manifest its receipt doesn't vouch for, and inspects again", async () => {
+    const files = ownNotes();
+    const { manifest, objectKey } = await keptInspection(files, "production");
+    const kept = await env.FILES.get(objectKey);
+    const text = (await kept?.text()) ?? "";
+    // A manifest that reads, naming the App otherwise: forged over the
+    // object its receipt names, as anyone who can write R2 could.
+    await env.FILES.put(
+      objectKey,
+      JSON.stringify({ ...JSON.parse(text), name: "Forged" })
+    );
+
+    const sidebar = await cachedFilesManifest(env, files);
+    const inspectedAgain = await filesManifest(env, files, "app-test");
+
+    expect({
+      // The sidebar shows only what core vouches for, so nothing now.
+      sidebar,
+      name: inspectedAgain.name,
+      restored: await cachedFilesManifest(env, files),
+    }).toStrictEqual({
+      sidebar: undefined,
+      name: manifest.name,
+      restored: inspectedAgain,
+    });
+  });
+
+  it("keeps a draft's inspection apart from a version's", async () => {
+    const files = ownNotes();
+    const preview = await keptInspection(files, "preview");
+    // A draft's inspection is no version's: the sidebar has none to show.
+    const sidebar = await cachedFilesManifest(env, files);
+    const production = await keptInspection(files, "production");
+
+    expect({
+      sidebar,
+      sameKey: preview.key === production.key,
+      manifest: production.manifest,
+    }).toStrictEqual({
+      sidebar: undefined,
+      sameKey: false,
+      manifest: preview.manifest,
     });
   });
 });

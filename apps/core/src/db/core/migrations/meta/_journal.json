@@ -1030,6 +1030,34 @@
       "when": 1792910407492,
       "tag": "0146_app_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "6",
+      "when": 1792914235199,
+      "tag": "0147_independent_run_pause",
+      "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "6",
+      "when": 1792935382584,
+      "tag": "0148_brain_capture_intents",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "6",
+      "when": 1792949160936,
+      "tag": "0149_aggregated_statements",
+      "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "6",
+      "when": 1792969527369,
+      "tag": "0150_checked_drawings",
+      "breakpoints": true
     }
   ]
 }

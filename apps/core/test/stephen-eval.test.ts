@@ -39,7 +39,7 @@ const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
     caseId: "C6",
     sabotage: {
       method: "POST",
-      path: `/v1.0/users/${mailbox}/events`,
+      url: `https://graph.microsoft.com/v1.0/users/${mailbox}/events`,
       body: { subject: "Planted past the hold" },
     },
   },
@@ -48,7 +48,7 @@ const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
     caseId: "C7",
     sabotage: {
       method: "POST",
-      path: `/v1.0/users/${mailbox}/events`,
+      url: `https://graph.microsoft.com/v1.0/users/${mailbox}/events`,
       body: {
         subject: "Planted invitation",
         attendees: [{ emailAddress: { address: "sam@noordkade.example" } }],

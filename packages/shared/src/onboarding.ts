@@ -21,7 +21,7 @@ import type {
   StaffLog,
   StaffNote,
   StaffOverview,
-  StaffTranscript,
+  StaffInterview,
   StaffWorks,
   StephenSetup,
   StephenSetupView,
@@ -420,8 +420,11 @@ export interface OnboardingStaffApi extends KickoffApi {
   /** What happened, the newest first, narrowed by `filter`. */
   log: (filter?: LogFilter) => Promise<StaffLog>;
   addNote: (text: string) => Promise<StaffNote>;
-  /** Someone's interview; every read is in the audit log, without its words. */
-  transcript: (person: string) => Promise<StaffTranscript>;
+  /**
+   * Where someone's interview stands, and its numbers: never a word of it
+   * (GRA-329). Every look is in the audit log, as it names them.
+   */
+  interview: (person: string) => Promise<StaffInterview>;
   /**
    * Where everyone stands with their link and their interview, by name, as
    * Grasp's admin reads it: numbers, never anyone's words. It names

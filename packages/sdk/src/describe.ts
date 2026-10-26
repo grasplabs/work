@@ -340,6 +340,33 @@ const isMethodCalled = (ancestors: Ancestor[]): boolean => {
   );
 };
 
+/** The Brain's skill calls a run makes: `brain(env.NAME).skills.<name>(…)`. */
+const brainSkillCalls: ReadonlySet<string> = new Set(["select", "read"]);
+
+/**
+ * Whether `ancestors`, ending at `brain(env.NAME)`, call one of the Brain
+ * facade's methods a run has where it is written: `.recall(…)`, or
+ * `.skills.select(…)` or `.skills.read(…)`.
+ */
+const isBrainCall = (ancestors: Ancestor[]): boolean => {
+  const member = ancestors.at(-1)?.node;
+  if (member?.type !== "MemberExpression" || member.computed) {
+    return false;
+  }
+  if (nameOf(member.property) === "recall") {
+    return isMethodCalled(ancestors);
+  }
+  const method = ancestors.at(-2)?.node;
+  return (
+    nameOf(member.property) === "skills" &&
+    isObjectOfMember(ancestors.at(-1)) &&
+    method?.type === "MemberExpression" &&
+    !method.computed &&
+    brainSkillCalls.has(nameOf(method.property) ?? "") &&
+    isMethodCalled(ancestors.slice(0, -1))
+  );
+};
+
 /**
  * The binding a use of `env` calls, from the use's `ancestors`: `NAME` in
  * `env.NAME.method(…)`, `APP` in `appFunctions(env).query(…)` (or
@@ -367,13 +394,10 @@ const envCallOf = (
     return undefined;
   }
   if (isStubArgument(bindings, ancestors.at(-2), "brain")) {
-    // `brain(env.NAME).recall(…)`: the Brain's binding by its name, a
-    // recall its only call.
-    const member = ancestors.at(-3)?.node;
-    return !parent.node.computed &&
-      isMethodCalled(ancestors.slice(0, -2)) &&
-      member?.type === "MemberExpression" &&
-      nameOf(member.property) === "recall"
+    // `brain(env.NAME).recall(…)`, `.skills.select(…)` or
+    // `.skills.read(…)`: the Brain's binding by its name, those its only
+    // calls.
+    return !parent.node.computed && isBrainCall(ancestors.slice(0, -2))
       ? nameOf(parent.node.property)
       : undefined;
   }
@@ -1724,6 +1748,37 @@ const aiKindsOf = (source: string): WorkflowCalls["kinds"] =>
   );
 
 /**
+ * The model binding of each AI step of a workflow whose outline can't be
+ * read, by its name (`$ai` for one whose name can't be read), as its code
+ * names it (`aiStepCalls`); none for one whose binding can't be read,
+ * which no release builds.
+ */
+const aiModelsOf = (source: string): WorkflowCalls["models"] => {
+  // A Map, not an object: a valid step name such as `constructor` must
+  // not read one of Object.prototype's members as its bindings.
+  const models = new Map<string, string[]>();
+  for (const { name, binding } of aiStepCalls(source) ?? []) {
+    if (binding !== null) {
+      const step = name ?? "$ai";
+      models.set(step, [...(models.get(step) ?? []), binding]);
+    }
+  }
+  return Object.fromEntries(models);
+};
+
+/** The model binding each AI step of `steps` names, by step name. */
+const outlineModelsOf = (
+  steps: readonly StepOutline[]
+): WorkflowCalls["models"] =>
+  Object.fromEntries(
+    steps.flatMap(({ name, kind, options: { binding } }) =>
+      kind === "ai" && typeof binding === "string"
+        ? [[name, [binding]] satisfies [string, string[]]]
+        : []
+    )
+  );
+
+/**
  * The App's bindings the workflow in `source` calls, as a review shows
  * them and its runs are held to: by step, as its outline names them, and
  * all together. A workflow whose steps can't be read (a step in a `try`,
@@ -1740,7 +1795,7 @@ export const reviewedCalls = (source: string): WorkflowCalls => {
     context = readContext(source);
   } catch (error) {
     if (error instanceof WorkflowError) {
-      return { steps: null, kinds: {}, all: [] };
+      return { steps: null, kinds: {}, models: {}, keyed: [], all: [] };
     }
     throw error;
   }
@@ -1761,6 +1816,8 @@ export const reviewedCalls = (source: string): WorkflowCalls => {
       outline === null
         ? aiKindsOf(source)
         : Object.fromEntries(steps.map(({ name, kind }) => [name, kind])),
+    models: outline === null ? aiModelsOf(source) : outlineModelsOf(steps),
+    keyed: steps.flatMap(({ name, key }) => (key === undefined ? [] : [name])),
     all: envCallsIn(bindings, [run.body]),
     ...(dynamic.length === 0 ? {} : { dynamic: Object.fromEntries(dynamic) }),
   };

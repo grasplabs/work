@@ -153,7 +153,9 @@ describe(MessageResponse, () => {
       looked,
     }).toStrictEqual({
       before: {
-        kinds: { Leave: "button", Travel: "span", Docs: "a" },
+        // A link out of Grasp is a button too, which asks before it opens
+        // (answer-markdown.test.tsx).
+        kinds: { Leave: "button", Travel: "span", Docs: "button" },
         looked: [],
       },
       at: "/knowledge/handbook",

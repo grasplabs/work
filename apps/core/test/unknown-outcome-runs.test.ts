@@ -302,6 +302,20 @@ const elapse = async (ms: number): Promise<void> => {
   await scheduler.wait(ms);
 };
 
+/**
+ * Run `runId`'s status once it is asleep between its checks: `waiting`.
+ * A check that comes due runs it for a moment, and it waits on.
+ */
+const asleep = async (runId: string): Promise<string> =>
+  await vi.waitFor(
+    async () => {
+      const status = await liveStatus(runId);
+      expect(status).toBe("waiting");
+      return status;
+    },
+    { timeout: 10_000, interval: 100 }
+  );
+
 describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
 
@@ -533,7 +547,9 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       badCursor: await codeOf(admin.api.unknownOutcomes.list("not-a-cursor")),
       othersList: await other.api.unknownOutcomes.list(),
       stillListed: await listedFor(admin),
-      live: await liveStatus(run.id),
+      // Between its checks (every `WORKFLOW_OFF_WAIT_MS`), as it went on
+      // waiting: a check itself shows it running for a moment.
+      live: await asleep(run.id),
       sent: await sentFrom(mailbox),
       resolutions: await resolutions(connectionId),
     }).toStrictEqual({
@@ -589,7 +605,8 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
         unknown.claim
       )
     );
-    const live = await liveStatus(run.id);
+    // Still waiting, between its checks (`asleep`).
+    const live = await asleep(run.id);
     await admin.api.unknownOutcomes.resolve(
       unknown.key,
       "happened",
@@ -632,6 +649,9 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       await waitingRun(admin);
     const other = await personApi("admin");
     const member = await personApi("builder");
+    // Asleep between its checks once it has gone quiet, with nothing of it
+    // running: a parked run suspends once every call it has out is parked.
+    await asleep(run.id);
     const listed = await other.api.unknownOutcomes.listAll();
     const [receipt] = await receiptsFrom(mailbox);
     const theirs = listed.filter(
@@ -667,7 +687,9 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       staffExport: await staffExport(),
       memberOwn: await member.api.unknownOutcomes.list(),
       stillListed: await listedFor(admin),
-      live: await liveStatus(run.id),
+      // Asleep again between its checks: a check that came due meanwhile
+      // runs, and the run waits on.
+      live: await asleep(run.id),
       sent: await sentFrom(mailbox),
       waitsOnOutcome: items.some(
         (entry) =>

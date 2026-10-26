@@ -730,7 +730,7 @@ export const cancelArchivedRuns = async (
       .where(
         and(
           eq(apps.status, "archived"),
-          sql`(EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.appId} = ${apps.id} AND ${workflowRuns.status} IN ('starting', 'running', 'paused') AND ${workflowRuns.cancelRequestedAt} IS NULL) OR EXISTS (SELECT 1 FROM workflow_resource_runs r JOIN workflow_start_receipts s ON s.id = r.id WHERE s.invoker_type = 'app' AND s.invoker_id = ${apps.id} AND r.status IN ('starting', 'running') AND (r.stop_requested_at IS NULL OR r.stop_requested_at <= ${Date.now() - stopRetryMs})))`,
+          sql`(EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.appId} = ${apps.id} AND ${workflowRuns.status} IN ('starting', 'running', 'paused') AND ${workflowRuns.cancelRequestedAt} IS NULL) OR EXISTS (SELECT 1 FROM workflow_resource_runs r JOIN workflow_start_receipts s ON s.id = r.id WHERE s.invoker_type = 'app' AND s.invoker_id = ${apps.id} AND r.status IN ('starting', 'running', 'paused') AND (r.stop_requested_at IS NULL OR r.stop_requested_at <= ${Date.now() - stopRetryMs})))`,
           side
         )
       )

@@ -125,25 +125,17 @@ test("someone has their interview by typing, carries on after stopping, and agre
     page.getByRole("heading", { name: "Thank you, Noor." })
   ).toBeVisible();
 
-  // Core keeps it agreed: what is left in, as it was put right.
+  // Core keeps it approved: both lines, as they were put right. Staff see
+  // its numbers, never its words (GRA-329).
   const reader = apiOf(staff);
   try {
     await expect
       .poll(async () => {
-        const { progress } =
-          await reader.api.onboardingStaff.transcript(person);
-        return {
-          person: progress?.person,
-          facts: progress?.facts.map(({ text, agreed }) => ({ text, agreed })),
-        };
+        const { state, counts } =
+          await reader.api.onboardingStaff.interview(person);
+        return { state, facts: counts.facts, approved: counts.approved };
       })
-      .toStrictEqual({
-        person: "completed",
-        facts: [
-          { text: "You check the invoice in Exact.", agreed: true },
-          { text: "You send it to Kim in finance.", agreed: true },
-        ],
-      });
+      .toStrictEqual({ state: "completed", facts: 2, approved: 2 });
   } finally {
     reader.core[Symbol.dispose]();
   }
@@ -218,9 +210,9 @@ test("someone goes through the screens before the interview in Dutch, chooses Cl
   try {
     await expect
       .poll(async () => {
-        const { progress } =
-          await reader.api.onboardingStaff.transcript(person);
-        return progress?.interviewer;
+        const { interviewer } =
+          await reader.api.onboardingStaff.interview(person);
+        return interviewer;
       })
       .toBe("claire");
   } finally {

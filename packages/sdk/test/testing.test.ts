@@ -1,4 +1,5 @@
 /* oxlint-disable require-await -- fakes of async interfaces answer right away */
+import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -371,6 +372,8 @@ describe("workflow tests", () => {
     const held = await runWorkflowTests(tests, {
       steps: { find: ["CRM"], tidy: [] },
       kinds: { find: "exact", tidy: "exact" },
+      models: {},
+      keyed: [],
       all: ["CRM"],
     });
     const unheld = await runWorkflowTests(tests);
@@ -387,6 +390,174 @@ describe("workflow tests", () => {
       ],
       unheld: true,
       reached: ["CRM", "CRM", "MAIL"],
+    });
+  });
+
+  it("hold an AI step to the model its review shows it asking, and a key to a step its review shows keyed", async () => {
+    const asked: string[] = [];
+    const summary = workflow("summary", { params: {} }, async (step) => {
+      const text = await step.llm("write", {
+        description: "Write",
+        binding: "WRITER",
+        instructions: "Summarise",
+        input: "Invoice INV-7",
+        schema: z.string(),
+      });
+      await step.do(
+        "file",
+        { description: "File", key: "k1" },
+        async () => text.length
+      );
+      return text;
+    });
+    const tests = workflowTests(summary, [
+      {
+        name: "runs",
+        model: (request) => {
+          asked.push(request.binding);
+          return "Fine";
+        },
+        expect: {},
+      },
+    ]);
+    const reviewed = {
+      steps: { write: [], file: [] },
+      kinds: { write: "ai", file: "exact" },
+      models: { write: ["WRITER"] },
+      keyed: ["file"],
+      all: [],
+    } as const satisfies WorkflowCalls;
+
+    const held = await runWorkflowTests(tests, reviewed);
+    const anotherModel = await runWorkflowTests(tests, {
+      ...reviewed,
+      models: { write: ["DRAFTER"] },
+    });
+    const unkeyed = await runWorkflowTests(tests, { ...reviewed, keyed: [] });
+
+    expect({
+      held: held.passed,
+      anotherModel: anotherModel.results[0]?.failures,
+      unkeyed: unkeyed.results[0]?.failures,
+      asked,
+    }).toStrictEqual({
+      held: true,
+      anotherModel: [
+        expect.stringContaining('Step "write" asked model WRITER'),
+      ],
+      unkeyed: [
+        expect.stringContaining('Step "file:k1" isn\'t one the review'),
+      ],
+      // Asked twice: the run held to its review, and the one whose file
+      // step was refused after it. Never in the one refused.
+      asked: ["WRITER", "WRITER"],
+    });
+  });
+
+  it("complete a run whose caught refused call failed only its step", async () => {
+    const reached: string[] = [];
+    const binding = (name: string) => ({
+      call: async () => {
+        reached.push(name);
+        return "ok";
+      },
+    });
+    const notify = workflow("notify", { params: {} }, async (step, { env }) => {
+      let sent = "not sent";
+      try {
+        sent = await step.do("send", { description: "Send" }, async () =>
+          String(await env.MAIL?.call?.("send"))
+        );
+      } catch {
+        // Goes on without the mail, as a workflow may.
+      }
+      const found = await step.do("find", { description: "Find" }, async () =>
+        String(await env.CRM?.call?.("find"))
+      );
+      return { sent, found };
+    });
+    const tests = workflowTests(notify, [
+      {
+        name: "runs",
+        env: { CRM: binding("CRM"), MAIL: binding("MAIL") },
+        expect: { output: { sent: "not sent", found: "ok" } },
+      },
+    ]);
+
+    const report = await runWorkflowTests(tests, {
+      steps: { send: [], find: ["CRM"] },
+      kinds: { send: "exact", find: "exact" },
+      models: {},
+      keyed: [],
+      all: ["CRM"],
+    });
+
+    // As on the platform, a refused call fails its step's attempts, not
+    // the run: the next step's reviewed call goes through.
+    expect({ passed: report.passed, reached }).toStrictEqual({
+      passed: true,
+      reached: ["CRM"],
+    });
+  });
+
+  it("fail a run that caught a refused step or model call and went on", async () => {
+    const summary = workflow("summary", { params: {} }, async (step) => {
+      let text = "none";
+      try {
+        text = await step.llm("write", {
+          description: "Write",
+          binding: "WRITER",
+          instructions: "Summarise",
+          input: "Invoice INV-7",
+          schema: z.string(),
+        });
+      } catch {
+        // Goes on as if the model had answered.
+      }
+      try {
+        await step.do(
+          "file",
+          { description: "File", key: "k1" },
+          async () => text.length
+        );
+      } catch {
+        // Goes on as if the step had run.
+      }
+      return text;
+    });
+    const tests = workflowTests(summary, [
+      { name: "runs", model: () => "Fine", expect: { output: "Fine" } },
+    ]);
+    const reviewed = {
+      steps: { write: [], file: [] },
+      kinds: { write: "ai", file: "exact" },
+      models: { write: ["WRITER"] },
+      keyed: ["file"],
+      all: [],
+    } as const satisfies WorkflowCalls;
+
+    const held = await runWorkflowTests(tests, reviewed);
+    const anotherModel = await runWorkflowTests(tests, {
+      ...reviewed,
+      models: { write: ["DRAFTER"] },
+    });
+    const unkeyed = await runWorkflowTests(tests, { ...reviewed, keyed: [] });
+
+    expect({
+      held: held.passed,
+      anotherModel: anotherModel.results[0]?.failures,
+      unkeyed: unkeyed.results[0]?.failures,
+    }).toStrictEqual({
+      held: true,
+      // The first refusal fails the run, though the workflow caught it.
+      anotherModel: [
+        expect.stringContaining('it failed: Step "write" asked model WRITER'),
+      ],
+      unkeyed: [
+        expect.stringContaining(
+          'it failed: Step "file:k1" isn\'t one the review'
+        ),
+      ],
     });
   });
 

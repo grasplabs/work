@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
+import { useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -53,6 +54,7 @@ const ConnectionRequest = ({
   onDecided: () => void;
 }) => {
   const { busy, failure, run } = useCoreAction();
+  const router = useRouter();
   // Read again however it went: a failed decision may have changed
   // something too (decided elsewhere, say).
   const decide = async (
@@ -60,6 +62,9 @@ const ConnectionRequest = ({
   ): Promise<void> => {
     await run(decision);
     onDecided();
+    // Core notes the decision in the chat, which moves it up the chat
+    // list: the list is read again so it shows under its new time.
+    await router.invalidate();
   };
   const connection = [request.provider, request.accountName]
     .filter((part) => part !== null)

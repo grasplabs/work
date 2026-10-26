@@ -17,6 +17,7 @@ import {
   buildWorkflows,
   withinBuildWait,
 } from "./screens.ts";
+import type { BuildProfile } from "./screens.ts";
 
 type SavedBuilds = CommittedVersion["builds"];
 
@@ -113,15 +114,23 @@ const savedBuild = async (
 export const buildOnSave = async (
   env: Env,
   source: SavedSource,
-  /**
-   * Aborted once the build is no one's (a build job's lease lost): no
-   * build starts the compiler after, and it throws its reason, rather than
-   * report the builds it gave up as errors. A compile already running
-   * goes on (screens.ts, `cachedBuild`).
-   */
-  signal?: AbortSignal
+  {
+    profile,
+    signal,
+  }: {
+    /** `preview` for a chat's draft, `production` for a saved version. */
+    readonly profile: BuildProfile;
+    /**
+     * Aborted once the build is no one's (a build job's lease lost): no
+     * build starts the compiler after, and it throws its reason, rather
+     * than report the builds it gave up as errors. A compile already
+     * running goes on (screens.ts, `cachedBuild`).
+     */
+    readonly signal?: AbortSignal;
+  }
 ): Promise<SavedBuilds> => {
   const { files } = source;
+  const options = { profile, signal };
   const [screens, server, workflows] = await Promise.all([
     savedBuild(
       "screens",
@@ -137,10 +146,10 @@ export const buildOnSave = async (
             source.app,
             source.version,
             files,
-            signal
+            options
           ),
           source.app,
-          signal
+          options
         ),
       env,
       signal
@@ -149,7 +158,7 @@ export const buildOnSave = async (
       "server",
       source,
       serverFiles,
-      async () => await buildServer(env, files, source.app, signal),
+      async () => await buildServer(env, files, source.app, options),
       env,
       signal
     ),
@@ -158,7 +167,7 @@ export const buildOnSave = async (
       source,
       workflowFiles,
       async () =>
-        await buildWorkflows(env, files, source.app, source.bindings, signal),
+        await buildWorkflows(env, files, source.app, source.bindings, options),
       env,
       signal
     ),

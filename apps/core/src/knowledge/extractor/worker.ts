@@ -3,7 +3,9 @@ import type { ChunkRead } from "@grasp-os/shared/chunks";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { extractedPart } from "./asset.ts";
-import { formats, TooLargeError } from "./formats.ts";
+import { formats } from "./formats.ts";
+import { TooLargeError } from "./too-large.ts";
+import type { VttExtraction } from "./vtt.ts";
 
 // The extractor's sandbox: the one module of a Dynamic Worker core starts
 // for each extraction (extract.ts), built into core's static assets
@@ -13,14 +15,22 @@ import { formats, TooLargeError } from "./formats.ts";
 
 /**
  * The most Markdown it hands back, in bytes of UTF-8: a document's limit
- * (knowledge/documents.ts). Anything longer couldn't be saved, and isn't
- * sent back to core.
+ * (knowledge/documents.ts), and a transcript's (packages/brain
+ * transcripts.ts). Anything longer couldn't be saved, and isn't sent back
+ * to core.
  */
 const markdownMaxBytes = 1024 * 1024;
 
-/** What an extraction returns: the Markdown, or why there is none. */
+/**
+ * What an extraction returns: the Markdown, with the transcript of a file
+ * that is one (a WebVTT file's), or why there is none.
+ */
 export type Extracted =
-  | { ok: true; markdown: string }
+  | {
+      ok: true;
+      markdown: string;
+      transcript?: VttExtraction["transcript"];
+    }
   | { ok: false; reason: "unreadable" | "too_large" };
 
 /** Extracts one file's text; started once per extraction. */
@@ -35,9 +45,9 @@ export default class Extractor extends WorkerEntrypoint {
     if (format === undefined) {
       return { ok: false, reason: "unreadable" };
     }
-    let markdown: string;
+    let extraction: Awaited<ReturnType<typeof format>>;
     try {
-      markdown = await format(file.bytes);
+      extraction = await format(file.bytes);
     } catch (error) {
       // Only why: a parser's message may quote the file.
       return {
@@ -45,10 +55,22 @@ export default class Extractor extends WorkerEntrypoint {
         reason: error instanceof TooLargeError ? "too_large" : "unreadable",
       };
     }
-    if (new TextEncoder().encode(markdown).byteLength > markdownMaxBytes) {
+    const { markdown, transcript } =
+      typeof extraction === "string"
+        ? { markdown: extraction, transcript: undefined }
+        : extraction;
+    const encoder = new TextEncoder();
+    if (
+      encoder.encode(markdown).byteLength > markdownMaxBytes ||
+      (transcript !== undefined &&
+        encoder.encode(JSON.stringify(transcript)).byteLength >
+          markdownMaxBytes)
+    ) {
       return { ok: false, reason: "too_large" };
     }
-    return { ok: true, markdown };
+    return transcript === undefined
+      ? { ok: true, markdown }
+      : { ok: true, markdown, transcript };
   }
 
   /**

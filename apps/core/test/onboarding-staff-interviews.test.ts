@@ -140,7 +140,7 @@ describe("the interviews in Grasp's onboarding area", () => {
         outcome(api.onboardingStaff.remind([ids.ona])),
         outcome(api.onboardingStaff.askIn("labs")),
         outcome(api.onboardingStaff.deleteInterview(ids.oli)),
-        outcome(api.onboardingStaff.transcript(ids.oli)),
+        outcome(api.onboardingStaff.interview(ids.oli)),
       ])
     );
     expect(new Set(refused)).toStrictEqual(new Set(["onboarding.staff_only"]));
@@ -151,9 +151,12 @@ describe("the interviews in Grasp's onboarding area", () => {
     const staff = await asStaff();
 
     const reads: AdminSnapshot[] = [];
-    const events = await auditedDuring(async () => {
-      reads.push(await staff.onboardingStaff.interviews());
-    });
+    const events = await auditedDuring(
+      async () => {
+        reads.push(await staff.onboardingStaff.interviews());
+      },
+      { staffAccesses: true }
+    );
     const links = reads[0]?.links ?? [];
     const stateOf = (person: string) =>
       links.find((link) => link.person === person)?.state;
@@ -171,7 +174,8 @@ describe("the interviews in Grasp's onboarding area", () => {
       states: ["completed", "invited", "waiting"],
       oli: [4, "claire", true],
       words: false,
-      audited: [["onboarding.interviews.read", "staff", "organization"]],
+      // On record as a staff look (staff-audit.ts), naming no one.
+      audited: [["staff.accessed", "staff", undefined]],
     });
   });
 
@@ -180,9 +184,12 @@ describe("the interviews in Grasp's onboarding area", () => {
     const staff = await asStaff();
 
     const paths: string[] = [];
-    const events = await auditedDuring(async () => {
-      paths.push(await staff.onboardingStaff.link(ids.ona));
-    });
+    const events = await auditedDuring(
+      async () => {
+        paths.push(await staff.onboardingStaff.link(ids.ona));
+      },
+      { staffAccesses: true }
+    );
     const path = paths[0] ?? "";
     const secret = path.split("#")[1] ?? "";
     // The link staff were given opens Ona's interview, and nobody else's.
@@ -198,7 +205,9 @@ describe("the interviews in Grasp's onboarding area", () => {
     }).toStrictEqual({
       path: true,
       opens: true,
-      audited: [["onboarding.link.read", "interview"]],
+      // On record as a staff look before anything was read, by the kind of
+      // what was asked alone (staff-audit.ts).
+      audited: [["staff.accessed", undefined]],
       secretInLog: false,
       named: false,
       nobody: "onboarding.not_found",
@@ -263,7 +272,7 @@ describe("the interviews in Grasp's onboarding area", () => {
     const events = await auditedDuring(async () => {
       await staff.onboardingStaff.deleteInterview(ids.oli);
     });
-    const read = await staff.onboardingStaff.transcript(ids.oli);
+    const read = await staff.onboardingStaff.interview(ids.oli);
     const resaved = await routed(interviewApiPath, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -277,7 +286,7 @@ describe("the interviews in Grasp's onboarding area", () => {
     });
     const { links } = await staff.onboardingStaff.interviews();
     expect({
-      progress: read.progress,
+      state: read.state,
       resaved: resaved.status,
       deleted:
         (links.find(({ person }) => person === ids.oli)?.deletedAt ?? null) !==
@@ -286,7 +295,7 @@ describe("the interviews in Grasp's onboarding area", () => {
       named: JSON.stringify(events).includes(ids.oli),
       nobody: await outcome(staff.onboardingStaff.deleteInterview(ids.lia)),
     }).toStrictEqual({
-      progress: null,
+      state: null,
       resaved: 410,
       deleted: true,
       audited: ["onboarding.interview.deleted"],
@@ -295,10 +304,10 @@ describe("the interviews in Grasp's onboarding area", () => {
     });
   });
 
-  it("show who held a transcript, and the text it was held with, by its mark", async () => {
+  it("show who held an interview, and the text it was held with, by its mark", async () => {
     const { link, person } = await openedFor();
     const staff = await asStaff();
-    const before = await staff.onboardingStaff.transcript(person);
+    const before = await staff.onboardingStaff.interview(person);
     await answering(
       [
         {
@@ -330,7 +339,7 @@ describe("the interviews in Grasp's onboarding area", () => {
         await turn.text();
       }
     );
-    const after = await staff.onboardingStaff.transcript(person);
+    const after = await staff.onboardingStaff.interview(person);
     expect({ before: before.texts, after: after.texts }).toStrictEqual({
       before: [],
       after: [labMarks.claire.own.nl],

@@ -3,7 +3,7 @@ import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { Speaker } from "@grasp-os/shared/voice";
 
 import { gatewaySettings } from "../models.ts";
-import { forgetLines } from "../speech-cache.ts";
+import { forgetLines, storedKeysOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
 
 // How Stephen's lines are said (speech.ts), and taking them out of the
@@ -99,6 +99,16 @@ export const forgetSpokenLines = async (
   }
   await forgetLines(env, keysOf(env, said));
 };
+
+/**
+ * The stored keys of every line of `said`, as it may have been kept:
+ * hashes, so they can wait to be taken out without keeping what was said.
+ */
+export const spokenKeysOf = async (
+  env: Env,
+  said: SaidIn
+): Promise<string[]> =>
+  said.texts.length === 0 ? [] : await storedKeysOf(keysOf(env, said));
 
 /** Every language an interview may be held in, when its own isn't known. */
 export const anyLanguage: readonly string[] = interviewLocales;
