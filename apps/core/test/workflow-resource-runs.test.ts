@@ -245,6 +245,7 @@ const runColumn = async (
     | "manifest_hash"
     | "next_start_at"
     | "failure_code"
+    | "summary_revision"
 ): Promise<unknown> => {
   const row = await env.DB.prepare(
     `SELECT ${column} AS value FROM workflow_resource_runs WHERE id = ?`
@@ -1242,6 +1243,14 @@ describe("whose word a run's row takes, and whose clock", () => {
     const by = await builder();
     const waiting = await waitingWorkflow(by);
     const { runId } = await start(by, waiting.id);
+    // Asleep, its row running: nothing but the settlers moves its snapshot.
+    await settledInEngine(runId);
+    await vi.waitFor(
+      async () => {
+        await expect(runColumn(runId, "status")).resolves.toBe("running");
+      },
+      { timeout: 10_000, interval: 50 }
+    );
     const app = crypto.randomUUID();
     const control = crypto.randomUUID();
     const now = Date.now();
@@ -1257,6 +1266,9 @@ describe("whose word a run's row takes, and whose clock", () => {
     if (row === undefined) {
       throw new Error("No run");
     }
+    const revision = async (): Promise<unknown> =>
+      await runColumn(runId, "summary_revision");
+    const before = await revision();
     // Both settlers read the same clock: the screen's apply and the
     // engine's notification, landing together.
     vi.useFakeTimers({ toFake: ["Date"], now });
@@ -1284,9 +1296,16 @@ describe("whose word a run's row takes, and whose clock", () => {
       .bind(control)
       .first<{ state: string }>();
     const audited = await runEvents(runId, "workflow.run.control_applied");
-    expect({ state: settled?.state, audited: audited.length }).toStrictEqual({
+    const after = await revision();
+    expect({
+      state: settled?.state,
+      audited: audited.length,
+      // The snapshot moved on once, by the settler that changed the row.
+      revisions: Number(after) - Number(before),
+    }).toStrictEqual({
       state: "applied",
       audited: 1,
+      revisions: 1,
     });
   });
 
