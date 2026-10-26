@@ -1270,43 +1270,70 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("shows an organization whose core didn't answer by its name and why, with no sections", async () => {
+  it("opens an organization whose core didn't answer with its column of sections, each saying why nothing of it is read, and its Setup", async () => {
     const down = await liveClient();
     down.account.unhealthy = 1000;
     const waiting = await recordClient("provisioning");
 
     const downPage = await page(`/organizations/${down.clientId}`);
     const downMembers = await page(`/organizations/${down.clientId}/members`);
+    const downSetup = await page(`/organizations/${down.clientId}/setup`);
     const waitingPage = await page(`/organizations/${waiting.clientId}`);
-    /** What the page says of `name`: its title, why, and whether any section is there. */
+    /** What the page says of `name`: its title, its column, and whether anything of its core is there. */
     const pageOf = (
       { status, html }: { status: number; html: string },
-      name: string
+      name: string,
+      title = name
     ) => ({
       status,
-      title: html.includes(`${name}</h1>`),
-      column: columnOf(html, name) !== "",
-      sections: [
-        "Members</h1>",
-        "Needs Grasp",
-        "% known",
-        "From the company",
-      ].some((text) => html.includes(text)),
+      title: html.includes(`${title}</h1>`),
+      column:
+        columnOf(html, name).includes("Members") &&
+        columnOf(html, name).includes("Not read now"),
+      fromCore: ["Needs Grasp", "% known", "From the company"].some((text) =>
+        html.includes(text)
+      ),
+      toSetup: html.includes(
+        `href="/organizations/${name === down.name ? down.clientId : waiting.clientId}/setup"`
+      ),
     });
 
     expect({
       down: pageOf(downPage, down.name),
       downWhy: downPage.html.includes("Its Grasp can’t be read now:"),
-      downMembers: pageOf(downMembers, down.name),
+      downMembers: pageOf(downMembers, down.name, "Members"),
+      membersWhy: downMembers.html.includes("Its Grasp can’t be read now:"),
+      // Its Setup is the admin's own record, read whatever its core does.
+      setup: downSetup.html.includes("How it stands"),
       waiting: pageOf(waitingPage, waiting.name),
       waitingWhy: waitingPage.html.includes(
         "Its Grasp isn’t deployed yet, so there is nothing of it to read."
       ),
     }).toStrictEqual({
-      down: { status: 200, title: true, column: false, sections: false },
+      down: {
+        status: 200,
+        title: true,
+        column: true,
+        fromCore: false,
+        toSetup: true,
+      },
       downWhy: true,
-      downMembers: { status: 200, title: true, column: false, sections: false },
-      waiting: { status: 200, title: true, column: false, sections: false },
+      downMembers: {
+        status: 200,
+        title: true,
+        column: true,
+        fromCore: false,
+        toSetup: true,
+      },
+      membersWhy: true,
+      setup: true,
+      waiting: {
+        status: 200,
+        title: true,
+        column: true,
+        fromCore: false,
+        toSetup: true,
+      },
       waitingWhy: true,
     });
   });
