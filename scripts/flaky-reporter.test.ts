@@ -4,7 +4,12 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 
-import { annotationOf, flakeOf, summaryOf } from "./flaky-reporter.ts";
+import {
+  annotationOf,
+  flakeOf,
+  flakesIn,
+  summaryOf,
+} from "./flaky-reporter.ts";
 import type { Flake, RetriedCase } from "./flaky-reporter.ts";
 
 const testCase = (diagnostic?: {
@@ -38,6 +43,22 @@ describe("naming the tests that passed only when tried again", () => {
   it("names neither a test that passed the first time nor one that never ran", () => {
     expect(flakeOf(testCase({ flaky: false, retryCount: 0 }))).toBeUndefined();
     expect(flakeOf(testCase())).toBeUndefined();
+  });
+
+  it("finds the flakes in the finished files, whatever events arrived", () => {
+    expect(
+      flakesIn([
+        {
+          children: {
+            allTests: () => [
+              testCase({ flaky: false, retryCount: 0 }),
+              testCase({ flaky: true, retryCount: 1 }),
+            ],
+          },
+        },
+        { children: { allTests: () => [testCase()] } },
+      ])
+    ).toStrictEqual([flake]);
   });
 
   it("annotates the flake's file, from the repository's root", () => {

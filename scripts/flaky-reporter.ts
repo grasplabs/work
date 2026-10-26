@@ -81,24 +81,38 @@ export const summaryOf = (flakes: readonly Flake[]): string => {
   ].join("\n");
 };
 
+/** What the reporter reads of a test file: Vitest's `TestModule` has it. */
+export interface RetriedModule {
+  readonly children: { allTests: () => Iterable<RetriedCase> };
+}
+
+/**
+ * The flakes in `testModules`, read from Vitest's state when the run ends
+ * rather than from each test's result event: vitest-pool-workers can lose
+ * a batch of those events while the results still reach the state (see
+ * stall-reporter.ts).
+ */
+export const flakesIn = (testModules: readonly RetriedModule[]): Flake[] =>
+  testModules.flatMap((testModule) =>
+    [...testModule.children.allTests()].flatMap((testCase) => {
+      const flake = flakeOf(testCase);
+      return flake === undefined ? [] : [flake];
+    })
+  );
+
 export default class FlakyReporter implements Reporter {
-  readonly #flakes: Flake[] = [];
-
-  onTestCaseResult(testCase: RetriedCase): void {
-    const flake = flakeOf(testCase);
-    if (flake !== undefined) {
-      this.#flakes.push(flake);
-    }
-  }
-
-  async onTestRunEnd(): Promise<void> {
+  // oxlint-disable-next-line class-methods-use-this -- Vitest calls it on its reporter
+  async onTestRunEnd(
+    testModules: readonly RetriedModule[] = []
+  ): Promise<void> {
+    const flakes = flakesIn(testModules);
     const root = process.cwd();
-    for (const flake of this.#flakes) {
+    for (const flake of flakes) {
       process.stdout.write(annotationOf(flake, root));
     }
     const summaryFile = process.env.GITHUB_STEP_SUMMARY;
     if (summaryFile !== undefined && summaryFile !== "") {
-      await appendFile(summaryFile, summaryOf(this.#flakes));
+      await appendFile(summaryFile, summaryOf(flakes));
     }
   }
 }

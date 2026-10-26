@@ -17,11 +17,6 @@ test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
 });
 
-// Each test is an admin of its own company, so they run apart, on any
-// worker and in any CI part: one after another they took nearly 3 minutes
-// (October 2026, GRA-1094).
-test.describe.configure({ mode: "parallel" });
-
 const sourcesLine =
   "Where does the work get written down? Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me.";
 
