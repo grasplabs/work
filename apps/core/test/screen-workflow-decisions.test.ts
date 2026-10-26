@@ -318,15 +318,76 @@ describe(
       });
     });
 
-    it("answer an empty inbox, and refuse every decision alike, while independent runs have none", async () => {
-      const { fixture } = await boundApp();
+    it("list the decisions of the App's runs a person may answer now, oldest first, and refuse every other decision alike", async () => {
+      const { fixture, workflowId } = await boundApp();
       const release = await seal(fixture);
       await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+      const [reviewer, starter, outsider] = await Promise.all([
+        person("admin"),
+        person("admin"),
+        person("user"),
+      ]);
+      await env.DB.batch(
+        [reviewer, starter, outsider].map((member) =>
+          env.DB.prepare(
+            "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+          ).bind(fixture.app, member.userId, fixture.owner.userId, Date.now())
+        )
+      );
+      const version = await env.DB.prepare(
+        "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+      )
+        .bind(workflowId)
+        .first<{ hash: string }>();
+      const manifestHash = version?.hash ?? "";
+      const opened = Date.now() - 60_000;
+      /** A run of the pinned version `app` started for `starter`, asking `ask`. */
+      const runAsking = async (
+        app: string,
+        at: number,
+        step = "task:ask"
+      ): Promise<{ runId: string; decisionId: string }> => {
+        const runId = crypto.randomUUID();
+        const decisionId = crypto.randomUUID();
+        await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'app', ?, ?, ?, 1, ?, ?, 1, 'h', ?)"
+          ).bind(
+            runId,
+            app,
+            `key-${runId}`,
+            workflowId,
+            manifestHash,
+            starter.userId,
+            at
+          ),
+          env.DB.prepare(
+            "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, ?, 'b', ?, 'running', ?)"
+          ).bind(runId, workflowId, manifestHash, starter.userId, at),
+          env.DB.prepare(
+            "INSERT INTO workflow_decisions (id, resource_run_id, step, deciders, description, status, opened_at, expires_at, input) VALUES (?, ?, ?, 'role:admin', 'Approve this invoice?', 'open', ?, ?, ?)"
+          ).bind(
+            decisionId,
+            runId,
+            step,
+            at,
+            at + 86_400_000,
+            JSON.stringify({ amount: 5 })
+          ),
+        ]);
+        return { runId, decisionId };
+      };
+      const first = await runAsking(fixture.app, opened);
+      const second = await runAsking(fixture.app, opened + 1000);
+      // Another App's run, and a step no decision task of the build names.
+      const elsewhere = await runAsking(`other-${unique()}`, opened + 2000);
+      const unnamed = await runAsking(fixture.app, opened + 3000, "task:other");
       const ask = async (
+        who: typeof reviewer,
         name: "decisions" | "decision",
         input: unknown,
         window?: number
-      ): Promise<OperationResult> => {
+      ): Promise<unknown> => {
         const request = JSON.stringify({
           reference: await queryReference(release, "review", name),
           input,
@@ -334,10 +395,10 @@ describe(
         });
         const { result } =
           window === undefined
-            ? await callAppFunction(env, fixture.owner, fixture.app, request)
+            ? await callAppFunction(env, who, fixture.app, request)
             : await callScreenFunction(
                 env,
-                fixture.owner,
+                who,
                 fixture.app,
                 request,
                 Date.now() + 30_000,
@@ -345,27 +406,129 @@ describe(
                   // A window's pages cost nothing here.
                 }
               );
-        return result;
+        return answerOf(result);
       };
+      const waitOf = (
+        { runId, decisionId }: { runId: string; decisionId: string },
+        at: number
+      ) => ({
+        run: {
+          runId,
+          workflowId,
+          workflowVersion: 1,
+          manifestHash,
+        },
+        wait: {
+          kind: "decision",
+          id: decisionId,
+          taskId: "ask",
+          key: "approval",
+          title: "ask",
+          openedAt: at,
+          deadline: at + 86_400_000,
+          canRespond: true,
+        },
+      });
+      const page = await ask(reviewer, "decisions", {
+        pagination: { pageSize: 1 },
+      });
+      const cursor =
+        typeof page === "object" && page !== null && "nextCursor" in page
+          ? page.nextCursor
+          : null;
+      const detail = async (who: typeof reviewer, of: typeof first) =>
+        await ask(who, "decision", {
+          runId: of.runId,
+          decisionId: of.decisionId,
+        });
+      const before = {
+        page,
+        next: await ask(reviewer, "decisions", {
+          pagination: { pageSize: 1, cursor },
+        }),
+        ofRun: await ask(reviewer, "decisions", {
+          runId: second.runId,
+          pagination: {},
+        }),
+        window: await ask(reviewer, "decisions", {}, 20),
+        starter: await ask(starter, "decisions", { pagination: {} }),
+        outsider: await ask(outsider, "decisions", { pagination: {} }),
+        detail: await detail(reviewer, first),
+        starterDetail: await detail(starter, first),
+        outsiderDetail: await detail(outsider, first),
+        elsewhere: await detail(reviewer, elsewhere),
+        unnamed: await detail(reviewer, unnamed),
+        mismatched: await ask(reviewer, "decision", {
+          runId: second.runId,
+          decisionId: first.decisionId,
+        }),
+        unknown: await ask(reviewer, "decision", {
+          runId: first.runId,
+          decisionId: "decision-1",
+        }),
+        decisionWindow: await ask(
+          reviewer,
+          "decision",
+          { runId: first.runId, decisionId: first.decisionId },
+          20
+        ),
+      };
+      await env.DB.prepare(
+        "UPDATE workflow_decisions SET status = 'approved', decided_by = ?, decided_at = ? WHERE id = ?"
+      )
+        .bind(reviewer.userId, Date.now(), first.decisionId)
+        .run();
+
       expect({
-        inbox: answerOf(await ask("decisions", { pagination: {} })),
-        window: answerOf(await ask("decisions", {}, 20)),
-        decision: answerOf(
-          await ask("decision", { runId: "run-1", decisionId: "decision-1" })
-        ),
-        decisionWindow: answerOf(
-          await ask(
-            "decision",
-            { runId: "run-1", decisionId: "decision-1" },
-            20
-          )
-        ),
+        ...before,
+        answered: await detail(reviewer, first),
+        afterAnswer: await ask(reviewer, "decisions", { pagination: {} }),
       }).toStrictEqual({
-        inbox: { items: [], nextCursor: null, hasMore: false },
-        window: { items: [], hasMore: false },
-        decision: "workflow.decision_unavailable",
+        page: {
+          items: [waitOf(first, opened)],
+          nextCursor: `${opened}:${first.decisionId}`,
+          hasMore: true,
+        },
+        // The unnamed decision after it takes a place it never shows in.
+        next: {
+          items: [waitOf(second, opened + 1000)],
+          nextCursor: `${opened + 1000}:${second.decisionId}`,
+          hasMore: true,
+        },
+        ofRun: {
+          items: [waitOf(second, opened + 1000)],
+          nextCursor: null,
+          hasMore: false,
+        },
+        window: {
+          items: [waitOf(first, opened), waitOf(second, opened + 1000)],
+          hasMore: false,
+        },
+        // Their own run's decision is never theirs to answer (R8).
+        starter: { items: [], nextCursor: null, hasMore: false },
+        outsider: { items: [], nextCursor: null, hasMore: false },
+        detail: {
+          key: "approval",
+          wait: waitOf(first, opened).wait,
+          prompt: "Approve this invoice?",
+          context: { amount: 5 },
+          canRespond: true,
+        },
+        starterDetail: "workflow.decision_unavailable",
+        outsiderDetail: "workflow.decision_unavailable",
+        elsewhere: "workflow.decision_unavailable",
+        unnamed: "workflow.decision_unavailable",
+        mismatched: "workflow.decision_unavailable",
+        unknown: "workflow.decision_unavailable",
         // One decision isn't a list a window reads.
         decisionWindow: "contract.not_paginated",
+        // Theirs to read, but no longer taking an answer.
+        answered: null,
+        afterAnswer: {
+          items: [waitOf(second, opened + 1000)],
+          nextCursor: null,
+          hasMore: false,
+        },
       });
     });
 

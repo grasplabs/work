@@ -532,6 +532,24 @@ const decidersCondition = (deciders: string): SQL => {
 };
 
 /**
+ * Members a decision row's deciders column names, as a condition on
+ * `members`: `decidersCondition` for a column, so one statement holds many
+ * decisions to it, each by its own deciders.
+ */
+const decidersColumnCondition = (deciders: SQLiteColumn): SQL => sql`(
+  (substr(${deciders}, 1, 7) = 'person:'
+    AND substr(${deciders}, 8) = ${members.userId})
+  OR (substr(${deciders}, 1, 5) = 'role:'
+    AND substr(${deciders}, 6) = ${members.role})
+  OR (substr(${deciders}, 1, 5) = 'team:' AND EXISTS (
+    SELECT 1 FROM ${teamMembers}
+    INNER JOIN ${teams} ON ${teams.id} = ${teamMembers.teamId}
+    WHERE ${teamMembers.userId} = ${members.userId}
+      AND ${teamMembers.teamId} = substr(${deciders}, 6)
+      AND ${teams.organizationId} = ${organizationId}))
+)`;
+
+/**
  * Members one of decision `decision`'s recipients names, when it has more
  * than one (`workflow_decision_recipients`), as a condition on `members`.
  */
@@ -566,7 +584,7 @@ const recipientsCondition = (
  * by it. An independent run's starter is the person it acts for.
  */
 const eligibleMembers = (
-  deciders: string,
+  deciders: string | SQLiteColumn,
   run: {
     /** The decision's ID: its recipients, if it has more than one. */
     id: string | SQLiteColumn;
@@ -585,22 +603,68 @@ const eligibleMembers = (
       AND ${workflowResourceRuns.principalId} = ${members.userId}
   )`;
   let starter: SQL | undefined = notStarter;
-  if (decidersOf(deciders).kind === "person") {
+  if (typeof deciders !== "string") {
+    // As below, read from the row: a `person:` decision leaves out its
+    // starter only when it excludes them.
+    starter = sql`((substr(${deciders}, 1, 7) = 'person:' AND ${starterExcluded} = 0) OR ${notStarter})`;
+  } else if (decidersOf(deciders).kind === "person") {
     if (typeof starterExcluded === "boolean") {
       starter = starterExcluded ? notStarter : undefined;
     } else {
       starter = sql`(${starterExcluded} = 0 OR ${notStarter})`;
     }
   }
+  const named =
+    typeof deciders === "string"
+      ? decidersCondition(deciders)
+      : decidersColumnCondition(deciders);
   return (
     and(
       eq(members.organizationId, organizationId),
       notRemoved(members.userId),
-      or(decidersCondition(deciders), recipientsCondition(run.id)),
+      or(named, recipientsCondition(run.id)),
       starter
     ) ?? sql`0`
   );
 };
+
+/**
+ * That `userId` may answer the decision of each row now, as a condition on
+ * `workflow_decisions` (`eligibleMembers`, by each row's own deciders): for
+ * a statement that lists decisions, so one nobody asks of them never
+ * shapes its page. Staff, who aren't members, are asked nothing.
+ */
+export const answerableByNow = (db: DrizzleD1Database, userId: string): SQL =>
+  exists(
+    db
+      .select({ one: sql`1` })
+      .from(members)
+      .where(
+        and(
+          eq(members.userId, userId),
+          eligibleMembers(
+            workflowDecisions.deciders,
+            {
+              id: workflowDecisions.id,
+              runId: workflowDecisions.runId,
+              resourceRunId: workflowDecisions.resourceRunId,
+            },
+            workflowDecisions.starterExcluded
+          )
+        )
+      )
+  );
+
+/**
+ * That the decision of each row of an independent run goes on and still
+ * takes answers at `now`, as a condition on `workflow_decisions`: open,
+ * before its deadline, its run going on (`resourceRunGoesOn`).
+ */
+export const resourceDecisionPending = (now: Date): SQL =>
+  and(
+    stillOpen(workflowDecisions, now),
+    resourceRunGoesOn(workflowDecisions.resourceRunId)
+  ) ?? sql`0`;
 
 /**
  * That `userId` may answer the decision now, as a condition on its row
