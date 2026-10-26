@@ -36,7 +36,6 @@ import type { Release } from "./app-releases.ts";
 import { callTimeoutMs } from "./app.ts";
 import { usableApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { memberRole } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { callOperation } from "./operations.ts";
@@ -46,7 +45,7 @@ import type {
   ResourceBindings,
   UseRefusal,
 } from "./operations.ts";
-import { requireApprovedVersion } from "./permissions.ts";
+import { personRole, requireApprovedVersion } from "./permissions.ts";
 import { readWindow } from "./query-windows.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
@@ -453,7 +452,7 @@ export const runInvocationFor = async (
   const authorize = async () => {
     await requireNotRevoked(env, app, version);
     await requireApprovedVersion(env, app, version, auditRefusal);
-    const role = await memberRole(env.DB, authority.onBehalfOf);
+    const role = await personRole(env, authority.onBehalfOf, authority.staff);
     if (role === undefined) {
       throw permissionErrors.create("permission.person_inactive");
     }
