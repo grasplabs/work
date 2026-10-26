@@ -2,12 +2,12 @@ import type { ActionManifest } from "@grasp-os/connector-kit/manifest";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { isolateBase } from "@grasp-os/shared/runtime";
 import { exports } from "cloudflare:workers";
 
 import { nativeConnector } from "./bundled-connectors.ts";
 import type { NativeConnector } from "./bundled-connectors.ts";
 import type { Connection } from "./connections.ts";
+import { loadConnector } from "./connector-isolate.ts";
 import type { EgressProps } from "./egress.ts";
 import { callTimeoutMs, mcpServer } from "./mcp.ts";
 import type { McpServer, McpTool } from "./mcp.ts";
@@ -26,6 +26,9 @@ import { credentialFor } from "./tokens.ts";
 // the isolate, so a cached one would send a later call's requests with an
 // earlier call's token, for another connection or person. A fresh isolate
 // also leaves nothing from one call in module state for the next (EG5).
+//
+// Whatever a connector logs stays in its isolate: connector-isolate.ts
+// loads it silenced (GRA-940).
 
 /** The build a connector's code makes (`nativeRelease`). */
 const releaseOf = async ({
@@ -56,17 +59,6 @@ export const nativeRelease = async (
   }
   return await release;
 };
-
-/**
- * How a connector's isolate runs: no importable env, and limits per call,
- * enforced by the runtime. Its env is empty; its one way out is the egress
- * handler, its `globalOutbound`, set per call (see `nativeServer`).
- */
-const isolate = {
-  ...isolateBase,
-  // Unlike App code, it calls a provider's API, a bounded number of times.
-  limits: { cpuMs: 10_000, subRequests: 50 },
-} satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
 
 /**
  * Largest answer connect reads from a native connector, in bytes: a read
@@ -147,14 +139,11 @@ export const nativeServer = async (
     // The egress closes when connect's MCP client gives up on the call.
     expiresAt: Date.now() + callTimeoutMs,
   };
-  const worker = env.LOADER.load({
-    ...isolate,
-    mainModule: "connector.js",
-    modules: { "connector.js": code },
-    env: {},
-    globalOutbound: exports.ConnectorEgress({ props }),
-  });
-  const entrypoint = worker.getEntrypoint();
+  const entrypoint = loadConnector(
+    env.LOADER,
+    code,
+    exports.ConnectorEgress({ props })
+  ).getEntrypoint();
   return mcpServer(
     connectorEndpoint,
     async (request) => await entrypoint.fetch(request),

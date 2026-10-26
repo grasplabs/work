@@ -2,6 +2,7 @@ import { transcriptSchema } from "@grasp-os/brain/transcripts";
 import type { Transcript } from "@grasp-os/brain/transcripts";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { isolateBase } from "@grasp-os/shared/runtime";
 import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import type { UploadMediaType } from "@grasp-os/shared/uploads";
@@ -15,7 +16,6 @@ import {
   platformWallMs,
   runPlatformCode,
 } from "../platform-sandbox.ts";
-import { quietLoader } from "../quiet-loader.ts";
 import {
   functionCapability,
   inOrderReader,
