@@ -1500,6 +1500,133 @@ export const linkProposals = async <C>(
   }));
 };
 
+/** One entity of a match proposal, as the reader sees it. */
+export interface MatchedEntity {
+  id: string;
+  /** The readable collections whose current sources mention it. */
+  collectionIds: string[];
+  /** How many of the reader's readable sources mention it. */
+  sources: number;
+}
+
+/**
+ * Entities of different collections that may be one (GRA-1080): of one
+ * kind, known by one name. A proposal only, never a link: on a name alone
+ * (`basis`), nothing says they are, least of all of two people.
+ */
+export interface EntityMatchProposal {
+  kind: string;
+  name: string;
+  basis: "name";
+  entities: MatchedEntity[];
+}
+
+const matchProposalsInputSchema = z.strictObject({
+  limit: z.int().min(1).max(100).optional(),
+});
+
+/**
+ * Entities that may be the same across the collections `reader` may read
+ * (GRA-1080): each of one kind and one name, in sources of more than one
+ * collection, which linking keeps apart (identity stays inside a
+ * collection). Worked out from what the reader may read now, and nothing
+ * else: a proposal is never kept, so it exists only for a reader of every
+ * side of it, and an entity of a collection they can't read is never one
+ * of its sides, nor shapes how many there are (the probe #1203 closed).
+ * Exact names only, never similar ones.
+ */
+export const entityMatchProposals = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown = {}
+): Promise<EntityMatchProposal[]> => {
+  const { limit = 20 } = brainErrors.parse(
+    "brain.invalid",
+    matchProposalsInputSchema,
+    input
+  );
+  // As a recall: an App, run or agent only under its Brain grant.
+  await brain.ports.recall.require(reader);
+  const linked = await readableMentions(
+    brain,
+    reader,
+    eq(brainMentions.state, "linked")
+  );
+  const rows = linked.filter(({ collectionId }) => collectionId !== null);
+  const byEntity = new Map<
+    string,
+    {
+      kind: string;
+      names: Map<string, string>;
+      collections: Set<string>;
+      sources: Set<string>;
+    }
+  >();
+  for (const { entityId, kind, name, collectionId, source } of rows) {
+    if (entityId !== null && collectionId !== null) {
+      const entry = byEntity.get(entityId) ?? {
+        kind,
+        names: new Map(),
+        collections: new Set(),
+        sources: new Set(),
+      };
+      entry.names.set(fold(name), entry.names.get(fold(name)) ?? name);
+      entry.collections.add(collectionId);
+      entry.sources.add(source);
+      byEntity.set(entityId, entry);
+    }
+  }
+  // Each kind and name, with the entities known by it.
+  const byName = new Map<
+    string,
+    { kind: string; name: string; ids: Set<string> }
+  >();
+  for (const [id, { kind, names }] of byEntity) {
+    for (const [folded, name] of names) {
+      const key = `${kind}\u0000${folded}`;
+      const entry = byName.get(key) ?? { kind, name, ids: new Set() };
+      entry.ids.add(id);
+      byName.set(key, entry);
+    }
+  }
+  const proposals = new Map<string, EntityMatchProposal>();
+  for (const { kind, name, ids } of byName.values()) {
+    const entities = [...ids].toSorted().map((id) => {
+      const entry = byEntity.get(id);
+      return {
+        id,
+        collectionIds: [...(entry?.collections ?? [])].toSorted(),
+        sources: entry?.sources.size ?? 0,
+      };
+    });
+    const collectionCount = new Set(
+      entities.flatMap(({ collectionIds }) => collectionIds)
+    ).size;
+    const key = entities.map(({ id }) => id).join(",");
+    if (entities.length > 1 && collectionCount > 1 && !proposals.has(key)) {
+      proposals.set(key, { kind, name, basis: "name", entities });
+    }
+  }
+  const page = [...proposals.values()]
+    .toSorted(
+      (a, b) =>
+        b.entities.length - a.entities.length ||
+        a.name.localeCompare(b.name) ||
+        a.kind.localeCompare(b.kind)
+    )
+    .slice(0, limit);
+  const shown = new Set(
+    page.flatMap(({ entities }) => entities.map(({ id }) => id))
+  );
+  await noteRead(
+    brain,
+    reader,
+    "entity_match_proposals",
+    rows.filter(({ entityId }) => entityId !== null && shown.has(entityId))
+  );
+  return page;
+};
+
 /** How far linking is over what a reader may read. */
 export interface LinkCoverage {
   sources: number;
