@@ -2206,24 +2206,29 @@ export const brainCaptureIntents = sqliteTable(
 );
 
 /**
- * What a run's latest recall on each Brain binding cites (GRA-299;
- * workflows/host.ts): the collections and document versions of its pack,
- * identifiers only. Before the run calls a model or a connection, the host
- * checks the run may still read them all; a recall on the binding again
- * replaces them, the deliberate refresh. Goes with the run's details.
+ * Every document version a run's recalls cited (GRA-299; workflows/
+ * run-evidence.ts), with the Brain binding's permission each came through:
+ * identifiers only. It only grows while the run lives, so no recall can
+ * narrow it, and before the run's next model, connection or App call,
+ * decision or output, the host checks the run may still read them all,
+ * under those permissions. A run that may no longer is refused from then
+ * on. Goes with the run's details.
  */
 export const runBrainEvidence = sqliteTable(
   "run_brain_evidence",
   {
     runId: text("run_id").notNull(),
-    /** The run's binding of the Brain the pack came through. */
-    binding: text().notNull(),
-    packId: text("pack_id").notNull(),
-    /** JSON array of the collection IDs its pack cites. */
-    collectionIds: text("collection_ids").notNull(),
+    documentId: text("document_id").notNull(),
+    collectionId: text("collection_id").notNull(),
+    /** The `brain` permission of the binding that recalled it. */
+    permissionId: text("permission_id").notNull(),
     recordedAt: timestamp("recorded_at").notNull(),
   },
-  (table) => [primaryKey({ columns: [table.runId, table.binding] })]
+  (table) => [
+    primaryKey({
+      columns: [table.runId, table.documentId, table.permissionId],
+    }),
+  ]
 );
 
 /**

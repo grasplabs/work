@@ -1,8 +1,5 @@
 import { brainErrors } from "@grasp-os/brain/contract";
-import { collectionIdSchema } from "@grasp-os/brain/ids";
-import { knowledgeErrors } from "@grasp-os/brain/knowledge";
 import { recall } from "@grasp-os/brain/recall";
-import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { connectErrors } from "@grasp-os/shared/connect";
@@ -65,7 +62,7 @@ import type { RunCaller } from "../app-functions.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "../audit-outbox.ts";
 import { forSandbox, requireStepKey, runStubCall } from "../bindings.ts";
 import type { ConnectionGrant } from "../bindings.ts";
-import { runBrainEvidence, workflowRuns } from "../db/core/schema.ts";
+import { workflowRuns } from "../db/core/schema.ts";
 import {
   decisionDeadline,
   decisionEventType,
@@ -93,6 +90,10 @@ import { attachmentOf, keptMessage } from "./kept-email.ts";
 import { modelWaitRecorded } from "./model-waits.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
+import {
+  recordRunEvidence,
+  requireRunEvidenceReadable,
+} from "./run-evidence.ts";
 import { shareWakeType } from "./share-wakes.ts";
 import { heldWakeType } from "./wakes.ts";
 
@@ -2785,84 +2786,20 @@ export class RunHost extends RpcTarget {
         undefined,
         async (reader) => await recall(brainOf(this.#env), reader, request)
       );
-      // What it cites, kept with the run: checked before every model or
-      // connection call from now on (`#requireEvidenceReadable`). A recall
-      // on this binding again replaces it, the deliberate refresh. A step
-      // replayed returns its recorded pack and records nothing.
-      const collectionIds = [
-        ...new Set(
-          pack.sourceVersions.flatMap((ref) =>
-            ref.kind === "document" ? [ref.collectionId] : []
-          )
-        ),
-      ];
-      const now = new Date();
-      await drizzle(this.#env.DB)
-        .insert(runBrainEvidence)
-        .values({
-          runId: this.#run.runId,
-          binding: name,
-          packId: pack.id,
-          collectionIds: JSON.stringify(collectionIds),
-          recordedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: [runBrainEvidence.runId, runBrainEvidence.binding],
-          set: {
-            packId: pack.id,
-            collectionIds: JSON.stringify(collectionIds),
-            recordedAt: now,
-          },
-        });
+      // What it cites, added to the run's evidence (run-evidence.ts):
+      // checked before anything leaves the run from now on. A step replayed
+      // returns its recorded pack and records nothing.
+      await recordRunEvidence(this.#env, this.#run, permissionId, pack);
       return pack;
     });
   }
 
   /**
-   * Refuses, as `brain.revoked`, a model or connection call of a run whose
-   * recalls cite what it may no longer read (GRA-299; the threat model is
-   * on the issue): the collections its latest pack on each binding came
-   * from, under its `brain` grant and its person's access as they are now.
-   * Completed steps and what they recorded stay as they were; a recall
-   * again (a new step) is the way on.
+   * Refuses, as `brain.revoked`, anything leaving this run once it may no
+   * longer read what it recalled (run-evidence.ts).
    */
   async #requireEvidenceReadable(): Promise<void> {
-    const rows = await drizzle(this.#env.DB)
-      .select({ collectionIds: runBrainEvidence.collectionIds })
-      .from(runBrainEvidence)
-      .where(eq(runBrainEvidence.runId, this.#run.runId));
-    if (rows.length === 0) {
-      return;
-    }
-    const collectionIds = [
-      ...new Set(
-        rows.flatMap(({ collectionIds: cited }) =>
-          z.array(collectionIdSchema).parse(JSON.parse(cited))
-        )
-      ),
-    ];
-    try {
-      await readAsDelegate(
-        this.#env,
-        this.#run.authority,
-        { type: "run", appId: this.#run.app, runId: this.#run.runId },
-        undefined,
-        async (reader) => {
-          const store = d1BrainStore(brainOf(this.#env));
-          await store.requireBrainGrant(reader);
-          await store.requireReadable(reader, collectionIds);
-        }
-      );
-    } catch (error) {
-      if (
-        brainErrors.codeOf(error) !== undefined ||
-        knowledgeErrors.codeOf(error) !== undefined ||
-        permissionErrors.codeOf(error) !== undefined
-      ) {
-        throw brainErrors.create("brain.revoked");
-      }
-      throw error;
-    }
+    await requireRunEvidenceReadable(this.#env, this.#run);
   }
 
   /**
@@ -2951,6 +2888,7 @@ export class RunHost extends RpcTarget {
     return await settle(async () => {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "APP");
+      await this.#requireEvidenceReadable();
       await this.#requireReviewed(attempt, "APP");
       await this.#requirePerson();
       const stepKey = this.#stepKeyOf(attempt);
@@ -3008,6 +2946,8 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "decision");
       requireUnrefused(attempt);
+      // Its text goes to people other than the run's person.
+      await this.#requireEvidenceReadable();
       await this.#requireKindIn(attempt, "decision", "decision");
       const { step, from, description, timeout } = checked(
         decisionSchema,

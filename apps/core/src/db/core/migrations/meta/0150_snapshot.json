@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9a86ffc2-48ac-43f8-8994-154e296de617",
+  "id": "2a123fd4-ca16-4f0e-ae49-82e1d73173a1",
   "prevId": "7419e593-cc45-42a9-a7bf-c2740f0f2974",
   "tables": {
     "access_revocations": {
@@ -6080,22 +6080,22 @@
           "notNull": true,
           "autoincrement": false
         },
-        "binding": {
-          "name": "binding",
+        "document_id": {
+          "name": "document_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "pack_id": {
-          "name": "pack_id",
+        "collection_id": {
+          "name": "collection_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "collection_ids": {
-          "name": "collection_ids",
+        "permission_id": {
+          "name": "permission_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -6112,12 +6112,13 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "run_brain_evidence_run_id_binding_pk": {
+        "run_brain_evidence_run_id_document_id_permission_id_pk": {
           "columns": [
             "run_id",
-            "binding"
+            "document_id",
+            "permission_id"
           ],
-          "name": "run_brain_evidence_run_id_binding_pk"
+          "name": "run_brain_evidence_run_id_document_id_permission_id_pk"
         }
       },
       "uniqueConstraints": {},
