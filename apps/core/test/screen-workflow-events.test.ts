@@ -36,6 +36,7 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { readWorkflowWatch } from "../src/screen-workflows.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
@@ -698,12 +699,43 @@ describe("a screen's typed send", { timeout: 180_000 }, () => {
     const send = async (runId: string) =>
       outcomeOf(await called(builder, app, lease, sendText(reference, runId)));
 
+    // What each run's snapshot says of sending it its event: as a send
+    // goes, once the run waits for it.
+    const canSend = async (runId: string) =>
+      await vi.waitFor(
+        async () => {
+          const { value: snapshot } = await readWorkflowWatch(
+            env,
+            builder.acting,
+            app,
+            {
+              workflow: { ...wireOf(reference), kind: "workflow" },
+              watch: "run",
+              runId,
+            }
+          );
+          const [wait] = z
+            .object({ waits: z.array(z.object({ canSend: z.boolean() })) })
+            .parse(snapshot).waits;
+          expect(wait).toBeDefined();
+          return wait?.canSend;
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+    // Read before sending: the event a send delivers ends the wait.
+    const shown = {
+      unrestrictedRun: await canSend(before),
+      restrictedRun: await canSend(after),
+    };
+
     expect({
       unrestrictedRun: await send(before),
       restrictedRun: isEvent(await send(after)),
+      shown,
     }).toStrictEqual({
       unrestrictedRun: "permission.restricted",
       restrictedRun: true,
+      shown: { unrestrictedRun: false, restrictedRun: true },
     });
   });
 });
