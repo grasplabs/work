@@ -17,12 +17,14 @@ import {
   chatAuthority,
   chatContext,
   endedBy,
+  recordRunReads,
   recordSources,
   recordToolCall,
   requireOpenRun,
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { brainGaps } from "./brain-rpc.ts";
+import { brainDocumentRead, brainGrantRead } from "./history-access.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { brainOf } from "./knowledge/ports.ts";
@@ -81,13 +83,48 @@ interface AgentGap {
   about: string[];
 }
 
+/** A document a Brain read hands over, in its collection. */
+interface HandedDocument {
+  documentId: string;
+  collectionId: string;
+}
+
 /** What a skill call read, as `#delegated` records it, and what it hands over. */
 interface Delegated<T> {
   value: T;
   /** The collections it read from, and the documents it hands over. */
-  sources: { collections: readonly string[]; documents: readonly string[] };
+  sources: {
+    collections: readonly string[];
+    documents: readonly HandedDocument[];
+  };
   detail: Record<string, string | number>;
 }
+
+/**
+ * Records what a Brain read of the chat's code read from, before it is
+ * handed over: its collections with the chat (`recordSources`), and with
+ * the run the agent's `brain` grant and each document handed over too
+ * (history-access.ts), so the run's result is withheld from the model
+ * once that grant is revoked or a document is erased or moved, though its
+ * collection may still be read. Only ever added to: a later read that
+ * finds nothing lifts nothing.
+ */
+const recordBrainRead = async (
+  env: Env,
+  scope: AgentScope,
+  collections: readonly string[],
+  documents: readonly HandedDocument[]
+): Promise<void> => {
+  await recordSources(env, scope, collections, [
+    ...new Set(documents.map(({ documentId }) => documentId)),
+  ]);
+  await recordRunReads(env, scope, [
+    brainGrantRead,
+    ...documents.map(({ collectionId, documentId }) =>
+      brainDocumentRead(collectionId, documentId)
+    ),
+  ]);
+};
 
 /** The brain, as a chat's code reads it. */
 export class BrainAgentApi
@@ -130,13 +167,16 @@ export class BrainAgentApi
         await recallWithSources(brainOf(this.env), reader, input)
     );
     // Every collection it read from, found or not, as a search records.
-    await recordSources(this.env, scope, sources, [
-      ...new Set(
-        pack.sourceVersions.flatMap((ref) =>
-          ref.kind === "document" ? [ref.documentId] : []
-        )
-      ),
-    ]);
+    await recordBrainRead(
+      this.env,
+      scope,
+      sources,
+      pack.sourceVersions.flatMap((ref) =>
+        ref.kind === "document"
+          ? [{ documentId: ref.documentId, collectionId: ref.collectionId }]
+          : []
+      )
+    );
     return pack;
   }
 
@@ -184,7 +224,12 @@ export class BrainAgentApi
         value: read,
         sources: {
           collections: provenance.collectionIds,
-          documents: [read.skill.documentId],
+          documents: [
+            {
+              documentId: read.skill.documentId,
+              collectionId: read.skill.collectionId,
+            },
+          ],
         },
         detail: { version: read.skill.version },
       };
@@ -211,7 +256,7 @@ export class BrainAgentApi
         undefined,
         read
       );
-      await recordSources(
+      await recordBrainRead(
         this.env,
         scope,
         done.sources.collections,

@@ -1402,6 +1402,87 @@ describe("a chat's recall before a question", setUpTime, () => {
     });
   });
 
+  it("withholds what a recall handed over once its document is gone or the Brain permission is revoked, though its collection may still be read, and audits it", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    /** A chat whose first turn recalled `fact`, from a collection it keeps. */
+    const recalled = async () => {
+      const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+      const fact = `The depot code is ${unique()}`;
+      const { id: collectionId } = await admin.knowledge.createCollection({
+        name: `Handbook ${unique()}`,
+        access: "everyone",
+      });
+      const { id: documentId } = await admin.knowledge.saveDocument({
+        collectionId,
+        path: "depot.md",
+        text: `# Depot ${word}\n\n${fact}.`,
+        ifVersion: 0,
+      });
+      const chat = await chatOf(
+        person.userId,
+        says("Noted."),
+        says("And again.")
+      );
+      await grantRead(admin, chat.agent, collectionId);
+      const brainGrant = await grantBrain(admin, chat.agent);
+      await chat.ask(word);
+      /** Whether the next turn's first request still sent the fact. */
+      const next = async () => {
+        const before = chat.gateway.requests.length;
+        await chat.ask("And the code?");
+        const body = JSON.stringify(chat.gateway.requests[before]?.body);
+        return {
+          fact: body.includes(fact),
+          withheld: body.includes(withheldResult),
+        };
+      };
+      return { ...chat, collectionId, documentId, brainGrant, next };
+    };
+    /** The sources of the chat's `chat.history_withheld` events. */
+    const withheldOf = async (agentId: string, chatId: string) => {
+      const events = await eventsOf(agentId, (all) =>
+        all.some(({ action }) => action === "chat.history_withheld")
+      );
+      return events
+        .filter(
+          ({ action, target }) =>
+            action === "chat.history_withheld" && target?.id === chatId
+        )
+        .map(({ detail }) => detail.source);
+    };
+
+    const kept = await recalled();
+    const unchanged = await kept.next();
+    const erased = await recalled();
+    // Erased from the Brain, as a purge erases it: its collection stays.
+    await env.KNOWLEDGE.prepare("DELETE FROM documents WHERE id = ?")
+      .bind(erased.documentId)
+      .run();
+    const afterErase = await erased.next();
+    const revoked = await recalled();
+    await admin.api.permissions.revoke(revoked.brainGrant);
+    const afterRevoke = await revoked.next();
+
+    expect({
+      unchanged,
+      afterErase,
+      afterRevoke,
+      erasedSources: await withheldOf(erased.agent.agentId, erased.chat.id),
+      revokedSources: await withheldOf(revoked.agent.agentId, revoked.chat.id),
+    }).toStrictEqual({
+      // Still readable: the next turn sends what the first recalled.
+      unchanged: { fact: true, withheld: false },
+      afterErase: { fact: false, withheld: true },
+      afterRevoke: { fact: false, withheld: true },
+      // Named by its IDs, never by what it said.
+      erasedSources: [
+        `brain-document:${erased.collectionId}/${erased.documentId}`,
+      ],
+      revokedSources: ["brain-grant"],
+    });
+  });
+
   it("answers without evidence, told why, when the recall runs out of time", async () => {
     const admin = await newAdmin();
     const person = await newPerson();
