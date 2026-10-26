@@ -815,7 +815,7 @@ const ruleOf = async (
             WHERE parent_run.id = ${parent.runId}
               AND parent_run.workflow_resource_id = ${parent.workflowId}
               AND parent_run.principal_id = ${parent.principal}
-              AND parent_run.status IN ('starting', 'running'))
+              AND parent_run.status IN ('starting', 'running', 'paused'))
           AND ${grantSql(
             allowingPermissionSql(
               { type: "workflow", workflowId: parentWorkflow.data },
@@ -1302,7 +1302,7 @@ const underRunLimit = (authorization: StartAuthorization): SQL =>
     : sql`((SELECT COUNT(*) FROM workflow_resource_runs AS live
         WHERE live.workflow_resource_id = ${authorization.workflowId}
           AND live.principal_id = ${authorization.principal}
-          AND live.status IN ('starting', 'running')) < ${maxLiveRunsPerPrincipal})`;
+          AND live.status IN ('starting', 'running', 'paused')) < ${maxLiveRunsPerPrincipal})`;
 
 /**
  * Admits the new start `authorization` decided on: its receipt, written in

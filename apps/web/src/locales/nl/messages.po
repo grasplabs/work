@@ -45,11 +45,6 @@ msgstr "(van jou)"
 msgid "{0, plural, one {{requester} asks for # package} other {{requester} asks for # packages}}"
 msgstr "{0, plural, one {{requester} vraagt om # pakket} other {{requester} vraagt om # pakketten}}"
 
-#. placeholder {0}: draft.changed.length
-#: src/chat/studio.tsx
-msgid "{0, plural, one {# file changed in this chat, not proposed yet} other {# files changed in this chat, not proposed yet}}"
-msgstr "{0, plural, one {# bestand gewijzigd in deze chat, nog niet voorgesteld} other {# bestanden gewijzigd in deze chat, nog niet voorgesteld}}"
-
 #. placeholder {0}: request.counts.findings
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {# finding reported} other {# findings reported}}"
@@ -869,10 +864,6 @@ msgstr "{name} is uitgenodigd, maar nog niet geïnterviewd."
 msgid "{name} is named, but not seen in use yet."
 msgstr "{name} wordt genoemd, maar is nog niet in gebruik gezien."
 
-#: src/connections/connect-dialog.tsx
-msgid "{name} is read-only"
-msgstr "{name} is alleen-lezen"
-
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
 msgstr "{name} is verwijderd. {count, plural, one {# persoonlijke verbinding is verbroken.} other {# persoonlijke verbindingen zijn verbroken.}}"
@@ -885,6 +876,10 @@ msgstr "{name} is overal afgemeld."
 msgid "{name} logo"
 msgstr "Logo van {name}"
 
+#: src/connections/connect-dialog.tsx
+msgid "{name} may write. Change to Read"
+msgstr "{name} mag schrijven. Wijzigen naar Lezen"
+
 #: src/chat/builds-state.ts
 msgid "{name} no longer changes the domain's data (write → read)"
 msgstr "{name} wijzigt de gegevens van het domein niet meer (schrijven → lezen)"
@@ -892,6 +887,10 @@ msgstr "{name} wijzigt de gegevens van het domein niet meer (schrijven → lezen
 #: src/chat/builds-state.ts
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} wijzigt nu de gegevens van het domein (lezen → schrijven)"
+
+#: src/connections/connect-dialog.tsx
+msgid "{name} reads only. Change to Write"
+msgstr "{name} leest alleen. Wijzigen naar Schrijven"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
@@ -917,6 +916,10 @@ msgstr "{name}, per {key}"
 #: src/dashboard/report.ts
 msgid "{name}: {count}"
 msgstr "{name}: {count}"
+
+#: src/onboarding/work-record.tsx
+msgid "{name}: {outOfTen} in 10"
+msgstr "{name}: {outOfTen} op 10"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "{name}: {shown} of the limit"
@@ -1834,6 +1837,10 @@ msgstr "Een team dat niet meer bij je organisatie hoort"
 msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
 msgstr "Een team zonder teamleider krijgt zijn links op de eerste dag, en ik vraag iedereen wat ze doen."
 
+#: src/connections/connect-dialog.tsx
+msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Een tool die je aanzet begint als Lezen waar Composio zegt dat hij alleen leest; Grasp controleert dat niet. Een tool op Lezen draait zonder te vragen. Een aanroep van een tool op Schrijven vanuit een chat, of door iemand die een domein gebruikt, wacht tot die persoon bevestigt; een workflowrun voert hem uit als een van zijn stappen. Klik op het label van een tool om het te wijzigen. Zet een tool alleen op Lezen als hij niets wijzigt: verkeerd gemarkeerd wijzigt hij dingen zonder te vragen."
+
 #: src/dashboard/standard-widgets.tsx
 msgid "A workflow is redesigned with AI and waits for its test."
 msgstr "Een workflow is herontworpen met AI en wacht op zijn test."
@@ -1897,6 +1904,11 @@ msgstr "Over teams"
 #: src/brain/brain.ts
 msgid "About tools"
 msgstr "Over tools"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record state"
+msgid "Accepted"
+msgstr "Geaccepteerd"
 
 #: src/landscape/landscape-audit.ts
 msgctxt "category of an audit event"
@@ -2163,6 +2175,10 @@ msgstr "Akkoord"
 msgid "Agreed before the first interview"
 msgstr "Afgesproken voor het eerste interview"
 
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "Agreed to take part on {on}."
+msgstr "Heeft op {on} ingestemd met deelname."
+
 #: src/routes/_shell.onboarding.tsx
 msgctxt "onboarding area section"
 msgid "Agreements"
@@ -2306,6 +2322,10 @@ msgstr "Alle aanroepen samen"
 msgid "All interviewed"
 msgstr "Allemaal geïnterviewd"
 
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "All interviews"
+msgstr "Alle interviews"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "All invoices"
 msgstr "Alle facturen"
@@ -2318,10 +2338,6 @@ msgstr "Alle teams"
 #: src/settings/pulse.ts
 msgid "All the time"
 msgstr "Altijd"
-
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "All transcripts"
-msgstr "Alle transcripten"
 
 #: src/chat/builds.tsx
 msgid "All workflow tests pass."
@@ -2508,6 +2524,7 @@ msgid "Answered: {question}"
 msgstr "Beantwoord: {question}"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
+#: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Answers"
 msgstr "Antwoorden"
 
@@ -2691,6 +2708,7 @@ msgstr "De pakketten voor {domain} goedkeuren?"
 #: src/dashboard/runs-widget.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
+#: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Approved"
 msgstr "Goedgekeurd"
 
@@ -2837,14 +2855,6 @@ msgstr "Zoals de lijst van het bedrijf ze hoort te hebben. Hun link blijft dezel
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "As the kickoff suggests"
 msgstr "Zoals de kick-off voorstelt"
-
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "As the record keeps it so far. Nothing counts until the person has agreed to it."
-msgstr "Zoals het tot nu toe is vastgelegd. Niets telt tot de persoon ermee heeft ingestemd."
-
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "As the record keeps it. What they took out is struck through and does not count."
-msgstr "Zoals het is vastgelegd. Wat de persoon eruit haalde, is doorgestreept en telt niet."
 
 #. placeholder {0}: gap.owner
 #: src/chat/brain-questions.tsx
@@ -3078,6 +3088,10 @@ msgstr "Terug naar een concept, alleen voor de bouwers"
 msgid "Back to how it began"
 msgstr "Terug naar hoe het begon"
 
+#: src/chat/draft-versions.tsx
+msgid "Back to latest"
+msgstr "Terug naar de nieuwste"
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "Back to policies"
@@ -3299,6 +3313,10 @@ msgctxt "column of the audit trail export: who recorded the event"
 msgid "By"
 msgstr "Door"
 
+#: src/brain/memory-page.tsx
+msgid "By {by}"
+msgstr "Door {by}"
+
 #. Column value: a team named this application
 #: src/brain/brain-source-contents.tsx
 msgid "By a team"
@@ -3402,8 +3420,10 @@ msgstr "Kan bedrijfsdata {verbs}"
 msgid "Can’t be read"
 msgstr "Niet leesbaar"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
+#: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
@@ -3801,6 +3821,12 @@ msgstr "Gekozen tijdens de run: {options}"
 msgid "Chosen teams"
 msgstr "Gekozen teams"
 
+#. placeholder {0}: node.citedRevision
+#. placeholder {1}: node.record.revision
+#: src/brain/memory-page.tsx
+msgid "Cited at revision {0}; it is at revision {1} now."
+msgstr "Geciteerd bij revisie {0}; nu is het revisie {1}."
+
 #: src/activity/audit-log.tsx
 msgid "Clear"
 msgstr "Wissen"
@@ -3865,6 +3891,7 @@ msgstr "Gesloten zonder gesprek"
 msgid "Closes {closes}"
 msgstr "Sluit op {closes}"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
 msgid "Code"
 msgstr "Code"
@@ -3950,6 +3977,11 @@ msgstr "Compact"
 
 #: src/brain/brain.ts
 #: src/routes/_shell.settings.billing.tsx
+msgid "Company"
+msgstr "Bedrijf"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
 msgid "Company"
 msgstr "Bedrijf"
 
@@ -4226,6 +4258,7 @@ msgstr "Gesprekken"
 msgid "Copenhagen"
 msgstr "Kopenhagen"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/review-parts.tsx
@@ -4246,9 +4279,29 @@ msgstr "Adres kopiëren"
 msgid "Copy app ID"
 msgstr "App-ID kopiëren"
 
+#: src/chat/answer-markdown.tsx
+msgid "Copy code"
+msgstr "Code kopiëren"
+
 #: src/landscape/audit-trail.tsx
 msgid "Copy fingerprint"
 msgstr "Vingerafdruk kopiëren"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table"
+msgstr "Tabel kopiëren"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as CSV"
+msgstr "Tabel kopiëren als CSV"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as Markdown"
+msgstr "Tabel kopiëren als Markdown"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as TSV"
+msgstr "Tabel kopiëren als TSV"
 
 #: src/chat/thread.tsx
 msgid "Copy the answer"
@@ -4262,9 +4315,21 @@ msgstr "Link kopiëren"
 msgid "Copy the link for {name}"
 msgstr "Kopieer de link voor {name}"
 
+#: src/chat/answer-markdown.tsx
+msgid "Copying didn't work"
+msgstr "Kopiëren is niet gelukt"
+
 #: src/landscape/landscape.ts
 msgid "Core AI"
 msgstr "AI als kern"
+
+#: src/brain/memory-page.tsx
+msgid "Correct it"
+msgstr "Corrigeren"
+
+#: src/brain/memory-page.tsx
+msgid "Corrected by"
+msgstr "Gecorrigeerd door"
 
 #: src/dashboard/signals.tsx
 #: src/dashboard/widget-board.tsx
@@ -4835,6 +4900,10 @@ msgstr "Domeinen"
 msgid "Domains and agents with a permission"
 msgstr "Domeinen en agents met een toestemming"
 
+#: src/knowledge/uploads.tsx
+msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
+msgstr "Upload geen opnames van interviews of hun ondertitels: interviews gaan via de interviewflow."
+
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
 msgid "done"
@@ -4843,6 +4912,11 @@ msgstr "klaar"
 #: src/chat/thread.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
+msgid "Done"
+msgstr "Klaar"
+
+#: src/connections/connect-dialog.tsx
+msgctxt "a step that is finished"
 msgid "Done"
 msgstr "Klaar"
 
@@ -4881,6 +4955,18 @@ msgstr "{name} downloaden"
 #: src/dashboard/report-dialog.tsx
 msgid "Download Markdown"
 msgstr "Markdown downloaden"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table"
+msgstr "Tabel downloaden"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table as CSV"
+msgstr "Tabel downloaden als CSV"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table as Markdown"
+msgstr "Tabel downloaden als Markdown"
 
 #: src/landscape/landscape-overview.ts
 msgid "DPA status"
@@ -4975,6 +5061,10 @@ msgstr "Elke persoon"
 msgid "Each person's numbers"
 msgstr "Ieders eigen cijfers"
 
+#: src/onboarding/work-record.tsx
+msgid "Each person's share"
+msgstr "Het aandeel van ieder"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Each workflow"
 msgstr "Elke workflow"
@@ -4991,6 +5081,10 @@ msgstr "Elke workflowrun mag, met de runs die hij start, hooguit 100 modelverzoe
 msgctxt "older chats"
 msgid "Earlier"
 msgstr "Eerder"
+
+#: src/chat/draft-versions.tsx
+msgid "Earlier version"
+msgstr "Eerdere versie"
 
 #: src/engines/screen-approval.tsx
 msgid "Earlier versions"
@@ -5148,8 +5242,8 @@ msgid "Every interview Stephen and Claire held, by voice or typed."
 msgstr "Elk interview dat Stephen en Claire hielden, met stem of getypt."
 
 #: src/onboarding/interview-list.tsx
-msgid "Every interview, finished or stopped halfway. A name opens what was said, and every transcript read is in the audit log; the company never sees anyone's words."
-msgstr "Elk interview, afgerond of halverwege gestopt. Een naam opent wat er is gezegd, en elk gelezen transcript staat in het auditlog; het bedrijf ziet nooit wat iemand zei."
+msgid "Every interview, finished or stopped halfway. A name opens where it stands and its numbers; what was said stays with the person who said it, and every look is in the audit log."
+msgstr "Elk interview, afgerond of halverwege gestopt. Een naam opent hoe het ervoor staat en de aantallen; wat er gezegd is blijft bij wie het zei, en elke keer kijken staat in het auditlog."
 
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
@@ -5783,6 +5877,10 @@ msgstr "Livegang"
 msgid "Go on without sound"
 msgstr "Verder zonder geluid"
 
+#: src/frame/page-states.tsx
+msgid "Go to Chat"
+msgstr "Naar Chat"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Go to Grasp"
 msgstr "Naar Grasp"
@@ -6023,6 +6121,10 @@ msgstr "Overdrachten"
 #: src/policies/policy.ts
 msgid "Has no owner"
 msgstr "Heeft geen eigenaar"
+
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "Has not agreed to take part yet."
+msgstr "Heeft nog niet ingestemd met deelname."
 
 #: src/onboarding/organization-words.ts
 msgctxt "where someone stands"
@@ -6671,6 +6773,10 @@ msgstr "Hij draait niet meer (hij kon iets wijzigen)."
 msgid "It no longer runs."
 msgstr "Hij draait niet meer."
 
+#: src/brain/memory-page.tsx
+msgid "It rests on nothing you can see."
+msgstr "Het berust op niets dat je kunt zien."
+
 #: src/landscape/overview-tab.tsx
 msgid "It shows once the desktop agent or single sign-on sees someone use the app."
 msgstr "Dit verschijnt zodra de desktopagent of single sign-on ziet dat iemand de app gebruikt."
@@ -6678,6 +6784,10 @@ msgstr "Dit verschijnt zodra de desktopagent of single sign-on ziet dat iemand d
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "It starts when Stephen reads the kickoff, and grows with every interview."
 msgstr "Het begint wanneer Stephen de kickoff leest, en groeit met elk interview."
+
+#: src/interview/page.tsx
+msgid "It stays here for you to read. You can still delete it."
+msgstr "Het blijft hier voor jou om te lezen. Je kunt het nog steeds verwijderen."
 
 #: src/interview/words.ts
 msgid "It still does not work. You can stop for now and come back later. Your place is kept."
@@ -7029,6 +7139,10 @@ msgstr "De audittrail legt de laatste tijd alleen zijn eigen zoekopdrachten vast
 msgctxt "onboarding stage status"
 msgid "later"
 msgstr "later"
+
+#: src/chat/draft-versions.tsx
+msgid "Later version"
+msgstr "Latere versie"
 
 #: src/dashboard/activity.tsx
 #: src/inbox/inbox-page.tsx
@@ -7439,6 +7553,8 @@ msgstr "Leden"
 msgid "Members and roles"
 msgstr "Leden en rollen"
 
+#: src/brain/brain-nav.tsx
+#: src/brain/memory-page.tsx
 #: src/labels.ts
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Memory"
@@ -7773,6 +7889,11 @@ msgstr "Eigen inlog-app nodig"
 
 #: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
+msgid "Never"
+msgstr "Nooit"
+
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Nooit"
 
@@ -8178,6 +8299,10 @@ msgstr "Geen Pulse"
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
 msgstr "Geen enkel record is de oorzaak, dus een beheerder kan de wijziging alleen opgeven, op de pagina van het domein."
+
+#: src/brain/memory-page.tsx
+msgid "No records yet"
+msgstr "Nog geen herinneringen"
 
 #: src/landscape/data-tab.tsx
 msgid "No residency disclosed"
@@ -8876,10 +9001,6 @@ msgstr "Er wacht niets op je"
 msgid "Nothing waits on you."
 msgstr "Er wacht niets op je."
 
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "Nothing was said yet, or it was deleted because {first} asked."
-msgstr "Er is nog niets gezegd, of het is verwijderd op verzoek van {first}."
-
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nog niets"
@@ -9059,6 +9180,15 @@ msgstr "Onboardingstappen"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "Zodra ik ongeveer {threshold}% van het plaatje heb, kan je team beginnen. De rest vul ik onderweg aan."
 
+#: src/onboarding/interview-list.tsx
+msgid "One by one"
+msgstr "Een voor een"
+
+#: src/routes/_shell.onboarding.interviews.index.tsx
+msgctxt "view of the interviews"
+msgid "One by one"
+msgstr "Een voor een"
+
 #: src/interview/voice-bar.tsx
 msgid "One moment"
 msgstr "Een moment"
@@ -9211,6 +9341,10 @@ msgstr "Aan de zijkant openen"
 msgid "Open Chat"
 msgstr "Chat openen"
 
+#: src/chat/answer-markdown.tsx
+msgid "Open external link?"
+msgstr "Externe link openen?"
+
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 msgid "Open full page"
 msgstr "Volledige pagina openen"
@@ -9234,6 +9368,10 @@ msgstr "Openen in het applicatielandschap"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open it anyway"
 msgstr "Toch openen"
+
+#: src/chat/answer-markdown.tsx
+msgid "Open link"
+msgstr "Link openen"
 
 #: src/dashboard/runs-widget.tsx
 msgid "Open now"
@@ -9339,6 +9477,10 @@ msgstr "Bewerkingen"
 #: src/onboarding/document-drop.tsx
 msgid "or choose them from your computer"
 msgstr "of kies ze op je computer"
+
+#: src/interview/closed.tsx
+msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
+msgstr "Of trek je terug: niets van wat je zei wordt nog gebruikt, en je kunt het hier nog steeds lezen."
 
 #: src/routes/_shell.onboarding.tsx
 msgctxt "onboarding area section"
@@ -9559,6 +9701,11 @@ msgstr "Gepauzeerd"
 
 #: src/policies/policy.ts
 msgctxt "status of a policy rule"
+msgid "Paused"
+msgstr "Gepauzeerd"
+
+#: src/workflows/resource-runs.tsx
+msgctxt "status of a workflow run"
 msgid "Paused"
 msgstr "Gepauzeerd"
 
@@ -9904,6 +10051,11 @@ msgctxt "kind of app"
 msgid "Projects and tasks"
 msgstr "Projecten en taken"
 
+#: src/brain/memory-page.tsx
+msgctxt "memory record state"
+msgid "Proposed"
+msgstr "Voorgesteld"
+
 #: src/chat/builds.tsx
 msgid "Proposed by the agent in chat \"{chatTitle}\"."
 msgstr "Voorgesteld door de agent in chat ‘{chatTitle}’."
@@ -10072,9 +10224,8 @@ msgctxt "a document, done reading"
 msgid "Read"
 msgstr "Gelezen"
 
-#: src/onboarding/interview-people.tsx
-#: src/onboarding/work-record.tsx
-msgctxt "button: read a transcript"
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Lezen"
 
@@ -10126,16 +10277,6 @@ msgstr "Wat van het bedrijf is lezen"
 msgid "Read the leads from {name} again"
 msgstr "Teamleiders opnieuw uit {name} lezen"
 
-#: src/onboarding/interview-people.tsx
-msgid "Read the transcript"
-msgstr "Transcript lezen"
-
-#: src/onboarding/interview-list.tsx
-#: src/onboarding/interview-people.tsx
-#: src/onboarding/work-record.tsx
-msgid "Read the transcript of {name}"
-msgstr "Transcript van {name} lezen"
-
 #: src/settings/stephen-settings.tsx
 msgid "Read their own"
 msgstr "Hun eigen lezen"
@@ -10152,14 +10293,10 @@ msgstr "Gelezen wat er bij een verbinding is veranderd"
 msgid "Read what could be improved"
 msgstr "Gelezen wat er beter kan"
 
-#: src/connections/connect-dialog.tsx
+#: src/chat/draft-versions.tsx
 #: src/knowledge/collection-markers.tsx
 msgid "Read-only"
 msgstr "Alleen-lezen"
-
-#: src/connections/connect-dialog.tsx
-msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Alleen-lezen is aangevinkt waar Composio zegt dat een tool alleen leest; Grasp controleert dat niet. Een alleen-lezen-tool draait zonder te vragen. Een aanroep van elke andere tool vanuit een chat, of door iemand die een domein gebruikt, wacht tot die persoon bevestigt; een workflowrun voert hem uit als een van zijn stappen. Markeer een tool alleen als alleen-lezen als hij niets wijzigt: verkeerd gemarkeerd wijzigt hij dingen zonder te vragen."
 
 #: src/onboarding/document-drop.tsx
 msgid "Reading"
@@ -10492,6 +10629,10 @@ msgstr "Bewaartermijn"
 msgid "Retire"
 msgstr "Uitfaseren"
 
+#: src/brain/memory-page.tsx
+msgid "Retire it"
+msgstr "Intrekken"
+
 #: src/engines/package-approvals.tsx
 msgid "Retire the packages for {domain}"
 msgstr "Pakketten voor {domain} uitfaseren"
@@ -10503,6 +10644,11 @@ msgstr "Pakketten voor {domain} uitfaseren?"
 #: src/engines/package-approvals.tsx
 msgid "Retired"
 msgstr "Uitgefaseerd"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record state"
+msgid "Retired"
+msgstr "Ingetrokken"
 
 #: src/engines/package-approvals.tsx
 msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
@@ -10542,6 +10688,11 @@ msgstr "Review te laat"
 #: src/dashboard/to-do.tsx
 msgid "Review the apps of {name}"
 msgstr "De apps van {name} beoordelen"
+
+#. placeholder {0}: record.revision
+#: src/brain/memory-page.tsx
+msgid "Revision {0}"
+msgstr "Revisie {0}"
 
 #: src/workflows/definition-editor.tsx
 msgid "Revision {revision} doesn't pass yet, and no revision has."
@@ -10872,6 +11023,10 @@ msgstr "Eerst opslaan"
 msgid "Save the agreements"
 msgstr "Afspraken opslaan"
 
+#: src/brain/memory-page.tsx
+msgid "Save the correction"
+msgstr "Correctie opslaan"
+
 #: src/interview/composer.tsx
 msgid "Saved"
 msgstr "Opgeslagen"
@@ -10991,9 +11146,25 @@ msgctxt "kind of finding"
 msgid "Security"
 msgstr "Beveiliging"
 
+#: src/onboarding/interview-people.tsx
+#: src/onboarding/work-record.tsx
+msgctxt "button: see an interview"
+msgid "See"
+msgstr "Bekijken"
+
 #: src/onboarding/setup-steps.tsx
 msgid "See an example"
 msgstr "Bekijk een voorbeeld"
+
+#: src/onboarding/interview-people.tsx
+msgid "See the interview"
+msgstr "Interview bekijken"
+
+#: src/onboarding/interview-list.tsx
+#: src/onboarding/interview-people.tsx
+#: src/onboarding/work-record.tsx
+msgid "See the interview of {name}"
+msgstr "Interview van {name} bekijken"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "See the models, AI spend and the audit trail"
@@ -11137,6 +11308,11 @@ msgstr "Gedeelde postvakken, registers en de gegevens van het bedrijf, nadat ze 
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Shared with"
 msgstr "Gedeeld met"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory records: others' that you read"
+msgid "Shared with you"
+msgstr "Met jou gedeeld"
 
 #: src/brain/atlas-overlays.tsx
 #: src/onboarding/work-record.tsx
@@ -11893,6 +12069,10 @@ msgstr "Rondleiding opnieuw volgen"
 msgid "Take theirs"
 msgstr "Die van hen overnemen"
 
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "Taken out"
+msgstr "Weggehaald"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Takes part in the interviews"
 msgstr "Doet mee aan de interviews"
@@ -11900,6 +12080,10 @@ msgstr "Doet mee aan de interviews"
 #: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
 msgstr "Neemt gevoelige gegevens aan"
+
+#: src/connections/connect-dialog.tsx
+msgid "Taking long? <0>Try again</0>"
+msgstr "Duurt het lang? <0>Probeer opnieuw</0>"
 
 #: src/onboarding/organization-words.ts
 msgctxt "filter: teams that take part in the interviews"
@@ -11973,6 +12157,11 @@ msgstr "Team"
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
+msgid "Team"
+msgstr "Team"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
 msgid "Team"
 msgstr "Team"
 
@@ -12268,6 +12457,10 @@ msgstr "De {top} die het meest uitgaven; anderen gaven minder uit."
 msgid "The account you signed in with."
 msgstr "Het account waarmee je bent ingelogd."
 
+#: src/frame/page-states.tsx
+msgid "The address may be wrong, or the page was moved or removed."
+msgstr "Misschien klopt het adres niet, of is de pagina verplaatst of verwijderd."
+
 #: src/activity/audit-words.ts
 msgid "The agent looked something up"
 msgstr "De agent heeft iets opgezocht"
@@ -12383,10 +12576,6 @@ msgstr "Het platform van het bedrijf blijft dicht tot Grasp het startsein geeft.
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
 msgstr "De koppeling werkt niet meer. Workflows die hem gebruiken, wachten tot iemand opnieuw inlogt."
-
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "The conversation"
-msgstr "Het gesprek"
 
 #: src/onboarding/kickoff-errors.ts
 msgid "The conversation couldn't be read just now. Try again in a moment."
@@ -12823,6 +13012,10 @@ msgid "The run is going."
 msgstr "De run is bezig."
 
 #: src/workflows/test-run.tsx
+msgid "The run is paused."
+msgstr "De run is gepauzeerd."
+
+#: src/workflows/test-run.tsx
 msgid "The run is starting."
 msgstr "De run start."
 
@@ -12958,6 +13151,10 @@ msgstr "Eigen limiet"
 #: src/settings/stephen-settings.tsx
 msgid "Their own mail, calendar and files. Runs at once."
 msgstr "Hun eigen mail, agenda en bestanden. Gebeurt meteen."
+
+#: src/onboarding/work-record.tsx
+msgid "Their own: {minutes}"
+msgstr "Eigen opgave: {minutes}"
 
 #: src/onboarding/interview-people.tsx
 msgid "Their rating"
@@ -13121,6 +13318,11 @@ msgstr "Deze wijziging wordt opnieuw toegepast, dus die kan nu niet worden opgeg
 #: src/engines/store-change-errors.ts
 msgid "This change was already abandoned."
 msgstr "Deze wijziging is al opgegeven."
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
+msgid "This chat"
+msgstr "Deze chat"
 
 #: src/settings/chat-accounts.tsx
 msgid "This chat account is linked to someone else. They need to unlink it first."
@@ -13295,6 +13497,10 @@ msgstr "Deze kan alleen worden vrijgegeven: een budgetrecord waartegen hij telt 
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Deze pagina is niet geladen"
+
+#: src/frame/page-states.tsx
+msgid "This page is not here"
+msgstr "Deze pagina is er niet"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "This policy is not here any more"
@@ -13552,15 +13758,6 @@ msgctxt "tab: the whole conversation word for word"
 msgid "Transcript"
 msgstr "Transcript"
 
-#: src/onboarding/interview-list.tsx
-msgid "Transcripts"
-msgstr "Transcripten"
-
-#: src/routes/_shell.onboarding.interviews.index.tsx
-msgctxt "view of the interviews"
-msgid "Transcripts"
-msgstr "Transcripten"
-
 #: src/activity/pending.tsx
 msgid "Trigger {trigger}"
 msgstr "Trigger {trigger}"
@@ -13792,8 +13989,8 @@ msgid "Upload"
 msgstr "Uploaden"
 
 #: src/knowledge/uploads.tsx
-msgid "Upload a PDF, Word or Excel file"
-msgstr "Upload een PDF-, Word- of Excelbestand"
+msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
+msgstr "Upload een PDF-, Word- of Excelbestand, of ondertitels (.vtt)"
 
 #: src/policies/policies-table.tsx
 msgctxt "column: who uploaded a policy, and when"
@@ -13946,6 +14143,17 @@ msgstr "Geverifieerd"
 msgid "Version"
 msgstr "Versie"
 
+#. placeholder {0}: node.version
+#: src/brain/memory-page.tsx
+msgid "version {0}, the current one"
+msgstr "versie {0}, de huidige"
+
+#. placeholder {0}: node.version
+#. placeholder {1}: node.currentVersion
+#: src/brain/memory-page.tsx
+msgid "version {0}; it is at version {1} now"
+msgstr "versie {0}; nu is het versie {1}"
+
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Version {currentVersion}"
 msgstr "Versie {currentVersion}"
@@ -13953,6 +14161,10 @@ msgstr "Versie {currentVersion}"
 #: src/knowledge/timeline.tsx
 msgid "Version {number}"
 msgstr "Versie {number}"
+
+#: src/chat/draft-versions.tsx
+msgid "Version {number} of {latest}"
+msgstr "Versie {number} van {latest}"
 
 #: src/knowledge/timeline.tsx
 msgid "Version {number}, current"
@@ -13969,6 +14181,10 @@ msgstr "Versie {version}"
 #: src/workflows/test-run.tsx
 msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
 msgstr "Versie {version} heeft geen build die draait, dus er draaide niets: een van de taken gebruikt iets wat Grasp nog niet kan uitvoeren."
+
+#: src/screens/screen-frame.tsx
+msgid "Version {version}: read-only preview"
+msgstr "Versie {version}: voorbeeld, alleen lezen"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Version to review: {version}"
@@ -14052,6 +14268,10 @@ msgstr "Wachten"
 msgctxt "dashboard: what waits on you, settled on its own page"
 msgid "Waiting elsewhere"
 msgstr "Wacht elders"
+
+#: src/connections/connect-dialog.tsx
+msgid "Waiting for {app}"
+msgstr "Wachten op {app}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Waiting for {signIn}"
@@ -14235,10 +14455,6 @@ msgstr "Wat"
 msgid "What {name} is told changes only through the Stephen Lab, a version at a time. Each version has a mark, the same here and in the lab."
 msgstr "Wat {name} meekrijgt, verandert alleen via het Stephen Lab, één versie tegelijk. Elke versie heeft een kenmerk, hier en in het lab hetzelfde."
 
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "What {who} wrote down"
-msgstr "Wat {who} heeft opgeschreven"
-
 #: src/routes/_shell.settings.billing.tsx
 msgid "What appears on every invoice."
 msgstr "Wat op elke factuur staat."
@@ -14341,10 +14557,6 @@ msgstr "Wat hij mag"
 msgid "What he may do in {appName}: as for the whole company, or for fewer people."
 msgstr "Wat hij in {appName} mag: zoals voor het hele bedrijf, of voor minder mensen."
 
-#: src/routes/_shell.onboarding.interviews.$person.tsx
-msgid "What is marked is what {who} wrote down."
-msgstr "Wat gemarkeerd is, heeft {who} opgeschreven."
-
 #: src/interview/transcript.tsx
 msgid "What is marked is what I wrote down. You check it at the end."
 msgstr "Wat gemarkeerd is, heb ik opgeschreven. Je controleert het aan het eind."
@@ -14393,6 +14605,14 @@ msgstr "Waaraan hij gekoppeld is, kan hem niet meer bedienen: het recht is inget
 #: src/engines/resource-bindings.tsx
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "Waaraan hij gekoppeld is, is veranderd sinds de koppeling is goedgekeurd. Koppel hem opnieuw zodra je hebt gecontroleerd dat het nog past."
+
+#: src/brain/memory-page.tsx
+msgid "What it rests on"
+msgstr "Waar het op berust"
+
+#: src/brain/memory-page.tsx
+msgid "What it should say"
+msgstr "Wat er moet staan"
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "What it was for, and which model did it."
@@ -14524,6 +14744,10 @@ msgstr "Wat gehoord, geschreven en gekoppeld is"
 msgid "What was said"
 msgstr "Wat er gezegd is"
 
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "What was said stays with the person who said it. Nobody at Grasp reads it."
+msgstr "Wat er gezegd is blijft bij wie het zei. Niemand bij Grasp leest het."
+
 #: src/dashboard/outcome-card.tsx
 msgid "What was sent is no longer kept."
 msgstr "Wat is verstuurd wordt niet meer bewaard."
@@ -14539,6 +14763,10 @@ msgstr "Wat we doen"
 #: src/interview/closed.tsx
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
 msgstr "Wat je hebt bevestigd, blijft bewaard. Iets vergeten? Deze link werkt tot {closes}."
+
+#: src/brain/memory-page.tsx
+msgid "What you and your agents remember, and what others share with you, shows here."
+msgstr "Wat jij en je agents onthouden, en wat anderen met je delen, staat hier."
 
 #: src/landscape/data-tab.tsx
 msgid "What your identity provider granted {appName}."
@@ -14899,6 +15127,10 @@ msgstr "Met het bestuur"
 msgid "Withdraw"
 msgstr "Intrekken"
 
+#: src/interview/closed.tsx
+msgid "Withdraw instead"
+msgstr "Liever terugtrekken"
+
 #: src/settings/invitations.tsx
 msgid "Withdraw the invitation of {email}"
 msgstr "Uitnodiging van {email} intrekken"
@@ -14910,6 +15142,10 @@ msgstr "Een pakketaanvraag ingetrokken"
 #: src/activity/audit-words.ts
 msgid "Withdrew an invitation"
 msgstr "Heeft een uitnodiging ingetrokken"
+
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "Withdrew on {on}: nothing of it is used."
+msgstr "Heeft zich op {on} teruggetrokken: er wordt niets van gebruikt."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."
@@ -15115,6 +15351,11 @@ msgstr "Zou gelden"
 msgid "Would run after approval"
 msgstr "Zou na goedkeuring draaien"
 
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
+msgid "Write"
+msgstr "Schrijven"
+
 #: src/routes/guest.tsx
 msgid "Write your answer"
 msgstr "Schrijf je antwoord"
@@ -15130,6 +15371,10 @@ msgstr "Schrijfacties die een model kan sturen: {target}"
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Schrijft"
+
+#: src/routes/_shell.onboarding.interviews.$person.tsx
+msgid "Written down"
+msgstr "Opgeschreven"
 
 #: src/onboarding/work-record.tsx
 msgid "Wrong"
@@ -15218,6 +15463,11 @@ msgstr "Je hebt deze chat afgerond. Bedankt voor je tijd."
 msgid "You show me who’s who, where the documents are, and which tools people use."
 msgstr "Jij laat me zien wie wie is, waar de documenten staan en welke tools mensen gebruiken."
 
+#. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
+#: src/connections/connect-dialog.tsx
+msgid "You sign in at <0>{host}</0>"
+msgstr "Je meldt je aan op <0>{host}</0>"
+
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."
 msgstr "Je meldt je aan op de eigen pagina van {app}."
@@ -15226,10 +15476,18 @@ msgstr "Je meldt je aan op de eigen pagina van {app}."
 msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
 msgstr "Dit is je gevraagd als {owner}. Beantwoord het in het brein: iedereen in het bedrijf leest het antwoord, met je naam."
 
+#: src/interview/page.tsx
+msgid "You withdrew. Nothing you said is used from now on."
+msgstr "Je hebt je teruggetrokken. Niets van wat je zei wordt nog gebruikt."
+
 #: src/interview/transcript.tsx
 #: src/routes/guest.tsx
 msgid "You:"
 msgstr "Jij:"
+
+#: src/chat/answer-markdown.tsx
+msgid "You’re about to visit an external website."
+msgstr "Je gaat naar een externe website."
 
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
@@ -15367,6 +15625,16 @@ msgstr "Jouw woorden"
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Je werkruimte, wie daarin wat mag doen, en je eigen account."
+
+#: src/brain/memory-page.tsx
+msgctxt "memory record scope"
+msgid "Yours"
+msgstr "Van jou"
+
+#: src/brain/memory-page.tsx
+msgctxt "memory records: the person's own"
+msgid "Yours"
+msgstr "Van jou"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Zoom in"

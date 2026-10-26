@@ -7,8 +7,8 @@ import {
   startAppCompiler,
 } from "@grasp-os/compiler";
 import type { PlatformCode } from "@grasp-os/compiler";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
 
-import { quietLoader } from "./quiet-loader.ts";
 import {
   functionCapability,
   noPlaceOf,

@@ -223,9 +223,8 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
       says("I may only search.")
     );
     const first = await chats.newChat();
-    const other = await chats.newChat();
-
     await first.ask("Find the invoice in my mail.");
+    const other = await chats.newChat();
     const [request, ...more] = await person.api.chats.connectionRequests(
       first.chat.id
     );
@@ -253,7 +252,15 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
       person.api.chats.connectionRequests(other.chat.id)
     ).resolves.toStrictEqual([]);
 
+    const listed = async () => {
+      const list = await person.api.chats.list();
+      return list.map((chat) => chat.id);
+    };
+    const before = await listed();
+    // A later millisecond than the other chat was made in.
+    await scheduler.wait(5);
     await person.api.chats.grantConnection(first.chat.id, id);
+    const after = await listed();
     await first.ask("Now look.");
     await other.ask("Look here too.");
     await first.ask("Send it to Ben.");
@@ -264,6 +271,8 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
       first: await results(chats.stub, first.chat.id),
       other: await results(chats.stub, other.chat.id),
       waiting: await person.api.chats.connectionRequests(first.chat.id),
+      // The note core adds of the grant moves the chat up its person's list.
+      listed: { before, after },
     }).toStrictEqual({
       first: [
         returned({ id, binding: "MAIL", decidedBy: "person" }),
@@ -273,6 +282,10 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
       ],
       other: [refusedWith(notFound.message)],
       waiting: [],
+      listed: {
+        before: [other.chat.id, first.chat.id],
+        after: [first.chat.id, other.chat.id],
+      },
     });
     // The agent was told, in its chat only.
     const [firstNotes, otherNotes] = await Promise.all([

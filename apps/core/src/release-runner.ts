@@ -10,6 +10,7 @@ import {
   appErrorMessageMaxLength,
   operationResultMaxBytes,
 } from "@grasp-os/shared/operation-limits";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import {
   isolateArgumentDepth,
@@ -27,7 +28,6 @@ import type { OpenStore } from "./data-stores.ts";
 import { sdkReleaseManifests } from "./db/core/schema.ts";
 import { hostJsonModule, hostJsonSource } from "./host-json.ts";
 import type { HostedApp, Runner } from "./operations.ts";
-import { quietLoader } from "./quiet-loader.ts";
 import {
   capability,
   runInSession,

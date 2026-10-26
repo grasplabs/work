@@ -3,14 +3,17 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useAnsweredOrganization } from "../../../admin/organization.tsx";
 import { OrgSetup, setupTabs } from "../../../admin/setup.tsx";
 import type { SetupTab } from "../../../admin/setup.tsx";
-import { fetchClientSetup } from "../../../clients/functions.ts";
+import {
+  fetchClientQuotaPolicy,
+  fetchClientSetup,
+} from "../../../clients/functions.ts";
 import { fetchClientHosting } from "../../../hosting/functions.ts";
 import { hostingPolicyIds } from "../../../hosting/policy.ts";
 import { fetchNewClientOptions } from "../../../provision/functions.ts";
 
 const Setup = () => {
   const { clientId } = Route.useParams();
-  const { setup, releases, hosting } = Route.useLoaderData();
+  const { setup, releases, hosting, quotaPolicy } = Route.useLoaderData();
   const { tab = "status" } = Route.useSearch();
   // Shown whether or not its core answered: being set up, it has none yet.
   const organization = useAnsweredOrganization();
@@ -18,6 +21,7 @@ const Setup = () => {
     <OrgSetup
       clientId={clientId}
       hosting={hosting}
+      quotaPolicy={quotaPolicy}
       releases={releases}
       setup={setup}
       tab={tab}
@@ -39,6 +43,18 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
     return { tab: tab === "status" ? undefined : tab };
   },
   loader: async ({ params }) => {
+    // Not awaited: a slow or unreachable core never holds up the Setup. A
+    // read that fails (the database included) shows no section, never the
+    // route's error page in place of the Setup.
+    const quotaPolicy = (async () => {
+      try {
+        return await fetchClientQuotaPolicy({
+          data: { clientId: params.clientId },
+        });
+      } catch {
+        return null;
+      }
+    })();
     const [setup, { releases }, hosting] = await Promise.all([
       fetchClientSetup({ data: { clientId: params.clientId } }),
       fetchNewClientOptions(),
@@ -49,7 +65,7 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
     if (setup === null) {
       throw notFound();
     }
-    return { setup, releases, hosting };
+    return { setup, releases, hosting, quotaPolicy };
   },
   component: Setup,
 });

@@ -1,6 +1,11 @@
 import { useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
-import { BrainIcon, Building2Icon, ChevronDownIcon } from "lucide-react";
+import {
+  BrainIcon,
+  Building2Icon,
+  ChevronDownIcon,
+  NotebookPenIcon,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -299,6 +304,9 @@ export const BrainNav = ({
         >
           <BrainIcon />
         </RailButton>
+        <RailButton label={t`Memory`} render={<Link to="/brain/memory" />}>
+          <NotebookPenIcon />
+        </RailButton>
         {sections.map((section) => {
           const Icon = section.icon;
           return (
@@ -341,6 +349,9 @@ export const BrainNav = ({
       </PageSidebarTop>
       <PageSidebarBody joined>
         {company ? <TopLink icon={BrainIcon} label={t`Brain`} /> : null}
+        <Link className={topLinkClass} to="/brain/memory">
+          <TopLinkContent icon={NotebookPenIcon} label={t`Memory`} />
+        </Link>
         <span aria-hidden="true" className="bg-border my-2 h-px" />
 
         {sections.map((section) => {

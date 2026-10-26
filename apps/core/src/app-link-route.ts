@@ -20,7 +20,7 @@ import { screenLeaseHeader } from "@grasp-os/shared/screens";
 import { drizzle } from "drizzle-orm/d1";
 
 import { loadRelease } from "./app-releases.ts";
-import { appFor } from "./apps.ts";
+import { usableApp } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { identify } from "./auth/identity.ts";
 import { appHost } from "./durable-objects.ts";
@@ -29,6 +29,7 @@ import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { delivering, leasedBuild, personRefusal } from "./screen-trust.ts";
 import { admitted } from "./screens-rpc.ts";
+import { auditStaffRoute } from "./staff-audit.ts";
 
 // Core's link channel (spec 10.7.7, 32.3): whether a running App's screen,
 // through its page, may open a URL through one of its App's
@@ -53,7 +54,8 @@ import { admitted } from "./screens-rpc.ts";
 //   else's: a request naming anyone else is refused before it is counted
 //   or read (`personRefusal`).
 // - Someone without a role in the App, a version whose release was
-//   revoked, a build nobody approved: the session, the role (`appFor`),
+//   revoked, a build nobody approved, an App archived (nobody uses one):
+//   the session, the role and the App's status (`usableApp`),
 //   the current version's release and its revocation are read on every
 //   request, inside `delivering`, which checks the lease's build is still
 //   trusted before and after. A check and its open each decide anew, so a
@@ -198,7 +200,7 @@ const decided = async (
   resource: string,
   url: string
 ): Promise<Decided> => {
-  const found = await appFor(env, person, app, "user");
+  const found = await usableApp(env, person, app, "user");
   if (found.currentVersion === null) {
     throw versionErrors.create("version.not_sealed");
   }
@@ -276,6 +278,11 @@ export const appLinkResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, `app.link.${route.kind}`, {
+    app: route.app,
+    resource: route.resource,
+  });
   const refusal = personRefusal(request.headers, person.userId);
   if (refusal !== undefined) {
     log.info("app_link.person_refused", { requestId, reason: refusal.code });

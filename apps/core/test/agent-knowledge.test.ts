@@ -23,6 +23,7 @@ import {
   codeResults,
   codeStatuses,
   codeStep,
+  readApiStep,
   gatewayConfig,
   model,
   pausedReply,
@@ -139,6 +140,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     });
     const { stub, chat, gateway, ask, agent } = await chatOf(
       person.userId,
+      readApiStep("knowledge"),
       codeStep(
         "export default async (self, env) => { const { hits } = await env.knowledge.search('parental leave'); const doc = await env.knowledge.read(hits[0].documentId, { section: hits[0].section }); return { title: doc.title, path: doc.path, text: doc.text }; };"
       ),
@@ -158,8 +160,11 @@ describe("a chat's Knowledge", setUpTime, () => {
       check: null,
       channelText: null,
     });
-    // The model read the API's declaration before it wrote the code.
-    const declared = JSON.stringify(gateway.requests[0]?.body);
+    // Every request lists the APIs, a line each; the model read the full
+    // declaration it needed before it wrote the code.
+    const [listed, declared] = gateway.requests.map((request) =>
+      JSON.stringify(request.body)
+    );
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
       {
         isError: false,
@@ -170,13 +175,21 @@ describe("a chat's Knowledge", setUpTime, () => {
         })}`,
       },
     ]);
-    expect([
-      declared.includes("interface KnowledgeHit {"),
-      declared.includes("knowledge: {"),
-    ]).toStrictEqual([true, true]);
+    expect({
+      listed: listed?.includes("- env.knowledge: "),
+      declaredUpFront: listed?.includes("interface KnowledgeHit {"),
+      readOnDemand: [
+        declared?.includes("interface KnowledgeHit {"),
+        declared?.includes("knowledge: {"),
+      ],
+    }).toStrictEqual({
+      listed: true,
+      declaredUpFront: false,
+      readOnDemand: [true, true],
+    });
     const events = await eventsOf(
       agent.agentId,
-      (all) => modelCalls(all).length === 2
+      (all) => modelCalls(all).length === 3
     );
     // Both reads, as the chat's agent acting for its person, with where
     // they read from and never what; then the request after the read,
@@ -207,7 +220,7 @@ describe("a chat's Knowledge", setUpTime, () => {
           provenance: [collectionId],
         },
       ],
-      requests: [[], [collectionId]],
+      requests: [[], [], [collectionId]],
       content: false,
     });
   });

@@ -15,22 +15,33 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
+
+import type { Support } from "./drawing-support.ts";
+import { plainPart } from "./plain-text.ts";
+import type { TeamClaim } from "./team-claims.ts";
+import { inUnitOf } from "./work-drawing.ts";
 
 // What the onboarding learned, as the brain's records (GRA-367): each
-// team as a team record, one source for all its interviews, the facts its
-// people agreed to as statements, and each piece of work as a workflow
+// team as a team record, one source for all its interviews, what five or
+// more of its people said, put together, as statements (GRA-1084,
+// team-claims.ts), and each piece of work as a workflow
 // with every drawing a new version. Decided in GRA-359: nothing in them
 // points at one person. So:
 //
 // - No source per person: one per team, served live by the brain
 //   (brain-rpc.ts) with how many people it rests on, never who.
-// - A statement is an agreed fact as the record says it, never their
-//   words (`text`) or quote; never the lead's, whose role alone says who
-//   they are; and a name on the staff list in it is taken out.
+// - A statement is a claim of the team's that five or more of its people
+//   made, never one person's fact, nor their words (`text`) or quote;
+//   never resting on the lead, whose role alone says who they are; and a
+//   name on the staff list in it is taken out.
 // - A drawing keeps no `from` and no `told`: its numbers are ranges over
-//   everyone who gave one, and how many did, never whose.
-// - A team reaches the brain only once `brainFloor` of its people agreed
-//   (the store holds it back until then).
+//   everyone who gave one, and how many did, never whose; and only what
+//   five or more of its people told, each part apart (`versionOf`,
+//   GRA-1084).
+// - A team reaches the brain only once `minTeamShown` (five) of its people
+//   agreed, as many as the company's numbers need and the interview's
+//   notice promises (GRA-329); the store holds it back until then.
 //
 // Who each record rests on is kept apart, in the onboarding's own store
 // (`brain_sent`), so deleting an interview can find what it is in
@@ -38,9 +49,6 @@ import { log } from "@grasp-os/shared/log";
 
 /** The staff list, as the source the brain found each team in. */
 export const rosterSource = "src-roster";
-
-/** How many of a team must have agreed before any of it reaches the brain. */
-export const brainFloor = 3;
 
 /** An id the onboarding owns, from what it stands for: the same thing is the same id. */
 const ownId = async (kind: string, ...parts: string[]): Promise<string> => {
@@ -64,7 +72,7 @@ export const intakeIds = {
 };
 
 /** The brain's statement kind for each fact tag that is one; the rest are the drawing's. */
-const statementKinds: Partial<Record<FactTag, StatementKind>> = {
+export const statementKinds: Partial<Record<FactTag, StatementKind>> = {
   system: "tool",
   workaround: "tool",
   ai: "tool",
@@ -80,7 +88,7 @@ export interface TeamIntake {
   team: { id: string; name: string };
   /** Everyone on the staff list, by name: no record says one. */
   names: string[];
-  /** The facts each person who told their own work agreed to: never the lead. */
+  /** The facts each person who told their own work agreed to, never the lead's: what its claims are put together from. */
   tellers: { person: string; facts: { tag: FactTag; record: string }[] }[];
   /** Its pieces of work as drawn, each with who it rests on besides the people it was drawn from. */
   works: {
@@ -120,7 +128,9 @@ const escaped = (text: string): string =>
  * name, as a whole word, becomes "someone". A word that is also a name
  * ("Mark") goes too: better a word lost than a name kept.
  */
-const withoutNames = (names: readonly string[]): ((text: string) => string) => {
+export const withoutNames = (
+  names: readonly string[]
+): ((text: string) => string) => {
   const words = [
     ...new Set(
       names.flatMap((name) =>
@@ -144,114 +154,232 @@ const withoutNames = (names: readonly string[]): ((text: string) => string) => {
   };
 };
 
-/** The lowest and highest of some numbers, and how many there are; none of none. */
-const rangeOf = (
-  values: readonly number[]
-): { low: number; high: number; people: number } | null =>
-  values.length === 0
-    ? null
-    : {
-        low: Math.min(...values),
-        high: Math.max(...values),
-        people: values.length,
-      };
+/** The median of some numbers, the lower of the middle two; none of none. */
+const medianOf = (values: readonly number[]): number | undefined =>
+  values.toSorted((x, y) => x - y)[Math.floor((values.length - 1) / 2)];
 
-/** How often, over everyone who said, by whose count it is. */
+/** A median of some numbers, when five or more gave one: what one of them gave never shows. */
+const shownMedian = (values: readonly number[]): number | null =>
+  values.length >= minTeamShown ? (medianOf(values) ?? null) : null;
+
+/**
+ * How often, by whose count it is: a median of the quiet weeks (or months)
+ * and of the busy ones, each over five or more who gave that one
+ * themselves and were checked to (`numbers.volume`); one side alone
+ * stands for both. None for a count with neither.
+ */
 const volumesOf = (
-  told: readonly Told[],
+  told: readonly (readonly [string, Told])[],
+  numbers: Support["numbers"]["volume"],
   per: DrawnWork["per"]
 ): WorkflowVersionRecord["volumes"] =>
   (["me", "team", "unknown"] as const).flatMap((of) => {
-    const said = told.flatMap(({ volume, volumeOf }) =>
-      volume !== null && (volumeOf ?? "unknown") === of ? [volume] : []
-    );
-    return said.length === 0
+    const counted = numbers[of];
+    const given = (people: readonly string[], value: "quiet" | "busy") =>
+      told.flatMap(([person, { gave }]) => {
+        const own = gave?.[value] ?? null;
+        return people.includes(person) && own !== null ? [own] : [];
+      });
+    const quiets = given(counted.quiet, "quiet");
+    const busies = given(counted.busy, "busy");
+    const quiet = shownMedian(quiets);
+    const busy = shownMedian(busies);
+    const low = quiet ?? busy;
+    const high = busy ?? quiet;
+    return low === null || high === null
       ? []
       : [
           {
             of,
             per,
-            low: Math.min(...said.map(([low]) => low)),
-            high: Math.max(...said.map(([, high]) => high)),
-            people: said.length,
+            low,
+            high: Math.max(low, high),
+            people: Math.max(quiets.length, busies.length),
             basis: "estimated" as const,
           },
         ];
   });
 
 /**
- * A drawing as the brain keeps it: no person in it, each person's numbers
- * as ranges over everyone, and every text without a name.
+ * How long one whole one takes, in the drawing's unit: a median of the
+ * quickest and of the longest, each over five or more who gave that one
+ * themselves and were checked to, taken of the minutes as they gave them
+ * and rounded to the unit only then; one end alone stands for both, and a
+ * normal one alone for both too. None with none of them.
+ */
+const takesOf = (
+  toldOf: (people: readonly string[]) => Told[],
+  numbers: Support["numbers"]["takes"],
+  unit: DrawnWork["unit"]
+): WorkflowVersionRecord["takes"] => {
+  const given = (people: readonly string[], at: 0 | 1 | 2) =>
+    toldOf(people).flatMap(({ gave }) => {
+      const own = gave?.takes[at] ?? null;
+      return own === null ? [] : [own];
+    });
+  const quickests = given(numbers.quickest, 0);
+  const normals = given(numbers.normal, 1);
+  const longests = given(numbers.longest, 2);
+  // Medians of the minutes as each gave them, rounded to the unit only now.
+  const inUnit = inUnitOf(unit);
+  const shownIn = (values: readonly number[]) => {
+    const median = shownMedian(values);
+    return median === null ? null : inUnit(median);
+  };
+  const quickestShown = shownIn(quickests);
+  const longestShown = shownIn(longests);
+  const normalShown = shownIn(normals);
+  const quickest = quickestShown ?? longestShown ?? normalShown;
+  const longest = longestShown ?? quickestShown ?? normalShown;
+  return quickest === null || longest === null
+    ? null
+    : {
+        unit,
+        quickest,
+        longest: Math.max(quickest, longest),
+        people: Math.max(quickests.length, longests.length, normals.length),
+        basis: "estimated",
+      };
+};
+
+/**
+ * A drawing as the brain keeps it (GRA-1084): only the parts five or more
+ * of the people it was drawn from are checked to have told
+ * (drawing-support.ts), in their bare words without a name, and what came
+ * with them (who and with what, what is done in a case, what a term
+ * means, why a step differs) left out. Each number is a median over five
+ * or more who gave it, the lead never among them: a step's minutes and a
+ * case's share over the people the part rests on, how often, how long and
+ * how many come in wrong over the people it was drawn from. What the next
+ * interviews should ask is never the brain's: it is written from what few
+ * said.
  */
 const versionOf = (
   work: TeamIntake["works"][number],
-  clean: (text: string) => string
+  clean: (text: string) => string,
+  support: Support
 ): Omit<WorkflowVersionRecord, "id" | "workflowId" | "sourceId"> => {
   const { drawn } = work;
-  const told = Object.values(drawn.told);
-  const takes = told.flatMap(({ takes: own }) => (own === null ? [] : [own]));
-  const wrong = rangeOf(
-    told.flatMap(({ wrong: own }) => (own === null ? [] : [own]))
+  const lead = new Set(work.namedBy);
+  const tellers = Object.entries(drawn.told).filter(
+    ([person]) => !lead.has(person)
   );
+  const toldOf = (people: readonly string[]): Told[] =>
+    tellers.flatMap(([person, each]) =>
+      people.includes(person) ? [each] : []
+    );
+  // A part's words as checked: the claim's allowlist, or nothing.
+  const words = (text: string): string => plainPart(clean(text)) ?? "";
+  const shown = (people: readonly string[], text: string): string =>
+    people.length >= minTeamShown ? words(text) : "";
+  const { numbers } = support;
+  // The steps five or more are checked to have told, and where each step
+  // of the drawing lands among them: a case off the path after a step left
+  // out follows the last step kept before it, and one with no step kept
+  // before it has no place, so it is left out (never put after the first).
+  const kept = drawn.steps.flatMap((step, index) =>
+    (support.steps[index] ?? []).length >= minTeamShown ? [{ step, index }] : []
+  );
+  const placeOf = (index: number): number | null => {
+    const before = kept.filter((each) => each.index <= index).length;
+    return before === 0 ? null : before - 1;
+  };
+  // Each number only from the people checked to have given it, and only
+  // as they gave it themselves: never a part filled in from another.
+  const wrongs = toldOf(numbers.wrong).flatMap(({ wrong: own }) =>
+    own === null ? [] : [own]
+  );
+  const wrong = shownMedian(wrongs);
+  const takes = takesOf(toldOf, numbers.takes, drawn.unit);
+  const { differs } = drawn;
+  const differsKept =
+    differs !== null &&
+    kept.some(({ index }) => index === differs.step) &&
+    support.other.length >= minTeamShown;
   return {
     type: "workflowVersion",
     date: dayOf(drawn.at),
     state: work.state,
     people: drawn.from.length,
-    starts: clean(drawn.starts),
-    steps: drawn.steps.map(({ text, who, tool, minutes, documented }) => ({
-      text: clean(text),
-      who: clean(who),
-      tool: clean(tool),
-      minutes:
-        minutes === null
-          ? null
-          : {
-              quickest: minutes[0],
-              normal: minutes[1],
-              longest: minutes[2],
-              basis: "estimated",
-            },
-      documented,
-    })),
-    waits: drawn.waits.map(clean),
-    differently: drawn.differently.map(({ when, does, outOfTen, after }) => ({
-      when: clean(when),
-      does: clean(does),
-      outOfTen,
-      after,
-    })),
-    decides: clean(drawn.decides),
-    own: clean(drawn.own),
-    ai: clean(drawn.ai),
-    right: clean(drawn.right),
-    ask: clean(drawn.ask),
-    next: clean(drawn.next),
+    starts: shown(support.starts, drawn.starts),
+    steps: kept.map(({ step: { text, documented }, index }) => {
+      const minutes = shownMedian(
+        toldOf(numbers.stepMinutes[index] ?? []).flatMap(({ stepMinutes }) =>
+          (stepMinutes ?? []).flatMap(({ step, normal }) =>
+            step === index && normal !== undefined && normal !== null
+              ? [normal]
+              : []
+          )
+        )
+      );
+      return {
+        text: words(text),
+        who: "",
+        tool: "",
+        minutes:
+          minutes === null
+            ? null
+            : {
+                quickest: minutes,
+                normal: minutes,
+                longest: minutes,
+                basis: "estimated" as const,
+              },
+        documented,
+      };
+    }),
+    waits: drawn.waits.flatMap((wait, index) =>
+      (support.waits[index] ?? []).length >= minTeamShown ? [words(wait)] : []
+    ),
+    differently: drawn.differently.flatMap(({ when, after }, index) => {
+      const place = placeOf(after);
+      if (
+        (support.differently[index] ?? []).length < minTeamShown ||
+        place === null
+      ) {
+        return [];
+      }
+      const outOfTen = shownMedian(
+        toldOf(numbers.caseShares[index] ?? []).flatMap(({ caseShares }) =>
+          (caseShares ?? []).flatMap((share) =>
+            share.case === index ? [share.outOfTen] : []
+          )
+        )
+      );
+      return [{ when: words(when), does: "", outOfTen, after: place }];
+    }),
+    decides: shown(support.answers.decides ?? [], drawn.decides),
+    own: shown(support.answers.own ?? [], drawn.own),
+    ai: shown(support.answers.ai ?? [], drawn.ai),
+    right: shown(support.answers.right ?? [], drawn.right),
+    ask: shown(support.answers.ask ?? [], drawn.ask),
+    next: shown(support.answers.next ?? [], drawn.next),
     term:
-      drawn.term === null
+      drawn.term === null || support.term.length < minTeamShown
         ? null
-        : { word: clean(drawn.term.word), meaning: clean(drawn.term.meaning) },
+        : { word: words(drawn.term.word), meaning: "" },
     differs:
-      drawn.differs === null
+      differs === null || !differsKept
         ? null
         : {
-            ...drawn.differs,
-            other: clean(drawn.differs.other),
-            because: clean(drawn.differs.because),
+            // Its step is kept (`differsKept`): it has a place.
+            step: placeOf(differs.step) ?? 0,
+            other: words(differs.other),
+            why: differs.why,
+            because: "",
           },
-    volumes: volumesOf(told, drawn.per),
-    takes:
-      takes.length === 0
+    volumes: volumesOf(tellers, numbers.volume, drawn.per),
+    takes,
+    wrong:
+      wrong === null
         ? null
         : {
-            unit: drawn.unit,
-            quickest: Math.min(...takes.map(([quickest]) => quickest)),
-            longest: Math.max(...takes.map((times) => times[2])),
-            people: takes.length,
+            low: wrong,
+            high: wrong,
+            people: wrongs.length,
             basis: "estimated",
           },
-    wrong: wrong === null ? null : { ...wrong, basis: "estimated" },
-    open: drawn.open.map(clean),
+    open: [],
   };
 };
 
@@ -266,13 +394,17 @@ const recordOf = (record: BrainRecordInput): BrainRecord[] => {
 };
 
 /**
- * What a team gives the brain: its team record, its statements and its
- * drawn workflows, each drawing a version of its own, all naming the one
- * source of its interviews. The same team, fact or drawing is the same
- * id, so giving it again keeps nothing twice; a new drawing is a new
- * version. The team was found in the staff list (`rosterSource`).
+ * What a team gives the brain: its team record, its claims (`claims`, each
+ * resting on five or more people) as statements, and its drawn workflows,
+ * each drawing a version of its own, all naming the one source of its
+ * interviews. The same team, claim or drawing is the same id, so giving
+ * it again keeps nothing twice; a new drawing is a new version. The team was found in the staff list (`rosterSource`).
  */
-export const intakeOf = async (intake: TeamIntake): Promise<Intake> => {
+export const intakeOf = async (
+  intake: TeamIntake,
+  claims: readonly TeamClaim[],
+  supports: ReadonlyMap<string, Support>
+): Promise<Intake> => {
   const clean = withoutNames(intake.names);
   const teamId = intakeIds.team(intake.team.id);
   const sourceId = await intakeIds.interviews(intake.team.id);
@@ -283,35 +415,35 @@ export const intakeOf = async (intake: TeamIntake): Promise<Intake> => {
     sourceId: rosterSource,
   });
   const rests: Rest[] = [];
-  const kept = new Set<string>();
-  for (const { person, facts } of intake.tellers) {
-    for (const { tag, record } of facts) {
-      const kind = statementKinds[tag];
-      const text = clean(record).trim();
-      if (kind === undefined || text === "") {
-        continue;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- a hash each, in order
-      const id = await intakeIds.statement(intake.team.id, kind, text);
-      if (!kept.has(id)) {
-        const statement = recordOf({
-          type: "statement",
-          id,
-          kind,
-          text,
-          sourceId,
-          teamIds: [teamId],
-          toolIds: [],
-        });
-        records.push(...statement);
-        if (statement.length > 0) {
-          kept.add(id);
-        }
-      }
-      if (kept.has(id)) {
-        rests.push({ record: id, type: "statement", person });
-      }
+  // Only what five or more of its people said, put together
+  // (team-claims.ts): never one person's fact as a statement of its own.
+  for (const claim of claims) {
+    const text = clean(claim.text).trim();
+    if (text === "" || claim.people.length < minTeamShown) {
+      continue;
     }
+    // oxlint-disable-next-line no-await-in-loop -- a hash each, in order
+    const id = await intakeIds.statement(intake.team.id, claim.kind, text);
+    const statement = recordOf({
+      type: "statement",
+      id,
+      kind: claim.kind,
+      text,
+      sourceId,
+      teamIds: [teamId],
+      toolIds: [],
+    });
+    if (statement.length === 0 || records.some((each) => each.id === id)) {
+      continue;
+    }
+    records.push(...statement);
+    rests.push(
+      ...claim.people.map((person) => ({
+        record: id,
+        type: "statement" as const,
+        person,
+      }))
+    );
   }
   for (const work of intake.works) {
     // oxlint-disable-next-line no-await-in-loop -- a hash each, in order
@@ -331,7 +463,11 @@ export const intakeOf = async (intake: TeamIntake): Promise<Intake> => {
     if (workflow === undefined) {
       continue;
     }
-    const body = { ...versionOf(work, clean), workflowId, sourceId };
+    const support = supports.get(work.id);
+    if (support === undefined) {
+      continue;
+    }
+    const body = { ...versionOf(work, clean, support), workflowId, sourceId };
     // oxlint-disable-next-line no-await-in-loop -- a hash each, in order
     const id = await ownId("wfv", canonicalJson(body));
     const version = recordOf({ ...body, id });

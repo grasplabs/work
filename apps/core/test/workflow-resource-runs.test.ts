@@ -40,6 +40,8 @@ import {
   repairResourceStarts,
   repairResourceTerminations,
   resourceRunFor,
+  runOf,
+  settleControl,
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
 import { removedText, sweepRunDetails } from "../src/workflows/retention.ts";
@@ -243,6 +245,7 @@ const runColumn = async (
     | "manifest_hash"
     | "next_start_at"
     | "failure_code"
+    | "summary_revision"
 ): Promise<unknown> => {
   const row = await env.DB.prepare(
     `SELECT ${column} AS value FROM workflow_resource_runs WHERE id = ?`
@@ -447,14 +450,10 @@ describe("runs of JSON workflows", () => {
     const workflow = await published(by, (name) =>
       definitionOf(name, [
         {
-          stop: {
-            raise: {
-              error: {
-                type: "urn:grasp:error:test.stopped",
-                status: 400,
-                title: "Stopped.",
-              },
-            },
+          // A catch that retries isn't lowered (yet): no build.
+          guard: {
+            try: [{ attempt: { set: { status: "trying" } } }],
+            catch: { retry: { limit: { attempt: { count: 2 } } } },
           },
         },
       ])
@@ -562,6 +561,15 @@ describe("runs of JSON workflows", () => {
       params: JSON.stringify({ greeting: "Hello" }),
     });
   });
+});
+
+/** A first attempt at step `step` of a later activation, held a minute. */
+const laterAttempt = (step: string) => ({
+  key: `capacity:${unique()}`,
+  step,
+  number: 1,
+  generation: 100,
+  deadline: Date.now() + 60_000,
 });
 
 /** A workflow of `by`'s whose run waits an hour before it finishes. */
@@ -1231,6 +1239,76 @@ describe("a run's host, against a forged module", () => {
 });
 
 describe("whose word a run's row takes, and whose clock", () => {
+  it("audits a control settled once, though a screen and the engine settle it in the same millisecond", async () => {
+    const by = await builder();
+    const waiting = await waitingWorkflow(by);
+    const { runId } = await start(by, waiting.id);
+    // Asleep, its row running: nothing but the settlers moves its snapshot.
+    await settledInEngine(runId);
+    await vi.waitFor(
+      async () => {
+        await expect(runColumn(runId, "status")).resolves.toBe("running");
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    const app = crypto.randomUUID();
+    const control = crypto.randomUUID();
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Desk', '', ?, ?)"
+      ).bind(app, by.userId, now),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, created_at, next_at, generation) VALUES (?, ?, ?, ?, ?, 'pause', 'admitted', ?, ?, 1)"
+      ).bind(control, runId, app, by.userId, "0".repeat(32), now, now),
+    ]);
+    const row = await runOf(env, runId ?? "");
+    if (row === undefined) {
+      throw new Error("No run");
+    }
+    const revision = async (): Promise<unknown> =>
+      await runColumn(runId, "summary_revision");
+    const before = await revision();
+    // Both settlers read the same clock: the screen's apply and the
+    // engine's notification, landing together.
+    vi.useFakeTimers({ toFake: ["Date"], now });
+    try {
+      await Promise.all([
+        settleControl(
+          env,
+          row,
+          { id: control, kind: "pause", principalId: by.userId },
+          "applied"
+        ),
+        settleControl(
+          env,
+          row,
+          { id: control, kind: "pause", principalId: by.userId },
+          "applied"
+        ),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+    const settled = await env.DB.prepare(
+      "SELECT state FROM workflow_resource_run_controls WHERE id = ?"
+    )
+      .bind(control)
+      .first<{ state: string }>();
+    const audited = await runEvents(runId, "workflow.run.control_applied");
+    const after = await revision();
+    expect({
+      state: settled?.state,
+      audited: audited.length,
+      // The snapshot moved on once, by the settler that changed the row.
+      revisions: Number(after) - Number(before),
+    }).toStrictEqual({
+      state: "applied",
+      audited: 1,
+      revisions: 1,
+    });
+  });
+
   it("shows what a run returned only within the retention the deployment has now", async () => {
     const by = await builder();
     const done = await published(by, (name) =>
@@ -1827,19 +1905,22 @@ describe(
         status: result.run.status,
         code: result.run.error?.code,
         hostCalls: lineage?.hostCalls,
-        attempts: receipts.map(({ attempt, hostCalls }) => ({
-          attempt,
-          hostCalls,
-        })),
+        attempts: receipts.map(({ hostCalls }) => ({ hostCalls })),
+        // The killed attempt's retry, under the same key. The engine's
+        // attempt numbers needn't run on by one: under load CI saw the
+        // retry recorded as attempt 3 with no receipt for a second. What
+        // the quota counts is the two receipts' host calls, so the test
+        // asserts their order, not the retry's number.
+        firstAttempt: first?.attempt,
+        retryLater: (second?.attempt ?? 0) > (first?.attempt ?? 0),
         sameKey: first?.key === second?.key,
       }).toStrictEqual({
         status: "failed",
         code: "workflow.lineage_limit",
         hostCalls: 2,
-        attempts: [
-          { attempt: 1, hostCalls: 1 },
-          { attempt: 2, hostCalls: 1 },
-        ],
+        attempts: [{ hostCalls: 1 }, { hostCalls: 1 }],
+        firstAttempt: 1,
+        retryLater: true,
         sameKey: true,
       });
     });
@@ -2046,6 +2127,87 @@ describe(
         fencedActivation: "execution.stale_attempt",
         newerActivation: "ok",
         endedRun: "execution.stale_attempt",
+      });
+    });
+
+    it("keeps a resumed run's step waiting for a share while its row still says paused, and queues none of a run still paused", async () => {
+      const by = await builder();
+      const waiting = await waitingWorkflow(by);
+      const { runId: holder } = await start(by, waiting.id);
+      const { runId: resumed } = await start(by, waiting.id);
+      const { runId: paused } = await start(by, waiting.id);
+      const app = crypto.randomUUID();
+      const now = Date.now();
+      // Both paused, as the engine last told core. One was resumed since:
+      // its resume is admitted, the newest control, and the engine runs it
+      // again before core hears of it. The other's pause is the newest.
+      const receipt = (run: string | null, kind: string, generation: number) =>
+        env.DB.prepare(
+          "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, created_at, next_at, generation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).bind(
+          crypto.randomUUID(),
+          run,
+          app,
+          by.userId,
+          "0".repeat(31) + String(generation),
+          kind,
+          kind === "resume" ? "admitted" : "applied",
+          now,
+          now,
+          generation
+        );
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Desk', '', ?, ?)"
+        ).bind(app, by.userId, now),
+        env.DB.prepare(
+          "UPDATE workflow_resource_runs SET status = 'paused', control_generation = 2 WHERE id IN (?, ?)"
+        ).bind(resumed, paused),
+        receipt(resumed, "pause", 1),
+        receipt(resumed, "resume", 2),
+        receipt(paused, "pause", 2),
+      ]);
+      const ownerOf = (run: string | null) => ({
+        run: run ?? "",
+        root: run ?? "",
+        subject: by.userId,
+        resource: `workflow-resource:${waiting.id}`,
+      });
+      const result = await withQuotas(
+        { ...configuredLimits, workflowPersonAttempts: 1 },
+        async () => {
+          // The person's one attempt at once, taken.
+          const held = await admitAttempt(
+            env,
+            ownerOf(holder),
+            laterAttempt("held")
+          );
+          try {
+            return {
+              resumed: await outcome(
+                admitAttempt(env, ownerOf(resumed), laterAttempt("resumed"))
+              ),
+              resumedPlaces: await placesOf(resumed),
+              paused: await outcome(
+                admitAttempt(env, ownerOf(paused), laterAttempt("paused"))
+              ),
+              pausedPlaces: await placesOf(paused),
+            };
+          } finally {
+            await held.settle();
+            await env.DB.prepare(
+              "DELETE FROM workflow_admission_queue WHERE run_id IN (?, ?)"
+            )
+              .bind(resumed, paused)
+              .run();
+          }
+        }
+      );
+      expect(result).toStrictEqual({
+        resumed: "workflow.queued",
+        resumedPlaces: 1,
+        paused: "execution.stale_attempt",
+        pausedPlaces: 0,
       });
     });
 
@@ -2284,16 +2446,16 @@ describe(
             { workflowPersonAttempts: 1, workflowSteps: 1 },
             async () => {
               // Recorded first, so each read of it later is one query. The
-              // holder's share coming back reads it, to wake the run
-              // (share-wakes.ts); the load reads it for its model calls,
-              // then for its step limit, and that read fails.
+              // load's read for its step limit fails (`stepLimitOf`): the
+              // holder's share coming back, the run's own wakes and
+              // admissions read it too, each in its own time.
               await quotaPolicy(env);
               return await withPolicyReadFailingOnce(
                 async () => {
                   await terminateResourceRun(env, by, hanging.id, holder.runId);
                   return await ended(by, workflow.id, runId);
                 },
-                { skip: 2 }
+                { by: "stepLimitOf" }
               );
             }
           );

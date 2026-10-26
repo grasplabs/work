@@ -51,18 +51,14 @@ import type { JWTHeaderParameters } from "jose";
 import { z } from "zod";
 
 import { inJurisdiction } from "../durable-objects.ts";
+import { channelKeys, keyFor as channelKeyFor } from "./signing-keys.ts";
+import type { ChannelKeys } from "./signing-keys.ts";
 
 /** Who issues the tokens Pub/Sub pushes with. */
 const googleIssuers = ["https://accounts.google.com", "accounts.google.com"];
 
 /** How far a token's times may be from core's clock. */
 const clockToleranceSeconds = 5 * 60;
-
-/** How long fetched keys are used before they are fetched again. */
-const keysMaxAgeMs = 60 * 60 * 1000;
-
-/** How often a key id not among the keys may have them fetched again. */
-const refreshIntervalMs = 60 * 1000;
 
 const bearerPattern = /^Bearer (?<token>[\w-]+\.[\w-]+\.[\w-]+)$/u;
 
@@ -119,68 +115,29 @@ const notificationSchema = z.object({
   emailAddress: z.string().min(3).max(320),
 });
 
-interface KeySet {
-  keys: Map<string, ChannelSigningKey>;
-  at: number;
-}
-
-/**
- * The keys an isolate last fetched, when it last started fetching them,
- * and the fetch under way, if one is.
- */
-export interface GmailKeys {
-  set?: KeySet;
-  lastFetch: number;
-  fetching?: Promise<KeySet>;
-}
+/** The keys an isolate holds for Gmail (signing-keys.ts). */
+export type GmailKeys = ChannelKeys;
 
 /** Keys not yet fetched. */
-export const gmailKeys = (): GmailKeys => ({
-  lastFetch: Number.NEGATIVE_INFINITY,
-});
+export const gmailKeys = (): GmailKeys => channelKeys();
 
 /** This isolate's keys, which every push it serves checks against. */
 const isolateKeys = gmailKeys();
 
-const fetchKeys = async (env: Env, keys: GmailKeys): Promise<KeySet> => {
-  keys.fetching ??= (async () => {
-    keys.lastFetch = Date.now();
-    try {
-      const fetched = await env.CONNECT.channelSigningKeys("gmail");
-      keys.set = {
-        keys: new Map(fetched.keys.map((key) => [key.kid, key])),
-        at: Date.now(),
-      };
-      return keys.set;
-    } finally {
-      keys.fetching = undefined;
-    }
-  })();
-  return await keys.fetching;
-};
-
-/**
- * The published key `kid` names, fetched as Teams' are (teams.ts): when
- * older than an hour or not among them, at most once a minute.
- */
+/** The published key `kid` names, as Teams' (signing-keys.ts). */
 const keyFor = async (
   env: Env,
   keys: GmailKeys,
   kid: string
-): Promise<ChannelSigningKey | undefined> => {
-  const now = Date.now();
-  const { set } = keys;
-  const fresh = set !== undefined && now - set.at < keysMaxAgeMs;
-  const known = fresh ? set.keys.get(kid) : undefined;
-  if (known !== undefined) {
-    return known;
-  }
-  if (keys.fetching === undefined && now - keys.lastFetch < refreshIntervalMs) {
-    return undefined;
-  }
-  const fetched = await fetchKeys(env, keys);
-  return fetched.keys.get(kid);
-};
+): Promise<ChannelSigningKey | undefined> =>
+  await channelKeyFor(
+    async () => {
+      const fetched = await env.CONNECT.channelSigningKeys("gmail");
+      return fetched.keys;
+    },
+    keys,
+    kid
+  );
 
 /** Why a push was refused, for the log: never anything of its own. */
 class RefusalError extends Error {

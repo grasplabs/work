@@ -83,7 +83,12 @@ const released = async (
  * and raw requests of the channel as a page that doesn't follow the
  * protocol would send them.
  */
-const screenOf = async (person: Person, app: string) => {
+const screenOf = async (
+  person: Person,
+  app: string,
+  /** Core's env each request reaches, as it is sent: core's own unless a test holds part of it. */
+  coreEnv: () => Env = () => env
+) => {
   const { lease } = await person.api.screens.open(app, "notes");
   const fetch = async (path: string, init: RequestInit) => {
     const headers = new Headers(init.headers);
@@ -98,7 +103,7 @@ const screenOf = async (person: Person, app: string) => {
     if (!headers.has(screenPersonHeader)) {
       headers.set(screenPersonHeader, person.userId);
     }
-    return await routed(path, { ...init, headers });
+    return await routed(path, { ...init, headers }, coreEnv());
   };
   const channel = linkChannel({
     app,
@@ -153,6 +158,73 @@ const openedApp = async (files = linkedFiles()) => {
     builder,
     admin,
     screen: await screenOf(builder, id),
+  };
+};
+
+/**
+ * Core's database with the first read of App `app`'s screen trust held
+ * once it is reached (screen-trust.ts `standingOf`): a link request
+ * waits there, past its admission and before its decision, until
+ * `release`.
+ */
+const pausedAtTrust = (app: string) => {
+  const reached = Promise.withResolvers<null>();
+  const letGo = Promise.withResolvers<null>();
+  let taken = false;
+  const held = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        if (property === "bind") {
+          return (...binds: unknown[]): D1PreparedStatement => {
+            const bound = target.bind(...binds);
+            if (taken || !binds.includes(app)) {
+              return bound;
+            }
+            taken = true;
+            return new Proxy(bound, {
+              get: (inner, key) => {
+                const call: unknown = Reflect.get(inner, key);
+                return typeof call === "function"
+                  ? async (...args: unknown[]): Promise<unknown> => {
+                      reached.resolve(null);
+                      await letGo.promise;
+                      return await Reflect.apply(call, inner, args);
+                    }
+                  : call;
+              },
+            });
+          };
+        }
+        return (...args: unknown[]): unknown =>
+          Reflect.apply(value, target, args);
+      },
+    });
+  const db = new Proxy(env.DB, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): D1PreparedStatement => {
+          const statement = target.prepare(query);
+          return query.includes("screen_policies")
+            ? held(statement)
+            : statement;
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return {
+    db,
+    reached: reached.promise,
+    release: () => {
+      letGo.resolve(null);
+    },
   };
 };
 
@@ -342,6 +414,53 @@ describe("an App's external links", { timeout: 120_000 }, () => {
       undeclared: "link.not_allowed",
       buildRevoked: true,
     });
+  });
+
+  it("opens nothing for anyone once its App is archived, builders included, and opens again once it is restored", async () => {
+    const { app, builder, screen } = await openedApp();
+    const url = "https://help.example.com/";
+    const before = await outcomeOf(screen.channel.check("help", url));
+    await builder.api.apps.archive(app);
+    const archived = {
+      check: await outcomeOf(screen.channel.check("help", url)),
+      open: await outcomeOf(screen.channel.open("help", url, "activation")),
+    };
+    await builder.api.apps.restore(app);
+    const restored = await outcomeOf(screen.channel.check("help", url));
+
+    expect({ before, archived, restored }).toStrictEqual({
+      before: "opened",
+      archived: { check: "app.archived", open: "app.archived" },
+      restored: "opened",
+    });
+  });
+
+  it("opens nothing through a request admitted before its App was archived, decided after", async () => {
+    const { app, builder } = await openedApp();
+    let reaching: Env = env;
+    const screen = await screenOf(builder, app, () => reaching);
+    const url = "https://help.example.com/";
+    // Admitted while the App is in use, held before its decision while
+    // the App is archived, then let go.
+    const across = async (ask: () => Promise<unknown>): Promise<unknown> => {
+      const paused = pausedAtTrust(app);
+      reaching = { ...env, DB: paused.db };
+      const answer = outcomeOf(ask());
+      await paused.reached;
+      reaching = env;
+      await builder.api.apps.archive(app);
+      paused.release();
+      const decided = await answer;
+      await builder.api.apps.restore(app);
+      return decided;
+    };
+
+    expect({
+      check: await across(async () => await screen.channel.check("help", url)),
+      open: await across(
+        async () => await screen.channel.open("help", url, "activation")
+      ),
+    }).toStrictEqual({ check: "app.archived", open: "app.archived" });
   });
 
   it("opens nothing through a release revoked since its screen opened", async () => {

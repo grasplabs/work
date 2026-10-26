@@ -34,7 +34,7 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Await, Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowDownIcon,
   ArrowRightIcon,
@@ -51,6 +51,8 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
+import { QuotaPolicyCard } from "../clients/quota-policy-card.tsx";
+import type { ClientQuotaPolicy } from "../clients/quota-policy.ts";
 import type { ClientSetup, SetupDeploy } from "../clients/setup.ts";
 import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
 import { overBars } from "../clients/watch-signals.ts";
@@ -1056,6 +1058,7 @@ const Status = ({
   setup,
   needs,
   view,
+  quotaPolicy,
   hosting,
   releases,
   refresh,
@@ -1065,6 +1068,8 @@ const Status = ({
   needs: PlatformNeed[];
   /** What its core answered, worked out; null when it didn't answer. */
   view: AdminView | null;
+  /** Its quota policy, its core read live; null when it couldn't be read. */
+  quotaPolicy: Promise<ClientQuotaPolicy | null>;
   hosting: ClientHostingView | null;
   releases: readonly { id: string; notes: string }[];
   refresh: Refresh;
@@ -1106,6 +1111,15 @@ const Status = ({
         clientId={clientId}
       />
     </SetupSection>
+    {setup.provisioning.client?.status === "active" ? (
+      // Its core read live, within the grid's deadline: the Setup shows
+      // without waiting for it, and the section once it answers.
+      <Await fallback={null} promise={quotaPolicy}>
+        {(policy) =>
+          policy === null ? null : <QuotaPolicyCard policy={policy} />
+        }
+      </Await>
+    ) : null}
     <StephenWatched setup={setup} />
     <SetupSection
       description="From its address to where its data is. Everything after the router is in the company’s own Cloudflare account, in the EU."
@@ -2161,6 +2175,7 @@ export const OrgSetup = ({
   setup,
   tab,
   view,
+  quotaPolicy,
   releases,
   hosting,
 }: {
@@ -2168,6 +2183,8 @@ export const OrgSetup = ({
   setup: ClientSetup;
   tab: SetupTab;
   view: AdminView | null;
+  /** Its quota policy, read live and not awaited; null when it couldn't be read. */
+  quotaPolicy: Promise<ClientQuotaPolicy | null>;
   /** Every imported release, newest first. */
   releases: readonly { id: string; notes: string }[];
   hosting: ClientHostingView | null;
@@ -2200,6 +2217,7 @@ export const OrgSetup = ({
             clientId={clientId}
             hosting={hosting}
             needs={needs}
+            quotaPolicy={quotaPolicy}
             refresh={refresh}
             releases={releases}
             setup={setup}

@@ -64,6 +64,7 @@ import {
 import type { LeasedBuild } from "./screen-trust.ts";
 import { isWorkflowRequest } from "./screen-workflows.ts";
 import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
+import { auditStaffRoute } from "./staff-audit.ts";
 
 // A running App's screen calling one of its App's functions (spec 32.6):
 // `POST /api/app-functions/<app>`, the request as the body, the frame's
@@ -745,6 +746,8 @@ export const appFunctionResponse = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "app.functions", { app });
   const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;
@@ -861,6 +864,9 @@ export const portableFunctionResponse = async (
     }
     return refused(401, authErrors.create("auth.unauthenticated"), requestId);
   }
+  // A staff member's call from a portable host is in the client's audit
+  // log too (staff-audit.ts).
+  await auditStaffRoute(env, checked.person, "app.functions.portable", { app });
   return withCors(
     await boundedCall(
       request,
@@ -923,6 +929,8 @@ const admitCall = async (
       requestId
     );
   }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "app.functions.stream", { app });
   const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;

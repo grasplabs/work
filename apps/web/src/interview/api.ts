@@ -13,8 +13,12 @@ import type { HearFields } from "@grasp-os/shared/interview-hear";
 import {
   interviewApiPath,
   interviewProgressSchema,
+  participationNotice,
 } from "@grasp-os/shared/interview-links";
-import type { InterviewRequest } from "@grasp-os/shared/interview-links";
+import type {
+  ApprovedFact,
+  InterviewRequest,
+} from "@grasp-os/shared/interview-links";
 import { interviewStoryPath, storyOf } from "@grasp-os/shared/interview-story";
 import type {
   InterviewStoryRequest,
@@ -60,6 +64,7 @@ const sessionSchema = z.discriminatedUnion("state", [
     closed: z.boolean(),
     progress: interviewProgressSchema.nullable(),
     version: z.int().min(0),
+    withdrawn: z.boolean(),
   }),
   z.object({ state: z.literal("elsewhere") }),
 ]);
@@ -77,6 +82,27 @@ const savedSchema = z.union([
 export type SaveAnswer = z.output<typeof savedSchema>;
 
 const deletedSchema = z.object({ deleted: z.literal(true) });
+
+const participationSchema = z.object({ notice: z.int(), at: z.string() });
+
+const approvalSchema = z.union([
+  z.object({
+    approved: z.literal(true),
+    receipt: z.string(),
+    at: z.string(),
+  }),
+  z.object({
+    approved: z.literal(false),
+    version: z.int().min(0),
+    progress: interviewProgressSchema.nullable(),
+  }),
+]);
+export type ApprovalAnswer = z.output<typeof approvalSchema>;
+
+const withdrawnSchema = z.object({
+  withdrawn: z.literal(true),
+  at: z.string(),
+});
 
 /** How long a call to keep or open may take. */
 const callTimeoutMs = 30_000;
@@ -135,6 +161,14 @@ const posted = async <T>(
   if (!response.ok && response.status !== 409) {
     return await refusalOf(response);
   }
+  if (response.status === 409) {
+    // A 409 is the copy kept, or a refusal with its code (a notice that
+    // changed): the refusal is told as it is, never tried again.
+    const refusal = await refusalOf(response.clone());
+    if (refusal.code !== null) {
+      return refusal;
+    }
+  }
   try {
     const parsed = schema.safeParse(await response.json());
     if (parsed.success) {
@@ -182,6 +216,45 @@ export const deleteInterview = async (
     interviewApiPath,
     { action: "delete", secret, key } satisfies InterviewRequest,
     deletedSchema
+  );
+
+/** They read what this is for and agree to take part, to the notice as this page shows it. */
+export const participate = async (
+  secret: string,
+  key: string
+): Promise<z.output<typeof participationSchema> | Refused> =>
+  await posted(
+    interviewApiPath,
+    {
+      action: "participate",
+      secret,
+      key,
+      notice: participationNotice.version,
+    } satisfies InterviewRequest,
+    participationSchema
+  );
+
+/** They approve the facts read back to them, each at the revision they saw. */
+export const approveFacts = async (
+  secret: string,
+  key: string,
+  facts: ApprovedFact[]
+): Promise<ApprovalAnswer | Refused> =>
+  await posted(
+    interviewApiPath,
+    { action: "approve", secret, key, facts } satisfies InterviewRequest,
+    approvalSchema
+  );
+
+/** They withdraw: nothing of their interview is used from now on. */
+export const withdrawInterview = async (
+  secret: string,
+  key: string
+): Promise<z.output<typeof withdrawnSchema> | Refused> =>
+  await posted(
+    interviewApiPath,
+    { action: "withdraw", secret, key } satisfies InterviewRequest,
+    withdrawnSchema
   );
 
 /** A turn that could not be had: its status, 0 when nothing came back. */

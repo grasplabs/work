@@ -1,3 +1,4 @@
+import { sweepLinking } from "@grasp-os/brain/entities";
 import { sweepIndexing } from "@grasp-os/brain/indexing";
 import { sweepBrainReceipts } from "@grasp-os/brain/memories";
 import { sweepPayloads } from "@grasp-os/brain/payloads";
@@ -18,6 +19,8 @@ import { sweepTestFixtures } from "./app-tests.ts";
 import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
+import { reconcileRunCaptures } from "./brain-capture.ts";
+import { reconcileConsolidation } from "./brain-consolidation.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
 import { renewGmailWatch } from "./channels/gmail.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
@@ -65,6 +68,15 @@ import { repairWakes } from "./workflows/wakes.ts";
  */
 export const clockTasks: readonly ClockTask<Env>[] = [
   { name: "audit.drain", period: "minute", run: drainAuditOutboxes },
+  // Settled runs' outcomes the Brain doesn't have yet (src/brain-capture.ts).
+  { name: "brain.capture", period: "minute", run: reconcileRunCaptures },
+  // Scopes whose few new episodes waited long enough to be consolidated
+  // into lesson candidates (src/brain-consolidation.ts).
+  {
+    name: "brain.consolidation",
+    period: "minute",
+    run: reconcileConsolidation,
+  },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   {
     name: "access.revocations",
@@ -87,6 +99,16 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: async (env, at) => {
       await sweepIndexing(brainOf(env), at);
+    },
+  },
+  // Brain sources settled since their change, linking runs that ended
+  // unfinished, and failed ones due another run (packages/brain's
+  // entities.ts).
+  {
+    name: "knowledge.linking",
+    period: "minute",
+    run: async (env, at) => {
+      await sweepLinking(brainOf(env), at);
     },
   },
   // Deploys apply migrations first (CI's db:migrate, and the admin's

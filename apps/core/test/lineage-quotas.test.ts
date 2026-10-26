@@ -875,15 +875,21 @@ ${working("b", 1)}
         { timeout: 30_000, interval: 200 }
       );
       // The operator lowers the steps to one; the run's next load can't
-      // read the policy, and counts by the limit it last read.
+      // read the policy for its step limit (`stepLimitOf`), and counts by
+      // the limit it last read. The share coming back and the run's own
+      // wakes read the policy too, each in its own time: the read that
+      // fails is the load's, not whichever comes first.
       return await withQuotas(
         { workflowPersonAttempts: 1, workflowSteps: 1 },
         async () =>
-          await withPolicyReadFailingOnce(async () => {
-            await held.settle();
-            await finished(run.id);
-            return run.id;
-          })
+          await withPolicyReadFailingOnce(
+            async () => {
+              await held.settle();
+              await finished(run.id);
+              return run.id;
+            },
+            { by: "stepLimitOf" }
+          )
       );
     });
 

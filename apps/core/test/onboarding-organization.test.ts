@@ -16,7 +16,7 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
-import { answering } from "./interview-link.ts";
+import { answering, approveAgreed } from "./interview-link.ts";
 import {
   auditedDuring,
   openRpc,
@@ -152,6 +152,10 @@ const mapOps = async (ids: Awaited<ReturnType<typeof running>>) => {
   });
   const { version }: InterviewSaved = await saved.json();
   expect(version).toBe(1);
+  await approveAgreed(
+    { secret, key: key ?? "" },
+    progressOf("Max and Mia handle tickets; Lea plans the rota.").facts
+  );
   const reply: GatewayReply = {
     text: JSON.stringify({
       does: "Answers customers' questions",
@@ -205,9 +209,12 @@ describe("the organization, for Grasp's staff", { timeout: 60_000 }, () => {
     const { staff } = await asStaff();
 
     const reads: StaffOrganization[] = [];
-    const events = await auditedDuring(async () => {
-      reads.push(await staff.onboardingStaff.organization());
-    });
+    const events = await auditedDuring(
+      async () => {
+        reads.push(await staff.onboardingStaff.organization());
+      },
+      { staffAccesses: true }
+    );
 
     const [organization] = reads;
     const text = JSON.stringify(events);
@@ -236,7 +243,8 @@ describe("the organization, for Grasp's staff", { timeout: 60_000 }, () => {
         ["Sol Sand", "sent", true],
         ["Sam Smit", "waiting", false],
       ],
-      actions: [["onboarding.organization.read", "staff"]],
+      // On record as a staff look (staff-audit.ts), naming no one.
+      actions: [["staff.accessed", "staff"]],
       names: false,
     });
   });

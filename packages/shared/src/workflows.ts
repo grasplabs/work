@@ -47,6 +47,8 @@ export const workflowErrors = defineErrorFamily({
     "Another pause, resume or cancel of this run is still being applied, or the run is being cancelled: wait for it, then try again.",
   "workflow.control_refused":
     "The run has ended, so it can't be paused, resumed or cancelled.",
+  "workflow.control_rolling_back":
+    "The run is rolling back what it did, so it can't be paused, resumed or cancelled until that's done.",
   "workflow.too_many_steps":
     "This run has taken as many steps as a workflow run may: split the work over more runs.",
   "workflow.too_many_attempts":
@@ -932,6 +934,20 @@ export interface WorkflowCalls {
    * Empty when the steps can't be read.
    */
   kinds: Record<string, StepKind>;
+  /**
+   * The model binding each AI step's call names (`step.llm`'s `binding`),
+   * by step name: what its model calls may name (`modelReviewed`). When
+   * the steps can't be read, the bindings of every AI step its code may
+   * take (`aiStepCalls`), any of which its model calls may name. Empty
+   * when it has no AI step.
+   */
+  models: Record<string, string[]>;
+  /**
+   * The steps written with a `key` (`StepOutline.key`): only these run
+   * under a keyed engine name (`name:key`). Empty when the steps can't be
+   * read, and any name may then run.
+   */
+  keyed: string[];
   /** Every binding the workflow's code calls, in any step. */
   all: string[];
   /**
@@ -955,17 +971,53 @@ export const paramsStep = "$params";
 export const outlineNameOf = (engineStep: string): string =>
   engineStep.split(engineNameSeparator, 1)[0] ?? "";
 
+/** Whether an engine name runs its step under a key (`name:key…`). */
+const isKeyed = (engineStep: string): boolean =>
+  engineStep.slice(outlineNameOf(engineStep).length).startsWith(":");
+
 /**
  * Whether a step of this name may run: one the review shows, or the
- * SDK's `$params`. Any name may when the steps can't be read.
+ * SDK's `$params`, and under a key only if the review shows it written
+ * with one (`WorkflowCalls.keyed`): a step written once is never run
+ * again under names of the run's making. Any name may when the steps
+ * can't be read.
  */
 export const stepReviewed = (
   calls: WorkflowCalls,
   engineStep: string
-): boolean =>
-  calls.steps === null ||
-  engineStep === paramsStep ||
-  Object.hasOwn(calls.steps, outlineNameOf(engineStep));
+): boolean => {
+  if (calls.steps === null || engineStep === paramsStep) {
+    return true;
+  }
+  const name = outlineNameOf(engineStep);
+  return (
+    Object.hasOwn(calls.steps, name) &&
+    (!isKeyed(engineStep) || calls.keyed.includes(name))
+  );
+};
+
+/**
+ * Whether an AI step of engine name `engineStep` may ask the model
+ * binding `binding`: the one its review shows its call naming
+ * (`WorkflowCalls.models`), or, when the steps can't be read, one of
+ * those its code's AI steps name.
+ */
+export const modelReviewed = (
+  calls: WorkflowCalls,
+  engineStep: string,
+  binding: string
+): boolean => {
+  if (calls.steps === null) {
+    return Object.values(calls.models).some((bindings) =>
+      bindings.includes(binding)
+    );
+  }
+  const name = outlineNameOf(engineStep);
+  return (
+    Object.hasOwn(calls.models, name) &&
+    (calls.models[name]?.includes(binding) ?? false)
+  );
+};
 
 /**
  * Whether a decision step of engine name `engineStep` takes its reviewer

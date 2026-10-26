@@ -1,9 +1,11 @@
+import { z } from "zod";
+
 /**
  * A stand-in for AI Gateway behind the AI binding: it answers each request
  * with the next scripted reply, in the wire format of the provider route the
  * request went to, and keeps every request it got.
  */
-import { z } from "zod";
+import { relabelled } from "./drawing-labels.ts";
 
 /** A tool call the model makes in a scripted answer. */
 export interface ScriptedToolCall {
@@ -671,7 +673,7 @@ export const answeringGateway = (
     if (badInput !== undefined) {
       return badInput;
     }
-    const reply = await respond(requests);
+    const reply = await relabelled(await respond(requests), body);
     if (reply === undefined) {
       throw new Error("The fake gateway has no reply left");
     }

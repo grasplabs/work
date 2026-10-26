@@ -800,16 +800,27 @@ test("a file whose screen lost the App's data shows the refusal, and isn't read 
       reads += 1;
     }
   });
-  await picker.setInputFiles({
-    name: "again.png",
-    mimeType: "image/png",
-    buffer: pixel,
-  });
-  await expect(
-    page.getByText(
-      "Nobody has approved this app's code for the domain's data yet."
-    )
-  ).toBeVisible();
+  const refusal = page.getByText(
+    "Nobody has approved this app's code for the domain's data yet."
+  );
+  // The upload makes the screen ask, but it may have asked already: its
+  // live data is refused the same way the moment the data turns
+  // sensitive, and the page then stops the screen, its picker with it. So
+  // whichever comes first: the refusal, or the upload that brings it.
+  const uploaded = async (): Promise<void> => {
+    try {
+      await picker.setInputFiles({
+        name: "again.png",
+        mimeType: "image/png",
+        buffer: pixel,
+      });
+    } catch {
+      // The screen was stopped first: there was nothing left to upload to.
+    }
+  };
+  const upload = uploaded();
+  await Promise.race([refusal.waitFor(), upload]);
+  await expect(refusal).toBeVisible();
   await expect(page.locator('iframe[title="notes app"]')).not.toHaveAttribute(
     "src"
   );

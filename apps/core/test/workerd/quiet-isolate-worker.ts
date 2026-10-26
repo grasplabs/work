@@ -1,4 +1,4 @@
-import { quietModules } from "../../src/on-prem/quiet-isolate.ts";
+import { quietModules } from "@grasp-os/shared/quiet-isolate";
 
 // The sandbox host's quiet module on a workerd served `--verbose`, which
 // prints an isolate's uncaught errors with their message

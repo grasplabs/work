@@ -26,6 +26,7 @@ import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
+  approveAgreed,
   careful,
   countedFor,
   gatewayConfig,
@@ -122,7 +123,7 @@ const agreedFact = (
   record: string
 ): InterviewFact => ({ id, tag, text: record, record, agreed: true });
 
-/** Opens someone's link on a device and saves their interview as agreed to, with `facts`. */
+/** Opens someone's link on a device and saves their interview as agreed to, with `facts`, approved. */
 const agree = async (person: string, facts: InterviewFact[]): Promise<void> => {
   const link = await onboardingStore(env).linkOf(person);
   const secret = link?.split("#")[1] ?? "";
@@ -150,6 +151,7 @@ const agree = async (person: string, facts: InterviewFact[]): Promise<void> => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "save", secret, key, version: 0, progress }),
   });
+  await approveAgreed({ secret, key }, facts);
 };
 
 /** What the careful model answers for the team's map: entering orders, Karin's. */
@@ -194,18 +196,26 @@ const ordersDrawn = (karin: string): GatewayReply => ({
 });
 
 describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
-  it("is not there on a deployed core, for staff either", async () => {
-    const session = await staffSession();
-    const response = await routed(labPath, {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie: session },
-      body: JSON.stringify({ action: "via" }),
-    });
-    await expect(codeOf(response)).resolves.toStrictEqual([
-      404,
-      "request.not_found",
-    ]);
-  });
+  it.each([
+    ["how it reaches its models", { action: "via" }],
+    // What a practice person said is the lab's to read on a local stack:
+    // on a client's core, staff read no word of an interview (GRA-329).
+    ["what someone said", { action: "interview", person: "anyone" }],
+  ])(
+    "is not there on a deployed core, for staff either: %s",
+    async (_, body) => {
+      const session = await staffSession();
+      const response = await routed(labPath, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: session },
+        body: JSON.stringify(body),
+      });
+      await expect(codeOf(response)).resolves.toStrictEqual([
+        404,
+        "request.not_found",
+      ]);
+    }
+  );
 
   it("answers Grasp's staff only, on a local stack too", async () => {
     const member = await signedInWithRole(idp, "admin");

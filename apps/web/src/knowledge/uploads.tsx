@@ -382,7 +382,13 @@ export const Uploads = ({
             {t`or choose them from your computer`}
           </span>
           <span className="text-muted-foreground pt-1.5 text-xs">
-            <Trans>Upload a PDF, Word or Excel file</Trans>
+            <Trans>Upload a PDF, Word or Excel file, or captions (.vtt)</Trans>
+          </span>
+          <span className="text-muted-foreground pt-1 text-xs">
+            <Trans>
+              Don’t upload interview recordings or their captions: interviews go
+              through the interview flow.
+            </Trans>
           </span>
         </label>
         <input

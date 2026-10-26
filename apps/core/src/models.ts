@@ -568,6 +568,14 @@ const sessionShape = {
        * own code makes such a call: no App or client names a `work` here.
        */
       z.strictObject({ onboarding: z.literal(true) }),
+      /**
+       * Core's own upkeep of the Brain (knowledge/entities.ts): reading a
+       * source's text for the entities it names. Judged as onboarding's
+       * is, as carrying sensitive data, for no one in particular, but
+       * kept apart from it in spend and audit (`platform` in its events).
+       * Only core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("brain_upkeep") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
@@ -2176,6 +2184,13 @@ const workflowRunOf = ({
       }
     : {};
 
+/**
+ * The platform upkeep a call is core's own for, if it is one: named in
+ * its audit events, so its spend is told apart from everyone else's.
+ */
+const platformOf = ({ work }: Session): { platform: string } | object =>
+  work !== undefined && "platform" in work ? { platform: work.platform } : {};
+
 /** Whether `entry` makes an event the audit log takes. */
 const fitsAuditLog = (entry: AuditEntry): boolean => {
   try {
@@ -2266,6 +2281,7 @@ const auditEntry = (
       chat: chatOf(call),
       ...bindingOf(call),
       ...workflowRunOf(call),
+      ...platformOf(call),
     },
   }));
 };
@@ -2451,6 +2467,7 @@ const refusedEntry = (
       chat: chatOf(call),
       ...bindingOf(call),
       ...workflowRunOf(call),
+      ...platformOf(call),
     },
   }));
 };

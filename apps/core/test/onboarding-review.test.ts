@@ -13,7 +13,7 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, holdAlarm } from "./interview-link.ts";
+import { answering, approveAgreed, holdAlarm } from "./interview-link.ts";
 import {
   auditedDuring,
   outcome,
@@ -123,6 +123,7 @@ const agree = async (person: string, tag: FactTag, facts: string[]) => {
     }),
   });
   const { version }: InterviewSaved = await saved.json();
+  await approveAgreed({ secret, key: key ?? "" }, agreed);
   return version;
 };
 

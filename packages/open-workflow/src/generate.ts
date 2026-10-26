@@ -1,6 +1,6 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import type { Stage } from "@grasp-os/workflow-expressions/evaluate";
-import { parseSlot } from "@grasp-os/workflow-expressions/source";
+import { checkSource, parseSlot } from "@grasp-os/workflow-expressions/source";
 
 import { pointerJoin } from "./diagnostics.ts";
 import { isObject } from "./json-text.ts";
@@ -51,10 +51,21 @@ import { literalDurationMs } from "./values.ts";
  * - Generated code reaching past the SDK. The module imports
  *   `@grasp-os/sdk/open-workflow` and nothing else; the compiler refuses
  *   any other import of generated code all the same.
+ * - A catch taking what it mustn't. A `try` lowers to a JavaScript `try`
+ *   whose `catch` asks the host, in the try's own `catch:<id>` step,
+ *   whether its catch takes the failure, and otherwise throws the original
+ *   on unchanged: the host decides it from its own record of which step
+ *   failed and with what, never from what the isolate threw, and the
+ *   catch's filter and conditions are sealed with the task, its
+ *   conditions host expressions (`GeneratedCatch`). A suspended step never
+ *   settles its call, so no catch runs on a wait, a pause or a
+ *   cancellation. A `raise` raises only the literal error sealed with it,
+ *   which the host, not the module, fails its step with.
  * - Lowering something it doesn't implement. Every construct is checked
  *   against what this generator lowers: anything else (other task kinds
  *   and named calls, a workflow's own timeout, a nested list's or a wait's
- *   timeout, reusable definitions) is reported
+ *   timeout, a catch's retry, reusable definitions but timeouts and
+ *   errors) is reported
  *   as unsupported, with its pointer, and nothing is generated. Nothing is
  *   approximated, skipped or left to run time.
  * - A task that makes core spend without bound. A run evaluates each
@@ -132,7 +143,7 @@ export const maxTaskExpressions = 64;
 export const maxStepExpressions = 128;
 
 /** The generator's identity: part of every build it makes. */
-export const generatorVersion = "grasp-open-workflow-ts/7";
+export const generatorVersion = "grasp-open-workflow-ts/8";
 
 /** Where the generated module is among a version's files. */
 export const generatedPath = ".grasp/workflow.ts";
@@ -162,6 +173,20 @@ export interface SealedExpression {
    * tasks' `each` and `at`, outermost first. Empty outside any loop.
    */
   readonly loopVariables: readonly string[];
+  /**
+   * The caught errors it may read, innermost last: each a catch's variable
+   * (`catch.as`) and the `try` task whose catch binds it. Only an
+   * expression of a catch's `when`, `exceptWhen` or `do` has any; the host
+   * binds each to the error that catch caught, never to anything the
+   * isolate says.
+   */
+  readonly caught?: readonly CaughtVariable[];
+}
+
+/** A caught error an expression may read: its variable, and whose it is. */
+export interface CaughtVariable {
+  readonly variable: string;
+  readonly taskId: string;
 }
 
 /** The task kinds this generator lowers. */
@@ -170,9 +195,11 @@ export type LoweredKind =
   | "do"
   | "for"
   | "listen"
+  | "raise"
   | "run"
   | "set"
   | "switch"
+  | "try"
   | "wait";
 
 /**
@@ -206,6 +233,39 @@ export interface GeneratedListen {
 export interface GeneratedFilter {
   readonly type: string;
   readonly attributes: readonly (readonly [string, CallTemplate])[];
+}
+
+/**
+ * An error a `raise` task raises, as the definition declares it, inline or
+ * in `use.errors`: literal throughout, never a host type or status
+ * (validation refuses those), so the host only ever reports it as the
+ * workflow's own. The host sets its `instance` to the raising task.
+ */
+export interface RaisedError {
+  readonly type: string;
+  readonly status: number;
+  readonly title?: string;
+  readonly detail?: string;
+}
+
+/**
+ * What a `try` task's catch catches, as the host decides it in the task's
+ * `catch:<id>` step: a failure of a step of a task in its `try` list that
+ * no inner catch caught, which the host may let a catch take (core's
+ * resource-errors.ts), whose error has every property of `errors` exactly
+ * (`errors.with`), whose `when` holds and whose `exceptWhen` doesn't; its
+ * conditions are the slots of host expressions, evaluated by the host with
+ * the error bound to `variable`.
+ */
+export interface GeneratedCatch {
+  readonly variable: string;
+  readonly errors?: Readonly<
+    Partial<Record<"type" | "title" | "detail" | "instance", string>> & {
+      readonly status?: number;
+    }
+  >;
+  readonly when?: number;
+  readonly exceptWhen?: number;
 }
 
 /**
@@ -314,9 +374,10 @@ export interface WorkflowLimits {
 
 /**
  * A step a task runs as, besides a `wait`'s sleep: an `item` step is a
- * `for` task's check of its `while`, before each item.
+ * `for` task's check of its `while`, before each item; `catch` is a
+ * `try` task's, which decides whether its catch takes a failure.
  */
-export type TaskStep = "task" | "enter" | "leave" | "item";
+export type TaskStep = "task" | "enter" | "leave" | "item" | "catch";
 
 /** A task's data the host checks against the task's own schema. */
 export type TaskSchemas = Readonly<
@@ -378,6 +439,10 @@ export interface GeneratedTask {
   readonly listen?: GeneratedListen;
   /** A `run` task's child workflow. */
   readonly run?: GeneratedRun;
+  /** A `raise` task's error. */
+  readonly error?: RaisedError;
+  /** A `try` task's catch. */
+  readonly catch?: GeneratedCatch;
   /**
    * A `call` or `wait` task's `input.from`, as a template of the
    * expressions its module evaluates for it (their slots) and its
@@ -406,14 +471,15 @@ export interface GeneratedTask {
   readonly scope: readonly string[];
   /**
    * A `for` task's loop: its collection (`for.in`), which the host
-   * resolves in its enter step, and its items' keys
-   * (`metadata.grasp.key`), each built by the host on the item; the names
-   * its items' variables have; and the slot of its `while`, which each
-   * item's `item` step evaluates.
+   * resolves in its enter step; the slot of its items' keys
+   * (`metadata.grasp.key`, `keysSourceOf`), which the host evaluates once
+   * on the items in the same step, before any item runs; the names its
+   * items' variables have; and the slot of its `while`, which each item's
+   * `item` step evaluates.
    */
   readonly loop?: {
     readonly in: CallTemplate;
-    readonly key?: CallTemplate;
+    readonly keys?: number;
     readonly each: string;
     readonly at: string;
     readonly while?: number;
@@ -478,8 +544,8 @@ const supportedRoot = new Set([
   "do",
 ]);
 
-/** What `use` may hold: reusable timeouts, which tasks name. */
-const supportedUse = new Set(["timeouts"]);
+/** What `use` may hold: reusable timeouts and errors, which tasks name. */
+const supportedUse = new Set(["timeouts", "errors"]);
 
 /** What a lowered task may hold besides its kind (`with`: a call's). */
 const supportedTaskKeys = new Set([
@@ -500,9 +566,11 @@ const loweredKinds = new Set<string>([
   "for",
   "emit",
   "listen",
+  "raise",
   "run",
   "set",
   "switch",
+  "try",
   "wait",
 ]);
 
@@ -773,6 +841,8 @@ interface Emitter {
   readonly spans: TaskSpan[];
   /** Labels some `break` leaves: only those are written. */
   readonly usedLabels: Set<string>;
+  /** The caught errors in scope where the walk is, innermost last. */
+  readonly caught: CaughtVariable[];
   /** Counts lists and tasks, for labels and variables of their own. */
   counter: number;
   /** The flow the code being written runs its tasks on: its variable. */
@@ -780,6 +850,31 @@ interface Emitter {
   /** The `for` tasks around the code being written, outermost first. */
   scope: string[];
 }
+
+/**
+ * The loop variables an expression sealed now reads: those of the loops
+ * around it, not the caught errors it reads too (`caughtOf`), which the
+ * checker lists with them.
+ */
+const loopVariablesOf = (
+  emitter: Emitter,
+  variables: readonly string[]
+): readonly string[] =>
+  Object.freeze(
+    variables.filter(
+      (name) => !emitter.caught.some(({ variable }) => variable === name)
+    )
+  );
+
+/** The caught errors an expression sealed now may read, if any. */
+const caughtOf = (emitter: Emitter): { caught?: readonly CaughtVariable[] } =>
+  emitter.caught.length === 0
+    ? {}
+    : {
+        caught: Object.freeze(
+          emitter.caught.map((c) => Object.freeze({ ...c }))
+        ),
+      };
 
 /**
  * `value` at `pointer` as a TypeScript expression: its literals as
@@ -808,7 +903,8 @@ const valueCode = (
       stage: compiled.stage,
       result,
       source: compiled.source,
-      loopVariables: Object.freeze([...compiled.loopVariables]),
+      loopVariables: loopVariablesOf(emitter, compiled.loopVariables),
+      ...caughtOf(emitter),
     });
     return `await task.evaluate(${slot})`;
   }
@@ -927,7 +1023,8 @@ const templateOf = (
       stage: compiled.stage,
       result,
       source: compiled.source,
-      loopVariables: Object.freeze([...compiled.loopVariables]),
+      loopVariables: loopVariablesOf(emitter, compiled.loopVariables),
+      ...caughtOf(emitter),
     });
     return { slot };
   }
@@ -1166,6 +1263,10 @@ const transitionsOf = (task: JsonObject): string[] => {
   const targets: string[] = [];
   if (typeof task.then === "string") {
     targets.push(task.then);
+  }
+  // Where a try's catch sends a failure it caught, among the try's siblings.
+  if (isObject(task.catch) && typeof task.catch.then === "string") {
+    targets.push(task.catch.then);
   }
   if (Array.isArray(task.switch)) {
     for (const item of task.switch) {
@@ -2156,6 +2257,195 @@ const lowerRun = (
   );
 };
 
+/**
+ * The error a `raise` task raises, as validation left it: its own, or the
+ * one of `use.errors` it names, its literal properties only.
+ */
+const raisedErrorOf = (
+  definition: JsonValue,
+  raise: JsonValue | undefined
+): RaisedError => {
+  let error = isObject(raise) ? raise.error : undefined;
+  if (typeof error === "string") {
+    const use = isObject(definition) ? definition.use : undefined;
+    const errors = isObject(use) ? use.errors : undefined;
+    error =
+      isObject(errors) && Object.hasOwn(errors, error)
+        ? errors[error]
+        : undefined;
+  }
+  if (
+    !isObject(error) ||
+    typeof error.type !== "string" ||
+    typeof error.status !== "number"
+  ) {
+    throw new Error("The checked workflow raises an error it doesn't declare");
+  }
+  return Object.freeze({
+    type: error.type,
+    status: error.status,
+    ...(typeof error.title === "string" ? { title: error.title } : {}),
+    ...(typeof error.detail === "string" ? { detail: error.detail } : {}),
+  });
+};
+
+/**
+ * The statement of a `raise` task: its step runs its stages before its
+ * work (its `if` and input), then the host fails it with the task's
+ * sealed error, as its own, never retried. Skipped, it passes its input
+ * on, as any task does.
+ */
+const lowerRaise = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase
+): void => {
+  emitter.tasks.push({
+    ...sealed,
+    kind: "raise",
+    error: raisedErrorOf(emitter.checked.definition, item.task.raise),
+    steps: ["task"],
+  });
+  emitter.lines.push(
+    `${place.indent}({ output, context } = await ${emitter.flow}.raise(${literal(item.id)}, { input: output, context }, ${planCode(stages.enter)}));`
+  );
+};
+
+/** The literal properties of a catch's `errors.with`, as validation left them. */
+const errorFilterOf = (
+  handler: JsonObject
+): GeneratedCatch["errors"] | undefined => {
+  const filter = isObject(handler.errors) ? handler.errors.with : undefined;
+  if (!isObject(filter)) {
+    return undefined;
+  }
+  const kept: Record<string, string | number> = {};
+  for (const key of ["type", "status", "title", "detail", "instance"]) {
+    const value = filter[key];
+    if (
+      (key === "status" && typeof value === "number") ||
+      (key !== "status" && typeof value === "string")
+    ) {
+      kept[key] = value;
+    }
+  }
+  return Object.freeze(kept);
+};
+
+/**
+ * The slot of a catch's condition `key` (`when`, `exceptWhen`), sealed as
+ * an expression the host evaluates in the try's catch step, with the error
+ * in scope; `undefined` without one.
+ */
+const catchConditionOf = (
+  emitter: Emitter,
+  item: ListTask,
+  handler: JsonObject,
+  key: "when" | "exceptWhen"
+): number | undefined => {
+  if (!Object.hasOwn(handler, key)) {
+    return undefined;
+  }
+  const template = templateOf(
+    emitter,
+    handler[key] ?? null,
+    pointerJoin(pointerJoin(item.pointer, "catch"), key),
+    item.id,
+    "boolean"
+  );
+  if (!("slot" in template)) {
+    throw new Error(`The checked workflow's catch ${key} isn't an expression`);
+  }
+  return template.slot;
+};
+
+/**
+ * The statements of a `try` task: its list in a JavaScript `try`, and,
+ * on a failure, its catch step, in which the host decides whether its
+ * catch takes it; the original failure goes on unchanged when it
+ * doesn't. Taken, its `do` runs on the try's own input, with the
+ * context as the failure left it. Its enter and leave steps around them,
+ * as a nested `do`'s. A suspended step never settles (the engine leaves
+ * its call), so no catch ever sees a run's wait, its pause or its
+ * cancellation. Answers the variable that says whether the catch took a
+ * failure, when its catch has a transition of its own.
+ */
+const lowerTry = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase,
+  lowerList: ListLowerer
+): string | undefined => {
+  const { id, task, pointer } = item;
+  const handler = isObject(task.catch) ? task.catch : {};
+  const variable = typeof handler.as === "string" ? handler.as : "error";
+  emitter.caught.push({ variable, taskId: id });
+  const when = catchConditionOf(emitter, item, handler, "when");
+  const exceptWhen = catchConditionOf(emitter, item, handler, "exceptWhen");
+  emitter.caught.pop();
+  const errors = errorFilterOf(handler);
+  const steps: TaskStep[] = [];
+  emitter.tasks.push({
+    ...sealed,
+    kind: "try",
+    catch: Object.freeze({
+      variable,
+      ...(errors === undefined ? {} : { errors }),
+      ...(when === undefined ? {} : { when }),
+      ...(exceptWhen === undefined ? {} : { exceptWhen }),
+    }),
+    steps,
+  });
+  emitter.counter += 1;
+  const number = emitter.counter;
+  const flag = typeof handler.then === "string" ? `caught${number}` : undefined;
+  if (flag !== undefined) {
+    emitter.lines.push(`${place.indent}let ${flag} = false;`);
+  }
+  steps.push(
+    ...lowerDurable(emitter, item, stages, place, (indent) => {
+      const tried = `tried${number}`;
+      const thrown = `thrown${number}`;
+      emitter.lines.push(`${indent}const ${tried} = output;`, `${indent}try {`);
+      emitter.counter += 1;
+      lowerList(
+        emitter,
+        Array.isArray(task.try) ? task.try : [],
+        pointerJoin(pointer, "try"),
+        `${indent}  `,
+        { label: `s${emitter.counter}`, number: emitter.counter }
+      );
+      emitter.lines.push(
+        `${indent}} catch (${thrown}) {`,
+        `${indent}  if (!(await ${emitter.flow}.catch(${literal(id)}, { input: ${tried}, context }))) {`,
+        `${indent}    throw ${thrown};`,
+        `${indent}  }`,
+        ...(flag === undefined ? [] : [`${indent}  ${flag} = true;`]),
+        `${indent}  output = ${tried};`
+      );
+      if (Array.isArray(handler.do)) {
+        emitter.caught.push({ variable, taskId: id });
+        emitter.counter += 1;
+        lowerList(
+          emitter,
+          handler.do,
+          pointerJoin(pointerJoin(pointer, "catch"), "do"),
+          `${indent}  `,
+          { label: `s${emitter.counter}`, number: emitter.counter }
+        );
+        emitter.caught.pop();
+      }
+      emitter.lines.push(`${indent}}`);
+    }),
+    "catch"
+  );
+  return flag;
+};
+
 /** Lowers a task list: `lowerList`, passed to the tasks it lowers. */
 type ListLowerer = (
   emitter: Emitter,
@@ -2213,9 +2503,8 @@ const graspMetadataOf = (task: JsonObject): JsonObject | undefined =>
 
 /**
  * Refuses what of `for` task `item` isn't lowered yet: items at once
- * (`metadata.grasp.concurrency` above 1, GRA-276's next slice) and items'
- * own keys (`metadata.grasp.key`): its items are identified by their
- * index in the collection its enter step records. Whether anything was.
+ * (`metadata.grasp.concurrency` above 1, GRA-276's next slice). Whether
+ * anything was.
  */
 const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
   const grasp = graspMetadataOf(item.task);
@@ -2236,10 +2525,6 @@ const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
     );
     refused = true;
   }
-  if (grasp !== undefined && Object.hasOwn(grasp, "key")) {
-    emitter.refusals.add(pointerJoin(graspPointer, "key"), "for:key", item.id);
-    refused = true;
-  }
   // Loops inside one another, at most spec 18's eight levels: what the
   // host reads of a step's name.
   if (emitter.scope.length >= maxLoopDepth) {
@@ -2248,6 +2533,46 @@ const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
   }
   return refused;
 };
+
+/**
+ * Refuses what of a `try` or `raise` task `item` isn't lowered: a catch
+ * that retries (GRA-278's next slice brings the durable timers it needs;
+ * until then it is never run without them), and a raise's output or
+ * export, as a raise never produces an output: nothing after its work
+ * ever runs. Whether anything was.
+ */
+const refusedFailureTask = (
+  emitter: Emitter,
+  { id, task, pointer }: ListTask,
+  kind: string
+): boolean => {
+  let refused = false;
+  const handler = kind === "try" && isObject(task.catch) ? task.catch : {};
+  if (Object.hasOwn(handler, "retry")) {
+    emitter.refusals.add(
+      pointerJoin(pointerJoin(pointer, "catch"), "retry"),
+      "catch.retry",
+      id
+    );
+    refused = true;
+  }
+  for (const key of ["output", "export"]) {
+    if (kind === "raise" && Object.hasOwn(task, key)) {
+      emitter.refusals.add(pointerJoin(pointer, key), `raise:${key}`, id);
+      refused = true;
+    }
+  }
+  return refused;
+};
+
+/**
+ * Whether `key` of a task of `kind` is part of its kind: the kind's own
+ * key, a for's while and do, and a try's catch.
+ */
+const isKindKey = (kind: string, key: string): boolean =>
+  key === kind ||
+  (kind === "for" && (key === "while" || key === "do")) ||
+  (kind === "try" && key === "catch");
 
 /**
  * Refuses, by pointer, what of task `item` (of `kind`) isn't lowered: its
@@ -2270,8 +2595,7 @@ const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
     refused = true;
   }
   for (const key of Object.keys(task)) {
-    const own = kind === "for" && (key === "while" || key === "do");
-    if (key !== kind && !own && !supportedTaskKeys.has(key)) {
+    if (!isKindKey(kind, key) && !supportedTaskKeys.has(key)) {
       emitter.refusals.add(pointerJoin(pointer, key), key, id);
       refused = true;
     }
@@ -2279,6 +2603,7 @@ const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
   if (kind === "for") {
     refused = refusedLoop(emitter, item) || refused;
   }
+  refused = refusedFailureTask(emitter, item, kind) || refused;
   // A listen's timeout is its deadline: required, and what it waits until.
   const timed =
     (timedKinds.has(kind) && !sleepsOf(task, kind)) || kind === "listen";
@@ -2305,6 +2630,22 @@ const endJump = (emitter: Emitter): string => {
   emitter.usedLabels.add(workflowLabel);
   return `break ${workflowLabel};`;
 };
+
+/**
+ * The expression that makes a loop's item keys (`metadata.grasp.key`,
+ * `key` its source) at once: for each of the items its enter step
+ * recorded, which are `.` (stage `loopKeys`), in their order, the list of
+ * what the key yields on its item with the item's variables (`each`, `at`)
+ * bound as the loop binds them. A list per item, not one flat list: jq's
+ * key may yield no value or several, and only per item can the host tell
+ * that each yielded exactly one. One evaluation for every item, not one
+ * per item: a key per item would take one attempt's fuel for every few
+ * hundred items, and a fresh jq for each. `key` is one expression of the
+ * profile, which `|` takes whole (nothing of jq's grammar binds looser),
+ * so it is the inner list's member as it is.
+ */
+export const keysSourceOf = (key: string, each: string, at: string): string =>
+  `[range(0; length) as $${at} | .[$${at}] as $${each} | [$${each} | ${key}]]`;
 
 /**
  * The statements of a `for` task: one call of the SDK's loop, whose enter
@@ -2336,6 +2677,41 @@ const lowerFor = (
     id,
     "json"
   );
+  // Its items' keys, made once on the recorded items before any item runs.
+  let keysSlot: number | undefined;
+  const key = graspMetadataOf(task)?.key;
+  if (key !== undefined) {
+    const keyPointer = pointerJoin(
+      pointerJoin(pointerJoin(pointer, "metadata"), "grasp"),
+      "key"
+    );
+    const compiled = emitter.checked.expressions.get(keyPointer);
+    if (compiled === undefined) {
+      throw new Error(
+        `The checked workflow has no expression at ${keyPointer}`
+      );
+    }
+    const source = keysSourceOf(compiled.source, each, at);
+    // As the key is checked, but a list around it: too large or deep as
+    // that, refused here rather than at run time.
+    if (!checkSource(source).ok) {
+      emitter.refusals.add(keyPointer, "for:key_too_large", id);
+      return;
+    }
+    keysSlot = emitter.expressions.length;
+    emitter.expressions.push({
+      slot: keysSlot,
+      pointer: keyPointer,
+      taskId: id,
+      stage: "loopKeys",
+      result: "json",
+      source,
+      // The loops around this one: its own item's variables the list binds.
+      loopVariables: Object.freeze(
+        compiled.loopVariables.filter((name) => name !== each && name !== at)
+      ),
+    });
+  }
   const members = [...stages.enter];
   let whileSlot: number | undefined;
   if (Object.hasOwn(task, "while")) {
@@ -2365,6 +2741,7 @@ const lowerFor = (
     steps,
     loop: {
       in: collection,
+      ...(keysSlot === undefined ? {} : { keys: keysSlot }),
       each,
       at,
       ...(whileSlot === undefined ? {} : { while: whileSlot }),
@@ -2376,11 +2753,22 @@ const lowerFor = (
   const looped = `looped${number}`;
   const flow = `flow${number}`;
   const state = `state${number}`;
+  const reached = `reached${number}`;
+  const thrown = `thrown${number}`;
   const { indent } = place;
+  // An item's list has a context of its own, which the loop passes on
+  // only when it returns: `reached` follows it as each item settles, so
+  // a failure out of the loop leaves the context its items had exported
+  // before it, for a catch around the loop. Each item settles from its
+  // recorded steps, so a replay reaches the same context.
   emitter.lines.push(
     `${indent}{`,
-    `${indent}  const ${looped} = await ${emitter.flow}.for(${literal(id)}, { input: output, context }, ${planCode(members)}, async (${flow}, ${state}) => {`,
-    `${indent}    let { output, context } = ${state};`
+    `${indent}  let ${reached}: FlowValue = context;`,
+    `${indent}  let ${looped};`,
+    `${indent}  try {`,
+    `${indent}    ${looped} = await ${emitter.flow}.for(${literal(id)}, { input: output, context }, ${planCode(members)}, async (${flow}, ${state}) => {`,
+    `${indent}      let { output, context } = ${state};`,
+    `${indent}      try {`
   );
   const outer = { flow: emitter.flow, scope: emitter.scope };
   emitter.flow = flow;
@@ -2390,14 +2778,21 @@ const lowerFor = (
     emitter,
     Array.isArray(task.do) ? task.do : [],
     pointerJoin(pointer, "do"),
-    `${indent}    `,
+    `${indent}        `,
     { label: `s${emitter.counter}`, number: emitter.counter }
   );
   emitter.flow = outer.flow;
   emitter.scope = outer.scope;
   emitter.lines.push(
-    `${indent}    return { output, context };`,
-    `${indent}  });`,
+    `${indent}      } finally {`,
+    `${indent}        ${reached} = context;`,
+    `${indent}      }`,
+    `${indent}      return { output, context };`,
+    `${indent}    });`,
+    `${indent}  } catch (${thrown}) {`,
+    `${indent}    context = ${reached};`,
+    `${indent}    throw ${thrown};`,
+    `${indent}  }`,
     `${indent}  ({ output, context } = ${looped});`,
     `${indent}  if (${looped}.end) {`,
     `${indent}    ${endJump(emitter)}`,
@@ -2436,6 +2831,55 @@ const lowerOneStep = (
   }
 };
 
+/**
+ * The jump after task `item` (of `kind`): its own `then`; a try whose
+ * catch has a transition of its own (`caughtFlag` says whether it caught)
+ * takes that one on the error path, and its own then otherwise
+ * (validation's flow.ts reads it so). A switch moves on through its cases.
+ */
+const lowerTransition = (
+  emitter: Emitter,
+  { task }: ListTask,
+  kind: string,
+  place: ListPlace,
+  caughtFlag: string | undefined
+): void => {
+  const own =
+    kind !== "switch" && typeof task.then === "string"
+      ? place.jump(task.then)
+      : null;
+  const catchThen = isObject(task.catch) ? task.catch.then : undefined;
+  const onCatch =
+    caughtFlag !== undefined && typeof catchThen === "string"
+      ? place.jump(catchThen)
+      : null;
+  if (caughtFlag === undefined || (onCatch === null && own === null)) {
+    if (own !== null) {
+      emitter.lines.push(`${place.indent}${own}`);
+    }
+  } else if (own === null) {
+    emitter.lines.push(
+      `${place.indent}if (${caughtFlag}) {`,
+      `${place.indent}  ${String(onCatch)}`,
+      `${place.indent}}`
+    );
+  } else if (onCatch === null) {
+    emitter.lines.push(
+      `${place.indent}if (!${caughtFlag}) {`,
+      `${place.indent}  ${own}`,
+      `${place.indent}}`
+    );
+  } else {
+    emitter.lines.push(
+      `${place.indent}if (${caughtFlag}) {`,
+      `${place.indent}  ${onCatch}`,
+      `${place.indent}} else {`,
+      `${place.indent}  ${own}`,
+      `${place.indent}}`
+    );
+  }
+};
+
 /** Lowers one task, or says why it can't be. */
 const lowerTask = (
   emitter: Emitter,
@@ -2470,8 +2914,13 @@ const lowerTask = (
     scope: Object.freeze([...emitter.scope]),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   };
+  let caughtFlag: string | undefined;
   if (kind === "call" && task.call === "grasp.decision") {
     lowerDecision(emitter, item, stages, place, sealed, before);
+  } else if (kind === "raise") {
+    lowerRaise(emitter, item, stages, place, sealed);
+  } else if (kind === "try") {
+    caughtFlag = lowerTry(emitter, item, stages, place, sealed, lowerList);
   } else if (inOneStep(kind, sleeps)) {
     lowerOneStep(emitter, item, stages, place, sealed, kind);
     // One step evaluates all of these. A durable task's enter and leave
@@ -2507,12 +2956,7 @@ const lowerTask = (
   // leave steps of the tasks around it: spec 13.5's `end` "completes the
   // workflow", with the current output, which the workflow's own
   // output.as and required output schema still take.
-  if (kind !== "switch" && typeof task.then === "string") {
-    const jump = place.jump(task.then);
-    if (jump !== null) {
-      emitter.lines.push(`${place.indent}${jump}`);
-    }
-  }
+  lowerTransition(emitter, item, kind, place, caughtFlag);
   // Its transition's jump included: a diagnostic there is still its own.
   emitter.spans.push(
     Object.freeze({ taskId: id, pointer, from: line, to: emitter.lines.length })
@@ -2706,6 +3150,7 @@ export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
     tasks: [],
     spans: [],
     usedLabels: new Set(),
+    caught: [],
     counter: 0,
     flow: "flow",
     scope: [],

@@ -14,7 +14,13 @@ import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import { answering, careful, openedFor, quick } from "./interview-link.ts";
+import {
+  answering,
+  approveAgreed,
+  careful,
+  openedFor,
+  quick,
+} from "./interview-link.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // The onboarding's durability (GRA-339): its Worker restarted in the middle
@@ -209,7 +215,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       before.version,
       progressOf([asked, answer, said])
     );
-    const kept = await onboardingStore(env).transcriptOf(person);
+    const kept = await onboardingStore(env).practiceInterviewOf(person);
     expect({
       again,
       saved: [before.saved, after.saved, twice.saved],
@@ -270,23 +276,21 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       body: JSON.stringify({ action: "session", secret }),
     });
     const { key = "" } = sessionKey.parse(await session.json());
-    await save(
-      { secret, key },
-      0,
-      progressOf(
-        [{ from: "stephen", text: "What does your team do?" }],
-        [
-          {
-            id: "f1",
-            tag: "work",
-            text: "Max and Mia handle new tickets.",
-            record: "Max and Mia handle new tickets.",
-            agreed: true,
-          },
-        ],
-        "completed"
-      )
+    const agreed = progressOf(
+      [{ from: "stephen", text: "What does your team do?" }],
+      [
+        {
+          id: "f1",
+          tag: "work",
+          text: "Max and Mia handle new tickets.",
+          record: "Max and Mia handle new tickets.",
+          agreed: true,
+        },
+      ],
+      "completed"
     );
+    await save({ secret, key }, 0, agreed);
+    await approveAgreed({ secret, key }, agreed.facts);
     const map: GatewayReply = {
       text: JSON.stringify({
         does: "Answers customers' questions",

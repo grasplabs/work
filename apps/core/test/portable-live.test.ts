@@ -34,7 +34,15 @@ import { apiOf, notesFiles } from "./notes-client-app.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import { person as actingAs } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { callAuth, outcome, routed, signedIn, signedInApi } from "./sign-in.ts";
+import {
+  auditedDuring,
+  callAuth,
+  outcome,
+  routed,
+  signedIn,
+  signedInApi,
+  staffPerson,
+} from "./sign-in.ts";
 
 // A portable host (spec 10.7.1) following its App's live queries (spec
 // 11) over core's token-authenticated connection
@@ -919,5 +927,34 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       thenOnlyTheMembers: true,
     });
     list.stop();
+  });
+
+  it("puts a staff member's connection and each of their queries in the client's audit log", async () => {
+    const notes = await notesApp();
+    const staff = await signedIn(idp, "grasp-staff", staffPerson());
+    const token = await tokenFor(staff, notes.app);
+    hostBrowser({ cookie: staff });
+
+    const events = await auditedDuring(
+      async () => {
+        const client = portableClient(() => token);
+        const list = reading(client, notes.api.list, { pagination: {} });
+        await eventually(() => {
+          expect(list.now()).toStrictEqual([]);
+        });
+        list.stop();
+      },
+      { staffAccesses: true }
+    );
+    const surfaces = events
+      .filter(({ action }) => action === "staff.accessed")
+      .map(({ detail, provenance }) => [detail.surface, provenance]);
+
+    expect(surfaces).toStrictEqual(
+      expect.arrayContaining([
+        ["app.live.connect", [notes.app]],
+        ["portableQueries.watchQuery", []],
+      ])
+    );
   });
 });

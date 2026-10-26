@@ -489,6 +489,8 @@ describe(describeWorkflow, () => {
       expect(reviewedCalls(source)).toStrictEqual({
         steps: null,
         kinds: {},
+        models: {},
+        keyed: [],
         all: [],
       });
     }
@@ -513,6 +515,30 @@ describe(describeWorkflow, () => {
       `return await brain(env).recall({ query: "leave" });`,
       // Not a recall: no other call the stub has.
       `return await brain(env.BRAIN).remember({ text: "x" }, { idempotencyKey: "k" });`,
+    ]) {
+      expect(() => describeWorkflow(brainSource(code))).toThrow(
+        "don't keep `env`"
+      );
+    }
+  });
+
+  it("names the Brain binding a step selects or reads a skill through, and refuses another skills call or the skills kept", () => {
+    const select = `return await brain(env.BRAIN).skills.select({ task: { type: "invoice" } });`;
+    const read = `return await brain(env.BRAIN).skills.read({ documentId: "d", version: 1 });`;
+    expect({
+      select: reviewedCalls(brainSource(select)).steps,
+      read: reviewedCalls(brainSource(read)).steps,
+    }).toStrictEqual({
+      select: { recall: ["BRAIN"] },
+      read: { recall: ["BRAIN"] },
+    });
+    for (const code of [
+      // Kept: its calls could be made anywhere.
+      `const skills = brain(env.BRAIN).skills; return await skills.select({ task: { type: "invoice" } });`,
+      // No such call.
+      `return await brain(env.BRAIN).skills.remove({ name: "x" });`,
+      // Computed: any name.
+      `return await brain(env.BRAIN).skills["select"]({ task: { type: "invoice" } });`,
     ]) {
       expect(() => describeWorkflow(brainSource(code))).toThrow(
         "don't keep `env`"
@@ -922,6 +948,47 @@ const llm = (binding: string): string =>
 /** `source`'s AI steps, as `name:binding`. */
 const bindings = (source: string): string[] | undefined =>
   aiStepCalls(source)?.map(({ name, binding }) => `${name}:${binding}`);
+
+describe(reviewedCalls, () => {
+  it("keeps the model binding each AI step names and which steps are keyed, read or not, whatever the step is called", () => {
+    const read = reviewedCalls(
+      workflowSource(`${llm("reader")}
+  for (const item of input.items) {
+    await step.do("each", { description: "Each", key: item.id }, async () => 1);
+  }
+  await step.do("tidy", { description: "Tidy" }, async () => 1);`)
+    );
+    // A step in a \`try\`: its steps can't be read, its AI steps can.
+    const unread = reviewedCalls(
+      workflowSource(`try { ${llm("reader")} } catch {}`)
+    );
+    // Valid step names that an empty object would otherwise inherit.
+    const inherited = reviewedCalls(
+      workflowSource(`try {
+    await step.llm("constructor", { description: "Read", binding: "reader", instructions: "Read", input: "x", schema: {} });
+    await step.llm("toString", { description: "Read", binding: "writer", instructions: "Read", input: "x", schema: {} });
+  } catch {}`)
+    );
+
+    expect({
+      read: { models: read.models, keyed: read.keyed },
+      unread: {
+        steps: unread.steps,
+        models: unread.models,
+        keyed: unread.keyed,
+      },
+      // As entries: an expected object can't hold `constructor` as data.
+      inherited: Object.entries(inherited.models),
+    }).toStrictEqual({
+      read: { models: { read: ["reader"] }, keyed: ["each"] },
+      unread: { steps: null, models: { read: ["reader"] }, keyed: [] },
+      inherited: [
+        ["constructor", ["reader"]],
+        ["toString", ["writer"]],
+      ],
+    });
+  });
+});
 
 describe(aiStepCalls, () => {
   it("reads every AI step's name and binding, wherever it sits, and only the workflow's own step", () => {

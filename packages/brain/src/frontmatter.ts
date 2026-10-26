@@ -1,6 +1,7 @@
 import { parse } from "yaml";
 import { z } from "zod";
 
+import { skillManifestSchema } from "./contract.ts";
 import { issuesOf } from "./errors.ts";
 import {
   builtinDocumentTypeSchema,
@@ -28,16 +29,31 @@ const baseSchema = z.object({
  * An Agent Skill (`SKILL.md`): its name and description are required, as
  * the Agent Skills format has them.
  */
-const skillSchema = baseSchema.extend({
-  name: z
-    .string()
-    .max(64)
-    .regex(
-      /^[a-z0-9]+(?:-[a-z0-9]+)*$/u,
-      "Lowercase letters, digits and single hyphens"
-    ),
-  description: z.string().trim().min(1).max(1024),
-});
+const skillSchema = baseSchema
+  .extend({
+    name: z
+      .string()
+      .max(64)
+      .regex(
+        /^[a-z0-9]+(?:-[a-z0-9]+)*$/u,
+        "Lowercase letters, digits and single hyphens"
+      ),
+    description: z.string().trim().min(1).max(1024),
+  })
+  // When it applies (contract.ts `skillManifestSchema`), checked as it is
+  // saved, so a manifest that can't be read never gets in.
+  .extend(skillManifestSchema.shape)
+  // By name, in its own collection: itself. (One that names its own
+  // collection explicitly is caught as selection resolves it.)
+  .refine(
+    ({ name, prerequisites, dependencies, replaces }) =>
+      !prerequisites.includes(name) &&
+      !replaces.includes(name) &&
+      !dependencies.some(
+        (each) => typeof each === "string" && each.split("@")[0] === name
+      ),
+    { message: "A skill can't rest on, or take the place of, itself." }
+  );
 
 /** A decision, and where it stands. */
 const decisionSchema = baseSchema.extend({

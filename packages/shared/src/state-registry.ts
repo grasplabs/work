@@ -288,6 +288,10 @@ const coreDb: D1State = {
     resource_templates: exported(`${core}resource-bindings.ts`),
     app_resource_bindings: exported(`${core}resource-bindings.ts`),
     workflow_runs: exported(`${core}workflows/runs.ts`),
+    brain_capture_intents: transient(
+      `${core}brain-capture.ts`,
+      "Settled runs' outcomes still owed to the Brain, and those it gave up on."
+    ),
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
     workflow_admission_queue: transient(`${core}workflows/admission.ts`),
@@ -362,6 +366,7 @@ const coreDb: D1State = {
       `${core}workflows/resource-runs.ts`
     ),
     workflow_resource_run_controls: exported(`${core}screen-workflows.ts`),
+    workflow_resource_run_control_keys: exported(`${core}screen-workflows.ts`),
     workflow_catalog_contracts: exported(`${core}workflow-catalog.ts`),
     workflow_binding_approvals: exported(`${core}workflow-bindings.ts`),
     workflow_resource_params: exported(`${core}workflow-params.ts`),
@@ -409,6 +414,7 @@ const knowledgeDb: D1State = {
       "The current version's text, split by heading."
     ),
     links: cache(`${brain}documents.ts`),
+    transcripts: exported(`${brain}transcripts.ts`, brainPending),
     search_rows: cache(`${brain}search.ts`, "Search projection."),
     search_words: cache(`${brain}search.ts`, "Search projection."),
     search_trigrams: cache(`${brain}search.ts`, "Search projection."),
@@ -419,9 +425,78 @@ const knowledgeDb: D1State = {
       "Empty between batches."
     ),
     brain_memories: exported(`${brain}memories.ts`, brainPending),
+    brain_memory_cites: cache(
+      `${brain}memories.ts`,
+      "The collections each memory record's lineage rests on, written with the record."
+    ),
+    brain_memory_rows: cache(
+      `${brain}memories.ts`,
+      "Memory search projection."
+    ),
+    brain_memory_words: cache(
+      `${brain}memories.ts`,
+      "Memory search projection."
+    ),
+    brain_link_jobs: exported(
+      `${brain}entities.ts`,
+      `Where linking each Brain source stands: without it, nothing links a source until it changes. ${brainPending}`
+    ),
+    brain_entities: exported(
+      `${brain}entities.ts`,
+      `Stable entity IDs: an ID and a kind, never a name. ${brainPending}`
+    ),
+    brain_entity_keys: exported(
+      `${brain}entities.ts`,
+      `The exact evidence each entity is known by, as deployment-keyed HMACs. ${brainPending}`
+    ),
+    brain_mentions: exported(
+      `${brain}entities.ts`,
+      `Entity mentions of each source's linked version: derived, but only by model calls again. ${brainPending}`
+    ),
     brain_receipts: transient(
       `${brain}memories.ts`,
       "Command receipts for retries, swept a day after the command."
+    ),
+    brain_episodes: exported(`${brain}outcomes.ts`, brainPending),
+    brain_episode_members: exported(
+      `${brain}outcomes.ts`,
+      "Who each shared session's event is for."
+    ),
+    brain_capture_cursors: exported(
+      `${brain}outcomes.ts`,
+      "How far each host boundary's task outcomes reached."
+    ),
+    brain_erased_evidence: exported(
+      `${brain}outcomes.ts`,
+      "Execution records whose events were erased, and single events taken back: late captures stay erased."
+    ),
+    brain_lessons: exported(
+      `${brain}lessons.ts`,
+      "Lesson candidates consolidated from a scope's episodes."
+    ),
+    brain_lesson_versions: exported(
+      `${brain}lessons.ts`,
+      "Every revision of a lesson, and what it superseded."
+    ),
+    brain_lesson_evidence: exported(
+      `${brain}lessons.ts`,
+      "The episodes each lesson revision rests on."
+    ),
+    brain_consolidation_marks: exported(
+      `${brain}lessons.ts`,
+      "How far consolidation read each scope's episodes."
+    ),
+    brain_consolidation_due: exported(
+      `${brain}lessons.ts`,
+      "Scopes whose consolidation is due."
+    ),
+    brain_sequences: exported(
+      `${brain}outcomes.ts`,
+      "Counters numbering what the Brain records, in order."
+    ),
+    brain_forgotten_people: exported(
+      `${brain}outcomes.ts`,
+      "Who a personal purge forgot, and when: late captures stay forgotten."
     ),
     audit_outbox: transient(
       `${brain}audit.ts`,
@@ -485,7 +560,14 @@ const workspaces: DurableObjectState = {
     chat_documents: exported(`${core}workspace.ts`),
     chat_drafts: exported(`${core}workspace.ts`),
     chat_draft_files: exported(`${core}workspace.ts`),
+    chat_draft_versions: exported(`${core}draft-versions.ts`),
+    chat_draft_version_files: exported(`${core}draft-versions.ts`),
+    chat_draft_contents: exported(`${core}draft-versions.ts`),
     audit_outbox: exported(`${core}workspace.ts`),
+    brain_capture_intents: transient(
+      `${core}workspace.ts`,
+      "Settled turns' outcomes still owed to the Brain, and those it gave up on."
+    ),
     chat_attachments: exported(`${core}workspace.ts`),
     chat_code_runs: exported(`${core}workspace.ts`),
     chat_tool_events: exported(`${core}workspace.ts`),
@@ -594,6 +676,22 @@ const onboarding: DurableObjectState = {
     documents: exported(`${core}onboarding/documents.ts`),
     usage: exported(`${core}onboarding/store.ts`),
     interview_texts: exported(`${core}onboarding/store.ts`),
+    participations: exported(
+      `${core}onboarding/store.ts`,
+      "Who agreed to take part in their interview, to which notice, and when they withdrew; a withdrawal stays through a delete or new start, until they leave the roster."
+    ),
+    readbacks: exported(
+      `${core}onboarding/store.ts`,
+      "Receipts of the read-backs people approved."
+    ),
+    forget_lines: transient(
+      `${core}onboarding/store.ts`,
+      "Voice cache keys of interviews that went, until the cache confirms they are gone."
+    ),
+    approvals: exported(
+      `${core}onboarding/store.ts`,
+      "The exact fact revisions each person approved: only these count."
+    ),
     works: exported(`${core}onboarding/store.ts`),
     asked_about: exported(`${core}onboarding/store.ts`),
     drawn_works: exported(`${core}onboarding/store.ts`),

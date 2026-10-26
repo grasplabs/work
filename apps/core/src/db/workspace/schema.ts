@@ -25,6 +25,13 @@ export const chats = sqliteTable(
     id: text().$type<ChatId>().primaryKey(),
     title: text().notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    /**
+     * When it last had a message, or was made before it had any: what the
+     * person's list goes by, so a chat they just continued comes first.
+     */
+    lastAt: integer("last_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`0`),
     /** It read restricted data, and is in restricted mode for good. */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
     /**
@@ -59,9 +66,9 @@ export const chats = sqliteTable(
      */
     thread: text(),
   },
-  // A person's list, newest first.
+  // A person's list, most recently active first.
   (table) => [
-    index("chats_person").on(table.personId, table.createdAt),
+    index("chats_person").on(table.personId, table.lastAt),
     index("chats_project").on(table.projectId),
   ]
 );
@@ -258,6 +265,85 @@ export const chatDraftFiles = sqliteTable(
 );
 
 /**
+ * Every write of a chat's draft of an App, kept as it left the draft and
+ * never changed: its `number`, counting up from 1 per chat and App in the
+ * order the writes landed, the draft's revision it made, the version it
+ * is over (`base`), and the SHA-256 of what it holds (`contentHash`, of
+ * the canonical JSON of `base` and each path's content hash). Who wrote
+ * it: the chat's agent, in the code step `callId`, or the chat's person,
+ * restoring version `restoredFrom`. The draft's row and files hold only
+ * the latest; these hold every one, to list, preview and restore. Deleted
+ * with the chat, whose drafts they are.
+ */
+export const chatDraftVersions = sqliteTable(
+  "chat_draft_versions",
+  {
+    chatId: text("chat_id")
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    appId: text("app_id").notNull(),
+    number: integer().notNull(),
+    revision: integer().notNull(),
+    base: integer(),
+    contentHash: text("content_hash").notNull(),
+    callId: text("call_id"),
+    restoredFrom: integer("restored_from"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chatId, table.appId, table.number] }),
+  ]
+);
+
+/**
+ * What a draft version (`chatDraftVersions`) changes over its base: each
+ * path's content by its SHA-256 (`chatDraftContents`), or null to delete
+ * the file, a row each.
+ */
+export const chatDraftVersionFiles = sqliteTable(
+  "chat_draft_version_files",
+  {
+    chatId: text("chat_id").$type<ChatId>().notNull(),
+    appId: text("app_id").notNull(),
+    number: integer().notNull(),
+    path: text().notNull(),
+    sha256: text(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.chatId, table.appId, table.number, table.path],
+    }),
+    foreignKey({
+      columns: [table.chatId, table.appId, table.number],
+      foreignColumns: [
+        chatDraftVersions.chatId,
+        chatDraftVersions.appId,
+        chatDraftVersions.number,
+      ],
+    }),
+  ]
+);
+
+/**
+ * The contents a chat's draft versions of an App name, each once, by its
+ * SHA-256: most writes change a file or two, so the versions share the
+ * rest.
+ */
+export const chatDraftContents = sqliteTable(
+  "chat_draft_contents",
+  {
+    chatId: text("chat_id").$type<ChatId>().notNull(),
+    appId: text("app_id").notNull(),
+    sha256: text().notNull(),
+    content: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chatId, table.appId, table.sha256] }),
+  ]
+);
+
+/**
  * Audit events of changes to this object's chats (made, renamed, deleted,
  * started to fix a failed run, restricted from the start),
  * each stored in the same transaction as its change, until the object has
@@ -268,6 +354,43 @@ export const auditOutbox = sqliteTable("audit_outbox", {
   event: text().notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+/**
+ * Settled turns' outcomes still owed to the Brain (src/brain-capture.ts),
+ * each written in the same transaction as the turn's last message, so a
+ * turn never settles without its capture. `facts` is what the turn's end
+ * said (how it ended, its model, its answer), identifiers only; the
+ * object delivers the rest from the chat when it delivers. Deleted once
+ * the Brain has it, or once its chat is deleted; one the Brain refused for
+ * good stays `dead`. `seq` only grows (AUTOINCREMENT): the Brain's cursor
+ * of this object's turns.
+ */
+export const brainCaptureIntents = sqliteTable(
+  "brain_capture_intents",
+  {
+    seq: integer().primaryKey({ autoIncrement: true }),
+    eventId: text("event_id").notNull(),
+    /** The chat the outcome rests on. */
+    evidenceId: text("evidence_id").notNull(),
+    /** JSON: the turn's end, as `brain-capture.ts` reads it. */
+    facts: text().notNull(),
+    state: text({ enum: ["pending", "dead"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer().notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("brain_capture_intents_event_idx").on(table.eventId),
+    index("brain_capture_intents_evidence_idx").on(table.evidenceId),
+    index("brain_capture_intents_state_idx").on(
+      table.state,
+      table.attempts,
+      table.seq
+    ),
+  ]
+);
 
 /**
  * What a chat was started with, besides its question: for now, the

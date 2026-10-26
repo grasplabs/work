@@ -1,9 +1,15 @@
 import type {
+  ChangeOptions,
   CommandOptions,
+  MemoriesProposeChangeInput,
+  MemoriesPublishInput,
+  MemoriesRetireInput,
   CommandReceipt,
   MemoriesGetInput,
+  MemoriesLineageInput,
   MemoriesListInput,
   MemoryPack,
+  MemoryLineage,
   MemoryPage,
   MemoryRecord,
   ReceiptsGetInput,
@@ -20,9 +26,13 @@ import type { Writer } from "@grasp-os/brain/documents";
 import {
   memoriesGet,
   memoriesList,
+  memoriesProposeChange,
+  memoriesPublish,
+  memoriesRetire,
   receiptsGet,
   remember,
 } from "@grasp-os/brain/memories";
+import { memoriesLineage } from "@grasp-os/brain/memory-lineage";
 import { preparePurge, purge } from "@grasp-os/brain/purge";
 import type { OnErase } from "@grasp-os/brain/purge";
 import { recall } from "@grasp-os/brain/recall";
@@ -172,6 +182,39 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     );
   }
 
+  /** Publishes a record into a team's, the company's or a chat's memory (GRA-298). */
+  async memoriesPublish(
+    input: MemoriesPublishInput,
+    options: CommandOptions
+  ): Promise<CommandReceipt> {
+    return await this.#asReader(
+      async (reader) =>
+        await memoriesPublish(brainOf(this.#env), reader, input, options)
+    );
+  }
+
+  /** Corrects one of the person's own records, keeping its history (GRA-298). */
+  async memoriesProposeChange(
+    input: MemoriesProposeChangeInput,
+    options: ChangeOptions
+  ): Promise<CommandReceipt> {
+    return await this.#asReader(
+      async (reader) =>
+        await memoriesProposeChange(brainOf(this.#env), reader, input, options)
+    );
+  }
+
+  /** Retires a shared record its publisher or an admin no longer wants used (GRA-298). */
+  async memoriesRetire(
+    input: MemoriesRetireInput,
+    options: ChangeOptions
+  ): Promise<CommandReceipt> {
+    return await this.#asReader(
+      async (reader) =>
+        await memoriesRetire(brainOf(this.#env), reader, input, options)
+    );
+  }
+
   async receiptsGet(input: ReceiptsGetInput): Promise<CommandReceipt> {
     return await this.#asReader(
       async (reader) => await receiptsGet(brainOf(this.#env), reader, input)
@@ -187,6 +230,12 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   async memoriesList(input?: MemoriesListInput): Promise<MemoryPage> {
     return await this.#asReader(
       async (reader) => await memoriesList(brainOf(this.#env), reader, input)
+    );
+  }
+
+  async memoriesLineage(input: MemoriesLineageInput): Promise<MemoryLineage> {
+    return await this.#asReader(
+      async (reader) => await memoriesLineage(brainOf(this.#env), reader, input)
     );
   }
 

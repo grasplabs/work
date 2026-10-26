@@ -116,7 +116,7 @@ const unended: (typeof workflowRuns.$inferSelect)["status"][] = [
 
 /** Statuses of an independent workflow's run that hasn't ended. */
 const resourceUnended: (typeof workflowResourceRuns.$inferSelect)["status"][] =
-  ["starting", "running"];
+  ["starting", "running", "paused"];
 
 /**
  * A decision's run, as the signals name it: an App's workflow, or an

@@ -1,6 +1,11 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
+import {
+  factRevision,
+  interviewApiPath,
+  participationNotice,
+} from "@grasp-os/shared/interview-links";
+import type { InterviewFact } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -8,7 +13,7 @@ import { vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { routed, unique } from "./sign-in.ts";
 
@@ -42,12 +47,72 @@ export const codeOf = async (response: Response) => {
 };
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
+/** A link as the page holds it: its secret and the device's key. */
+export interface Device {
+  secret: string;
+  key: string;
+}
+
+/** One of the link's calls, as the page makes it. */
+export const onLink = async (body: unknown): Promise<Response> =>
+  await routed(interviewApiPath, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+/** They agree to take part, to the notice as it is now (or `notice`). */
+export const participate = async (
+  device: Device,
+  notice: number = participationNotice.version
+): Promise<Response> =>
+  await onLink({ action: "participate", ...device, notice });
+
+/** Each fact not taken out, at its revision as it stands: what approving it names. */
+export const revisionsOf = async (
+  facts: readonly InterviewFact[]
+): Promise<{ id: string; revision: string }[]> =>
+  await Promise.all(
+    facts
+      .filter(({ out }) => out !== true)
+      .map(async (fact) => ({
+        id: fact.id,
+        revision: await factRevision(fact),
+      }))
+  );
+
+/** They approve `facts` as they stand: each at its revision. */
+export const approve = async (
+  device: Device,
+  facts: readonly InterviewFact[]
+): Promise<Response> =>
+  await onLink({
+    action: "approve",
+    ...device,
+    facts: await revisionsOf(facts),
+  });
+
+/**
+ * What a page does once someone agreed to the read-back: takes part, if it
+ * didn't yet, and approves the facts it marked agreed, as they stand.
+ */
+export const approveAgreed = async (
+  device: Device,
+  facts: readonly InterviewFact[]
+): Promise<void> => {
+  await participate(device);
+  const agreed = facts.filter(({ agreed: yes }) => yes === true);
+  if (agreed.length > 0) {
+    await approve(device, agreed);
+  }
+};
+
 /**
  * A fresh onboarding running since yesterday, with one person in Ops (no
- * lead) whose link is out, opened on a device: their secret and key, and
- * who they are.
+ * lead) whose link is out, opened on a device, and who agreed to take part
+ * unless `participating` is false: their secret and key, and who they are.
  */
-export const openedFor = async () => {
+export const openedFor = async ({ participating = true } = {}) => {
   const store = onboardingStore(env);
   const person = `oli-${unique()}`;
   const roster: Roster = {
@@ -80,7 +145,11 @@ export const openedFor = async () => {
     body: JSON.stringify({ action: "session", secret }),
   });
   const { key } = sessionKey.parse(await session.json());
-  return { link: { secret, key: key ?? "" }, person };
+  const device = { secret, key: key ?? "" };
+  if (participating) {
+    await participate(device);
+  }
+  return { link: device, person };
 };
 
 /** The same, as the page holds it: the link's secret and the device's key. */
@@ -92,6 +161,26 @@ export const opened = async () => {
 /** The model a request went to, by its id in pi's catalog. */
 export const modelOf = ({ body }: GatewayRequest): unknown =>
   requestModel.safeParse(body).data?.model;
+
+/** What `run` returns while the gateway answers each request as `respond` says, from those so far. */
+export const answeringWith = async <T>(
+  respond: (
+    requests: readonly GatewayRequest[]
+  ) => GatewayReply | undefined | Promise<GatewayReply | undefined>,
+  run: () => Promise<T>
+) => {
+  const before = env.MODEL_GATEWAY;
+  const fake = answeringGateway(respond);
+  const ai: AiBinding = env.AI;
+  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
+  env.MODEL_GATEWAY = gatewayConfig;
+  try {
+    return { requests: fake.requests, result: await run() };
+  } finally {
+    env.MODEL_GATEWAY = before;
+    spy.mockRestore();
+  }
+};
 
 /** What `run` returns while the gateway answers with `replies`. */
 export const answering = async <T>(
@@ -129,7 +218,8 @@ export const countedFor = async (model: string) => {
  * `intakeNext`). Agreeing, deleting or drawing sets the alarm half a second
  * on, and on a slow runner it got there first: it drew outside the test's
  * faked gateway, so the drawing failed and waited a minute to be tried
- * again, or its `model.call` landed amid the test's audit events, or it
+ * again, or it took a gateway reply queued for the test's own drawing, or
+ * its `model.call` landed amid the test's audit events, or it
  * gave the team to the brain before the test did. Deleting the alarm isn't
  * enough: the next agreement or drawing sets it again, and one already
  * going runs on.

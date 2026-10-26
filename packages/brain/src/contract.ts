@@ -28,9 +28,9 @@ import { searchQueryMaxLength } from "./limits.ts";
 //
 // Interview and privacy operations, and the learning and maintenance
 // capabilities, are GRA-294's, behind GRA-327. The one host-only entry
-// is named, never callable here: `BrainRuntimeApi.recordOutcome`, which
-// records verified execution outcomes and has no SDK or tool form, so a
-// model can't manufacture one by writing "success".
+// isn't here: `recordOutcome` (outcomes.ts) records settled execution
+// outcomes and has no SDK or tool form, so a model can't manufacture one
+// by writing "success".
 
 /** This contract's version: what a pack and a receipt say they follow. */
 export const brainContractVersion = 1;
@@ -299,7 +299,12 @@ export type CommandStatus = z.infer<typeof commandStatusSchema>;
 export const commandReceiptSchema = z.strictObject({
   id: brainReceiptIdSchema,
   contractVersion: z.literal(brainContractVersion),
-  operation: z.enum(["remember", "memories.proposeChange"]),
+  operation: z.enum([
+    "remember",
+    "memories.proposeChange",
+    "memories.publish",
+    "memories.retire",
+  ]),
   /** The validated request's hash, which a retry must match. */
   requestHash: z.string().min(1),
   status: commandStatusSchema,
@@ -354,6 +359,11 @@ export const memoriesPageMax = 100;
 
 export const memoriesListInputSchema = z.strictObject({
   kind: memoryKindSchema.optional(),
+  /**
+   * Whose records: the caller's own (the default), or the shared records
+   * of others that the caller's memory audience reads now (GRA-298).
+   */
+  among: z.enum(["mine", "shared"]).optional(),
   limit: z.int().min(1).max(memoriesPageMax).optional(),
   cursor: z.string().max(512).optional(),
 });
@@ -366,6 +376,57 @@ export const memoryPageSchema = z.strictObject({
 });
 export type MemoryPage = z.infer<typeof memoryPageSchema>;
 
+/** A record as an inspection shows it (GRA-298). */
+export const shownMemorySchema = memoryRecordSchema.extend({
+  /** Who published it, as the host names them; null for the reader's own. */
+  by: z.string().nullable(),
+});
+export type ShownMemory = z.infer<typeof shownMemorySchema>;
+
+export const memoriesLineageInputSchema = z.strictObject({
+  memoryId: memoryIdSchema,
+});
+export type MemoriesLineageInput = z.input<typeof memoriesLineageInputSchema>;
+
+/**
+ * One thing a record rests on, as the reader may see it now: a record it
+ * cites, at the revision cited, or a document version, with where the
+ * document is and its version now. What the reader can't see isn't here
+ * at all.
+ */
+export const lineageNodeSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("memory"),
+    /** The record that cites it. */
+    citedBy: memoryIdSchema,
+    citedRevision: revisionSchema,
+    record: shownMemorySchema,
+  }),
+  z.strictObject({
+    kind: z.literal("document"),
+    citedBy: memoryIdSchema,
+    documentId: documentIdSchema,
+    collectionId: collectionIdSchema,
+    version: revisionSchema,
+    section: z.int().min(0).optional(),
+    title: z.string(),
+    path: z.string(),
+    currentVersion: revisionSchema,
+  }),
+]);
+export type LineageNode = z.infer<typeof lineageNodeSchema>;
+
+/**
+ * A record's lineage (GRA-298): the record, what it rests on as far as
+ * the reader may follow it, and the correction that superseded it.
+ */
+export const memoryLineageSchema = z.strictObject({
+  record: shownMemorySchema,
+  restsOn: z.array(lineageNodeSchema),
+  supersededBy: shownMemorySchema.nullable(),
+});
+export type MemoryLineage = z.infer<typeof memoryLineageSchema>;
+
 /** A correction of a memory record, against the revision it was read at. */
 export const memoriesProposeChangeInputSchema = z.strictObject({
   memoryId: memoryIdSchema,
@@ -375,6 +436,233 @@ export const memoriesProposeChangeInputSchema = z.strictObject({
 export type MemoriesProposeChangeInput = z.input<
   typeof memoriesProposeChangeInputSchema
 >;
+
+/** The scopes a record is published into: shared ones, never a person's. */
+export const publishScopeSchema = z.enum(["team", "company", "session"]);
+export type PublishScope = z.infer<typeof publishScopeSchema>;
+
+/**
+ * A record published into a shared scope (GRA-298): its scope, and the
+ * key of it (a team's or a chat's ID; none for the company), what it says
+ * and what it rests on. The host decides who may publish where.
+ */
+export const memoriesPublishInputSchema = z
+  .strictObject({
+    scope: publishScopeSchema,
+    scopeId: z.string().min(1).max(128).optional(),
+    kind: memoryKindSchema,
+    text: z.string().trim().min(1).max(rememberTextMaxLength),
+    sourceRefs: z
+      .array(brainSourceRefSchema)
+      .max(brainSourceRefsMax)
+      .optional(),
+  })
+  .refine(
+    ({ scope, scopeId }) => (scope === "company") === (scopeId === undefined)
+  );
+export type MemoriesPublishInput = z.input<typeof memoriesPublishInputSchema>;
+
+/** A shared record to retire (GRA-298): by its publisher or an admin. */
+export const memoriesRetireInputSchema = z.strictObject({
+  memoryId: memoryIdSchema,
+});
+export type MemoriesRetireInput = z.input<typeof memoriesRetireInputSchema>;
+
+// --- skills -----------------------------------------------------------------
+
+/**
+ * A word a skill's manifest and a task share (a task type, a trait):
+ * lowercase letters, digits and `.`, `_`, `:` or `-`. Matched exactly,
+ * never by similarity.
+ */
+export const skillTokenSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9][a-z0-9._:-]*$/u);
+
+/** The longest capability name a manifest may require. */
+export const skillCapabilityMax = 512;
+
+/**
+ * A capability a skill requires, by the host's own name for it, whatever
+ * its case or length (core's: `connection:MAIL_SEND`, or with a 256
+ * character object ID in it): only the host names capabilities, and they
+ * are matched exactly, so the Brain bounds them and nothing more. No
+ * whitespace or control characters, which no host name holds.
+ */
+export const skillCapabilitySchema = z
+  .string()
+  .min(1)
+  .max(skillCapabilityMax)
+  .regex(/^[^\s\p{Cc}]+$/u);
+
+/** Most traits a task names. */
+export const skillTraitsMax = 32;
+
+/**
+ * What a caller asks a skill for: the task's type and what holds of it
+ * (its traits), never who it is or what it may do: the host says that.
+ */
+export const skillsSelectInputSchema = z.strictObject({
+  task: z.strictObject({
+    type: skillTokenSchema,
+    traits: z
+      .array(skillTokenSchema)
+      .max(skillTraitsMax)
+      .refine((traits) => new Set(traits).size === traits.length, {
+        message: "Name each trait once.",
+      })
+      .optional(),
+  }),
+});
+export type SkillsSelectInput = z.input<typeof skillsSelectInputSchema>;
+
+/** A skill at one exact version: what a selection pins and a read returns. */
+export const skillRefSchema = z.strictObject({
+  documentId: documentIdSchema,
+  collectionId: collectionIdSchema,
+  name: z.string().min(1).max(64),
+  version: revisionSchema,
+});
+export type SkillRef = z.infer<typeof skillRefSchema>;
+
+/**
+ * Why a skill whose tasks name the task's type wasn't selected, or that
+ * it was. Given only for skills the caller may read.
+ */
+export const skillOutcomeSchema = z.enum([
+  "selected",
+  "ambiguous",
+  "excluded",
+  "precondition_unmet",
+  "missing_capability",
+  "prerequisite_missing",
+  "dependency_missing",
+  "replaced",
+  "retired",
+  /** It applied so far, but the selection stopped before it could tell (`incomplete`). */
+  "incomplete",
+]);
+export type SkillOutcome = z.infer<typeof skillOutcomeSchema>;
+
+/** Why no skill was selected. */
+export const noSkillReasonSchema = z.enum([
+  /** No skill the caller may read applies to the task. */
+  "no_match",
+  /** More than one applies, and nothing says which: none is forced. */
+  "ambiguous",
+  /** More skills than one selection reads: none is chosen from a part. */
+  "incomplete",
+]);
+export type NoSkillReason = z.infer<typeof noSkillReasonSchema>;
+
+/**
+ * A selection: the one applicable skill, pinned at the version read, with
+ * the versions it depends on; or an explicit no-skill result. Either way,
+ * every skill considered, with why. A host checks what it hands a caller
+ * against it.
+ */
+export const skillSelectionSchema = z.strictObject({
+  id: z.string(),
+  contractVersion: z.int(),
+  /** The rules it followed: deterministic, never a model's choice. */
+  selectionPolicyVersion: z.string(),
+  result: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("skill"),
+      skill: skillRefSchema,
+      dependencies: z.array(skillRefSchema),
+    }),
+    z.strictObject({ kind: z.literal("none"), reason: noSkillReasonSchema }),
+  ]),
+  considered: z.array(
+    z.strictObject({ skill: skillRefSchema, outcome: skillOutcomeSchema })
+  ),
+  createdAt: z.string(),
+});
+export type SkillSelection = z.infer<typeof skillSelectionSchema>;
+
+/** A skill read at the exact version a selection pinned. */
+export const skillsReadInputSchema = z.strictObject({
+  documentId: documentIdSchema,
+  version: revisionSchema,
+});
+export type SkillsReadInput = z.input<typeof skillsReadInputSchema>;
+
+/** A skill's name, as its frontmatter has it. */
+export const skillNameSchema = z
+  .string()
+  .max(64)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
+
+/** Another skill: by name in the same collection, or by collection and name. */
+export const skillReferenceSchema = z.union([
+  skillNameSchema,
+  z.strictObject({ collection: collectionIdSchema, name: skillNameSchema }),
+]);
+export type SkillReference = z.infer<typeof skillReferenceSchema>;
+
+/** Another skill at one exact version: `name@version`, or qualified by collection. */
+export const skillDependencySchema = z.union([
+  z
+    .string()
+    .max(80)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*@[1-9][0-9]{0,8}$/u),
+  z.strictObject({
+    collection: collectionIdSchema,
+    name: skillNameSchema,
+    version: revisionSchema,
+  }),
+]);
+export type SkillDependency = z.infer<typeof skillDependencySchema>;
+
+/**
+ * What a skill's frontmatter says of when to use it (the Brain design's
+ * skill manifest), all of it exact words the host defines, matched as
+ * they are. A skill without `tasks` applies to no task: none is ever
+ * selected because it exists.
+ */
+export const skillManifestSchema = z.object({
+  /** The task types it applies to. */
+  tasks: z.array(skillTokenSchema).max(32).default([]),
+  /** Traits that must all hold of the task. */
+  when: z.array(skillTokenSchema).max(32).default([]),
+  /** Traits any one of which rules it out. */
+  unless: z.array(skillTokenSchema).max(32).default([]),
+  /** Capabilities the caller must already hold: a skill never grants one. */
+  requires: z.array(skillCapabilitySchema).max(32).default([]),
+  /**
+   * Skills that must be accepted and usable by the caller too: by name, in
+   * the skill's own collection, or by collection and name.
+   */
+  prerequisites: z.array(skillReferenceSchema).max(16).default([]),
+  /**
+   * Skills it rests on at exact versions: `name@version` in its own
+   * collection, or `{ collection, name, version }`.
+   */
+  dependencies: z.array(skillDependencySchema).max(16).default([]),
+  /**
+   * Skills, by name, it takes the place of where both apply: in its own
+   * collection, or, from a collection only admins write, a shipped skill.
+   */
+  replaces: z.array(skillNameSchema).max(16).default([]),
+  /** What checks it does what it says: references the host resolves. */
+  acceptance: z.array(z.string().trim().min(1).max(512)).max(16).default([]),
+  /** A retired skill is never selected again; pinned reads still work. */
+  status: z.enum(["accepted", "retired"]).default("accepted"),
+});
+export type SkillManifest = z.infer<typeof skillManifestSchema>;
+
+/** A skill as read: its exact version, its manifest and its text. */
+export const skillReadSchema = z.strictObject({
+  skill: skillRefSchema,
+  /** Its manifest at that version; null when it has none that parses. */
+  manifest: skillManifestSchema.nullable(),
+  /** The whole `SKILL.md` at that version: instructions are data to the host. */
+  text: z.string(),
+});
+export type SkillRead = z.infer<typeof skillReadSchema>;
 
 // --- operations and errors --------------------------------------------------
 
@@ -389,7 +677,12 @@ export const brainOperationSchema = z.enum([
   "receipts.get",
   "memories.get",
   "memories.list",
+  "memories.lineage",
   "memories.proposeChange",
+  "memories.publish",
+  "memories.retire",
+  "skills.select",
+  "skills.read",
 ]);
 export type BrainOperation = z.infer<typeof brainOperationSchema>;
 
@@ -399,7 +692,14 @@ export const brainOperations = {
   "receipts.get": "query",
   "memories.get": "query",
   "memories.list": "query",
+  "memories.lineage": "query",
   "memories.proposeChange": "mutation",
+  "memories.publish": "mutation",
+  "memories.retire": "mutation",
+  // Deterministic rules over manifests: no model, but adaptive selection
+  // will be an action, so callers treat it as one from the start.
+  "skills.select": "action",
+  "skills.read": "query",
 } as const satisfies Record<BrainOperation, "query" | "mutation" | "action">;
 
 /**

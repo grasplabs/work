@@ -671,9 +671,16 @@ export const callsFor = async (
   if (kept === undefined) {
     throw workflowErrors.create("workflow.calls_not_kept");
   }
-  // A row kept before kinds were: no kind, so every reviewed step is
-  // refused, and audited, as running another way (`stepRunsAs`).
-  return Object.hasOwn(kept, "kinds") ? kept : { ...kept, kinds: {} };
+  // A row kept before kinds, models or keys were: none of them, so every
+  // reviewed step is refused as running another way (`stepRunsAs`), every
+  // model call as asking a model its review doesn't show (`modelReviewed`)
+  // and every keyed name (`stepReviewed`), each audited.
+  return {
+    ...kept,
+    kinds: Object.hasOwn(kept, "kinds") ? kept.kinds : {},
+    models: Object.hasOwn(kept, "models") ? kept.models : {},
+    keyed: Object.hasOwn(kept, "keyed") ? kept.keyed : [],
+  };
 };
 
 /** The screens and workflows of an App's current version. */
@@ -897,12 +904,16 @@ export const commitFiles = async (
   // the files as the version reads back, paths in order, so a build says
   // the same here as at its first use.
   const saved = storedTreeSchema.parse(JSON.parse(json));
-  const builds = await buildOnSave(env, {
-    app: appId,
-    version: row.version,
-    files: saved,
-    bindings: workflowBindings,
-  });
+  const builds = await buildOnSave(
+    env,
+    {
+      app: appId,
+      version: row.version,
+      files: saved,
+      bindings: workflowBindings,
+    },
+    { profile: "production" }
+  );
   // The pages open on the App hear of it (spec 11.5): their screens show
   // a new version ready, and switch to it (screens-rpc.ts, `watchVersion`).
   waitUntil(versionMadeCurrent(env, appId));

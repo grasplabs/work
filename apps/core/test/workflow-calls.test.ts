@@ -72,6 +72,7 @@ import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import type { Settled, StepError } from "../src/workflows/code.ts";
+import { runEngine } from "../src/workflows/engine.ts";
 import { cpuLimitKill } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import type { FrozenCatalogBinding } from "../src/workflows/resource-authority.ts";
@@ -1704,6 +1705,58 @@ describe("runs started by a restricted App", () => {
     });
   });
 
+  it("refuse confirming a side effect while its run is paused, then send it once and complete once resumed", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
+      before: [hold],
+    });
+    const starter = await startingApp(ada, admin, workflow.id, {
+      restricted: true,
+    });
+    const runId = await starter.start(serving);
+    const held = await heldFor(ada, runId);
+    // Paused while it waits for its person, as a screen's pause asks it.
+    await runEngine(env).pause(runId, 1);
+    await vi.waitFor(
+      async () => {
+        await expect(
+          resourceRunFor(env, ada, workflow.id, runId)
+        ).resolves.toMatchObject({ status: "paused" });
+      },
+      { timeout: 30_000, interval: 50 }
+    );
+    const whilePaused = await settledCode(
+      confirmPendingAction(env, ada, held.id, held.inputHash)
+    );
+    const { calls: sentWhilePaused } = await mail.did();
+    // Resumed: its next activation may read its row before it hears of the
+    // resume, and goes on all the same.
+    await runEngine(env).resume(runId, 2);
+    await vi.waitFor(
+      async () => {
+        await expect(
+          resourceRunFor(env, ada, workflow.id, runId)
+        ).resolves.not.toMatchObject({ status: "paused" });
+      },
+      { timeout: 30_000, interval: 50 }
+    );
+    await confirmPendingAction(env, ada, held.id, held.inputHash);
+    const run = await ended(ada, workflow.id, runId);
+    const { calls: sent } = await mail.did();
+    expect({
+      whilePaused,
+      sentWhilePaused,
+      end: endOf(run),
+      sent,
+    }).toStrictEqual({
+      whilePaused: "workflow.run_paused",
+      sentWhilePaused: 0,
+      end: { status: "completed", output: { status: "message-1" } },
+      sent: 1,
+    });
+  });
+
   it("send nothing their person declines, nor anything confirmed once the run's own authority for its alias is gone, whatever other alias shares its permission", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -2180,6 +2233,7 @@ const activationOf = async (
     attempts = {},
     bindings,
     failed,
+    parks = false,
   }: {
     /** The run's row: a real start's, which its calls are checked against. */
     runId: string;
@@ -2191,6 +2245,11 @@ const activationOf = async (
     bindings: ReadonlyMap<string, FrozenCatalogBinding>;
     /** What each attempt failed with, as the engine heard it: its name and code. */
     failed: unknown[];
+    /**
+     * Whether a step whose attempt fails as it may be tried again is parked,
+     * as the engine parks it: its call never settles, the activation over.
+     */
+    parks?: boolean;
   }
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
@@ -2213,6 +2272,12 @@ const activationOf = async (
           name: error instanceof Error ? error.name : "unknown",
           code: code ?? null,
         });
+        if (parks && error instanceof Error && error.name === "TimeoutError") {
+          // oxlint-disable-next-line promise/avoid-new -- a parked step's call never settles
+          return await new Promise<never>(() => {
+            // Never settles.
+          });
+        }
         throw error;
       }
     },
@@ -2306,16 +2371,26 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
       marks,
       bindings,
       failed,
+      parks: true,
     });
-    // The isolate is stopped past its CPU time in an earlier step's call.
-    await first.do("task:first", adaData, async () => {
+    // The isolate is stopped past its CPU time in an earlier step's call,
+    // which the engine parks; a step still out after it (one of a branch)
+    // asks next.
+    const parkedOnce = async (count: number) => {
+      await vi.waitFor(() => {
+        expect(failed).toHaveLength(count);
+      });
+    };
+    void first.do("task:first", adaData, async () => {
       ran.push("first");
       return await Promise.reject(cpuLimitKill());
     });
-    await first.do("task:greet", adaData, async (attempt) => {
+    await parkedOnce(1);
+    void first.do("task:greet", adaData, async (attempt) => {
       ran.push("greet, first activation");
       return await called(attempt);
     });
+    await parkedOnce(2);
     const parked = [...failed];
     // The next activation's attempt, the step's retry: its module runs.
     const second = await activationOf(ada, workflow.id, {

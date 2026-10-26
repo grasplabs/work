@@ -81,6 +81,10 @@ const keptCallsSchema = z.record(
   z.object({
     steps: z.record(z.string(), z.array(z.string())).nullable(),
     kinds: z.record(z.string(), z.enum(["exact", "ai", "decision", "wait"])),
+    // Only for naming its steps, which neither changes: a row without them
+    // names its steps all the same.
+    models: z.record(z.string(), z.array(z.string())).default({}),
+    keyed: z.array(z.string()).default([]),
     all: z.array(z.string()),
   })
 );

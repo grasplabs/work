@@ -179,7 +179,7 @@ export const recordVersionBuilds = async (
   try {
     const codeOf =
       codesOf === undefined
-        ? await versionScreens(env, files, version, app)
+        ? await versionScreens(env, files, version, app, "production")
         : await codesOf();
     const recorded = await Promise.all(
       screens.map(async (name) => await codeOf(name))

@@ -534,7 +534,7 @@ export const checkFiles = async (
       files,
       bindings: await appBindingKinds(env, app),
     },
-    signal
+    { profile: "preview", signal }
   );
   signal?.throwIfAborted();
   const builds = {
@@ -1598,6 +1598,8 @@ build: {
 /** `env.build`. */
 export const buildApi: AgentApi = {
   name: "build",
+  summary:
+    "Building Apps in this chat's draft: write, check and propose their files, and ask for the permissions they need. Nothing goes live until a builder makes it current, and no permission holds until an admin grants it.",
   types: buildTypes,
   declaration: buildDeclaration,
   stub: (scope) => exports.BuildApi({ props: scope }),

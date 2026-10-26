@@ -2169,6 +2169,43 @@ export const quotaPolicies = sqliteTable("quota_policies", {
 });
 
 /**
+ * Settled runs' outcomes still owed to the Brain (src/brain-capture.ts):
+ * one row per eligible run, written with the write that ended it
+ * (src/workflows/runs.ts, `projectStatus`), so a run never ends without
+ * its capture. Delivery builds the outcome from the run's row then, and
+ * deletes the intent once the Brain has it; one the Brain refused for good
+ * stays `dead`, for someone to look at. `seq` only grows (AUTOINCREMENT),
+ * so it is the Brain's cursor of this source.
+ */
+export const brainCaptureIntents = sqliteTable(
+  "brain_capture_intents",
+  {
+    seq: integer().primaryKey({ autoIncrement: true }),
+    /** The Brain's event ID: one intent per event. */
+    eventId: text("event_id").notNull(),
+    /** The run the outcome rests on: its erasure drops the intent. */
+    evidenceId: text("evidence_id").notNull(),
+    state: text({ enum: ["pending", "dead"] })
+      .notNull()
+      .default("pending"),
+    /** Failed deliveries. */
+    attempts: integer().notNull().default(0),
+    /** The code of the last failed delivery. */
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("brain_capture_intents_event_idx").on(table.eventId),
+    index("brain_capture_intents_evidence_idx").on(table.evidenceId),
+    index("brain_capture_intents_state_idx").on(
+      table.state,
+      table.attempts,
+      table.seq
+    ),
+  ]
+);
+
+/**
  * Each pause, resume or cancel of a run that the host admitted
  * (src/workflows/controls.ts): its durable receipt. `admitted` until the
  * engine confirms it (`applied`), or a cancel supersedes a pause or resume
@@ -3666,7 +3703,14 @@ export const workflowResourceRuns = sqliteTable(
     buildHash: text("build_hash").notNull(),
     principalId: text("principal_id").notNull(),
     status: text({
-      enum: ["starting", "running", "completed", "failed", "cancelled"],
+      enum: [
+        "starting",
+        "running",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+      ],
     }).notNull(),
     engineSequence: integer("engine_sequence").notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
@@ -3714,6 +3758,18 @@ export const workflowResourceRuns = sqliteTable(
      * later pass while the engine ends it.
      */
     stopRequestedAt: timestamp("stop_requested_at"),
+    /**
+     * The newest control generation a screen's pause, resume or cancel took
+     * (screen-workflows.ts): each admitted one takes the next, and goes to
+     * the engine with it, which ignores one older than the newest it took.
+     */
+    controlGeneration: integer("control_generation").notNull().default(0),
+    /**
+     * Moves on with every write that changes what a screen's snapshot of the
+     * run shows (its status, a control admitted or settled), in the write's
+     * own statement: the snapshot's revision is read from it.
+     */
+    summaryRevision: integer("summary_revision").notNull().default(0),
   },
   (table) => [
     // A run's children that haven't ended, for its end to stop them.
@@ -3915,7 +3971,7 @@ export const workflowResourceRunControls = sqliteTable(
       .references(() => apps.id),
     principalId: text("principal_id").notNull(),
     key: text().notNull(),
-    kind: text({ enum: ["cancel"] }).notNull(),
+    kind: text({ enum: ["pause", "resume", "cancel"] }).notNull(),
     state: text({ enum: ["admitted", "applied", "superseded"] }).notNull(),
     createdAt: timestamp("created_at").notNull(),
     settledAt: timestamp("settled_at"),
@@ -3931,10 +3987,24 @@ export const workflowResourceRunControls = sqliteTable(
      * that stop exactly once, however often it is asked again.
      */
     stopRequestedAt: timestamp("stop_requested_at"),
+    /**
+     * The run's control generation it was admitted under (its run's
+     * `control_generation`), which it goes to the engine with; one applied
+     * at once, the run already where it asked, keeps the run's current one.
+     */
+    generation: integer().notNull().default(0),
   },
   (table) => [
-    uniqueIndex("workflow_resource_run_controls_kind_idx").on(
+    // One cancel per run, whatever key asks for it; pauses and resumes are
+    // as many as the run takes, one unresolved at a time, and one per key:
+    // two overlapping requests under one key write one receipt between
+    // them, even one the run is already past, which takes no generation.
+    uniqueIndex("workflow_resource_run_controls_cancel_idx")
+      .on(table.runId)
+      .where(sql`${table.kind} = 'cancel'`),
+    uniqueIndex("workflow_resource_run_controls_key_idx").on(
       table.runId,
+      table.key,
       table.kind
     ),
     index("workflow_resource_run_controls_run_idx").on(
@@ -3946,6 +4016,29 @@ export const workflowResourceRunControls = sqliteTable(
       table.nextAt
     ),
   ]
+);
+
+/**
+ * The keys a screen's pause or resume of an independent run was asked
+ * under (screen-workflows.ts), each with the receipt it was answered: its
+ * own, or, for one that joined a pause or resume already unresolved, that
+ * one's. One per run, kind and key, so a request sent again under a key
+ * is answered the receipt it was first, never decided anew: a retry of a
+ * request that joined another can't undo a control admitted since.
+ */
+export const workflowResourceRunControlKeys = sqliteTable(
+  "workflow_resource_run_control_keys",
+  {
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    kind: text({ enum: ["pause", "resume"] }).notNull(),
+    key: text().notNull(),
+    receiptId: text("receipt_id")
+      .notNull()
+      .references(() => workflowResourceRunControls.id),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.kind, table.key] })]
 );
 
 /**

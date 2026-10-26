@@ -1,6 +1,7 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
+import type { StaffInterview } from "@grasp-os/shared/onboarding-staff";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -18,12 +19,14 @@ import {
 
 // Grasp's onboarding area over `/rpc` (src/onboarding/staff-area.ts and
 // staff-rpc.ts): a staff session sees where the onboarding stands, what
-// needs Grasp, its notes and the log, and reads someone's interview. The
-// ways it can fail, tried here:
+// needs Grasp, its notes and the log, and where someone's interview
+// stands. The ways it can fail, tried here:
 //
 // - Anyone but staff reading any of it: a member, the company's admin.
-// - A transcript read without a trace, or one that names the person, or
-//   carries their words, in the audit log, which the company's admin
+// - Staff reading what anyone said (GRA-329): no answer carries a word of
+//   an interview, and there is no way to read one.
+// - A look at an interview without a trace, or one that names the person,
+//   or carries their words, in the audit log, which the company's admin
 //   reads (S2).
 // - What needs Grasp missing what holds the onboarding up.
 
@@ -44,7 +47,7 @@ const progress = (text = sentinel): InterviewProgress => ({
   told: true,
   mode: "type",
   lines: [{ from: "person", text, typed: true }],
-  facts: [],
+  facts: [{ id: "f1", tag: "step", text, record: text }],
   phase: "readback",
   wants: "end",
   startedAt: Date.now(),
@@ -128,36 +131,84 @@ describe("Grasp's onboarding area", () => {
         outcome(api.onboardingStaff.overview()),
         outcome(api.onboardingStaff.log()),
         outcome(api.onboardingStaff.addNote("A note")),
-        outcome(api.onboardingStaff.transcript("anyone")),
+        outcome(api.onboardingStaff.interview("anyone")),
       ])
     );
     expect(new Set(refused)).toStrictEqual(new Set(["onboarding.staff_only"]));
   });
 
-  it("puts every transcript read in the audit log, by the interview's own id, without the person or their words", async () => {
+  it("shows staff where an interview stands and its numbers, never a word of it, and puts every look in the audit log without the person (GRA-329)", async () => {
     const { ids } = await running();
     const staff = await asStaff();
 
-    const reads: string[] = [];
-    const events = await auditedDuring(async () => {
-      const read = await staff.onboardingStaff.transcript(ids.oli);
-      reads.push(read.progress?.lines[0]?.text ?? "");
-    });
+    const seen: StaffInterview[] = [];
+    const events = await auditedDuring(
+      async () => {
+        seen.push(await staff.onboardingStaff.interview(ids.oli));
+      },
+      { staffAccesses: true }
+    );
 
     const text = JSON.stringify(events);
+    const [read] = seen;
+    const { startedAt, completedAt, ...rest } = read ?? {
+      startedAt: null,
+      completedAt: null,
+    };
     expect({
-      words: reads[0],
+      times: [typeof startedAt, typeof completedAt],
+      read: rest,
+      words: JSON.stringify(seen).includes(sentinel),
       actions: events.map(({ action, actor }) => [action, actor.type]),
       target: events.map(({ target }) => target?.type),
       names: text.includes(ids.oli) || text.includes("Oli Olsen"),
-      words_in_log: text.includes(sentinel),
+      wordsInLog: text.includes(sentinel),
     }).toStrictEqual({
-      words: sentinel,
-      actions: [["onboarding.transcript.read", "staff"]],
-      target: ["interview"],
+      times: ["string", "string"],
+      read: {
+        person: ids.oli,
+        name: "Oli Olsen",
+        team: "Ops",
+        state: "completed",
+        mode: "type",
+        rating: null,
+        interviewer: "stephen",
+        texts: [],
+        counts: { said: 1, facts: 1, out: 0, approved: 0 },
+        participatedAt: null,
+        withdrawnAt: null,
+      },
+      words: false,
+      // On record as a staff look before anything was read, by the kind of
+      // what was asked alone (staff-audit.ts).
+      actions: [["staff.accessed", "staff"]],
+      target: [undefined],
       names: false,
-      words_in_log: false,
+      wordsInLog: false,
     });
+  });
+
+  it("has no way for staff to read a transcript: asking for one is refused, and reads nothing", async () => {
+    const { ids } = await running();
+    const staff = await asStaff();
+    const area: object = staff.onboardingStaff;
+    // The read staff had before GRA-329, asked for by its old name.
+    const transcript: unknown = Reflect.get(area, "transcript");
+    const asked: string[] = [];
+    const events = await auditedDuring(async () => {
+      asked.push(
+        typeof transcript === "function"
+          ? await outcome(
+              Promise.resolve(Reflect.apply(transcript, area, [ids.oli]))
+            )
+          : "no such read"
+      );
+    });
+    expect({
+      answered: asked[0] === "ok",
+      words: JSON.stringify(asked).includes(sentinel),
+      read: events.some(({ action }) => action.includes("read")),
+    }).toStrictEqual({ answered: false, words: false, read: false });
   });
 
   it("keeps staff's notes, and narrows the log by who, what, team and day, naming who did what", async () => {

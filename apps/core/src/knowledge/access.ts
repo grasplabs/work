@@ -19,7 +19,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "../audit-outbox.ts";
-import { teamsOf } from "../auth/identity.ts";
+import { memberRole, teamsOf } from "../auth/identity.ts";
 import {
   chatAudiences,
   collectionTeams,
@@ -184,6 +184,33 @@ export const keepAudience = async (
     .insert(chatAudiences)
     .values({ chatId, workspaceId, ...kept })
     .onConflictDoUpdate({ target: chatAudiences.chatId, set: kept });
+};
+
+/**
+ * The chats others share that count `reader` in their audience now, by
+ * chat ID, as `chat_audiences` keeps them before each turn: none once
+ * they are no longer one of the organization's members. The audiences
+ * whose shared events reach them (the Brain's `audiences` port). Only a
+ * person: an App or agent reaches no shared session's events.
+ */
+export const audiencesOf = async (
+  env: Env,
+  reader: Reader
+): Promise<string[]> => {
+  if (reader.type !== "person") {
+    return [];
+  }
+  const { userId } = reader.person;
+  if ((await memberRole(env.DB, userId)) === undefined) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .select({ chatId: chatAudiences.chatId })
+    .from(chatAudiences)
+    .where(
+      sql`EXISTS (SELECT 1 FROM json_each(${chatAudiences.members}) WHERE json_each.value = ${userId})`
+    );
+  return rows.map(({ chatId }) => chatId);
 };
 
 /**

@@ -176,14 +176,13 @@ export default {
       return new Response("Which type?", { status: 400 });
     }
     return Response.json(
-      await outcomeOf(
-        async () =>
-          await localExtractor({ ...extractorEnv, LOADER: noLoader })({
-            name: "upload",
-            mediaType,
-            bytes,
-          })
-      )
+      await outcomeOf(async () => {
+        const { markdown } = await localExtractor({
+          ...extractorEnv,
+          LOADER: noLoader,
+        })({ name: "upload", mediaType, bytes });
+        return markdown;
+      })
     );
   },
 } satisfies ExportedHandler<StandInEnv>;

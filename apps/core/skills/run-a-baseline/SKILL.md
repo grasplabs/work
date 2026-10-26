@@ -1,6 +1,11 @@
 ---
 name: run-a-baseline
 description: Runs a baseline of how the company works today, from interviews and documents to drawn workflows and a dated snapshot on the board page. Use at the start of an engagement, or when asked where the company stands.
+tasks: [baseline.run]
+prerequisites:
+  - { collection: grasp-skills, name: draw-a-workflow }
+  - { collection: grasp-skills, name: interview-a-stakeholder }
+status: accepted
 ---
 
 # Run a baseline

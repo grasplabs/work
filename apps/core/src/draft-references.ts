@@ -6,6 +6,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 
 import { filesManifest } from "./app-inspection.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
+import type { BuildOptions } from "./screens.ts";
 
 // What an App's screens import as `#grasp` (spec 8, 10.1): the public
 // references the host generates from its server code. They are data (each
@@ -122,13 +123,14 @@ export const withDraftReferences = async (
   version: number,
   files: Record<string, string>,
   /**
-   * Given up on (a build job's lease lost): generating them starts no
-   * compile nor inspection, and it throws its reason.
+   * Its build profile (`preview` for a chat's draft), and when it is given
+   * up on (a build job's lease lost): generating them starts no compile
+   * nor inspection, and it throws its reason.
    */
-  signal?: AbortSignal
+  options?: BuildOptions
 ): Promise<Record<string, string>> =>
   await withReferencesFrom(app, version, files, async () => {
-    const manifest = await filesManifest(env, files, app, signal);
+    const manifest = await filesManifest(env, files, app, options);
     return {
       manifest,
       workflows: await boundWorkflowsOf(env, app, manifest),

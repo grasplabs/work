@@ -1,6 +1,8 @@
 ---
 name: write-board-page
 description: Writes the one-page board update from the board page's latest snapshot, with where the company stands, what changed since the last snapshot, what the plan does next and what the board needs to decide. Use before a board or management meeting.
+tasks: [board-page.write]
+status: accepted
 ---
 
 # Write the board page

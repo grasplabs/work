@@ -86,7 +86,11 @@ export const allowedFor = async <Caller>(
  * was read or searched for.
  */
 export interface ReadRecord {
-  action: "knowledge.read" | "knowledge.search" | "knowledge.search.empty";
+  action:
+    | "knowledge.read"
+    | "knowledge.search"
+    | "knowledge.search.empty"
+    | "knowledge.skill.select";
   target?: { type: "document" | "collection"; id: string };
   documentIds?: string[];
   detail: Record<string, DetailValue>;

@@ -48,6 +48,8 @@ import type { JWTHeaderParameters } from "jose";
 import { z } from "zod";
 
 import { signInConfig } from "../auth/config.ts";
+import { channelKeys, keyFor as channelKeyFor } from "./signing-keys.ts";
+import type { ChannelKeys } from "./signing-keys.ts";
 import { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 
 /** Who issues the tokens the Bot Framework sends its requests with. */
@@ -58,12 +60,6 @@ const teamsChannel = "msteams";
 
 /** How far a token's times may be from core's clock. */
 const clockToleranceSeconds = 5 * 60;
-
-/** How long fetched keys are used before they are fetched again. */
-const keysMaxAgeMs = 60 * 60 * 1000;
-
-/** How often a key id not among the keys may have them fetched again. */
-const refreshIntervalMs = 60 * 1000;
 
 /** An activity, as far as its check reads it. */
 const activitySchema = z.object({
@@ -79,71 +75,29 @@ const activitySchema = z.object({
 
 const bearerPattern = /^Bearer (?<token>[\w-]+\.[\w-]+\.[\w-]+)$/u;
 
-interface KeySet {
-  keys: Map<string, ChannelSigningKey>;
-  at: number;
-}
-
-/**
- * The keys an isolate last fetched, when it last started fetching them,
- * and the fetch under way, if one is.
- */
-export interface TeamsKeys {
-  set?: KeySet;
-  lastFetch: number;
-  fetching?: Promise<KeySet>;
-}
+/** The keys an isolate holds for Teams (signing-keys.ts). */
+export type TeamsKeys = ChannelKeys;
 
 /** Keys not yet fetched. */
-export const teamsKeys = (): TeamsKeys => ({
-  lastFetch: Number.NEGATIVE_INFINITY,
-});
+export const teamsKeys = (): TeamsKeys => channelKeys();
 
 /** This isolate's keys, which every request it serves checks against. */
 const isolateKeys = teamsKeys();
 
-const fetchKeys = async (env: Env, keys: TeamsKeys): Promise<KeySet> => {
-  keys.fetching ??= (async () => {
-    keys.lastFetch = Date.now();
-    try {
-      const fetched = await env.CONNECT.channelSigningKeys("teams");
-      keys.set = {
-        keys: new Map(fetched.keys.map((key) => [key.kid, key])),
-        at: Date.now(),
-      };
-      return keys.set;
-    } finally {
-      keys.fetching = undefined;
-    }
-  })();
-  return await keys.fetching;
-};
-
-/**
- * The published key `kid` names. The keys are fetched when they are older
- * than an hour, or when `kid` isn't among them; fetches start at least a
- * minute apart whatever the keys' state, a failed one included, so an
- * outage or made-up key ids can't have every request ask connect again. A
- * request arriving while a fetch is under way waits for that fetch.
- */
+/** The published key `kid` names (signing-keys.ts). */
 const keyFor = async (
   env: Env,
   keys: TeamsKeys,
   kid: string
-): Promise<ChannelSigningKey | undefined> => {
-  const now = Date.now();
-  const { set } = keys;
-  const fresh = set !== undefined && now - set.at < keysMaxAgeMs;
-  const known = fresh ? set.keys.get(kid) : undefined;
-  if (known !== undefined) {
-    return known;
-  }
-  if (keys.fetching === undefined && now - keys.lastFetch < refreshIntervalMs) {
-    return undefined;
-  }
-  const fetched = await fetchKeys(env, keys);
-  return fetched.keys.get(kid);
-};
+): Promise<ChannelSigningKey | undefined> =>
+  await channelKeyFor(
+    async () => {
+      const fetched = await env.CONNECT.channelSigningKeys("teams");
+      return fetched.keys;
+    },
+    keys,
+    kid
+  );
 
 /** Why a request was refused, for the log: never anything of its own. */
 class RefusalError extends Error {

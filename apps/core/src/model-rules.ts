@@ -62,7 +62,9 @@ export interface RulesInput {
   work?:
     | { authority: Authority; context: WorkContext }
     /** Core's own onboarding: always carries sensitive data. */
-    | { onboarding: true };
+    | { onboarding: true }
+    /** Core's own upkeep of the Brain: always carries sensitive data. */
+    | { platform: "brain_upkeep" };
 }
 
 /** Why a call must stay in the EU: which rule says so. */
@@ -220,7 +222,8 @@ const restrictedWork = async (
   }
   // What the company told Grasp, and what its people say in interviews:
   // judged as data the deployment's sensitive-data rule covers.
-  if ("onboarding" in work) {
+  // And the Brain's own sources, which core reads for its upkeep.
+  if ("onboarding" in work || "platform" in work) {
     return true;
   }
   try {

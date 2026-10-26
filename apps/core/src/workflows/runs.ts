@@ -54,6 +54,7 @@ import {
 } from "../audit-outbox.ts";
 import { currentMembership } from "../auth/auth.ts";
 import type { Member } from "../auth/identity.ts";
+import { deliverRunCapturesSoon, runCaptured } from "../brain-capture.ts";
 import {
   apps,
   members,
@@ -1190,6 +1191,24 @@ const engineFields = (engine: EngineStatus) => ({
 });
 
 /**
+ * What follows a projection that changed `row`: its screens are told of a
+ * new status, and the Brain gets an ended run's outcome soon.
+ */
+const afterProjection = async (
+  env: Env,
+  row: RunRow,
+  status: RunRow["status"],
+  ended: boolean
+): Promise<void> => {
+  if (ended) {
+    deliverRunCapturesSoon(env);
+  }
+  if (shownStatus(row.status) !== status) {
+    await tellScreens(env, row);
+  }
+};
+
+/**
  * Makes the run's row say where the engine says it is: the one writer of
  * a run's status. A notification no newer than the last the row took is
  * late and changes nothing; an ended run's row never changes again. The
@@ -1198,7 +1217,8 @@ const engineFields = (engine: EngineStatus) => ({
  * (its own, or one saying it stopped) and its owner notified; cancelled,
  * which a cancel has audited already, unless the engine ended it without
  * one. Screens are told of every change of status, and a run that ended
- * forgets the statistics points of its steps that never completed.
+ * forgets the statistics points of its steps that never completed. An
+ * ended run's outcome is captured for the Brain with its end.
  */
 export const projectStatus = async (
   env: Env,
@@ -1292,14 +1312,14 @@ export const projectStatus = async (
       : []),
     // Its end and the cleanup of the statistics points its steps never
     // added up are written together: a retried notification finds the
-    // row ended, so nothing would be left to clean up after it.
-    ...(ended ? [stepStatisticsForgotten(db, row.id)] : []),
+    // row ended, so nothing would be left to clean up after it. Its outcome's capture for the Brain goes with its end too: a run
+    // never ends without it (brain-capture.ts).
+    ...(ended
+      ? [stepStatisticsForgotten(db, row.id), runCaptured(db, row.id, at)]
+      : []),
   ]);
-  if (!changed) {
-    return;
-  }
-  if (shownStatus(row.status) !== changed.status) {
-    await tellScreens(env, row);
+  if (changed) {
+    await afterProjection(env, row, changed.status, ended);
   }
 };
 

@@ -492,6 +492,8 @@ describe("variables by stage", () => {
         "runtime",
         "params",
       ],
+      // A for's item keys, made on its items as its definition is.
+      loopKeys: ["context", "input", "task", "workflow", "runtime", "params"],
       taskExportAs: [
         "context",
         "input",

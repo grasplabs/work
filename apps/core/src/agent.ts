@@ -26,7 +26,9 @@ import type { AgentModel } from "./models.ts";
 import type { CodeRunOpening } from "./workspace.ts";
 
 // The agent loop: Pi (pi-agent-core) in Code Mode. The model answers, or
-// calls one tool, `executeCode`, with code against the chat's typed APIs;
+// calls `executeCode` with code against the chat's typed APIs, after
+// reading their declarations with `readApi` (every request carries only an
+// index of the APIs, a line each, so it fits the smallest model's window);
 // the code runs in its own locked isolate (src/code-mode.ts) and what it
 // returns or throws goes back to the model, until the model answers. Every
 // request goes through the model gateway (`models(env).agent`).
@@ -57,7 +59,7 @@ export default async (self, env, ctx) => {
 };
 \`\`\`
 
-What it returns comes back to you as JSON, with what it logs and anything it throws. The code runs in a sandbox with no network: it reaches nothing but the APIs in \`env\`, declared below. Don't guess at APIs that aren't declared. When the chat lacks what a question needs, say so.
+What it returns comes back to you as JSON, with what it logs and anything it throws. The code runs in a sandbox with no network: it reaches nothing but the APIs in \`env\`, listed below, a line each. Before you write code against an API, read its full declaration with the \`readApi\` tool: it says exactly what each call takes and returns. Don't guess at calls it doesn't declare. When the chat lacks what a question needs, say so.
 
 How you work:
 - Answer from what you read, not from memory: search Knowledge, read the documents that answer the question, and cite each one you used where you use it, as a Markdown link to its ID: [its title](grasp:note/<documentId>). Cite only documents your code was given in this chat.
@@ -72,18 +74,89 @@ Building in Grasp:
 - Screens never run in the background: anything that runs on a schedule, on an event or for a long time is a workflow.
 - To build or change an App, write its files into this chat's draft with \`env.build\`, check them, and fix what the check reports until it passes, without asking the person about each error. Then propose it, and ask for the permissions it needs. Nothing you build goes live until a builder of the App makes it current in Grasp, and no permission holds until an admin grants it: say so.`;
 
-/** The chat's APIs, as the model reads them. */
+/**
+ * The chat's APIs, as every request carries them: an index, a line each
+ * (GRA-1065). Their declarations are read on demand (`readApi`).
+ */
 const apisSection = (apis: readonly AgentApi[]): string =>
   [
     "<apis>",
+    "The APIs in `env`. Read one's declaration with `readApi` before you call it.",
+    ...apis.map(({ name, summary }) => `- env.${name}: ${summary}`),
+    "</apis>",
+  ].join("\n");
+
+/** `apis`' declarations, as `readApi` hands them over: TypeScript. */
+const declarationsOf = (apis: readonly AgentApi[]): string =>
+  [
     ...apis.flatMap(({ types }) => (types === undefined ? [] : [types, ""])),
     "interface Env {",
     ...apis.flatMap(({ declaration }) =>
       declaration.split("\n").map((line) => `  ${line}`)
     ),
     "}",
-    "</apis>",
   ].join("\n");
+
+const readApiParameters = Type.Object(
+  {
+    names: Type.Array(Type.String(), {
+      minItems: 1,
+      description:
+        "The APIs to read, by their names in `env`, such as `knowledge`.",
+    }),
+  },
+  { additionalProperties: false }
+);
+
+/** `readApi`'s input, checked: only `names`, a non-empty list of names. */
+const readApiInputSchema = z.strictObject({
+  names: z.array(z.string().max(64)).min(1).max(32),
+});
+
+/**
+ * The tool that reads APIs' full declarations (GRA-1065): types and doc
+ * comments, as written. Declarations are the platform's own text, never
+ * anyone's data; what the APIs return is data, as every request says.
+ * An unknown name is refused with the names there are.
+ */
+const readApi = (
+  apis: readonly AgentApi[]
+): AgentTool<typeof readApiParameters> => ({
+  name: "readApi",
+  label: "Read an API",
+  description:
+    "Returns the full TypeScript declaration of the named APIs in `env`: every call, what it takes and what it returns.",
+  parameters: readApiParameters,
+  prepareArguments: (args) => {
+    const input = readApiInputSchema.safeParse(args);
+    if (!input.success) {
+      throw new Error(
+        "readApi takes one field, `names`: a list of API names in `env`."
+      );
+    }
+    return input.data;
+  },
+  executionMode: "parallel",
+  execute: async (_toolCallId, { names }) => {
+    const unknown = names.filter(
+      (name) => !apis.some((api) => api.name === name)
+    );
+    if (unknown.length > 0) {
+      throw new Error(
+        `No API named ${unknown.join(", ")}. The APIs are: ${apis.map(({ name }) => name).join(", ")}.`
+      );
+    }
+    return await Promise.resolve({
+      content: [
+        {
+          type: "text",
+          text: declarationsOf(apis.filter(({ name }) => names.includes(name))),
+        },
+      ],
+      details: undefined,
+    });
+  },
+});
 
 /**
  * The chat's memory, as the model reads it: its files, and the version of
@@ -91,7 +164,10 @@ const apisSection = (apis: readonly AgentApi[]): string =>
  * `null` without any.
  */
 const memorySection = (memory: Memory | undefined): string | null => {
-  if (memory === undefined || memory.files.length === 0) {
+  if (
+    memory === undefined ||
+    (memory.files.length === 0 && memory.records.length === 0)
+  ) {
     return null;
   }
   const user = memory.files.find(
@@ -99,7 +175,7 @@ const memorySection = (memory: Memory | undefined): string | null => {
   );
   return [
     "<memory>",
-    `What you always know here: the company's files, and the person's USER.md (at version ${user?.version ?? 0}).`,
+    `What you always know here: the company's files, the person's USER.md (at version ${user?.version ?? 0}), and records kept in the brain that everyone in this chat may read.`,
     memory.text,
     "</memory>",
   ].join("\n");
@@ -1071,6 +1147,7 @@ export const runTurn = async ({
   const progress: Progress = { steps: 0, runs: 0, withheld: new Set() };
   const tools = [
     executeCode({ apis, scope, runs, loader, sandbox, codeTimeoutMs }),
+    readApi(apis),
   ];
   const room = { chars: requestChars(model.inputTokens), tools };
   // A question that doesn't fit next to the rest of what the request
@@ -1128,9 +1205,13 @@ export const runTurn = async ({
           stop.abort();
         }
       },
-      beforeToolCall: async ({ assistantMessage }) => {
-        const reason = refusal(progress, assistantMessage);
-        if (reason === undefined) {
+      beforeToolCall: async ({ assistantMessage, toolCall }) => {
+        // Reading a declaration runs no code: only the turn's steps bound it.
+        const runsCode = toolCall.name !== "readApi";
+        const reason = runsCode
+          ? refusal(progress, assistantMessage)
+          : undefined;
+        if (runsCode && reason === undefined) {
           progress.runs += 1;
         }
         return await Promise.resolve(

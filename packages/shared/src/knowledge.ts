@@ -1,9 +1,15 @@
 import type {
+  ChangeOptions,
   CommandOptions,
   CommandReceipt,
   MemoriesGetInput,
+  MemoriesLineageInput,
   MemoriesListInput,
+  MemoriesProposeChangeInput,
+  MemoriesPublishInput,
+  MemoriesRetireInput,
   MemoryPack,
+  MemoryLineage,
   MemoryPage,
   MemoryRecord,
   ReceiptsGetInput,
@@ -319,8 +325,38 @@ export interface KnowledgeApi {
   receiptsGet: (input: ReceiptsGetInput) => Promise<CommandReceipt>;
   /** One of the person's own Brain memory records. */
   memoriesGet: (input: MemoriesGetInput) => Promise<MemoryRecord>;
-  /** The person's own Brain memory records, newest first, a page at a time. */
+  /**
+   * The person's own Brain memory records, or (`among: "shared"`) the
+   * shared records of others their memory reads, newest first, a page at
+   * a time.
+   */
   memoriesList: (input?: MemoriesListInput) => Promise<MemoryPage>;
+  /**
+   * A record the person may see, what it rests on as far as they may
+   * follow it now, and the correction that superseded it (GRA-298).
+   */
+  memoriesLineage: (input: MemoriesLineageInput) => Promise<MemoryLineage>;
+  /**
+   * Publishes a record into a team's, the company's or a chat's memory,
+   * where the person may (GRA-298): retry-safe, as `remember`.
+   */
+  memoriesPublish: (
+    input: MemoriesPublishInput,
+    options: CommandOptions
+  ) => Promise<CommandReceipt>;
+  /**
+   * Corrects one of the person's own records against the revision read,
+   * keeping its history (GRA-298).
+   */
+  memoriesProposeChange: (
+    input: MemoriesProposeChangeInput,
+    options: ChangeOptions
+  ) => Promise<CommandReceipt>;
+  /** Retires a shared record, by its publisher or an admin (GRA-298). */
+  memoriesRetire: (
+    input: MemoriesRetireInput,
+    options: ChangeOptions
+  ) => Promise<CommandReceipt>;
   /** The collections the person may read and their skills, as an agent's. */
   catalog: KnowledgeTools["catalog"];
   /** A document, or one section of it. */
