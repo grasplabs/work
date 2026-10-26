@@ -1280,9 +1280,9 @@ export const projectResourceRun = async (
       .update(workflowResourceRuns)
       .set({
         status,
-        // A screen's snapshot shows the status: another is a revision of
-        // its own (screen-workflows.ts).
-        summaryRevision: sql`CASE WHEN ${workflowResourceRuns.status} = ${status} THEN ${workflowResourceRuns.summaryRevision} ELSE ${workflowResourceRuns.summaryRevision} + 1 END`,
+        // Every status the engine takes: a wait opened or closed is one,
+        // and a screen's snapshot shows its waits (run-waits.ts).
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
         ...(engine.sequence === undefined
           ? {}
           : { engineSequence: engine.sequence }),
@@ -1326,9 +1326,8 @@ export const projectResourceRun = async (
   if (now !== undefined) {
     await settleCancels(env, now);
   }
-  if (status !== row.status) {
-    await tellQueryFollowers(env, id);
-  }
+  // Every status the engine takes is a revision of the run's snapshot.
+  await tellQueryFollowers(env, id);
   // Last: a failure here has the engine tell the end again, which repeats
   // only this (above), never skipping what came before it.
   if (now !== undefined) {
