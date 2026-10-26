@@ -1,7 +1,11 @@
+import { createBrain } from "@grasp-os/brain/brain";
+import { runLinking } from "@grasp-os/brain/entities";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { portsOf } from "../src/knowledge/ports.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -238,6 +242,71 @@ describe("a workflow's recall through the Brain binding", () => {
       // A run's env holds a binding only while its permission does: the
       // run that names it fails.
       withoutBrain: { status: "failed", error: "PermissionError" },
+    });
+  });
+
+  it("reads what its App's collections say relate an entity, each with its passage, through the same binding", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const thing = `Onboarding ${crypto.randomUUID().slice(0, 8)}`;
+    const said = `Anna owns ${thing}.`;
+    const { id: handbook } = await admin.api.knowledge.createCollection({
+      name: `Handbook ${crypto.randomUUID()}`,
+      access: "everyone",
+    });
+    const saved = await admin.api.knowledge.saveDocument({
+      collectionId: handbook,
+      path: "owners.md",
+      text: said,
+      ifVersion: 0,
+    });
+    // Linked as core's linking job does, with the model's answer faked.
+    const linking = createBrain(env.KNOWLEDGE, {
+      ...portsOf(env),
+      extractEntities: async () =>
+        await Promise.resolve({
+          entities: [
+            { kind: "person", name: "Anna" },
+            { kind: "process", name: thing },
+          ],
+          relations: [
+            {
+              subject: "Anna",
+              predicate: "owns",
+              object: thing,
+              evidence: said,
+            },
+          ],
+        }),
+    });
+    await runLinking(
+      linking,
+      { source: `doc:${saved.id}`, version: 1 },
+      { do: async (_name, _config, fn) => await fn() }
+    );
+    const { id: app } = await admin.api.apps.create({ name: "Relations" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    await requestGranted(idp, admin, readCollection(app_, handbook));
+    await requestGranted(idp, admin, brainFor(app));
+    await release(admin, app, {
+      ...sampleApp(),
+      ...withBrain(
+        workflowFiles(
+          "recaller",
+          `  return await step.do("relations", { description: "Who owns it" }, async () => {
+    const [found] = await brain(env.BRAIN).entities.list({ query: ${JSON.stringify(thing)} });
+    const relations = await brain(env.BRAIN).relations.get({ entityId: found?.id ?? "-" });
+    return relations.map(({ subject, predicate, evidence }) => ({ owner: subject.name, predicate, evidence })) as Json;
+  });`,
+          { relations: [] }
+        )
+      ),
+    });
+
+    const run = await ranOnce(admin, app);
+
+    expect({ status: run.status, output: run.output }).toStrictEqual({
+      status: "completed",
+      output: [{ owner: "Anna", predicate: "owns", evidence: said }],
     });
   });
 });
