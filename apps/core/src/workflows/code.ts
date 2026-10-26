@@ -472,6 +472,12 @@ export const bindings = ({ connections, collections, brains = [] }) => {
         unwrapped(await currentAttempt().callBrain(name, "skillsSelect", request)),
       skillsRead: async (request) =>
         unwrapped(await currentAttempt().callBrain(name, "skillsRead", request)),
+      entitiesList: async (request) =>
+        unwrapped(await currentAttempt().callBrain(name, "entitiesList", request)),
+      entitySources: async (request) =>
+        unwrapped(await currentAttempt().callBrain(name, "entitySources", request)),
+      relationsGet: async (request) =>
+        unwrapped(await currentAttempt().callBrain(name, "relationsGet", request)),
     };
   }
   for (let index = 0; index < connections.length; index += 1) {

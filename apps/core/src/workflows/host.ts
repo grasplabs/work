@@ -1,6 +1,8 @@
 import type { Brain } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
+import { entitiesFor, entitySources } from "@grasp-os/brain/entities";
 import { recall } from "@grasp-os/brain/recall";
+import { relationsFor } from "@grasp-os/brain/relations";
 import { readSkill, selectSkill } from "@grasp-os/brain/skills";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
@@ -715,7 +717,14 @@ const checked = <Schema extends z.ZodType>(
 };
 
 /** The Brain operations a run's Brain binding calls (`#callBrain`). */
-const brainCallSchema = z.enum(["recall", "skillsSelect", "skillsRead"]);
+const brainCallSchema = z.enum([
+  "recall",
+  "skillsSelect",
+  "skillsRead",
+  "entitiesList",
+  "entitySources",
+  "relationsGet",
+]);
 
 /**
  * Each, as the Brain serves every caller: a recall, a skill's selection,
@@ -731,6 +740,12 @@ const brainCalls: Record<
     await selectSkill(brain, reader, request),
   skillsRead: async (brain, reader, request) =>
     await readSkill(brain, reader, request),
+  entitiesList: async (brain, reader, request) =>
+    await entitiesFor(brain, reader, request),
+  entitySources: async (brain, reader, request) =>
+    await entitySources(brain, reader, request),
+  relationsGet: async (brain, reader, request) =>
+    await relationsFor(brain, reader, request),
 };
 
 /**
