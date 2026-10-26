@@ -48,6 +48,7 @@ import { brainReceiptIdSchema, memoryIdSchema } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
 import type { Json } from "./json.ts";
 import { keyed } from "./keyed.ts";
+import { forgetPersonLessons } from "./lessons.ts";
 import { forgetPersonOutcomes } from "./outcomes.ts";
 import { asWord, termsOf } from "./search.ts";
 
@@ -201,6 +202,7 @@ export const forgetPerson = (
     db.delete(brainMemories).where(eq(brainMemories.ownerId, userId)),
     db.delete(brainReceipts).where(eq(brainReceipts.caller, callerKey(userId))),
     ...forgetPersonOutcomes(db, userId, now),
+    ...forgetPersonLessons(db, userId),
   ] as const;
 
 /** How many records and receipts `forgetPerson` deletes. */

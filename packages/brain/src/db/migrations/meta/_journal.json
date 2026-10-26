@@ -50,6 +50,13 @@
       "when": 1792957353354,
       "tag": "0006_memory_cites",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792968410028,
+      "tag": "0007_brain_lessons",
+      "breakpoints": true
     }
   ]
 }
