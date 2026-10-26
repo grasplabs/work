@@ -119,6 +119,9 @@ jobs:
       # is fixed, not retried for ever.
       # Vitest's default runs a worker per CPU but one, which left a third
       # of the runner's CPU idle; a worker per CPU measured about 6% faster.
+      # Even then the CPUs were idle a third of the time, tests waiting on
+      # their runs' timers (October 2026, GRA-1094): six workers on the
+      # runner's four CPUs.
       # Vitest times a test out from inside its worker, so a worker that is
       # blocked, or whose request workerd cancelled, never reports its test.
       # The stall reporter (scripts/stall-reporter.ts) names such a test or
@@ -134,7 +137,7 @@ jobs:
       # one), with the runner's memory.
       # Reporters given here replace Vitest's defaults, so github-actions is
       # listed for the inline failure annotations.
-      - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=100% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
+      - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
         timeout-minutes: 15
         env:
           # Below the step's timeout, so the reporter says what still runs
@@ -158,7 +161,7 @@ jobs:
       # TEMPORARY (GRA-1094): the CPU's average user, system, idle and I/O wait.
       - if: always()
         run: |
-          awk 'NR>2 {us+=$13; sy+=$14; id+=$15; wa+=$16; n++} END {if (n) printf "CPU over %d samples: user %.0f%%, system %.0f%%, idle %.0f%%, I/O wait %.0f%%\n", n, us/n, sy/n, id/n, wa/n}' "$RUNNER_TEMP/vmstat.log" | tee -a "$GITHUB_STEP_SUMMARY"
+          awk 'NR>2 {us+=$13; sy+=$14; id+=$15; wa+=$16; n++; free=$4+$5+$6; if (!least || free<least) least=free} END {if (n) printf "CPU over %d samples: user %.0f%%, system %.0f%%, idle %.0f%%, I/O wait %.0f%%; least free memory %.1f GB\n", n, us/n, sy/n, id/n, wa/n, least/1048576}' "$RUNNER_TEMP/vmstat.log" | tee -a "$GITHUB_STEP_SUMMARY"
       # Kept for passing runs too: the durations the shards are split by
       # come from it (scripts/test-durations.ts).
       - if: always()
@@ -245,26 +248,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - part: 1/5
+          - part: 1/8
             project: parallel
-            artifact: 1-of-5
-            args: --shard=1/5
-          - part: 2/5
+            artifact: 1-of-8
+            args: --shard=1/8
+          - part: 2/8
             project: parallel
-            artifact: 2-of-5
-            args: --shard=2/5
-          - part: 3/5
+            artifact: 2-of-8
+            args: --shard=2/8
+          - part: 3/8
             project: parallel
-            artifact: 3-of-5
-            args: --shard=3/5
-          - part: 4/5
+            artifact: 3-of-8
+            args: --shard=3/8
+          - part: 4/8
             project: parallel
-            artifact: 4-of-5
-            args: --shard=4/5
-          - part: 5/5
+            artifact: 4-of-8
+            args: --shard=4/8
+          - part: 5/8
             project: parallel
-            artifact: 5-of-5
-            args: --shard=5/5
+            artifact: 5-of-8
+            args: --shard=5/8
+          - part: 6/8
+            project: parallel
+            artifact: 6-of-8
+            args: --shard=6/8
+          - part: 7/8
+            project: parallel
+            artifact: 7-of-8
+            args: --shard=7/8
+          - part: 8/8
+            project: parallel
+            artifact: 8-of-8
+            args: --shard=8/8
           - part: onboarding
             project: onboarding
             artifact: onboarding
@@ -287,9 +302,18 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - run: vp run e2e ${{ matrix.args }}
+      - run: vp run e2e ${{ matrix.args }} --reporter=github,json
         env:
           GRASP_E2E_PART: ${{ matrix.project }}
+          # TEMPORARY (GRA-1094): each test's time, to split the parts by it.
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/e2e-results.json
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-results-${{ matrix.artifact }}
+          path: ${{ runner.temp }}/e2e-results.json
+          if-no-files-found: ignore
+          retention-days: 14
       # A failing test is retried with a trace (playwright.config.ts): keep it.
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
