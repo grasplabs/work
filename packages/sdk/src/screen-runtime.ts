@@ -24,6 +24,7 @@ import { createRoot } from "react-dom/client";
 import { clientInternals, GraspClient } from "./client-core.ts";
 import type { ClientTransport } from "./client-core.ts";
 import { GraspError } from "./client-error.ts";
+import { appModuleAddresses, calledByApp } from "./console-origin.ts";
 import { portFileTransport } from "./file-port.ts";
 import type { DraftPersistence } from "./form-drafts.ts";
 import { portLinkTransport } from "./link-port.ts";
@@ -515,12 +516,24 @@ const reportProblems = (): void => {
     report({ kind: "rejection", ...describe(event.reason) });
   });
   const logError = console.error.bind(console);
+  // Read once: the App's modules are those the document's import map
+  // names (`app~…`); a preview's updates are `data:` modules.
+  const appModules = appModuleAddresses(
+    document.querySelector('script[type="importmap"]')?.textContent ?? undefined
+  );
   console.error = (...args: unknown[]) => {
     logError(...args);
     const [first] = args;
     const described = describe(first);
+    // The App's own call is a problem; React's development warnings in a
+    // preview, or a library's, only a warning (console-origin.ts).
+    const fromApp = calledByApp(
+      new Error("console.error called").stack ?? "",
+      import.meta.url,
+      appModules
+    );
     report({
-      kind: "console",
+      kind: fromApp ? "console" : "warning",
       ...described,
       message: args
         .map((arg) => describe(arg).message)
