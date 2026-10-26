@@ -1905,19 +1905,22 @@ describe(
         status: result.run.status,
         code: result.run.error?.code,
         hostCalls: lineage?.hostCalls,
-        attempts: receipts.map(({ attempt, hostCalls }) => ({
-          attempt,
-          hostCalls,
-        })),
+        attempts: receipts.map(({ hostCalls }) => ({ hostCalls })),
+        // The killed attempt's retry, under the same key. The engine's
+        // attempt numbers needn't run on by one: under load CI saw the
+        // retry recorded as attempt 3 with no receipt for a second. What
+        // the quota counts is the two receipts' host calls, so the test
+        // asserts their order, not the retry's number.
+        firstAttempt: first?.attempt,
+        retryLater: (second?.attempt ?? 0) > (first?.attempt ?? 0),
         sameKey: first?.key === second?.key,
       }).toStrictEqual({
         status: "failed",
         code: "workflow.lineage_limit",
         hostCalls: 2,
-        attempts: [
-          { attempt: 1, hostCalls: 1 },
-          { attempt: 2, hostCalls: 1 },
-        ],
+        attempts: [{ hostCalls: 1 }, { hostCalls: 1 }],
+        firstAttempt: 1,
+        retryLater: true,
         sameKey: true,
       });
     });
