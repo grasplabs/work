@@ -1,9 +1,10 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
+  workflowDecisions,
   workflowResourceRuns,
   workflowStartReceipts,
 } from "../db/core/schema.ts";
@@ -64,6 +65,13 @@ export const tellQueryFollowers = async (
         invokerType: workflowStartReceipts.invokerType,
         invokerId: workflowStartReceipts.invokerId,
         principal: workflowResourceRuns.principalId,
+        // A decision it still holds open: one the App's reviewers may
+        // list, which its run's change can take out of their inboxes.
+        asking: sql<number>`EXISTS (SELECT 1 FROM ${workflowDecisions}
+          WHERE ${and(
+            eq(workflowDecisions.resourceRunId, workflowResourceRuns.id),
+            eq(workflowDecisions.status, "open")
+          )})`,
       })
       .from(workflowResourceRuns)
       .innerJoin(
@@ -76,11 +84,51 @@ export const tellQueryFollowers = async (
     if (run?.invokerType !== "app") {
       return;
     }
-    await appHost(env, appIdSchema.parse(run.invokerId)).workflowRunsChanged(
-      run.principal
-    );
+    const host = appHost(env, appIdSchema.parse(run.invokerId));
+    await host.workflowRunsChanged(run.principal);
+    if (run.asking === 1) {
+      await host.workflowDecisionsChanged();
+    }
   } catch (error) {
     log.warn("workflow.query_followers_not_told", {
+      runId: id,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Tells the live queries of the App that started independent run `id`, if
+ * an App did, that one of the run's decisions opened, closed or was
+ * answered: every connection following the App's decision queries
+ * (`workflows.<alias>.queries.decisions` and `.decision`) reads them
+ * again, as its person, since whom a decision asks isn't whom it started
+ * for. The signal names no run nor decision and carries nothing: each
+ * read answers only what its person may answer now. Best effort, after
+ * the change is written, as `tellQueryFollowers` is.
+ */
+export const tellDecisionFollowers = async (
+  env: Env,
+  id: string
+): Promise<void> => {
+  try {
+    const receipt = await drizzle(env.DB)
+      .select({
+        invokerType: workflowStartReceipts.invokerType,
+        invokerId: workflowStartReceipts.invokerId,
+      })
+      .from(workflowStartReceipts)
+      .where(eq(workflowStartReceipts.id, id))
+      .get();
+    if (receipt?.invokerType !== "app") {
+      return;
+    }
+    await appHost(
+      env,
+      appIdSchema.parse(receipt.invokerId)
+    ).workflowDecisionsChanged();
+  } catch (error) {
+    log.warn("workflow.decision_followers_not_told", {
       runId: id,
       ...errorFields(error),
     });

@@ -1,3 +1,4 @@
+import { v } from "@grasp-os/sdk";
 import { appIdSchema } from "@grasp-os/shared/ids";
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { Role } from "@grasp-os/shared/roles";
@@ -14,9 +15,11 @@ import { loadRelease } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor, setCurrentVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { decisionOutcome, openDecision } from "../src/decisions/decisions.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -299,6 +302,55 @@ const showing = async (
   );
 };
 
+/** A workflow asking decision `contract` as `approval`, in its task `ask`. */
+const decidingDefinitionOf = (name: string, contract: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: {
+          profile: "grasp-open-workflow/1",
+          params: {},
+          bindings: { approval: { kind: "decision", contract } },
+        },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [
+      {
+        ask: {
+          call: "grasp.decision",
+          with: {
+            binding: "approval",
+            recipients: ["role:admin"],
+            prompt: "Approve this request?",
+            input: { who: "${ $workflow.input.who }" },
+          },
+        },
+      },
+      { greet: { set: { status: "done" } } },
+    ],
+  });
+
+const decisionsPageSchema = z.object({
+  items: z.array(z.object({ wait: z.object({ id: z.string() }) })),
+});
+
+/** The decisions the latest push to `follower` listed, by ID. */
+const latestDecisions = (
+  received: ReturnType<typeof pageFollower>["received"]
+): string[] => {
+  const latest = received.at(-1)?.result;
+  return latest === undefined || !latest.ok
+    ? []
+    : decisionsPageSchema.parse(latest.value).items.map(({ wait }) => wait.id);
+};
+
 describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
   it("show a run the App starts for the person, then each change of its status, with no subscribing again", async () => {
     const { builder, workflow, app, release, follower, subscription } =
@@ -397,5 +449,117 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
       gate.undo();
       await stopFollowing?.();
     }
+  });
+
+  it("list a decision of the App's run in a reviewer's live inbox as it opens, and take it out as it closes", async () => {
+    const admin = await signedIn("admin");
+    const builder = await signedIn("builder");
+    const key = `approval-${unique()}`;
+    await publishCatalogContract(env, admin.acting, {
+      key,
+      kind: "decision",
+      input: JSON.stringify(v.object({ who: v.string() }).descriptor),
+      response: JSON.stringify(v.object({ comment: v.string() }).descriptor),
+    });
+    const workflow = await createWorkflowResource(
+      env,
+      builder.acting,
+      `decide-${unique()}`
+    );
+    await publishWorkflowVersion(env, builder.acting, workflow.id, {
+      definition: decidingDefinitionOf(workflow.name, key),
+      basedOn: null,
+    });
+    const fixture = await appWith(files(), "Requests", builder.acting);
+    await bindWorkflowToApp(env, builder.acting, workflow.id, {
+      app: fixture.app,
+      alias: "followUp",
+      version: 1,
+    });
+    await seal(fixture);
+    await setCurrentVersion(env, builder.acting, fixture.app, 1);
+    await env.DB.prepare(
+      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+    )
+      .bind(fixture.app, admin.userId, builder.userId, Date.now())
+      .run();
+    const review = await admin.api.screenTrust.review(fixture.app);
+    await admin.api.screenTrust.approve(fixture.app, {
+      version: review.version,
+      generation: review.generation,
+      artifacts: builtArtifacts(review.screens),
+    });
+    const { lease } = await admin.api.screens.open(fixture.app, "desk");
+    const release = await loadRelease(env, fixture.app, 1);
+    // The admin's screen follows their inbox: nothing in it yet.
+    const follower = pageFollower();
+    const subscription = await admin.api.screens
+      .frame(fixture.app, lease)
+      .watchQuery(
+        JSON.stringify({
+          reference: await queryReference(release, "followUp", "decisions"),
+          input: { pagination: {} },
+        }),
+        follower.callback
+      );
+    const inbox = async (ids: string[]) => {
+      await vi.waitFor(
+        () => {
+          expect(follower.received.length).toBeGreaterThan(0);
+          expect(latestDecisions(follower.received)).toStrictEqual(ids);
+        },
+        { timeout: 30_000, interval: 50 }
+      );
+    };
+    await inbox([]);
+    // A run the App started for the builder, which asks the admins: as
+    // the run's own call opens it, so does nothing the admin follows.
+    const manifest = await env.DB.prepare(
+      "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ hash: string }>();
+    const runId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'app', ?, ?, ?, 1, ?, ?, 1, 'h', ?)"
+      ).bind(
+        runId,
+        fixture.app,
+        `key-${runId}`,
+        workflow.id,
+        manifest?.hash ?? "",
+        builder.userId,
+        Date.now()
+      ),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, ?, 'b', ?, 'running', ?)"
+      ).bind(
+        runId,
+        workflow.id,
+        manifest?.hash ?? "",
+        builder.userId,
+        Date.now()
+      ),
+    ]);
+    const run = {
+      kind: "resource",
+      runId,
+      workflow: workflow.id,
+      version: 1,
+    } as const;
+    const { decision } = await openDecision(env, run, {
+      step: "task:ask",
+      from: "role:admin",
+      description: "Approve this request?",
+      timeout: 3_600_000,
+      starterExcluded: false,
+      input: { who: "Ada" },
+    });
+    await inbox([decision]);
+    // Closed unanswered, as its deadline would: out of the inbox.
+    await decisionOutcome(env, run, decision, true);
+    await inbox([]);
+    await subscription.release();
   });
 });
