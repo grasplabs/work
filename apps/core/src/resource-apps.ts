@@ -260,6 +260,7 @@ const callFor = async (
     onBehalfOf: by.userId,
     mode: "interactive",
     appVersion: version,
+    ...(caller.authority.staff === true ? { staff: true as const } : {}),
   };
   const calleeContext: WorkContext = { type: "app", appId: callee };
   // Restricted mode follows the data both ways, each flag set before the
@@ -330,6 +331,8 @@ const callFor = async (
       ...(caller.cancelled === undefined
         ? {}
         : { cancelled: caller.cancelled }),
+      // The calling work's staff mark goes on to the called App (GRA-1088).
+      ...(caller.authority.staff === true ? { byStaff: true } : {}),
       ...runOriginField(caller),
       ...(caller.requireHolds === undefined
         ? {}
