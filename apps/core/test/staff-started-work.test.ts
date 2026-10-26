@@ -5,10 +5,19 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { model, pointAtGateway, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  model,
+  pointAtGateway,
+  says,
+} from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { readCollection } from "./knowledge.ts";
 import { finished, stepDone, woken } from "./runs.ts";
 import {
   openRpc,
@@ -96,9 +105,24 @@ describe("a workflow run Grasp staff start", () => {
         after: [...new Set(staffOf(after.map(({ actor }) => actor)))],
       };
     };
-    expect({
+    const outcomes = {
       staff: await runOutcome(byStaff.id),
       member: await runOutcome(byMember.id),
+    };
+    // Searched by the staff member's ID, as an admin would: what the run
+    // did for them is found with what they did themselves.
+    const admin = await signedInApi(idp, "admin");
+    const found = await admin.api.audit.search({
+      actorId: staff.userId,
+      targetId: byStaff.id,
+    });
+    const foundTypes = found.records.map(
+      ({ event }) => event?.actor.type ?? ""
+    );
+
+    expect({
+      ...outcomes,
+      searched: [...new Set(foundTypes)].toSorted((a, b) => a.localeCompare(b)),
     }).toStrictEqual({
       staff: {
         status: "completed",
@@ -112,6 +136,7 @@ describe("a workflow run Grasp staff start", () => {
         started: "person",
         after: [undefined],
       },
+      searched: ["staff", "workflow"],
     });
   });
 
@@ -227,6 +252,66 @@ describe("a turn Grasp staff ask in their own chat", () => {
       staff: staffOf(await modelCallsFor(staff.userId)),
       member: staffOf(await modelCallsFor(member.userId)),
     }).toStrictEqual({ staff: [staff.userId], member: [undefined] });
+  });
+
+  it("calls the agent's ordinary tools as them, under the agent's grants", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "report",
+        `  return await step.do("total", { description: "Read" }, async () => 1);`,
+        { total: 1 }
+      )
+    );
+    const staff = await staffOn();
+    const listed = `export default async (self, env) => {
+      const tried = async (call) => { try { return await call(); } catch (error) { return error.message; } };
+      return {
+        apps: await tried(async () => (await env.apps.list()).map(({ id }) => id)),
+        workflows: await tried(async () => (await env.workflows.list()).map(({ workflow }) => workflow)),
+      };
+    };`;
+    const chat = await chatOf(staff.userId, codeStep(listed), says("Done."));
+    // The agent still needs its grants, as for anyone's turn.
+    await requestGranted(
+      idp,
+      admin,
+      readCollection(chat.agent, "apps", "APP_LIBRARY")
+    );
+    await requestGranted(idp, admin, {
+      subject: chat.agent,
+      object: { type: "app", appId: app },
+      actions: ["read"],
+      binding: "REPORT",
+    });
+
+    // As core's chats send a staff member's question: marked.
+    await chat.stub.send(
+      chat.chat.id,
+      staff.userId,
+      { text: "List", model },
+      true
+    );
+    const returned = await vi.waitFor(
+      async () => {
+        const [result] = await codeResults(chat.stub, chat.chat.id);
+        expect(result).toBeDefined();
+        const parsed: unknown = JSON.parse(
+          result?.text.replace("Returned:\n", "") ?? "null"
+        );
+        return parsed;
+      },
+      { timeout: 10_000 }
+    );
+
+    // Every App the staff role sees, this one among them.
+    const apps: unknown = expect.arrayContaining([app]);
+    expect(returned).toStrictEqual({
+      apps,
+      workflows: ["report"],
+    });
   });
 
   it("goes ahead only with the mark core sets, and only while their staff session lasts", async () => {

@@ -7,7 +7,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { appsFoundBy, appsReadableBy } from "../app-access.ts";
 import type { Person } from "../app-access.ts";
-import { memberOf } from "../auth/identity.ts";
+import { actingPerson } from "../auth/identity.ts";
 import { apps } from "../db/core/schema.ts";
 import { collectionsAllowed } from "./access.ts";
 import type { Reader } from "./access.ts";
@@ -55,7 +55,11 @@ const personOf = async (
   if (reader.type === "person") {
     return reader.person;
   }
-  return await memberOf(env.DB, reader.authority.onBehalfOf);
+  return await actingPerson(
+    env,
+    reader.authority.onBehalfOf,
+    reader.authority.staff
+  );
 };
 
 /** The entries a reader finds: every one, or those at these paths. */

@@ -152,6 +152,27 @@ export const activeStaffRole = async (
 };
 
 /**
+ * The person work acts for, read now, as `memberOf` reads a member: for
+ * work a Grasp staff member started (its server-set mark, GRA-1088),
+ * the staff member while their staff session is still valid
+ * (`activeStaffRole`), with no teams. The mark is the only way past
+ * membership, as `personRole` holds it. `undefined` for no one.
+ */
+export const actingPerson = async (
+  env: Env,
+  userId: string,
+  staff: boolean | undefined
+): Promise<Member | undefined> => {
+  if (staff !== true) {
+    return await memberOf(env.DB, userId);
+  }
+  const role = await activeStaffRole(env, userId);
+  return role === undefined
+    ? undefined
+    : { userId, role, teams: [], staff: true };
+};
+
+/**
  * Who a current session's person is, read now: a staff session's role
  * from the sign-in config, anyone else's from their membership.
  * `undefined` once they have neither.
