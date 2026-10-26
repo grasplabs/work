@@ -132,6 +132,12 @@ const BringIn = ({
   const { busy, failure, run } = useKickoff(keep);
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  // The file input starts again, empty, each time this changes.
+  const [fileInput, setFileInput] = useState(0);
+  const clearFile = () => {
+    setFile(null);
+    setFileInput((each) => each + 1);
+  };
   const [locale, setLocale] = useState<InterviewLocale>("en");
   const bringIn = async (): Promise<void> => {
     await run(async () => {
@@ -141,7 +147,7 @@ const BringIn = ({
       });
       if (answer.kickoff !== null) {
         setText("");
-        setFile(null);
+        clearFile();
       }
       return answer;
     });
@@ -174,13 +180,24 @@ const BringIn = ({
           accept={accept}
           disabled={busy}
           id={`${id}-file`}
-          // Keyed by the file: empty again once it is brought in.
-          key={file === null ? "none" : "chosen"}
+          key={fileInput}
           onChange={(event) => {
             setFile(event.target.files?.[0] ?? null);
           }}
           type="file"
         />
+        {file === null ? null : (
+          <Button
+            className="self-start"
+            disabled={busy}
+            onClick={clearFile}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Remove the file
+          </Button>
+        )}
         <FieldDescription>
           A .txt, .vtt, .srt or .docx file of at most 5 MB.
         </FieldDescription>
@@ -351,6 +368,22 @@ const broughtWords = (transcript: AdminKickoffView["transcript"]): string => {
     : `${transcript.fileName}, brought in on ${at} (UTC). Bring it in again to read it again.`;
 };
 
+/** Client `clientId`'s kickoff as its core answers it, or why it isn't read. Never throws. */
+const readKickoff = async (
+  clientId: string
+): Promise<{ kickoff: AdminKickoffView | null; unread: string | null }> => {
+  let answer: KickoffAnswer = { kickoff: null, refused: "not_answered" };
+  try {
+    answer = await kickoffFn({ data: { clientId, ask: { kind: "read" } } });
+  } catch {
+    // Said as not answered.
+  }
+  return {
+    kickoff: answer.kickoff,
+    unread: answer.refused === null ? null : refusals[answer.refused],
+  };
+};
+
 /**
  * The kickoff of client `clientId`, read from its core when the panel
  * opens: bringing the transcript in, and what it brought and left open.
@@ -361,18 +394,10 @@ export const Kickoff = ({ clientId }: { clientId: string }) => {
   useEffect(() => {
     let current = true;
     const read = async (): Promise<void> => {
-      try {
-        const answer = await kickoffFn({
-          data: { clientId, ask: { kind: "read" } },
-        });
-        if (current) {
-          setKickoff(answer.kickoff);
-          setUnread(answer.refused === null ? null : refusals[answer.refused]);
-        }
-      } catch {
-        if (current) {
-          setUnread(refusals.not_answered);
-        }
+      const { kickoff: found, unread: why } = await readKickoff(clientId);
+      if (current) {
+        setKickoff(found);
+        setUnread(why);
       }
     };
     void read();

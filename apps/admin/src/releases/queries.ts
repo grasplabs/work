@@ -91,7 +91,11 @@ export const versionsOf = async (
   }
   const rows = await db.all<{ id: string; major: number; minor: number }>(sql`
     WITH ordered AS (
-      SELECT id, coalesce(feature, 0) AS feature,
+      -- A release an older admin imported has no flag: its note says.
+      SELECT id, coalesce(
+          feature,
+          CASE WHEN coalesce(json_extract(manifest, '$.notes'), '') GLOB 'feat[(:!]*' THEN 1 ELSE 0 END
+        ) AS feature,
         row_number() OVER (ORDER BY built_at, id) AS n
       FROM releases
     ), majored AS (

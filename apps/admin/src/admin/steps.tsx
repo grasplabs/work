@@ -256,7 +256,8 @@ const Conversation = ({
           <Done>Brought in</Done>
         )}
       </PanelRow>
-      <Kickoff clientId={clientId} />
+      {/* Keyed by the company: another's drafts and answers never carry over. */}
+      <Kickoff clientId={clientId} key={clientId} />
     </Panel>
   );
 };

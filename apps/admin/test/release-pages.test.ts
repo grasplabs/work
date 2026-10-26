@@ -172,8 +172,10 @@ describe("the release pages", () => {
     expect(html).toContain(`The newest ${RELEASE_LIST_LIMIT} releases.`);
     // The list shows the newest 97 old ones (and the three above): its
     // last row links to the diff from the one before it, which isn't shown.
-    // Named by its version: the fourth oldest of all, before any feature.
-    expect(html).toContain(`?from=${ids[3]}&amp;to=${ids[4]}">Since v0.4<`);
+    // Named by its version. Recorded without the feature flag, as an older
+    // admin records them, each still counts as the feature its note says:
+    // the fourth oldest of all is the fourth major.
+    expect(html).toContain(`?from=${ids[3]}&amp;to=${ids[4]}">Since v4.0<`);
 
     // From the oldest: the other 100 old ones and the three above lie
     // between, and the notes show the newest 100 of them.
