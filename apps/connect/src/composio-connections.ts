@@ -1095,7 +1095,10 @@ export const changeToolkitTools = async (
   try {
     await setServerTools(key, serverId, tools);
   } catch (error) {
+    // Recorded whatever went wrong: Composio refusing, or anything else
+    // on the way, which goes on as it was.
     if (!(error instanceof ComposioError)) {
+      await failed("connection.change_failed", "failed");
       throw error;
     }
     await failed("connection.provider_refused", "failed");
@@ -1111,6 +1114,14 @@ export const changeToolkitTools = async (
   );
   // Only while the list is still the one read.
   const stillRead = sql`${connections.id} = ${row.id} AND ${connections.tools} = ${before}`;
+  const addedNames = names.filter((name) => !previousNames.has(name));
+  const removedNames = [...previousNames].filter(
+    (name) => !names.includes(name)
+  );
+  // Which tools came and went, by name, so the log answers who allowed
+  // each: as many as fit, the rest counted.
+  const addedPacked = packedNames(addedNames);
+  const removedPacked = packedNames(removedNames);
   const changed = await recordEventIf(
     env,
     connectionEvent(person, "connection.tools", row.id, {
@@ -1120,9 +1131,10 @@ export const changeToolkitTools = async (
       toolsHash: await sha256Hex(stored),
       toolCount: tools.length,
       readCount: readTools.length,
-      added: names.filter((name) => !previousNames.has(name)).length,
-      removed: [...previousNames].filter((name) => !names.includes(name))
-        .length,
+      added: addedNames.length,
+      removed: removedNames.length,
+      unnamedAdded: addedPacked.rest.length,
+      unnamedRemoved: removedPacked.rest.length,
       unnamedReads: named.rest.length,
     }),
     {
@@ -1146,22 +1158,44 @@ export const changeToolkitTools = async (
     const kept = composioToolsSchema.safeParse(
       JSON.parse(now?.tools ?? "null")
     );
-    if (kept.success) {
-      await setServerTools(key, serverId, kept.data).catch((error: unknown) => {
-        log.warn("composio.tools_restore_failed", errorFields(error));
-      });
+    const restored =
+      kept.success &&
+      (await setServerTools(key, serverId, kept.data).then(
+        () => true,
+        (error: unknown) => {
+          log.warn("composio.tools_restore_failed", errorFields(error));
+          return false;
+        }
+      ));
+    if (!restored) {
+      // Composio may still allow this change's tools: connect, which every
+      // call goes by, doesn't, and the log says so for whoever reconciles.
+      await failed("connection.tools_restore_failed", "failed");
     }
     await failed("connection.tools_changed", "refused");
     throw connectionErrors.create("connection.tools_changed");
   }
-  const [firstNames, ...moreNames] = named.details.map((part, index) =>
-    connectionEvent(person, "connection.tools.read_tools", row.id, {
-      ...detail,
-      hinted: false,
-      part: index + 1,
-      ...part,
-    })
-  );
+  const partsOf = (
+    action:
+      | "connection.tools.added"
+      | "connection.tools.removed"
+      | "connection.tools.read_tools",
+    details: readonly Record<string, string>[],
+    extra: Record<string, boolean> = {}
+  ) =>
+    details.map((part, index) =>
+      connectionEvent(person, action, row.id, {
+        ...detail,
+        ...extra,
+        part: index + 1,
+        ...part,
+      })
+    );
+  const [firstNames, ...moreNames] = [
+    ...partsOf("connection.tools.added", addedPacked.details),
+    ...partsOf("connection.tools.removed", removedPacked.details),
+    ...partsOf("connection.tools.read_tools", named.details, { hinted: false }),
+  ];
   if (firstNames !== undefined) {
     await recordEvents(env, [firstNames, ...moreNames]);
   }
