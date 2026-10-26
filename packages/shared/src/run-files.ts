@@ -182,6 +182,19 @@ export const runFileNameFits = (name: string, type: RunFileType): boolean => {
 const unnamedStem = "document";
 
 /**
+ * `text` cut to at most `length` UTF-16 code units, as a name's length is
+ * counted, never inside a character: a surrogate pair cut in half would
+ * leave a name no run file may have.
+ */
+const withinLength = (text: string, length: number): string => {
+  const cut = text.slice(0, length);
+  const last = cut.codePointAt(cut.length - 1);
+  return last !== undefined && last >= 0xd8_00 && last <= 0xdb_ff
+    ? cut.slice(0, -1)
+    : cut;
+};
+
+/**
  * `name`, a run file's, as a file of `type` is named: as it is when it
  * fits (`runFileNameFits`); otherwise its last extension replaced by the
  * type's, within a run file name's length.
@@ -192,9 +205,10 @@ export const runFileNamed = (name: string, type: RunFileType): string => {
     return name;
   }
   const dot = name.lastIndexOf(".");
-  const stem = (dot === -1 ? name : name.slice(0, dot))
-    .slice(0, runFileLimits.nameLength - extension.length)
-    .trim();
+  const stem = withinLength(
+    dot === -1 ? name : name.slice(0, dot),
+    runFileLimits.nameLength - extension.length
+  ).trim();
   return `${stem === "" ? unnamedStem : stem}${extension}`;
 };
 
