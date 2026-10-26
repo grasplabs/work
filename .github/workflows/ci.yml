@@ -52,7 +52,7 @@ jobs:
       - run: vp run check:wrangler-configs
       - run: vp run check:state-registry
       - run: vp run check:playwright-image
-      # Generated files (Worker types, route trees, migrations, the
+      # Generated files (Worker types, migrations, the
       # frontend's translation catalogs) must be committed.
       - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
@@ -442,6 +442,10 @@ jobs:
       - if: github.event_name != 'push'
         run: vp run build && vp exec wrangler deploy --dry-run
         working-directory: apps/admin
+      # The builds above regenerate the route trees, which must be committed
+      # (static checks the other generated files without building).
+      - if: github.event_name != 'push'
+        run: git diff --exit-code -- '*routeTree.gen.ts'
       # Every file but the build's `.grasp-release` marker, which only
       # release:build reads. The download checks the artifact's digest, and
       # each job that uses it checks every file against the manifest again.
