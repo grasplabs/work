@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, like, or } from "drizzle-orm";
 
 import { allowedFor } from "./authorize.ts";
 import type { Brain, SkillAuthority } from "./brain.ts";
@@ -165,6 +165,21 @@ const manifestAt = async <C>(
   return parsed;
 };
 
+/** Every document that is, or was saved as, a skill: by its type, or by its file name. */
+const skillDocument = or(
+  eq(documents.type, "skill"),
+  like(documents.path, "%SKILL.md")
+);
+
+/** What a selection reads of the skills it may weigh. */
+interface Selectable {
+  candidates: Candidate[];
+  /** How many skill documents it read. */
+  read: number;
+  /** The names of admins' skill documents, readable or not (`copiedOver`). */
+  copied: ReadonlySet<string>;
+}
+
 /**
  * The selectable skills `reader` may read, at their current versions, in a
  * fixed order: those in collections the host vouches for, and of those
@@ -175,10 +190,10 @@ const selectableSkills = async <C>(
   brain: Brain<C>,
   reader: C,
   within: readonly CollectionId[] | undefined
-): Promise<{ candidates: Candidate[]; read: number } | undefined> => {
+): Promise<Selectable | undefined> => {
   const { db } = brain;
   if (within?.length === 0) {
-    return { candidates: [], read: 0 };
+    return { candidates: [], read: 0, copied: new Set() };
   }
   const allowed = await allowedFor(brain.ports, reader);
   const bound =
@@ -195,7 +210,7 @@ const selectableSkills = async <C>(
     })
     .from(documents)
     .innerJoin(collections, eq(collections.id, documents.collectionId))
-    .where(and(eq(documents.type, "skill"), allowed.documents(), bound))
+    .where(and(skillDocument, allowed.documents(), bound))
     .limit(skillsScanMax + 1);
   if (held.length > skillsScanMax) {
     return undefined;
@@ -205,7 +220,7 @@ const selectableSkills = async <C>(
     held.some((collection) => collection.id === id)
   );
   if (vouchedIds.length === 0) {
-    return { candidates: [], read: 0 };
+    return { candidates: [], read: 0, copied: new Set() };
   }
   const vouched = await db
     .select({
@@ -227,7 +242,7 @@ const selectableSkills = async <C>(
     .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
     .where(
       and(
-        eq(documents.type, "skill"),
+        skillDocument,
         allowed.documents(),
         inList(collections.id, vouchedIds)
       )
@@ -238,10 +253,21 @@ const selectableSkills = async <C>(
     return undefined;
   }
   const candidates: Candidate[] = [];
+  const copied = new Set<string>();
   for (const row of vouched) {
     // oxlint-disable-next-line no-await-in-loop -- bounded by skillsReadMax, in order
     const parsed = await manifestAt(brain, row.path, row.payload);
     const authority = authorities[row.collection.id];
+    if (authority === "admins") {
+      // Every admins' skill document names a shipped skill it is a copy
+      // of, by its folder and by its name: one whose frontmatter no
+      // longer reads (a purge broke it) still does, so a shipped skill an
+      // admin switched off never comes back that way.
+      copied.add(row.path.split("/").at(-2) ?? "");
+      if (parsed !== null) {
+        copied.add(parsed.name);
+      }
+    }
     if (parsed !== null && authority !== undefined) {
       candidates.push({
         ref: {
@@ -256,7 +282,7 @@ const selectableSkills = async <C>(
       });
     }
   }
-  return { candidates, read: vouched.length };
+  return { candidates, read: vouched.length, copied };
 };
 
 /** Whether every one of `needed` is in `held`. */
@@ -473,19 +499,15 @@ const replacedBy = (by: Candidate, all: readonly Candidate[]): Candidate[] =>
   });
 
 /**
- * Whether `candidate` is a shipped skill an admins' skill the caller reads
- * has the name of: the client's copy of it, adapted (which can't name
- * itself in `replaces`). The copy takes it out of selection whatever the
- * copy's own state, so a copy that doesn't apply, can't be used or is
- * retired selects nothing in its place: how admins switch a shipped skill
- * off.
+ * Whether `candidate` is a shipped skill an admins' skill document the
+ * caller reads has the name of (`copied`): the client's copy of it,
+ * adapted (which can't name itself in `replaces`). The copy takes it out
+ * of selection whatever the copy's own state, so a copy that doesn't
+ * apply, can't be used, is retired or no longer reads as a skill at all
+ * selects nothing in its place: how admins switch a shipped skill off.
  */
-const copiedOver = (candidate: Candidate, all: readonly Candidate[]) =>
-  candidate.authority === "shipped" &&
-  all.some(
-    (copy) =>
-      copy.authority === "admins" && copy.ref.name === candidate.ref.name
-  );
+const copiedOver = (candidate: Candidate, copied: ReadonlySet<string>) =>
+  candidate.authority === "shipped" && copied.has(candidate.ref.name);
 
 /**
  * Each of the skills `relevant` to the task, with why it was or wasn't
@@ -497,7 +519,8 @@ const outcomesOf = async <C>(
   relevant: readonly Candidate[],
   all: readonly Candidate[],
   traits: ReadonlySet<string>,
-  held: ReadonlySet<string>
+  held: ReadonlySet<string>,
+  copied: ReadonlySet<string>
 ): Promise<{
   outcomes: Map<Candidate, SkillOutcome>;
   left: { candidate: Candidate; pins: SkillRef[] }[];
@@ -507,7 +530,7 @@ const outcomesOf = async <C>(
   const applicable: { candidate: Candidate; pins: SkillRef[] }[] = [];
   const walk: Walk = { known: new Map(), visited: 0, exceeded: false };
   for (const candidate of relevant) {
-    if (copiedOver(candidate, all)) {
+    if (copiedOver(candidate, copied)) {
       outcomes.set(candidate, "replaced");
       continue;
     }
@@ -595,7 +618,8 @@ export const selectSkillWithSources = async <C>(
       relevant,
       all,
       traits,
-      held
+      held,
+      selectable?.copied ?? new Set()
     );
     const result = resultOf(selectable === undefined || exceeded, left);
     // Recorded with its result and counts, as the host records a read: the

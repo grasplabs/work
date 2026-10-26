@@ -6,6 +6,7 @@ import type { SkillSelection } from "../src/contract.ts";
 import { writeVersion } from "../src/documents.ts";
 import { collectionIdSchema } from "../src/ids.ts";
 import { knowledgeErrors } from "../src/knowledge.ts";
+import { preparePurge, purge } from "../src/purge.ts";
 import {
   readSkill,
   readSkillWithSources,
@@ -14,7 +15,7 @@ import {
   skillsReadMax,
 } from "../src/skills.ts";
 import type { Caller } from "./host.ts";
-import { newCollection, testHost, writerOf } from "./host.ts";
+import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 
 // Selecting a skill for a task, and reading the one pinned, at the Brain's
 // boundary. The ways it could fail its host, tried below (GRA-310):
@@ -640,6 +641,46 @@ describe("who can make a skill selectable", () => {
         ]),
       },
     ]);
+  });
+
+  it("keeps a shipped skill switched off once a purge leaves its admins' copy unreadable as a skill", async () => {
+    const shipped = await newCollection(brain, "Shipped skills", "shipped");
+    const company = await newCollection(brain, "Company skills");
+    const name = `onb${crypto
+      .randomUUID()
+      .replaceAll(/[^a-f]/gu, "")
+      .slice(0, 8)}`;
+    await saved(shipped, name, "tasks: [onboard-purged]");
+    const copy = await saved(
+      company,
+      name,
+      "tasks: [onboard-purged]\nstatus: retired"
+    );
+    // The copy's name is a term erased from it: its frontmatter no longer
+    // names a skill.
+    const input = {
+      type: "content",
+      documentIds: [copy.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    const { token } = await preparePurge(
+      brain,
+      writerOf("admin"),
+      input,
+      noCopies
+    );
+    await purge(brain, writerOf("admin"), input, token, noCopies);
+    const caller: Caller = { userId: "ann", reads: [shipped.id, company.id] };
+
+    const selection = await selectSkill(brain, caller, {
+      task: { type: "onboard-purged" },
+    });
+
+    expect(where(selection)).toStrictEqual({
+      result: "no_match",
+      considered: [[shipped.id, "replaced"]],
+    });
   });
 
   it("weighs and reads only skills in the collections a bound caller is bound to, and records no read outside them", async () => {

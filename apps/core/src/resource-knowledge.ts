@@ -57,7 +57,10 @@ import type {
 // answer and feed its later model requests. A remote search is a snapshot,
 // answered once, never a live query.
 
-/** What every knowledge binding serves. */
+/**
+ * What a knowledge binding serves: search, read and recall for every one,
+ * and the skill operations (GRA-310) for one that declares them.
+ */
 const knowledgeContract = {
   contractId: "grasp.knowledge@1",
   search: {
@@ -95,8 +98,28 @@ const knowledgeContract = {
   },
 } as const;
 
-/** The knowledge contract's fingerprint, computed once. */
-const knowledgeFingerprint = sha256Hex(canonicalJson(knowledgeContract));
+/** The operations every knowledge binding's fingerprint covers, declared or not. */
+const baseOperations = ["search", "read", "recall"] as const;
+
+/**
+ * The fingerprint of the knowledge contract a declaration of `operations`
+ * is bound to: search, read and recall, as every binding's has been, and
+ * a skill operation only once it is declared. So adding an operation to
+ * the contract changes no fingerprint but those of the Apps that use it,
+ * and every other App's approval still matches.
+ */
+export const knowledgeFingerprintOf = async (
+  operations: readonly string[]
+): Promise<string> => {
+  const { contractId } = knowledgeContract;
+  const covered = Object.entries(knowledgeContract).filter(
+    ([name]) =>
+      baseOperations.some((base) => base === name) || operations.includes(name)
+  );
+  return await sha256Hex(
+    canonicalJson({ contractId, ...Object.fromEntries(covered) })
+  );
+};
 
 /** What the operation host lets through, per operation (operations.ts). */
 const searchSchema = z.strictObject({
@@ -457,7 +480,7 @@ const readSkillBound = async (
 export const knowledgeAdapter: ResourceAdapter<"knowledge"> = {
   bind: async (env, app, declaration, target) => {
     const bound = await boundCollections(env, app, declaration, target);
-    const fingerprint = await knowledgeFingerprint;
+    const fingerprint = await knowledgeFingerprintOf(declaration.operations);
     return bound === undefined
       ? undefined
       : {

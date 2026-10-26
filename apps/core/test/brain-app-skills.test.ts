@@ -16,6 +16,7 @@ import {
   revokePermission,
 } from "../src/permissions.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
+import { knowledgeFingerprintOf } from "../src/resource-knowledge.ts";
 import { isRestricted } from "../src/restricted.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
@@ -34,6 +35,8 @@ import type { Fixture } from "./sealed-apps.ts";
 //    vetted one (only team collections can be sensitive, so none of a
 //    sensitive collection's skills is ever handed over).
 // 5. A retained binding keeps selecting after the Brain's grant is gone.
+// 6. Adding the skill operations to the contract breaks the approval of
+//    every App that doesn't use them.
 
 /** An App whose actions select a skill and read a pinned one. */
 const skillsFiles = (): Record<string, string> => ({
@@ -355,6 +358,31 @@ describe("an App's skills", setUpTime, () => {
     }).toStrictEqual({
       before: { picked: "refunds", read: true },
       after: { failed: "resource.unavailable" },
+    });
+  });
+
+  it("keeps the fingerprint of an App that declares no skill operation as it was approved, and changes only theirs that do", async () => {
+    // The knowledge contract's fingerprint before the skill operations,
+    // which every knowledge approval until then holds.
+    const approvedBefore =
+      "d2f36f61d3234407ab3e46b7445410ad4cab0a6dbd71d984859bcbeb684265dd";
+
+    expect({
+      search: await knowledgeFingerprintOf(["search"]),
+      readAndRecall: await knowledgeFingerprintOf(["read", "recall"]),
+      all: await knowledgeFingerprintOf(["search", "read", "recall"]),
+      skills:
+        (await knowledgeFingerprintOf(["recall", "skillsSelect"])) ===
+        approvedBefore,
+      inAnyOrder:
+        (await knowledgeFingerprintOf(["skillsRead", "skillsSelect"])) ===
+        (await knowledgeFingerprintOf(["skillsSelect", "skillsRead"])),
+    }).toStrictEqual({
+      search: approvedBefore,
+      readAndRecall: approvedBefore,
+      all: approvedBefore,
+      skills: false,
+      inAnyOrder: true,
     });
   });
 });
