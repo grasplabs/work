@@ -723,15 +723,29 @@ export const outputOf = (declared: unknown, output: unknown): Json => {
   return projected.data;
 };
 
-/** What run `row` waits on now, while it runs or is paused (run-waits.ts). */
-const waitsOf = async (env: Env, row: RunRow): Promise<Json[]> =>
+/**
+ * What run `row` waits on now, while it runs or is paused (run-waits.ts),
+ * as the release's binding of its workflow (`resolved`) names it, events
+ * the person may send it now (`canSend`) sendable.
+ */
+const waitsOf = async (
+  env: Env,
+  row: RunRow,
+  resolved: Resolved,
+  canSend: boolean
+): Promise<Json[]> =>
   row.status === "running" || row.status === "paused"
-    ? await runWaits(env, {
-        id: row.id,
-        workflowId: row.workflowResourceId,
-        version: row.version,
-        manifestHash: row.manifestHash,
-      })
+    ? await runWaits(
+        env,
+        {
+          id: row.id,
+          workflowId: row.workflowResourceId,
+          version: row.version,
+          manifestHash: row.manifestHash,
+        },
+        resolved.declared,
+        canSend
+      )
     : [];
 
 /** Run `runId`'s snapshot for the asking person, and its revision. */
@@ -757,7 +771,12 @@ const runSnapshot = async (
   const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
   const status = statusOf[row.status];
   // Read after the row: a wait opened or closed since moves its revision on.
-  const waits = await waitsOf(env, row);
+  const waits = await waitsOf(
+    env,
+    row,
+    resolved,
+    !ended && (await holds(env, maySendSql(asking, resolved.alias, pin)))
+  );
   const contract = await startedContract(
     env,
     asking,
