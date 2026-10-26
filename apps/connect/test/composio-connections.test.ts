@@ -5,6 +5,7 @@ import type {
   StartToolkitConnection,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { log } from "@grasp-os/shared/log";
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -932,6 +933,19 @@ const toolsNow = async (connectionId: string) => {
   return row?.tools;
 };
 
+/** The tool names the `action` events of `recorded` list, in order. */
+const namesIn = (
+  recorded: readonly { action: string; detail: Record<string, unknown> }[],
+  action: string
+) =>
+  recorded
+    .filter((event) => event.action === action)
+    .flatMap(({ detail }) =>
+      Object.entries(detail)
+        .filter(([key]) => key.startsWith("names"))
+        .flatMap(([, value]) => String(value).split(","))
+    );
+
 /** Composio updates connect asked for. */
 const updates = () =>
   composio.state.requests.filter(({ method }) => method === "PATCH");
@@ -965,6 +979,8 @@ describe("changing what a connected Composio toolkit may do", () => {
       ),
       listed: listed.find(({ id }) => id === connectionId)?.readTools,
       event: event?.detail,
+      came: namesIn(recorded, "connection.tools.added"),
+      went: namesIn(recorded, "connection.tools.removed"),
       // Marked a read on the admin's word alone: named.
       named: recorded
         .filter(({ action }) => action === "connection.tools.read_tools")
@@ -992,6 +1008,9 @@ describe("changing what a connected Composio toolkit may do", () => {
         removed: 1,
       },
       named: [1],
+      // Who allowed which tool, and took which away, by name.
+      came: ["HUBSPOT_UPDATE_CONTACT"],
+      went: ["HUBSPOT_CREATE_CONTACT"],
     });
   });
 
@@ -1070,6 +1089,69 @@ describe("changing what a connected Composio toolkit may do", () => {
       end: "connection.provider_refused",
       unchanged: true,
       failed: { outcome: "failed", reason: "connection.provider_refused" },
+    });
+  });
+
+  it("records it as failed when Composio can't be set back after a change another one beat", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    composio.state.beforeUpdate = async () => {
+      await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+        .bind(JSON.stringify(["HUBSPOT_LIST_CONTACTS"]), connectionId)
+        .run();
+      // And Composio takes no update after this one.
+      composio.state.failing = "PATCH /mcp/";
+    };
+    const end = await outcome(
+      change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+    );
+    const recorded = await events();
+
+    expect({
+      end,
+      reasons: recorded
+        .filter(({ action }) => action === "connection.tools")
+        .map(({ detail }) => [detail.outcome, detail.reason]),
+    }).toStrictEqual({
+      end: "connection.tools_changed",
+      reasons: [
+        ["failed", "connection.tools_restore_failed"],
+        ["refused", "connection.tools_changed"],
+      ],
+    });
+  });
+
+  it("records it as failed when anything but Composio goes wrong on the way, and changes nothing", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const before = await toolsNow(connectionId);
+    const { info } = log;
+    const broken = vi.spyOn(log, "info").mockImplementation((event, fields) => {
+      if (event === "composio.request" && fields?.method === "PATCH") {
+        throw new Error("Logging broke");
+      }
+      info(event, fields);
+    });
+    let end: string;
+    try {
+      end = await outcome(
+        change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+      );
+    } finally {
+      broken.mockRestore();
+    }
+    const recorded = await events();
+
+    expect({
+      end,
+      unchanged: (await toolsNow(connectionId)) === before,
+      failed: recorded
+        .filter(({ action }) => action === "connection.tools")
+        .map(({ detail }) => [detail.outcome, detail.reason]),
+    }).toStrictEqual({
+      end: "Error: Logging broke",
+      unchanged: true,
+      failed: [["failed", "connection.change_failed"]],
     });
   });
 

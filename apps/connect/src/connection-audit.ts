@@ -23,6 +23,8 @@ export const connectionEvent = (
     | "connection.consent"
     | "connection.consent.read_tools"
     | "connection.tools"
+    | "connection.tools.added"
+    | "connection.tools.removed"
     | "connection.tools.read_tools",
   connectionId: string | undefined,
   detail: Record<string, AuditDetailValue>
