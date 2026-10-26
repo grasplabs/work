@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  projectStartSeconds,
   shardSeconds,
   splitIntoShards,
   spreadOver,
@@ -12,11 +13,18 @@ import {
 } from "./test-shards.ts";
 import type { ShardFile, TimedFile } from "./test-shards.ts";
 
+/** A file of the project its key starts with. */
 const file = (
   key: string,
   seconds: number,
   { group = 0, serial = false }: { group?: number; serial?: boolean } = {}
-): ShardFile => ({ key, seconds, group, serial });
+): ShardFile => ({
+  key,
+  project: key.split(" ")[0] ?? key,
+  seconds,
+  group,
+  serial,
+});
 
 /** Many short files and a few long ones, as a test suite has. */
 const suite: ShardFile[] = [
@@ -90,17 +98,28 @@ describe("splitting the test files between shards", () => {
   });
 
   it("counts a group's files one after another where the project runs them so", () => {
-    const parallel = [file("a", 10), file("b", 10)];
+    const parallel = [file("core a", 10), file("core b", 10)];
     const serial = parallel.map((each) => ({ ...each, serial: true }));
 
-    expect(shardSeconds(serial)).toBe(20);
-    expect(shardSeconds(parallel)).toBeLessThan(20);
+    expect(shardSeconds(serial)).toBe(projectStartSeconds + 20);
+    expect(shardSeconds(parallel)).toBeLessThan(projectStartSeconds + 20);
   });
 
   it("adds a shard's groups up, as it runs them one after another", () => {
     expect(
       shardSeconds([file("core", 100), file("screens", 100, { group: 1 })])
-    ).toBe(200);
+    ).toBe(2 * projectStartSeconds + 200);
+  });
+
+  it("counts each project's start, so a project's files keep together", () => {
+    const small = Array.from({ length: 12 }, (_, index) =>
+      file(`${index % 2 === 0 ? "sdk" : "shared"} ${index}`, 5)
+    );
+    const projects = spreadOver(small, 2).map(
+      (shard) => new Set(shard.map(({ project }) => project)).size
+    );
+
+    expect(projects).toStrictEqual([1, 1]);
   });
 
   it("starts a project's untimed files first, then its longest", () => {
@@ -123,7 +142,7 @@ describe("splitting the test files between shards", () => {
 
   it("spreads the files recorded as taking no time, which still take time to load", () => {
     const instant = Array.from({ length: 40 }, (_, index) =>
-      file(`instant ${index}`, 0)
+      file(`instant-${index} file`, 0)
     );
     const counts = spreadOver(instant, 4).map((shard) => shard.length);
 
@@ -135,7 +154,7 @@ describe("splitting the test files between shards", () => {
       file(`long ${index}`, 100)
     );
     const short = Array.from({ length: 20 }, (_, index) =>
-      file(`short ${index}`, 2)
+      file(`short-${index} file`, 2)
     );
     const counts = spreadOver([...long, ...short], 4).map(
       (shard) => shard.length
