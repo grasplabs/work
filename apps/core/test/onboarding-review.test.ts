@@ -6,15 +6,14 @@ import type {
 } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, approveAgreed } from "./interview-link.ts";
+import { answering, approveAgreed, holdAlarm } from "./interview-link.ts";
 import {
   auditedDuring,
   outcome,
@@ -195,19 +194,6 @@ const drawn = async (ids: Ids) => {
   );
   const [tickets, rota] = await store.teamWorks(ids.team);
   return { tickets: tickets?.id ?? "", rota: rota?.id ?? "" };
-};
-
-/**
- * Holds the store's own alarm for the test, which draws each piece of work
- * itself (`drawn`), against the replies it queues in order. A drawing sets
- * the alarm half a second on, and on a slow runner the alarm drew next
- * first: it took a reply meant for the test's own drawing, so tickets was
- * drawn from the rota's answer, one way, with nothing to settle.
- */
-const holdAlarm = async (): Promise<void> => {
-  await runInDurableObject(onboardingStore(env), (instance) => {
-    vi.spyOn(instance, "alarm").mockResolvedValue();
-  });
 };
 
 describe("what needs the admin", { timeout: 60_000 }, () => {
