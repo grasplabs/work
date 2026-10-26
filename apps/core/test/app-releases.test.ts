@@ -277,6 +277,9 @@ describe("sealing a release", { timeout: 120_000 }, () => {
         targetVersion: 1,
         // A store's binding names no contract key.
         contractId: null,
+        // Nor an approval's target: the seal chose it.
+        targetPath: null,
+        approvalId: null,
       },
     ]);
     const events = await allEvents();
