@@ -107,7 +107,9 @@ const citing = (
   );
   return {
     sources: {
-      collections: [...new Set(documents.map(({ collectionId }) => collectionId))],
+      collections: [
+        ...new Set(documents.map(({ collectionId }) => collectionId)),
+      ],
       documents: [...new Set(documents.map(({ documentId }) => documentId))],
     },
     detail: { sources: refs.length },
