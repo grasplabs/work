@@ -45,25 +45,32 @@ const contextOf = ({ app, runId }: EvidenceRun) =>
  */
 export const runEvidenceMaxRows = 1000;
 
+/** A document a run was handed, in its collection. */
+export interface EvidenceRef {
+  documentId: string;
+  collectionId: string;
+}
+
 /**
- * Adds what `pack`, recalled through the binding of `permissionId`, cites
- * to the run's evidence: never replacing, never narrowing. An empty pack
- * adds nothing and clears nothing. Refuses, as `brain.budget_exceeded`
- * and adding nothing, a pack that would take the run past
- * `runEvidenceMaxRows`: counted and added in one statement, so recalls
- * running side by side can't each fit under it and together pass it.
+ * Adds `refs`, handed to the run through the binding of `permissionId`, to
+ * its evidence: never replacing, never narrowing; `recalled` when a recall
+ * cited them, so the Brain must still admit the run, which a later search
+ * or read of the same never undoes. None adds nothing and clears nothing.
+ * Refuses, as `brain.budget_exceeded` and adding nothing, refs that would
+ * take the run past `runEvidenceMaxRows`: counted and added in one
+ * statement, so reads running side by side can't each fit under it and
+ * together pass it.
  */
-export const recordRunEvidence = async (
+export const recordRunDocuments = async (
   env: Env,
   run: { readonly runId: string },
   permissionId: PermissionId,
-  pack: MemoryPack
+  handed: readonly EvidenceRef[],
+  recalled: boolean
 ): Promise<void> => {
   const cited = new Map<string, string>();
-  for (const ref of pack.sourceVersions) {
-    if (ref.kind === "document") {
-      cited.set(ref.documentId, ref.collectionId);
-    }
+  for (const { documentId, collectionId } of handed) {
+    cited.set(documentId, collectionId);
   }
   if (cited.size === 0) {
     return;
@@ -73,9 +80,19 @@ export const recordRunEvidence = async (
   await db
     .insert(runBrainEvidence)
     .select(
-      sql`SELECT ${run.runId}, json_extract(cited.value, '$[0]'), json_extract(cited.value, '$[1]'), ${permissionId}, ${Date.now()} FROM json_each(${refs}) AS cited WHERE (SELECT count(*) FROM ${runBrainEvidence} WHERE ${runBrainEvidence.runId} = ${run.runId}) + (SELECT count(*) FROM json_each(${refs}) AS fresh WHERE NOT EXISTS (SELECT 1 FROM ${runBrainEvidence} AS kept WHERE kept.run_id = ${run.runId} AND kept.document_id = json_extract(fresh.value, '$[0]') AND kept.permission_id = ${permissionId})) <= ${runEvidenceMaxRows}`
+      sql`SELECT ${run.runId}, json_extract(cited.value, '$[0]'), json_extract(cited.value, '$[1]'), ${permissionId}, ${recalled ? 1 : 0}, ${Date.now()} FROM json_each(${refs}) AS cited WHERE (SELECT count(*) FROM ${runBrainEvidence} WHERE ${runBrainEvidence.runId} = ${run.runId}) + (SELECT count(*) FROM json_each(${refs}) AS fresh WHERE NOT EXISTS (SELECT 1 FROM ${runBrainEvidence} AS kept WHERE kept.run_id = ${run.runId} AND kept.document_id = json_extract(fresh.value, '$[0]') AND kept.permission_id = ${permissionId})) <= ${runEvidenceMaxRows}`
     )
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [
+        runBrainEvidence.runId,
+        runBrainEvidence.documentId,
+        runBrainEvidence.permissionId,
+      ],
+      // Recalled once, recalled for good.
+      set: {
+        recalled: sql`max(${runBrainEvidence.recalled}, excluded.recalled)`,
+      },
+    });
   // Every ref kept, now or before: otherwise the cap held it back.
   const [kept] = await db
     .select({ count: sql<number>`count(*)` })
@@ -92,6 +109,29 @@ export const recordRunEvidence = async (
   }
 };
 
+/**
+ * Adds what `pack`, recalled through the binding of `permissionId`, cites
+ * to the run's evidence (`recordRunDocuments`).
+ */
+export const recordRunEvidence = async (
+  env: Env,
+  run: { readonly runId: string },
+  permissionId: PermissionId,
+  pack: MemoryPack
+): Promise<void> => {
+  await recordRunDocuments(
+    env,
+    run,
+    permissionId,
+    pack.sourceVersions.flatMap((ref) =>
+      ref.kind === "document"
+        ? [{ documentId: ref.documentId, collectionId: ref.collectionId }]
+        : []
+    ),
+    true
+  );
+};
+
 /** What run `runId` has recalled, as its evidence keeps it. */
 export const evidenceOf = async (env: Env, runId: string) =>
   await drizzle(env.DB)
@@ -99,6 +139,7 @@ export const evidenceOf = async (env: Env, runId: string) =>
       documentId: runBrainEvidence.documentId,
       collectionId: runBrainEvidence.collectionId,
       permissionId: runBrainEvidence.permissionId,
+      recalled: runBrainEvidence.recalled,
     })
     .from(runBrainEvidence)
     .where(eq(runBrainEvidence.runId, runId));

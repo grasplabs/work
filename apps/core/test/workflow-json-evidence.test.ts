@@ -1,5 +1,6 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
+import { v } from "@grasp-os/sdk";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -94,25 +95,44 @@ const objectSchema = (properties: Record<string, unknown>) => ({
   },
 });
 
-/** Action `look`: recalls "leave", answering the evidence's own text. */
-const recallsModule = `import { action, resource, v } from "@grasp-os/sdk/action";
+/** How action `look` reads the bound collection. */
+type How = "recall" | "search" | "read";
+
+/**
+ * Action `look`: recalls "leave", searches for it, or reads the document
+ * its input names, answering the text it was handed.
+ */
+const lookModule = (how: How): string => {
+  const bodies: Record<How, string> = {
+    recall: `const pack = await ctx.resources.docs.recall({ query: "leave" });
+    return { status: pack.items.map(({ statement }) => statement).join(" ") };`,
+    search: `const hits = await ctx.resources.docs.search({ text: "leave" });
+    return { status: hits.map(({ excerpt }) => excerpt).join(" ") };`,
+    read: `const found = await ctx.resources.docs.read({ id: args.who });
+    return { status: found.text };`,
+  };
+  return `import { action, resource, v } from "@grasp-os/sdk/action";
 
 export const look = action({
   args: { who: v.string() },
   returns: v.object({ status: v.string() }),
-  uses: [resource.knowledge("docs", { operations: ["recall"] })],
-  handler: async (ctx) => {
-    const pack = await ctx.resources.docs.recall({ query: "leave" });
-    return { status: pack.items.map(({ statement }) => statement).join(" ") };
+  uses: [resource.knowledge("docs", { operations: ["${how}"] })],
+  handler: async (ctx, args) => {
+    ${bodies[how]}
   },
 });
 `;
+};
+
+/** The event type a recalling workflow emits. */
+const recalledType = "grasp.leave.recalled";
 
 /**
  * What a recalling workflow does with what it recalled: ends with it as
- * its output, asks a model about it, or starts a child on it.
+ * its output, asks a model about it, starts a child on it, asks its
+ * builder to decide on it, or emits it as an event's data.
  */
-type Then = "output" | "model" | "child";
+type Then = "output" | "model" | "child" | "decision" | "emit";
 
 /** A child workflow of `by`'s greeting its input's `who`, at 1.0.0. */
 const greeter = async (by: Identity) => {
@@ -140,19 +160,42 @@ const greeter = async (by: Identity) => {
 
 /**
  * A workflow of `by`'s that recalls through its action, waits, then does
- * `then` with what it recalled: its collection everyone reads, granted to
+ * `then` with what it recalled (a decision asks `admin`): its collection everyone reads, granted to
  * it with the Brain, each binding approved by `admin`.
  */
-const recallingWorkflow = async (by: Identity, admin: Identity, then: Then) => {
+const recallingWorkflow = async (
+  by: Identity,
+  admin: Identity,
+  then: Then,
+  how: How = "recall"
+) => {
   const keys = {
     knowledge: `docs-${unique()}`,
     model: `summary-${unique()}`,
+    decision: `review-${unique()}`,
+    event: `recalled-${unique()}`,
   };
   await publishCatalogContract(env, admin, {
     key: keys.knowledge,
     kind: "knowledge",
   });
   await publishCatalogContract(env, admin, { key: keys.model, kind: "model" });
+  await publishCatalogContract(env, admin, {
+    key: keys.decision,
+    kind: "decision",
+    input: JSON.stringify(v.object({ recalled: v.string() }).descriptor),
+    response: JSON.stringify(v.null().descriptor),
+  });
+  await publishCatalogContract(env, admin, {
+    key: keys.event,
+    kind: "event",
+    events: {
+      [recalledType]: {
+        data: JSON.stringify(v.object({ recalled: v.string() }).descriptor),
+        browser: false,
+      },
+    },
+  });
   const collection = await createCollection(env, admin, {
     name: `Handbook ${unique()}`,
     access: "everyone",
@@ -199,6 +242,36 @@ const recallingWorkflow = async (by: Identity, admin: Identity, then: Then) => {
       },
       { finish: { set: { status: "${ .greeting }" } } },
     ],
+    decision: [
+      {
+        review: {
+          call: "grasp.decision",
+          with: {
+            binding: "review",
+            recipients: [admin.userId],
+            prompt: "Is this right?",
+            input: { recalled: "${ $context.recalled }" },
+          },
+        },
+      },
+      { finish: { set: { status: "decided" } } },
+    ],
+    emit: [
+      {
+        "tell-recalled": {
+          emit: {
+            event: {
+              with: {
+                type: recalledType,
+                data: { recalled: "${ $context.recalled }" },
+              },
+            },
+          },
+          metadata: { grasp: { binding: "recalledEvents" } },
+        },
+      },
+      { finish: { set: { status: "${ $context.recalled }" } } },
+    ],
   };
   const extraBindings: Record<Then, Record<string, unknown>> = {
     output: {},
@@ -209,6 +282,8 @@ const recallingWorkflow = async (by: Identity, admin: Identity, then: Then) => {
         contract: `${workflowNamespace}/${child?.name ?? ""}/1.0.0`,
       },
     },
+    decision: { review: { kind: "decision", contract: keys.decision } },
+    emit: { recalledEvents: { kind: "event", contract: keys.event } },
   };
   if (child !== undefined) {
     await granted(by, admin, {
@@ -256,7 +331,7 @@ const recallingWorkflow = async (by: Identity, admin: Identity, then: Then) => {
       ],
     }),
     basedOn: null,
-    modules: { "code/look.ts": recallsModule },
+    modules: { "code/look.ts": lookModule(how) },
   });
   const collectionGrant = await granted(by, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
@@ -264,12 +339,15 @@ const recallingWorkflow = async (by: Identity, admin: Identity, then: Then) => {
     actions: ["read"],
     binding: `DOCS_${unique().toUpperCase().replaceAll("-", "_")}`,
   });
-  await granted(by, admin, {
-    subject: { type: "workflow", workflowId: workflow.id },
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: `BRAIN_${unique().toUpperCase().replaceAll("-", "_")}`,
-  });
+  // Only a recall needs the Brain: a search or a read, the collection.
+  if (how === "recall") {
+    await granted(by, admin, {
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: `BRAIN_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+  }
   await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "docs",
     target: { kind: "knowledge", permissionId: collectionGrant },
@@ -282,7 +360,23 @@ const recallingWorkflow = async (by: Identity, admin: Identity, then: Then) => {
       reviewed: { version: 1 },
     });
   }
-  return { workflow, collectionGrant, documentId: leave.id, fact };
+  if (then === "decision") {
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "review",
+      target: { kind: "decision", deciders: [`person:${admin.userId}`] },
+      reviewed: { version: 1 },
+    });
+  }
+  if (then === "emit") {
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "recalledEvents",
+      target: { kind: "event" },
+      reviewed: { version: 1 },
+    });
+  }
+  // A read reads the document its input names.
+  const who = how === "read" ? leave.id : "Ada";
+  return { workflow, collectionGrant, documentId: leave.id, fact, who };
 };
 
 /** Run `run` once it sleeps in its hold, after its recall. */
@@ -302,6 +396,52 @@ const holding = async (run: string): Promise<void> => {
     },
     { timeout: 20_000, interval: 50 }
   );
+};
+
+type Made = Awaited<ReturnType<typeof recallingWorkflow>>;
+
+/** Starts `made` for `by`: its run's ID, once it holds after its read. */
+const startedHolding = async (by: Identity, made: Made): Promise<string> => {
+  const { runId } = await startWorkflow(
+    env,
+    { type: "person", person: by },
+    made.workflow.id,
+    { version: 1, input: { who: made.who }, key: unique() }
+  );
+  if (runId === null) {
+    throw new Error("The start admitted no run");
+  }
+  await holding(runId);
+  return runId;
+};
+
+/** What a run ended with, and whether that carries what it was handed. */
+const endOf = (made: Made, run: WorkflowResourceRun) => ({
+  status: run.status,
+  code: run.status === "failed" ? (run.error?.code ?? null) : null,
+  carries: JSON.stringify([run.output ?? null, run.error ?? null]).includes(
+    made.fact
+  ),
+});
+
+/** How many decisions run `runId` opened. */
+const decisionsOf = async (runId: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS n FROM workflow_decisions WHERE resource_run_id = ?"
+  )
+    .bind(runId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+};
+
+/** How many events run `runId` emitted. */
+const emittedOf = async (runId: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS n FROM workflow_emitted_events WHERE run_id = ?"
+  )
+    .bind(runId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
 };
 
 /** Run `runId` of workflow `id` once it has ended. */
@@ -343,9 +483,7 @@ const childrenOf = async (parentId: string): Promise<number> => {
 };
 
 /** Erases `made`'s document from Knowledge, as a purge erases it. */
-const erase = async ({
-  documentId,
-}: Awaited<ReturnType<typeof recallingWorkflow>>) => {
+const erase = async ({ documentId }: Made) => {
   await env.KNOWLEDGE.prepare("DELETE FROM documents WHERE id = ?")
     .bind(documentId)
     .run();
@@ -370,42 +508,20 @@ describe("a JSON workflow's recalled evidence", () => {
      * A run of a new recalling workflow (`asks` a model or ends with what
      * it recalled), `between` its recall and what follows.
      */
-    const ran = async (
-      then: Then,
-      between?: (
-        made: Awaited<ReturnType<typeof recallingWorkflow>>
-      ) => Promise<void>
-    ) => {
+    const ran = async (then: Then, between?: (made: Made) => Promise<void>) => {
       const made = await recallingWorkflow(ada, admin, then);
-      const { runId } = await startWorkflow(
-        env,
-        { type: "person", person: ada },
-        made.workflow.id,
-        { version: 1, input: { who: "Ada" }, key: unique() }
-      );
-      if (runId === null) {
-        throw new Error("The start admitted no run");
-      }
-      await holding(runId);
+      const runId = await startedHolding(ada, made);
       await between?.(made);
       const asked = gateway.requests.length;
       const run = await ended(ada, made.workflow.id, runId);
       return {
-        status: run.status,
-        code: run.status === "failed" ? (run.error?.code ?? null) : null,
-        // What it recalled, nowhere in what it ended with if refused.
-        carries: JSON.stringify([
-          run.output ?? null,
-          run.error ?? null,
-        ]).includes(made.fact),
+        ...endOf(made, run),
         asked: gateway.requests.length - asked,
         model: then === "model" ? await modelOutcomesOf(runId) : [],
         children: await childrenOf(runId),
       };
     };
-    const revoke = async ({
-      collectionGrant,
-    }: Awaited<ReturnType<typeof recallingWorkflow>>) => {
+    const revoke = async ({ collectionGrant }: Made) => {
       await revokePermission(env, admin, collectionGrant);
     };
 
@@ -488,6 +604,106 @@ describe("a JSON workflow's recalled evidence", () => {
         model: [],
         children: 0,
       },
+    });
+  });
+
+  it("opens no decision and emits no event once what it recalled can't be read, though it does as long as it can", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const revoke = async ({ collectionGrant }: Made) => {
+      await revokePermission(env, admin, collectionGrant);
+    };
+    // Kept readable: the decision opens (the run then waits on it), and
+    // the event is emitted.
+    const keptDeciding = await recallingWorkflow(ada, admin, "decision");
+    const keptDecidingRun = await startedHolding(ada, keptDeciding);
+    await vi.waitFor(
+      async () => {
+        await expect(decisionsOf(keptDecidingRun)).resolves.toBe(1);
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    const keptEmitting = await recallingWorkflow(ada, admin, "emit");
+    const keptEmittingRun = await startedHolding(ada, keptEmitting);
+    const keptEmittingEnd = await ended(
+      ada,
+      keptEmitting.workflow.id,
+      keptEmittingRun
+    );
+    /** A run that `then`s once its collection's grant was revoked. */
+    const revokedRun = async (then: "decision" | "emit") => {
+      const made = await recallingWorkflow(ada, admin, then);
+      const runId = await startedHolding(ada, made);
+      await revoke(made);
+      return {
+        ...endOf(made, await ended(ada, made.workflow.id, runId)),
+        decisions: await decisionsOf(runId),
+        emitted: await emittedOf(runId),
+      };
+    };
+
+    expect({
+      keptEmitting: {
+        ...endOf(keptEmitting, keptEmittingEnd),
+        emitted: await emittedOf(keptEmittingRun),
+      },
+      revokedDeciding: await revokedRun("decision"),
+      revokedEmitting: await revokedRun("emit"),
+    }).toStrictEqual({
+      keptEmitting: {
+        status: "completed",
+        code: null,
+        carries: true,
+        emitted: 1,
+      },
+      // Refused before anything of it is kept or sent.
+      revokedDeciding: {
+        status: "failed",
+        code: "brain.revoked",
+        carries: false,
+        decisions: 0,
+        emitted: 0,
+      },
+      revokedEmitting: {
+        status: "failed",
+        code: "brain.revoked",
+        carries: false,
+        decisions: 0,
+        emitted: 0,
+      },
+    });
+  });
+
+  it("pins what a search or a read hands over as a recall's evidence, without the Brain: refused once its document is gone", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    /** A run that reads `how`, its document erased while it waits if `erased`. */
+    const ranReading = async (how: "search" | "read", erased: boolean) => {
+      const made = await recallingWorkflow(ada, admin, "output", how);
+      const runId = await startedHolding(ada, made);
+      if (erased) {
+        await erase(made);
+      }
+      return endOf(made, await ended(ada, made.workflow.id, runId));
+    };
+
+    expect({
+      searched: await ranReading("search", false),
+      read: await ranReading("read", false),
+      searchedErased: await ranReading("search", true),
+      readErased: await ranReading("read", true),
+    }).toStrictEqual({
+      // Without the Brain permission: a search or a read needs only the
+      // collection, and its output is what it was handed.
+      searched: { status: "completed", code: null, carries: true },
+      read: { status: "completed", code: null, carries: true },
+      // Its document erased while it waited, its collection still read.
+      searchedErased: {
+        status: "failed",
+        code: "brain.revoked",
+        carries: false,
+      },
+      readErased: { status: "failed", code: "brain.revoked", carries: false },
     });
   });
 });

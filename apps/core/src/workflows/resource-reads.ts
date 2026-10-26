@@ -24,6 +24,7 @@ import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 import {
   evidenceOf,
   isAccessRefusal,
+  recordRunDocuments,
   recordRunEvidence,
 } from "./run-evidence.ts";
 
@@ -136,6 +137,18 @@ const searched = async (
           bound.collectionId
         )
     );
+    // Each document whose excerpt it hands over, pinned to the run as a
+    // recall's evidence is, without the Brain (run-evidence.ts).
+    await recordRunDocuments(
+      env,
+      run,
+      bound.permissionId,
+      results.hits.map(({ documentId }) => ({
+        documentId,
+        collectionId: bound.collectionId,
+      })),
+      false
+    );
     return results.hits.map((hit) => ({
       id: hit.documentId,
       title: hit.title,
@@ -173,6 +186,14 @@ const document = async (
       runContext(run),
       bound.permissionId,
       async (reader) => await read(brainOf(env), reader, request.id)
+    );
+    // The document it hands over, pinned to the run (run-evidence.ts).
+    await recordRunDocuments(
+      env,
+      run,
+      bound.permissionId,
+      [{ documentId: found.id, collectionId: bound.collectionId }],
+      false
     );
     return { title: found.title, text: found.text };
   } catch (error) {
@@ -336,11 +357,15 @@ export const requireResourceRunEvidenceReadable = async (
         runContext(run),
         bound.permissionId,
         async (reader) => {
-          await store.requireBrainGrant(reader);
-          await store.requireDocumentsReadable(
-            reader,
-            rows.filter((row) => row.permissionId === permissionId)
+          const pinned = rows.filter(
+            (row) => row.permissionId === permissionId
           );
+          // A recall's evidence needs the Brain too; a search's or a
+          // read's only the collection.
+          if (pinned.some((row) => row.recalled)) {
+            await store.requireBrainGrant(reader);
+          }
+          await store.requireDocumentsReadable(reader, pinned);
         }
       );
     }

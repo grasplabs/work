@@ -870,7 +870,7 @@ describe(
           }
           // Up to the cap, as a run recalling in a loop would come to.
           await env.DB.prepare(
-            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO run_brain_evidence SELECT ?, 'filler-' || i, 'filler', ?, 0 FROM n"
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO run_brain_evidence (run_id, document_id, collection_id, permission_id, recorded_at) SELECT ?, 'filler-' || i, 'filler', ?, 0 FROM n"
           )
             .bind(runEvidenceMaxRows - 1, kept.run, kept.permission)
             .run();
