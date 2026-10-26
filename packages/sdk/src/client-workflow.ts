@@ -376,7 +376,10 @@ export const readWorkflowReference = (value: unknown): ReadWorkflow => {
 /** The most waits one snapshot lists. */
 export const maxWaits = 256;
 
-const idText = v.string().min(1).max(256);
+/** The longest ID the host gives a run or a wait. */
+const maxWaitIdLength = 256;
+
+const idText = v.string().min(1).max(maxWaitIdLength);
 const plainText = v.string().max(2000);
 
 const runHandleSchema = v.object({
@@ -1075,6 +1078,70 @@ export class WorkflowChannel {
         read: (value) => checked(descriptors.sent, value),
       }
     );
+  }
+
+  /**
+   * Answers the decision `wait` holds run `runId` at, with `response`:
+   * through the trusted host (`WorkflowLink.decisions`), which has the
+   * person confirm the answer in its own UI before it records it. `wait`
+   * must be a decision wait of this very workflow's (its key one of the
+   * reference's decisions), and `response.value` what that decision's
+   * value schema takes. Never sent again on its own: an answer whose
+   * outcome is lost is `decision.outcome_unknown`, and the same answer
+   * given again is the recorded one, never a second.
+   */
+  async respond(
+    read: ReadWorkflow,
+    runId: string,
+    wait: unknown,
+    response: unknown
+  ): Promise<void> {
+    const decision =
+      isPlainObject(wait) &&
+      wait.kind === "decision" &&
+      typeof wait.key === "string"
+        ? read.decisions.get(wait.key)
+        : undefined;
+    if (
+      decision === undefined ||
+      !isPlainObject(wait) ||
+      typeof wait.id !== "string" ||
+      wait.id.length === 0 ||
+      wait.id.length > maxWaitIdLength
+    ) {
+      throw clientError("contract.invalid_request");
+    }
+    if (!isPlainObject(response) || typeof response.approved !== "boolean") {
+      throw clientError("contract.invalid_args");
+    }
+    const accepted = validateValue(
+      decision.valueSchema.descriptor,
+      response.value
+    );
+    if (accepted.issues !== undefined) {
+      throw clientError("contract.invalid_args", {
+        issues: issueDetails(accepted.issues),
+      });
+    }
+    const { decisions } = this.#link;
+    if (decisions === undefined) {
+      throw clientError("decision.unavailable");
+    }
+    try {
+      await decisions.respond(runId, wait.id, {
+        approved: response.approved,
+        payload: accepted.value,
+      });
+    } catch (error) {
+      const settled = readRejection(error);
+      if (settled.kind !== "failed") {
+        throw clientError("decision.outcome_unknown");
+      }
+      if (fences(settled.error.code)) {
+        this.#link.fence(settled.error);
+      }
+      throw settled.error;
+    }
   }
 
   #follow(
