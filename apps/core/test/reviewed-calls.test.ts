@@ -84,6 +84,8 @@ const refusals = async (run: string) => {
       step: detail.step,
       call: detail.call,
       errorCode: detail.errorCode,
+      // The model binding a refused model call named, if one did.
+      ...(detail.binding === undefined ? {} : { binding: detail.binding }),
     }));
 };
 
@@ -162,6 +164,7 @@ const hostHeldTo = async (
         });
   const appCalls: string[] = [];
   const tampered: string[] = [];
+  const models: string[] = [];
   const { step, leaseOf, leases } = engineOfTest();
   const hooks: HostHooks = {
     stepFailed: () => {},
@@ -183,7 +186,10 @@ const hostHeldTo = async (
       );
       return await Promise.resolve({ ok: true, value: null });
     },
-    modelBinding: () => {
+    // Records the model binding a call got past the host's checks with,
+    // then stops it: no gateway here.
+    modelBinding: (alias) => {
+      models.push(alias);
       throw new Error("No model step here");
     },
   };
@@ -204,7 +210,7 @@ const hostHeldTo = async (
     },
     hooks
   );
-  return { host, runId, appCalls, tampered, userId, leases };
+  return { host, runId, appCalls, tampered, models, userId, leases };
 };
 
 /** The App's counter's `hit`, as a step calls it. */
@@ -231,6 +237,22 @@ const tamperedWith = (step: string, call: string | null = null) => ({
   audited: [{ step, call, errorCode: "workflow.step_not_reviewed" }],
 });
 
+/** What a model call its AI step's review doesn't show asking leaves behind. */
+const modelRefused = (binding: string) => ({
+  refused: true,
+  step: "workflow.step_not_reviewed",
+  reached: [],
+  tampered: ["workflow.step_not_reviewed"],
+  audited: [
+    {
+      step: "write",
+      call: "model",
+      errorCode: "workflow.step_not_reviewed",
+      binding,
+    },
+  ],
+});
+
 /** A settled call's error code, or `ok`. */
 const codeOf = (settled: Settled<unknown>): string =>
   settled.ok ? "ok" : (settled.error.code ?? settled.error.message);
@@ -249,7 +271,13 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     }
     const kept = await storedCalls(shown);
     await describedAs(hidden, {
-      mailer: { steps: { send: [] }, kinds: { send: "exact" }, all: [] },
+      mailer: {
+        steps: { send: [] },
+        kinds: { send: "exact" },
+        models: {},
+        keyed: [],
+        all: [],
+      },
     });
 
     const sent = await admin.api.workflows.start(shown, "mailer");
@@ -268,6 +296,8 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
         mailer: {
           steps: { send: ["MAIL"] },
           kinds: { send: "exact" },
+          models: {},
+          keyed: [],
           all: ["MAIL"],
         },
       },
@@ -368,7 +398,15 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
       server: await mail.did(),
     }).toMatchObject({
       reviewed: [{ id: "guarded", steps: null, calls: ["MAIL"] }],
-      kept: { guarded: { steps: null, kinds: {}, all: ["MAIL"] } },
+      kept: {
+        guarded: {
+          steps: null,
+          kinds: {},
+          models: {},
+          keyed: [],
+          all: ["MAIL"],
+        },
+      },
       run: { status: "completed", output: { messageId: "message-1" } },
       server: { calls: 1, sent: [invoiceMail] },
     });
@@ -409,7 +447,9 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
       // The reader refuses a stub kept in a variable: the review shows the
       // workflow's steps as unreadable, calling none of the App's bindings.
       reviewed: [{ id: "tidy", steps: null, calls: [] }],
-      kept: { tidy: { steps: null, kinds: {}, all: [] } },
+      kept: {
+        tidy: { steps: null, kinds: {}, models: {}, keyed: [], all: [] },
+      },
       run: {
         status: "failed",
         step: "tidy-up",
@@ -475,6 +515,8 @@ queueMicrotask(() => {
         tidy: {
           steps: { tidy: ["APP"] },
           kinds: { tidy: "exact" },
+          models: {},
+          keyed: [],
           all: ["APP"],
         },
       },
@@ -488,6 +530,8 @@ queueMicrotask(() => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { arm: [], send: ["APP"] },
       kinds: { arm: "exact", send: "exact" },
+      models: {},
+      keyed: [],
       all: ["APP"],
     });
     let armed: AttemptHost | undefined;
@@ -556,7 +600,13 @@ queueMicrotask(() => {
       },
     });
     const { host, leases, runId } = await hostHeldTo(
-      { steps: { tidy: ["MAIL"] }, kinds: { tidy: "exact" }, all: ["MAIL"] },
+      {
+        steps: { tidy: ["MAIL"] },
+        kinds: { tidy: "exact" },
+        models: {},
+        keyed: [],
+        all: ["MAIL"],
+      },
       { db, of: { app, userId: admin.userId } }
     );
     let sent = "";
@@ -589,6 +639,8 @@ queueMicrotask(() => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { arm: ["APP"], send: [] },
       kinds: { arm: "exact", send: "exact" },
+      models: {},
+      keyed: [],
       all: ["APP"],
     });
     let passed: Settled<unknown> = { ok: true, value: null };
@@ -624,6 +676,8 @@ queueMicrotask(() => {
     const { host, runId, appCalls, leases, userId } = await hostHeldTo({
       steps: { tidy: ["APP", "CRM", "HANDBOOK"] },
       kinds: { tidy: "exact" },
+      models: {},
+      keyed: [],
       all: ["APP", "CRM", "HANDBOOK"],
     });
     const codes: Record<string, string> = {};
@@ -681,6 +735,8 @@ queueMicrotask(() => {
     const { host, runId, appCalls, leases } = await hostHeldTo({
       steps: { tidy: ["APP"] },
       kinds: { tidy: "exact" },
+      models: {},
+      keyed: [],
       all: ["APP"],
     });
     const codes: string[] = [];
@@ -707,6 +763,8 @@ queueMicrotask(() => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { tidy: ["APP"] },
       kinds: { tidy: "exact" },
+      models: {},
+      keyed: [],
       all: ["APP"],
     });
     const codes: string[] = [];
@@ -768,19 +826,33 @@ queueMicrotask(() => {
       // Kept as steps that can't be read, as an earlier describer may
       // have: every step may call MAIL, whatever the source reads as now.
       unread: await reviewedAs({
-        mailer: { steps: null, kinds: {}, all: ["MAIL"] },
+        mailer: {
+          steps: null,
+          kinds: {},
+          models: {},
+          keyed: [],
+          all: ["MAIL"],
+        },
       }),
       // Kept as more than the source reads, a step it doesn't show too.
       more: await reviewedAs({
         mailer: {
           steps: { send: ["MAIL", "CRM"], notify: ["APP"] },
           kinds: { send: "exact", notify: "exact" },
+          models: {},
+          keyed: [],
           all: ["APP", "CRM", "MAIL"],
         },
       }),
       // Kept as calling nothing: its runs may call nothing.
       none: await reviewedAs({
-        mailer: { steps: { send: [] }, kinds: { send: "exact" }, all: [] },
+        mailer: {
+          steps: { send: [] },
+          kinds: { send: "exact" },
+          models: {},
+          keyed: [],
+          all: [],
+        },
       }),
     }).toStrictEqual({
       unread: [
@@ -834,6 +906,8 @@ queueMicrotask(() => {
       mailer: {
         steps: { send: ["MAIL"], notify: ["APP"] },
         kinds: { send: "exact", notify: "exact" },
+        models: {},
+        keyed: [],
         all: ["APP", "MAIL"],
       },
     };
@@ -901,6 +975,8 @@ queueMicrotask(() => {
       paced: {
         steps: { pause: [] },
         kinds: { pause: "wait" },
+        models: {},
+        keyed: [],
         all: [],
         dynamic: { pause: ["duration"] },
       },
@@ -918,6 +994,8 @@ queueMicrotask(() => {
         paced: {
           steps: { evil: [], pause: [] },
           kinds: { evil: "exact", pause: "wait" },
+          models: {},
+          keyed: [],
           all: [],
           dynamic: { pause: ["duration"] },
         },
@@ -957,6 +1035,8 @@ queueMicrotask(() => {
       tidy: {
         steps: { tidy: ["APP"] },
         kinds: { tidy: "exact" },
+        models: {},
+        keyed: [],
         all: ["APP"],
       },
     });
@@ -981,6 +1061,8 @@ queueMicrotask(() => {
     const calls: WorkflowCalls = {
       steps: { tidy: [], pause: [], ask: [], write: [] },
       kinds: { tidy: "exact", pause: "wait", ask: "decision", write: "ai" },
+      models: {},
+      keyed: [],
       all: [],
     };
     const refusedAs = async (
@@ -1192,6 +1274,8 @@ queueMicrotask(() => {
       const { host, tampered } = await hostHeldTo({
         steps: null,
         kinds,
+        models: {},
+        keyed: [],
         all: [],
       });
       let model: Settled<unknown> = { ok: true, value: null };
@@ -1218,6 +1302,234 @@ queueMicrotask(() => {
     }).toStrictEqual({
       none: { refused: true, tampered: ["workflow.step_not_reviewed"] },
       some: { refused: false, tampered: [] },
+    });
+  });
+
+  it("hold an AI step's model call to the binding its review shows it naming, as tampering otherwise", async () => {
+    const asked = async (calls: WorkflowCalls, binding: string) => {
+      const { host, runId, tampered, models } = await hostHeldTo(calls);
+      let model: Settled<unknown> = { ok: true, value: null };
+      // The step catches the refusal and returns: it fails all the same.
+      const done = await host.do("write", {}, async (attempt) => {
+        model = await attempt.callModel({
+          step: "write",
+          binding,
+          instructions: "Summarise the invoice",
+          input: "Invoice INV-7",
+          outputSchema: { type: "string" },
+        });
+        return { ok: true, value: null };
+      });
+      const refused = codeOf(model) === "workflow.step_not_reviewed";
+      return {
+        refused,
+        step: codeOf(done),
+        // The binding the call got past every check with, if any.
+        reached: models,
+        tampered,
+        audited: await refusals(runId),
+      };
+    };
+    const read: WorkflowCalls = {
+      steps: { write: [], draft: [] },
+      kinds: { write: "ai", draft: "ai" },
+      models: { write: ["WRITER"], draft: ["DRAFTER"] },
+      keyed: [],
+      all: [],
+    };
+    // Its steps unread: held to the bindings its code's AI steps name.
+    const unread: WorkflowCalls = {
+      steps: null,
+      kinds: { $ai: "ai" },
+      models: { $ai: ["WRITER"] },
+      keyed: [],
+      all: [],
+    };
+
+    // The host of `write`, reviewed asking WRITER, borrowed by `draft`
+    // nested in it, reviewed asking DRAFTER: both must ask it.
+    const borrowed = await (async () => {
+      const { host, runId, tampered, models } = await hostHeldTo(read);
+      let within: Settled<unknown> = { ok: true, value: null };
+      let nested: Settled<unknown> = { ok: true, value: null };
+      const done = await host.do("write", {}, async (outer) => {
+        nested = await host.do("draft", {}, async () => {
+          within = await outer.callModel({
+            step: "write",
+            binding: "WRITER",
+            instructions: "Summarise the invoice",
+            input: "Invoice INV-7",
+            outputSchema: { type: "string" },
+          });
+          return { ok: true, value: null };
+        });
+        return { ok: true, value: null };
+      });
+      return {
+        code: codeOf(within),
+        nested: codeOf(nested),
+        step: codeOf(done),
+        reached: models,
+        tampered,
+        audited: await refusals(runId),
+      };
+    })();
+
+    // Two AI steps run side by side, as the SDK never runs them
+    // (`exclusive`): each is checked as if nested in the other, so a
+    // binding either may not ask ends the run as tampering.
+    const siblings = await (async () => {
+      const { host, tampered, models } = await hostHeldTo(read);
+      const started = Promise.withResolvers<null>();
+      let begun = 0;
+      const asks = async (step: string, binding: string) =>
+        await host.do(step, {}, async (attempt) => {
+          begun += 1;
+          if (begun === 2) {
+            started.resolve(null);
+          }
+          await started.promise;
+          await attempt.callModel({
+            step,
+            binding,
+            instructions: "Summarise the invoice",
+            input: "Invoice INV-7",
+            outputSchema: { type: "string" },
+          });
+          return { ok: true, value: null };
+        });
+      const done = await Promise.all([
+        asks("write", "WRITER"),
+        asks("draft", "DRAFTER"),
+      ]);
+      return {
+        steps: done.map(codeOf),
+        // `write`'s ask, checked against `draft` begun after it, never
+        // reaches a model; `draft`'s own may, before the run ends.
+        writerReached: models.includes("WRITER"),
+        tampered,
+      };
+    })();
+
+    expect({
+      siblings,
+      borrowed,
+      // Another step's model, and one no step names.
+      anotherStepsModel: await asked(read, "DRAFTER"),
+      unreviewedModel: await asked(read, "PRICEY"),
+      unreadOtherModel: await asked(unread, "PRICEY"),
+      // A row kept without models allows none.
+      noneKept: await asked({ ...read, models: {} }, "WRITER"),
+      reviewed: await asked(read, "WRITER"),
+      unreadReviewed: await asked(unread, "WRITER"),
+    }).toMatchObject({
+      siblings: {
+        steps: ["workflow.step_not_reviewed", "workflow.step_not_reviewed"],
+        writerReached: false,
+        tampered: ["workflow.step_not_reviewed"],
+      },
+      borrowed: {
+        code: "workflow.step_not_reviewed",
+        nested: "workflow.step_not_reviewed",
+        step: "workflow.step_not_reviewed",
+        reached: [],
+        tampered: ["workflow.step_not_reviewed"],
+        audited: [
+          {
+            step: "draft",
+            call: "model",
+            errorCode: "workflow.step_not_reviewed",
+            binding: "WRITER",
+          },
+        ],
+      },
+      anotherStepsModel: modelRefused("DRAFTER"),
+      unreviewedModel: modelRefused("PRICEY"),
+      unreadOtherModel: modelRefused("PRICEY"),
+      noneKept: modelRefused("WRITER"),
+      reviewed: {
+        refused: false,
+        reached: ["WRITER"],
+        tampered: [],
+        audited: [],
+      },
+      unreadReviewed: {
+        refused: false,
+        reached: ["WRITER"],
+        tampered: [],
+        audited: [],
+      },
+    });
+  });
+
+  it("refuse, as tampering, a key on a step its review shows written without one, of every kind, and run a keyed step under its keys", async () => {
+    const calls: WorkflowCalls = {
+      steps: { tidy: [], each: [], pause: [], ask: [], write: [] },
+      kinds: {
+        tidy: "exact",
+        each: "exact",
+        pause: "wait",
+        ask: "decision",
+        write: "ai",
+      },
+      models: { write: ["WRITER"] },
+      keyed: ["each"],
+      all: [],
+    };
+    const refusedAs = async (
+      run: (
+        host: Awaited<ReturnType<typeof hostHeldTo>>["host"]
+      ) => Promise<Settled<unknown>>
+    ) => {
+      const { host, runId, tampered } = await hostHeldTo(calls);
+      const settled = await run(host);
+      return {
+        code: codeOf(settled),
+        tampered,
+        audited: await refusals(runId),
+      };
+    };
+    const refused = {
+      code: await refusedAs(
+        async (host) => await host.do("tidy:k1", {}, ranOne)
+      ),
+      ai: await refusedAs(
+        async (host) => await host.do("write:k1", {}, ranOne)
+      ),
+      wait: await refusedAs(async (host) => await host.sleep("pause:k1", 1)),
+      decisionPart: await refusedAs(
+        async (host) => await host.do("ask:k1#asked", {}, ranOne)
+      ),
+      decisionWait: await refusedAs(
+        async (host) =>
+          await host.waitForDecision("ask:k1#answer", {
+            decision: crypto.randomUUID(),
+            timeout: 1000,
+            last: true,
+          })
+      ),
+    };
+    const keyed = await hostHeldTo(calls);
+    const ran = {
+      first: codeOf(await keyed.host.do("each:k1", {}, ranOne)),
+      second: codeOf(await keyed.host.do("each:k2", {}, ranOne)),
+      unkeyed: codeOf(await keyed.host.do("tidy", {}, ranOne)),
+    };
+    // A row kept without keys allows none.
+    const noneKept = await hostHeldTo({ ...calls, keyed: [] });
+    const unkept = codeOf(await noneKept.host.do("each:k1", {}, ranOne));
+
+    expect({ refused, ran, tampered: keyed.tampered, unkept }).toStrictEqual({
+      refused: {
+        code: tamperedWith("tidy:k1"),
+        ai: tamperedWith("write:k1"),
+        wait: tamperedWith("pause:k1"),
+        decisionPart: tamperedWith("ask:k1#asked"),
+        decisionWait: tamperedWith("ask:k1#answer"),
+      },
+      ran: { first: "ok", second: "ok", unkeyed: "ok" },
+      tampered: [],
+      unkept: "workflow.step_not_reviewed",
     });
   });
 
@@ -1254,6 +1566,8 @@ queueMicrotask(() => {
     const { host, userId, runId, tampered } = await hostHeldTo({
       steps: { ask: [], "sign-off": [] },
       kinds: { ask: "decision", "sign-off": "decision" },
+      models: {},
+      keyed: [],
       all: [],
       // `ask` takes its reviewer from the run's input; `sign-off` names it.
       dynamic: { ask: ["from"] },
@@ -1289,6 +1603,8 @@ queueMicrotask(() => {
     const { host, userId } = await hostHeldTo({
       steps: { tidy: [] },
       kinds: { tidy: "exact" },
+      models: {},
+      keyed: [],
       all: [],
     });
     const codes: string[] = [];

@@ -103,7 +103,7 @@ const runReading = async (changes: Partial<Env> = {}) => {
       connections: {},
       brains: {},
       collections: {},
-      calls: { steps: null, kinds: {}, all: [] },
+      calls: { steps: null, kinds: {}, models: {}, keyed: [], all: [] },
     },
     hooks
   );

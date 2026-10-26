@@ -4,6 +4,8 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import {
   callReviewed,
+  modelReviewed,
+  stepReviewed,
   inboundEmailIndexSchema,
   isRetryable,
   maxStepRetries,
@@ -329,6 +331,20 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
   // The step whose function runs now, by its engine name, and the first
   // of its calls refused as one its review doesn't show.
   let running: { step: string; refused?: Error } | undefined;
+  // The first refusal of a step or model call the review doesn't show.
+  // As on the platform (the host's tampering), it ends the run: every
+  // later call, step and model call fails with it at once, and the run
+  // fails with it even if the workflow caught it (`testRun`).
+  let tampered: Error | undefined;
+  const refuse = (error: Error): never => {
+    tampered ??= error;
+    throw error;
+  };
+  const requireUntampered = (): void => {
+    if (tampered !== undefined) {
+      throw tampered;
+    }
+  };
   const { calls } = options;
   const checkCall = (binding: string): void => {
     if (calls === undefined || calls === null) {
@@ -342,11 +358,46 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
     if (running.refused !== undefined) {
       throw running.refused;
     }
+    requireUntampered();
     if (!callReviewed(calls, running.step, binding)) {
       const error = workflowErrors.create("workflow.call_not_reviewed");
       error.message = `Step "${stepNameOf(running.step).name}" called ${binding}, which the review of this version doesn't show it calling: call each binding only in the step's own function, where the review shows it.`;
+      // As the host's `#requireReviewed`: it fails this step's attempt,
+      // caught or not, but isn't tampering, so the run goes on.
       running.refused = error;
       throw error;
+    }
+  };
+
+  // As the host refuses it (`stepReviewed`): a step under a name its
+  // review doesn't show, or under a key when its review shows it written
+  // without one.
+  const checkStep = (name: string): void => {
+    if (calls === undefined || calls === null) {
+      return;
+    }
+    requireUntampered();
+    if (!stepReviewed(calls, name)) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${name}" isn't one the review of this version shows: run steps only as the workflow's function writes them.`;
+      refuse(error);
+    }
+  };
+  // As the host refuses it (`modelReviewed`): a model call naming another
+  // binding than its AI step's review shows; it fails the step, caught or
+  // not.
+  const checkModel = (step: string, binding: string): void => {
+    if (calls === undefined || calls === null) {
+      return;
+    }
+    requireUntampered();
+    if (!modelReviewed(calls, running?.step ?? step, binding)) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${step}" asked model ${binding}, which the review of this version doesn't show it asking: ask each AI step's model only as its \`step.llm\` names it.`;
+      if (running !== undefined) {
+        running.refused = error;
+      }
+      refuse(error);
     }
   };
 
@@ -361,6 +412,7 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         return fromStored(results.get(name)) as Awaited<ReturnType<typeof fn>>;
       }
+      checkStep(name);
       const step = stepNameOf(name);
       const call = {
         name: step.name,
@@ -437,6 +489,7 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
       }
     },
     sleep: async (name, milliseconds) => {
+      checkStep(name);
       if (!recorded.has(name)) {
         recorded.set(name, null);
         log({ type: "sleep", name: stepNameOf(name).name, milliseconds });
@@ -445,6 +498,7 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
       await Promise.resolve();
     },
     callModel: async (request) => {
+      checkModel(request.step, request.binding);
       modelRequests.push(request);
       if (!options.model) {
         throw new Error(
@@ -477,6 +531,7 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
         },
       ]),
     waitForDecision: async (name, { decision, timeout }) => {
+      checkStep(name);
       const replayed = recorded.get(name);
       if (replayed !== undefined) {
         // SAFETY: only this method records under a decision wait's name.
@@ -536,7 +591,14 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
     },
   };
 
-  return { engine, steps, modelRequests, decisions };
+  return {
+    engine,
+    steps,
+    modelRequests,
+    decisions,
+    /** The refusal that ended the run, caught or not, if any. */
+    tampered: (): Error | undefined => tampered,
+  };
 };
 
 /** What a test run or dry run needs besides the workflow. */
@@ -570,7 +632,7 @@ export const testRun = async <Output>(
   definition: WorkflowDefinition<Output>,
   { input, ...options }: TestRunOptions = {}
 ): Promise<TestRun<Output>> => {
-  const { engine, steps } = createTestEngine({
+  const { engine, steps, tampered } = createTestEngine({
     ...options,
     // Last, so no option sets it: `TestRunOptions` has no `sideEffects`,
     // but untyped options (a test file's, sent to core) may.
@@ -589,6 +651,12 @@ export const testRun = async <Output>(
       status: "failed",
       error: error instanceof Error ? error : new Error(String(error)),
     };
+  }
+  // As on the platform: a refusal fails the run, even one the workflow
+  // caught and went on from.
+  const refusal = tampered();
+  if (refusal !== undefined) {
+    outcome = { status: "failed", error: refusal };
   }
   return {
     ...outcome,
