@@ -422,6 +422,7 @@ const shownSchema = z.array(
 const checkSchema = z.object({ claim: z.string(), fact: z.string() });
 const partSchema = z.object({ part: z.string(), facts: z.array(z.string()) });
 const numberSchema = z.object({
+  work: z.string(),
   number: z.string(),
   facts: z.array(z.string()),
 });
@@ -430,7 +431,12 @@ const numberSchema = z.object({
  * Whether a person's facts say a part of a drawing, or give a number the
  * drawing says is theirs, as the fake checker answers: a plain one agrees.
  */
-export type PartJudge = (part: string, facts: readonly string[]) => boolean;
+export type PartJudge = (
+  part: string,
+  facts: readonly string[],
+  /** For a number: the piece of work it is said to be for. */
+  work?: string
+) => boolean;
 
 /** The fake checker's answer for parts, unless a test gives one: yes. */
 const agrees: PartJudge = () => true;
@@ -479,7 +485,11 @@ const claimsOrCheck =
     } else if (ofPart.success) {
       answer = part(ofPart.data.part, ofPart.data.facts);
     } else if (ofNumber.success) {
-      answer = part(ofNumber.data.number, ofNumber.data.facts);
+      answer = part(
+        ofNumber.data.number,
+        ofNumber.data.facts,
+        ofNumber.data.work
+      );
     }
     if (answer === "fails") {
       return { status: 400, errorType: "invalid_request_error" };

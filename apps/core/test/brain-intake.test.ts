@@ -1254,6 +1254,52 @@ const givenWith = async (
 // - A question for the next interviews, written from what few said.
 // - Staff reading what the company's people told.
 describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
+  it("counts a number only for the work it is about: one a person gave for other work never backs this one", async () => {
+    // Each of the six gave numbers, but for the rota, not for tickets.
+    const ids = await team();
+    await mapped(ids);
+    await told(ids);
+    const tellers = [ids.mia, ids.mo, ids.noor, ids.pim, ids.rik];
+    for (const [index, person] of tellers.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+      await agree(
+        person,
+        [
+          fact(
+            `n${index}`,
+            "number",
+            "For planning the rota I do about 30 a week."
+          ),
+        ],
+        1
+      );
+    }
+    await answering(
+      [fiveToldReply(ids)],
+      async () => await onboardingStore(env).drawNext()
+    );
+    // The checker says yes to a number only when a fact is about its work.
+    await intake(ids, [zendeskClaim], (text, facts, work) =>
+      work === undefined
+        ? true
+        : facts.some((each) => each.includes(work.split(" (")[0] ?? work))
+    );
+    const member = await signedInApi(idp, "user");
+    const read = await ticketsDrawingFor(member.api, ids);
+    expect({
+      volumes: read.volumes,
+      takes: read.takes,
+      wrong: read.wrong,
+      minutes: read.minutes,
+    }).toStrictEqual({
+      volumes: [],
+      takes: null,
+      wrong: null,
+      // The parts stand; no number for them does.
+      minutes: [null, null],
+    });
+  });
+
   it("shows each count's median on its own: five giving their own count are enough, however one other counts", async () => {
     // Max gives the whole team's count; the other five, their own.
     const ids = await givenWith((each) =>
