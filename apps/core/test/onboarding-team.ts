@@ -239,6 +239,68 @@ export const ticketsReply = (
   outputTokens: 900,
 });
 
+/**
+ * Tickets as drawn, with what five who tell their own work told alike, as
+ * the brain may take it (GRA-1084): how one starts, opening the ticket
+ * (with the minutes of `minutesFrom` of them),
+ * the last step, what they decide by and their numbers; besides, what
+ * fewer told, which stays out of it: a step only Max told, naming Noor, a
+ * wait only Mo told, Max's own list, and a question for the next
+ * interviews.
+ */
+export const fiveToldReply = (
+  ids: Ids,
+  last = "Send the answer.",
+  minutesFrom = 5,
+  decides = "The priority of the ticket."
+): GatewayReply => {
+  const five = [ids.max, ids.mia, ids.mo, ids.noor, ids.pim];
+  return {
+    text: JSON.stringify({
+      starts: "A customer email arrives as a ticket in Zendesk.",
+      starts_by: five,
+      steps: [
+        {
+          text: "Open the ticket.",
+          who: "Agent",
+          tool: "Zendesk",
+          by: five,
+          minutes: [1, 2, 6],
+          // Each one's own normal minutes: 2 to 6, a median of 4.
+          minutes_by: five.slice(0, minutesFrom).map((person, index) => ({
+            person,
+            minutes: [1, 2 + index, 6],
+          })),
+        },
+        {
+          text: "Ask Noor when the customer number is missing.",
+          who: "Agent",
+          tool: "",
+          by: [ids.max],
+        },
+        { text: last, who: "Agent", tool: "Zendesk", by: five },
+      ],
+      notes: [
+        { kind: "wait", text: "Waits for the customer's reply.", by: [ids.mo] },
+        { kind: "decides", text: decides, by: five },
+        { kind: "own", text: "A sheet of open tickets.", by: [ids.max] },
+      ],
+      numbers: five.map((person, index) => ({
+        person,
+        quiet: 30 + index,
+        busy: 50 + index,
+        of: "me",
+        per: "week",
+        minutes: [3, 10 + index, 45],
+        wrong: 2,
+      })),
+      open: ["Why do some ask Noor?"],
+    }),
+    inputTokens: 4000,
+    outputTokens: 900,
+  };
+};
+
 /** Lea's map drawn, from `more` she said too, and everyone's links out. */
 export const mapped = async (
   ids: Ids,
@@ -358,6 +420,33 @@ const shownSchema = z.array(
   })
 );
 const checkSchema = z.object({ claim: z.string(), fact: z.string() });
+const partSchema = z.object({
+  work: z.string(),
+  kind: z.string(),
+  part: z.string(),
+  facts: z.array(z.string()),
+});
+const numberSchema = z.object({
+  work: z.string(),
+  number: z.string(),
+  facts: z.array(z.string()),
+});
+
+/**
+ * Whether a person's facts say a part of a drawing, or give a number the
+ * drawing says is theirs, as the fake checker answers: a plain one agrees.
+ */
+export type PartJudge = (
+  part: string,
+  facts: readonly string[],
+  /** The piece of work the part or number is said to be of. */
+  work: string,
+  /** For a part: what kind of part it is; none for a number. */
+  kind?: string
+) => boolean;
+
+/** The fake checker's answer for parts, unless a test gives one: yes. */
+const agrees: PartJudge = () => true;
 
 /** What a request gave the model as data between `<tag>` and `</tag>`, parsed; none when it gave none. */
 const dataOf = (request: GatewayRequest | undefined, tag: string): unknown => {
@@ -382,24 +471,45 @@ const shownIn = (request: GatewayRequest | undefined) =>
 
 /**
  * The model, faked: a check of one fact against one claim answered by
- * `says`; anything else, the claims, by `claims`.
+ * `says`, one of a person's facts against a drawing's part by `part`;
+ * anything else, the claims, by `claims`.
  */
 const claimsOrCheck =
   (
     claims: (request: GatewayRequest | undefined) => unknown,
-    says: (claim: string, fact: string) => boolean | "fails"
+    says: (claim: string, fact: string) => boolean | "fails",
+    part: PartJudge = agrees
   ) =>
   (requests: readonly GatewayRequest[]): GatewayReply => {
     const request = requests.at(-1);
-    const check = checkSchema.safeParse(dataOf(request, "data"));
-    const answer = check.success
-      ? says(check.data.claim, check.data.fact)
-      : false;
+    const data = dataOf(request, "data");
+    const check = checkSchema.safeParse(data);
+    const ofPart = partSchema.safeParse(data);
+    const ofNumber = numberSchema.safeParse(data);
+    let answer: boolean | "fails" | undefined;
+    if (check.success) {
+      answer = says(check.data.claim, check.data.fact);
+    } else if (ofPart.success) {
+      answer = part(
+        ofPart.data.part,
+        ofPart.data.facts,
+        ofPart.data.work,
+        ofPart.data.kind
+      );
+    } else if (ofNumber.success) {
+      answer = part(
+        ofNumber.data.number,
+        ofNumber.data.facts,
+        ofNumber.data.work
+      );
+    }
     if (answer === "fails") {
       return { status: 400, errorType: "invalid_request_error" };
     }
     return {
-      text: JSON.stringify(check.success ? { says: answer } : claims(request)),
+      text: JSON.stringify(
+        answer === undefined ? claims(request) : { says: answer }
+      ),
       inputTokens: 1000,
       outputTokens: 200,
     };
@@ -410,7 +520,10 @@ const claimsOrCheck =
  * the labels the prompt gave the facts it names by their words; checked,
  * a fact says a claim when it is among those it `says`.
  */
-export const claimsReply = (claims: readonly FakeClaim[]) =>
+export const claimsReply = (
+  claims: readonly FakeClaim[],
+  part: PartJudge = agrees
+) =>
   claimsOrCheck(
     (request) => {
       const shown = shownIn(request);
@@ -435,7 +548,8 @@ export const claimsReply = (claims: readonly FakeClaim[]) =>
         return "fails";
       }
       return of.some(({ cites, says }) => (says ?? cites).includes(said));
-    }
+    },
+    part
   );
 
 /**
@@ -491,7 +605,8 @@ export const zendeskClaim: FakeClaim = {
  */
 export const intake = async (
   ids: { team: string },
-  claims: readonly FakeClaim[] = [zendeskClaim]
+  claims: readonly FakeClaim[] = [zendeskClaim],
+  part: PartJudge = agrees
 ) => {
   let given: Awaited<ReturnType<typeof answeringWith<string | null>>> = {
     requests: [],
@@ -500,7 +615,7 @@ export const intake = async (
   for (let round = 0; round < 5; round += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
     given = await answeringWith(
-      claimsReply(claims),
+      claimsReply(claims, part),
       async () => await onboardingStore(env).intakeNext()
     );
     if (given.result === null || given.result === `brain:${ids.team}`) {
