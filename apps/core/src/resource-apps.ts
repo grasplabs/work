@@ -14,7 +14,7 @@ import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { findApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { memberRole, teamsOf } from "./auth/identity.ts";
+import { actingPerson } from "./auth/identity.ts";
 import { appResourceBindings } from "./db/core/schema.ts";
 import type {
   BindingCaller,
@@ -184,12 +184,18 @@ type Calling = BindingCaller & { readonly env: Env };
 
 /** Who `caller` acts for, to the called App: as core knows them now. */
 const personOf = async (caller: Calling) => {
-  const userId = caller.authority.onBehalfOf;
-  const role = await memberRole(caller.env.DB, userId);
-  if (role === undefined) {
+  // Work a Grasp staff member started acts as them while their staff
+  // session lasts (GRA-1088); the binding's approval still decides.
+  const person = await actingPerson(
+    caller.env,
+    caller.authority.onBehalfOf,
+    caller.authority.staff
+  );
+  if (person === undefined) {
     throw operationErrors.create("resource.unavailable");
   }
-  return { userId, role, teams: await teamsOf(caller.env.DB, userId) };
+  const { userId, role, teams } = person;
+  return { userId, role, teams };
 };
 
 /**

@@ -43,7 +43,13 @@ import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished, leave } from "./runs.ts";
 import { appWith, failure, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
-import { signedInApi } from "./sign-in.ts";
+import {
+  openRpc,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  whoami,
+} from "./sign-in.ts";
 
 // Another App's public functions through an app resource an App's actions
 // declare (`resource.app`), which reaches nothing until an admin binds it
@@ -1530,6 +1536,73 @@ export default workflowTests(definition, [{ name: "runs", mocks: { note: null },
           onBehalfOf: builder.userId,
         },
       ],
+    });
+  });
+
+  it("calls as the Grasp staff member who started the run, under the binding an admin approved, audited as theirs", async () => {
+    const admin = await person("admin");
+    const builder = await signedInApi(idp, "builder");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const reference = JSON.stringify({
+      contractId: "desk.add",
+      kind: "action",
+    });
+    const { id } = await builder.api.apps.create({ name: "Staff desk" });
+    await published(id);
+    await release(builder, id, {
+      ...deskFiles(),
+      "workflows/noter.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow("noter", { params: {}, input: z.unknown() }, async (step, { env }) =>
+  await step.do("note", { description: "Note", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
+    (await env.APP.callFunction(${reference}, { text: "from staff" })) as Json
+  )
+);
+`,
+      "workflows/noter.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import definition from "./noter.ts";
+
+export default workflowTests(definition, [{ name: "runs", mocks: { note: null }, expect: {} }]);
+`,
+    });
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const { core } = await openRpc(session);
+    const staff = core.authenticate();
+    const { userId: staffId } = await whoami(session);
+    // What the run did is the client's admins' to read.
+    const reader = await signedInApi(idp, "admin");
+    const startNoter = async () => {
+      const run = await staff.workflows.start(id, "noter");
+      await finished(run.id);
+      return await reader.api.workflows.status(run.id);
+    };
+
+    // Before an admin approves the binding: nothing reaches the CRM.
+    const unbound = await startNoter();
+    await approveResourceBinding(env, admin, {
+      app: id,
+      alias: "crm",
+      target: { kind: "app", appId: crm.app },
+      reviewed: { version: 1 },
+    });
+    const bound = await startNoter();
+
+    expect({
+      unbound: unbound.output,
+      status: bound.status,
+      output: bound.output,
+      audited: callsTo(await allEvents(), crm.app).map(
+        ({ actor, onBehalfOf }) => ({
+          staff: "staff" in actor ? actor.staff : undefined,
+          onBehalfOf,
+        })
+      ),
+    }).toStrictEqual({
+      unbound: { ok: true, value: "error:resource.unavailable" },
+      status: "completed",
+      output: { ok: true, value: "null" },
+      audited: [{ staff: staffId, onBehalfOf: staffId }],
     });
   });
 });
