@@ -21,6 +21,7 @@ import type {
   WorkflowBindingTarget,
 } from "@grasp-os/shared/workflow-resources";
 import { and, asc, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -30,6 +31,7 @@ import type { Acting } from "./auth/identity.ts";
 import { memberRole } from "./auth/identity.ts";
 import {
   permissions,
+  sdkResourceBindings,
   teams,
   workflowBindingApprovals,
 } from "./db/core/schema.ts";
@@ -37,6 +39,7 @@ import { modelSettings } from "./models.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
 import { pinnedTemplate } from "./resource-templates.ts";
 import { isRestricted, restrict } from "./restricted.ts";
+import { liveStoreSql } from "./store-deletion.ts";
 import {
   auditStoreRefusal,
   callStoreOperation,
@@ -105,6 +108,13 @@ import { envelopedSchemaText } from "./workflows/connector-schemas.ts";
 // - Another App's actions: no target reaches them. A store operation is
 //   a public query or mutation only; an action would run with its App's
 //   own resource bindings (store-operations.ts).
+// - A store's inventory says nothing of who relies on it: approving a
+//   store operation writes the store, its definition and the operation's
+//   path onto the version's binding row (`sdk_resource_bindings`, spec
+//   24) in the approval's own batch, while the store is live and not
+//   closing; revoking resets the row to the contract key. So the
+//   inventory names what serves a binding exactly while an approval
+//   does, and a store isn't deleted under one (data-stores.ts).
 // - A start on authority that changed: approving or revoking moves the
 //   workflow's policy generation, so a start decided before is refused;
 //   one that changed nothing refuses nothing.
@@ -670,6 +680,27 @@ const targetDetail = (
 };
 
 /**
+ * Resets the binding inventory's row (spec 24) approval `approval`
+ * projected onto, when `when` holds: its target is the contract key alone
+ * again, with no store, definition, path or approval. An approval that
+ * replaces it projects its own target onto the same row in its batch.
+ */
+const unprojected = (
+  db: ReturnType<typeof drizzle>,
+  approval: string,
+  when: SQL
+) =>
+  db
+    .update(sdkResourceBindings)
+    .set({
+      targetId: sql`${sdkResourceBindings.contractId}`,
+      targetVersion: null,
+      targetPath: null,
+      approvalId: null,
+    })
+    .where(and(eq(sdkResourceBindings.approvalId, approval), when));
+
+/**
  * Approves `input` for workflow `id`, for `by`, one of the organization's
  * own admins: the alias, its target and the version they reviewed, which
  * must declare the alias as a catalog binding of the target's kind, and
@@ -699,6 +730,19 @@ export const approveWorkflowBinding = async (
     );
   }
   await requireTargetServes(env, workflow.id, declared, target);
+  // What serves a store operation, for the binding inventory: the store
+  // and its owning App, as they stand now.
+  const resolved =
+    target.kind === "storeOperation"
+      ? await requireStoreOperationServes(
+          env,
+          workflow.id,
+          declared.contractId,
+          target,
+          1
+        )
+      : undefined;
+  const served = resolved?.served;
   const row: typeof workflowBindingApprovals.$inferSelect = {
     id: crypto.randomUUID(),
     workflowResourceId: workflow.id,
@@ -717,8 +761,15 @@ export const approveWorkflowBinding = async (
   // Only while `by` is still an admin and the workflow is live, read in
   // the batch. Versions never change, so the one reviewed stays the one
   // served, whichever is current.
+  // A store operation's store, too, only while it is live and no deletion
+  // has it closing: so a deletion that found no consumer resolving to it
+  // (data-stores.ts) never races an approval that does.
   const holds = sql`${stillAdminSql(by)} AND EXISTS (SELECT 1 FROM workflow_resources
-    WHERE id = ${workflow.id} AND deleted_at IS NULL)`;
+    WHERE id = ${workflow.id} AND deleted_at IS NULL)${
+      served === undefined
+        ? sql``
+        : sql` AND ${liveStoreSql(sql`${served.storeId}`, Date.now())}`
+    }`;
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db
@@ -743,6 +794,35 @@ export const approveWorkflowBinding = async (
         'active', ${row.approvedBy}, ${row.approvedAt.getTime()}, NULL, NULL
         WHERE ${holds}`
     ),
+    // What serves it, in the binding inventory (spec 24), for as long as
+    // this approval does: the store, the definition its App serves now and
+    // the operation's path.
+    ...(served === undefined || target.kind !== "storeOperation"
+      ? []
+      : [
+          db
+            .update(sdkResourceBindings)
+            .set({
+              targetId: served.storeId,
+              targetVersion: sql`(SELECT store.target_version
+                FROM sdk_resource_bindings AS store
+                JOIN apps ON apps.id = store.resource_id
+                  AND apps.current_version = store.resource_version
+                WHERE store.resource_id = ${served.owner}
+                  AND store.kind = 'store' AND store.alias = 'default')`,
+              targetPath: target.operation,
+              approvalId: row.id,
+            })
+            .where(
+              and(
+                eq(sdkResourceBindings.resourceId, workflow.id),
+                eq(sdkResourceBindings.resourceVersion, reviewed.version),
+                eq(sdkResourceBindings.alias, alias),
+                eq(sdkResourceBindings.kind, "operation"),
+                sql`EXISTS (SELECT 1 FROM workflow_binding_approvals WHERE id = ${row.id})`
+              )
+            ),
+        ]),
     outboxedIfChanged(db, {
       actor: actorOf(by),
       action: "workflow.binding.approved",
@@ -794,6 +874,10 @@ export const revokeWorkflowBinding = async (
   }
   const db = drizzle(env.DB);
   const revokedAt = new Date();
+  const revoked = sql`EXISTS (SELECT 1 FROM ${workflowBindingApprovals}
+        WHERE ${eq(workflowBindingApprovals.id, parsed.data)}
+          AND ${eq(workflowBindingApprovals.status, "revoked")}
+          AND ${eq(workflowBindingApprovals.revokedAt, revokedAt)})`;
   await auditedBatch(env, db, [
     db
       .update(workflowBindingApprovals)
@@ -806,20 +890,14 @@ export const revokeWorkflowBinding = async (
           stillAdminSql(by)
         )
       ),
+    unprojected(db, parsed.data, revoked),
     outboxedIfChanged(db, {
       actor: actorOf(by),
       action: "workflow.binding.revoked",
       target: { type: "workflow_resource", id: workflow.id },
       detail: { approval: parsed.data },
     }),
-    nextGeneration(
-      db,
-      workflow.id,
-      sql`EXISTS (SELECT 1 FROM ${workflowBindingApprovals}
-        WHERE ${eq(workflowBindingApprovals.id, parsed.data)}
-          AND ${eq(workflowBindingApprovals.status, "revoked")}
-          AND ${eq(workflowBindingApprovals.revokedAt, revokedAt)})`
-    ),
+    nextGeneration(db, workflow.id, revoked),
   ]);
 };
 

@@ -1705,7 +1705,9 @@ export const bindingsOf = async (
             kind: row.kind,
             resourceId: null,
             resourceVersion: null,
-            contractId: row.targetId,
+            // The contract key the version declared: `target_id` names the
+            // store an approval resolved instead, while one does.
+            contractId: row.contractId ?? row.targetId,
             fingerprint: row.schemaHash,
           }
     );
