@@ -19,7 +19,11 @@ import { permissions } from "../db/core/schema.ts";
 import { readAsDelegate } from "../knowledge/binding.ts";
 import { brainOf } from "../knowledge/ports.ts";
 import { pinnedTemplate } from "../resource-templates.ts";
-import { runAuthority, runContext } from "./resource-authority.ts";
+import {
+  callingRunOf,
+  runAuthority,
+  runContext,
+} from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 import {
   evidenceOf,
@@ -327,17 +331,8 @@ export const callTemplate = async (
   };
 };
 
-/**
- * `requireRunEvidenceReadable` for a run of a JSON workflow
- * (resource-host.ts, GRA-299): its recalls are each through a knowledge
- * binding, one collection under one permission of the workflow's, so each
- * binding's documents are checked under that permission, as the run
- * reads now: the permission still the workflow's and active
- * (`boundCollection`), the Brain still admitting the run, each document
- * still in its collection and readable there. A test run recalls nothing,
- * so has nothing to check.
- */
-export const requireResourceRunEvidenceReadable = async (
+/** `requireResourceRunEvidenceReadable` for `run`'s own evidence alone. */
+const requireOwnEvidenceReadable = async (
   env: Env,
   run: CallingRun
 ): Promise<void> => {
@@ -375,4 +370,51 @@ export const requireResourceRunEvidenceReadable = async (
     }
     throw error;
   }
+};
+
+/**
+ * Most ancestors a run's check follows: past any lineage's levels, so one
+ * deeper is held as one it can't check.
+ */
+const ancestorsMax = 64;
+
+/**
+ * `requireRunEvidenceReadable` for a run of a JSON workflow
+ * (resource-host.ts, GRA-299): its recalls are each through a knowledge
+ * binding, one collection under one permission of the workflow's, so each
+ * binding's documents are checked under that permission, as the run
+ * reads now: the permission still the workflow's and active
+ * (`boundCollection`), the Brain still admitting the run, each document
+ * still in its collection and readable there. A test run recalls nothing,
+ * so has nothing to check. A child run (run-children.ts, GRA-1093) took
+ * its input from its parent's steps, so it is held to each ancestor's
+ * evidence too,
+ * each under that ancestor's own authority and bindings as they are now.
+ * An ancestor no longer going (a child lives only while its parent does)
+ * is refused as `brain.revoked`, as is a lineage past `ancestorsMax`.
+ */
+export const requireResourceRunEvidenceReadable = async (
+  env: Env,
+  run: CallingRun
+): Promise<void> => {
+  let current = run;
+  for (let depth = 0; depth <= ancestorsMax; depth += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one run after its parent
+    await requireOwnEvidenceReadable(env, current);
+    const { invoker } = current;
+    if (invoker.type !== "workflow") {
+      return;
+    }
+    const parentWorkflowId = invoker.parentWorkflowId ?? null;
+    const parent =
+      parentWorkflowId === null
+        ? undefined
+        : // oxlint-disable-next-line no-await-in-loop -- one run after its parent
+          await callingRunOf(env, parentWorkflowId, invoker.id);
+    if (parent === undefined) {
+      throw brainErrors.create("brain.revoked");
+    }
+    current = parent;
+  }
+  throw brainErrors.create("brain.revoked");
 };

@@ -132,10 +132,13 @@ const recalledType = "grasp.leave.recalled";
  * its output, asks a model about it, starts a child on it, asks its
  * builder to decide on it, or emits it as an event's data.
  */
-type Then = "output" | "model" | "child" | "decision" | "emit";
+type Then = "output" | "model" | "child" | "heldChild" | "decision" | "emit";
 
-/** A child workflow of `by`'s greeting its input's `who`, at 1.0.0. */
-const greeter = async (by: Identity) => {
+/**
+ * A child workflow of `by`'s greeting its input's `who`, at 1.0.0, after
+ * a wait of its own if it `holds`.
+ */
+const greeter = async (by: Identity, holds = false) => {
   const child = await createWorkflowResource(env, by, `child-${unique()}`);
   await publishWorkflowVersion(env, by, child.id, {
     definition: JSON.stringify({
@@ -151,7 +154,10 @@ const greeter = async (by: Identity) => {
       },
       input: { schema: objectSchema({ who: { type: "string" } }) },
       output: { schema: objectSchema({ greeting: { type: "string" } }) },
-      do: [{ greet: { set: { greeting: '${ "Hi, " + .who }' } } }],
+      do: [
+        ...(holds ? [{ hold: { wait: "PT3S" } }] : []),
+        { greet: { set: { greeting: '${ "Hi, " + .who }' } } },
+      ],
     }),
     basedOn: null,
   });
@@ -208,7 +214,10 @@ const recallingWorkflow = async (
     ifVersion: 0,
   });
   const workflow = await createWorkflowResource(env, by, `pin-${unique()}`);
-  const child = then === "child" ? await greeter(by) : undefined;
+  const child =
+    then === "child" || then === "heldChild"
+      ? await greeter(by, then === "heldChild")
+      : undefined;
   const afterOf: Record<Then, unknown[]> = {
     output: [{ finish: { set: { status: "${ $context.recalled }" } } }],
     model: [
@@ -242,6 +251,7 @@ const recallingWorkflow = async (
       },
       { finish: { set: { status: "${ .greeting }" } } },
     ],
+    heldChild: [],
     decision: [
       {
         review: {
@@ -282,6 +292,7 @@ const recallingWorkflow = async (
         contract: `${workflowNamespace}/${child?.name ?? ""}/1.0.0`,
       },
     },
+    heldChild: {},
     decision: { review: { kind: "decision", contract: keys.decision } },
     emit: { recalledEvents: { kind: "event", contract: keys.event } },
   };
@@ -308,7 +319,7 @@ const recallingWorkflow = async (
             bindings: {
               look: { kind: "operation", contract: "local:code/look.ts#look" },
               docs: { kind: "knowledge", contract: keys.knowledge },
-              ...extraBindings[then],
+              ...extraBindings[then === "heldChild" ? "child" : then],
             },
           },
         },
@@ -327,7 +338,7 @@ const recallingWorkflow = async (
           },
         },
         { hold: { wait: "PT3S" } },
-        ...afterOf[then],
+        ...afterOf[then === "heldChild" ? "child" : then],
       ],
     }),
     basedOn: null,
@@ -704,6 +715,55 @@ describe("a JSON workflow's recalled evidence", () => {
         carries: false,
       },
       readErased: { status: "failed", code: "brain.revoked", carries: false },
+    });
+  });
+
+  it("holds a child to what its parent recalled: refused once the parent may no longer read it, though the child recalled nothing", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    /** A parent's child run, `between` the child's start and its end. */
+    const childRan = async (between?: (made: Made) => Promise<void>) => {
+      const made = await recallingWorkflow(ada, admin, "heldChild");
+      const parentId = await startedHolding(ada, made);
+      const childId = await vi.waitFor(
+        async () => {
+          const row = await env.DB.prepare(
+            "SELECT id, workflow_resource_id AS workflow FROM workflow_resource_runs WHERE parent_run_id = ?"
+          )
+            .bind(parentId)
+            .first<{ id: string; workflow: string }>();
+          expect(row).not.toBeNull();
+          return row ?? { id: "", workflow: "" };
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+      await holding(childId.id);
+      await between?.(made);
+      const child = await ended(ada, childId.workflow, childId.id);
+      const parent = await ended(ada, made.workflow.id, parentId);
+      return {
+        child: endOf(made, child),
+        parent: parent.status,
+      };
+    };
+
+    const kept = await childRan();
+    const revoked = await childRan(async ({ collectionGrant }) => {
+      await revokePermission(env, admin, collectionGrant);
+    });
+
+    expect({ kept, revoked }).toStrictEqual({
+      // Its input, what its parent recalled, goes on to its output.
+      kept: {
+        child: { status: "completed", code: null, carries: true },
+        parent: "completed",
+      },
+      // Its parent's collection revoked while it waited: its output never
+      // leaves it, though it holds no evidence of its own.
+      revoked: {
+        child: { status: "failed", code: "brain.revoked", carries: false },
+        parent: "failed",
+      },
     });
   });
 });
