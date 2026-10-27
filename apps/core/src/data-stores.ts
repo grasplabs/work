@@ -110,7 +110,7 @@ import type { ReadResult } from "./store-host.ts";
 // - A store is deleted under a consumer an admin approved to call its
 //   operations (a workflow's operation binding, workflow-bindings.ts), so
 //   the consumer fails later, unseen: refused (`data.store_consumed`,
-//   naming how many) while any live workflow's active approval resolves
+//   naming how many) while any live workflow's or App's active approval resolves
 //   to it in the binding inventory, read in the same statement that marks
 //   the store closing. An approval in turn requires the store live and not
 //   closing in its own batch, so of the two, one wins. Revoking the
@@ -406,18 +406,25 @@ const boundSql = (id: StoreId): SQL =>
 
 /**
  * The consumers whose active approval resolves to store `id`, in the
- * binding inventory (spec 24, workflow-bindings.ts): each live workflow
- * with an active approval that serves one of its operation bindings with
- * the store's operation. Revoking the approval, or deleting the workflow,
- * lets the store go.
+ * binding inventory (spec 24): each live workflow with an active approval
+ * that serves one of its operation bindings with the store's operation
+ * (workflow-bindings.ts), and each App with an active approval that binds
+ * one of its declared store resources to it (resource-bindings.ts).
+ * Revoking the approvals, or deleting the workflow, lets the store go.
  */
 const consumersSql = (id: StoreId): SQL =>
-  sql`(SELECT COUNT(DISTINCT bound.resource_id) FROM sdk_resource_bindings AS bound
-    JOIN workflow_binding_approvals AS approval
-      ON approval.id = bound.approval_id AND approval.status = 'active'
-    JOIN workflow_resources AS consumer
-      ON consumer.id = bound.resource_id AND consumer.deleted_at IS NULL
-    WHERE bound.kind = 'operation' AND bound.target_id = ${id})`;
+  sql`(SELECT COUNT(*) FROM (
+    SELECT bound.resource_id FROM sdk_resource_bindings AS bound
+      JOIN workflow_binding_approvals AS approval
+        ON approval.id = bound.approval_id AND approval.status = 'active'
+      JOIN workflow_resources AS consumer
+        ON consumer.id = bound.resource_id AND consumer.deleted_at IS NULL
+      WHERE bound.kind = 'operation' AND bound.target_id = ${id}
+    UNION
+    SELECT bound.resource_id FROM sdk_resource_bindings AS bound
+      JOIN app_resource_bindings AS approval
+        ON approval.id = bound.approval_id AND approval.status = 'active'
+      WHERE bound.kind = 'storeResource' AND bound.target_id = ${id}))`;
 
 /**
  * Marks store `id` closing at `now` for the deletion `owner`, in one
@@ -464,8 +471,8 @@ const consumedError = (consumers: number) =>
   Object.assign(dataErrors.create("data.store_consumed", { consumers }), {
     message:
       consumers === 1
-        ? "One workflow calls this store's operations through an approval. Revoke that approval first, then delete the store."
-        : `${consumers} workflows call this store's operations through approvals. Revoke those approvals first, then delete the store.`,
+        ? "One workflow or App calls this store's operations through an approval. Revoke that approval first, then delete the store."
+        : `${consumers} workflows or Apps call this store's operations through approvals. Revoke those approvals first, then delete the store.`,
   });
 
 /** How many consumers' active approvals resolve to store `id`. */

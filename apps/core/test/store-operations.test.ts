@@ -451,6 +451,16 @@ const bind = async (
     reviewed: { version: desk.release.manifest.resourceVersion },
   });
 
+/** A release's inventory row of Desk's store resource before an approval resolves it. */
+const declaredRow = (version: number) => ({
+  version,
+  kind: "storeResource",
+  target: null,
+  definition: null,
+  approval: null,
+  declared: 1,
+});
+
 const crmActions = [
   "contacts.list",
   "contacts.add",
@@ -499,6 +509,80 @@ describe("an App calling another App's store", () => {
         },
       ],
     });
+  });
+
+  it("is named in the binding inventory, for each release its approval serves, and by its declaration alone once revoked", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles, "Desk");
+    const inventory = async () => {
+      const { results } = await env.DB.prepare(
+        `SELECT resource_version AS version, kind,
+            CASE WHEN approval_id IS NULL THEN NULL ELSE target_id END AS target,
+            target_version AS definition, approval_id AS approval,
+            target_id = schema_hash AS declared
+          FROM sdk_resource_bindings
+          WHERE resource_id = ? AND alias = 'resources.crm'
+          ORDER BY resource_version`
+      )
+        .bind(desk.app)
+        .all();
+      return results;
+    };
+    const sealed = await inventory();
+    const permission = await deskGrant(admin, desk, crm, crmActions);
+    const approval = await bind(admin, desk, permission);
+    const approved = await inventory();
+    // A later version declaring the store the same: its seal names the
+    // store the approval resolves, as the approval serves it too.
+    const second = await nextVersion(desk, deskVersion(2), 2);
+    const later = await inventory();
+    await revokeResourceBinding(env, admin, approval.id);
+    const resolved = (version: number) => ({
+      version,
+      kind: "storeResource",
+      target: crm.store,
+      definition: 1,
+      approval: approval.id,
+      declared: 0,
+    });
+    expect({
+      sealed,
+      approved,
+      later,
+      revoked: await inventory(),
+      secondVersion: second.release.manifest.resourceVersion,
+    }).toStrictEqual({
+      sealed: [declaredRow(1)],
+      approved: [resolved(1)],
+      later: [resolved(1), resolved(2)],
+      revoked: [declaredRow(1), declaredRow(2)],
+      secondVersion: 2,
+    });
+  });
+
+  it("keeps the store from being deleted while an App's approval resolves to it, until it's revoked", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles, "Desk");
+    const permission = await deskGrant(admin, desk, crm, crmActions);
+    const approval = await bind(admin, desk, permission);
+    // The CRM goes on without tables, and retention lets the version that
+    // bound the store go: no release keeps it now, only Desk's approval.
+    await commitFiles(
+      env,
+      crm.owner,
+      crm.app,
+      { ...tablelessFiles, "operations/crm.ts": null },
+      "No tables"
+    );
+    await seal(crm, 2);
+    await setCurrentVersion(env, crm.owner, crm.app, 2);
+    await sweptAway(crm.app, 1);
+    const refused = await outcome(deleteStore(env, crm.owner, crm.store));
+    await revokeResourceBinding(env, admin, approval.id);
+    await deleteStore(env, crm.owner, crm.store);
+    expect(refused).toBe("data.store_consumed");
   });
 
   it("is never served an internal function or an operation the permission doesn't list", async () => {
@@ -1445,7 +1529,7 @@ describe("a workflow calling a store's public operation", () => {
     expect(refused).toStrictEqual({
       code: "data.store_consumed",
       message:
-        "One workflow calls this store's operations through an approval. Revoke that approval first, then delete the store.",
+        "One workflow or App calls this store's operations through an approval. Revoke that approval first, then delete the store.",
     });
   });
 
