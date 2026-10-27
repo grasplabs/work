@@ -1191,6 +1191,10 @@
 @utility setup-footer {
   grid-template-columns: 1fr auto 1fr;
 }
+/* Its head: the way back a step on the left, what Grasp knows in the middle. */
+@utility setup-header {
+  grid-template-columns: 1fr auto 1fr;
+}
 
 /* Who leads each team and whether it takes part: a row a team, the list no taller than the window leaves. */
 @utility setup-org-row {
@@ -1208,6 +1212,16 @@
 /* Someone's link to send: their name and team, and its copy button. */
 @utility setup-link-row {
   grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* A step's panel of what may grow long: what the window leaves once the step's title and its way on have their room. */
+@utility setup-panel {
+  max-height: max(12rem, 100svh - 20rem);
+}
+
+/* The documents shared in the onboarding: four and a bit, fewer where the window is low, so the step still fits on screen. */
+@utility setup-document-list {
+  max-height: max(9rem, min(17.5rem, 100svh - 36rem));
 }
 
 /* A document in the onboarding's list: its icon, its name and state, its button. */
