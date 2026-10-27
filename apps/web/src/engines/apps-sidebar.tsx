@@ -23,7 +23,7 @@ import {
   PencilIcon,
   SettingsIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { useDockMode } from "../chat/dock-mode.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -295,22 +295,27 @@ const Group = ({
   current: string | undefined;
   identity: Identity;
   onPick?: () => void;
-}) => (
-  <section className="flex flex-col gap-0.5">
-    <h3 className="text-muted-foreground px-2 pb-1 text-xs">{title}</h3>
-    <ul className="flex flex-col gap-0.5">
-      {apps.map((app) => (
-        <AppRow
-          app={app}
-          current={app.id === current}
-          identity={identity}
-          key={app.id}
-          onPick={onPick}
-        />
-      ))}
-    </ul>
-  </section>
-);
+}) => {
+  const heading = useId();
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-0.5">
+      <h3 className="text-muted-foreground px-2 pb-1 text-xs" id={heading}>
+        {title}
+      </h3>
+      <ul className="flex flex-col gap-0.5">
+        {apps.map((app) => (
+          <AppRow
+            app={app}
+            current={app.id === current}
+            identity={identity}
+            key={app.id}
+            onPick={onPick}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+};
 
 /**
  * The list itself: All Apps on top, with the fold beside it; then the
@@ -332,6 +337,7 @@ export const AppsList = ({
 }) => {
   const { t } = useLingui();
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const archivedHeading = useId();
   const { published, draft, archived } = appsByStatus(apps);
   const count = archived.length;
   return (
@@ -370,8 +376,11 @@ export const AppsList = ({
             />
           )}
           {count === 0 ? null : (
-            <section className="flex flex-col gap-0.5">
-              <h3>
+            <section
+              aria-labelledby={archivedHeading}
+              className="flex flex-col gap-0.5"
+            >
+              <h3 id={archivedHeading}>
                 <button
                   aria-expanded={archivedOpen}
                   className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex w-full items-center gap-1 rounded-md px-2 pb-1 text-left text-xs outline-none focus-visible:ring-3"
