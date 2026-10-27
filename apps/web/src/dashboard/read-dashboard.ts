@@ -1,5 +1,6 @@
 import type { AuditRecord } from "@grasp-os/shared/audit-log";
 import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
+import { expectedMessageOf } from "@grasp-os/shared/errors";
 import type { KnowledgeSignals } from "@grasp-os/shared/knowledge-signals";
 import type {
   OnboardingProgress,
@@ -8,10 +9,15 @@ import type {
 import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ImprovementSignals } from "@grasp-os/shared/signals";
+import type {
+  WaitingFeed,
+  WaitingItem,
+  WaitingKind,
+  WaitingPart,
+} from "@grasp-os/shared/waiting";
 import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
 
-import { readPendingRequests } from "../activity/pending.tsx";
-import { integrationsOf } from "../connections/integrations.ts";
+import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
@@ -20,9 +26,8 @@ import type { Loaded } from "../load-from-core.tsx";
 import { listWorkflows, openableApps } from "../workflows/reads.ts";
 import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
-import { readNotifications } from "./failed-workflows.tsx";
+import { markShownRead } from "./failed-workflows.tsx";
 import { offeredWidgets } from "./layout.ts";
-import { loadEveryPage } from "./outcome-pages.ts";
 import { reportWindow, todayUtc } from "./programme.ts";
 import type { ReportReads } from "./report.ts";
 import { noReturns } from "./returns.ts";
@@ -39,58 +44,110 @@ import type { Board, EnginesRead } from "./widget-board.tsx";
 // weekly report is made from, and, for admins, the latest of the audit
 // trail.
 
-/** The catalog and connections, as integrations: those whose access ran out are on the list. */
-const readIntegrations = async (session: Session) => {
-  const [catalog, connections] = await Promise.all([
-    session.connections.catalog(),
-    session.connections.list(),
-  ]);
-  return integrationsOf(catalog.entries, connections);
+/** The items of the feed of one kind. */
+const ofKind = <Kind extends WaitingKind>(
+  feed: WaitingFeed,
+  kind: Kind
+): Extract<WaitingItem, { kind: Kind }>[] =>
+  feed.items.filter(
+    (item): item is Extract<WaitingItem, { kind: Kind }> => item.kind === kind
+  );
+
+/** One part of the feed: what it read of it, or why it couldn't. */
+const partOf = <T>(
+  feed: Loaded<WaitingFeed>,
+  part: WaitingPart,
+  read: (feed: WaitingFeed) => T
+): Loaded<T> => {
+  if (feed.state !== "ready") {
+    return feed;
+  }
+  const failed = feed.data.unread.find((unread) => unread.part === part);
+  // Core's own words for why: not translated.
+  return failed === undefined
+    ? { state: "ready", data: read(feed.data) }
+    : {
+        state: "refused",
+        message: expectedMessageOf(failed.code) ?? failed.code,
+      };
 };
 
-/** What waits on the person. Reading it marks the failed workflows it lists as read. */
+/**
+ * What waits on the person: core's feed of it, in one read, and the names
+ * permission requests are shown with. Reading it marks the failed
+ * workflows it lists as read.
+ */
 export const readWaiting = async (
   core: CoreConnection,
   identity: Identity
 ): Promise<Waiting> => {
-  const [
-    held,
-    outcomes,
-    failed,
-    integrations,
-    requests,
-    dependencies,
-    screens,
-    decisions,
-  ] = await Promise.all([
-    loadFromCore(core, async (session) => await session.pendingActions.list()),
-    loadEveryPage(
-      core,
-      async (session, before) => await session.unknownOutcomes.list(before)
+  const feed = await loadFromCore(
+    core,
+    async (session) => await session.waiting.list()
+  );
+  const failed = partOf(feed, "notifications", (read) => {
+    const notifications = read.items.flatMap((item) =>
+      item.kind === "failedRun" || item.kind === "openQuestion"
+        ? [item.notification]
+        : []
+    );
+    return {
+      page: {
+        notifications,
+        unread: read.unreadNotifications,
+        more: read.moreNotifications,
+      },
+      model: read.fixModel ?? undefined,
+    };
+  });
+  // Marked read as shown; one that couldn't be stays unread, and shows all the same.
+  if (failed.state === "ready") {
+    await loadFromCore(core, async (session) => {
+      await markShownRead(session, failed.data.page.notifications);
+    });
+  }
+  const asked = partOf(feed, "requests", (read) =>
+    ofKind(read, "permissionRequest").map(({ request }) => request)
+  );
+  // Only admins decide them: nobody else is shown any.
+  let requests: Waiting["requests"];
+  if (decidesRequests(identity)) {
+    requests =
+      asked.state === "ready"
+        ? await loadFromCore(
+            core,
+            async (session) => await readRequestNames(session, asked.data)
+          )
+        : asked;
+  }
+  return {
+    held: partOf(feed, "held", (read) =>
+      ofKind(read, "heldWrite").map(({ action }) => action)
     ),
-    loadFromCore(core, readNotifications),
-    loadFromCore(core, readIntegrations),
-    decidesRequests(identity)
-      ? loadFromCore(core, readPendingRequests)
-      : undefined,
-    loadFromCore(core, async (session) => await session.dependencies.waiting()),
-    decidesRequests(identity)
-      ? loadFromCore(
-          core,
-          async (session) => await session.screenTrust.waiting()
+    outcomes: partOf(feed, "outcomes", (read) =>
+      ofKind(read, "unknownOutcome").map(({ outcome }) => outcome)
+    ),
+    failed,
+    reconnect: partOf(feed, "connections", (read) =>
+      ofKind(read, "signInAgain")
+    ),
+    versions: partOf(feed, "versions", (read) => ofKind(read, "goLive")),
+    requests,
+    dependencies: partOf(feed, "packages", (read) => {
+      const items = ofKind(read, "packages");
+      return {
+        policyGeneration: items[0]?.policyGeneration ?? 0,
+        requests: items.map(({ request }) => request),
+      };
+    }),
+    screens: decidesRequests(identity)
+      ? partOf(feed, "screens", (read) =>
+          ofKind(read, "appApproval").map(({ waiting }) => waiting)
         )
       : undefined,
-    loadFromCore(core, async (session) => await session.decisions.waiting()),
-  ]);
-  return {
-    held,
-    outcomes,
-    failed,
-    integrations,
-    requests,
-    dependencies,
-    screens,
-    decisions,
+    decisions: partOf(feed, "decisions", (read) =>
+      ofKind(read, "decision").map(({ decision }) => decision)
+    ),
   };
 };
 
