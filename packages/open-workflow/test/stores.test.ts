@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { declaredStoresOf } from "../src/stores.ts";
 import { validateWorkflow } from "../src/validate.ts";
 import { documentAround, options } from "./fixtures.ts";
 
@@ -106,8 +107,8 @@ describe("stores a workflow declares", () => {
       patch: contract("orders.update"),
     }).toStrictEqual({
       tables: ["orders"],
-      // Only the generated operations reach its records.
-      access: { read: "none", write: "none" },
+      // Its members are only the consumers its generated operations serve.
+      access: { read: "appMembers", write: "appMembers" },
       indexes: { byCustomer: { fields: ["customer"] } },
       hash: true,
       fingerprinted: Object.keys(operations).toSorted(),
@@ -281,6 +282,30 @@ describe("stores a workflow declares", () => {
         { code: "profile.invalid_value", pointer: `${storesPointer}/Intake` },
       ],
       quiet: [],
+    });
+  });
+
+  it("reads a sealed definition's stores again exactly as validation sealed them", async () => {
+    const definition = declaring({
+      intake: { tables: { orders: orderTable() }, operations },
+    });
+    const result = await validateWorkflow(definition, options);
+    const sealed = result.ok ? result.workflow.stores.get("intake") : undefined;
+    const declared = await declaredStoresOf(definition);
+    const reread = declared.get("intake");
+    const changed = definition.replace('"get"', '"delete"');
+
+    expect({
+      schemaHash: reread?.schemaHash,
+      fingerprints: reread?.fingerprints,
+      changed: await declaredStoresOf(changed).then(
+        () => "read",
+        () => "refused"
+      ),
+    }).toStrictEqual({
+      schemaHash: sealed?.schemaHash,
+      fingerprints: sealed?.fingerprints,
+      changed: "refused",
     });
   });
 

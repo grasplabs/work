@@ -24,9 +24,12 @@ import {
   storeOperationPathPattern,
 } from "@grasp-os/shared/operation-limits";
 
+import { readOptions } from "./catalog.ts";
+import { createChecker } from "./checker.ts";
 import type { Checker } from "./checker.ts";
 import { compileDataSchema } from "./data-schema.ts";
 import { pointerJoin } from "./diagnostics.ts";
+import { isObject, parseDefinitionText } from "./json-text.ts";
 import type { JsonValue } from "./json-text.ts";
 import { profileLimits } from "./limits.ts";
 import { allowKeys, at, objectAt, requireKey, workflowSite } from "./values.ts";
@@ -64,8 +67,12 @@ import { allowKeys, at, objectAt, requireKey, workflowSite } from "./values.ts";
 //   its table's fields changes its arguments or return and so its
 //   fingerprint; a consumer pinned to the old one is refused (slice 4).
 // - Records reached around the operations. Every table's own access is
-//   `none` both ways: only the generated operations, as the consumer's
-//   principal, reach its records.
+//   `appMembers` both ways, and the only callers a workflow's store ever
+//   counts as members are the consumers its generated operations serve
+//   (core's store-operations.ts): nobody is a member of a workflow, and no
+//   screen or App code reaches its store. So only the generated
+//   operations, as the consumer's principal, reach its records, every
+//   record of their table, whoever owns it.
 // - Diagnostics that repeat the definition. Refusals carry their code and
 //   pointer only, never a name or message the SDK built from the text.
 
@@ -226,7 +233,7 @@ const manifestTables = (
     read[name] = {
       fields,
       indexes,
-      access: { read: "none", write: "none" },
+      access: { read: "appMembers", write: "appMembers" },
     };
   }
   return ok ? read : undefined;
@@ -548,4 +555,56 @@ export const sealStore = async (store: DeclaredStore): Promise<SealedStore> => {
     schemaHash: await schemaHash(store.manifest),
     fingerprints: Object.freeze(fingerprints),
   });
+};
+
+/** The value at `path` of `root`, own members only, or undefined. */
+const memberAt = (
+  root: JsonValue,
+  path: readonly string[]
+): JsonValue | undefined => {
+  let value: JsonValue | undefined = root;
+  for (const key of path) {
+    if (value === undefined || !isObject(value) || !Object.hasOwn(value, key)) {
+      return undefined;
+    }
+    value = value[key];
+  }
+  return value;
+};
+
+const storesPath = ["document", "metadata", "grasp", "stores"] as const;
+
+/**
+ * The stores a published definition declares, read again from its sealed
+ * text by the same checks validation ran (`checkStores`), each with its
+ * schema hash and fingerprints: what a host serves a workflow store's
+ * operations from, and compares with what the version bound. Throws for
+ * text that doesn't declare its stores validly, which a sealed version's
+ * never is unless it was changed.
+ */
+export const declaredStoresOf = async (
+  definition: string
+): Promise<ReadonlyMap<string, SealedStore>> => {
+  const parsed = parseDefinitionText(definition, {
+    maxBytes: profileLimits.maxDefinitionBytes,
+    maxDepth: profileLimits.maxDefinitionDepth,
+    maxValues: profileLimits.maxDefinitionValues,
+  });
+  if (!parsed.ok) {
+    throw new Error("The definition isn't valid JSON text");
+  }
+  const value = memberAt(parsed.value, storesPath);
+  const checker = createChecker(readOptions({}));
+  if (value !== undefined) {
+    checkStores(checker, value, `/${storesPath.join("/")}`);
+  }
+  if (checker.report.errors() > 0) {
+    throw new Error("The definition doesn't declare its stores validly");
+  }
+  const sealed = new Map<string, SealedStore>();
+  for (const [name, store] of checker.stores) {
+    // oxlint-disable-next-line no-await-in-loop -- a few digests, in order
+    sealed.set(name, await sealStore(store));
+  }
+  return sealed;
 };
