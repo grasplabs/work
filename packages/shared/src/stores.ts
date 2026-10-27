@@ -571,7 +571,7 @@ export const dataErrors = defineErrorFamily({
   "data.store_bound":
     "This store can't be deleted while an App's kept versions read and write it.",
   "data.store_consumed":
-    "Workflows call this store's operations through approvals. Revoke those approvals first, then delete the store.",
+    "Workflows or Apps call this store's operations through approvals. Revoke those approvals first, then delete the store.",
   "data.store_managed_by_app":
     "This store is an App's default store: the App's builders and the organization's admins manage it. Share the App instead.",
   "data.store_closing":

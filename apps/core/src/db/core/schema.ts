@@ -1250,6 +1250,7 @@ export const sdkResourceBindings = sqliteTable(
         "store",
         "workflow",
         "operation",
+        "storeResource",
         "connector",
         "model",
         "decision",
