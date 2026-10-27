@@ -58,7 +58,9 @@ jobs:
           item=$(op item get env --vault grasp-os-staging --format json)
           for name in STEPHEN_EVAL_MODEL STEPHEN_WEEKLY_BUDGET_USD STEPHEN_WEEKLY_GATEWAY STEPHEN_EVAL_ISSUE; do
             value=$(jq -r --arg name "$name" '[.fields[] | select(.label == $name) | .value // ""][0] // ""' <<< "$item")
-            echo "$name=$value" >> "$GITHUB_OUTPUT"
+            # A value may span lines: written between a delimiter it can't contain.
+            delimiter=$(openssl rand -hex 16)
+            printf '%s<<%s\n%s\n%s\n' "$name" "$delimiter" "$value" "$delimiter" >> "$GITHUB_OUTPUT"
           done
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
