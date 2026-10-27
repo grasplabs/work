@@ -1,4 +1,8 @@
-import { hasNodeModules, quietModules } from "./quiet-isolate.ts";
+import {
+  capturedModules,
+  hasNodeModules,
+  quietModules,
+} from "./quiet-isolate.ts";
 
 // What an isolate core or connect loads itself may print (GRA-910,
 // GRA-940). On Cloudflare a Loader isolate's console output is dropped
@@ -23,11 +27,12 @@ import { hasNodeModules, quietModules } from "./quiet-isolate.ts";
 // is the operator's rule (core's env.d.ts).
 //
 // An isolate with a tail is left as it is: its tail (core's server-logs.ts)
-// is how a builder sees what the App's server code wrote, and a silenced
-// console would hand the tail nothing. On plain workerd that output still
-// reaches the process's logs too, which `SANDBOX_IN_PROCESS=unbounded`
-// accepts (core's env.d.ts); GRA-919 delivers it to the tail's destinations
-// instead. Connect attaches no tail.
+// is how a builder sees what the App's code wrote, and a silenced console
+// would hand the tail nothing. Only Cloudflare loads one so: plain workerd
+// prints a tailed isolate's console to the process's logs as well. Off
+// Cloudflare, core loads such code through `capturedCode` instead, which
+// records what it writes, prints nothing, and hands the lines to a sink of
+// core's once the call settled (GRA-919). Connect attaches no tail.
 
 /**
  * What `quietLoader` needs of a Loader's code: the Worker Loader's own
@@ -52,45 +57,96 @@ export interface QuietableLoader<Code extends QuietableCode, Stub> {
   readonly load: (code: Code) => Stub;
 }
 
-/** `code` with its console silenced first, unless it has a tail. */
-const quietCode = <Code extends QuietableCode>(code: Code): Code => {
-  if ((code.tails?.length ?? 0) > 0 || (code.streamingTails?.length ?? 0) > 0) {
-    return code;
-  }
+/** Code `capturedCode` made, which `quietLoader` loads as it is. */
+const captured = new WeakSet<object>();
+
+/**
+ * `code`'s main module as JavaScript text. An ES module given as `{ js }`
+ * counts: a module given as text is read by its name's extension, which
+ * `{ js }` doesn't need. Anything else (CommonJS, Python, a missing
+ * module) can't import the quiet module first: refused rather than loaded
+ * unsilenced.
+ */
+const mainSource = (code: QuietableCode): string => {
   const main = code.modules[code.mainModule];
-  // An ES module given as `{ js }` stays one: a module given as text is
-  // read by its name's extension, which `{ js }` doesn't need.
   const js: unknown =
     typeof main === "object" && main !== null && "js" in main
       ? main.js
       : undefined;
   const given = typeof js === "string" ? js : main;
   if (typeof given !== "string") {
-    // Anything else (CommonJS, Python, a missing module) can't import the
-    // quiet module first: refused rather than loaded unsilenced.
     throw new TypeError(
       `An isolate's main module must be an ES module to be silenced: ${code.mainModule} isn't one.`
     );
   }
+  return given;
+};
+
+/** `modules` with `code`'s main module given back as it was: text or `{ js }`. */
+const asGiven = (
+  code: QuietableCode,
+  modules: Readonly<Record<string, unknown>>
+): Readonly<Record<string, unknown>> => {
+  const main = code.modules[code.mainModule];
+  const source = modules[code.mainModule];
+  return typeof main === "string" || typeof source !== "string"
+    ? modules
+    : { ...modules, [code.mainModule]: { js: source } };
+};
+
+/** Whether `code` has `node:` modules, `node:timers` among them. */
+const nodejsCompatOf = (code: QuietableCode): boolean =>
+  hasNodeModules({
+    compatibilityDate: code.compatibilityDate ?? "",
+    compatibilityFlags: code.compatibilityFlags,
+  });
+
+/** `code` with its console silenced first, unless it has a tail. */
+const quietCode = <Code extends QuietableCode>(code: Code): Code => {
+  if (
+    captured.has(code) ||
+    (code.tails?.length ?? 0) > 0 ||
+    (code.streamingTails?.length ?? 0) > 0
+  ) {
+    return code;
+  }
   const modules = quietModules(
     code.mainModule,
-    { ...code.modules, [code.mainModule]: given },
+    { ...code.modules, [code.mainModule]: mainSource(code) },
     // Its `node:timers` caught too, where it has them.
-    {
-      nodejsCompat: hasNodeModules({
-        compatibilityDate: code.compatibilityDate ?? "",
-        compatibilityFlags: code.compatibilityFlags,
-      }),
-    }
+    { nodejsCompat: nodejsCompatOf(code) }
   );
-  const quieted = modules[code.mainModule];
-  return {
+  return { ...code, modules: asGiven(code, modules) };
+};
+
+/**
+ * `code` loaded to record what it writes with `console` rather than print
+ * it or hand it to a tail (see the header): its tails go, and its main
+ * module is the capture module (@grasp-os/shared/quiet-isolate,
+ * `capturedModules`). Call it through that module's `captureEntrypoint`:
+ * its `captureMethod` runs one call of `code`'s entrypoint, then hands
+ * what the call wrote, bounded by the isolate (so untrusted), to the sink
+ * it is given. `quietLoader` loads it as it is.
+ */
+export const capturedCode = <Code extends QuietableCode>(code: Code): Code => {
+  // Named at all, even empty, a streaming tail needs the Loader's
+  // experimental option: none is captured, and none is dropped unsaid.
+  if (code.streamingTails !== undefined) {
+    throw new TypeError("An isolate with streaming tails can't be captured.");
+  }
+  const loaded = capturedModules(
+    code.mainModule,
+    { ...code.modules, [code.mainModule]: mainSource(code) },
+    { nodejsCompat: nodejsCompatOf(code) }
+  );
+  const made: Code = {
     ...code,
-    modules:
-      typeof main === "string" || typeof quieted !== "string"
-        ? modules
-        : { ...modules, [code.mainModule]: { js: quieted } },
+    mainModule: loaded.mainModule,
+    modules: asGiven(code, loaded.modules),
+    tails: [],
   };
+  captured.add(made);
+  return made;
 };
 
 /**

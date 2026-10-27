@@ -1,5 +1,11 @@
-import { quietLoader } from "@grasp-os/shared/quiet-loader";
+import {
+  captureEntrypoint,
+  captureMethod,
+} from "@grasp-os/shared/quiet-isolate";
+import { capturedCode, quietLoader } from "@grasp-os/shared/quiet-loader";
 
+import { consoleSinkOf } from "../../src/sandbox-session.ts";
+import type { ConsoleLine } from "../../src/sandbox-session.ts";
 import { callSandboxed } from "../../src/sandboxed.ts";
 import type { SandboxedEnv } from "../../src/sandboxed.ts";
 
@@ -20,6 +26,10 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 // - `/thrown`: a call that throws to its caller, which workerd served
 //   `--verbose` reports with its message (GRA-939).
 // - `/cjs`: a main module that can't import the quiet module first.
+// - `/captured`: code loaded as core loads a tailed preview function here
+//   (`capturedCode`, GRA-919), its lines handed to a sink of core's
+//   (`consoleSinkOf`) once the call settled; `/forged`: the same, its code
+//   handing the sink more than a call may keep, which takes none of it.
 // - `/control`: the same code in the Loader as it is, which shows workerd's
 //   output is read at all.
 
@@ -30,6 +40,8 @@ const values = {
   nested: "record-value-3e97",
   carriage: "record-value-71d2",
   thrown: "record-value-c40b",
+  captured: "record-value-9a24",
+  forged: "record-value-e613",
   control: "control-value-0a6f",
 } as const;
 
@@ -87,6 +99,53 @@ const settings = {
   compatibilityFlags: ["nodejs_compat"],
   env: {},
   globalOutbound: null,
+};
+
+/**
+ * An isolate that hands the capture module's sink 21 lines of `value`:
+ * its `Array.prototype.splice`, which the capture module takes its lines
+ * with, answers them, past the 20 a call keeps.
+ */
+const forgingOf = (
+  value: string
+): string => `import { WorkerEntrypoint } from "cloudflare:workers";
+const line = { at: 0, level: "log", message: ${JSON.stringify(value)} };
+export class App extends WorkerEntrypoint {
+  run() {
+    Array.prototype.splice = () => Array.from({ length: 21 }, () => line);
+    return ${JSON.stringify(value)};
+  }
+}
+`;
+
+/**
+ * Runs the App entrypoint's `run` of `source` as core runs a tailed
+ * preview function off Cloudflare (release-runner.ts): captured, its lines
+ * read by `consoleSinkOf`. Answers its answer and the lines the sink took.
+ */
+const runCaptured = async (
+  env: SandboxedEnv,
+  source: string
+): Promise<{ answer: unknown; lines: ConsoleLine[] }> => {
+  const lines: ConsoleLine[] = [];
+  const sink = consoleSinkOf((taken) => {
+    lines.push(...taken);
+  });
+  const entry = quietLoader(env.LOADER)
+    .get(null, () =>
+      capturedCode({
+        ...settings,
+        mainModule: "app.js",
+        modules: { "app.js": source },
+      })
+    )
+    .getEntrypoint(captureEntrypoint);
+  const call: unknown = Reflect.get(entry, captureMethod);
+  const answer: unknown =
+    typeof call === "function"
+      ? await Reflect.apply(call, entry, ["App", "run", [], sink])
+      : null;
+  return { answer, lines };
 };
 
 /** What `run` of the App entrypoint of `stub` answers. */
@@ -250,10 +309,22 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
   );
 };
 
+/** The routes whose isolate is captured, by the source each runs. */
+const capturedSources: Readonly<Record<string, () => string>> = {
+  "/captured": () => isolateOf(values.captured),
+  "/forged": () => forgingOf(values.forged),
+};
+
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
-    const answered = await answerOf(pathname, env);
+    const source = Object.hasOwn(capturedSources, pathname)
+      ? capturedSources[pathname]?.()
+      : undefined;
+    const answered =
+      source === undefined
+        ? await answerOf(pathname, env)
+        : await runCaptured(env, source);
     return Response.json({ answered, values });
   },
 } satisfies ExportedHandler<SandboxedEnv>;
