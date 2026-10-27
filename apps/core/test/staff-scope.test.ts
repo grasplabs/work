@@ -76,6 +76,7 @@ describe("staff with the onboarding scope", () => {
       chats: await outcome(api.chats.list()),
       members: await outcome(api.members.list()),
       emailPreferences: await outcome(api.emailPreferences.get()),
+      waiting: await outcome(api.waiting.list()),
       audit: audit.status,
     }).toStrictEqual({
       who: true,
@@ -85,6 +86,7 @@ describe("staff with the onboarding scope", () => {
       chats: "role.forbidden",
       members: "role.forbidden",
       emailPreferences: "role.forbidden",
+      waiting: "role.forbidden",
       audit: 401,
     });
   });
