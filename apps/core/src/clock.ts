@@ -54,6 +54,7 @@ import {
 import { sweepRunDetails } from "./workflows/retention.ts";
 import { sweepRunFiles } from "./workflows/run-files.ts";
 import { repairStarts } from "./workflows/runs.ts";
+import { startDueScheduleTriggers } from "./workflows/schedule-triggers.ts";
 import { startDueSchedules } from "./workflows/triggers.ts";
 import { repairWakes } from "./workflows/wakes.ts";
 
@@ -125,6 +126,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "workflows.schedules",
     period: "minute",
     run: startDueSchedules,
+  },
+  // Independent schedule triggers' due occurrences
+  // (src/workflows/schedule-triggers.ts).
+  {
+    name: "workflows.schedule_triggers",
+    period: "minute",
+    run: startDueScheduleTriggers,
   },
   {
     name: "workflows.starts",

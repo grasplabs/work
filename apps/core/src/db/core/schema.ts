@@ -3655,6 +3655,16 @@ export const triggerResourceVersions = sqliteTable(
      */
     eventContract: text("event_contract"),
     eventType: text("event_type"),
+    /**
+     * For a schedule trigger: its five-field cron expression, the IANA time
+     * zone it is read in, and the input each of its runs starts with
+     * (canonical JSON, accepted by the workflow version it pins), all
+     * checked as the version was written (trigger-resources.ts). Null for
+     * any other kind.
+     */
+    scheduleCron: text("schedule_cron"),
+    scheduleTimeZone: text("schedule_time_zone"),
+    scheduleInput: text("schedule_input"),
   },
   (table) => [
     primaryKey({ columns: [table.triggerId, table.version] }),
@@ -3662,6 +3672,34 @@ export const triggerResourceVersions = sqliteTable(
     index("trigger_resource_versions_event")
       .on(table.eventContract, table.eventType)
       .where(sql`${table.eventContract} IS NOT NULL`),
+  ]
+);
+
+/**
+ * When each schedule trigger next starts its run (workflows/schedule-
+ * triggers.ts): the occurrence due next for the trigger version it was
+ * worked out for (`version`), none once it stopped. Only a live, enabled
+ * trigger whose current version is `version` starts anything; the rest
+ * wait here untouched until enabling or moving the trigger works out its
+ * next occurrence again, from then. `failed_starts` counts its starts that
+ * failed in a row, each try of a due one waiting twice as long as the one
+ * before.
+ */
+export const triggerSchedules = sqliteTable(
+  "trigger_schedules",
+  {
+    triggerId: text("trigger_id")
+      .primaryKey()
+      .references(() => triggerResources.id),
+    version: integer().notNull(),
+    nextAt: timestamp("next_at"),
+    failedStarts: integer("failed_starts").notNull().default(0),
+  },
+  (table) => [
+    // The schedules due by a time.
+    index("trigger_schedules_next_at")
+      .on(table.nextAt)
+      .where(sql`${table.nextAt} IS NOT NULL`),
   ]
 );
 

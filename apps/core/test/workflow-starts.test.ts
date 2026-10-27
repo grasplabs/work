@@ -753,7 +753,11 @@ describe("a trigger starting a workflow", () => {
       kind: "schedule",
       workflowId: workflow.id,
       version: 1,
-      config: { cron: "0 9 * * 1-5", timeZone: "Europe/Amsterdam" },
+      config: {
+        schedule: { cron: "0 9 * * 1-5", timeZone: "Europe/Amsterdam" },
+        input: { who: "Ada" },
+        missedOccurrences: "coalesce",
+      },
     });
     const invoker: StartInvoker = { type: "trigger", triggerId: trigger.id };
     const ungranted = await outcome(
