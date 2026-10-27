@@ -779,6 +779,20 @@ export const approveWorkflowBinding = async (
         'active', ${row.approvedBy}, ${row.approvedAt.getTime()}, NULL, NULL
         WHERE ${holds}`
     ),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "workflow.binding.approved",
+      target: { type: "workflow_resource", id: workflow.id },
+      detail: {
+        approval: row.id,
+        alias,
+        kind: row.kind,
+        contract: row.contractId,
+        fingerprint: row.fingerprint,
+        reviewedVersion: reviewed.version,
+        ...targetDetail(target),
+      },
+    }),
     // What serves it, in the binding inventory (spec 24), for as long as
     // this approval does: the store, the definition its App serves now and
     // the operation's path.
@@ -808,20 +822,6 @@ export const approveWorkflowBinding = async (
               )
             ),
         ]),
-    outboxedIfChanged(db, {
-      actor: actorOf(by),
-      action: "workflow.binding.approved",
-      target: { type: "workflow_resource", id: workflow.id },
-      detail: {
-        approval: row.id,
-        alias,
-        kind: row.kind,
-        contract: row.contractId,
-        fingerprint: row.fingerprint,
-        reviewedVersion: reviewed.version,
-        ...targetDetail(target),
-      },
-    }),
     nextGeneration(
       db,
       workflow.id,
@@ -875,13 +875,14 @@ export const revokeWorkflowBinding = async (
           stillAdminSql(by)
         )
       ),
-    unprojected(db, parsed.data, revoked),
     outboxedIfChanged(db, {
       actor: actorOf(by),
       action: "workflow.binding.revoked",
       target: { type: "workflow_resource", id: workflow.id },
       detail: { approval: parsed.data },
     }),
+    // After its event, which reads what the revocation itself changed.
+    unprojected(db, parsed.data, revoked),
     nextGeneration(db, workflow.id, revoked),
   ]);
 };
