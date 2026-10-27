@@ -10,9 +10,9 @@ import {
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
+import type { GoLiveItem, SignInAgainItem } from "@grasp-os/shared/waiting";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { Integration } from "../connections/integrations.ts";
 import type { Waiting } from "../dashboard/to-do.tsx";
 import { inboxItems, listed, unread } from "./items.ts";
 
@@ -102,37 +102,43 @@ const request: Permission = {
   chat: null,
 };
 
-const microsoft = (status: "active" | "needs_reauth"): Integration => ({
-  key: "native:microsoft",
-  source: "native",
-  id: "microsoft",
-  name: "Microsoft 365",
-  categories: [],
-  group: "Email and calendar",
-  auth: "managed",
-  description: null,
-  logo: null,
-  toolCount: 3,
-  offered: true,
-  listed: true,
-  connections: [
-    {
-      id: "connection-1",
-      source: "native",
-      provider: "microsoft",
-      scope: "personal",
-      status,
-      ownerUserId: "me",
-      connectedBy: "me",
-      connectedByName: "Me",
-      accountName: "anna@acme.test",
-      createdAt: "2026-10-01T00:00:00.000Z",
-    },
-  ],
-});
+/** The person's Microsoft 365 account, whose access ran out, as core's feed lists it. */
+const signInAgain: SignInAgainItem = {
+  kind: "signInAgain",
+  id: "signInAgain:connection-1",
+  at: null,
+  urgent: true,
+  waitsOn: { type: "person", userId: "me" },
+  verdicts: [],
+  connection: {
+    id: "connection-1",
+    source: "native",
+    provider: "microsoft",
+    scope: "personal",
+    status: "needs_reauth",
+    ownerUserId: "me",
+    connectedBy: "me",
+    connectedByName: "Me",
+    accountName: "anna@acme.test",
+    createdAt: "2026-10-01T00:00:00.000Z",
+  },
+  integration: { source: "native", id: "microsoft", name: "Microsoft 365" },
+};
+
+/** A version of Invoices up for review, for the person who answers for it. */
+const goLive: GoLiveItem = {
+  kind: "goLive",
+  id: "goLive:app-invoices:4",
+  at: null,
+  urgent: false,
+  waitsOn: { type: "person", userId: "me" },
+  verdicts: [],
+  app: { id: app, name: "Invoices" },
+  version: 4,
+};
 
 /** What waits, every part read. */
-const waiting = (status: "active" | "needs_reauth" = "needs_reauth") =>
+const waiting = (ranOut = true) =>
   ({
     held: {
       state: "ready",
@@ -177,7 +183,8 @@ const waiting = (status: "active" | "needs_reauth" = "needs_reauth") =>
         },
       },
     },
-    integrations: { state: "ready", data: [microsoft(status)] },
+    reconnect: { state: "ready", data: ranOut ? [signInAgain] : [] },
+    versions: { state: "ready", data: [goLive] },
     requests: {
       state: "ready",
       data: {
@@ -229,6 +236,7 @@ describe(inboxItems, () => {
         "asked:asked-1",
         "decision:decision-1",
         "failed:failure-1",
+        "goLive:app-invoices:4",
         "held:held-new",
         "held:held-old",
         `outcome:${JSON.stringify([outcome("mail-1", readAt).key, 1])}`,
@@ -259,7 +267,7 @@ describe(inboxItems, () => {
 
   it("lets go of an item once what it is about is settled", () => {
     const settled = {
-      ...waiting("active"),
+      ...waiting(false),
       held: { state: "ready", data: [] },
       outcomes: { state: "ready", data: [] },
     } satisfies Waiting;
@@ -292,7 +300,7 @@ describe(listed, () => {
   it("shows one group of kinds when asked", () => {
     expect(
       listed(items, "workflows", "urgent").map(({ kind }) => kind)
-    ).toStrictEqual(["decision", "failedRun"]);
+    ).toStrictEqual(["decision", "goLive", "failedRun"]);
     expect(
       listed(items, "brain", "urgent").map(({ kind, title, about }) => ({
         kind,
@@ -306,6 +314,6 @@ describe(listed, () => {
         about: { kind: "brain" },
       },
     ]);
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 3);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 4);
   });
 });

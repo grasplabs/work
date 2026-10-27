@@ -1760,6 +1760,10 @@ msgstr "par mois"
 msgid "A new template"
 msgstr "Un nouveau modèle"
 
+#: src/inbox/items.ts
+msgid "A new version of {name} is up for review, and you answer for it. It runs once it is made current, on the domain's page."
+msgstr "Une nouvelle version de {name} attend d’être examinée, et vous en êtes responsable. Elle s’exécute dès qu’elle est rendue actuelle, sur la page du domaine."
+
 #: src/screens/screen-frame.tsx
 msgid "A new version of this app is ready"
 msgstr "Une nouvelle version de cette app est prête"
@@ -7510,6 +7514,10 @@ msgstr "Rendre la version {version} actuelle"
 #: src/chat/builds.tsx
 msgid "Make version {version} current and publish"
 msgstr "Rendre la version {version} actuelle et publier"
+
+#: src/inbox/items.ts
+msgid "Make version {version} of {name} live?"
+msgstr "Mettre en service la version {version} de {name} ?"
 
 #: src/connections/integration-row.tsx
 msgid "Manage"
