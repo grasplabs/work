@@ -5,6 +5,7 @@ import { ensureCollection } from "../src/collections.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
   entitiesFor,
+  entitiesWithSources,
   entityMatchProposals,
   entitySources,
   linkCoverage,
@@ -240,6 +241,41 @@ describe("entity linking", () => {
     }).toStrictEqual({
       coverage: { sources: 1, linked: 1, pending: 0, failed: 0, partial: 0 },
       found: 50,
+    });
+  });
+
+  it("says which collections and documents named the entities it listed, and only those", async () => {
+    const anna = { kind: "person", name: `Anna ${word()}` };
+    const ben = { kind: "person", name: `Ben ${word()}` };
+    const host = testHost(gazetteer([anna, ben]));
+    const [handbook, wiki] = await Promise.all([
+      newCollection(host.brain, "Handbook"),
+      newCollection(host.brain, "Wiki"),
+    ]);
+    const reader: Caller = { userId: "reader", reads: [handbook.id, wiki.id] };
+    const named = await save(
+      host,
+      handbook,
+      "anna.md",
+      `${anna.name} owns it.`
+    );
+    await save(host, wiki, "ben.md", `${ben.name} owns it.`);
+    await settle(host, new Set());
+
+    const { entities, sources } = await entitiesWithSources(
+      host.brain,
+      reader,
+      {
+        query: anna.name,
+      }
+    );
+
+    expect({
+      labels: entities.map(({ label }) => label),
+      sources,
+    }).toStrictEqual({
+      labels: [anna.name],
+      sources: { collections: [handbook.id], documents: [named.id] },
     });
   });
 
