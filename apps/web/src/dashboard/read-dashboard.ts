@@ -30,7 +30,8 @@ import { markShownRead } from "./failed-workflows.tsx";
 import { offeredWidgets } from "./layout.ts";
 import { reportWindow, todayUtc } from "./programme.ts";
 import type { ReportReads } from "./report.ts";
-import { noReturns } from "./returns.ts";
+import { goalProgressOf, noReturns } from "./returns.ts";
+import type { GoalProgress } from "./returns.ts";
 import { fullDays } from "./runs.ts";
 import type { Signals } from "./signals.tsx";
 import { decidesRequests } from "./to-do.tsx";
@@ -290,6 +291,23 @@ const readEngines = async (
 };
 
 /**
+ * The goals widget's read: the board's goals, with the workflows read once
+ * for the board, to say how far each goal's are.
+ */
+const readGoals = async (
+  core: CoreConnection,
+  workflows: Promise<Loaded<WorkflowSummary[]>>
+): Promise<Loaded<GoalProgress[]>> => {
+  const both = await bothOf(
+    loadFromCore(core, async (session) => await session.brain.goals()),
+    workflows
+  );
+  return both.state === "ready"
+    ? { state: "ready", data: goalProgressOf(both.data[0], both.data[1]) }
+    : both;
+};
+
+/**
  * The runs the weekly report counts: those of its own week
  * (`reportWindow`), read once the programme is known, not the board's
  * days. Without a programme no report is offered: the board's runs.
@@ -376,6 +394,7 @@ export const readDashboard = async (
     async (session) => await readSignals(session, identity)
   );
   const engines = readEngines(core, workflows);
+  const goals = readGoals(core, workflows);
   // The full view's days, once: the block shows the last week of them.
   const runs = loadFromCore(
     core,
@@ -413,12 +432,13 @@ export const readDashboard = async (
   ]);
   return {
     waiting,
-    // Core keeps no hours, stages, goals or teams' work yet: the return,
-    // goals and teams widgets show they have nothing to count.
+    // Core keeps no hours, stages or teams' work yet: the return and
+    // teams widgets show they have nothing to count.
     board: {
       layout,
       offered,
       returns: noReturns,
+      goals,
       workflows,
       engines,
       runs,
