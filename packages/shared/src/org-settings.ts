@@ -6,7 +6,7 @@ import { defineErrorFamily } from "./errors.ts";
 // The organization's settings an admin keeps in Grasp (core's
 // org-settings.ts), beside its name and time zone (organization.ts): how
 // it is billed, and when and for whom Pulse may report; and, read only,
-// how its people sign in. Only the organization's admins read them, and
+// how its people sign in, which Grasp sets up for the deployment. Only the organization's admins read them, and
 // only its own admins (never Grasp staff) change them; every change is
 // audited, naming what changed, never the values.
 
@@ -99,6 +99,35 @@ export const quietPulse: PulseSettings = {
   employeeDomains: [],
 };
 
+/** One identity provider people sign in with, as the deployment sets it up. */
+export interface SignInProvider {
+  provider: "microsoft" | "google";
+  /** The Entra tenant, pinned: its ID tokens alone are taken. */
+  tenantId?: string;
+  /** The Google Workspace, pinned by its primary domain. */
+  hostedDomain?: string;
+  clientId: string;
+  /** Whether its client secret is set: never the secret. */
+  secretSet: boolean;
+  /** Offered on the sign-in page: set up, with its secret. */
+  offered: boolean;
+}
+
+/**
+ * How the organization's people sign in, read only: Grasp sets it up for
+ * the deployment (its `SIGN_IN` config and client secrets), so changing it
+ * isn't a setting here. No secret is ever in it.
+ */
+export interface SignInSettings {
+  /** Whether sign-in is set up at all; none is offered until it is. */
+  configured: boolean;
+  /** The email domains people may sign in with. */
+  domains: string[];
+  providers: SignInProvider[];
+  /** Grasp staff's access window: open, and until when (ISO 8601); null without one. */
+  staffWindow: { open: boolean; until: string } | null;
+}
+
 /** Why a change to the organization's settings was refused. */
 export const orgSettingsErrors = defineErrorFamily({
   "org_settings.billing_invalid":
@@ -123,4 +152,9 @@ export interface OrgSettingsApi {
    * own admins only, never Grasp staff; audited when something changed.
    */
   updatePulse: (pulse: PulseSettings) => Promise<PulseSettings>;
+  /**
+   * How people sign in, as the deployment sets it up, never a secret.
+   * Admins, Grasp staff included; not a setting anyone changes here.
+   */
+  signIn: () => Promise<SignInSettings>;
 }

@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
+import { entraClient, googleClient, signInConfig } from "./sign-in-config.ts";
 import {
   auditedDuring,
   openRpc,
@@ -176,5 +177,45 @@ describe("the organization's settings", () => {
     ]);
     expect(JSON.stringify(events)).not.toContain(sentinel);
     expect(JSON.stringify(events)).not.toContain("Keizersgracht");
+  });
+
+  it("say how people sign in, as the deployment sets it up, to admins alone, and never a secret", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+
+    const signIn = await admin.api.orgSettings.signIn();
+    expect({
+      signIn,
+      builder: await outcome(builder.api.orgSettings.signIn()),
+    }).toStrictEqual({
+      signIn: {
+        configured: true,
+        domains: signInConfig.domains,
+        providers: [
+          {
+            provider: "microsoft",
+            tenantId: signInConfig.entra.tenantId,
+            clientId: entraClient.id,
+            secretSet: true,
+            offered: true,
+          },
+          {
+            provider: "google",
+            hostedDomain: signInConfig.google.hostedDomain,
+            clientId: googleClient.id,
+            secretSet: true,
+            offered: true,
+          },
+        ],
+        // Its end is the deployment's, set when the test's config was made.
+        staffWindow: { open: true, until: signIn.staffWindow?.until },
+      },
+      builder: "role.forbidden",
+    });
+    expect(Date.parse(signIn.staffWindow?.until ?? "")).toBeGreaterThan(
+      Date.now()
+    );
+    expect(JSON.stringify(signIn)).not.toContain(entraClient.secret);
+    expect(JSON.stringify(signIn)).not.toContain(googleClient.secret);
   });
 });

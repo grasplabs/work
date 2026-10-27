@@ -1,4 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
+import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import { log } from "@grasp-os/shared/log";
 import {
   billingSettingsSchema,
@@ -12,6 +13,7 @@ import type {
   BillingSettingsInput,
   OrgSettingsApi,
   PulseSettings,
+  SignInSettings,
 } from "@grasp-os/shared/org-settings";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -21,6 +23,7 @@ import type { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
+import { signInConfig } from "./auth/config.ts";
 import { orgSettings } from "./db/core/schema.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -28,7 +31,8 @@ import type { SessionCheck } from "./session-check.ts";
 
 // The organization's settings an admin keeps beside its name and time
 // zone (@grasp-os/shared/org-settings): billing and Pulse, one row each in
-// `org_settings`. Its admins read them, Grasp staff included (whose every
+// `org_settings`; and, read only, how people sign in, from the
+// deployment's config. Its admins read them, Grasp staff included (whose every
 // view is audited, staff-audit.ts); only its own admins change them, as
 // for the organization's name: what the client is billed as and what
 // Pulse watches are the client's to say. A change writes only while the
@@ -162,6 +166,54 @@ const saveSetting = async <T extends object>(
   return await readSetting(env, kind);
 };
 
+const isSet = (secret: string | undefined): boolean =>
+  secret !== undefined && secret !== "";
+
+/**
+ * How people sign in, from the deployment's config (auth/config.ts): what
+ * is set up, and whether each secret is, never a secret itself.
+ */
+const signInOf = (env: Env, now: number): SignInSettings => {
+  const config = signInConfig(env);
+  if (config === undefined) {
+    return { configured: false, domains: [], providers: [], staffWindow: null };
+  }
+  const entraSecret = isSet(env.ENTRA_CLIENT_SECRET);
+  const googleSecret = isSet(env.GOOGLE_CLIENT_SECRET);
+  return {
+    configured: true,
+    domains: config.domains,
+    providers: [
+      ...(config.entra === undefined
+        ? []
+        : [
+            {
+              provider: "microsoft" as const,
+              tenantId: config.entra.tenantId,
+              clientId: config.entra.clientId,
+              secretSet: entraSecret,
+              offered: entraSecret,
+            },
+          ]),
+      ...(config.google === undefined
+        ? []
+        : [
+            {
+              provider: "google" as const,
+              hostedDomain: config.google.hostedDomain,
+              clientId: config.google.clientId,
+              secretSet: googleSecret,
+              offered: googleSecret,
+            },
+          ]),
+    ],
+    staffWindow:
+      config.staff === undefined
+        ? null
+        : { open: staffWindowOpen(config, now), until: config.staff.until },
+  };
+};
+
 /** A signed-in person's `orgSettings`. */
 export class OrgSettingsRpc extends CoreRpcTarget implements OrgSettingsApi {
   readonly #env: Env;
@@ -191,6 +243,13 @@ export class OrgSettingsRpc extends CoreRpcTarget implements OrgSettingsApi {
     return await withPerson(this.#check, async (by) => {
       requireReader(by);
       return await readSetting(this.#env, pulse);
+    });
+  }
+
+  async signIn(): Promise<SignInSettings> {
+    return await withPerson(this.#check, (by) => {
+      requireReader(by);
+      return signInOf(this.#env, Date.now());
     });
   }
 
