@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
 import { allowedFor } from "./authorize.ts";
@@ -9,6 +9,7 @@ import type {
   NetworkStep,
   RelationView,
 } from "./contract.ts";
+import { inList } from "./db/d1.ts";
 import { brainAssertions, collections, documents } from "./db/schema.ts";
 import { toHex } from "./encoding.ts";
 import type { Provenance } from "./knowledge.ts";
@@ -160,15 +161,15 @@ const itemOf = async (
   };
 };
 
-/** Which of `found` a condition matches, at its version. */
-const ofFound = (found: readonly FoundDocument[]): SQL | undefined =>
-  or(
-    ...found.map(({ documentId, version }) =>
-      and(
-        eq(brainAssertions.documentId, documentId),
-        eq(brainAssertions.version, version)
-      )
-    )
+/**
+ * Relations of `found`, each at its version, bound as one parameter
+ * (`inList`) however many there are: the last `@` of each key parts the
+ * document's ID from its version, a whole number.
+ */
+const ofFound = (found: readonly FoundDocument[]): SQL =>
+  inList(
+    sql`${brainAssertions.documentId} || '@' || ${brainAssertions.version}`,
+    found.map(({ documentId, version }) => `${documentId}@${version}`)
   );
 
 /**
@@ -197,7 +198,7 @@ const seedsOf = async <C>(
         eq(collections.sensitive, false),
         query.within === undefined
           ? undefined
-          : inArray(collections.id, [...query.within]),
+          : inList(collections.id, query.within),
         currentRelations(),
         ofFound(query.found)
       )

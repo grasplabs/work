@@ -380,6 +380,49 @@ describe("a recall's network route", () => {
     });
   });
 
+  it("starts from as many found documents as a recall holds, past what one statement may bind one by one", async () => {
+    const query = word();
+    const owned = Array.from({ length: 50 }, (_, index) =>
+      stated(`Owner ${index} ${word()}`, "owns", `Process ${index} ${word()}`)
+    );
+    const used = owned.map(({ object }) =>
+      stated(object, "uses", `Tool ${word()}`)
+    );
+    const host = testHost(modelOf([...owned, ...used]).model);
+    const notes = await newCollection(host.brain, "Processes");
+    for (const [index, relation] of owned.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await saved(
+        host,
+        notes,
+        `owner-${index}.md`,
+        `${query}: ${relation.evidence}`
+      );
+    }
+    await saved(
+      host,
+      notes,
+      "tools.md",
+      used.map(({ evidence }) => evidence).join("\n")
+    );
+    const reader: Caller = { userId: "reader", reads: [notes.id] };
+
+    const pack = await recall(
+      host.brain,
+      reader,
+      { query, network: { hops: 1 }, budget: { maxItems: 50 } },
+      [collectionIdSchema.parse(notes.id)]
+    );
+
+    // Fifty notes fill the pack: the route read their hundred seeds, went
+    // on from twenty, and had no room left, and says so, rather than
+    // failing.
+    expect({ items: pack.items.length, cuts: cutsOf(pack) }).toStrictEqual({
+      items: 50,
+      cuts: ["fan_out", "items"],
+    });
+  });
+
   it("no longer follows a relation once its source's new version doesn't state it", async () => {
     const { host, notes, query, names, passages, everyone } = await team();
     await saved(host, notes, "handbook.md", `${names.tool} is retired.`, 1);
