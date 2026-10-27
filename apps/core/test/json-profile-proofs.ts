@@ -1,3 +1,4 @@
+import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import { v } from "@grasp-os/sdk";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -25,6 +26,7 @@ import {
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { admitRunEvent } from "../src/workflows/run-events.ts";
+import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { liveStatus, resumed, runObject, stopped } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
@@ -223,6 +225,22 @@ const jobEvents = async (admin: Identity): Promise<string> => {
     },
   });
   return contract;
+};
+
+/** The model the tests' deployment allows (vite.config.ts). */
+const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+/** The calls run `runId` made of `call`, by outcome, as the audit log has them. */
+const receiptsOf = async (runId: string, call: string) => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, target, detail }) =>
+        action === "workflow.run.called" &&
+        target?.id === runId &&
+        detail?.call === call
+    )
+    .map(({ detail }) => detail?.outcome);
 };
 
 /** The proofs, where they run (Cloudflare's runtime, or plain workerd). */
@@ -594,6 +612,66 @@ export const profileProofs = (where: string): void => {
           status: run.status,
           slept: Date.parse(run.endedAt ?? "") - startedAt >= 3000,
         }).toStrictEqual({ status: "completed", slept: true });
+      });
+
+      it("grasp.model: asks the provider once for the task's structured output, and nothing again after a restart", async () => {
+        const admin = await person("admin");
+        const by = await person("builder");
+        const contract = `summary-${unique()}`;
+        await publishCatalogContract(env, admin, {
+          key: contract,
+          kind: "model",
+        });
+        const workflow = await published(by, {
+          bindings: { summary: { kind: "model", contract } },
+          do: [
+            {
+              greet: {
+                call: "grasp.model",
+                with: {
+                  binding: "summary",
+                  instructions: "Greet them.",
+                  input: { who: "${ $workflow.input.who }" },
+                  outputSchema: objectSchema({ line: { type: "string" } }),
+                },
+                export: { as: "${ {line: .line} }" },
+              },
+            },
+            { pause: { wait: "PT2S" } },
+            { finish: { set: { status: "${ $context.line }" } } },
+          ],
+        });
+        await approveWorkflowBinding(env, admin, workflow.id, {
+          alias: "summary",
+          target: { kind: "model", model: allowedModel },
+          reviewed: { version: 1 },
+        });
+        // The provider behind AI Gateway, the one outside system here.
+        const gateway = fakeGateway({
+          text: '{"line":"Hello Ada"}',
+          inputTokens: 100,
+          outputTokens: 20,
+        });
+        const ai: AiBinding = env.AI;
+        const fetching = vi
+          .spyOn(ai, "fetch")
+          .mockImplementation(gateway.binding.fetch);
+        try {
+          const runId = await started(by, workflow.id);
+          await restarted(runId);
+          const run = await ended(by, workflow.id, runId);
+          expect({
+            end: endOf(run),
+            requests: gateway.requests.length,
+            receipts: await receiptsOf(runId, "grasp.model"),
+          }).toStrictEqual({
+            end: { status: "completed", output: { status: "Hello Ada" } },
+            requests: 1,
+            receipts: ["started", "done"],
+          });
+        } finally {
+          fetching.mockRestore();
+        }
       });
 
       it("grasp.decision: asks its recipient once, waits through a restart, and goes on with their confirmed answer", async () => {
