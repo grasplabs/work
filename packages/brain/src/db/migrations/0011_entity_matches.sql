@@ -4,6 +4,7 @@ CREATE TABLE `brain_entity_matches` (
 	`decision` text NOT NULL,
 	`evidence_document_id` text,
 	`evidence_version` integer,
+	`decided_by` text NOT NULL,
 	`decided_at` integer NOT NULL,
 	PRIMARY KEY(`entity_a`, `entity_b`),
 	FOREIGN KEY (`entity_a`) REFERENCES `brain_entities`(`id`) ON UPDATE no action ON DELETE cascade,

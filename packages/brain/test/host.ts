@@ -33,6 +33,8 @@ export interface Caller {
   only?: Readonly<Record<string, readonly string[]>>;
   /** The capabilities the host says they hold. */
   capabilities?: readonly string[];
+  /** Whether the host counts them an admin: they replace others' decisions. */
+  admin?: boolean;
 }
 
 /** A job the Brain asked its host to start. */
@@ -128,6 +130,12 @@ export const testHost = (
     },
     mayRetire: async () => {
       await Promise.resolve();
+    },
+    mayReplaceMatch: async (caller, { decidedBy }) => {
+      await Promise.resolve();
+      if (caller.userId !== decidedBy && caller.admin !== true) {
+        throw brainErrors.create("brain.denied");
+      }
     },
     wordLesson: async (facts) => {
       worded.push(facts);
