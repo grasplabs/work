@@ -1086,14 +1086,6 @@ msgstr "{people}, oder {fewer} und ein Dokument"
 msgid "{percent}% known now"
 msgstr "{percent} % bekannt, jetzt"
 
-#: src/onboarding/knowledge-bar.tsx
-msgid "{percent}% known. Your team can start at {threshold}%, and I keep learning after that."
-msgstr "{percent} % bekannt. Ihr Team kann bei {threshold} % starten, und ich lerne danach weiter."
-
-#: src/onboarding/knowledge-bar.tsx
-msgid "{percent}% known. Your team can start at {threshold}%."
-msgstr "{percent} % bekannt. Ihr Team kann bei {threshold} % starten."
-
 #. Who connected the app, then the day they did.
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{person}, {date}"
@@ -3102,9 +3094,14 @@ msgstr "In diesen Wochen abwesend. Nichts wartet auf {first}."
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/onboarding/setup-frame.tsx
 #: src/tour/tour-layer.tsx
 msgid "Back"
 msgstr "Zurück"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Back and forward"
+msgstr "Zurück und weiter"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Back to {destination}"
@@ -5833,6 +5830,10 @@ msgctxt "kind of app"
 msgid "Forms and surveys"
 msgstr "Formulare und Umfragen"
 
+#: src/onboarding/setup-frame.tsx
+msgid "Forward"
+msgstr "Weiter"
+
 #: src/connections/request-app-dialog.tsx
 msgid "Forwarded to our team"
 msgstr "An unser Team weitergeleitet"
@@ -6366,6 +6367,10 @@ msgstr "Wie oft jede Bewertung vergeben wurde"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "How much has to be known before it opens"
 msgstr "Wie viel bekannt sein muss, bevor es öffnet"
+
+#: src/onboarding/knowledge-bar.tsx
+msgid "How much I know about your organization, not how far you are in these steps. It grows as you share and as I talk to your team. Your team can start at {threshold}%, and I keep learning after that."
+msgstr "Wie viel ich über Ihre Organisation weiß, nicht wie weit Sie in diesen Schritten sind. Es wächst mit dem, was Sie teilen, und mit meinen Gesprächen mit Ihrem Team. Ihr Team kann bei {threshold} % starten, und ich lerne danach weiter."
 
 #: src/onboarding/work-canvas.tsx
 msgid "How often is not known"
@@ -7130,6 +7135,10 @@ msgstr "Bekannt"
 msgctxt "where a workflow stands"
 msgid "Known"
 msgstr "Bekannt"
+
+#: src/onboarding/knowledge-bar.tsx
+msgid "Known about your organization"
+msgstr "Bekannt über Ihre Organisation"
 
 #: src/onboarding/work-words.ts
 msgctxt "where a workflow stands"
@@ -14720,6 +14729,10 @@ msgstr "Was er darf"
 #: src/settings/stephen-settings.tsx
 msgid "What he may do in {appName}: as for the whole company, or for fewer people."
 msgstr "Was er in {appName} darf: wie für das ganze Unternehmen oder für weniger Personen."
+
+#: src/onboarding/knowledge-bar.tsx
+msgid "What I know about your organization: {percent}%. This is not how far you are in these steps. Your team can start at {threshold}%."
+msgstr "Was ich über Ihre Organisation weiß: {percent} %. Das ist nicht, wie weit Sie in diesen Schritten sind. Ihr Team kann bei {threshold} % starten."
 
 #: src/interview/transcript.tsx
 msgid "What is marked is what I wrote down. You check it at the end."

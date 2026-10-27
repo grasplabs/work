@@ -4,10 +4,14 @@ import {
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
+import type {
+  RunActivity,
+  RunActivityWorkflow,
+  WorkflowSummary,
+} from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
-import { goalProgressOf } from "./returns.ts";
+import { goalProgressOf, teamProgressOf } from "./returns.ts";
 
 // The board's goals as the goals widget draws them (returns.ts): each by
 // its newest wording, with the workflows linked to it and how far each is.
@@ -20,6 +24,7 @@ const workflow = (name: string, handled: number): WorkflowSummary => ({
   version: 1,
   owner: { userId: "owner", name: null },
   changesOwner: false,
+  team: null,
   lastRun: {
     id: runIdSchema.parse(`run-${name}`),
     status: "completed",
@@ -83,6 +88,104 @@ describe("the board's goals", () => {
       back: 0,
       coming: 0,
       basis: ["unknown", "unknown"],
+    });
+  });
+});
+
+/** What `name` of the invoices App did over the week: completed runs, and how many asked no one. */
+const ran = (
+  name: string,
+  completed: number,
+  completedAlone: number
+): RunActivityWorkflow => ({
+  app: appIdSchema.parse("invoices"),
+  appName: "Invoices",
+  workflow: workflowIdSchema.parse(name),
+  current: true,
+  started: completed,
+  completed,
+  failed: 0,
+  completedAlone,
+});
+
+/** A week's activity of `workflows`. */
+const week = (...workflows: RunActivityWorkflow[]): RunActivity => ({
+  from: "2026-10-21",
+  to: "2026-10-27",
+  days: [],
+  runs: { total: 0, withPerson: 0, withoutPerson: 0 },
+  decisions: { approved: 0, rejected: 0, timedOut: 0, open: 0 },
+  workflows,
+});
+
+const finance = { id: "team-finance", name: "Finance" };
+const sales = { id: "team-sales", name: "Sales" };
+
+describe("the teams with AI", () => {
+  it("are the teams that own workflows, the furthest first, with what their workflows handled and how much of it without a person", () => {
+    const read = teamProgressOf(
+      [
+        { ...workflow("chase", 12), team: finance },
+        { ...workflow("remind", 0), team: finance },
+        { ...workflow("quote", 0), team: sales },
+        // No team owns it: no team counts it.
+        workflow("archive", 3),
+      ],
+      week(ran("chase", 12, 9), ran("quote", 0, 0), ran("archive", 3, 3))
+    );
+    expect({
+      teams: read.teams.map(
+        ({ name, level, workflows, live, testing, handled, alone }) => ({
+          name,
+          level,
+          workflows,
+          live,
+          testing,
+          handled,
+          alone,
+        })
+      ),
+      rows: read.rows.map(({ workflow: { name, teamId }, stage }) => [
+        name,
+        teamId,
+        stage,
+      ]),
+      // No hours are kept: nothing to say of cost, share or help.
+      unknowns: read.teams.map(({ share, cost, needsHelp }) => [
+        share,
+        cost,
+        needsHelp,
+      ]),
+    }).toStrictEqual({
+      teams: [
+        {
+          name: "Finance",
+          level: "live",
+          workflows: 2,
+          live: 1,
+          testing: 1,
+          handled: 12,
+          alone: 9,
+        },
+        {
+          name: "Sales",
+          level: "testing",
+          workflows: 1,
+          live: 0,
+          testing: 1,
+          handled: 0,
+          alone: 0,
+        },
+      ],
+      rows: [
+        ["chase", "team-finance", "live"],
+        ["remind", "team-finance", "testing"],
+        ["quote", "team-sales", "testing"],
+      ],
+      unknowns: [
+        [null, 0, false],
+        [null, 0, false],
+      ],
     });
   });
 });

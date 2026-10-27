@@ -333,6 +333,7 @@ const coreDb: D1State = {
     dependency_admission_refusals: exported(`${core}dependencies/requests.ts`),
     workflow_param_values: exported(`${core}workflows/params.ts`),
     workflow_owners: exported(`${core}workflows/owners.ts`),
+    workflow_teams: exported(`${core}workflows/teams.ts`),
     hidden_connectors: exported(`${core}connections.ts`),
     tool_class_settings: exported(`${core}tool-classes.ts`),
     stephen_reach: exported(`${core}stephen-reach.ts`),

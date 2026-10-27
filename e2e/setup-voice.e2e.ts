@@ -93,6 +93,11 @@ test("the admin goes through empty steps and back, with the sound on and off", a
       name: "Do you have anything that explains how you work?",
     })
   ).toBeVisible();
+  // The way back at the top, beside what Grasp knows, goes back a step too.
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Where does the work get written down?" })
+  ).toBeVisible();
   expect(asked.length).toBe(before);
 });
 
@@ -134,12 +139,13 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
     await leaveNothingChosen();
     const page = await pageOf(admin);
     await page.goto("/setup?step=sources");
+    // What Grasp knows of the organization, said apart from how far the admin is through the steps.
     const bar = page.getByRole("button", {
-      name: /% known\. Your team can start at/u,
+      name: /^What I know about your organization: \d+%\. This is not how far you are in these steps\./u,
     });
     const known = async (): Promise<number> =>
       Number(
-        /^(?<known>\d+)%/u.exec((await bar.getAttribute("aria-label")) ?? "")
+        /: (?<known>\d+)%/u.exec((await bar.getAttribute("aria-label")) ?? "")
           ?.groups?.known
       );
     await expect(bar).toBeVisible();
@@ -242,11 +248,19 @@ test("the story plays through in Dutch, with the sound on and off, and goes on t
     page.getByRole("heading", { name: "Wie is wie in je bedrijf?" })
   ).toBeVisible();
 
-  // Sound off: told at the pace of speech, nothing asked of the voice.
-  // Paused, it holds on the line it is at; played, it goes on to the end.
+  // Told once, coming back to it shows the plan in full at once.
   await page.getByRole("button", { name: "Geluid uitzetten" }).click();
   const before = asked.length;
   await page.goto("/setup?step=about");
+  await expect(page.getByText(story.summary)).toBeVisible();
+
+  // Sound off, in a tab where it wasn't told yet: told at the pace of
+  // speech, nothing asked of the voice. Paused, it holds on the line it is
+  // at; played, it goes on to the end.
+  await page.evaluate(() => {
+    sessionStorage.clear();
+  });
+  await page.reload();
   const second = page.getByText(story.second);
   await expect(second).toBeVisible();
   await page.getByRole("button", { name: "Pauzeren" }).click();

@@ -89,6 +89,7 @@ import { useReveal, useWayIn } from "./platform-reveal.tsx";
 import { DifferenceItem, MailItem } from "./review-parts.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
 import { choiceHolds, choiceShown, replanOf } from "./send-plan.ts";
+import type { SendChoice } from "./send-plan.ts";
 import {
   Asides,
   Callout,
@@ -101,10 +102,13 @@ import {
   LaterLink,
   MoreAbout,
   Onward,
+  Opening,
   Primary,
+  Seen,
   stepLine,
   SupportLink,
   tones,
+  useEntrance,
   useSayFollowing,
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
@@ -118,6 +122,13 @@ import {
   staffListOf,
   withSaved,
 } from "./staff-list.ts";
+import {
+  noteHeard,
+  orgConfirmed,
+  orgDraft,
+  planDraft,
+  wasHeard,
+} from "./visit.ts";
 import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 
 // One screen of the client onboarding, by step (prototype
@@ -407,9 +418,11 @@ const Welcome = (props: StepProps) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).welcome;
   const { i18n } = useLingui();
-  // A language is chosen before anything else, every time: none is marked
-  // until you pick one, unless the page was just drawn anew for it.
-  const [picked, setPicked] = useState(() => languagePicked);
+  // A language is chosen before anything else: none is marked until you
+  // pick one, unless the page was just drawn anew for it, or you come back
+  // to the welcome after it.
+  const seen = useContext(Seen);
+  const [picked, setPicked] = useState(() => languagePicked || seen);
   useEffect(() => {
     languagePicked = false;
   }, []);
@@ -1262,6 +1275,10 @@ const Documents = (props: StepProps) => {
     ...pending,
   ];
   const ask = open?.reading.ask ?? null;
+  const askEntrance = useEntrance(
+    open?.id ?? "",
+    "animate-in fade-in slide-in-from-bottom-1 duration-300"
+  );
   return (
     <>
       <Heading
@@ -1320,7 +1337,7 @@ const Documents = (props: StepProps) => {
         )}
         {open === undefined || ask === null ? null : (
           <div
-            className="animate-in fade-in slide-in-from-bottom-1 flex flex-col items-center gap-2 duration-300"
+            className={cn("flex flex-col items-center gap-2", askEntrance)}
             key={open.id}
           >
             <p className="text-balance">
@@ -1379,8 +1396,21 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
   const lines = useHeadlines(props).leads;
   const { run, busy, failure } = useCoreAction();
   const refresh = useRefresh();
-  const [draft, setDraft] = useState<Roster>(props.roster);
-  const [saved, setSaved] = useState(false);
+  const from = JSON.stringify(props.roster);
+  // Changed and not confirmed yet, it is as they left it.
+  const [draft, setDraft] = useState<Roster>(
+    () => orgDraft.of(from) ?? props.roster
+  );
+  const redraft = (next: Roster) => {
+    orgDraft.keep(from, next);
+    setDraft(next);
+  };
+  // Confirmed as it stands: on this visit ("now"), or before, on this page, and nothing changed since ("before").
+  const [saved, setSaved] = useState<"now" | "before" | null>(() =>
+    orgDraft.of(from) === undefined && orgConfirmed.of(from) === true
+      ? "before"
+      : null
+  );
   // What Stephen says of the HR platform, once it was read or could not be.
   const [fromHr, setFromHr] = useState<Answer>();
   const teams = draft.teams
@@ -1396,8 +1426,8 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
     (team) => !team.off && team.lead === null
   ).length;
   const change = (id: string, next: Partial<Roster["teams"][number]>) => {
-    setSaved(false);
-    setDraft({
+    setSaved(null);
+    redraft({
       ...draft,
       teams: draft.teams.map((team) =>
         team.id === id ? { ...team, ...next } : team
@@ -1405,17 +1435,18 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
     });
   };
   // A thank-you, said on its own every time it is saved, and quick: the count is only known as he says it.
-  const answer: Answer | undefined = saved
-    ? {
-        text: plural(leads, {
-          one: "Thank you. I’ll start with this lead.",
-          other: "Thank you. I’ll start with these # leads.",
-        }),
-        announce: true,
-        tone: tones.warm,
-        quick: true,
-      }
-    : fromHr;
+  const answer: Answer | undefined =
+    saved === null
+      ? fromHr
+      : {
+          text: plural(leads, {
+            one: "Thank you. I’ll start with this lead.",
+            other: "Thank you. I’ll start with these # leads.",
+          }),
+          announce: saved === "now",
+          tone: tones.warm,
+          quick: true,
+        };
   return (
     <>
       <Heading
@@ -1500,15 +1531,7 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
         <WaitingNote waiting={props.data.view.waiting} />
         <ErrorText>{failure}</ErrorText>
       </Onward>
-      {saved ? (
-        <Primary
-          onClick={() => {
-            props.go("team");
-          }}
-        >
-          {t`Continue`}
-        </Primary>
-      ) : (
+      {saved === null ? (
         <Primary
           busy={busy}
           onClick={() => {
@@ -1517,21 +1540,31 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
                 async (session) => await session.onboarding.confirmRoster(draft)
               );
               if (kept !== undefined) {
+                // Coming back while it stands as confirmed, it still is.
+                orgConfirmed.keep(JSON.stringify(kept.roster), true);
                 await refresh();
-                setSaved(true);
+                setSaved("now");
               }
             })();
           }}
         >
           {t`This is right`}
         </Primary>
+      ) : (
+        <Primary
+          onClick={() => {
+            props.go("team");
+          }}
+        >
+          {t`Continue`}
+        </Primary>
       )}
       <HrLeads
         hr={props.data.hr}
         onAnswer={setFromHr}
         onRoster={(roster) => {
-          setSaved(false);
-          setDraft(roster);
+          setSaved(null);
+          redraft(roster);
         }}
         roster={draft}
       />
@@ -1616,14 +1649,21 @@ const Team = (props: StepProps) => {
         (person) => person.team === team.id && !person.away
       ).length,
     }));
-  // What they set before stands; else the next working day at nine, every team.
-  const [choice, setChoice] = useState(() =>
-    choiceShown(
-      view.plan,
-      props.today,
-      teams.map((team) => team.id)
-    )
+  // What they set before stands; else the next working day at nine, every team. Changed and not sent yet, it is as they left it.
+  const from = JSON.stringify(view.plan);
+  const [choice, setChoice] = useState(
+    () =>
+      planDraft.of(from) ??
+      choiceShown(
+        view.plan,
+        props.today,
+        teams.map((team) => team.id)
+      )
   );
+  const choose = (next: SendChoice) => {
+    planDraft.keep(from, next);
+    setChoice(next);
+  };
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
   const when = useSendWords()(choice.day, choice.time);
@@ -1644,81 +1684,86 @@ const Team = (props: StepProps) => {
         title={lines.title}
         voice={lines.voice}
       />
-      <div className="flex w-full flex-col gap-3.5 text-left">
-        <div className="bg-card overflow-hidden rounded-xl border shadow-sm">
-          <div className="flex items-center gap-2.5 border-b px-4 py-3">
-            <div className="flex min-w-0 flex-1 flex-col">
-              <span>{admin}</span>
-              <span className="text-muted-foreground">
-                {company === null
-                  ? t`To everyone`
-                  : t`To everyone at ${company}`}
-              </span>
-            </div>
-            <Button
-              onClick={() => {
-                setEditing(!editing);
-              }}
-              size="sm"
-              variant="ghost"
-            >
-              {editing ? (
-                <CheckIcon data-icon="inline-start" />
-              ) : (
-                <PenLineIcon data-icon="inline-start" />
-              )}
-              {editing ? t`Done` : t`Edit`}
-            </Button>
-            <Button
-              onClick={() => {
-                void (async () => {
-                  setCopied(await copyText(message));
-                })();
-              }}
-              size="sm"
-              variant="ghost"
-            >
-              {copied ? (
-                <CheckIcon data-icon="inline-start" />
-              ) : (
-                <CopyIcon data-icon="inline-start" />
-              )}
-              {copied ? t`Copied` : t`Copy`}
-            </Button>
-          </div>
-          {editing ? (
-            <div className="p-3">
-              <Textarea
-                aria-label={t`The message`}
-                onChange={(event) => {
-                  props.onMessage(event.target.value);
+      {/* On a laptop, the message on the left and the plan on the right, so the step fits on screen. */}
+      <div className="grid w-full gap-3.5 text-left lg:grid-cols-2 lg:items-start">
+        <div className="flex flex-col gap-3.5">
+          <div className="bg-card overflow-hidden rounded-xl border shadow-sm">
+            <div className="flex items-center gap-2.5 border-b px-4 py-3">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span>{admin}</span>
+                <span className="text-muted-foreground">
+                  {company === null
+                    ? t`To everyone`
+                    : t`To everyone at ${company}`}
+                </span>
+              </div>
+              <Button
+                onClick={() => {
+                  setEditing(!editing);
                 }}
-                rows={8}
-                value={message}
-              />
+                size="sm"
+                variant="ghost"
+              >
+                {editing ? (
+                  <CheckIcon data-icon="inline-start" />
+                ) : (
+                  <PenLineIcon data-icon="inline-start" />
+                )}
+                {editing ? t`Done` : t`Edit`}
+              </Button>
+              <Button
+                onClick={() => {
+                  void (async () => {
+                    setCopied(await copyText(message));
+                  })();
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                {copied ? (
+                  <CheckIcon data-icon="inline-start" />
+                ) : (
+                  <CopyIcon data-icon="inline-start" />
+                )}
+                {copied ? t`Copied` : t`Copy`}
+              </Button>
             </div>
-          ) : (
-            <div className="flex max-h-48 flex-col gap-2.5 overflow-auto px-4 py-4 whitespace-pre-line">
-              {message.split(/\n{2,}/u).map((paragraph, index) => (
-                <p key={index}>{paragraph}</p>
-              ))}
-            </div>
-          )}
+            {editing ? (
+              <div className="p-3">
+                <Textarea
+                  aria-label={t`The message`}
+                  onChange={(event) => {
+                    props.onMessage(event.target.value);
+                  }}
+                  rows={8}
+                  value={message}
+                />
+              </div>
+            ) : (
+              <div className="flex max-h-40 flex-col gap-2.5 overflow-auto px-4 py-4 whitespace-pre-line">
+                {message.split(/\n{2,}/u).map((paragraph, index) => (
+                  <p key={index}>{paragraph}</p>
+                ))}
+              </div>
+            )}
+          </div>
+          <Alert>
+            <InfoIcon />
+            <AlertTitle>{t`What happens next`}</AlertTitle>
+            <AlertDescription>
+              <SpokenText from={0} line={next} text={next} />
+            </AlertDescription>
+          </Alert>
         </div>
-        <SendPlanForm
-          choice={choice}
-          onChange={setChoice}
-          teams={teams}
-          today={props.today}
-        />
-        <Alert>
-          <InfoIcon />
-          <AlertTitle>{t`What happens next`}</AlertTitle>
-          <AlertDescription>
-            <SpokenText from={0} line={next} text={next} />
-          </AlertDescription>
-        </Alert>
-        <ErrorText>{failure}</ErrorText>
+        <div className="flex flex-col gap-3.5">
+          <SendPlanForm
+            choice={choice}
+            onChange={choose}
+            teams={teams}
+            today={props.today}
+          />
+          <ErrorText>{failure}</ErrorText>
+        </div>
       </div>
       <Primary
         busy={busy}
@@ -1781,6 +1826,10 @@ const ListeningStep = (props: StepProps) => {
   // oxlint-disable-next-line react/hook-use-state -- read once as the step arrives, never set
   const [mailShown] = useState(() => !props.settled.includes("mail"));
   const gateOpen = percent >= data.gate.threshold;
+  const gateEntrance = useEntrance(
+    gateOpen ? "open" : "",
+    "animate-in fade-in slide-in-from-bottom-2 duration-400"
+  );
   return (
     <>
       <Heading
@@ -1788,30 +1837,43 @@ const ListeningStep = (props: StepProps) => {
         title={lines.title}
         voice={lines.voice}
       />
-      <InterviewsProgress
-        links={data.links}
-        listening={listening}
-        spoken
-        today={today}
-        view={data.view}
+      {/* Before the links go out, until it's done: the admin's mail filter lets Grasp's mail through, beside where the interviews stand and the way on on a laptop, so the step fits on screen. Settled here, it stays to say so until they leave. */}
+      <div
+        className={cn(
+          "grid w-full gap-6 text-left",
+          mailShown ? "lg:grid-cols-2 lg:items-start" : "max-w-140"
+        )}
       >
-        {/* Before the links go out, until it's done: the admin's mail filter lets Grasp's mail through. Settled here, it stays to say so until they leave. */}
-        {mailShown ? <Mail {...props} /> : null}
-      </InterviewsProgress>
-      {gateOpen ? (
-        <div className="animate-in fade-in slide-in-from-bottom-2 flex w-full flex-col gap-3 duration-400">
-          <Callout
-            text={t`I’ve heard enough to open. There are just a few things I need from you first.`}
+        <div className="flex flex-col gap-6">
+          <InterviewsProgress
+            links={data.links}
+            listening={listening}
+            spoken
+            today={today}
+            view={data.view}
           />
-          <Primary
-            onClick={() => {
-              props.go("review");
-            }}
-          >
-            {t`See what needs you`}
-          </Primary>
+          {gateOpen ? (
+            <div
+              className={cn(
+                "flex w-full flex-col items-center gap-3 text-center",
+                gateEntrance
+              )}
+            >
+              <Callout
+                text={t`I’ve heard enough to open. There are just a few things I need from you first.`}
+              />
+              <Primary
+                onClick={() => {
+                  props.go("review");
+                }}
+              >
+                {t`See what needs you`}
+              </Primary>
+            </div>
+          ) : null}
         </div>
-      ) : null}
+        {mailShown ? <Mail {...props} /> : null}
+      </div>
     </>
   );
 };
@@ -1889,7 +1951,11 @@ const Review = (props: StepProps) => {
         title={lines.title}
         voice={lines.voice}
       />
-      <section aria-label={t`What needs you`} className="w-full">
+      {/* Many things to settle scroll in their own panel, so the way on stays in sight. */}
+      <section
+        aria-label={t`What needs you`}
+        className="setup-panel w-full overflow-y-auto"
+      >
         {differences.length === 0 ? null : (
           <Differences
             changing={changing}
@@ -1972,7 +2038,9 @@ const bodies: Record<SetupStep, ComponentType<StepProps>> = {
  * One screen of the onboarding, by step: one title, one sentence, one
  * small action, one main button. `cramped`: on a phone, the step does not
  * fit beside even the smallest brain; `onMadeWay` hears how much room its
- * sentence frees as it makes way.
+ * sentence frees as it makes way. Each step fades in, but one Stephen
+ * finished before in this tab opens as it was left (`Seen`, `Opening`):
+ * in full at once, with what was given on it, and nothing coming in.
  */
 export const SetupStepBody = ({
   step,
@@ -1984,9 +2052,16 @@ export const SetupStepBody = ({
   cramped: boolean;
   onMadeWay: (freed: number) => void;
 }) => {
-  // Each step is drawn anew, so this starts over with every step.
-  const [explained, setExplained] = useState(false);
-  // This step's line and the next one's are fetched ahead, so he starts the moment a step arrives.
+  // Each step is drawn anew, so this starts over with every step: as it was on arrival.
+  // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
+  const [seen] = useState(() => wasHeard(step));
+  const [explained, setExplained] = useState(seen);
+  // Finished before, it opens as it was left: what is drawn as it arrives is there at once.
+  const opening = useRef(seen);
+  useEffect(() => {
+    opening.current = false;
+  }, []);
+  // This step's line and the next one's are fetched ahead, so he starts the moment a step arrives; a step seen is not said again.
   const headlines = useHeadlines(props);
   const [here, ahead] = [step, steps[stepIndex(step) + 1]].map((each) => {
     const headline =
@@ -1996,17 +2071,29 @@ export const SetupStepBody = ({
       voice: headline?.voice ?? evenVoice,
     };
   });
-  usePrepare(here?.line ?? "", here?.voice);
+  usePrepare(seen ? "" : (here?.line ?? ""), here?.voice);
   usePrepare(ahead?.line ?? "", ahead?.voice);
   const onExplained = () => {
+    noteHeard(step);
     setExplained(true);
   };
   const Body = bodies[step];
   return (
     <Cramped value={{ cramped, onMadeWay }}>
-      <Explained value={{ explained, onExplained }}>
-        <Body {...props} />
-      </Explained>
+      <Seen value={seen}>
+        <Opening value={opening}>
+          <Explained value={{ explained, onExplained }}>
+            <div
+              className={cn(
+                "flex w-full flex-col items-center gap-6",
+                !seen && "animate-in fade-in duration-500"
+              )}
+            >
+              <Body {...props} />
+            </div>
+          </Explained>
+        </Opening>
+      </Seen>
     </Cramped>
   );
 };

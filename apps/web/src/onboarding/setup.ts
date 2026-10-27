@@ -338,6 +338,18 @@ export const reachedOf = (
   );
 
 /**
+ * Where the admin can go from step `index`, having been as far as
+ * `reached`: back a step always, on a step only as far as they have been,
+ * and to any step up to there. The way back, the way on, the dots and the
+ * arrow keys all go by it.
+ */
+export const waysFrom = (index: number, reached: number) => ({
+  back: steps[index - 1],
+  on: index < reached ? steps[index + 1] : undefined,
+  open: (at: number) => at <= reached,
+});
+
+/**
  * What only the admin can settle, by id (the prototype's `reviewItems`):
  * letting Grasp's mail through their mail filter, so their people's links
  * don't land in spam. Core keeps none of it; the admin says when it's done.

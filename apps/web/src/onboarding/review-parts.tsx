@@ -6,12 +6,13 @@ import {
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
+import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { copyText } from "./setup-parts.tsx";
+import { copyText, useEntrance } from "./setup-parts.tsx";
 
 // What only the admin can settle in their onboarding, one item each
 // (prototype `components/onboarding/review-parts.tsx`): a step people told
@@ -54,6 +55,10 @@ export const ReviewItem = ({
   const { t } = useLingui();
   const settled = chosen !== null;
   const choice = chosen?.label ?? "";
+  const settledEntrance = useEntrance(
+    chosen?.id ?? "",
+    "animate-in fade-in duration-300"
+  );
   return (
     <div className="flex flex-col gap-3 border-t py-4 text-left last:border-b">
       <div className="flex flex-col">
@@ -80,7 +85,10 @@ export const ReviewItem = ({
         </div>
       ) : (
         <div
-          className="text-muted-foreground animate-in fade-in flex items-center gap-2 duration-300"
+          className={cn(
+            "text-muted-foreground flex items-center gap-2",
+            settledEntrance
+          )}
           key="settled"
         >
           <CheckIcon

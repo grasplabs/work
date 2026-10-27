@@ -89,10 +89,13 @@ const useSaveChoices = () => {
   return { save, busy, failure };
 };
 
-/** The integrations Grasp offers here, with what is connected: none while they load, or if they can't be read. */
+/** The integrations last read while this page is open: coming back to the step, what is connected shows at once while they are read again. */
+let lastRead: Integration[] = [];
+
+/** The integrations Grasp offers here, with what is connected: the ones last read, or none, while they load or if they can't be read. */
 const useIntegrations = (): Integration[] => {
   const core = useCore();
-  const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [integrations, setIntegrations] = useState<Integration[]>(lastRead);
   useEffect(() => {
     const left = new AbortController();
     const read = async (): Promise<void> => {
@@ -107,7 +110,8 @@ const useIntegrations = (): Integration[] => {
       );
       if (!left.signal.aborted && loaded.state === "ready") {
         const [catalog, connections] = loaded.data;
-        setIntegrations(integrationsOf(catalog.entries, connections));
+        lastRead = integrationsOf(catalog.entries, connections);
+        setIntegrations(lastRead);
       }
     };
     void read();
