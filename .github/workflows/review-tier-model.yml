@@ -7,10 +7,11 @@
 # `pull_request_target`, with main checked out: nothing of the PR runs, and
 # only its files and patches reach the model, never its title or body. That
 # trigger gives secrets to forks' PRs too, so the job's `if:` is what keeps
-# them out. The key comes from the review-tier environment's 1Password
-# service account, as the other jobs' secrets do; the API key there has its
-# own spend limit. The job may only read, so the key never sits beside a
-# write token.
+# them out. The key is a secret of the review-tier environment itself, not
+# of 1Password, which holds the platform's secrets: it is repository
+# tooling's, with a spend limit of its own, and the environment deploys
+# from main only. Only the one step that calls the model sees it, and the
+# job may only read, so it never sits beside a write token.
 #
 # A workflow of its own, so a title edit, which reruns the labels, never
 # cancels a verdict being paid for. Not for drafts, which are pushed often
@@ -50,15 +51,10 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
-        with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          ANTHROPIC_API_KEY: op://grasp-os-review-tier/anthropic/api-key
       - name: Ask the model
         shell: bash
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
