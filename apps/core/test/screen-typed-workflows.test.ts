@@ -2289,7 +2289,7 @@ describe(
         other.runId
       );
       await vi.waitFor(() => {
-        expect(shown().error?.code).toBe("workflow.run_unavailable");
+        expect(shown().unavailable).toBeTruthy();
       }, settles);
       const away = shown();
       // Bound back, and read again as a new run starts: shown again.
@@ -2310,7 +2310,8 @@ describe(
         away: {
           value: away.value,
           fresh: away.fresh,
-          error: away.error?.code,
+          error: away.error,
+          unavailable: away.unavailable,
         },
         back: { revision: back.revision, control: back.value?.control },
       }).toStrictEqual({
@@ -2323,10 +2324,12 @@ describe(
             pendingControl: null,
           },
         },
+        // Shown before: losing it is a state, no error.
         away: {
           value: undefined,
           fresh: false,
-          error: "workflow.run_unavailable",
+          error: undefined,
+          unavailable: true,
         },
         back: { revision: before.revision, control: before.value?.control },
       });
