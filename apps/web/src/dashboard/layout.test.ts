@@ -1,3 +1,4 @@
+import { offeredWidgets } from "@grasp-os/shared/dashboard";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -5,7 +6,6 @@ import {
   differsFromDefault,
   missingWidgets,
   moveWidget,
-  offeredWidgets,
   placeWidget,
   removeWidget,
   slotAt,

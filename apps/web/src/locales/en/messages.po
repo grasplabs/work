@@ -438,6 +438,10 @@ msgstr "{daily} a day"
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# day} other {# days}}"
 
+#: src/dashboard/custom-widget.tsx
+msgid "{days, plural, one {The last # day} other {The last # days}}"
+msgstr "{days, plural, one {The last # day} other {The last # days}}"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
 msgstr "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
@@ -1849,6 +1853,10 @@ msgstr "A team without a lead gets its links on the first day, and I ask each pe
 msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 msgstr "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 
+#: src/dashboard/widget-board.tsx
+msgid "A widget Grasp made"
+msgstr "A widget Grasp made"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "A workflow is redesigned with AI and waits for its test."
 msgstr "A workflow is redesigned with AI and waits for its test."
@@ -2900,8 +2908,13 @@ msgid "Ask for it"
 msgstr "Ask for it"
 
 #: src/chat/chat-dock.tsx
+#: src/dashboard/widget-board.tsx
 msgid "Ask Grasp"
 msgstr "Ask Grasp"
+
+#: src/dashboard/widget-board.tsx
+msgid "Ask Grasp for a widget"
+msgstr "Ask Grasp for a widget"
 
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
@@ -3455,6 +3468,11 @@ msgstr "Cancelled"
 
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"
+msgid "Cancelled"
+msgstr "Cancelled"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
 msgid "Cancelled"
 msgstr "Cancelled"
 
@@ -4012,6 +4030,11 @@ msgctxt "a run's lifecycle"
 msgid "Completed"
 msgstr "Completed"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
+msgid "Completed"
+msgstr "Completed"
+
 #: src/workflows/history-view.tsx
 msgctxt "an attempt of a step"
 msgid "Completed"
@@ -4019,6 +4042,11 @@ msgstr "Completed"
 
 #: src/workflows/resource-runs.tsx
 msgctxt "status of a workflow run"
+msgid "Completed"
+msgstr "Completed"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "workflow runs"
 msgid "Completed"
 msgstr "Completed"
 
@@ -4877,6 +4905,11 @@ msgstr "Doesn't take part: nobody in it gets a link."
 msgid "Domain"
 msgstr "Domain"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a table column: an engine"
+msgid "Domain"
+msgstr "Domain"
+
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Domain"
@@ -5509,6 +5542,11 @@ msgctxt "a run's lifecycle"
 msgid "Failed"
 msgstr "Failed"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
+msgid "Failed"
+msgstr "Failed"
+
 #: src/workflows/history-view.tsx
 msgctxt "an attempt of a step"
 msgid "Failed"
@@ -5516,6 +5554,11 @@ msgstr "Failed"
 
 #: src/workflows/resource-runs.tsx
 msgctxt "status of a workflow run"
+msgid "Failed"
+msgstr "Failed"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "workflow runs"
 msgid "Failed"
 msgstr "Failed"
 
@@ -6008,6 +6051,10 @@ msgstr "Grasp in your language. Numbers, dates and amounts follow it too."
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp is busy right now. Remove this policy and upload it again in a minute."
 msgstr "Grasp is busy right now. Remove this policy and upload it again in a minute."
+
+#: src/dashboard/widget-board.tsx
+msgid "Grasp is making it…"
+msgstr "Grasp is making it…"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp is reading the policy"
@@ -8844,6 +8891,11 @@ msgstr "Not released"
 msgid "Not run yet"
 msgstr "Not run yet"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
+msgid "Not run yet"
+msgstr "Not run yet"
+
 #: src/onboarding/work-record.tsx
 msgid "Not said"
 msgstr "Not said"
@@ -9038,6 +9090,10 @@ msgstr "Nothing to make better right now."
 #: src/landscape/overview-tab.tsx
 msgid "Nothing to raise right now."
 msgstr "Nothing to raise right now."
+
+#: src/dashboard/custom-widget.tsx
+msgid "Nothing to show yet."
+msgstr "Nothing to show yet."
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "Nothing used yet"
@@ -9741,6 +9797,11 @@ msgctxt "a run's lifecycle"
 msgid "Paused"
 msgstr "Paused"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
+msgid "Paused"
+msgstr "Paused"
+
 #: src/policies/policy.ts
 msgctxt "status of a policy rule"
 msgid "Paused"
@@ -10190,12 +10251,21 @@ msgstr "Purpose and model"
 msgid "Put back"
 msgstr "Put back"
 
+#: src/dashboard/widget-board.tsx
+msgid "Put one back"
+msgstr "Put one back"
+
 #: src/workflows/runs.tsx
 msgid "Queued"
 msgstr "Queued"
 
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"
+msgid "Queued"
+msgstr "Queued"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
 msgid "Queued"
 msgstr "Queued"
 
@@ -10968,6 +11038,11 @@ msgstr "Running"
 
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"
+msgid "Running"
+msgstr "Running"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
 msgid "Running"
 msgstr "Running"
 
@@ -11789,6 +11864,11 @@ msgctxt "step of the interviews"
 msgid "Started"
 msgstr "Started"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "workflow runs that started"
+msgid "Started"
+msgstr "Started"
+
 #: src/activity/audit-words.ts
 msgid "Started a chat"
 msgstr "Started a chat"
@@ -11830,6 +11910,11 @@ msgstr "Starts the day the company tells its team."
 #: src/onboarding/work-canvas.tsx
 msgid "Starts when: {starts}"
 msgstr "Starts when: {starts}"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "a table column: a workflow's"
+msgid "State"
+msgstr "State"
 
 #: src/policies/findings-table.tsx
 msgctxt "column: what a rule does to an app"
@@ -14330,6 +14415,11 @@ msgctxt "a run's lifecycle"
 msgid "Waiting"
 msgstr "Waiting"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
+msgid "Waiting"
+msgstr "Waiting"
+
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"
 msgid "Waiting"
@@ -14386,6 +14476,11 @@ msgstr "Waiting for an event"
 msgctxt "state of a data processing agreement"
 msgid "Waiting for signature"
 msgstr "Waiting for signature"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "workflow runs"
+msgid "Waiting for someone"
+msgstr "Waiting for someone"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Waiting for the answer"
@@ -15018,6 +15113,10 @@ msgstr "Which teams to show"
 msgid "Which tools do people actually use?"
 msgstr "Which tools do people actually use?"
 
+#: src/dashboard/widget-board.tsx
+msgid "Which workflows failed most this month?"
+msgstr "Which workflows failed most this month?"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "While paused, no link opens and none goes out, whatever was agreed."
 msgstr "While paused, no link opens and none goes out, whatever was agreed."
@@ -15290,6 +15389,11 @@ msgctxt "a kind of note in the brain: work worth turning into a workflow"
 msgid "Workflow"
 msgstr "Workflow"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a table column"
+msgid "Workflow"
+msgstr "Workflow"
+
 #: src/activity/pending.tsx
 msgid "Workflow {workflow}"
 msgstr "Workflow {workflow}"
@@ -15313,6 +15417,7 @@ msgstr "workflow.json"
 
 #: src/brain/goals-editor.tsx
 #: src/chat/builds.tsx
+#: src/dashboard/custom-widget.tsx
 #: src/dashboard/report.ts
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx

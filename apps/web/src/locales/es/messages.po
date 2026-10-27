@@ -438,6 +438,10 @@ msgstr "{daily} al día"
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# día} other {# días}}"
 
+#: src/dashboard/custom-widget.tsx
+msgid "{days, plural, one {The last # day} other {The last # days}}"
+msgstr "{days, plural, one {El último día} other {Los últimos # días}}"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
 msgstr "{devices, plural, one {Sesión iniciada en # dispositivo. Cierra la sesión en cualquiera que no reconozcas.} other {Sesión iniciada en # dispositivos. Cierra la sesión en cualquiera que no reconozcas.}}"
@@ -1849,6 +1853,10 @@ msgstr "Un equipo sin responsable recibe sus enlaces el primer día, y pregunto 
 msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 msgstr "Una herramienta activada empieza en Lectura donde Composio dice que solo lee; Grasp no lo comprueba. Una herramienta en Lectura se ejecuta sin preguntar. La llamada a una herramienta en Escritura desde un chat, o por una persona que usa un dominio, espera a que esa persona la confirme; la ejecución de un flujo de trabajo la hace como uno de sus pasos. Pulsa la etiqueta de una herramienta para cambiarla. Pon una herramienta en Lectura solo si no cambia nada: mal marcada, cambia cosas sin preguntar."
 
+#: src/dashboard/widget-board.tsx
+msgid "A widget Grasp made"
+msgstr "Un widget que hizo Grasp"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "A workflow is redesigned with AI and waits for its test."
 msgstr "Un flujo está rediseñado con IA y espera su prueba."
@@ -2900,8 +2908,13 @@ msgid "Ask for it"
 msgstr "Solicitar"
 
 #: src/chat/chat-dock.tsx
+#: src/dashboard/widget-board.tsx
 msgid "Ask Grasp"
 msgstr "Pregunta a Grasp"
+
+#: src/dashboard/widget-board.tsx
+msgid "Ask Grasp for a widget"
+msgstr "Pide un widget a Grasp"
 
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
@@ -3458,6 +3471,11 @@ msgctxt "a run's lifecycle"
 msgid "Cancelled"
 msgstr "Cancelada"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
+msgid "Cancelled"
+msgstr "Cancelado"
+
 #: src/workflows/resource-runs.tsx
 msgctxt "status of a workflow run"
 msgid "Cancelled"
@@ -4012,6 +4030,11 @@ msgctxt "a run's lifecycle"
 msgid "Completed"
 msgstr "Completada"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
+msgid "Completed"
+msgstr "Completado"
+
 #: src/workflows/history-view.tsx
 msgctxt "an attempt of a step"
 msgid "Completed"
@@ -4021,6 +4044,11 @@ msgstr "Completado"
 msgctxt "status of a workflow run"
 msgid "Completed"
 msgstr "Completada"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "workflow runs"
+msgid "Completed"
+msgstr "Completadas"
 
 #. placeholder {0}: episode.taskType
 #: src/brain/lessons-view.tsx
@@ -4877,6 +4905,11 @@ msgstr "No participa: nadie en él recibe un enlace."
 msgid "Domain"
 msgstr "Dominio"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a table column: an engine"
+msgid "Domain"
+msgstr "Dominio"
+
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Domain"
@@ -5509,6 +5542,11 @@ msgctxt "a run's lifecycle"
 msgid "Failed"
 msgstr "Fallida"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
+msgid "Failed"
+msgstr "Fallido"
+
 #: src/workflows/history-view.tsx
 msgctxt "an attempt of a step"
 msgid "Failed"
@@ -5518,6 +5556,11 @@ msgstr "Fallido"
 msgctxt "status of a workflow run"
 msgid "Failed"
 msgstr "Fallida"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "workflow runs"
+msgid "Failed"
+msgstr "Fallidas"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -6008,6 +6051,10 @@ msgstr "Grasp en tu idioma. Los números, las fechas y los importes también lo 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp is busy right now. Remove this policy and upload it again in a minute."
 msgstr "Grasp está ocupado ahora mismo. Quita esta política y vuelve a subirla dentro de un minuto."
+
+#: src/dashboard/widget-board.tsx
+msgid "Grasp is making it…"
+msgstr "Grasp lo está haciendo…"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp is reading the policy"
@@ -8844,6 +8891,11 @@ msgstr "Sin publicar"
 msgid "Not run yet"
 msgstr "Aún sin ejecutar"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
+msgid "Not run yet"
+msgstr "Aún sin ejecutar"
+
 #: src/onboarding/work-record.tsx
 msgid "Not said"
 msgstr "No lo dijo"
@@ -9038,6 +9090,10 @@ msgstr "Ahora mismo no hay nada que mejorar."
 #: src/landscape/overview-tab.tsx
 msgid "Nothing to raise right now."
 msgstr "Nada que señalar por ahora."
+
+#: src/dashboard/custom-widget.tsx
+msgid "Nothing to show yet."
+msgstr "Aún no hay nada que mostrar."
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "Nothing used yet"
@@ -9741,6 +9797,11 @@ msgctxt "a run's lifecycle"
 msgid "Paused"
 msgstr "En pausa"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
+msgid "Paused"
+msgstr "En pausa"
+
 #: src/policies/policy.ts
 msgctxt "status of a policy rule"
 msgid "Paused"
@@ -10190,12 +10251,21 @@ msgstr "Finalidad y modelo"
 msgid "Put back"
 msgstr "Volver a poner"
 
+#: src/dashboard/widget-board.tsx
+msgid "Put one back"
+msgstr "Volver a poner uno"
+
 #: src/workflows/runs.tsx
 msgid "Queued"
 msgstr "En cola"
 
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"
+msgid "Queued"
+msgstr "En cola"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
 msgid "Queued"
 msgstr "En cola"
 
@@ -10968,6 +11038,11 @@ msgstr "En marcha"
 
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"
+msgid "Running"
+msgstr "En curso"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
 msgid "Running"
 msgstr "En curso"
 
@@ -11789,6 +11864,11 @@ msgctxt "step of the interviews"
 msgid "Started"
 msgstr "Empezado"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "workflow runs that started"
+msgid "Started"
+msgstr "Iniciadas"
+
 #: src/activity/audit-words.ts
 msgid "Started a chat"
 msgstr "Empezó un chat"
@@ -11830,6 +11910,11 @@ msgstr "Empieza el día en que la empresa informa a su equipo."
 #: src/onboarding/work-canvas.tsx
 msgid "Starts when: {starts}"
 msgstr "Empieza cuando: {starts}"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "a table column: a workflow's"
+msgid "State"
+msgstr "Estado"
 
 #: src/policies/findings-table.tsx
 msgctxt "column: what a rule does to an app"
@@ -14330,6 +14415,11 @@ msgctxt "a run's lifecycle"
 msgid "Waiting"
 msgstr "En espera"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a workflow's state"
+msgid "Waiting"
+msgstr "En espera"
+
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"
 msgid "Waiting"
@@ -14386,6 +14476,11 @@ msgstr "Esperando un evento"
 msgctxt "state of a data processing agreement"
 msgid "Waiting for signature"
 msgstr "Pendiente de firma"
+
+#: src/dashboard/custom-widget.tsx
+msgctxt "workflow runs"
+msgid "Waiting for someone"
+msgstr "Esperando a alguien"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Waiting for the answer"
@@ -15018,6 +15113,10 @@ msgstr "Qué equipos mostrar"
 msgid "Which tools do people actually use?"
 msgstr "¿Qué herramientas usa realmente la gente?"
 
+#: src/dashboard/widget-board.tsx
+msgid "Which workflows failed most this month?"
+msgstr "¿Qué flujos de trabajo fallaron más este mes?"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "While paused, no link opens and none goes out, whatever was agreed."
 msgstr "Mientras está en pausa, ningún enlace se abre ni sale, se haya acordado lo que se haya acordado."
@@ -15290,6 +15389,11 @@ msgctxt "a kind of note in the brain: work worth turning into a workflow"
 msgid "Workflow"
 msgstr "Flujo de trabajo"
 
+#: src/dashboard/custom-widget.tsx
+msgctxt "a table column"
+msgid "Workflow"
+msgstr "Flujo de trabajo"
+
 #: src/activity/pending.tsx
 msgid "Workflow {workflow}"
 msgstr "Flujo de trabajo {workflow}"
@@ -15313,6 +15417,7 @@ msgstr "workflow.json"
 
 #: src/brain/goals-editor.tsx
 #: src/chat/builds.tsx
+#: src/dashboard/custom-widget.tsx
 #: src/dashboard/report.ts
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
