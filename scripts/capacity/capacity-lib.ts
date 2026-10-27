@@ -19,6 +19,10 @@
  * - A limit with no workload, or one whose workload doesn't run on the
  *   profile, gets no result at all: nothing to make evidence of, so
  *   publish fails rather than pass a raise unproven.
+ * - A workload that ran nothing proves nothing: it passes only when its
+ *   run reports at least one test passed, and none failed, was skipped or
+ *   left to do (`workloadPassed`), so a mistyped path, a file the config
+ *   doesn't include, or one whose tests all skip, never becomes evidence.
  */
 import { limitRaises } from "@grasp-os/shared/release";
 import type {
@@ -26,6 +30,7 @@ import type {
   ReleaseManifest,
   RuntimeProfile,
 } from "@grasp-os/shared/release";
+import { z } from "zod";
 
 import { previousReleaseOf } from "../release/evidence-lib.ts";
 import type { CapacityWorkload } from "./workloads.ts";
@@ -119,4 +124,33 @@ export const runCapacity = async (
     results.push({ ...raise, profile, commit });
   }
   return results;
+};
+
+/** What a workload's run reports, as Vitest's JSON reporter writes it. */
+const reportSchema = z.object({
+  success: z.boolean(),
+  numPassedTests: z.int(),
+  numFailedTests: z.int(),
+  numPendingTests: z.int(),
+  numTodoTests: z.int(),
+});
+
+/**
+ * Whether a workload's run (`report`, Vitest's JSON reporter's output)
+ * proves it held: it succeeded, at least one test passed, and none failed,
+ * was skipped or left to do. A report that doesn't parse proves nothing.
+ */
+export const workloadPassed = (report: unknown): boolean => {
+  const parsed = reportSchema.safeParse(report);
+  if (!parsed.success) {
+    return false;
+  }
+  const run = parsed.data;
+  return (
+    run.success &&
+    run.numPassedTests > 0 &&
+    run.numFailedTests === 0 &&
+    run.numPendingTests === 0 &&
+    run.numTodoTests === 0
+  );
 };

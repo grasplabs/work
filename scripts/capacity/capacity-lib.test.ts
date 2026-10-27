@@ -1,9 +1,14 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { describe, expect, it } from "vite-plus/test";
 
 import { builds, info } from "../release/fixture-release.ts";
 import { generateManifest } from "../release/manifest-lib.ts";
-import { runCapacity } from "./capacity-lib.ts";
+import { runCapacity, workloadPassed } from "./capacity-lib.ts";
 import type { CapacityWorkload } from "./workloads.ts";
 
 // The capacity job (GRA-942), from what a run must not prove first: a
@@ -99,5 +104,54 @@ describe("the capacity job", () => {
       "No capacity workload for workflowSteps on workerd",
       `The capacity workload for workflowSteps failed at ${steps} on workerd`,
     ]);
+  });
+});
+
+const root = path.join(import.meta.dirname, "../..");
+
+/** The report Vitest writes for its run of `file`, from the repo's root. */
+const reportOf = (file: string): unknown => {
+  const out = path.join(
+    mkdtempSync(path.join(tmpdir(), "grasp-os-capacity-test-")),
+    "report.json"
+  );
+  execFileSync(
+    path.join(root, "node_modules/.bin/vp"),
+    ["test", "run", "--reporter=json", `--outputFile=${out}`, file],
+    { cwd: root, stdio: "ignore" }
+  );
+  return JSON.parse(readFileSync(out, "utf-8"));
+};
+
+describe("a capacity workload's run", () => {
+  it("proves nothing for a mistyped path, which Vitest runs as nothing, exiting 0", () => {
+    expect(
+      workloadPassed(reportOf("scripts/capacity/no-such-workload.test.ts"))
+    ).toBeFalsy();
+  });
+
+  it("holds only when a test passed and none failed, skipped or was left to do", () => {
+    const run = {
+      success: true,
+      numPassedTests: 1,
+      numFailedTests: 0,
+      numPendingTests: 0,
+      numTodoTests: 0,
+    };
+    expect({
+      passed: workloadPassed(run),
+      skipped: workloadPassed({ ...run, numPendingTests: 1 }),
+      todo: workloadPassed({ ...run, numTodoTests: 1 }),
+      failed: workloadPassed({ ...run, success: false, numFailedTests: 1 }),
+      nothing: workloadPassed({ ...run, numPassedTests: 0 }),
+      unreadable: workloadPassed("not a report"),
+    }).toStrictEqual({
+      passed: true,
+      skipped: false,
+      todo: false,
+      failed: false,
+      nothing: false,
+      unreadable: false,
+    });
   });
 });

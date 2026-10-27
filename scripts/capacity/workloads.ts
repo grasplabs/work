@@ -24,3 +24,18 @@ export interface CapacityWorkload {
 
 /** Each limit's workload, by the limit's name in `platformLimits`. */
 export const capacityWorkloads: Readonly<Record<string, CapacityWorkload>> = {};
+
+/**
+ * What a change has to be reviewed for when a release raises a limit
+ * (scripts/release/review-lib.ts): the limits themselves, what proves
+ * them (the workloads and their tests, this job, the evidence's making)
+ * and the workflow that runs it. A path, or a folder ending in `/`.
+ */
+export const capacityWatched: readonly string[] = [
+  "packages/shared/src/platform-limits.ts",
+  "packages/shared/src/release.ts",
+  "scripts/capacity/",
+  "scripts/release/",
+  ".github/",
+  ...Object.values(capacityWorkloads).map(({ test }) => `apps/core/${test}`),
+];

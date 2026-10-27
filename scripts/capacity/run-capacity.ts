@@ -11,14 +11,15 @@
  *        --previous <file> --out <file>
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
 import { runtimeProfileSchema } from "@grasp-os/shared/release";
 
 import { verifyRelease } from "../release/manifest-lib.ts";
-import { runCapacity } from "./capacity-lib.ts";
+import { runCapacity, workloadPassed } from "./capacity-lib.ts";
 import { capacityWorkloads } from "./workloads.ts";
 
 const { values: args } = parseArgs({
@@ -51,6 +52,10 @@ const results = await runCapacity(
   process.env.GITHUB_SHA,
   capacityWorkloads,
   async (workload, raise) => {
+    const report = path.join(
+      mkdtempSync(path.join(tmpdir(), "grasp-os-capacity-")),
+      "report.json"
+    );
     try {
       execFileSync(
         "vp",
@@ -60,6 +65,8 @@ const results = await runCapacity(
           "-c",
           "vite.on-prem.config.ts",
           "--maxWorkers=1",
+          "--reporter=json",
+          `--outputFile=${report}`,
           workload.test,
         ],
         {
@@ -71,10 +78,14 @@ const results = await runCapacity(
           },
         }
       );
-      return await Promise.resolve(true);
     } catch {
       return false;
     }
+    // Ran, and ran something: a test passed, none skipped (capacity-lib.ts).
+    return await Promise.resolve(
+      existsSync(report) &&
+        workloadPassed(JSON.parse(readFileSync(report, "utf-8")))
+    );
   }
 );
 writeFileSync(path.resolve(args.out), `${JSON.stringify(results, null, 2)}\n`);

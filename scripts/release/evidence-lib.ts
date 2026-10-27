@@ -128,7 +128,7 @@ export const evidenceFromCapacity = (
   manifest: ReleaseManifest,
   results: unknown,
   jobId: number,
-  securityReview: { pullRequest: number; approvedBy: string }
+  securityReviews: readonly { pullRequest: number; approvedBy: string }[]
 ): LimitEvidence[] =>
   capacityResultsSchema.parse(results).map((result) => ({
     limit: result.limit,
@@ -137,5 +137,5 @@ export const evidenceFromCapacity = (
     releaseId: manifest.releaseId,
     profile: result.profile,
     capacityRun: { jobId, commit: result.commit, profile: result.profile },
-    securityReview,
+    securityReviews: [...securityReviews],
   }));

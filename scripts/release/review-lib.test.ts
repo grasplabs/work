@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { catchAllOwners, mergedAs, ownerApproval } from "./review-lib.ts";
+import {
+  catchAllOwners,
+  mergedAs,
+  ownerApproval,
+  securityReviewsSince,
+} from "./review-lib.ts";
+import type { ReviewSource } from "./review-lib.ts";
 
 // The security review a release's limit evidence names (GRA-942), from
 // what must not count first: a pull request merged elsewhere or as
@@ -72,9 +78,22 @@ describe("the security review of a release's change", () => {
     ];
     for (const reviews of attempts) {
       expect(() => ownerApproval(merged, reviews, owners)).toThrow(
-        /has no CODEOWNER's approval of its final head/u
+        /has no CODEOWNER's approval of its final head|has a CODEOWNER's changes requested/u
       );
     }
+  });
+
+  it("refuses an approval while another CODEOWNER's latest word is changes requested", () => {
+    expect(() =>
+      ownerApproval(
+        mergedAs([pull()], commit),
+        [
+          review("nickruigrok", "APPROVED", "2026-10-27T09:00:00Z"),
+          review("jkobgnther", "CHANGES_REQUESTED", "2026-10-27T09:10:00Z"),
+        ],
+        owners
+      )
+    ).toThrow(/has a CODEOWNER's changes requested/u);
   });
 
   it("keeps an approval a later comment follows", () => {
@@ -98,5 +117,146 @@ describe("the security review of a release's change", () => {
       /only users are resolved/u
     );
     expect(() => catchAllOwners("# none\n")).toThrow(/names no owner/u);
+  });
+});
+
+/** Main between two releases, as GitHub would answer for it. */
+const mainBetween = (
+  merges: {
+    sha: string;
+    files: string[];
+    number: number;
+    reviews: unknown[];
+    codeowners?: string;
+  }[]
+): ReviewSource => ({
+  commitsBetween: async () =>
+    await Promise.resolve(merges.map(({ sha }) => sha)),
+  commit: async (sha) => {
+    const merge = merges.find((each) => each.sha === sha);
+    return await Promise.resolve({
+      files: merge?.files ?? [],
+      parent: `parent-of-${sha}`,
+    });
+  },
+  pullsOf: async (sha) => {
+    const merge = merges.find((each) => each.sha === sha);
+    return await Promise.resolve([
+      pull({ number: merge?.number, merge_commit_sha: sha }),
+    ]);
+  },
+  reviewsOf: async (number) =>
+    await Promise.resolve(
+      merges.find((each) => each.number === number)?.reviews ?? []
+    ),
+  codeownersAt: async (sha) => {
+    const merge = merges.find((each) => `parent-of-${each.sha}` === sha);
+    return await Promise.resolve(
+      merge?.codeowners ?? "* @nickruigrok @jkobgnther\n"
+    );
+  },
+});
+
+const watched = ["packages/shared/src/platform-limits.ts", "scripts/capacity/"];
+const approved = [review("jkobgnther", "APPROVED", "2026-10-27T09:00:00Z")];
+
+describe("the security review of every change between two releases", () => {
+  it("names each approved change to the limits or a workload, oldest first, and passes over the rest", async () => {
+    await expect(
+      securityReviewsSince(
+        mainBetween([
+          {
+            sha: "1".repeat(40),
+            files: ["packages/shared/src/platform-limits.ts"],
+            number: 10,
+            reviews: approved,
+          },
+          {
+            sha: "2".repeat(40),
+            files: ["apps/web/src/x.tsx"],
+            number: 11,
+            reviews: [],
+          },
+          {
+            sha: commit,
+            files: ["scripts/capacity/workloads.ts"],
+            number: 12,
+            reviews: approved,
+          },
+        ]),
+        "0".repeat(40),
+        commit,
+        watched
+      )
+    ).resolves.toStrictEqual([
+      { pullRequest: 10, approvedBy: "jkobgnther" },
+      { pullRequest: 12, approvedBy: "jkobgnther" },
+    ]);
+  });
+
+  it("refuses an unreviewed raise that an approved, unrelated change follows", async () => {
+    await expect(
+      securityReviewsSince(
+        mainBetween([
+          // Merged by an admin's bypass, with no approval.
+          {
+            sha: "1".repeat(40),
+            files: ["packages/shared/src/platform-limits.ts"],
+            number: 10,
+            reviews: [],
+          },
+          {
+            sha: commit,
+            files: ["apps/web/src/x.tsx"],
+            number: 12,
+            reviews: approved,
+          },
+        ]),
+        "0".repeat(40),
+        commit,
+        watched
+      )
+    ).rejects.toThrow(/#10 has no CODEOWNER's approval/u);
+  });
+
+  it("reads CODEOWNERS from before the merge, so a change can't name its own owners", async () => {
+    await expect(
+      securityReviewsSince(
+        mainBetween([
+          {
+            sha: commit,
+            files: [
+              "packages/shared/src/platform-limits.ts",
+              ".github/CODEOWNERS",
+            ],
+            number: 12,
+            // Approved by someone the change itself made an owner.
+            reviews: [review("someone", "APPROVED", "2026-10-27T09:00:00Z")],
+            codeowners: "* @nickruigrok @jkobgnther\n",
+          },
+        ]),
+        "0".repeat(40),
+        commit,
+        watched
+      )
+    ).rejects.toThrow(/no CODEOWNER's approval/u);
+  });
+
+  it("refuses a raise no reviewed change between the releases made", async () => {
+    await expect(
+      securityReviewsSince(
+        mainBetween([
+          {
+            sha: commit,
+            files: ["apps/web/src/x.tsx"],
+            number: 12,
+            reviews: approved,
+          },
+        ]),
+        "0".repeat(40),
+        commit,
+        watched
+      )
+    ).rejects.toThrow(/nothing reviewed raised them/u);
   });
 });

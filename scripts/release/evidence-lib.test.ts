@@ -40,7 +40,7 @@ describe("a release's limit evidence at publish", () => {
             commit: manifest.commit,
             profile: "cloudflare",
           },
-          securityReview: { pullRequest: 1, approvedBy: "nickruigrok" },
+          securityReviews: [{ pullRequest: 1, approvedBy: "nickruigrok" }],
         },
       ]);
     const itself = (): unknown =>
@@ -62,7 +62,7 @@ describe("a release's limit evidence at publish", () => {
         commit: manifest.commit,
         profile: "workerd" as const,
       },
-      securityReview: { pullRequest: 3, approvedBy: "nickruigrok" },
+      securityReviews: [{ pullRequest: 3, approvedBy: "nickruigrok" }],
     };
 
     expect(limitEvidenceFor(manifest, before(), [evidence])).toStrictEqual({
@@ -85,7 +85,7 @@ describe("a release's limit evidence at publish", () => {
         },
       ],
       987_654,
-      { pullRequest: 42, approvedBy: "nickruigrok" }
+      [{ pullRequest: 42, approvedBy: "nickruigrok" }]
     );
 
     expect(
@@ -102,7 +102,7 @@ describe("a release's limit evidence at publish", () => {
           commit: manifest.commit,
           profile: "workerd",
         },
-        securityReview: { pullRequest: 42, approvedBy: "nickruigrok" },
+        securityReviews: [{ pullRequest: 42, approvedBy: "nickruigrok" }],
       },
     ]);
   });

@@ -6,10 +6,11 @@
  *
  * The evidence for each raise comes from the capacity job's results
  * (`--capacity`, scripts/capacity/run-capacity.ts), each with this CI
- * job's id and the security review of the change: the pull request
- * merged as the release's commit and its CODEOWNER's approval
- * (review-lib.ts), read from GitHub's API. Nothing is asked of GitHub for
- * a release that raises nothing.
+ * job's id and the security review of the change: every pull request
+ * merged since the release before that touched the limits or what proves
+ * them, each with its CODEOWNER's approval (review-lib.ts), read from
+ * GitHub's API. Nothing is asked of GitHub for a release that raises
+ * nothing.
  *
  * Env, with capacity results: GITHUB_TOKEN, GITHUB_REPOSITORY,
  *      GITHUB_API_URL, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, and CI_JOB_NAME,
@@ -24,10 +25,16 @@ import { parseArgs } from "node:util";
 import { limitEvidenceFile } from "@grasp-os/shared/release";
 import { z } from "zod";
 
+import { capacityWatched } from "../capacity/workloads.ts";
 import { evidenceFromCapacity, limitEvidenceFor } from "./evidence-lib.ts";
 import { verifyRelease } from "./manifest-lib.ts";
-import { catchAllOwners, mergedAs, ownerApproval } from "./review-lib.ts";
-import type { SecurityReview } from "./review-lib.ts";
+import { securityReviewsSince } from "./review-lib.ts";
+import type { ReviewSource } from "./review-lib.ts";
+
+/** The commit of the release before, from its manifest (previous-release.ts). */
+const previousCommit = (previous: unknown): string =>
+  z.object({ commit: z.string().regex(/^[0-9a-f]{40}$/u) }).parse(previous)
+    .commit;
 
 const { values: args } = parseArgs({
   options: {
@@ -91,19 +98,48 @@ const pages = async (route: string): Promise<unknown[]> => {
   }
 };
 
-/** The security review of commit `commit`: its pull request and CODEOWNER's approval. */
-const securityReviewOf = async (commit: string): Promise<SecurityReview> => {
-  const pull = mergedAs(await pages(`commits/${commit}/pulls`), commit);
-  const owners = await github(
-    `contents/.github/CODEOWNERS?ref=${commit}`,
-    "application/vnd.github.raw+json"
-  );
-  const codeowners = await owners.text();
-  return ownerApproval(
-    pull,
-    await pages(`pulls/${pull.number}/reviews`),
-    catchAllOwners(codeowners)
-  );
+/** The security review, as GitHub's API answers it for this repository. */
+const fromGitHub: ReviewSource = {
+  commitsBetween: async (base, head) => {
+    const shas: string[] = [];
+    for (let page = 1; ; page += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- each page after the last
+      const response = await github(
+        `compare/${base}...${head}?per_page=100&page=${page}`
+      );
+      const { commits } = z
+        .object({ commits: z.array(z.object({ sha: z.string() })) })
+        // oxlint-disable-next-line no-await-in-loop -- each page after the last
+        .parse(await response.json());
+      shas.push(...commits.map(({ sha }) => sha));
+      if (commits.length < 100) {
+        return shas;
+      }
+    }
+  },
+  commit: async (sha) => {
+    const response = await github(`commits/${sha}`);
+    const { files, parents } = z
+      .object({
+        files: z.array(z.object({ filename: z.string() })),
+        parents: z.array(z.object({ sha: z.string() })).min(1),
+      })
+      .parse(await response.json());
+    const [first] = parents;
+    if (first === undefined) {
+      throw new Error(`Commit ${sha} has no parent`);
+    }
+    return { files: files.map(({ filename }) => filename), parent: first.sha };
+  },
+  pullsOf: async (sha) => await pages(`commits/${sha}/pulls`),
+  reviewsOf: async (pullRequest) => await pages(`pulls/${pullRequest}/reviews`),
+  codeownersAt: async (sha) => {
+    const response = await github(
+      `contents/.github/CODEOWNERS?ref=${sha}`,
+      "application/vnd.github.raw+json"
+    );
+    return await response.text();
+  },
 };
 
 /** This CI job's id, by its name in this run's attempt. */
@@ -123,6 +159,7 @@ const thisJobId = async (): Promise<number> => {
 };
 
 const { manifest } = await verifyRelease(releaseDir);
+const previous = readJson(args.previous);
 const results =
   args.capacity === undefined
     ? []
@@ -134,9 +171,14 @@ const evidence =
         manifest,
         results,
         await thisJobId(),
-        await securityReviewOf(manifest.commit)
+        await securityReviewsSince(
+          fromGitHub,
+          previousCommit(previous),
+          manifest.commit,
+          capacityWatched
+        )
       );
-const file = limitEvidenceFor(manifest, readJson(args.previous), evidence);
+const file = limitEvidenceFor(manifest, previous, evidence);
 writeFileSync(
   path.join(releaseDir, limitEvidenceFile),
   `${JSON.stringify(file, null, 2)}\n`
