@@ -456,7 +456,7 @@ const applyPatch = async <C>(
     db
       .insert(brainLessonVersions)
       .select(
-        sql`SELECT ${patch.lessonId}, ${revision}, ${patch.base === 0 ? null : patch.base}, ${content}, ${patchKey}, ${now.getTime()}, NULL, NULL, NULL WHERE ${atBase}`
+        sql`SELECT ${patch.lessonId}, ${revision}, ${patch.base === 0 ? null : patch.base}, ${content}, ${patchKey}, ${now.getTime()}, NULL, NULL, NULL, NULL WHERE ${atBase}`
       )
       .onConflictDoNothing(),
     db
@@ -768,17 +768,19 @@ const episodesOf = (stored: string): number => {
 };
 
 /**
- * How long a wording pass holds the revisions it claimed: longer than its
- * step may run, so only a pass that died lets another word them.
+ * How long a job's claim on a revision lasts against other jobs: longer
+ * than a job's steps may run, so only a job that died lets another word
+ * what it claimed. Its own retries take their claims back at once.
  */
 export const wordingClaimMs = 10 * 60_000;
 
 /**
- * That a revision has no wording and no pass holds it, as of `now`: never
- * claimed, or claimed past its lease.
+ * That a revision has no wording yet and the job holding `token` may word
+ * it, as of `now`: never claimed, claimed by that job (a retry of one of
+ * its steps), or claimed by another job past its lease.
  */
-const unclaimed = (now: Date) =>
-  sql`(${brainLessonVersions.wordingState} IS NULL OR (${brainLessonVersions.wordingState} = 'claimed' AND ${brainLessonVersions.wordingClaimedAt} < ${now.getTime() - wordingClaimMs}))`;
+const claimable = (now: Date, token: string) =>
+  sql`(${brainLessonVersions.wordingState} IS NULL OR (${brainLessonVersions.wordingState} = 'claimed' AND (${brainLessonVersions.wordingClaim} = ${token} OR ${brainLessonVersions.wordingClaimedAt} < ${now.getTime() - wordingClaimMs})))`;
 
 /**
  * One pass of `wordLessons`: how many lessons it asked to word, whether
@@ -787,7 +789,9 @@ const unclaimed = (now: Date) =>
  */
 const wordingPass = async <C>(
   brain: Brain<C>,
-  scope: ConsolidationScope
+  scope: ConsolidationScope,
+  /** The job's claim token, the same in every retry of its steps. */
+  token: string
 ): Promise<{ asked: number; worded: number; refused: boolean }> => {
   const { db } = brain;
   const now = brain.ports.clock();
@@ -813,7 +817,7 @@ const wordingPass = async <C>(
         eq(brainLessons.scope, scope.scope),
         eq(brainLessons.scopeId, scope.scopeId),
         eq(brainLessons.state, "candidate"),
-        unclaimed(now)
+        claimable(now, token)
       )
     )
     .orderBy(asc(brainLessons.updatedAt), asc(brainLessons.id))
@@ -844,12 +848,16 @@ const wordingPass = async <C>(
     // oxlint-disable-next-line no-await-in-loop -- one bounded call at a time
     const claimed = await db
       .update(brainLessonVersions)
-      .set({ wordingState: "claimed", wordingClaimedAt: now })
+      .set({
+        wordingState: "claimed",
+        wordingClaim: token,
+        wordingClaimedAt: now,
+      })
       .where(
         and(
           eq(brainLessonVersions.lessonId, lesson.lessonId),
           eq(brainLessonVersions.revision, lesson.revision),
-          unclaimed(now)
+          claimable(now, token)
         )
       )
       .returning({ lessonId: brainLessonVersions.lessonId });
@@ -888,24 +896,34 @@ const wordingPass = async <C>(
             : "failed",
       };
     }
-    // oxlint-disable-next-line no-await-in-loop -- as above
-    await db
-      .update(brainLessonVersions)
-      .set({
-        wording: written.wording,
-        wordingState: written.state,
-        wordingClaimedAt: null,
-      })
-      .where(
-        and(
-          eq(brainLessonVersions.lessonId, lesson.lessonId),
-          eq(brainLessonVersions.revision, lesson.revision),
-          // Still this pass's claim: one past its lease another took saves
-          // nothing more of this one.
-          eq(brainLessonVersions.wordingState, "claimed"),
-          eq(brainLessonVersions.wordingClaimedAt, now)
-        )
-      );
+    const mine = and(
+      eq(brainLessonVersions.lessonId, lesson.lessonId),
+      eq(brainLessonVersions.revision, lesson.revision),
+      eq(brainLessonVersions.wordingState, "claimed"),
+      eq(brainLessonVersions.wordingClaim, token)
+    );
+    try {
+      // Still this job's claim: one another job took past its lease saves
+      // nothing more of this one.
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await db
+        .update(brainLessonVersions)
+        .set({
+          wording: written.wording,
+          wordingState: written.state,
+          wordingClaim: null,
+          wordingClaimedAt: null,
+        })
+        .where(mine);
+    } catch (error) {
+      // A save that failed gives its claim back before the step retries.
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await db
+        .update(brainLessonVersions)
+        .set({ wordingState: null, wordingClaim: null, wordingClaimedAt: null })
+        .where(mine);
+      throw error;
+    }
     if (written.state === "written") {
       worded += 1;
     }
@@ -925,9 +943,10 @@ const wordingPass = async <C>(
  */
 export const wordLessons = async <C>(
   brain: Brain<C>,
-  scope: ConsolidationScope
+  scope: ConsolidationScope,
+  token: string = crypto.randomUUID()
 ): Promise<number> => {
-  const { worded } = await wordingPass(brain, scope);
+  const { worded } = await wordingPass(brain, scope, token);
   return worded;
 };
 
@@ -1211,12 +1230,23 @@ export const runConsolidation = async <C>(
   // may (none left) or the budget refuses one, at most as many as it
   // patched. A wording that failed counts as asked, so it never ends the
   // passes before the lessons after it are worded.
+  // The job's claim token, kept by its own step: the same in every retry
+  // and replay, so a retried pass takes back what it claimed before.
+  const token = z
+    .string()
+    .parse(
+      await step.do(
+        "word-claim",
+        consolidationConfig,
+        async () => await Promise.resolve(crypto.randomUUID())
+      )
+    );
   for (let pass = 0; pass < wordingPassesPerJob; pass += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one bounded pass after another
     const passed = await step.do(
       `word-${pass}`,
       consolidationConfig,
-      async () => await wordingPass(brain, scope)
+      async () => await wordingPass(brain, scope, token)
     );
     const done = z
       .object({ asked: z.int(), refused: z.boolean() })

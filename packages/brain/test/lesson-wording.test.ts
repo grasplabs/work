@@ -66,6 +66,14 @@ const lessonFor = async (
   await consolidate(brain, { scope: "person", scopeId: ownerId });
 };
 
+/** Claims lesson `lessonId`'s current revision for job `token`, now. */
+const claim = async (lessonId: string, token: string) =>
+  await env.BRAIN.prepare(
+    "UPDATE brain_lesson_versions SET wording_state = 'claimed', wording_claim = ?, wording_claimed_at = ? WHERE lesson_id = ?"
+  )
+    .bind(token, Date.now(), lessonId)
+    .run();
+
 /** The current version's wording and state, as stored. */
 const stored = async (lessonId: string) =>
   await env.BRAIN.prepare(
@@ -208,7 +216,7 @@ describe("wording lessons", () => {
     );
 
     expect({ steps, asked: worded.length }).toStrictEqual({
-      steps: ["consolidate", "word-0", "word-1"],
+      steps: ["consolidate", "word-claim", "word-0", "word-1"],
       asked: wordingsPerJob + 2,
     });
   });
@@ -284,6 +292,41 @@ describe("wording lessons", () => {
       askedAtOnce: 3,
       reclaimed: 1,
       asked: 4,
+    });
+  });
+
+  it("words on a job's retry what its failed attempt claimed, though another job's claim holds", async () => {
+    const { brain, worded } = testHost();
+    const ann = named("ann");
+    await lessonFor(brain, ann, "workflow:app/retried");
+    await lessonFor(brain, ann, "workflow:app/elsewhere");
+    const lessons = await lessonsOf(brain, { scope: "person", scopeId: ann });
+    const [retried, elsewhere] = lessons;
+    // Its first attempt claimed one and failed before saving; another job,
+    // still running, holds the other.
+    await claim(retried?.id ?? "", "this-job");
+    await claim(elsewhere?.id ?? "", "another-job");
+
+    // The retry: its durable step answers the token it kept.
+    await runConsolidation(
+      brain,
+      { scope: "person", scopeId: ann },
+      {
+        do: async (name, _config, fn) =>
+          name === "word-claim" ? "this-job" : await fn(),
+      }
+    );
+
+    const retriedKept = await stored(retried?.id ?? "");
+    const elsewhereKept = await stored(elsewhere?.id ?? "");
+    expect({
+      retried: retriedKept?.state,
+      elsewhere: elsewhereKept?.state,
+      asked: worded.length,
+    }).toStrictEqual({
+      retried: "written",
+      elsewhere: "claimed",
+      asked: 1,
     });
   });
 

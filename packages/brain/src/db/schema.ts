@@ -686,7 +686,13 @@ export const brainLessonVersions = sqliteTable(
     wordingState: text("wording_state", {
       enum: ["claimed", "written", "refused", "failed"],
     }),
-    /** When a wording pass claimed it: past its lease, another may. */
+    /**
+     * The claim of the consolidation job wording it: a token the job keeps
+     * in its durable steps, so a retry of the job takes its own claims
+     * back, and another job never takes them while they last.
+     */
+    wordingClaim: text("wording_claim"),
+    /** When a job claimed it: past its lease, another job may. */
     wordingClaimedAt: timestamp("wording_claimed_at"),
   },
   (table) => [
