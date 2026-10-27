@@ -2621,7 +2621,6 @@ msgstr "En cualquier punto"
 #: src/connections/request-app-dialog.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.settings.packages.index.tsx
 msgid "App"
 msgstr "Aplicación"
 
@@ -4894,6 +4893,7 @@ msgstr "No participa: nadie en él recibe un enlace."
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Domain"

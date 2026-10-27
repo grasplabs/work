@@ -2621,7 +2621,6 @@ msgstr "Überall"
 #: src/connections/request-app-dialog.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.settings.packages.index.tsx
 msgid "App"
 msgstr "App"
 
@@ -4894,6 +4893,7 @@ msgstr "Nimmt nicht teil: Niemand darin bekommt einen Link."
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Domain"
@@ -4907,7 +4907,7 @@ msgstr "Domäne"
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Domain"
-msgstr "Domain"
+msgstr "Domäne"
 
 #: src/chat/studio.tsx
 msgctxt "the domain being built, beside its chat"

@@ -127,7 +127,7 @@ const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
               </TableCell>
               <TableCell>
                 <Badge variant="outline">
-                  {subject.type === "workflow" ? t`Workflow` : t`App`}
+                  {subject.type === "workflow" ? t`Workflow` : t`Domain`}
                 </Badge>
               </TableCell>
               <TableCell>
