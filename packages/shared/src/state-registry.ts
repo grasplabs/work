@@ -697,6 +697,10 @@ const onboarding: DurableObjectState = {
     asked_about: exported(`${core}onboarding/store.ts`),
     drawn_works: exported(`${core}onboarding/store.ts`),
     settled_works: exported(`${core}onboarding/store.ts`),
+    checked_differences: exported(
+      `${core}onboarding/store.ts`,
+      "The differences whose two ways the brain's intake checked five or more people behind, by the drawing it checked."
+    ),
     counted_works: exported(`${core}onboarding/store.ts`),
     brain_teams: exported(`${core}onboarding/store.ts`),
     brain_sent: exported(

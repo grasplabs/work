@@ -10413,6 +10413,10 @@ msgstr "leest de gegevens van het domein"
 msgid "Ready"
 msgstr "Klaar"
 
+#: src/chat/thread.tsx
+msgid "Reasoning"
+msgstr "Redenering"
+
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Receipt"
 msgstr "Ontvangstbewijs"
@@ -13644,6 +13648,10 @@ msgstr "Deze versie van de app is ingetrokken en draait niet meer. Een beheerder
 msgid "This version's data change is still being applied. Try again in a moment."
 msgstr "De gegevenswijziging van deze versie wordt nog toegepast. Probeer het zo opnieuw."
 
+#: src/chat/thread.tsx
+msgid "Thought for {time}"
+msgstr "Heeft {time} nagedacht"
+
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
 msgstr "Via Composio, dat de toegang in zijn eigen cloud bewaart. Je workflows kunnen het gebruiken zodra het gekoppeld is, alleen voor wat je toestaat."
@@ -15461,6 +15469,11 @@ msgstr "Schrijfacties die een model kan sturen: {target}"
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Schrijft"
+
+#. placeholder {0}: version.wording
+#: src/brain/lessons-view.tsx
+msgid "Written by a model: {0}"
+msgstr "Geschreven door een model: {0}"
 
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Written down"

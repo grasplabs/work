@@ -405,6 +405,24 @@ export const settledWorks = sqliteTable("settled_works", {
 });
 
 /**
+ * The pieces of work whose step told two ways the brain's intake checked
+ * five or more people behind, each way (GRA-1084, drawing-support.ts),
+ * and the drawing it checked: the review shows that difference only while
+ * that drawing stands, and only as it was checked, the two ways with every
+ * name the roster had then taken out (`way`, `other`), so a name changed
+ * on the roster since never brings one back. Goes with the piece of work.
+ */
+export const checkedDifferences = sqliteTable("checked_differences", {
+  work: text().primaryKey(),
+  drawnAt: text("drawn_at").notNull(),
+  /** The step as one way tells it, names taken out. */
+  way: text().notNull(),
+  /** The other way, names taken out. */
+  other: text().notNull(),
+  at: text().notNull(),
+});
+
+/**
  * The pieces of work Grasp counts as known by hand, before the rules say
  * so: when, and by which staff member. Goes with the piece of work.
  */
