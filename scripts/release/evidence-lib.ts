@@ -15,9 +15,11 @@ import {
   limitEvidenceSchema,
   platformLimitsSchema,
   releaseIdSchema,
+  runtimeProfileSchema,
   verifyLimitEvidence,
 } from "@grasp-os/shared/release";
 import type {
+  LimitEvidence,
   LimitEvidenceFile,
   PreviousRelease,
   ReleaseManifest,
@@ -106,3 +108,34 @@ export const readLimitEvidence = (
   verifyLimitEvidence({ ...evidence, platformLimits: manifest.platformLimits });
   return bytes;
 };
+
+/** A capacity run's result (scripts/capacity), as evidence-lib reads it. */
+const capacityResultsSchema = z.array(
+  z.strictObject({
+    limit: z.string(),
+    raisedTo: z.int().nonnegative().nullable(),
+    profile: runtimeProfileSchema,
+    commit: z.string(),
+  })
+);
+
+/**
+ * The evidence entries for `manifest` from its capacity runs (`results`,
+ * run-capacity.ts's output) in CI job `jobId`, each with the security
+ * review of the change: one per raised limit and profile that passed.
+ */
+export const evidenceFromCapacity = (
+  manifest: ReleaseManifest,
+  results: unknown,
+  jobId: number,
+  securityReview: { pullRequest: number; approvedBy: string }
+): LimitEvidence[] =>
+  capacityResultsSchema.parse(results).map((result) => ({
+    limit: result.limit,
+    raisedTo: result.raisedTo,
+    commit: manifest.commit,
+    releaseId: manifest.releaseId,
+    profile: result.profile,
+    capacityRun: { jobId, commit: result.commit, profile: result.profile },
+    securityReview,
+  }));

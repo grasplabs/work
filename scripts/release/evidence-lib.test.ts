@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { limitEvidenceFor, previousReleaseOf } from "./evidence-lib.ts";
+import {
+  evidenceFromCapacity,
+  limitEvidenceFor,
+  previousReleaseOf,
+} from "./evidence-lib.ts";
 import { builds, info } from "./fixture-release.ts";
 import { generateManifest } from "./manifest-lib.ts";
 
@@ -67,5 +71,39 @@ describe("a release's limit evidence at publish", () => {
       previousRelease: before(),
       limitEvidence: [evidence],
     });
+  });
+
+  it("makes an entry of each passing capacity run, with the job and the review, that the release's own check takes", () => {
+    const evidence = evidenceFromCapacity(
+      manifest,
+      [
+        {
+          limit: "workflowSteps",
+          raisedTo: 1000,
+          profile: "workerd",
+          commit: manifest.commit,
+        },
+      ],
+      987_654,
+      { pullRequest: 42, approvedBy: "nickruigrok" }
+    );
+
+    expect(
+      limitEvidenceFor(manifest, before(), evidence).limitEvidence
+    ).toStrictEqual([
+      {
+        limit: "workflowSteps",
+        raisedTo: 1000,
+        commit: manifest.commit,
+        releaseId: manifest.releaseId,
+        profile: "workerd",
+        capacityRun: {
+          jobId: 987_654,
+          commit: manifest.commit,
+          profile: "workerd",
+        },
+        securityReview: { pullRequest: 42, approvedBy: "nickruigrok" },
+      },
+    ]);
   });
 });
