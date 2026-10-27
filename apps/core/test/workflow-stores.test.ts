@@ -8,6 +8,7 @@ import { deleteStore, shareStore } from "../src/data-stores.ts";
 import {
   candidateBuildOf,
   createWorkflowResource,
+  deleteWorkflowResource,
   getWorkflowResource,
   liveWorkflow,
   publishWorkflowVersion,
@@ -303,6 +304,16 @@ describe("stores a workflow declares", () => {
       adminShares: "data.store_managed_by_workflow",
       adminDeletes: "data.store_bound",
       stillThere: null,
+    });
+    // Deleting the workflow keeps its store, and leaves it the admins' to
+    // delete: no version of it runs again.
+    await deleteWorkflowResource(env, ada, id);
+    const kept = await deletedAtOf(id);
+    const afterWorkflow = await outcome(deleteStore(env, admin, storeId));
+
+    expect({ kept, afterWorkflow }).toStrictEqual({
+      kept: null,
+      afterWorkflow: "ok",
     });
   });
 });
