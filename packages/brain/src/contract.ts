@@ -751,6 +751,7 @@ export type EntitySourcesInput = z.input<typeof entitySourcesInputSchema>;
  */
 export const relationsGetInputSchema = z.strictObject({
   entityId: idSchema,
+  /** Only this relation, folded as relations are kept (`Reports to` is `reports_to`). */
   predicate: z.string().min(1).max(40).optional(),
   at: z
     .string()
