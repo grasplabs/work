@@ -4,7 +4,12 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
-import { canBuild, isAdmin, requireBuilder } from "@grasp-os/shared/roles";
+import {
+  canBuild,
+  isAdmin,
+  isMemberAdmin,
+  requireBuilder,
+} from "@grasp-os/shared/roles";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
 import {
@@ -243,6 +248,8 @@ export const createStore = async (env: Env, by: Acting): Promise<StoreId> => {
 /** The App a default store serves: whose roles decide who manages it. */
 type DefaultStoreApp = Pick<App, "id" | "owner" | "status"> & {
   createdAt: Date;
+  /** Whether the App was removed (app-removal.ts): its admins' alone then. */
+  removed: boolean;
 };
 
 /**
@@ -262,6 +269,7 @@ const defaultStoreApp = async (
       owner: apps.ownerId,
       status: apps.status,
       createdAt: apps.createdAt,
+      removedAt: apps.removedAt,
     })
     .from(appDefaultStores)
     .leftJoin(apps, eq(apps.id, appDefaultStores.appId))
@@ -283,6 +291,7 @@ const defaultStoreApp = async (
     owner: row.owner,
     status: row.status,
     createdAt: row.createdAt,
+    removed: row.removedAt !== null,
   };
 };
 
@@ -311,7 +320,14 @@ const managedBy = async (
   }
   const db = drizzle(env.DB);
   const app = await defaultStoreApp(env, parsed.data);
-  if (app !== undefined) {
+  // A removed App's default store has no builders left: the
+  // organization's own admins, never Grasp staff, read, export and delete
+  // it, so its records are never stuck (erasure, GRA-335).
+  if (app?.removed === true) {
+    if (!isMemberAdmin(by)) {
+      throw dataErrors.create("data.store_unavailable");
+    }
+  } else if (app !== undefined) {
     try {
       await requireAppRole(env, by, app, "builder");
     } catch (error) {

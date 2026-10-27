@@ -16,6 +16,7 @@ import {
   apps,
   permissions,
 } from "./db/core/schema.ts";
+import { forgetAppEntry } from "./knowledge/apps-collection.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { stopsUnsettled } from "./workflows/resource-runs.ts";
 
@@ -60,6 +61,13 @@ import { stopsUnsettled } from "./workflows/resource-runs.ts";
 //   not removed; the rest of its batch only once that write made it
 //   removed. Otherwise nothing is written or recorded, and it is refused
 //   (`app.conflict`).
+// - What it was, kept where people search: its Apps-collection entry
+//   (its name, description and AGENTS.md) is replaced by a tombstone and
+//   read by nobody, admins included (app-entries.ts).
+// - Its default store's records stuck: a removed App has no builders, so
+//   the organization's own admins, never Grasp staff, read, export and
+//   delete its default store (data-stores.ts, `managedBy`); the store's
+//   owner claim stays.
 // - Going unrecorded: `app.removed`, naming who and the App, is written in
 //   the batch, only if the App was removed by it.
 
@@ -167,4 +175,6 @@ export const removeApp = async (
   if (removed === undefined) {
     throw appErrors.create("app.conflict");
   }
+  // Its Apps-collection entry: its name, description and AGENTS.md go.
+  await forgetAppEntry(env, found.id);
 };
