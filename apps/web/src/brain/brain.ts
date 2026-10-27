@@ -1055,7 +1055,7 @@ const points = (...list: (NotePoint | undefined)[]): NotePoint[] =>
   list.filter((entry): entry is NotePoint => Boolean(entry));
 
 /** A statement in the reader's quotation marks: “…” in English, „…“ in German. */
-export const quoted = (text: string): string =>
+const quoted = (text: string): string =>
   t({
     message: `“${text}”`,
     comment: "A statement, quoted. Use the quotation marks of your language.",

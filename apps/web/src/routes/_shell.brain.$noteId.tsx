@@ -22,6 +22,7 @@ import { intervieweeOf, kernOf } from "../brain/article-kern.ts";
 import type { StatementRow } from "../brain/article-kern.ts";
 import { BackButton } from "../brain/back-button.tsx";
 import { BannerHeader, Interviewed } from "../brain/brain-article/kern.tsx";
+import { MentionLinks } from "../brain/brain-article/mention-links.tsx";
 import { NoteArticle } from "../brain/brain-article/note-article.tsx";
 import type { SideTab } from "../brain/brain-article/note-article.tsx";
 import { StatementsByKind } from "../brain/brain-article/statements-by-kind.tsx";
@@ -639,19 +640,7 @@ const Mentions = ({ note }: { note: Note }) => {
   }
   return (
     <Fold count={note.mentions.length} title={t`Named, not linked`}>
-      <div className="flex flex-col gap-1 pt-2 pb-4">
-        {note.mentions.map((mention) => (
-          <Link
-            className="text-muted-foreground hover:text-foreground text-sm leading-snug"
-            hash={mention.statementId}
-            key={mention.statementId}
-            params={{ noteId: mention.sourceId }}
-            to="/brain/$noteId"
-          >
-            {statementWords(mention.statementId, mention.text)}
-          </Link>
-        ))}
-      </div>
+      <MentionLinks mentions={note.mentions} />
     </Fold>
   );
 };
