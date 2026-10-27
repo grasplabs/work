@@ -373,6 +373,63 @@ const statusOf = async (decision: string): Promise<string> => {
   return z.object({ status: z.string() }).parse(row).status;
 };
 
+/**
+ * `database`, but ending run `runId` (completed, with an output) right
+ * after the read that admits a person to its snapshot (screen-workflows.ts,
+ * `seenRun`), before the snapshot reads the run again.
+ */
+const endsRunAfterAdmission = (database: D1Database, runId: string) => {
+  const ended = async () => {
+    await database
+      .prepare(
+        "UPDATE workflow_resource_runs SET status = 'completed', ended_at = ? WHERE id = ?"
+      )
+      .bind(Date.now(), runId)
+      .run();
+  };
+  /** `statement`, ending the run once any of its reads settled. */
+  const ending = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (inner, name) => {
+        const member: unknown = Reflect.get(inner, name);
+        if (typeof member !== "function") {
+          return member;
+        }
+        if (name === "bind") {
+          return (...args: unknown[]) => {
+            // SAFETY: `bind` answers a prepared statement, as D1 types it.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            const bound = Reflect.apply(
+              member,
+              inner,
+              args
+            ) as D1PreparedStatement;
+            return ending(bound);
+          };
+        }
+        return async (...args: unknown[]) => {
+          const result: unknown = await Reflect.apply(member, inner, args);
+          await ended();
+          return result;
+        };
+      },
+    });
+  return new Proxy(database, {
+    get: (target, property) => {
+      const member: unknown = Reflect.get(target, property);
+      if (property !== "prepare") {
+        return typeof member === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(member, target, args)
+          : member;
+      }
+      return (query: string) =>
+        query.includes("origin_app_version")
+          ? ending(target.prepare(query))
+          : target.prepare(query);
+    },
+  });
+};
+
 /** What a call answered, or its refusal's code. */
 const answerOf = (result: OperationResult): unknown =>
   result.ok ? result.value : result.error.code;
@@ -1204,6 +1261,27 @@ describe(
           "UPDATE workflow_decisions SET deciders = ? WHERE id = ?"
         ).bind(`person:${outsider.userId}`, reassignedRun.decisionId),
       ]);
+      // A run that ends between the read that admits the reviewer and the
+      // read of what it is: they see neither its output nor its error.
+      const endingRun = await runAsking(app, opened + 4000);
+      const racing = {
+        ...env,
+        DB: endsRunAfterAdmission(env.DB, endingRun.runId),
+      };
+      let ending: unknown;
+      try {
+        const read = await readWorkflowWatch(racing, reviewer, app, {
+          workflow,
+          watch: "run",
+          runId: endingRun.runId,
+        });
+        ending = read.value;
+      } catch (error) {
+        ending =
+          error instanceof Error && "code" in error
+            ? error.code
+            : String(error);
+      }
       // Read before restricting the App, which refuses these on its own.
       const stopped = {
         answered: await watched(reviewer, answeredRun.runId),
@@ -1220,6 +1298,7 @@ describe(
         unrestrictedBefore: typeof unrestrictedBefore,
         afterRestricting: await watched(reviewer, asked.runId),
         ...stopped,
+        ending,
       }).toStrictEqual({
         reviewer: {
           // No engine runs these rows' run, so it waits on nothing the
@@ -1238,6 +1317,7 @@ describe(
         cancel: "workflow.run_unavailable",
         unrestrictedBefore: "object",
         afterRestricting: "workflow.run_unavailable",
+        ending: "workflow.run_unavailable",
         answered: "workflow.run_unavailable",
         closed: "workflow.run_unavailable",
         reassigned: "workflow.run_unavailable",
