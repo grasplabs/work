@@ -64,6 +64,13 @@
       "when": 1793017469974,
       "tag": "0008_lessons_hard_cut",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793107444168,
+      "tag": "0009_lesson_wording",
+      "breakpoints": true
     }
   ]
 }
