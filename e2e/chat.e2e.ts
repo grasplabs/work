@@ -313,6 +313,43 @@ test("Grasp asks a person questions with choices in place of the box, and they p
   await expect(page.getByLabel("Your question")).toBeVisible();
 });
 
+test("the chat dock asks questions folded away too, the way to open it beside them, and opens on the reply once they send", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener, replies } = modelScripts.questions;
+  const [, answer] = replies;
+  const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
+  await page.goto("/domains");
+  const box = page.getByRole("textbox", { name: "Ask Grasp" });
+  const send = page
+    .locator("form")
+    .filter({ has: box })
+    .getByRole("button", { name: "Send" });
+  await box.fill(question);
+  await expect(send).toBeEnabled();
+  await box.press("Enter");
+  const dock = page.getByRole("region", { name: "Ask Grasp" });
+  const asked = page.getByRole("region", { name: "Grasp asks" });
+  await expect(asked).toContainText("Grasp asks, 1 of 2", { timeout: 30_000 });
+
+  // Folded away, the questions stay in the bar, with the way to open it.
+  await dock.getByRole("button", { name: "Fold the chat away" }).click();
+  await expect(dock).toHaveCount(0);
+  await expect(asked).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Open the chat" })
+  ).toBeVisible();
+
+  // Sending from the bar opens the dock, where the reply shows.
+  await asked.getByRole("radio", { name: "Weekly" }).click();
+  await asked.getByRole("button", { name: "Next" }).click();
+  await asked.getByRole("radio", { name: "My team" }).click();
+  await asked.getByRole("button", { name: "Send" }).click();
+  await expect(dock.getByText(answer.text)).toBeVisible({ timeout: 30_000 });
+});
+
 test("a person groups chats in a project with a goal and a document, moves them in and out, and deletes it", async ({
   pageOf,
 }) => {
