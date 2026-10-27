@@ -1,5 +1,6 @@
 import { appLimits } from "@grasp-os/shared/app-limits";
-import type { App, AppContents } from "@grasp-os/shared/apps";
+import type { App, AppContents, ViewedApp } from "@grasp-os/shared/apps";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
   DropdownMenu,
@@ -26,6 +27,7 @@ import { setDockMode } from "../chat/dock-mode.ts";
 import { ErrorText } from "../error-text.tsx";
 import { RenameField } from "../frame/rename-field.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { buildsApp } from "./app-role.ts";
 import { StatusBadge, useStatusMove } from "./app-status.tsx";
 
 // An App's own page (grasplabs/prototype `routes/apps/$appId.tsx`): its bar
@@ -268,25 +270,27 @@ const AppTitle = ({ app }: { app: App }) => {
 
 /**
  * The App's page: its bar, then under it that it is archived, then its
- * open screen (`children`), or that it has none. `builds`: the person
- * builds Apps, so they edit, publish and restore it.
+ * open screen (`children`), or that it has none. Only one who builds it
+ * (`buildsApp`, by their role in this App) edits, publishes and restores
+ * it.
  */
 export const AppPage = ({
   app,
   contents,
   open,
-  builds,
+  identity,
   children,
 }: {
-  app: App;
+  app: ViewedApp;
   contents: AppContents;
   /** The screen open, of `contents.screens`; none while it has none. */
   open: string | undefined;
-  builds: boolean;
+  identity: Pick<Identity, "staff">;
   children: ReactNode;
 }) => {
   const { t } = useLingui();
   const { name } = app;
+  const builds = buildsApp(app, identity);
   const archived = app.status === "archived";
   const editable = builds && !archived;
   return (

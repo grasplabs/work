@@ -949,13 +949,18 @@ ${working("b", 1)}
       };
     };
 
+    const owner = ownerOf(root.id, app, builder.userId);
     const result = await withQuotas({}, async () => ({
+      // The step's first attempt ran; its second is the one raced.
       attempt: await outcome(
-        admitAttempt(
-          racing({ workflowAttemptsPerStep: 1 }),
-          ownerOf(root.id, app, builder.userId),
-          { ...attemptOf("raced"), number: 2 }
-        )
+        (async () => {
+          await admitAttempt(env, owner, attemptOf("raced"));
+          return await admitAttempt(
+            racing({ workflowAttemptsPerStep: 1 }),
+            owner,
+            { ...attemptOf("raced"), number: 2 }
+          );
+        })()
       ),
       child: await outcome(
         admitChild(racing({ workflowNestingLevels: 1 }), parent)

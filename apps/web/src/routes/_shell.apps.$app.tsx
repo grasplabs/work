@@ -3,7 +3,6 @@ import { Await, createFileRoute, useRouter } from "@tanstack/react-router";
 import { LayoutGridIcon } from "lucide-react";
 
 import { AppPage } from "../engines/app-page.tsx";
-import { buildsApp } from "../engines/app-role.ts";
 import { AppsSheetButton, AppsSidebar } from "../engines/apps-sidebar.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -83,12 +82,7 @@ const AppPageView = () => {
             ) : null
           }
         </Await>
-        <AppPage
-          app={app}
-          builds={buildsApp(app, identity)}
-          contents={contents}
-          open={open}
-        >
+        <AppPage app={app} contents={contents} identity={identity} open={open}>
           {open === undefined ? null : (
             <ScreenFrame
               app={id}
