@@ -1,3 +1,4 @@
+import type { WeekSchedule } from "@grasp-os/shared/org-settings";
 import {
   Select,
   SelectContent,
@@ -11,7 +12,6 @@ import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 
 import { dayName, scheduleHours, scheduleSummary } from "./pulse.ts";
-import type { WeekSchedule } from "./pulse.ts";
 
 // When Pulse may report, as in the prototype (`components/week-schedule.tsx`).
 
