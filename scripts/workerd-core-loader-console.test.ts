@@ -31,6 +31,8 @@ const ranSchema = z.object({
     carriage: z.string(),
     thrown: z.string(),
     captured: z.string(),
+    capturedThrown: z.string(),
+    thrownMessage: z.string(),
     forged: z.string(),
     control: z.string(),
   }),
@@ -220,6 +222,37 @@ const core :Workerd.Worker = (
       ],
       forged: [],
       printed: [false, false],
+    });
+  });
+
+  // A captured call that throws after it wrote: its lines still reach the
+  // sink, and never workerd's output. What it threw is the call's answer,
+  // which workerd served `--verbose` reports as any call's throw (GRA-939):
+  // pinned, so a change is seen. Core's release runner never lets one
+  // through: its `Run` module answers what the function threw.
+  it("hands a captured call's lines to core's sink when it throws, printing none of them", async () => {
+    const response = await fetch(new URL("/captured-thrown", served.url));
+    const { answered, values } = z
+      .object({
+        answered: z.object({
+          answer: z.string(),
+          lines: z.array(z.object({ level: z.string(), message: z.string() })),
+        }),
+        values: ranSchema.shape.values,
+      })
+      .parse(await response.json());
+    await sleep(SETTLE_MS);
+
+    expect({
+      answer: answered.answer,
+      lines: answered.lines.map(({ level, message }) => `${level} ${message}`),
+      printed: served.logs().includes(values.capturedThrown),
+      thrownReported: served.logs().includes(values.thrownMessage),
+    }).toStrictEqual({
+      answer: "threw",
+      lines: [`log ${values.capturedThrown}`],
+      printed: false,
+      thrownReported: true,
     });
   });
 

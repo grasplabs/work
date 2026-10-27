@@ -28,7 +28,8 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 // - `/cjs`: a main module that can't import the quiet module first.
 // - `/captured`: code loaded as core loads a tailed preview function here
 //   (`capturedCode`, GRA-919), its lines handed to a sink of core's
-//   (`consoleSinkOf`) once the call settled; `/forged`: the same, its code
+//   (`consoleSinkOf`) once the call settled; `/captured-thrown`: the same,
+//   its call throwing after it wrote; `/forged`: the same, its code
 //   handing the sink more than a call may keep, which takes none of it.
 // - `/control`: the same code in the Loader as it is, which shows workerd's
 //   output is read at all.
@@ -41,6 +42,8 @@ const values = {
   carriage: "record-value-71d2",
   thrown: "record-value-c40b",
   captured: "record-value-9a24",
+  capturedThrown: "record-value-27b8",
+  thrownMessage: "thrown-message-51c3",
   forged: "record-value-e613",
   control: "control-value-0a6f",
 } as const;
@@ -118,6 +121,22 @@ export class App extends WorkerEntrypoint {
 }
 `;
 
+/** What `call`, the capture module's, answers: "threw" when it throws. */
+const capturedAnswer = async (
+  call: unknown,
+  entry: unknown,
+  taking: unknown
+): Promise<unknown> => {
+  if (typeof call !== "function") {
+    return null;
+  }
+  try {
+    return await Reflect.apply(call, entry, ["App", "run", [], taking]);
+  } catch {
+    return "threw";
+  }
+};
+
 /**
  * Runs the App entrypoint's `run` of `source` as core runs a tailed
  * preview function off Cloudflare (release-runner.ts): captured, its lines
@@ -140,11 +159,11 @@ const runCaptured = async (
       })
     )
     .getEntrypoint(captureEntrypoint);
-  const call: unknown = Reflect.get(entry, captureMethod);
-  const answer: unknown =
-    typeof call === "function"
-      ? await Reflect.apply(call, entry, ["App", "run", [], sink])
-      : null;
+  const answer = await capturedAnswer(
+    Reflect.get(entry, captureMethod),
+    entry,
+    sink
+  );
   return { answer, lines };
 };
 
@@ -313,6 +332,15 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
 const capturedSources: Readonly<Record<string, () => string>> = {
   "/captured": () => isolateOf(values.captured),
   "/forged": () => forgingOf(values.forged),
+  "/captured-thrown": () =>
+    `import { WorkerEntrypoint } from "cloudflare:workers";
+export class App extends WorkerEntrypoint {
+  run() {
+    console.log(${JSON.stringify(values.capturedThrown)});
+    throw new Error(${JSON.stringify(values.thrownMessage)});
+  }
+}
+`,
 };
 
 export default {
