@@ -6,6 +6,7 @@ import type {
   ChatCode,
   ChatMessage,
   ChatPartial,
+  ChatReasoning,
   ChatReplyEnd,
   ChatReplyUsage,
 } from "@grasp-os/shared/chat";
@@ -13,9 +14,9 @@ import type {
 import { contextWindowOf } from "./models.ts";
 
 // A chat's transcript as pi keeps it (workspace.ts), shown as the person
-// reads it: their questions, the agent's answers with the code it ran,
-// and each code step's result. The agent's instructions, the APIs and the
-// memory it was shown, and its reasoning stay out.
+// reads it: their questions, the agent's answers with the code it ran and
+// what the model thought before them, and each code step's result. The
+// agent's instructions, and the APIs and the memory it was shown, stay out.
 
 /** The text parts of a message's content, joined. */
 const textOf = (
@@ -61,6 +62,34 @@ const askedOf = (message: AssistantMessage): ChatAsked | undefined => {
   }
   return undefined;
 };
+
+/**
+ * What a response thought, as far as it has streamed in: each thinking
+ * part the provider showed, joined. A redacted part holds only pi's own
+ * placeholder, never the model's words, so it shows nothing.
+ */
+const thoughtOf = (message: AssistantMessage): string =>
+  message.content
+    .flatMap((part) =>
+      part.type === "thinking" && part.redacted !== true && part.thinking !== ""
+        ? [part.thinking]
+        : []
+    )
+    .join("\n\n");
+
+/** Whether a response thought at all, shown or redacted. */
+const thought = (message: AssistantMessage): boolean =>
+  message.content.some(({ type }) => type === "thinking");
+
+/**
+ * What a stored response thought, and for how long (`thinkingMs`, as core
+ * timed it); none for one that didn't think.
+ */
+const reasoningOf = (
+  message: AssistantMessage,
+  thinkingMs: number | null
+): ChatReasoning | undefined =>
+  thought(message) ? { text: thoughtOf(message), ms: thinkingMs } : undefined;
 
 const ends: Record<AssistantMessage["stopReason"], ChatReplyEnd> = {
   stop: "done",
@@ -312,21 +341,24 @@ const givenNothing = (): boolean => false;
 export const partialOf = (message: AssistantMessage): ChatPartial => ({
   text: citedIn(textOf(message.content), givenNothing).text,
   code: codeOf(message),
+  reasoning: thoughtOf(message),
 });
 
 /**
  * A stored message as the person reads it; `undefined` for a system one.
  * An answer cites the notes `given` holds (`citedIn`): the documents its
- * chat's code was given before it. It asks the person questions only in
- * a chat whose agent is offered `askQuestions` (`asking`, Grasp's own
- * app): one a chat app's model calls anyway was never offered, so it shows
- * as the failed call it is, never as questions.
+ * chat's code was given before it; it thought for `thinkingMs`, as core
+ * kept it. It asks the person questions only in a chat whose agent is
+ * offered `askQuestions` (`asking`, Grasp's own app): one a chat app's
+ * model calls anyway was never offered, so it shows as the failed call it
+ * is, never as questions.
  */
 export const chatMessageOf = (
   id: number,
   message: Message,
   createdAt: Date,
   given: (documentId: string) => boolean = givenNothing,
+  thinkingMs: number | null = null,
   asking = false
 ): ChatMessage | undefined => {
   const at = createdAt.toISOString();
@@ -335,12 +367,14 @@ export const chatMessageOf = (
   }
   if (message.role === "assistant") {
     const usage = usageOf(message);
+    const reasoning = reasoningOf(message, thinkingMs);
     const asked = asking ? askedOf(message) : undefined;
     return {
       id,
       role: "assistant",
       ...citedIn(textOf(message.content), given),
       code: codeOf(message),
+      ...(reasoning === undefined ? {} : { reasoning }),
       ...(asked === undefined ? {} : { asked }),
       end: ends[message.stopReason],
       ...(message.stopReason === "error" && message.errorMessage !== undefined

@@ -10418,6 +10418,10 @@ msgstr "leest de gegevens van het domein"
 msgid "Ready"
 msgstr "Klaar"
 
+#: src/chat/thread.tsx
+msgid "Reasoning"
+msgstr "Redenering"
+
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Receipt"
 msgstr "Ontvangstbewijs"
@@ -11057,6 +11061,11 @@ msgstr "Runs deze week"
 #: src/dashboard/report.ts
 msgid "Runs: {total}"
 msgstr "Runs: {total}"
+
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+msgid "Said by five or more people"
+msgstr "Gezegd door vijf of meer mensen"
 
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
@@ -13646,6 +13655,10 @@ msgstr "Deze versie van de app is ingetrokken en draait niet meer. Een beheerder
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
 msgstr "De gegevenswijziging van deze versie wordt nog toegepast. Probeer het zo opnieuw."
+
+#: src/chat/thread.tsx
+msgid "Thought for {time}"
+msgstr "Heeft {time} nagedacht"
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."

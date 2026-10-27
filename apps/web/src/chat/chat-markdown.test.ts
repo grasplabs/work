@@ -118,7 +118,7 @@ describe(chatMarkdown, () => {
       chatMarkdown({
         title: "Hello",
         messages: [asked(1, "Hi")],
-        partial: { text: "Hello the", code: [] },
+        partial: { text: "Hello the", code: [], reasoning: "" },
         provenance: none,
         names: new Map(),
         i18n,

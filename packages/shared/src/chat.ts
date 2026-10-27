@@ -366,6 +366,22 @@ export interface ChatAsked extends ChatAsk {
 }
 
 /**
+ * What the model thought before it answered, as its provider let it be
+ * shown: its own words, or a summary of them (OpenAI's). A redacted part
+ * (Anthropic's safety filters) shows nothing, but its time counts.
+ */
+export interface ChatReasoning {
+  /** Its parts, joined; empty when the provider showed none of it. */
+  text: string;
+  /**
+   * How long it thought, in milliseconds, from its first word to its last
+   * (core's clock, as the answer streamed in); null for a reply core kept
+   * before it timed it.
+   */
+  ms: number | null;
+}
+
+/**
  * One stored message of a chat, oldest first by `id`. The agent's
  * instructions and the APIs it was shown aren't among them.
  */
@@ -384,6 +400,8 @@ export type ChatMessage =
       citations: ChatCitation[];
       /** The code it asked to run, each run in a code step. */
       code: ChatCode[];
+      /** What the model thought before it, when it thought. */
+      reasoning?: ChatReasoning;
       /**
        * The questions it asked the person, with choices, if it ended its
        * response asking them (`askQuestions`): shown in place of the
@@ -420,6 +438,8 @@ export type ChatMessage =
 export interface ChatPartial {
   text: string;
   code: ChatCode[];
+  /** What the model thought so far (`ChatReasoning.text`); empty for nothing. */
+  reasoning: string;
 }
 
 /**
@@ -443,6 +463,8 @@ export interface ChatPartialUpdate {
   text: string;
   /** Every code step of the response, each as its own text is. */
   code: { callId: string; from: number; code: string }[];
+  /** What the model thought, as `from` and `text` are for its answer. */
+  reasoning: { from: number; text: string };
 }
 
 /** A text the watcher has, with what an update adds from `from` on. */
@@ -470,6 +492,11 @@ export const applyPartial = (
         code
       ),
     })),
+    reasoning: extended(
+      shown?.reasoning ?? "",
+      update.reasoning.from,
+      update.reasoning.text
+    ),
   };
 };
 

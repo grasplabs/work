@@ -20,14 +20,14 @@ describe("what the sign shows", () => {
   it("follows what the answer being written shows: its words, or the code it writes", () => {
     expect(
       signOf({
-        partial: { text: "So", code: [] },
+        partial: { text: "So", code: [], reasoning: "" },
         replies: [],
         ran: nothingRan,
       })
     ).toBe("writing");
     expect(
       signOf({
-        partial: { text: "Let me look.", code: [step("a")] },
+        partial: { text: "Let me look.", code: [step("a")], reasoning: "" },
         replies: [],
         ran: nothingRan,
       })
@@ -35,7 +35,7 @@ describe("what the sign shows", () => {
     // Words that are not there yet are not being written.
     expect(
       signOf({
-        partial: { text: " ", code: [] },
+        partial: { text: " ", code: [], reasoning: "" },
         replies: [{ code: [step("a")] }],
         ran: () => true,
       })
