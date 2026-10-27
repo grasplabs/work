@@ -305,6 +305,7 @@ const cast = {
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
+  boardGoals: { admin: "admin", member: "user" },
   brainChat: { member: "user" },
   contexts: { member: "user" },
   staffInterviews: { admin: "admin" },

@@ -399,6 +399,10 @@ msgstr "{count, plural, one {# version} other {# versions}}"
 msgid "{count, plural, one {# wish} other {# wishes}}"
 msgstr "{count, plural, one {# souhait} other {# souhaits}}"
 
+#: src/brain/goals-editor.tsx
+msgid "{count, plural, one {# workflow serves it} other {# workflows serve it}}"
+msgstr "{count, plural, one {# workflow le sert} other {# workflows le servent}}"
+
 #: src/onboarding/place-picker.tsx
 msgid "{count, plural, one {Add # document} other {Add # documents}}"
 msgstr "{count, plural, one {Ajouter # document} other {Ajouter # documents}}"
@@ -2005,6 +2009,10 @@ msgstr "Ajouter une carte"
 msgid "Add a domain for a second brand or an old one."
 msgstr "Ajoutez un domaine pour une deuxième marque ou une ancienne."
 
+#: src/brain/goals-editor.tsx
+msgid "Add a goal"
+msgstr "Ajouter un objectif"
+
 #: src/onboarding/organization-dialogs.tsx
 #: src/routes/_shell.onboarding.organization.$team.tsx
 #: src/routes/_shell.onboarding.organization.index.tsx
@@ -3238,6 +3246,10 @@ msgstr "Blocage"
 msgid "Blockers"
 msgstr "Blocages"
 
+#: src/brain/goals-editor.tsx
+msgid "Board goals"
+msgstr "Objectifs du conseil"
+
 #: src/dashboard/widget-board.tsx
 msgctxt "dashboard widget"
 msgid "Board goals"
@@ -3429,6 +3441,7 @@ msgstr "Peut {verbs} les données de l’entreprise"
 msgid "Can’t be read"
 msgstr "Illisible"
 
+#: src/brain/goals-editor.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
@@ -5915,6 +5928,7 @@ msgid "Go to Grasp"
 msgstr "Aller sur Grasp"
 
 #: src/brain/brain.ts
+#: src/brain/goals-editor.tsx
 #: src/chat/project-dialog.tsx
 msgid "Goal"
 msgstr "Objectif"
@@ -6362,6 +6376,14 @@ msgstr "Comment ils le remarqueraient : pas encore précisé."
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
 msgstr "Comment s’est passé l’échange avec {who} ?"
+
+#: src/brain/goals-editor.tsx
+msgid "How we notice it"
+msgstr "Comment on le remarque"
+
+#: src/brain/goals-editor.tsx
+msgid "How will the company see that it is met?"
+msgstr "Comment l’entreprise verra-t-elle qu’il est atteint ?"
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
@@ -7944,6 +7966,10 @@ msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Jamais"
 
+#: src/brain/goals-editor.tsx
+msgid "New board goal"
+msgstr "Nouvel objectif du conseil"
+
 #: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
@@ -8184,6 +8210,7 @@ msgstr "Aucune modification de fichier."
 msgid "No files yet."
 msgstr "Pas encore de fichiers."
 
+#: src/brain/goals-editor.tsx
 #: src/dashboard/standard-widgets.tsx
 msgid "No goals yet."
 msgstr "Pas encore d’objectifs."
@@ -10808,6 +10835,18 @@ msgstr "Révoquer les paquets de {domain} ?"
 msgid "Revoked a permission"
 msgstr "A révoqué une autorisation"
 
+#: src/brain/goals-editor.tsx
+msgid "Reword"
+msgstr "Reformuler"
+
+#: src/brain/goals-editor.tsx
+msgid "Reword {title}"
+msgstr "Reformuler {title}"
+
+#: src/brain/goals-editor.tsx
+msgid "Reword the goal"
+msgstr "Reformuler l’objectif"
+
 #: src/landscape/landscape-overview.ts
 msgid "Right to deletion"
 msgstr "Droit à l’effacement"
@@ -11075,6 +11114,7 @@ msgstr "A dit oui"
 msgid "Same version, different contents: {changed}"
 msgstr "Même version, contenu différent : {changed}"
 
+#: src/brain/goals-editor.tsx
 #: src/chat/project-dialog.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -12771,6 +12811,10 @@ msgstr "Les statistiques propres au domaine, et celles de la plateforme sous l'a
 msgid "The domains this chat builds didn't load."
 msgstr "Les domaines que ce chat crée n’ont pas été chargés."
 
+#: src/brain/goals-editor.tsx
+msgid "The earlier wording stays in the goal's history."
+msgstr "La formulation précédente reste dans l’historique de l’objectif."
+
 #: src/policies/policy.ts
 msgid "the EU"
 msgstr "UE"
@@ -13299,6 +13343,10 @@ msgstr "Il n’y a encore aucune collection que vous pouvez lire."
 #: src/routes/_shell.domains.index.tsx
 msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 msgstr "Il n’y a pas encore de domaine que vous puissiez ouvrir. Les domaines se créent dans le chat : décrivez une partie de votre travail, et Grasp en construit les workflows et les applications."
+
+#: src/brain/goals-editor.tsx
+msgid "There are no workflows to link yet."
+msgstr "Il n’y a pas encore de workflows à lier."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."
@@ -14580,6 +14628,10 @@ msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Ce qui compte comme un succès"
 
+#: src/brain/goals-editor.tsx
+msgid "What does the board want to reach?"
+msgstr "Que veut atteindre le conseil ?"
+
 #: src/settings/person-limits.tsx
 msgid "What each person's model calls may cost a month, and how many messages they may send an hour. A person's own exception goes first, then their team's, then the default."
 msgstr "Ce que les appels aux modèles de chaque personne peuvent coûter par mois, et combien de messages elle peut envoyer par heure. L'exception propre à une personne passe en premier, puis celle de son équipe, puis la limite par défaut."
@@ -15334,6 +15386,7 @@ msgstr "Des tests de workflow échouent :"
 msgid "workflow.json"
 msgstr "workflow.json"
 
+#: src/brain/goals-editor.tsx
 #: src/chat/builds.tsx
 #: src/dashboard/report.ts
 #: src/dashboard/widget-board.tsx
@@ -15392,10 +15445,18 @@ msgctxt "what Grasp knows, by source"
 msgid "Workflows known"
 msgstr "Workflows connus"
 
+#: src/brain/goals-editor.tsx
+msgid "Workflows of {title}"
+msgstr "Workflows de {title}"
+
 #: src/dashboard/failed-workflows.tsx
 #: src/dashboard/to-do.tsx
 msgid "Workflows that failed"
 msgstr "Workflows en échec"
+
+#: src/brain/goals-editor.tsx
+msgid "Workflows that serve {title}"
+msgstr "Workflows qui servent {title}"
 
 #: src/dashboard/spend-widget.tsx
 msgid "Workflows that spent most"

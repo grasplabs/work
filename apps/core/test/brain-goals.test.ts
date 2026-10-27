@@ -171,6 +171,73 @@ describe("the board's goals", slow, () => {
     });
   });
 
+  it("take the same day's source with every change, kept once, and refuse a member's", async () => {
+    const [admin, member] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const day = "2026-10-27";
+    const source: BrainRecordInput = {
+      type: "source",
+      id: `src-goals-${unique()}`,
+      kind: "document",
+      title: "Board goals, as set in Grasp",
+      date: day,
+      teamIds: [],
+    };
+    const goalId = `goal-${unique()}`;
+    const wording = {
+      title: "Answer every customer within a day",
+      howWeNotice: "",
+      sourceId: source.id,
+      date: day,
+    };
+    const set = await admin.api.brain.addRecords([
+      source,
+      { type: "goal", id: goalId, ...wording },
+    ]);
+    const reworded = await admin.api.brain.addRecords([
+      source,
+      {
+        type: "goalVersion",
+        id: `goalv-${unique()}`,
+        goalId,
+        ...wording,
+        title: "Answer every customer within four hours",
+      },
+    ]);
+    const refused = await outcome(
+      member.api.brain.addRecords([
+        source,
+        {
+          type: "goalVersion",
+          id: `goalv-${unique()}`,
+          goalId,
+          ...wording,
+          title: "Answer whenever",
+        },
+      ])
+    );
+    expect({
+      set,
+      reworded,
+      refused,
+      read: await goalAs(member, goalId),
+    }).toStrictEqual({
+      set: { added: 2, unchanged: 0 },
+      // The source again, exactly so, is left as it is.
+      reworded: { added: 1, unchanged: 1 },
+      refused: "role.forbidden",
+      read: {
+        titles: [
+          "Answer every customer within a day",
+          "Answer every customer within four hours",
+        ],
+        workflows: [],
+      },
+    });
+  });
+
   it("are refused, whole, to anyone but an admin, over a goal held differently, and for what doesn't exist", async () => {
     const [admin, builder] = await Promise.all([
       signedInApi(idp, "admin"),
