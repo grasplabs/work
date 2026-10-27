@@ -180,6 +180,54 @@ describe("typed relations", () => {
     });
   });
 
+  it("find a relation by its predicate however the question writes it", async () => {
+    const team = `Support ${word()}`;
+    const said = `Ben reports to Anna on ${team}.`;
+    const host = testHost(
+      modelOf({
+        [said]: {
+          entities: [
+            { kind: "person", name: "Ben" },
+            { kind: "person", name: "Anna" },
+          ],
+          relations: [
+            {
+              subject: "Ben",
+              predicate: "Reports To",
+              object: "Anna",
+              evidence: said,
+            },
+          ],
+        },
+      })
+    );
+    const collection = await newCollection(host.brain, "People");
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    await savedAndLinked(host, collection, "team.md", said);
+    const anna = await entityOf(host, reader, "Anna");
+    const asked = async (predicate: string) => {
+      const found = await relationsFor(host.brain, reader, {
+        entityId: anna,
+        predicate,
+      });
+      return found.map(
+        ({ subject, predicate: kept }) => `${subject.name} ${kept}`
+      );
+    };
+
+    expect({
+      folded: await asked("reports_to"),
+      written: await asked("Reports to"),
+      shouted: await asked(" REPORTS-TO "),
+      other: await asked("Leads"),
+    }).toStrictEqual({
+      folded: ["Ben reports_to"],
+      written: ["Ben reports_to"],
+      shouted: ["Ben reports_to"],
+      other: [],
+    });
+  });
+
   it("keep every relation of a source that states as many as it may hold", async () => {
     const thing = `Directory ${word()}`;
     const people = Array.from({ length: 50 }, (_, index) => `Person ${index}`);
