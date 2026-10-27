@@ -25,7 +25,7 @@ import { loadCoreStatus } from "../core-connection.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import { useReveal } from "../onboarding/platform-reveal.tsx";
-import { SetupFrame } from "../onboarding/setup-frame.tsx";
+import { Arriving, SetupFrame } from "../onboarding/setup-frame.tsx";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
   brainScene,
@@ -38,8 +38,10 @@ import {
   settledAs,
   stepIndex,
   steps,
+  waysFrom,
 } from "../onboarding/setup.ts";
 import type { Kept, ReviewItemId, SetupStep } from "../onboarding/setup.ts";
+import { wasHeard } from "../onboarding/visit.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { resumeVoice, stopSpeaking, voiceLevel } from "../voice/voice.ts";
 
@@ -64,8 +66,8 @@ const layout: Record<SetupStep, { width: string; brain: number }> = {
   documents: { width: "max-w-150", brain: 260 },
   pulse: { width: "max-w-140", brain: 240 },
   leads: { width: "max-w-140", brain: 260 },
-  team: { width: "max-w-130", brain: 270 },
-  listening: { width: "max-w-140", brain: 300 },
+  team: { width: "max-w-130 lg:max-w-240", brain: 270 },
+  listening: { width: "max-w-140 lg:max-w-240", brain: 300 },
   review: { width: "max-w-110", brain: 330 },
   open: { width: "max-w-110", brain: 450 },
 };
@@ -201,12 +203,11 @@ const useArrowKeys = (
       if (typing || event.metaKey || event.ctrlKey || event.altKey) {
         return;
       }
-      const back = steps[index - 1];
-      const on = steps[index + 1];
+      const { back, on } = waysFrom(index, reached);
       if (event.key === "ArrowLeft" && back !== undefined) {
         go(back);
       }
-      if (event.key === "ArrowRight" && on !== undefined && index < reached) {
+      if (event.key === "ArrowRight" && on !== undefined) {
         go(on);
       }
     };
@@ -220,7 +221,8 @@ const useArrowKeys = (
 /**
  * A step never needs scrolling: the brain takes what the window leaves
  * once the step itself has its room, down to a small one, in steps, so it
- * does not flutter as a line comes and goes. On a phone a step that does
+ * does not flutter as a line comes and goes; where not even the small one
+ * fits, it makes way. On a phone a step that does
  * not fit even beside the smallest brain is cramped: its sentence makes way
  * once read, and where that frees too little, the brain makes way with it,
  * until the next step.
@@ -262,6 +264,9 @@ const useBrainRoom = (step: SetupStep) => {
   let brain = wanted;
   if (brainAway === step) {
     brain = 0;
+  } else if (measured && !phone && room < brainLeast) {
+    // Where even the smallest brain leaves the step too little room, it makes way, so the page never scrolls.
+    brain = 0;
   } else if (measured) {
     brain = Math.max(brainLeast, Math.min(wanted, room));
   }
@@ -279,8 +284,9 @@ const useBrainRoom = (step: SetupStep) => {
 
 /**
  * Leaving the onboarding, Stephen stops mid-sentence rather than talk over
- * the app; every step that follows is a new start, so a pause from the
- * last one lets go.
+ * the app; every step that follows is a new start, so he stops what he was
+ * saying on the last one (a step he finished before says nothing to cut it), and
+ * a pause from it lets go.
  */
 const useVoiceBetweenSteps = (step: SetupStep): void => {
   useEffect(
@@ -294,6 +300,7 @@ const useVoiceBetweenSteps = (step: SetupStep): void => {
   useEffect(() => {
     if (last.current !== step) {
       last.current = step;
+      stopSpeaking();
       resumeVoice();
     }
   }, [step]);
@@ -383,19 +390,23 @@ const Setup = () => {
         )}
       >
         <div className="flex flex-col items-center gap-1.5">
-          {/* The brain fades with the step it belongs to; making way, it folds up as it fades. */}
+          {/* The brain fades with the step it belongs to, or is there at once on one finished before; making way, it folds up as it fades. */}
           {brainSize === undefined ? null : (
-            <div className="animate-in fade-in fill-mode-backwards overflow-hidden delay-300 duration-500">
+            <Arriving
+              className="block overflow-hidden"
+              motion="animate-in fade-in fill-mode-backwards delay-300 duration-500"
+              settled={wasHeard(step)}
+            >
               <DotBrain
                 className={cn("transition-all duration-500", brainSize)}
                 label={t`The company brain: ${percent}% known. Dark dots are what I know, grey dots what I still need to learn.`}
                 scene={scene}
                 voice={voiceLevel}
               />
-            </div>
+            </Arriving>
           )}
         </div>
-        {/* One step fades out, the next fades in: nothing slides. On the way in, the step fades and only the brain stays. */}
+        {/* One step fades out, the next fades in, or is there at once if finished before: nothing slides. On the way in, the step fades and only the brain stays. */}
         <div
           className={cn(
             "flex w-full flex-col items-center transition-all duration-450",
@@ -404,31 +415,28 @@ const Setup = () => {
           inert={revealing}
           ref={body}
         >
-          <div
-            className="animate-in fade-in flex w-full flex-col items-center gap-6 duration-500"
+          {/* Each step drawn anew, fading in unless it is one finished before (setup-steps.tsx). */}
+          <SetupStepBody
+            cramped={cramped}
+            data={{ ...data, admin, sendingDomain, signIn, suites, identity }}
+            go={go}
+            listening={listening}
+            message={kept.message}
+            onMadeWay={onMadeWay}
+            onMessage={(message) => {
+              kept.onMessage(message);
+            }}
+            onSettle={(item, settled) => {
+              kept.onSettle(item, settled);
+            }}
+            onStory={setStory}
+            parts={parts}
+            percent={percent}
+            settled={kept.settled}
             key={step}
-          >
-            <SetupStepBody
-              cramped={cramped}
-              data={{ ...data, admin, sendingDomain, signIn, suites, identity }}
-              go={go}
-              listening={listening}
-              message={kept.message}
-              onMadeWay={onMadeWay}
-              onMessage={(message) => {
-                kept.onMessage(message);
-              }}
-              onSettle={(item, settled) => {
-                kept.onSettle(item, settled);
-              }}
-              onStory={setStory}
-              parts={parts}
-              percent={percent}
-              settled={kept.settled}
-              step={step}
-              today={now}
-            />
-          </div>
+            step={step}
+            today={now}
+          />
         </div>
       </div>
     </SetupFrame>

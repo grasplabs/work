@@ -1,19 +1,56 @@
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
+import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
+import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+} from "@tanstack/react-router";
+import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
+import { SetupFrame } from "./setup-frame.tsx";
 import { SetupStepBody } from "./setup-steps.tsx";
 import type { SetupData } from "./setup-steps.tsx";
-import { listeningOf } from "./setup.ts";
+import { listeningOf, stepIndex } from "./setup.ts";
 import type { SetupStep } from "./setup.ts";
+import { noteHeard } from "./visit.ts";
 
 // What the onboarding's step tells the company's admin while Stephen talks
 // to their people, from what it renders.
 
 const today = "2026-10-14";
+
+/** What the page's one route shows next. */
+const onRoute: { node: ReactElement | null } = { node: null };
+
+// Drawn once, a step asks core nothing: what it shows comes from what it is given.
+const router = createRouter({
+  routeTree: createRootRoute({ component: () => onRoute.node }),
+  history: createMemoryHistory(),
+  context: {
+    core: {
+      withSession: async () =>
+        await Promise.reject(new Error("Not asked while drawn")),
+    },
+  },
+});
+await router.load();
+
+/** Drawn as the page draws it: in the page's language, on its route. */
+const page = (children: ReactElement): string => {
+  onRoute.node = children;
+  return renderToStaticMarkup(
+    <I18nProvider i18n={i18n}>
+      <RouterProvider router={router} />
+    </I18nProvider>
+  );
+};
 
 const view = (paused: boolean, sponsor: string | null): OnboardingView => ({
   roster: null,
@@ -25,21 +62,37 @@ const view = (paused: boolean, sponsor: string | null): OnboardingView => ({
   waiting: 0,
 });
 
-/** What a step says, as text without its markup. */
-const said = (
+interface Shown {
+  paused?: boolean;
+  settled?: "mail"[];
+  sponsor?: string | null;
+  /** Stephen finished this step before. */
+  seen?: boolean;
+  choices?: SetupChoices;
+  documents?: OnboardingDocument[];
+}
+
+/** A step as it is drawn as it arrives, its markup and all. */
+const drawn = (
   step: SetupStep,
   {
     paused = false,
     settled = [],
     sponsor = null,
-  }: { paused?: boolean; settled?: "mail"[]; sponsor?: string | null }
+    seen = false,
+    choices = noChoices,
+    documents = [],
+  }: Shown
 ): string => {
+  if (seen) {
+    noteHeard(step);
+  }
   const data: SetupData = {
     admin: "Ada",
     company: null,
     view: view(paused, sponsor),
     links: [],
-    documents: [],
+    documents,
     sendingDomain: "mail.example.test",
     gate: {
       open: false,
@@ -57,7 +110,7 @@ const said = (
     hr: null,
     suites: [],
     places: null,
-    choices: noChoices,
+    choices,
     signIn: ["microsoft"],
     identity: {
       userId: "ada",
@@ -69,32 +122,34 @@ const said = (
       expiresAt: "2026-10-15T00:00:00Z",
     },
   };
-  return renderToStaticMarkup(
-    <I18nProvider i18n={i18n}>
-      <SetupStepBody
-        cramped={false}
-        data={data}
-        go={() => {}}
-        listening={listeningOf(
-          { roster: null, plan: data.view.plan, progress: null },
-          today
-        )}
-        message={null}
-        onMadeWay={() => {}}
-        onMessage={() => {}}
-        onSettle={() => {}}
-        onStory={() => {}}
-        parts={[]}
-        percent={10}
-        settled={settled}
-        step={step}
-        today={today}
-      />
-    </I18nProvider>
-  )
+  return page(
+    <SetupStepBody
+      cramped={false}
+      data={data}
+      go={() => {}}
+      listening={listeningOf(
+        { roster: null, plan: data.view.plan, progress: null },
+        today
+      )}
+      message={null}
+      onMadeWay={() => {}}
+      onMessage={() => {}}
+      onSettle={() => {}}
+      onStory={() => {}}
+      parts={[]}
+      percent={10}
+      settled={settled}
+      step={step}
+      today={today}
+    />
+  );
+};
+
+/** What a step says, as text without its markup. */
+const said = (step: SetupStep, shown: Shown): string =>
+  drawn(step, shown)
     .replaceAll(/<[^>]+>/gu, " ")
     .replaceAll(/\s+/gu, " ");
-};
 
 describe("the step while Stephen talks to the team", () => {
   it("says the interviews are paused, while Grasp paused them", () => {
@@ -154,4 +209,114 @@ describe("the welcome", () => {
       expect(said("welcome", { sponsor })).toContain(says);
     }
   );
+});
+
+/** Whether anything on a step comes in as it arrives: a fade, a slide, a check drawn. */
+const comesIn = (markup: string): boolean =>
+  /animate-in|drawn-check/u.test(markup);
+
+describe("a step the admin comes back to", () => {
+  it("shows its way on at once, rather than after Stephen says it again", () => {
+    // Held back (inert) until explained on arrival; there at once when seen before.
+    expect({
+      first: drawn("review", { settled: ["mail"] }).includes("inert"),
+      again: drawn("review", { settled: ["mail"], seen: true }).includes(
+        "inert"
+      ),
+    }).toStrictEqual({ first: true, again: false });
+  });
+
+  it("keeps the language chosen on the welcome, with Stephen's answer in full", () => {
+    const answer = "English it is. This takes about 8 minutes. Ready to start?";
+    expect({
+      first: said("welcome", {}).includes(answer),
+      again: said("welcome", { seen: true }).includes(answer),
+    }).toStrictEqual({ first: false, again: true });
+    expect(comesIn(drawn("welcome", { seen: true }))).toBeFalsy();
+  });
+
+  it("shows the places chosen for the documents at once, rather than held back and coming in", () => {
+    const sharePoint: SetupChoices = { ...noChoices, sources: ["sharepoint"] };
+    const first = drawn("sources", { choices: sharePoint });
+    const again = drawn("sources", { choices: sharePoint, seen: true });
+    expect({
+      first: {
+        noted: first.includes("Noted"),
+        held: first.includes("inert"),
+        comesIn: comesIn(first),
+      },
+      again: {
+        noted: again.includes("Noted"),
+        held: again.includes("inert"),
+        comesIn: comesIn(again),
+      },
+    }).toStrictEqual({
+      first: { noted: true, held: true, comesIn: true },
+      again: { noted: true, held: false, comesIn: false },
+    });
+  });
+
+  it("shows the documents shared, read, as they were left", () => {
+    const handbook: OnboardingDocument = {
+      id: "handbook",
+      name: "Handbook.pdf",
+      at: "2026-10-13T09:00:00Z",
+      reading: {
+        about: "How claims are handled, start to end.",
+        tools: [],
+        teams: [],
+        unclear: [],
+        ask: null,
+      },
+      answer: null,
+    };
+    const again = drawn("documents", { documents: [handbook], seen: true });
+    expect({
+      listed: again.includes("Handbook.pdf"),
+      read: again.includes("How claims are handled, start to end."),
+      held: again.includes("inert"),
+      comesIn: comesIn(again),
+    }).toStrictEqual({ listed: true, read: true, held: false, comesIn: false });
+  });
+
+  it("has the plan summed up at once on how this works", () => {
+    const again = drawn("about", { seen: true });
+    expect({
+      summed: again.includes("Your people, documents and tools first."),
+      comesIn: comesIn(again),
+    }).toStrictEqual({ summed: true, comesIn: false });
+  });
+});
+
+/** The ways back and forward the frame offers on `step`, the admin having been as far as `furthest`. */
+const waysOn = (step: SetupStep, furthest: SetupStep) => {
+  const markup = page(
+    <SetupFrame
+      knowledge={{ parts: [], percent: 10, threshold: 80 }}
+      onExit={() => {}}
+      onGo={() => {}}
+      reached={stepIndex(furthest)}
+      step={step}
+    >
+      {null}
+    </SetupFrame>
+  );
+  return {
+    back: markup.includes(">Back<"),
+    forward: markup.includes(">Forward<"),
+  };
+};
+
+describe("going back and forward", () => {
+  it("goes back a step, and forward only as far as the admin has been", () => {
+    expect({
+      furthest: waysOn("documents", "documents"),
+      behind: waysOn("company", "documents"),
+      first: waysOn("welcome", "about"),
+    }).toStrictEqual({
+      furthest: { back: true, forward: false },
+      behind: { back: true, forward: true },
+      first: { back: false, forward: true },
+    });
+  });
 });

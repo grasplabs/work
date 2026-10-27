@@ -3,9 +3,10 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
 import { ChatDock } from "../chat/chat-dock.tsx";
-import { loadCoreStatus } from "../core-connection.ts";
+import { loadCoreStatus, readWithin } from "../core-connection.ts";
 import { AppFrame } from "../frame/app-frame.tsx";
 import { PageError } from "../frame/page-states.tsx";
+import { landingAfterSignIn, takeJustSignedIn } from "../landing.ts";
 import { RouteError } from "../route-error.tsx";
 import { AppPanelProvider } from "../screens/app-panel-context.tsx";
 import { AppPanelSlot } from "../screens/app-panel.tsx";
@@ -98,6 +99,29 @@ export const Route = createFileRoute("/_shell")({
           ...signInErrorSearch(location.search),
         },
       });
+    }
+    // Just back from signing in, an admin whose organization is still
+    // onboarding starts in the onboarding. Core out of reach for it: home, as ever.
+    const landing = takeJustSignedIn()
+      ? await landingAfterSignIn({
+          path: location.pathname,
+          identity,
+          open: async () => {
+            try {
+              const gate = await readWithin(
+                core,
+                async (session) => await session.onboardingGate.view()
+              );
+              return gate.open;
+            } catch {
+              return true;
+            }
+          },
+        })
+      : null;
+    if (landing !== null) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: landing, replace: true });
     }
     return { identity };
   },
