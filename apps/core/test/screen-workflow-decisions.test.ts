@@ -932,13 +932,31 @@ describe(
       const approve = { approved: true, payload: { comment: "Yes" } };
       const reject = { approved: false, payload: { comment: "No" } };
 
-      // Two reviewers answer at once, differently: one answer stands.
+      // Two reviewers answer at once, differently: both confirm before
+      // either answers (a barrier), so both confirmed answers reach the
+      // final write together. One answer stands.
       const raced = await runAsking(app, opened);
+      let confirmed = 0;
+      const bothConfirmed = Promise.withResolvers<null>();
+      const barrier = async (): Promise<void> => {
+        confirmed += 1;
+        if (confirmed === 2) {
+          bothConfirmed.resolve(null);
+        }
+        await bothConfirmed.promise;
+      };
       const both = await Promise.all([
-        answered(reviewer, screen, raced, approve),
-        answered(second, screen, raced, reject),
+        answered(reviewer, screen, raced, approve, barrier),
+        answered(second, screen, raced, reject, barrier),
       ]);
       const racedStatus = await statusOf(raced.decisionId);
+      const racedEvents = await allEvents();
+      const racedAnswers = racedEvents.filter(
+        ({ action, target }) =>
+          (action === "workflow.decision.approved" ||
+            action === "workflow.decision.rejected") &&
+          target?.id === raced.decisionId
+      ).length;
 
       // An answer against its run closing it at the deadline: one of them.
       const timed = await runAsking(app, opened + 1000);
@@ -1002,6 +1020,7 @@ describe(
         // Exactly one answered; the other found it closed.
         oneStands: winners.length === 1 && both.includes("decision.closed"),
         racedMatches: racedStatus === winners[0],
+        racedAnswers,
         // The answer and the close agree on how it ended.
         timed:
           (late === "approved" &&
@@ -1020,6 +1039,7 @@ describe(
       }).toStrictEqual({
         oneStands: true,
         racedMatches: true,
+        racedAnswers: 1,
         timed: true,
         conflict: "decision.conflict",
         changedStatus: "open",
