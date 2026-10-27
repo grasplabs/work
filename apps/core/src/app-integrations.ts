@@ -12,10 +12,10 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { appFor } from "./apps.ts";
+import { appFor, findApp } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { connectionOwnersOf, entryKey } from "./connections.ts";
-import { appIntegrations, permissions } from "./db/core/schema.ts";
+import { appIntegrations, apps, permissions } from "./db/core/schema.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -118,7 +118,8 @@ export const addIntegration = async (
       .insert(appIntegrations)
       .select(
         sql`SELECT ${found.id}, ${entry.source}, ${entry.id}, ${by.userId}, ${Date.now()}
-          WHERE ${count} < ${appLimits.addedIntegrations}`
+          WHERE ${count} < ${appLimits.addedIntegrations}
+          AND EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${found.id} AND ${apps.removedAt} IS NULL)`
       )
       .onConflictDoNothing()
       .returning({ appId: appIntegrations.appId }),
@@ -132,6 +133,8 @@ export const addIntegration = async (
   if (inserted.length > 0) {
     return;
   }
+  // Removed meanwhile (app-removal.ts): nothing is added to it.
+  await findApp(env, found.id);
   const there = await db
     .select({ appId: appIntegrations.appId })
     .from(appIntegrations)

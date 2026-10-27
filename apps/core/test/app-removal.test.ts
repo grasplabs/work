@@ -2,6 +2,9 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { addIntegration } from "../src/app-integrations.ts";
+import { removeApp } from "../src/app-removal.ts";
+import { updateApp } from "../src/app-settings.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { deleteStore } from "../src/data-stores.ts";
 import { authorize } from "../src/knowledge/app-entries.ts";
@@ -91,6 +94,117 @@ const rowCount = async (sql: string, ...values: unknown[]) => {
     .bind(...values)
     .first<{ n: number }>();
   return row?.n ?? -1;
+};
+
+/** `target`'s `key`, a method bound to it. */
+const passOn = (target: object, key: string | symbol): unknown => {
+  const value: unknown = Reflect.get(target, key);
+  if (typeof value !== "function") {
+    return value;
+  }
+  return (...args: unknown[]): unknown => {
+    const answer: unknown = Reflect.apply(value, target, args);
+    return answer;
+  };
+};
+
+/**
+ * `db`, but with `meanwhile` run once, right after the first statement
+ * whose SQL `at` matches has run: another request's writes landing
+ * between two of the removal's own reads and its write.
+ */
+const interleaved = (
+  db: D1Database,
+  at: (query: string) => boolean,
+  meanwhile: () => Promise<void>
+): D1Database => {
+  let ran = false;
+  const real = new WeakMap<D1PreparedStatement, D1PreparedStatement>();
+  const after = async <T>(query: string, answer: Promise<T>): Promise<T> => {
+    const value = await answer;
+    if (!ran && at(query)) {
+      ran = true;
+      await meanwhile();
+    }
+    return value;
+  };
+  const wrap = (
+    statement: D1PreparedStatement,
+    query: string
+  ): D1PreparedStatement => {
+    const wrapped = new Proxy(statement, {
+      get: (target, key) => {
+        switch (key) {
+          case "bind": {
+            return (...values: unknown[]) =>
+              wrap(target.bind(...values), query);
+          }
+          case "first": {
+            return async (column?: string) =>
+              await after(
+                query,
+                column === undefined ? target.first() : target.first(column)
+              );
+          }
+          case "all": {
+            return async () => await after(query, target.all());
+          }
+          case "run": {
+            return async () => await after(query, target.run());
+          }
+          case "raw": {
+            return async (options?: { columnNames?: boolean }) =>
+              await after(
+                query,
+                options?.columnNames === true
+                  ? target.raw({ columnNames: true })
+                  : target.raw()
+              );
+          }
+          default: {
+            return passOn(target, key);
+          }
+        }
+      },
+    });
+    real.set(wrapped, statement);
+    return wrapped;
+  };
+  return new Proxy(db, {
+    get: (target, key) => {
+      if (key === "prepare") {
+        return (query: string) => wrap(target.prepare(query), query);
+      }
+      if (key === "batch") {
+        return async (statements: D1PreparedStatement[]) =>
+          await target.batch(
+            statements.map((statement) => real.get(statement) ?? statement)
+          );
+      }
+      return passOn(target, key);
+    },
+  });
+};
+
+/**
+ * A stop claimed for an independent run App `app` started, that hasn't
+ * ended it yet: what an archive's `stopRunsStartedBy` leaves settling.
+ */
+const settlingStop = (app: string): D1PreparedStatement[] => {
+  const workflow = crypto.randomUUID();
+  const run = crypto.randomUUID();
+  const now = Date.now();
+  return [
+    env.DB.prepare(
+      "INSERT INTO workflow_resources (id, name, owner_id, created_at) VALUES (?, ?, 'someone', ?)"
+    ).bind(workflow, `w-${workflow}`, now),
+    env.DB.prepare(
+      "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'app', ?, ?, ?, 1, 'm', 'someone', 1, 'i', ?)"
+    ).bind(run, app, run, workflow, now),
+    env.DB.prepare(
+      "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at, stop_requested_at) VALUES (?, ?, 1, 'm', 'b', 'someone', 'running', ?, ?)"
+    ).bind(run, workflow, now, now),
+  ];
 };
 
 describe("removing an App", slow, () => {
@@ -367,6 +481,110 @@ describe("removing an App", slow, () => {
         recorded: true,
       }))
     );
+  });
+
+  it("waits for the stops of the archive it writes over, however the App changed between its checks", async () => {
+    const owner = await personApi("builder");
+    const [sameArchive, newerArchive] = await Promise.all([
+      archivedApp(owner),
+      archivedApp(owner),
+    ]);
+    // Right after the removal found no stop settling: a stop claimed for
+    // the same archive; or a restore, new work, and another archive,
+    // whose stop is settling.
+    const removedWith = async (app: string, meanwhile: D1PreparedStatement[]) =>
+      await outcome(
+        removeApp(
+          {
+            ...env,
+            DB: interleaved(
+              env.DB,
+              (query) => query.includes("stop_requested_at"),
+              async () => {
+                await env.DB.batch(meanwhile);
+              }
+            ),
+          },
+          acting(owner, "builder"),
+          app
+        )
+      );
+    const events = await auditedDuring(async () => {
+      await removedWith(sameArchive, settlingStop(sameArchive));
+      await removedWith(newerArchive, [
+        env.DB.prepare(
+          "UPDATE apps SET status_changed_at = status_changed_at + 60000 WHERE id = ?"
+        ).bind(newerArchive),
+        ...settlingStop(newerArchive),
+      ]);
+    });
+    const removed = await rowCount(
+      "SELECT count(*) AS n FROM apps WHERE id IN (?, ?) AND removed_at IS NOT NULL",
+      sameArchive,
+      newerArchive
+    );
+
+    expect({
+      removed,
+      recorded: events.filter(({ action }) => action === "app.removed").length,
+      // Asked again, it is refused up front, its stop still settling.
+      again: await outcome(owner.api.apps.remove(sameArchive)),
+    }).toStrictEqual({ removed: 0, recorded: 0, again: "app.stops_pending" });
+  });
+
+  it("takes no change that read the App before it was removed: no new name, no integration", async () => {
+    const owner = await personApi("builder");
+    const [renamed, integrated] = await Promise.all([
+      archivedApp(owner),
+      archivedApp(owner),
+    ]);
+    // Removed right after the change first read the App.
+    const removedMeanwhile = (app: string): Env => ({
+      ...env,
+      DB: interleaved(
+        env.DB,
+        (query) => query.includes('"apps"'),
+        async () => {
+          await env.DB.prepare(
+            "UPDATE apps SET removed_at = ?, removed_by = ?, current_version = NULL WHERE id = ?"
+          )
+            .bind(Date.now(), owner.userId, app)
+            .run();
+        }
+      ),
+    });
+    const events = await auditedDuring(async () => {
+      await outcome(
+        updateApp(
+          removedMeanwhile(renamed),
+          acting(owner, "builder"),
+          renamed,
+          {
+            name: "Renamed after removal",
+          }
+        )
+      );
+      await outcome(
+        addIntegration(
+          removedMeanwhile(integrated),
+          acting(owner, "builder"),
+          integrated,
+          { source: "native", id: "slack" }
+        )
+      );
+    });
+
+    expect({
+      name: await rowCount(
+        "SELECT count(*) AS n FROM apps WHERE id = ? AND name = 'Renamed after removal'",
+        renamed
+      ),
+      integrations: await rowCount(
+        "SELECT count(*) AS n FROM app_integrations WHERE app_id = ?",
+        integrated
+      ),
+      recorded: events.map(({ action }) => action),
+    }).toStrictEqual({ name: 0, integrations: 0, recorded: [] });
   });
 
   it("changes nothing when a restore lands first", async () => {

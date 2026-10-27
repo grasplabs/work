@@ -19,7 +19,10 @@ import {
 } from "./db/core/schema.ts";
 import { forgetAppEntry } from "./knowledge/apps-collection.ts";
 import { requireNotStaff } from "./sharing.ts";
-import { stopsUnsettled } from "./workflows/resource-runs.ts";
+import {
+  stopsUnsettled,
+  stopsUnsettledSql,
+} from "./workflows/resource-runs.ts";
 
 // Removing an App (GRA-1120): what the settings page's "Remove app" and the
 // Apps sidebar's row menu ask core for. The App goes; what it doesn't own
@@ -43,7 +46,10 @@ import { stopsUnsettled } from "./workflows/resource-runs.ts";
 // - Running work outliving it: it must be archived first (its triggers
 //   stopped, its unfinished runs cancelled, app-status.ts), and is refused
 //   while the stops of runs it started are still settling
-//   (`app.stops_pending`).
+//   (`app.stops_pending`): checked against the archive the removal read,
+//   and again by its write, which lands only over that archive with no
+//   stop settling. The cron trigger goes on cancelling a removed App's
+//   runs, as any archived App's (`cancelArchivedRuns`).
 // - A removed App reached afterwards: every way to an App reads it through
 //   `findApp` or the SQL forms beside it, which refuse a removed one; and
 //   it is archived, which already serves nobody.
@@ -95,18 +101,22 @@ export const removeApp = async (
   if (found.owner !== by.userId && !isAdmin(by.role)) {
     throw appErrors.create("app.remove_forbidden");
   }
-  if (found.status !== "archived") {
+  const db = drizzle(env.DB);
+  // Its status, and when that last changed, read before anything is
+  // checked against it: the stops below are this very archive's, and the
+  // batch writes only over it, so a restore, new work and another archive
+  // meanwhile is a conflict, never a removal whose stops went unchecked.
+  const fence = await db
+    .select({ status: apps.status, at: apps.statusChangedAt })
+    .from(apps)
+    .where(eq(apps.id, found.id))
+    .get();
+  if (fence?.status !== "archived") {
     throw appErrors.create("app.remove_unarchived");
   }
   if (await stopsUnsettled(env, found.id)) {
     throw appErrors.create("app.stops_pending");
   }
-  const db = drizzle(env.DB);
-  const fence = await db
-    .select({ at: apps.statusChangedAt })
-    .from(apps)
-    .where(eq(apps.id, found.id))
-    .get();
   const now = new Date();
   const gone = removedSql(found.id);
   const [[removed]] = await auditedBatch(env, db, [
@@ -124,7 +134,10 @@ export const removeApp = async (
           eq(apps.id, found.id),
           eq(apps.status, "archived"),
           isNull(apps.removedAt),
-          sql`${apps.statusChangedAt} IS ${fence?.at?.getTime() ?? null}`
+          sql`${apps.statusChangedAt} IS ${fence.at?.getTime() ?? null}`,
+          // And none settling still, read where the removal lands: a stop
+          // claimed since the check above waits as one before it did.
+          sql`NOT ${stopsUnsettledSql(found.id)}`
         )
       )
       .returning({ id: apps.id }),
