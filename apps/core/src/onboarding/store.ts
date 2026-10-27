@@ -487,6 +487,15 @@ const agreedOf = (stored: string): Record<string, string> =>
   agreedSchema.safeParse(JSON.parse(stored)).data ?? {};
 
 /** A drawing as the store keeps it; null when there is none. */
+/**
+ * Someone's admission as SQL, as `#interviewsOf` reads it: their
+ * interview's start and when anything they approved last stopped counting,
+ * or NULL while nothing they agreed to counts. For a statement that writes
+ * only while it is what an intake read.
+ */
+const admissionSql = (person: string): SQL =>
+  sql`(SELECT CASE WHEN agreed_at IS NULL THEN NULL ELSE coalesce(started_at, '') || '|' || coalesce(revoked_at, '') END FROM interview_states WHERE person = ${person})`;
+
 const drawingOf = (stored: string | null): DrawnWork | null =>
   stored === null
     ? null
@@ -5216,25 +5225,33 @@ export class Onboarding extends DurableObject<Env> {
             other: clean(differs.other),
             at,
           };
-          // Only while the drawing it checked is still held: one forgotten
-          // meanwhile (its teller withdrew or deleted their interview, or
-          // a document it had was purged) leaves no copy of its words.
-          const held = this.#db
-            .select({ drawn: drawnWorks.drawn })
-            .from(drawnWorks)
-            .where(eq(drawnWorks.work, work.id))
-            .all()
-            .some(({ drawn }) => drawingOf(drawn)?.at === work.drawn.at);
-          if (held) {
-            this.#db
-              .insert(checkedDifferences)
-              .values({ work: work.id, ...shown })
-              .onConflictDoUpdate({
-                target: checkedDifferences.work,
-                set: shown,
-              })
-              .run();
-          }
+          // In one statement, only while what it was checked from still
+          // stands as the intake read it: the drawing it checked, and the
+          // interview of everyone it rests on, at the same admission
+          // (`admissionSql`). One forgotten, withdrawn, deleted or taken
+          // back meanwhile leaves no copy of its words.
+          const restsOn = [
+            ...new Set([
+              ...(support.steps[differs.step] ?? []),
+              ...support.other,
+            ]),
+          ];
+          const standing = and(
+            sql`EXISTS (SELECT 1 FROM ${drawnWorks}
+              WHERE ${drawnWorks.work} = ${work.id}
+                AND json_extract(${drawnWorks.drawn}, '$.at') = ${work.drawn.at})`,
+            ...restsOn.map(
+              (person) =>
+                sql`${admissionSql(person)} IS ${began.get(person) ?? null}`
+            )
+          );
+          this.#db
+            .insert(checkedDifferences)
+            .select(
+              sql`SELECT ${work.id}, ${shown.drawnAt}, ${shown.way}, ${shown.other}, ${shown.at} WHERE ${standing}`
+            )
+            .onConflictDoUpdate({ target: checkedDifferences.work, set: shown })
+            .run();
         } else {
           this.#db
             .delete(checkedDifferences)

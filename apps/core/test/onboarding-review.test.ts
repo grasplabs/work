@@ -386,16 +386,23 @@ describe("what needs the admin", { timeout: 120_000 }, () => {
     });
   });
 
-  it("writes no checked difference's words for a drawing someone it rests on withdrew from while it was checked", async () => {
-    const ids = await team();
-    let withdrawing: Promise<void> | undefined;
-    // While the intake checks who told what, the first of them withdraws.
-    const { tickets } = await drawn(ids, () => {
-      withdrawing ??= onLinkOf(ids.doers[0] ?? "", "withdraw");
-      return true;
-    });
-    await withdrawing;
-    await expect(checkedOf(tickets)).resolves.toStrictEqual([]);
+  it("writes no checked difference's words once someone it rests on withdraws or deletes their interview while it is checked", async () => {
+    // Between the intake's read and its write: while it checks who told
+    // what, the first of them withdraws, or deletes their interview.
+    const erasedWhileChecked = async (action: "withdraw" | "delete") => {
+      const ids = await team();
+      let erasing: Promise<void> | undefined;
+      const { tickets } = await drawn(ids, () => {
+        erasing ??= onLinkOf(ids.doers[0] ?? "", action);
+        return true;
+      });
+      await erasing;
+      return await checkedOf(tickets);
+    };
+    expect({
+      withdrawn: await erasedWhileChecked("withdraw"),
+      deleted: await erasedWhileChecked("delete"),
+    }).toStrictEqual({ withdrawn: [], deleted: [] });
   });
 
   it("shows no difference whose other way fewer than five are checked to tell, the drawing's word for five notwithstanding", async () => {
