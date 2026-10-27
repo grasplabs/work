@@ -351,6 +351,29 @@ export const settlesSubmission = (failure: GraspError): boolean =>
   // gets the key.
   !fences(failure.code);
 
+/** Each uncertain failure's receipt link (`withReceiptLink`), by failure. */
+const receiptLinks = new WeakMap<GraspError, () => Promise<unknown>>();
+
+/**
+ * `error`, an uncertain failure of a call that has an identity of its own
+ * (a decision's answer, spec 10.7.2), with a private link that sends
+ * exactly that call again: the same answer to the same decision, never a
+ * fresh one. A form keeps it to send the submission again under its
+ * identity (form.ts); nothing of it is on the error itself.
+ */
+export const withReceiptLink = (
+  error: GraspError,
+  again: () => Promise<unknown>
+): GraspError => {
+  receiptLinks.set(error, again);
+  return error;
+};
+
+/** The link `withReceiptLink` gave `error`, if it gave it one. */
+export const receiptLinkOf = (
+  error: GraspError
+): (() => Promise<unknown>) | undefined => receiptLinks.get(error);
+
 /** Refusals sent before a call reached the App's code: nothing of it ran. */
 export const refusedBeforeCallCodes: ReadonlySet<string> = new Set([
   "screen.rate_limited",
