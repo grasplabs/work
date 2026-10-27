@@ -5,9 +5,9 @@ import {
   nextReport,
   programmeWeek,
   reportWindow,
-} from "./programme.ts";
+} from "../src/onboarding/cadence.ts";
 
-// The programme's weeks (programme.ts): which week today is in, and when
+// The programme's weeks (src/onboarding/cadence.ts): which week today is in, and when
 // the next weekly report is ready, from the programme's first Monday.
 
 /** Monday 7 September 2026: the programme's first day. */

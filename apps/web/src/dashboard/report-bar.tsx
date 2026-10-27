@@ -1,9 +1,8 @@
+import type { NextReport } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Plural, Trans } from "@lingui/react/macro";
 import { FileTextIcon } from "lucide-react";
-
-import type { NextReport } from "./programme.ts";
 
 // The weekly report as one bar across the dashboard, as the prototype's
 // (`components/dashboard/report-bar.tsx`): in how many days the next

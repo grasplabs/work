@@ -54,10 +54,12 @@ export const familyNamespaces = [
   "notification",
   "onboarding",
   "operation",
+  "org_settings",
   "organization",
   "package",
   "permission",
   "place",
+  "policy",
   "query",
   "request",
   "resource",
@@ -70,6 +72,7 @@ export const familyNamespaces = [
   "transcription",
   "upload",
   "version",
+  "waiting",
   "workflow",
 ] as const;
 

@@ -664,6 +664,54 @@ export const skillReadSchema = z.strictObject({
 });
 export type SkillRead = z.infer<typeof skillReadSchema>;
 
+// --- lessons (GRA-301) -------------------------------------------------------
+
+/** A lesson as a list shows it: its current revision. */
+export interface LessonSummary {
+  id: string;
+  revision: number;
+  scope: "person" | "session";
+  state: "candidate" | "retired";
+  retiredBy: "owner" | "admin" | "evidence" | null;
+  instruction: string;
+  evidenceStatus: "supported" | "contested";
+  taskType: string;
+  versions: string[];
+  updatedAt: string;
+}
+
+/** One episode a lesson rests on, as its reader may see it. */
+export interface LessonEpisode {
+  episodeId: string;
+  role: "supporting" | "contradicting";
+  taskType: string;
+  execution: "completed" | "failed" | "cancelled";
+  result: "success" | "failure" | "unknown";
+  occurredAt: string;
+}
+
+/** One version of a lesson, as its reader may see it. */
+export interface LessonVersionView {
+  revision: number;
+  supersedes: number | null;
+  /** Its text, unless it rests on episodes the reader wasn't part of. */
+  instruction: string | null;
+  /**
+   * A model's wording of it for a person, beside its text: shown, or not,
+   * exactly as its text is.
+   */
+  wording: string | null;
+  evidenceStatus: "supported" | "contested" | null;
+  episodes: LessonEpisode[];
+  createdAt: string;
+}
+
+/** A lesson's lineage: the lesson, and its versions newest first. */
+export interface LessonLineage {
+  lesson: LessonSummary;
+  versions: LessonVersionView[];
+}
+
 // --- operations and errors --------------------------------------------------
 
 /**

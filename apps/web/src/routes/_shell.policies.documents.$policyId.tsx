@@ -23,7 +23,7 @@ import { Page, PageHeading, SectionTitle } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadLandscape } from "../landscape/landscape-data.ts";
 import type { LandscapeApp } from "../landscape/landscape.ts";
-import { policyBook } from "../policies/policies-data.ts";
+import { bookOf } from "../policies/policies-data.ts";
 import {
   ConditionChips,
   PolicyExcerpt,
@@ -31,6 +31,7 @@ import {
 } from "../policies/policy-parts.tsx";
 import { effectLabel, matchingApps } from "../policies/policy.ts";
 import type {
+  PolicyBook,
   PolicyDocument,
   PolicyReadingProblem,
   RuleProposal,
@@ -99,14 +100,16 @@ const ProposalCard = ({
 const PolicyDetail = ({
   policy,
   apps,
+  book,
 }: {
   policy: PolicyDocument;
   apps: readonly LandscapeApp[];
+  book: PolicyBook;
 }) => {
   const { t, i18n } = useLingui();
   const uploadedOn = formatDate(policy.uploadedAt);
   const { uploadedBy, fileName } = policy;
-  const rules = policyBook.rules.filter((rule) => rule.policyId === policy.id);
+  const rules = book.rules.filter((rule) => rule.policyId === policy.id);
   return (
     <>
       <SiteHeader
@@ -264,8 +267,9 @@ const PolicyDetail = ({
 const PolicyPage = () => {
   const { t } = useLingui();
   const { policyId } = Route.useParams();
-  const { apps } = Route.useLoaderData();
-  const policy = policyBook.policies.find(({ id }) => id === policyId);
+  const { apps, book: loaded } = Route.useLoaderData();
+  const book = bookOf(loaded);
+  const policy = book.policies.find(({ id }) => id === policyId);
   if (policy === undefined) {
     return (
       <>
@@ -300,6 +304,7 @@ const PolicyPage = () => {
   return (
     <PolicyDetail
       apps={apps.state === "ready" ? apps.data : []}
+      book={book}
       policy={policy}
     />
   );

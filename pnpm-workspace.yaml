@@ -220,3 +220,4 @@ peerDependencyRules:
 patchedDependencies:
   "@cloudflare/vitest-pool-workers@0.22.0": patches/@cloudflare__vitest-pool-workers@0.22.0.patch
   jq-wasm@3.0.0-jq-1.8.2: patches/jq-wasm@3.0.0-jq-1.8.2.patch
+  miniflare@5.20261012.0-beta: patches/miniflare@5.20261012.0-beta.patch

@@ -398,6 +398,10 @@ msgstr "{count, plural, one {# version} other {# versions}}"
 msgid "{count, plural, one {# wish} other {# wishes}}"
 msgstr "{count, plural, one {# souhait} other {# souhaits}}"
 
+#: src/brain/goals-editor.tsx
+msgid "{count, plural, one {# workflow serves it} other {# workflows serve it}}"
+msgstr "{count, plural, one {# workflow le sert} other {# workflows le servent}}"
+
 #: src/onboarding/place-picker.tsx
 msgid "{count, plural, one {Add # document} other {Add # documents}}"
 msgstr "{count, plural, one {Ajouter # document} other {Ajouter # documents}}"
@@ -1751,6 +1755,10 @@ msgstr "par mois"
 msgid "A new template"
 msgstr "Un nouveau modèle"
 
+#: src/inbox/items.ts
+msgid "A new version of {name} is up for review, and you answer for it. It runs once it is made current, on the domain's page."
+msgstr "Une nouvelle version de {name} attend d’être examinée, et vous en êtes responsable. Elle s’exécute dès qu’elle est rendue actuelle, sur la page du domaine."
+
 #: src/screens/screen-frame.tsx
 msgid "A new version of this app is ready"
 msgstr "Une nouvelle version de cette app est prête"
@@ -1811,6 +1819,11 @@ msgstr "Une exécution d’un workflow attend cette réponse."
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Une recherche dans {where} n’a rien trouvé {searches, plural, one {une fois} other {# fois}}, pour {askers, plural, one {# personne} other {# personnes}}."
+
+#: src/brain/lessons-view.tsx
+msgctxt "lesson scope"
+msgid "A shared chat"
+msgstr "Une conversation partagée"
 
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
@@ -1976,6 +1989,7 @@ msgid "Actor ID"
 msgstr "ID de l’acteur"
 
 #: src/onboarding/connect-steps.tsx
+#: src/routes/_shell.settings.pulse.tsx
 msgid "Add"
 msgstr "Ajouter"
 
@@ -1986,6 +2000,10 @@ msgstr "Ajouter une carte"
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Add a domain for a second brand or an old one."
 msgstr "Ajoutez un domaine pour une deuxième marque ou une ancienne."
+
+#: src/brain/goals-editor.tsx
+msgid "Add a goal"
+msgstr "Ajouter un objectif"
 
 #: src/onboarding/organization-dialogs.tsx
 #: src/routes/_shell.onboarding.organization.$team.tsx
@@ -3154,6 +3172,7 @@ msgctxt "where a workflow stands"
 msgid "Better split in two"
 msgstr "Mieux vaut le scinder en deux"
 
+#: src/routes/_shell.settings.billing.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Billing"
 msgstr "Facturation"
@@ -3207,6 +3226,10 @@ msgstr "Blocage"
 #: src/brain/brain.ts
 msgid "Blockers"
 msgstr "Blocages"
+
+#: src/brain/goals-editor.tsx
+msgid "Board goals"
+msgstr "Objectifs du conseil"
 
 #: src/dashboard/widget-board.tsx
 msgctxt "dashboard widget"
@@ -3399,6 +3422,7 @@ msgstr "Peut {verbs} les données de l’entreprise"
 msgid "Can’t be read"
 msgstr "Illisible"
 
+#: src/brain/goals-editor.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
@@ -3429,6 +3453,11 @@ msgstr "Annulée"
 msgctxt "status of a workflow run"
 msgid "Cancelled"
 msgstr "Annulée"
+
+#: src/brain/lessons-view.tsx
+msgctxt "lesson state"
+msgid "Candidate"
+msgstr "Candidate"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Cap reached"
@@ -3988,6 +4017,11 @@ msgctxt "status of a workflow run"
 msgid "Completed"
 msgstr "Terminée"
 
+#. placeholder {0}: episode.taskType
+#: src/brain/lessons-view.tsx
+msgid "Completed: {0}"
+msgstr "Terminé : {0}"
+
 #: src/dashboard/report.ts
 msgid "Completed: {completed}"
 msgstr "Terminées : {completed}"
@@ -4198,6 +4232,11 @@ msgstr "Contenu, en JSON"
 msgctxt "heading: the headings of a document, as a table of contents"
 msgid "Contents"
 msgstr "Sommaire"
+
+#: src/brain/lessons-view.tsx
+msgctxt "lesson evidence"
+msgid "Contested"
+msgstr "Contestée"
 
 #: src/inbox/item-detail.tsx
 msgctxt "inbox item section"
@@ -5071,10 +5110,6 @@ msgstr "Versions précédentes"
 msgid "Edit"
 msgstr "Modifier"
 
-#: src/routes/_shell.settings.billing.tsx
-msgid "Edit details"
-msgstr "Modifier les informations"
-
 #: src/chat/project-dialog.tsx
 msgid "Edit project"
 msgstr "Modifier le projet"
@@ -5101,6 +5136,10 @@ msgstr "IA embarquée"
 #: src/brain/brain-article/kern.tsx
 msgid "Employee"
 msgstr "Employé"
+
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Employee email domain"
+msgstr "Domaine e-mail des employés"
 
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Employee email domains"
@@ -5488,6 +5527,11 @@ msgstr "A échoué en agissant pour vous"
 msgid "Failed, tried again"
 msgstr "Échouée, nouvelle tentative"
 
+#. placeholder {0}: episode.taskType
+#: src/brain/lessons-view.tsx
+msgid "Failed: {0}"
+msgstr "Échec : {0}"
+
 #: src/dashboard/report.ts
 msgid "Failed: {failed}"
 msgstr "En échec : {failed}"
@@ -5861,6 +5905,7 @@ msgid "Go to Grasp"
 msgstr "Aller sur Grasp"
 
 #: src/brain/brain.ts
+#: src/brain/goals-editor.tsx
 #: src/chat/project-dialog.tsx
 msgid "Goal"
 msgstr "Objectif"
@@ -6305,6 +6350,14 @@ msgstr "Comment ils le remarqueraient : pas encore précisé."
 msgid "How was talking to {who}?"
 msgstr "Comment s’est passé l’échange avec {who} ?"
 
+#: src/brain/goals-editor.tsx
+msgid "How we notice it"
+msgstr "Comment on le remarque"
+
+#: src/brain/goals-editor.tsx
+msgid "How will the company see that it is met?"
+msgstr "Comment l’entreprise verra-t-elle qu’il est atteint ?"
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
 msgstr "Comment vous apparaissez dans Grasp : sur les workflows dont vous êtes responsable, et dans le journal d’audit."
@@ -6748,6 +6801,10 @@ msgstr "Il ne s’exécute plus."
 msgid "It rests on nothing you can see."
 msgstr "Il ne repose sur rien que vous puissiez voir."
 
+#: src/brain/lessons-view.tsx
+msgid "It rests on turns you were not part of."
+msgstr "Il repose sur des échanges auxquels vous n'avez pas participé."
+
 #: src/landscape/overview-tab.tsx
 msgid "It shows once the desktop agent or single sign-on sees someone use the app."
 msgstr "Cette section s’affiche dès que l’agent pour postes de travail ou l’authentification unique détecte une personne utilisant l’application."
@@ -7185,6 +7242,11 @@ msgstr "Documents juridiques et politiques que publie le fournisseur."
 msgid "Legal data"
 msgstr "Données juridiques"
 
+#: src/brain/memory-page.tsx
+msgctxt "the Brain's lessons from repeated failures"
+msgid "Lessons"
+msgstr "Leçons"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it."
 msgstr "Laissez une app d’IA comme Claude ou ChatGPT utiliser Grasp. Elle lit ce que Grasp sait et peut vous montrer une page. Pour tout le reste, elle vous demande d’abord ici : rien ne change sans votre accord."
@@ -7438,6 +7500,10 @@ msgstr "Rendre la version {version} actuelle"
 #: src/chat/builds.tsx
 msgid "Make version {version} current and publish"
 msgstr "Rendre la version {version} actuelle et publier"
+
+#: src/inbox/items.ts
+msgid "Make version {version} of {name} live?"
+msgstr "Mettre en service la version {version} de {name} ?"
 
 #: src/connections/integration-row.tsx
 msgid "Manage"
@@ -7864,6 +7930,10 @@ msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Jamais"
 
+#: src/brain/goals-editor.tsx
+msgid "New board goal"
+msgstr "Nouvel objectif du conseil"
+
 #: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
@@ -8104,6 +8174,7 @@ msgstr "Aucune modification de fichier."
 msgid "No files yet."
 msgstr "Pas encore de fichiers."
 
+#: src/brain/goals-editor.tsx
 #: src/dashboard/standard-widgets.tsx
 msgid "No goals yet."
 msgstr "Pas encore d’objectifs."
@@ -8131,6 +8202,10 @@ msgstr "Pas encore d’entretiens. Ils commencent une fois que l’entreprise a 
 #: src/routes/_shell.settings.billing.tsx
 msgid "No invoices yet."
 msgstr "Pas encore de factures."
+
+#: src/brain/lessons-view.tsx
+msgid "No lessons yet"
+msgstr "Aucune leçon pour l'instant"
 
 #: src/settings/person-limits.tsx
 msgid "No limit"
@@ -10308,6 +10383,10 @@ msgstr "lit les données du domaine"
 msgid "Ready"
 msgstr "Prêt"
 
+#: src/chat/thread.tsx
+msgid "Reasoning"
+msgstr "Raisonnement"
+
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Receipt"
 msgstr "Reçu"
@@ -10426,6 +10505,10 @@ msgstr "Retirer"
 #: src/chat/project-dialog.tsx
 msgid "Remove {documentName}"
 msgstr "Retirer {documentName}"
+
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Remove {domain}"
+msgstr "Retirer {domain}"
 
 #: src/onboarding/document-drop.tsx
 #: src/workflows/module-files.tsx
@@ -10591,9 +10674,18 @@ msgstr "Mettre hors service les paquets de {domain}"
 msgid "Retire the packages for {domain}?"
 msgstr "Mettre hors service les paquets de {domain} ?"
 
+#: src/brain/lessons-view.tsx
+msgid "Retire this lesson"
+msgstr "Retirer cette leçon"
+
 #: src/engines/package-approvals.tsx
 msgid "Retired"
 msgstr "Hors service"
+
+#: src/brain/lessons-view.tsx
+msgctxt "lesson state"
+msgid "Retired"
+msgstr "Retirée"
 
 #: src/brain/memory-page.tsx
 msgctxt "memory record state"
@@ -10639,10 +10731,19 @@ msgstr "Révision en retard"
 msgid "Review the apps of {name}"
 msgstr "Examiner les applications de {name}"
 
+#. placeholder {0}: lesson.revision
 #. placeholder {0}: record.revision
+#. placeholder {0}: version.revision
+#: src/brain/lessons-view.tsx
 #: src/brain/memory-page.tsx
 msgid "Revision {0}"
 msgstr "Révision {0}"
+
+#. placeholder {0}: version.revision
+#. placeholder {1}: version.supersedes
+#: src/brain/lessons-view.tsx
+msgid "Revision {0}, after revision {1}"
+msgstr "Révision {0}, après la révision {1}"
 
 #: src/workflows/definition-editor.tsx
 msgid "Revision {revision} doesn't pass yet, and no revision has."
@@ -10685,6 +10786,18 @@ msgstr "Révoquer les paquets de {domain} ?"
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
 msgstr "A révoqué une autorisation"
+
+#: src/brain/goals-editor.tsx
+msgid "Reword"
+msgstr "Reformuler"
+
+#: src/brain/goals-editor.tsx
+msgid "Reword {title}"
+msgstr "Reformuler {title}"
+
+#: src/brain/goals-editor.tsx
+msgid "Reword the goal"
+msgstr "Reformuler l’objectif"
 
 #: src/landscape/landscape-overview.ts
 msgid "Right to deletion"
@@ -10930,6 +11043,11 @@ msgstr "Exécutions cette semaine"
 msgid "Runs: {total}"
 msgstr "Exécutions : {total}"
 
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+msgid "Said by five or more people"
+msgstr "Dit par cinq personnes ou plus"
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "Said it didn't happen: {who}."
@@ -10948,6 +11066,7 @@ msgstr "A dit oui"
 msgid "Same version, different contents: {changed}"
 msgstr "Même version, contenu différent : {changed}"
 
+#: src/brain/goals-editor.tsx
 #: src/chat/project-dialog.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -11586,6 +11705,10 @@ msgctxt "column: how Grasp knows an app is used"
 msgid "Source"
 msgstr "Source"
 
+#: src/chat/cited-note.tsx
+msgid "Source {number}: {title}"
+msgstr "Source {number} : {title}"
+
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
@@ -11949,6 +12072,11 @@ msgstr "Résumé"
 msgctxt "kind of app"
 msgid "Support"
 msgstr "Service client"
+
+#: src/brain/lessons-view.tsx
+msgctxt "lesson evidence"
+msgid "Supported"
+msgstr "Étayée"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
@@ -12603,6 +12731,10 @@ msgstr "Les statistiques propres au domaine, et celles de la plateforme sous l'a
 msgid "The domains this chat builds didn't load."
 msgstr "Les domaines que ce chat crée n’ont pas été chargés."
 
+#: src/brain/goals-editor.tsx
+msgid "The earlier wording stays in the goal's history."
+msgstr "La formulation précédente reste dans l’historique de l’objectif."
+
 #: src/policies/policy.ts
 msgid "the EU"
 msgstr "UE"
@@ -13120,6 +13252,10 @@ msgstr "Il n’y a encore aucune collection que vous pouvez lire."
 msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 msgstr "Il n’y a pas encore de domaine que vous puissiez ouvrir. Les domaines se créent dans le chat : décrivez une partie de votre travail, et Grasp en construit les workflows et les applications."
 
+#: src/brain/goals-editor.tsx
+msgid "There are no workflows to link yet."
+msgstr "Il n’y a pas encore de workflows à lier."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."
 msgstr "Il n’y a pas de règle de données : tout modèle autorisé peut recevoir des données sensibles."
@@ -13467,6 +13603,10 @@ msgstr "Cette version de l’application a été révoquée et ne s’exécute p
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
 msgstr "La modification des données de cette version est encore en cours d’application. Réessayez dans un instant."
+
+#: src/chat/thread.tsx
+msgid "Thought for {time}"
+msgstr "A réfléchi pendant {time}"
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
@@ -13875,8 +14015,8 @@ msgid "Until {until}"
 msgstr "Jusqu'au {until}"
 
 #: src/routes/_shell.settings.billing.tsx
-msgid "Until it is, billing can be seen here but not changed."
-msgstr "D’ici là, la facturation est visible ici mais ne peut pas être modifiée."
+msgid "Until it is, there is no plan, card or invoice. The billing details and emails below are kept for when it is."
+msgstr "D’ici là, il n’y a ni forfait, ni carte, ni facture. Les coordonnées de facturation et les e-mails ci-dessous sont conservés pour ce moment-là."
 
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. Mend the record through the domain and the change is tried again, or abandon it."
@@ -14396,6 +14536,10 @@ msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Ce qui compte comme un succès"
 
+#: src/brain/goals-editor.tsx
+msgid "What does the board want to reach?"
+msgstr "Que veut atteindre le conseil ?"
+
 #: src/settings/person-limits.tsx
 msgid "What each person's model calls may cost a month, and how many messages they may send an hour. A person's own exception goes first, then their team's, then the default."
 msgstr "Ce que les appels aux modèles de chaque personne peuvent coûter par mois, et combien de messages elle peut envoyer par heure. L'exception propre à une personne passe en premier, puis celle de son équipe, puis la limite par défaut."
@@ -14691,6 +14835,10 @@ msgstr "Quand {when}"
 #: src/routes/_shell.settings.notifications.tsx
 msgid "When a payment fails or the card is about to run out, so you can fix it in time."
 msgstr "Quand un paiement échoue ou que la carte arrive à expiration, pour que vous puissiez régler cela à temps."
+
+#: src/brain/lessons-view.tsx
+msgid "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
+msgstr "Quand une tâche échoue sans cesse de la même manière, le Brain le note ici comme une leçon que vous pouvez vérifier."
 
 #: src/onboarding/work-rules.tsx
 msgid "When a workflow is known"
@@ -15138,6 +15286,7 @@ msgstr "Des tests de workflow échouent :"
 msgid "workflow.json"
 msgstr "workflow.json"
 
+#: src/brain/goals-editor.tsx
 #: src/chat/builds.tsx
 #: src/dashboard/report.ts
 #: src/dashboard/widget-board.tsx
@@ -15196,10 +15345,18 @@ msgctxt "what Grasp knows, by source"
 msgid "Workflows known"
 msgstr "Workflows connus"
 
+#: src/brain/goals-editor.tsx
+msgid "Workflows of {title}"
+msgstr "Workflows de {title}"
+
 #: src/dashboard/failed-workflows.tsx
 #: src/dashboard/to-do.tsx
 msgid "Workflows that failed"
 msgstr "Workflows en échec"
+
+#: src/brain/goals-editor.tsx
+msgid "Workflows that serve {title}"
+msgstr "Workflows qui servent {title}"
 
 #: src/dashboard/spend-widget.tsx
 msgid "Workflows that spent most"
@@ -15273,6 +15430,11 @@ msgstr "Écritures qu’un modèle peut orienter : {target}"
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Rédaction"
+
+#. placeholder {0}: version.wording
+#: src/brain/lessons-view.tsx
+msgid "Written by a model: {0}"
+msgstr "Écrit par un modèle : {0}"
 
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Written down"
@@ -15527,6 +15689,11 @@ msgstr "Vos mots"
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Votre espace de travail, qui peut y faire quoi, et votre propre compte."
+
+#: src/brain/lessons-view.tsx
+msgctxt "lesson scope"
+msgid "Yours"
+msgstr "La vôtre"
 
 #: src/brain/memory-page.tsx
 msgctxt "memory record scope"

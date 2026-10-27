@@ -1,0 +1,88 @@
+# Labels each pull request with how much review it gets
+# (scripts/review-tier.ts): Complexity: Low, Medium or High, and Security
+# when it touches what guards the product. High and Security PRs get
+# Greptile's review; Low and Medium ones are reviewed by the session that
+# wrote them.
+#
+# `pull_request_target`, with main checked out: the classifier that runs is
+# main's, never the PR's own, and nothing of the PR runs; the PR is only
+# read, as its list of changed files from the API. So a PR can't lower its
+# own label by changing the classifier.
+name: Review tier
+
+on:
+  pull_request_target:
+    # `edited`: a new base branch changes the files.
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+  # Labels: creating them is the issues API's, adding them the PR's.
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: review-tier-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: review tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - name: Label the pull request
+        # pipefail: a failed listing fails the step, never labels a PR Low.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api "repos/$REPO/pulls/$PR/files" --paginate \
+            --jq '.[] | {filename, previous_filename, additions, deletions}' \
+            | node scripts/review-tier.ts > "$RUNNER_TEMP/tier.json"
+          complexity=$(jq -r .complexity "$RUNNER_TEMP/tier.json")
+          security=$(jq -r .security "$RUNNER_TEMP/tier.json")
+          # The labels, defined here so a new repository gets them too.
+          gh label create "Complexity: Low" --repo "$REPO" --color 0E8A16 --description "Reviewed in the session" --force
+          gh label create "Complexity: Medium" --repo "$REPO" --color FBCA04 --description "Reviewed in the session" --force
+          gh label create "Complexity: High" --repo "$REPO" --color B60205 --description "Gets Greptile's review" --force
+          gh label create Security --repo "$REPO" --color 5319E7 --description "Gets Greptile's review" --force
+          # One complexity at a time, never lowered: a session raises it by
+          # hand for what size can't show, and a later push keeps that.
+          # Security is only ever added, for the same reason.
+          labels=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')
+          case "$complexity,$labels" in
+            Low,*"Complexity: Medium"*) complexity=Medium ;;
+          esac
+          case "$labels" in
+            *"Complexity: High"*) complexity=High ;;
+          esac
+          # Only the labels below it come off, and only those the PR has: a
+          # label raised while this job runs stays, and a failed removal
+          # fails the job.
+          for lower in Low Medium; do
+            [ "$lower" = "$complexity" ] && break
+            case ",$labels," in
+              *",Complexity: $lower,"*) gh pr edit "$PR" --repo "$REPO" --remove-label "Complexity: $lower" ;;
+            esac
+          done
+          gh pr edit "$PR" --repo "$REPO" --add-label "Complexity: $complexity"
+          if [ "$security" = true ]; then
+            gh pr edit "$PR" --repo "$REPO" --add-label Security
+          fi
+          {
+            echo "### Complexity: $complexity$([ "$security" = true ] && echo ', Security')"
+            echo
+            jq -r '.reasons[] | "- \(.)"' "$RUNNER_TEMP/tier.json"
+          } >> "$GITHUB_STEP_SUMMARY"

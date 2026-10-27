@@ -1,10 +1,11 @@
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
-import { chatCitationsMax } from "@grasp-os/shared/chat";
+import { chatCitationsMax, citedQuoteMax } from "@grasp-os/shared/chat";
 import type {
   ChatCitation,
   ChatCode,
   ChatMessage,
   ChatPartial,
+  ChatReasoning,
   ChatReplyEnd,
   ChatReplyUsage,
 } from "@grasp-os/shared/chat";
@@ -12,9 +13,9 @@ import type {
 import { contextWindowOf } from "./models.ts";
 
 // A chat's transcript as pi keeps it (workspace.ts), shown as the person
-// reads it: their questions, the agent's answers with the code it ran,
-// and each code step's result. The agent's instructions, the APIs and the
-// memory it was shown, and its reasoning stay out.
+// reads it: their questions, the agent's answers with the code it ran and
+// what the model thought before them, and each code step's result. The
+// agent's instructions, and the APIs and the memory it was shown, stay out.
 
 /** The text parts of a message's content, joined. */
 const textOf = (
@@ -43,6 +44,34 @@ const codeOf = (message: AssistantMessage): ChatCode[] =>
     const { code } = part.arguments;
     return [{ callId: part.id, code: typeof code === "string" ? code : "" }];
   });
+
+/**
+ * What a response thought, as far as it has streamed in: each thinking
+ * part the provider showed, joined. A redacted part holds only pi's own
+ * placeholder, never the model's words, so it shows nothing.
+ */
+const thoughtOf = (message: AssistantMessage): string =>
+  message.content
+    .flatMap((part) =>
+      part.type === "thinking" && part.redacted !== true && part.thinking !== ""
+        ? [part.thinking]
+        : []
+    )
+    .join("\n\n");
+
+/** Whether a response thought at all, shown or redacted. */
+const thought = (message: AssistantMessage): boolean =>
+  message.content.some(({ type }) => type === "thinking");
+
+/**
+ * What a stored response thought, and for how long (`thinkingMs`, as core
+ * timed it); none for one that didn't think.
+ */
+const reasoningOf = (
+  message: AssistantMessage,
+  thinkingMs: number | null
+): ChatReasoning | undefined =>
+  thought(message) ? { text: thoughtOf(message), ms: thinkingMs } : undefined;
 
 const ends: Record<AssistantMessage["stopReason"], ChatReplyEnd> = {
   stop: "done",
@@ -88,11 +117,31 @@ const usageOf = ({
 
 /**
  * An inline Markdown link to a note: its text, and the note's ID, its
- * destination in angle brackets or not, with a title or none. Only this
- * form, in lower case and with an ID of plain characters, is ever kept.
+ * destination in angle brackets or not, with a title or none, which is
+ * the words of the note it quotes. Only this form, in lower case and with
+ * an ID of plain characters, is ever kept.
  */
 const noteLink =
-  /\[(?<label>[^\]\n]*)\]\(\s*<?grasp:note\/(?<id>[\w-]{1,128})>?(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?\s*\)/gu;
+  /\[(?<label>[^\]\n]*)\]\(\s*<?grasp:note\/(?<id>[\w-]{1,128})>?(?:\s+(?:"(?<double>[^"\n]*)"|'(?<single>[^'\n]*)'|\((?<parenthesised>[^)\n]*)\)))?\s*\)/gu;
+
+/** A backslash escape in a link's title, which renders as what it escapes. */
+const titleEscape = /\\(?<character>[!-/:-@[-`{-~])/gu;
+
+/** A run of whitespace, which a quote matches as one space. */
+const whitespace = /\s+/gu;
+
+/**
+ * The quote a note link's title holds, as the answer means it: its
+ * escapes undone and its whitespace folded; none for a title that is
+ * empty, or one longer than a span keeps.
+ */
+const quoteOf = (title: string | undefined): string | null => {
+  const quote = (title ?? "")
+    .replaceAll(titleEscape, "$<character>")
+    .replaceAll(whitespace, " ")
+    .trim();
+  return quote === "" || quote.length > citedQuoteMax ? null : quote;
+};
 
 /**
  * A character reference a Markdown renderer would read as a character
@@ -238,9 +287,23 @@ const partsOf = (text: string): Part[] => {
 };
 
 /**
+ * A note link an answer keeps (`citedIn`): where it starts in the
+ * answer's text, the note, the words it links, and the quote its title
+ * holds (`quoteOf`), as the answer wrote it: whether the note says it is
+ * for whoever shows it to decide (`ChatCitedSpan`).
+ */
+export interface NoteLink {
+  at: number;
+  documentId: string;
+  text: string;
+  quote: string | null;
+}
+
+/**
  * An answer's text with the notes it cites (`ChatCitation`): its links to
  * the first {@link chatCitationsMax} notes `given` holds stay, each as
- * `[label](grasp:note/<id>)`, and are its citations. Everything else
+ * `[label](grasp:note/<id>)`, and are its citations; `links` are where
+ * each stays, in order, with the quote its title held. Everything else
  * outside code loses the note scheme, wherever and however it is written:
  * a link to any other note is its text alone, and an autolink, a reference
  * definition, an escaped or character-referenced scheme, or one in another
@@ -251,35 +314,67 @@ const partsOf = (text: string): Part[] => {
 export const citedIn = (
   text: string,
   given: (documentId: string) => boolean
-): { text: string; citations: ChatCitation[] } => {
+): { text: string; citations: ChatCitation[]; links: NoteLink[] } => {
   const cited: string[] = [];
-  const cleaned = (prose: string): string => {
-    const kept: string[] = [];
-    const marked = prose
-      .replaceAll(mark, "")
-      .replaceAll(characterReference, "&amp;")
-      .replaceAll(escapedPunctuation, "$<character>")
-      .replaceAll(noteLink, (_link, label: string, id: string) => {
-        const known = cited.includes(id);
-        if (!given(id) || (!known && cited.length >= chatCitationsMax)) {
-          return label;
-        }
-        if (!known) {
-          cited.push(id);
-        }
-        kept.push(`[${withoutScheme(label)}](grasp:note/${id})`);
-        return keptMark(kept.length - 1);
-      });
-    return withoutScheme(marked).replaceAll(
-      keptMarks,
-      (_mark, index: string) => kept[Number(index)] ?? ""
+  const kept: Omit<NoteLink, "at">[] = [];
+  const marked = (prose: string): string =>
+    withoutScheme(
+      prose
+        .replaceAll(mark, "")
+        .replaceAll(characterReference, "&amp;")
+        .replaceAll(escapedPunctuation, "$<character>")
+        .replaceAll(
+          noteLink,
+          (
+            _link,
+            label: string,
+            id: string,
+            double: string | undefined,
+            single: string | undefined,
+            parenthesised: string | undefined
+          ) => {
+            const known = cited.includes(id);
+            if (!given(id) || (!known && cited.length >= chatCitationsMax)) {
+              return label;
+            }
+            if (!known) {
+              cited.push(id);
+            }
+            kept.push({
+              documentId: id,
+              text: withoutScheme(label),
+              quote: quoteOf(double ?? single ?? parenthesised),
+            });
+            return keptMark(kept.length - 1);
+          }
+        )
     );
-  };
+  // Each kept link goes back in its place once the rest is cleaned, so
+  // where it starts is known.
+  let shown = "";
+  const links: NoteLink[] = [];
+  for (const part of partsOf(text)) {
+    if (part.code) {
+      shown += part.text;
+      continue;
+    }
+    const prose = marked(part.text);
+    let from = 0;
+    for (const match of prose.matchAll(keptMarks)) {
+      shown += prose.slice(from, match.index);
+      const link = kept[Number(match.groups?.index)];
+      if (link !== undefined) {
+        links.push({ at: shown.length, ...link });
+        shown += `[${link.text}](grasp:note/${link.documentId})`;
+      }
+      from = match.index + match[0].length;
+    }
+    shown += prose.slice(from);
+  }
   return {
-    text: partsOf(text)
-      .map((part) => (part.code ? part.text : cleaned(part.text)))
-      .join(""),
+    text: shown,
     citations: cited.map((documentId) => ({ kind: "document", documentId })),
+    links,
   };
 };
 
@@ -294,18 +389,33 @@ const givenNothing = (): boolean => false;
 export const partialOf = (message: AssistantMessage): ChatPartial => ({
   text: citedIn(textOf(message.content), givenNothing).text,
   code: codeOf(message),
+  reasoning: thoughtOf(message),
 });
+
+/**
+ * The note links a stored answer keeps (`citedIn`), citing the notes
+ * `given` holds; none for any other message.
+ */
+export const noteLinksOf = (
+  message: Message,
+  given: (documentId: string) => boolean
+): NoteLink[] =>
+  message.role === "assistant"
+    ? citedIn(textOf(message.content), given).links
+    : [];
 
 /**
  * A stored message as the person reads it; `undefined` for a system one.
  * An answer cites the notes `given` holds (`citedIn`): the documents its
- * chat's code was given before it.
+ * chat's code was given before it; it thought for `thinkingMs`, as core
+ * kept it.
  */
 export const chatMessageOf = (
   id: number,
   message: Message,
   createdAt: Date,
-  given: (documentId: string) => boolean = givenNothing
+  given: (documentId: string) => boolean = givenNothing,
+  thinkingMs: number | null = null
 ): ChatMessage | undefined => {
   const at = createdAt.toISOString();
   if (message.role === "user") {
@@ -313,11 +423,15 @@ export const chatMessageOf = (
   }
   if (message.role === "assistant") {
     const usage = usageOf(message);
+    const { text, citations } = citedIn(textOf(message.content), given);
+    const reasoning = reasoningOf(message, thinkingMs);
     return {
       id,
       role: "assistant",
-      ...citedIn(textOf(message.content), given),
+      text,
+      citations,
       code: codeOf(message),
+      ...(reasoning === undefined ? {} : { reasoning }),
       end: ends[message.stopReason],
       ...(message.stopReason === "error" && message.errorMessage !== undefined
         ? { error: message.errorMessage }

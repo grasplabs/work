@@ -16,7 +16,7 @@ import { loopbackHosts } from "./router.ts";
 
 // SIGN_IN (core's src/auth/config.ts)
 
-const domainSchema = z
+export const domainSchema = z
   .string()
   .regex(/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/u, "a lowercase domain, e.g. acme.com");
 
