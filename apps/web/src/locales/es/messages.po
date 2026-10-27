@@ -10400,6 +10400,10 @@ msgstr "lee los datos del dominio"
 msgid "Ready"
 msgstr "Listo"
 
+#: src/chat/thread.tsx
+msgid "Reasoning"
+msgstr "Razonamiento"
+
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Receipt"
 msgstr "Comprobante"
@@ -11039,6 +11043,11 @@ msgstr "Ejecuciones esta semana"
 #: src/dashboard/report.ts
 msgid "Runs: {total}"
 msgstr "Ejecuciones: {total}"
+
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+msgid "Said by five or more people"
+msgstr "Dicho por cinco o más personas"
 
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
@@ -13626,6 +13635,10 @@ msgstr "Esta versión de la aplicación se revocó y ya no se ejecuta. Un admini
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
 msgstr "El cambio de datos de esta versión todavía se está aplicando. Vuelve a intentarlo en un momento."
+
+#: src/chat/thread.tsx
+msgid "Thought for {time}"
+msgstr "Pensó durante {time}"
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."

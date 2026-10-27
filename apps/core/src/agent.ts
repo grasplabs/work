@@ -1,5 +1,9 @@
 import { runAgentLoop } from "@earendil-works/pi-agent-core";
-import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import type {
+  AgentEvent,
+  AgentMessage,
+  AgentTool,
+} from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
 import type {
   AssistantMessage,
@@ -681,8 +685,11 @@ export interface Turn {
   recallFirst?: boolean;
   /** Cancels the turn: the request or code run in flight stops. */
   signal: AbortSignal;
-  /** Keeps a finished message: called in order, as each one finishes. */
-  keep: (message: Message) => void;
+  /**
+   * Keeps a finished message: called in order, as each one finishes. A
+   * response that thought comes with how long it did, in milliseconds.
+   */
+  keep: (message: Message, thinkingMs?: number) => void;
   /**
    * Shows a response as it streams in, before `keep` gets it whole: called
    * with the response so far on each change.
@@ -907,6 +914,44 @@ const resultRunId = (message: Message): string | undefined => {
     typeof details.runId === "string"
     ? details.runId
     : undefined;
+};
+
+/**
+ * Times the thinking of the response streaming in: from each thinking
+ * part's start to its end, as the provider streams them, the parts' times
+ * added up. `take` gives the response's time once it ended (none when it
+ * didn't think), a part it ended in the middle of counted up to then, and
+ * starts again for the next one.
+ */
+const thinkingClock = () => {
+  let ms: number | undefined;
+  let since: number | undefined;
+  const stop = (): void => {
+    if (since !== undefined) {
+      ms = (ms ?? 0) + Date.now() - since;
+      since = undefined;
+    }
+  };
+  return {
+    see: (event: AgentEvent): void => {
+      if (event.type !== "message_update") {
+        return;
+      }
+      const { type } = event.assistantMessageEvent;
+      if (type === "thinking_start") {
+        stop();
+        since = Date.now();
+      } else if (type === "thinking_end") {
+        stop();
+      }
+    },
+    take: (): number | undefined => {
+      stop();
+      const taken = ms;
+      ms = undefined;
+      return taken;
+    },
+  };
 };
 
 /**
@@ -1145,6 +1190,7 @@ export const runTurn = async ({
     { role: "user", content: question, timestamp: Date.now() },
   ];
   const progress: Progress = { steps: 0, runs: 0, withheld: new Set() };
+  const thinking = thinkingClock();
   const tools = [
     executeCode({ apis, scope, runs, loader, sandbox, codeTimeoutMs }),
     readApi(apis),
@@ -1227,8 +1273,12 @@ export const runTurn = async ({
       },
     },
     (event) => {
+      thinking.see(event);
       if (event.type === "message_end" && isMessage(event.message)) {
-        keep(ownWords ? inOwnWords(event.message) : event.message);
+        keep(
+          ownWords ? inOwnWords(event.message) : event.message,
+          event.message.role === "assistant" ? thinking.take() : undefined
+        );
       }
       if (event.type === "tool_execution_update") {
         const update: unknown = event.partialResult;
