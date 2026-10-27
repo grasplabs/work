@@ -321,8 +321,10 @@ const managedBy = async (
   const db = drizzle(env.DB);
   const app = await defaultStoreApp(env, parsed.data);
   // A removed App's default store has no builders left: the
-  // organization's own admins, never Grasp staff, read, export and delete
-  // it, so its records are never stuck (erasure, GRA-335).
+  // organization's own admins, never Grasp staff, read, export, change
+  // (`requireStoreChangeable` lets them: the App is no longer archived as
+  // one that can be restored) and delete it, so its records are never
+  // stuck (erasure, GRA-335).
   if (app?.removed === true) {
     if (!isMemberAdmin(by)) {
       throw dataErrors.create("data.store_unavailable");

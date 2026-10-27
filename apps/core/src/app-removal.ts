@@ -1,5 +1,6 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
@@ -68,6 +69,9 @@ import { stopsUnsettled } from "./workflows/resource-runs.ts";
 //   the organization's own admins, never Grasp staff, read, export and
 //   delete its default store (data-stores.ts, `managedBy`); the store's
 //   owner claim stays.
+// - Held actions waiting for ever: those it made in connect, which nobody
+//   can confirm now, are declined as expired, recorded by connect
+//   (`connection.action.expired`, reason `app.removed`).
 // - Going unrecorded: `app.removed`, naming who and the App, is written in
 //   the batch, only if the App was removed by it.
 
@@ -177,4 +181,15 @@ export const removeApp = async (
   }
   // Its Apps-collection entry: its name, description and AGENTS.md go.
   await forgetAppEntry(env, found.id);
+  // Its held actions in connect, which nobody can confirm now, go as
+  // expired ones do, recorded there. Best effort: confirming one checks
+  // its binding, which is revoked, and refuses it all the same.
+  try {
+    await env.CONNECT.dropForRemovedApp({ appId: found.id });
+  } catch (error) {
+    log.warn("app.held_drop_failed", {
+      appId: found.id,
+      ...errorFields(error),
+    });
+  }
 };

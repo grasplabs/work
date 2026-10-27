@@ -140,6 +140,7 @@ import {
   dropForEndedRun,
   dropForBinding,
   dropForEndedRuns,
+  dropForRemovedApp,
   dropStaleBinding,
   heldFor,
   declineChatActions,
@@ -620,6 +621,10 @@ export default class Connect
 
   async dropForBinding(request: unknown): Promise<void> {
     await dropForBinding(this.env, request);
+  }
+
+  async dropForRemovedApp(request: unknown): Promise<void> {
+    await dropForRemovedApp(this.env, request);
   }
 
   async dropStaleBinding(request: unknown): Promise<void> {
