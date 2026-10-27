@@ -11044,6 +11044,11 @@ msgstr "Runs deze week"
 msgid "Runs: {total}"
 msgstr "Runs: {total}"
 
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+msgid "Said by five or more people"
+msgstr "Gezegd door vijf of meer mensen"
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "Said it didn't happen: {who}."
