@@ -405,8 +405,8 @@ brain: {
   }): Promise<MemoryPack>;
   /** The people, teams, processes and things its sources mention, by the start of a name (two characters at least): needs the brain permission. */
   entities(input: { query: string; limit?: number }): Promise<Entity[]>;
-  /** The sources that mention one entity, at their versions. */
-  entitySources(input: { entityId: string }): Promise<MemoryItem["sourceRefs"]>;
+  /** The sources that mention one entity, at their versions: documents, or the person's own memories. */
+  entitySources(input: { entityId: string }): Promise<Relation["sourceRef"][]>;
   /** What its sources say relates one entity to others (who owns or leads what), each with the source's own sentence: \`at\` (YYYY-MM-DD) for who held it on a date, \`knownAt\` (ISO instant) for what was known then. Quote the evidence; when relations conflict, say so and show both. */
   relations(input: { entityId: string; predicate?: string; at?: string; knownAt?: string }): Promise<Relation[]>;
   /** Its open questions. Bring one up when the person could answer it, and say who can; you can't answer or close one yourself. */
