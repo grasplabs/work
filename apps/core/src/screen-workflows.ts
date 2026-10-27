@@ -863,6 +863,18 @@ const snapshotWaits = async (
   return own ? waits : waits.filter(isAnswerableDecision);
 };
 
+/**
+ * Refuses (`workflow.run_unavailable`) run `row` to a reviewer once it has
+ * ended: they watch it only while a decision of it asks them, which a run
+ * that goes on has, so one that ended since `seenRun` admitted them never
+ * hands them its output or its error.
+ */
+const requireWatchable = (row: RunRow, asking: Asking): void => {
+  if (isEnded(row.status) && row.principalId !== asking.by.userId) {
+    throw workflowResourceErrors.create("workflow.run_unavailable");
+  }
+};
+
 /** Run `runId`'s snapshot for the asking person, and its revision. */
 const runSnapshot = async (
   env: Env,
@@ -886,6 +898,7 @@ const runSnapshot = async (
   // write that changes either moves on in that write).
   const [row, pending] = await runAndPending(env, seen.row);
   const ended = isEnded(row.status);
+  requireWatchable(row, asking);
   // Controls are the run's own person's: a reviewer watching it has none.
   const mayStart =
     row.principalId === asking.by.userId &&
