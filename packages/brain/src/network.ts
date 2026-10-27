@@ -252,6 +252,49 @@ const reported = async <C>(
   );
 };
 
+/** `read`'s value, wrapped, so a race tells it from an expiry. */
+const answered = async <T>(read: Promise<T>): Promise<{ value: T }> => ({
+  value: await read,
+});
+
+/** `null`, once `ms` milliseconds have passed. */
+const expired = async (ms: number): Promise<null> => {
+  await scheduler.wait(ms);
+  return null;
+};
+
+/**
+ * `read`, or undefined once the deadline passes first: a read that would
+ * outlast it is given up on (its rows are left unread), as the recall's
+ * own full-text read is.
+ */
+const beforeDeadline = async <C, T>(
+  brain: Brain<C>,
+  deadline: number,
+  read: Promise<T>
+): Promise<T | undefined> => {
+  const remaining = deadline - brain.ports.clock().getTime();
+  if (remaining <= 0) {
+    return undefined;
+  }
+  const settled = await Promise.race([answered(read), expired(remaining)]);
+  return settled?.value;
+};
+
+/**
+ * Each entity of `starts` once, as first reached: an entity two relations
+ * reach is one start, so it takes one of a hop's `networkFanOut` places.
+ */
+const distinct = (starts: readonly Start[]): Start[] => {
+  const byEntity = new Map<string, Start>();
+  for (const start of starts) {
+    if (!byEntity.has(start.entity.entityId)) {
+      byEntity.set(start.entity.entityId, start);
+    }
+  }
+  return [...byEntity.values()];
+};
+
 /** One hop's start: an entity, how the path reached it, and from where. */
 interface Start {
   entity: End;
@@ -346,7 +389,15 @@ export const networkOf = async <C>(
     ownerReads: [],
   };
   const cuts = new Set<NetworkCut>();
-  const { seeds, cut } = await seedsOf(brain, scope, query);
+  const seeded = await beforeDeadline(
+    brain,
+    query.deadline,
+    seedsOf(brain, scope, query)
+  );
+  if (seeded === undefined) {
+    return { ...none, cuts: ["deadline"] };
+  }
+  const { seeds, cut } = seeded;
   if (cut) {
     cuts.add("rows");
   }
@@ -372,17 +423,21 @@ export const networkOf = async <C>(
       if (reached.length > query.maxItems) {
         break;
       }
-      if (brain.ports.clock().getTime() >= query.deadline) {
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time, within the deadline
+      const hopRead = await beforeDeadline(
+        brain,
+        query.deadline,
+        readable(
+          brain,
+          scope,
+          { entityId: start.entity.entityId },
+          query.within
+        )
+      );
+      if (hopRead === undefined) {
         cuts.add("deadline");
         break;
       }
-      // oxlint-disable-next-line no-await-in-loop -- one read at a time, within the deadline
-      const hopRead = await readable(
-        brain,
-        scope,
-        { entityId: start.entity.entityId },
-        query.within
-      );
       considered.push(...hopRead.considered);
       if (hopRead.cut) {
         cuts.add("rows");
@@ -395,7 +450,7 @@ export const networkOf = async <C>(
       reached.push(...stepped.reached);
       next.push(...stepped.next);
     }
-    starts = next;
+    starts = distinct(next);
   }
   if (reached.length > query.maxItems) {
     cuts.add("items");
