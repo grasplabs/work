@@ -61,16 +61,31 @@ export const go = action({
     }
   },
 });
+
+export const goStreaming = action({
+  args: {},
+  returns: v.string(),
+  stream: v.object({ step: v.string() }),
+  uses: [next],
+  handler: async (ctx) => {
+    await ctx.emit({ step: "calling" });
+    try {
+      return "+" + (await ctx.resources.next.call("relay.go", {}));
+    } catch (error) {
+      return "+error:" + String(Reflect.get(Object(error), "code"));
+    }
+  },
+});
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { go, next } from "./operations/relay.ts";
+import { go, goStreaming, next } from "./operations/relay.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Relay",
   schema,
   access: { tables: {} },
-  operations: { relay: { go } },
+  operations: { relay: { go, goStreaming } },
   internalOperations: {},
   screens: [],
   uses: [next],
@@ -103,31 +118,36 @@ const relay = async (name: string) => {
   return { app: id, version, release: await loadRelease(env, id, version) };
 };
 
-/** The relay's `relay.go`, as its screen sends it, under `key` if given. */
+/** The relay's `path`, as its screen sends it, under `key` if given. */
 const goRequest = (
   { release }: Awaited<ReturnType<typeof relay>>,
-  key?: string
+  key?: string,
+  path = "relay.go"
 ): string =>
   JSON.stringify({
     reference: {
       resourceId: release.manifest.resourceId,
       resourceVersion: release.manifest.resourceVersion,
-      contractId: "relay.go",
-      fingerprint: release.fingerprints["relay.go"],
+      contractId: path,
+      fingerprint: release.fingerprints[path],
       kind: "action",
     },
     input: {},
     ...(key === undefined ? {} : { idempotencyKey: key }),
   });
 
-/** Posts `body` to `app`'s function path as `as`'s screen, under `lease`. */
+/**
+ * Posts `body` to `app`'s function path (`suffix`: a streaming action's
+ * `/stream`) as `as`'s screen, under `lease`.
+ */
 const post = async (
   app: string,
   body: string,
   as: { session: string; userId: string },
-  lease: string
+  lease: string,
+  suffix = ""
 ): Promise<Response> =>
-  await routed(`${appFunctionPath}/${app}`, {
+  await routed(`${appFunctionPath}/${app}${suffix}`, {
     method: "POST",
     headers: {
       origin: clientOrigin,
@@ -138,6 +158,12 @@ const post = async (
     },
     body,
   });
+
+/** The text a request answered. */
+const textOf = async (responding: Promise<Response>): Promise<string> => {
+  const response = await responding;
+  return await response.text();
+};
 
 /** Who each `app.call` to `callee` was made by, and for whom. */
 const callsTo = (events: readonly AuditEvent[], callee: string) =>
@@ -151,7 +177,7 @@ const callsTo = (events: readonly AuditEvent[], callee: string) =>
     }));
 
 describe("a Grasp staff session's screen of an App", setUpTime, () => {
-  it("calls on down the chain as them, for a plain call and a keyed action alike", async () => {
+  it("calls on down the chain as them, for a plain call, a keyed action and a streamed one alike", async () => {
     const admin = await person("admin");
     const [first, second] = await Promise.all([
       relay("First"),
@@ -170,26 +196,53 @@ describe("a Grasp staff session's screen of an App", setUpTime, () => {
       .authenticate()
       .screens.open(first.app, "relay");
     const staff = { session, userId };
+    /** The calls of Second each run below made, in turn. */
+    const madeBy = async (run: () => Promise<string>) => {
+      const before = callsTo(await allEvents(), second.app).length;
+      const body = await run();
+      return {
+        body,
+        calls: callsTo(await allEvents(), second.app).slice(before),
+      };
+    };
 
-    const plain = await post(first.app, goRequest(first), staff, lease);
-    const plainCalls = callsTo(await allEvents(), second.app);
-    const keyed = await post(
-      first.app,
-      goRequest(first, crypto.randomUUID()),
-      staff,
-      lease
+    const plain = await madeBy(
+      async () => await textOf(post(first.app, goRequest(first), staff, lease))
     );
-    const allCalls = callsTo(await allEvents(), second.app);
+    const keyed = await madeBy(
+      async () =>
+        await textOf(
+          post(first.app, goRequest(first, crypto.randomUUID()), staff, lease)
+        )
+    );
+    const streamed = await madeBy(
+      async () =>
+        await textOf(
+          post(
+            first.app,
+            goRequest(first, crypto.randomUUID(), "relay.goStreaming"),
+            staff,
+            lease,
+            "/stream"
+          )
+        )
+    );
 
+    // First reached Second as them; Second, bound to nothing, went no further.
+    const reached = "++error:resource.unavailable";
+    const theirs = [{ staff: userId, onBehalfOf: userId }];
     expect({
-      answered: [plain.status, keyed.status],
-      // The plain call's, then the keyed action's: each the staff member's.
-      plain: plainCalls,
-      keyed: allCalls.slice(plainCalls.length),
+      bodies: [plain.body, keyed.body, streamed.body].map((body) =>
+        body.includes(reached)
+      ),
+      plain: plain.calls,
+      keyed: keyed.calls,
+      streamed: streamed.calls,
     }).toStrictEqual({
-      answered: [200, 200],
-      plain: [{ staff: userId, onBehalfOf: userId }],
-      keyed: [{ staff: userId, onBehalfOf: userId }],
+      bodies: [true, true, true],
+      plain: theirs,
+      keyed: theirs,
+      streamed: theirs,
     });
   });
 });
