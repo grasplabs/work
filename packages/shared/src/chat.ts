@@ -309,12 +309,14 @@ export const chatAskLimits = {
   choiceLength: 120,
 } as const;
 
-/** Text with no line break in it. */
-const oneLine = /^[^\r\n]*$/u;
+/** One line of text, starting and ending with something other than space. */
+const oneLine = /^\S(?:[^\r\n]*\S)?$/u;
 
-/** One line of plain text, as a question or a choice is. */
-const askLine = (max: number) =>
-  z.string().trim().min(1).max(max).regex(oneLine);
+/**
+ * One line of plain text, as a question or a choice is: taken as written
+ * or refused, never trimmed.
+ */
+const askLine = (max: number) => z.string().max(max).regex(oneLine);
 
 /** What the agent asks the person at once, as it calls `askQuestions`. */
 export const chatAskSchema = z.strictObject({

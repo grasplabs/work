@@ -47,14 +47,16 @@ const codeOf = (message: AssistantMessage): ChatCode[] =>
 
 /**
  * The questions a response asked the person (`askQuestions`), as the tool
- * took them; none when it asked none, or asked in a shape the tool
- * refused (the model was told why, and the turn went on).
+ * took them: its first call the tool took; none when it asked none, or
+ * only in shapes the tool refused (the model was told why).
  */
 const askedOf = (message: AssistantMessage): ChatAsked | undefined => {
   for (const part of message.content) {
     if (part.type === "toolCall" && part.name === "askQuestions") {
       const ask = chatAskSchema.safeParse(part.arguments);
-      return ask.success ? { callId: part.id, ...ask.data } : undefined;
+      if (ask.success) {
+        return { callId: part.id, ...ask.data };
+      }
     }
   }
   return undefined;
