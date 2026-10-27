@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b9a5e01e-3eca-4078-8cb0-8eec60c5f93c",
-  "prevId": "204d6d86-e9e7-4e0b-b440-2460536976f4",
+  "id": "d3fab926-7558-4afa-9ae3-0a659c13db82",
+  "prevId": "2a899558-5ce1-4356-bb32-e4ae94ed396e",
   "tables": {
     "audit_outbox": {
       "name": "audit_outbox",
@@ -978,6 +978,20 @@
         "wording_state": {
           "name": "wording_state",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "wording_claim": {
+          "name": "wording_claim",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "wording_claimed_at": {
+          "name": "wording_claimed_at",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
