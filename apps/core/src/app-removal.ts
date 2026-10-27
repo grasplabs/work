@@ -53,6 +53,12 @@ import {
 // - A removed App reached afterwards: every way to an App reads it through
 //   `findApp` or the SQL forms beside it, which refuse a removed one; and
 //   it is archived, which already serves nobody.
+// - A write that read it before its removal and lands after (a grant, a
+//   request, a binding, a member, a version, a run, a change to the App
+//   itself): refused by the database (migration 0153's triggers), in one
+//   place for every writer, now and later, and answered `app.not_found`
+//   (`auditedBatch`). Only ending things stays open: revoking, deleting,
+//   and the cron trigger cancelling its runs.
 // - Grants outliving it: in the batch that removes it, the permissions it
 //   held, and other Apps' and agents' permissions on its exports, are
 //   revoked; its resource bindings revoked; its workflow bindings

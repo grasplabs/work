@@ -12,6 +12,16 @@ export const isUniqueViolation = (error: unknown): boolean =>
     isUniqueViolation(error.cause));
 
 /**
+ * Whether D1 refused a write for touching a removed App: the triggers of
+ * migration 0153 (app-removal.ts) abort any write that gives a removed
+ * App something new, or changes it.
+ */
+export const isRemovedAppRefusal = (error: unknown): boolean =>
+  error instanceof Error &&
+  (/for a removed App|a removed App stays/u.test(error.message) ||
+    isRemovedAppRefusal(error.cause));
+
+/**
  * What D1 says when it couldn't be reached for a moment or reset under
  * the call (Cloudflare's own list of errors worth retrying), never a
  * refusal of what was asked: a constraint, a syntax error, a limit.

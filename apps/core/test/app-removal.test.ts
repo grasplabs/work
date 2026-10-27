@@ -5,10 +5,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { addIntegration } from "../src/app-integrations.ts";
 import { removeApp } from "../src/app-removal.ts";
 import { updateApp } from "../src/app-settings.ts";
+import { appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { deleteStore } from "../src/data-stores.ts";
 import { authorize } from "../src/knowledge/app-entries.ts";
 import { indexApps } from "../src/knowledge/apps-collection.ts";
+import { requestPermission } from "../src/permissions.ts";
 import { published, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -585,6 +587,80 @@ describe("removing an App", slow, () => {
       ),
       recorded: events.map(({ action }) => action),
     }).toStrictEqual({ name: 0, integrations: 0, recorded: [] });
+  });
+
+  it("takes no permission request that read the App before it was removed, and the database refuses any other write that would", async () => {
+    const owner = await personApi("builder");
+    const [app, other] = await Promise.all([
+      archivedApp(owner),
+      owner.api.apps.create({ name: `Other ${unique()}` }),
+    ]);
+    const by = acting(owner, "builder");
+    // Removed right after the request first read the App.
+    const racing = {
+      ...env,
+      DB: interleaved(
+        env.DB,
+        (query) => query.includes('"apps"'),
+        async () => {
+          await env.DB.prepare(
+            "UPDATE apps SET removed_at = ?, removed_by = ?, current_version = NULL WHERE id = ?"
+          )
+            .bind(Date.now(), owner.userId, app)
+            .run();
+        }
+      ),
+    };
+    const requested = await outcome(
+      requestPermission(
+        racing,
+        by,
+        {
+          subject: { type: "app", appId: app },
+          object: { type: "app", appId: other.id },
+          actions: ["read"],
+          binding: "OTHER",
+        },
+        {
+          app: async (id, role) => await appFor(env, by, id, role),
+          resource: () => {
+            throw new Error("Only Apps are named here");
+          },
+        }
+      )
+    );
+    // Whatever writes next, the database itself refuses it.
+    const direct = await outcome(
+      env.DB.prepare(
+        "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+      )
+        .bind(app, owner.userId, owner.userId, Date.now())
+        .run()
+    );
+    const restored = await outcome(
+      env.DB.prepare("UPDATE apps SET status = 'draft' WHERE id = ?")
+        .bind(app)
+        .run()
+    );
+
+    expect({
+      requested,
+      requests: await rowCount(
+        "SELECT count(*) AS n FROM permissions WHERE subject_type = 'app' AND subject_id = ?",
+        app
+      ),
+      direct: direct === "ok",
+      restored: restored === "ok",
+      status: await env.DB.prepare("SELECT status FROM apps WHERE id = ?")
+        .bind(app)
+        .first("status"),
+    }).toStrictEqual({
+      requested: "app.not_found",
+      requests: 0,
+      direct: false,
+      restored: false,
+      status: "archived",
+    });
   });
 
   it("changes nothing when a restore lands first", async () => {
