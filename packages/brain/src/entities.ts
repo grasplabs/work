@@ -4,7 +4,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxedIfChanged } from "./audit.ts";
+import { auditedBatch, outboxed, outboxedIfChanged } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { brainErrors } from "./contract.ts";
@@ -14,6 +14,7 @@ import {
   brainAssertions,
   brainEntities,
   brainEntityKeys,
+  brainEntityMatches,
   brainLinkJobs,
   brainMemories,
   brainMentions,
@@ -1510,7 +1511,9 @@ interface ReadableMention {
 const readableMentions = async <C>(
   brain: Brain<C>,
   reader: C,
-  where?: SQL
+  where?: SQL,
+  /** Whether to read their own memories' mentions too: a read of collections alone skips it. */
+  { memories = true }: { memories?: boolean } = {}
 ): Promise<ReadableMention[]> => {
   const { db } = brain;
   const allowed = await allowedFor(brain.ports, reader);
@@ -1549,7 +1552,7 @@ const readableMentions = async <C>(
       )
       .orderBy(sql`${brainMentions}.rowid DESC`)
       .limit(readRowsMax),
-    owner === undefined
+    owner === undefined || !memories
       ? []
       : db
           .select(columns)
@@ -1750,6 +1753,35 @@ export const linkProposals = async <C>(
   }));
 };
 
+/** Two entity IDs in their stored order, as one key. */
+const pairKey = (a: string, b: string): string =>
+  a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`;
+
+/** Most entities a read of decisions asks about at once: D1 binds 100 at most. */
+const decisionBatch = 40;
+
+/** The pairs among `ids` that have a decision, either way, as `pairKey`s. */
+const decidedPairs = async <C>(
+  brain: Brain<C>,
+  ids: readonly string[]
+): Promise<Set<string>> => {
+  const keys = new Set<string>();
+  for (let start = 0; start < ids.length; start += decisionBatch) {
+    const chunk = ids.slice(start, start + decisionBatch);
+    // oxlint-disable-next-line no-await-in-loop -- a chunk at a time, bounded by readRowsMax
+    const rows = await brain.db
+      .select({ a: brainEntityMatches.entityA, b: brainEntityMatches.entityB })
+      .from(brainEntityMatches)
+      .where(inArray(brainEntityMatches.entityA, chunk));
+    for (const { a, b } of rows) {
+      if (ids.includes(b)) {
+        keys.add(pairKey(a, b));
+      }
+    }
+  }
+  return keys;
+};
+
 /** One entity of a match proposal, as the reader sees it. */
 export interface MatchedEntity {
   id: string;
@@ -1800,7 +1832,8 @@ export const entityMatchProposals = async <C>(
   const linked = await readableMentions(
     brain,
     reader,
-    eq(brainMentions.state, "linked")
+    eq(brainMentions.state, "linked"),
+    { memories: false }
   );
   const rows = linked.filter(({ collectionId }) => collectionId !== null);
   const byEntity = new Map<
@@ -1839,6 +1872,7 @@ export const entityMatchProposals = async <C>(
       byName.set(key, entry);
     }
   }
+  const decided = await decidedPairs(brain, [...byEntity.keys()]);
   const proposals = new Map<string, EntityMatchProposal>();
   for (const { kind, name, ids } of byName.values()) {
     const entities = [...ids].toSorted().map((id) => {
@@ -1853,7 +1887,16 @@ export const entityMatchProposals = async <C>(
       entities.flatMap(({ collectionIds }) => collectionIds)
     ).size;
     const key = entities.map(({ id }) => id).join(",");
-    if (entities.length > 1 && collectionCount > 1 && !proposals.has(key)) {
+    // Once every pair of it is decided, there is nothing left to propose.
+    const open = entities.some(({ id: a }, index) =>
+      entities.slice(index + 1).some(({ id: b }) => !decided.has(pairKey(a, b)))
+    );
+    if (
+      entities.length > 1 &&
+      collectionCount > 1 &&
+      open &&
+      !proposals.has(key)
+    ) {
       proposals.set(key, { kind, name, basis: "name", entities });
     }
   }
@@ -1875,6 +1918,171 @@ export const entityMatchProposals = async <C>(
     rows.filter(({ entityId }) => entityId !== null && shown.has(entityId))
   );
   return page;
+};
+
+const decisionInputSchema = z.strictObject({
+  entities: z
+    .tuple([z.string().min(1).max(64), z.string().min(1).max(64)])
+    .refine(([a, b]) => a !== b, { message: "Two different entities." }),
+  decision: z.enum(["same", "different"]),
+  /** For `same`: a document the reviewer reads, at its version, that says they are one. */
+  evidence: z
+    .strictObject({
+      documentId: z.string().min(1).max(64),
+      version: z.int().min(1),
+    })
+    .optional(),
+});
+
+/** A decision on a match, as `decideEntityMatch` records it. */
+export interface EntityMatchDecision {
+  entities: [string, string];
+  decision: "same" | "different";
+}
+
+/**
+ * The collections `reader` may read that link each of `ids` now, by
+ * entity: an entity they see none of isn't in it.
+ */
+const readableSides = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  ids: readonly string[]
+): Promise<{
+  sides: Map<string, { kind: string }>;
+  rows: ReadableMention[];
+}> => {
+  const rows = await readableMentions(
+    brain,
+    reader,
+    and(eq(brainMentions.state, "linked"), inList(brainMentions.entityId, ids)),
+    { memories: false }
+  );
+  const sides = new Map<string, { kind: string }>();
+  for (const { entityId, kind, collectionId } of rows) {
+    if (entityId !== null && collectionId !== null) {
+      sides.set(entityId, { kind });
+    }
+  }
+  return { sides, rows };
+};
+
+/**
+ * Records that two entities of different collections are one (`same`) or
+ * not (`different`), GRA-1080: only by a person who reads both now (an
+ * entity they read none of isn't found, so a decision never tells anyone
+ * an entity exists), of one kind, and `same` only with evidence they read
+ * (a name alone never makes two people one). Entity IDs are never
+ * rewritten: a reader sees a decision only where they read both sides
+ * (`sameAsFor`, `entityMatchProposals`). A later decision on the pair
+ * replaces it; each is audited.
+ */
+export const decideEntityMatch = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<EntityMatchDecision> => {
+  const { entities, decision, evidence } = brainErrors.parse(
+    "brain.invalid",
+    decisionInputSchema,
+    input
+  );
+  await brain.ports.recall.require(reader);
+  // A person's own call: an App, run or agent never decides who is who.
+  brain.ports.ownerOf(reader);
+  const [first, second] = entities;
+  const { sides, rows } = await readableSides(brain, reader, entities);
+  const one = sides.get(first);
+  const other = sides.get(second);
+  if (one === undefined || other === undefined) {
+    throw brainErrors.create("brain.not_found");
+  }
+  if (
+    one.kind !== other.kind ||
+    (decision === "same") !== (evidence !== undefined)
+  ) {
+    throw brainErrors.create("brain.invalid");
+  }
+  if (evidence !== undefined) {
+    const allowed = await allowedFor(brain.ports, reader);
+    const found = await brain.db
+      .select({ id: documents.id })
+      .from(documents)
+      .innerJoin(collections, eq(collections.id, documents.collectionId))
+      .innerJoin(
+        versions,
+        and(
+          eq(versions.documentId, documents.id),
+          eq(versions.number, evidence.version)
+        )
+      )
+      .where(and(eq(documents.id, evidence.documentId), allowed.documents()))
+      .get();
+    if (found === undefined) {
+      throw brainErrors.create("brain.not_found");
+    }
+  }
+  const [entityA, entityB] = first < second ? [first, second] : [second, first];
+  const decidedAt = brain.ports.clock();
+  const values = {
+    decision,
+    evidenceDocumentId: evidence?.documentId ?? null,
+    evidenceVersion: evidence?.version ?? null,
+    decidedAt,
+  };
+  await auditedBatch(brain.ports, brain.db, [
+    brain.db
+      .insert(brainEntityMatches)
+      .values({ entityA, entityB, ...values })
+      .onConflictDoUpdate({
+        target: [brainEntityMatches.entityA, brainEntityMatches.entityB],
+        set: values,
+      }),
+    outboxed(brain, {
+      actor: brain.ports.actorOf(reader),
+      action: "brain.entity_match.decided",
+      target: { type: "entity_match", id: `${entityA}:${entityB}` },
+      detail: {
+        decision,
+        evidence: evidence?.documentId ?? null,
+        version: evidence?.version ?? null,
+      },
+      provenance: [
+        ...new Set(rows.flatMap(({ collectionId }) => collectionId ?? [])),
+      ],
+    }),
+  ]);
+  return { entities: [entityA, entityB], decision };
+};
+
+/**
+ * The entities decided to be the same as `entityId` that `reader` reads
+ * now, with `entityId` itself readable to them: none otherwise, so a
+ * decision never widens what anyone sees. Direct decisions only.
+ */
+export const sameAsFor = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  entityId: string
+): Promise<string[]> => {
+  const decided = await brain.db
+    .select({ a: brainEntityMatches.entityA, b: brainEntityMatches.entityB })
+    .from(brainEntityMatches)
+    .where(
+      and(
+        eq(brainEntityMatches.decision, "same"),
+        sql`(${brainEntityMatches.entityA} = ${entityId} OR ${brainEntityMatches.entityB} = ${entityId})`
+      )
+    )
+    .limit(decisionBatch);
+  const others = decided.map(({ a, b }) => (a === entityId ? b : a));
+  if (others.length === 0) {
+    return [];
+  }
+  const { sides } = await readableSides(brain, reader, [entityId, ...others]);
+  return sides.has(entityId)
+    ? others.filter((id) => sides.has(id)).toSorted()
+    : [];
 };
 
 /** How far linking is over what a reader may read. */
