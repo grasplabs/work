@@ -19,7 +19,7 @@ import {
   SettingsIcon,
   SquarePenIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { setDockMode } from "../chat/dock-mode.ts";
@@ -205,6 +205,16 @@ const AppTitle = ({ app }: { app: App }) => {
   const router = useRouter();
   const { failure, run } = useCoreAction();
   const [renaming, setRenaming] = useState(false);
+  // Enter or Escape gives the focus back to the name once the field goes.
+  const button = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (renaming || !refocus.current) {
+      return;
+    }
+    refocus.current = false;
+    button.current?.focus();
+  }, [renaming]);
   const { name } = app;
   if (renaming) {
     return (
@@ -212,7 +222,8 @@ const AppTitle = ({ app }: { app: App }) => {
         <RenameField
           label={t`Name of the app`}
           maxLength={appLimits.nameLength}
-          onDone={(next) => {
+          onDone={(next, byKey) => {
+            refocus.current = byKey;
             setRenaming(false);
             const trimmed = next?.trim();
             if (trimmed === undefined || trimmed === "" || trimmed === name) {
@@ -235,6 +246,7 @@ const AppTitle = ({ app }: { app: App }) => {
         onDoubleClick={() => {
           setRenaming(true);
         }}
+        ref={button}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== "F2") {
             return;
