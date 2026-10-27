@@ -1253,6 +1253,93 @@ describe("entity linking", () => {
     }).toStrictEqual({ decided: many.length, same: others.toSorted() });
   });
 
+  it("honours a `same` only for a reader of its evidence, and lets only its decider or an admin replace a decision, audited", async () => {
+    const person = `Ida ${word()}`;
+    const host = testHost(gazetteer([{ kind: "person", name: person }]));
+    const sales = await newCollection(host.brain, "Sales");
+    const support = await newCollection(host.brain, "Support");
+    const hr = await newCollection(host.brain, "HR");
+    const saved = [
+      await save(host, sales, "a.md", `${person} called.`),
+      await save(host, support, "b.md", `${person} called back.`),
+      await save(host, hr, "proof.md", "Both calls were from one person."),
+    ];
+    for (const { id } of saved) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, on purpose
+      await link(host, id, 1);
+    }
+    const decider: Caller = {
+      userId: "hr-lead",
+      reads: [sales.id, support.id, hr.id],
+    };
+    // Reads both people, but not the HR note that says they are one.
+    const broad: Caller = { userId: "broad", reads: [sales.id, support.id] };
+    const admin: Caller = {
+      userId: "boss",
+      reads: [sales.id, support.id, hr.id],
+      admin: true,
+    };
+    const [proposal] = await entityMatchProposals(host.brain, decider);
+    const [a = "", b = ""] = proposal?.entities.map(({ id }) => id) ?? [];
+    const evidence = { documentId: saved[2]?.id ?? "", version: 1 };
+    await decideEntityMatch(host.brain, decider, {
+      entities: [a, b],
+      decision: "same",
+      evidence,
+    });
+    const broadProposals = await entityMatchProposals(host.brain, broad);
+    const seen = {
+      byDecider: await sameAsFor(host.brain, decider, a),
+      byBroad: await sameAsFor(host.brain, broad, a),
+      // Still an open question to them: nothing they read decides it.
+      broadProposals: broadProposals.length,
+    };
+    const byBroad = await outcome(
+      decideEntityMatch(host.brain, broad, {
+        entities: [a, b],
+        decision: "different",
+      })
+    );
+    const ownChange = await decideEntityMatch(host.brain, decider, {
+      entities: [a, b],
+      decision: "different",
+    });
+    const byAdmin = await decideEntityMatch(host.brain, admin, {
+      entities: [a, b],
+      decision: "same",
+      evidence,
+    });
+    const audited = host.events
+      .filter(({ action }) => action === "brain.entity_match.decided")
+      .map(({ detail }) => ({
+        decision: detail?.decision,
+        replaced: detail?.replaced,
+        previousDecider: detail?.previousDecider,
+      }));
+
+    expect({
+      seen,
+      byBroad,
+      ownChange: ownChange.decision,
+      byAdmin: byAdmin.decision,
+      audited,
+    }).toStrictEqual({
+      seen: { byDecider: [b], byBroad: [], broadProposals: 1 },
+      byBroad: "brain.denied",
+      ownChange: "different",
+      byAdmin: "same",
+      audited: [
+        { decision: "same", replaced: null, previousDecider: null },
+        { decision: "different", replaced: "same", previousDecider: null },
+        {
+          decision: "same",
+          replaced: "different",
+          previousDecider: "hr-lead",
+        },
+      ],
+    });
+  });
+
   it("drops a decision with an entity an erasure removes, so none outlives it", async () => {
     const person = `Bo ${word()}`;
     const host = testHost(gazetteer([{ kind: "person", name: person }]));
