@@ -572,6 +572,8 @@ export const dataErrors = defineErrorFamily({
     "This store can't be deleted while an App's kept versions read and write it.",
   "data.store_managed_by_app":
     "This store is an App's default store: the App's builders and the organization's admins manage it. Share the App instead.",
+  "data.store_managed_by_workflow":
+    "This store is a workflow's: its versions decide its schema, and only the organization's admins manage it. Share the workflow instead.",
   "data.store_closing":
     "This store is already being deleted. Try again in a moment.",
   "data.store_in_use":
