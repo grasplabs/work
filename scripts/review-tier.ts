@@ -6,7 +6,8 @@
 // (.github/workflows/review-tier.yml):
 //
 //   gh api repos/<repo>/pulls/<n>/files --paginate \
-//     --jq '.[] | {filename, additions, deletions}' | node scripts/review-tier.ts
+//     --jq '.[] | {filename, previous_filename, additions, deletions}' \
+//     | node scripts/review-tier.ts
 //
 // Read from the paths and line counts only, the same way on every push,
 // so neither an author nor a PR's text can talk a PR into less review.
@@ -19,6 +20,8 @@ export type Complexity = "Low" | "Medium" | "High";
 /** A changed file, as GitHub's pull request files API lists it. */
 export interface ChangedFile {
   readonly filename: string;
+  /** Where a renamed file was: it's judged by both paths. */
+  readonly previous_filename?: string | undefined;
   readonly additions: number;
   readonly deletions: number;
 }
@@ -47,15 +50,21 @@ const securityPaths: readonly RegExp[] = [
   /^apps\/core\/src\/auth\//u,
   /^\.github\/(?:workflows|rulesets)\/|^\.github\/CODEOWNERS$/u,
   /^\.secretlintrc\.json$/u,
+  // What's installed, and what may run while installing (`allowBuilds`).
+  /^(?:pnpm-workspace\.yaml|pnpm-lock\.yaml|\.npmrc)$/u,
+  // This classifier: a PR that weakens it is classified by main's copy,
+  // which this rule makes Security.
+  /^scripts\/review-tier\.ts$/u,
 ];
 
 /**
- * Server code named for what it guards. The frontend and the UI kit are
- * left out: their `tokens` are the theme's, and the boundaries they show
- * are enforced in core.
+ * Server code named for what it guards: a word of a file's or folder's
+ * name, in any case. The frontend and the UI kit are left out: their
+ * `tokens` are the theme's, and the boundaries they show are enforced in
+ * core.
  */
 const guardedServerCode =
-  /^(?:apps\/(?!web\/)[^/]+|packages\/(?!ui\/)[^/]+)\/src\/(?:.*[/-])?(?:auth|permissions?|sandbox(?:ed)?|secrets?|tokens?|oauth|egress|isolate|sealed?|grants?|rights|keys?|signing|security|session-check|idp|audit-chain)(?:[-./]|$)/u;
+  /^(?:apps\/(?!web\/)[^/]+|packages\/connectors\/[^/]+|packages\/(?!ui\/|connectors\/)[^/]+)\/src\/(?:.*[-_./])?(?:auth|authori[sz]e|authority|access|permissions?|polic(?:y|ies)|sandbox(?:ed)?|secrets?|tokens?|oauth|egress|isolate|sealed?|grants?|rights|keys?|signing|security|session-check|idp|audit-chain)(?:[-_./]|$)/iu;
 
 /** Code lines above which a PR is High, and up to which it can be Low. */
 const highLines = 1000;
@@ -81,15 +90,27 @@ const linesOf = (files: readonly ChangedFile[]): number => {
   return lines;
 };
 
+/** A file's path, and where it was when it's a rename. */
+const pathsOf = ({ filename, previous_filename }: ChangedFile): string[] =>
+  previous_filename === undefined ? [filename] : [filename, previous_filename];
+
 export const assess = (files: readonly ChangedFile[]): Assessment => {
   const reviewed = files.filter(({ filename }) => !generated.test(filename));
   const code = reviewed.filter(({ filename }) => !testFile.test(filename));
   const codeLines = linesOf(code);
   const weighted =
     codeLines + Math.round((linesOf(reviewed) - codeLines) * testWeight);
-  const areas = new Set(code.map(({ filename }) => areaOf(filename)));
-  const guarded = code.filter(({ filename }) =>
-    [...securityPaths, guardedServerCode].some((path) => path.test(filename))
+  const areas = new Set(code.flatMap((file) => pathsOf(file).map(areaOf)));
+  // Generated files count here: a lockfile is generated, and what it
+  // resolves is still what's installed.
+  const guarded = files.filter(
+    (file) =>
+      !pathsOf(file).every((path) => testFile.test(path)) &&
+      pathsOf(file).some((path) =>
+        [...securityPaths, guardedServerCode].some((pattern) =>
+          pattern.test(path)
+        )
+      )
   );
 
   const reasons = [
@@ -110,16 +131,29 @@ export const assess = (files: readonly ChangedFile[]): Assessment => {
 
 const fileSchema = z.object({
   filename: z.string(),
+  previous_filename: z
+    .string()
+    .nullish()
+    .transform((path) => path ?? undefined),
   additions: z.number(),
   deletions: z.number(),
 });
 
-/** One changed file per line, as `gh api --jq '.[] | …'` prints them. */
-export const parseFiles = (text: string): ChangedFile[] =>
-  text
+/**
+ * One changed file per line, as `gh api --jq '.[] | …'` prints them. None
+ * at all is an error, never a Low: a pull request changes something, so
+ * an empty list means the listing failed.
+ */
+export const parseFiles = (text: string): ChangedFile[] => {
+  const files = text
     .split("\n")
     .filter((line) => line.trim() !== "")
     .map((line) => fileSchema.parse(JSON.parse(line)));
+  if (files.length === 0) {
+    throw new Error("No changed files: the pull request's listing failed");
+  }
+  return files;
+};
 
 if (import.meta.main) {
   const { complexity, security, reasons } = assess(

@@ -12,7 +12,8 @@ name: Review tier
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # `edited`: a new base branch changes the files.
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions:
   contents: read
@@ -40,13 +41,15 @@ jobs:
           run-install: |
             - args: ["--frozen-lockfile"]
       - name: Label the pull request
+        # pipefail: a failed listing fails the step, never labels a PR Low.
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: |
           gh api "repos/$REPO/pulls/$PR/files" --paginate \
-            --jq '.[] | {filename, additions, deletions}' \
+            --jq '.[] | {filename, previous_filename, additions, deletions}' \
             | node scripts/review-tier.ts > "$RUNNER_TEMP/tier.json"
           complexity=$(jq -r .complexity "$RUNNER_TEMP/tier.json")
           security=$(jq -r .security "$RUNNER_TEMP/tier.json")

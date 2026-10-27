@@ -75,12 +75,16 @@ describe("ranking a pull request's complexity", () => {
 });
 
 describe("the Security floor", () => {
-  it("marks sign-in, CI and the repository's rules as Security", () => {
+  it("marks sign-in, CI, the repository's rules, what's installed and this classifier as Security", () => {
     for (const filename of [
       "apps/core/src/auth/claims.ts",
       ".github/workflows/ci.yml",
       ".github/rulesets/main.json",
       ".github/CODEOWNERS",
+      "pnpm-workspace.yaml",
+      "pnpm-lock.yaml",
+      ".npmrc",
+      "scripts/review-tier.ts",
     ]) {
       expect(assess([changed(filename, 1)]).security).toBeTruthy();
     }
@@ -98,6 +102,12 @@ describe("the Security floor", () => {
       "apps/core/src/audit-chain.ts",
       "apps/admin/src/deploy/sealed-secrets.ts",
       "packages/shared/src/permissions.ts",
+      "packages/connectors/microsoft-365/src/oauth.ts",
+      "packages/brain/src/authorize.ts",
+      "packages/compiler/src/authority.ts",
+      "apps/core/src/knowledge/access.ts",
+      "apps/connect/src/policy.ts",
+      "apps/core/src/oauth_tokens.ts",
     ]) {
       expect(assess([changed(filename, 1)]).security).toBeTruthy();
     }
@@ -111,10 +121,20 @@ describe("the Security floor", () => {
       "apps/core/test/permissions.test.ts",
       "apps/core/src/chat-messages.ts",
       "packages/shared/src/audit-log.ts",
-      "pnpm-workspace.yaml",
     ]) {
       expect(assess([changed(filename, 1)]).security).toBeFalsy();
     }
+  });
+
+  it("judges a renamed file by where it was too", () => {
+    const moved = {
+      filename: "apps/core/src/lib/guard.ts",
+      previous_filename: "apps/core/src/auth/guard.ts",
+      additions: 0,
+      deletions: 0,
+    };
+
+    expect(assess([moved]).security).toBeTruthy();
   });
 
   it("says why, naming the files", () => {
@@ -140,6 +160,31 @@ describe("reading the changed files", () => {
       { filename: "a.ts", additions: 1, deletions: 2 },
       { filename: "b.ts", additions: 3, deletions: 0 },
     ]);
+  });
+
+  it("reads a rename's old path, and a null one as none", () => {
+    expect(
+      parseFiles(
+        '{"filename":"b.ts","previous_filename":"a.ts","additions":0,"deletions":0}\n{"filename":"c.ts","previous_filename":null,"additions":1,"deletions":0}'
+      )
+    ).toStrictEqual([
+      {
+        filename: "b.ts",
+        previous_filename: "a.ts",
+        additions: 0,
+        deletions: 0,
+      },
+      {
+        filename: "c.ts",
+        previous_filename: undefined,
+        additions: 1,
+        deletions: 0,
+      },
+    ]);
+  });
+
+  it("refuses an empty listing rather than calling it Low", () => {
+    expect(() => parseFiles("\n")).toThrow("listing failed");
   });
 
   it("refuses a line that isn't a changed file", () => {
