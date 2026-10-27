@@ -143,6 +143,7 @@ import {
   readbacks,
   teamCounts,
   teams,
+  checkedDifferences,
   settledWorks,
   usage,
   voiceUse,
@@ -486,6 +487,15 @@ const agreedOf = (stored: string): Record<string, string> =>
   agreedSchema.safeParse(JSON.parse(stored)).data ?? {};
 
 /** A drawing as the store keeps it; null when there is none. */
+/**
+ * Someone's admission as SQL, as `#interviewsOf` reads it: their
+ * interview's start and when anything they approved last stopped counting,
+ * or NULL while nothing they agreed to counts. For a statement that writes
+ * only while it is what an intake read.
+ */
+const admissionSql = (person: string): SQL =>
+  sql`(SELECT CASE WHEN agreed_at IS NULL THEN NULL ELSE coalesce(started_at, '') || '|' || coalesce(revoked_at, '') END FROM interview_states WHERE person = ${person})`;
+
 const drawingOf = (stored: string | null): DrawnWork | null =>
   stored === null
     ? null
@@ -2214,6 +2224,13 @@ export class Onboarding extends DurableObject<Env> {
     known: number;
   } {
     const settled = this.#settled();
+    const checked = new Map(
+      this.#db
+        .select()
+        .from(checkedDifferences)
+        .all()
+        .map((row) => [row.work, row])
+    );
     const differences: Difference[] = [];
     let mapped = 0;
     let all = 0;
@@ -2222,6 +2239,9 @@ export class Onboarding extends DurableObject<Env> {
       if (team.off) {
         continue;
       }
+      // A team whose interviews the brain doesn't hold shows no
+      // difference: too few told their own work (GRA-1084).
+      const heard = this.#tellers(team.id).length >= minTeamShown;
       for (const work of this.teamWorks(team.id)) {
         all += 1;
         if (
@@ -2236,13 +2256,21 @@ export class Onboarding extends DurableObject<Env> {
         }
         mapped += 1;
         const { differs } = drawn;
-        if (differs?.why === "conflict") {
+        // Shown only when the brain's intake checked five or more people
+        // behind each way, in this drawing, and without a name in either
+        // (GRA-1084): never one person's way of doing it.
+        const check = checked.get(work.id);
+        if (
+          differs?.why === "conflict" &&
+          heard &&
+          check?.drawnAt === drawn.at
+        ) {
           differences.push({
             work: work.id,
             name: work.local === "" ? work.name : work.local,
             team: team.name,
-            way: drawn.steps[differs.step]?.text ?? "",
-            other: differs.other,
+            way: check.way,
+            other: check.other,
             holds: settled.get(work.id) ?? null,
           });
         }
@@ -3422,6 +3450,11 @@ export class Onboarding extends DurableObject<Env> {
         this.#db
           .delete(drawnWorks)
           .where(inList(drawnWorks.work, forgotten))
+          .run();
+        // And the ways of a difference checked in them: words of theirs.
+        this.#db
+          .delete(checkedDifferences)
+          .where(inList(checkedDifferences.work, forgotten))
           .run();
         this.#db
           .delete(drawFailures)
@@ -5173,6 +5206,59 @@ export class Onboarding extends DurableObject<Env> {
         .set({ sentAt: sql`coalesce(${brainTeams.sentAt}, ${at})` })
         .where(eq(brainTeams.team, teamId))
         .run();
+      // Which differences the review may show: those whose two ways five
+      // or more were checked to tell, each, in the drawing as it stands.
+      for (const work of intake.works) {
+        const support = supports.get(work.id);
+        const { differs } = work.drawn;
+        const checked =
+          support !== undefined &&
+          differs !== null &&
+          (support.steps[differs.step] ?? []).length >= minTeamShown &&
+          support.other.length >= minTeamShown;
+        if (checked) {
+          // As checked: each way with the roster's names taken out now,
+          // never again with whatever names it has later.
+          const shown = {
+            drawnAt: work.drawn.at,
+            way: clean(work.drawn.steps[differs.step]?.text ?? ""),
+            other: clean(differs.other),
+            at,
+          };
+          // In one statement, only while what it was checked from still
+          // stands as the intake read it: the drawing it checked, and the
+          // interview of everyone it rests on, at the same admission
+          // (`admissionSql`). One forgotten, withdrawn, deleted or taken
+          // back meanwhile leaves no copy of its words.
+          const restsOn = [
+            ...new Set([
+              ...(support.steps[differs.step] ?? []),
+              ...support.other,
+            ]),
+          ];
+          const standing = and(
+            sql`EXISTS (SELECT 1 FROM ${drawnWorks}
+              WHERE ${drawnWorks.work} = ${work.id}
+                AND json_extract(${drawnWorks.drawn}, '$.at') = ${work.drawn.at})`,
+            ...restsOn.map(
+              (person) =>
+                sql`${admissionSql(person)} IS ${began.get(person) ?? null}`
+            )
+          );
+          this.#db
+            .insert(checkedDifferences)
+            .select(
+              sql`SELECT ${work.id}, ${shown.drawnAt}, ${shown.way}, ${shown.other}, ${shown.at} WHERE ${standing}`
+            )
+            .onConflictDoUpdate({ target: checkedDifferences.work, set: shown })
+            .run();
+        } else {
+          this.#db
+            .delete(checkedDifferences)
+            .where(eq(checkedDifferences.work, work.id))
+            .run();
+        }
+      }
       this.#brainSettled(teamId, dueAt);
       return changed || since.length > 0 || stale.length > 0;
     });
@@ -5363,6 +5449,12 @@ export class Onboarding extends DurableObject<Env> {
       .delete(countedWorks)
       .where(
         sql`${countedWorks.work} not in (select ${works.id} from ${works})`
+      )
+      .run();
+    this.#db
+      .delete(checkedDifferences)
+      .where(
+        sql`${checkedDifferences.work} not in (select ${works.id} from ${works})`
       )
       .run();
   }
@@ -6022,6 +6114,11 @@ export class Onboarding extends DurableObject<Env> {
         led.has(teamOf.get(row.work) ?? "");
       if (rests) {
         this.#db.delete(drawnWorks).where(eq(drawnWorks.work, row.work)).run();
+        // The ways of a difference checked in it hold their words too.
+        this.#db
+          .delete(checkedDifferences)
+          .where(eq(checkedDifferences.work, row.work))
+          .run();
         this.#db
           .delete(drawFailures)
           .where(eq(drawFailures.item, `work:${row.work}`))
