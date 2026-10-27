@@ -643,18 +643,18 @@ export type WorkContext = z.infer<typeof workContextSchema>;
 
 /** Why a permission call was refused. */
 export const permissionErrors = defineErrorFamily({
-  "permission.denied": "This App or agent has no permission to do that.",
+  "permission.denied": "This domain or agent has no permission to do that.",
   "permission.context_invalid":
-    "This App or agent can't work in that chat or App, or it doesn't exist.",
+    "This domain or agent can't work in that chat or domain, or it doesn't exist.",
   "permission.restricted":
-    "This chat, App or run has read restricted data, so it can no longer act on or fetch from outside systems.",
+    "This chat, domain or run has read restricted data, so it can no longer act on or fetch from outside systems.",
   "permission.person_inactive":
     "The person this acts for no longer has access to this deployment.",
   "permission.invalid": "That isn't a valid permission request.",
   "permission.not_found": "There's no such permission.",
   "permission.not_requested": "Only a requested permission can be granted.",
   "permission.conflict":
-    "This App or agent already has a permission with that binding name.",
+    "This domain or agent already has a permission with that binding name.",
   "permission.admin_decides":
     "A shared connection is granted by an admin. You can withdraw the request.",
   "permission.denied_before":
