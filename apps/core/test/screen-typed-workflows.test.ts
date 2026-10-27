@@ -62,7 +62,9 @@ import {
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
 import { tellQueryFollowers } from "../src/workflows/run-changes.ts";
+import { WorkflowRuns } from "../src/workflows/run-object.ts";
 import { published } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
 import { hostOrigin } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
@@ -2940,6 +2942,81 @@ describe(
           status: "failed",
           failureCode: "workflow.compensation_failed",
         },
+      });
+    });
+
+    it("audits a cancel admitted just before its run began to compensate as nothing terminated, and notes no stop", async () => {
+      let seen:
+        | {
+            answered: { kind: string; state: string } | undefined;
+            terminated: number;
+            runId: string;
+          }
+        | undefined;
+      const shown = await compensatedRun(
+        { ends: { fails: "resource.declined" } },
+        undefined,
+        async ({ channel, read, runId }) => {
+          // The engine's word is lost as the cancel is admitted, as when
+          // its rollback began right after: the cancel goes ahead, and the
+          // engine answers that it rolls back.
+          const spy = vi
+            .spyOn(WorkflowRuns.prototype, "status")
+            .mockImplementationOnce(() => {
+              throw new Error("The engine couldn't say");
+            });
+          let answered: { kind: string; state: string } | undefined;
+          const events = await auditedDuring(async () => {
+            const { kind, state } = await channel.control(
+              read,
+              runId,
+              "cancel",
+              () => {
+                // Never recovering.
+              }
+            );
+            answered = { kind, state };
+          });
+          spy.mockRestore();
+          seen = {
+            answered,
+            terminated: events.filter(
+              ({ action }) => action === "workflow.run.terminated"
+            ).length,
+            runId,
+          };
+        }
+      );
+      const runId = seen?.runId ?? "";
+      const receipt = await env.DB.prepare(
+        "SELECT state FROM workflow_resource_run_controls WHERE run_id = ?"
+      )
+        .bind(runId)
+        .first<string>("state");
+      const events = await allEvents();
+      const terminated = events.filter(
+        ({ action, target }) =>
+          action === "workflow.run.terminated" && target?.id === runId
+      ).length;
+      expect({
+        during: {
+          answered: seen?.answered,
+          terminated: seen?.terminated,
+        },
+        ended: shown.ended,
+        receipt,
+        terminated,
+      }).toStrictEqual({
+        // Admitted, its stop not taken: nothing recorded as terminated.
+        during: {
+          answered: { kind: "cancel", state: "admitted" },
+          terminated: 0,
+        },
+        // Its compensation ran to its end, never cut short.
+        ended: { status: "failed", error: "resource.declined" },
+        // Settled by the run's end, which no stop of its brought about.
+        receipt: "superseded",
+        terminated: 0,
       });
     });
 
