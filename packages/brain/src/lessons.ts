@@ -157,6 +157,12 @@ interface LessonContent {
   evidenceStatus: "supported" | "contested";
   supporting: string[];
   contradicting: string[];
+  /**
+   * How many episodes its text was written from, for content read back
+   * from a version: a patch that carries the text forward keeps it, so
+   * erased episodes still count against it (lesson-reads.ts).
+   */
+  recorded?: number;
 }
 
 /** The ID of the lesson of `scopeKey`'s group `groupKey`: one per group. */
@@ -240,7 +246,7 @@ interface LessonAt {
   id: string;
   revision: number;
   state: "candidate" | "retired";
-  retiredBy: "owner" | "evidence" | null;
+  retiredBy: "owner" | "admin" | "evidence" | null;
   content: LessonContent | undefined;
 }
 
@@ -257,30 +263,58 @@ const storedContentSchema = z.strictObject({
   exclusions: z.array(z.string()),
   instruction: z.string(),
   evidenceStatus: z.enum(["supported", "contested"]),
+  /**
+   * How many episodes it rested on when it was written: a reader sees its
+   * text only while every one of them is still there and theirs, so an
+   * erased episode counts as one they weren't part of (lesson-reads.ts).
+   */
+  episodes: z.int().min(0),
 });
+
+/** A stored content without its episode count: what a lesson says. */
+const omitEpisodes = ({
+  episodes: _episodes,
+  ...said
+}: z.infer<typeof storedContentSchema>) => said;
 
 /** `content` as a version stores it. */
 const storedOf = ({
-  supporting: _supporting,
-  contradicting: _contradicting,
+  supporting,
+  contradicting,
+  recorded,
   ...stored
-}: LessonContent): string => canonicalJson(stored);
+}: LessonContent): string =>
+  canonicalJson({
+    ...stored,
+    episodes: recorded ?? supporting.length + contradicting.length,
+  });
 
-/** A stored version's content, with the evidence it still has. */
+/**
+ * A stored version's content, with the evidence it still has; undefined
+ * for one not of this shape (none after the lessons' hard cut, 0008):
+ * read as no content, never as content missing a field.
+ */
 const contentFrom = (
   stored: string,
   evidence: readonly { episodeId: string; role: string }[]
-): LessonContent => ({
-  ...storedContentSchema.parse(JSON.parse(stored)),
-  supporting: evidence
-    .filter(({ role }) => role === "supporting")
-    .map(({ episodeId }) => episodeId)
-    .toSorted(),
-  contradicting: evidence
-    .filter(({ role }) => role === "contradicting")
-    .map(({ episodeId }) => episodeId)
-    .toSorted(),
-});
+): LessonContent | undefined => {
+  const parsed = storedContentSchema.safeParse(JSON.parse(stored));
+  if (!parsed.success) {
+    return undefined;
+  }
+  return {
+    ...omitEpisodes(parsed.data),
+    recorded: parsed.data.episodes,
+    supporting: evidence
+      .filter(({ role }) => role === "supporting")
+      .map(({ episodeId }) => episodeId)
+      .toSorted(),
+    contradicting: evidence
+      .filter(({ role }) => role === "contradicting")
+      .map(({ episodeId }) => episodeId)
+      .toSorted(),
+  };
+};
 
 const lessonAt = async <C>(
   { db }: Brain<C>,
@@ -349,9 +383,11 @@ interface Patch {
   base: number;
   content: LessonContent;
   state: "candidate" | "retired";
-  retiredBy: "owner" | "evidence" | null;
+  retiredBy: "owner" | "admin" | "evidence" | null;
   /** When the work that made it started: a purge since outranks it. */
   since: Date;
+  /** Who made it, as the host's audit log names them: the Brain's own if none. */
+  actor?: Json;
 }
 
 /**
@@ -432,7 +468,7 @@ const applyPatch = async <C>(
     outboxedWhere(
       brain,
       {
-        actor: system,
+        actor: patch.actor ?? system,
         action:
           patch.state === "retired"
             ? "knowledge.lesson.retired"
@@ -518,7 +554,7 @@ const consolidateGroup = async <C>(
       contentOf(brain, scope, groupKey, taskType),
     ]);
     // Its owner's correction outranks repetition: never patched again.
-    if (current?.retiredBy === "owner") {
+    if (current?.retiredBy === "owner" || current?.retiredBy === "admin") {
       return false;
     }
     let patch: Patch | undefined;
@@ -704,7 +740,7 @@ export interface Lesson {
   scope: "person" | "session";
   scopeId: string;
   state: "candidate" | "retired";
-  retiredBy: "owner" | "evidence" | null;
+  retiredBy: "owner" | "admin" | "evidence" | null;
   versions: {
     revision: number;
     supersedes: number | null;
@@ -756,21 +792,75 @@ export const lessonsOf = async <C>(
     retiredBy: lesson.retiredBy,
     versions: versions
       .filter(({ lessonId }) => lessonId === lesson.id)
-      .map((version) => {
+      .flatMap((version) => {
         const held = evidence
           .filter(
             ({ lessonId, revision }) =>
               lessonId === lesson.id && revision === version.revision
           )
           .map(({ episodeId, role }) => ({ episodeId, role }));
-        return {
-          revision: version.revision,
-          supersedes: version.supersedes,
-          content: contentFrom(version.content, held),
-          evidence: held,
-        };
+        const content = contentFrom(version.content, held);
+        // One not of this shape is left out, never shown half read.
+        return content === undefined
+          ? []
+          : [
+              {
+                revision: version.revision,
+                supersedes: version.supersedes,
+                content,
+                evidence: held,
+              },
+            ];
       }),
   }));
+};
+
+/**
+ * Retires the lesson `lessonId` at `expectedRevision` as a person's
+ * correction, once its caller decided they may: never patched or recreated
+ * after. One that doesn't exist is `brain.not_found`; a stale revision is
+ * `brain.revision_conflict`.
+ */
+export const retireLessonAt = async <C>(
+  brain: Brain<C>,
+  lessonId: string,
+  expectedRevision: number,
+  by: { actor: Json; as: "owner" | "admin" }
+): Promise<void> => {
+  const current = await lessonAt(brain, lessonId);
+  const row = await brain.db
+    .select({
+      scope: brainLessons.scope,
+      scopeId: brainLessons.scopeId,
+      groupKey: brainLessons.groupKey,
+    })
+    .from(brainLessons)
+    .where(eq(brainLessons.id, lessonId))
+    .get();
+  if (
+    current === undefined ||
+    row === undefined ||
+    current.content === undefined
+  ) {
+    throw brainErrors.create("brain.not_found");
+  }
+  if (current.revision !== expectedRevision) {
+    throw brainErrors.create("brain.revision_conflict");
+  }
+  const moved = await applyPatch(brain, {
+    lessonId,
+    scope: { scope: row.scope, scopeId: row.scopeId },
+    groupKey: row.groupKey,
+    base: current.revision,
+    content: current.content,
+    state: "retired",
+    retiredBy: by.as,
+    since: brain.ports.clock(),
+    actor: by.actor,
+  });
+  if (!moved) {
+    throw brainErrors.create("brain.revision_conflict");
+  }
 };
 
 /**
@@ -794,10 +884,8 @@ export const retireLesson = async <C>(
     }),
     input
   );
-  const scope: ConsolidationScope = { scope: "person", scopeId: ownerId };
-  const current = await lessonAt(brain, lessonId);
   const [own] = await brain.db
-    .select({ id: brainLessons.id, groupKey: brainLessons.groupKey })
+    .select({ id: brainLessons.id })
     .from(brainLessons)
     .where(
       and(
@@ -806,29 +894,13 @@ export const retireLesson = async <C>(
         eq(brainLessons.scopeId, ownerId)
       )
     );
-  if (
-    current === undefined ||
-    own === undefined ||
-    current.content === undefined
-  ) {
+  if (own === undefined) {
     throw brainErrors.create("brain.not_found");
   }
-  if (current.revision !== expectedRevision) {
-    throw brainErrors.create("brain.revision_conflict");
-  }
-  const moved = await applyPatch(brain, {
-    lessonId,
-    scope,
-    groupKey: own.groupKey,
-    base: current.revision,
-    content: current.content,
-    state: "retired",
-    retiredBy: "owner",
-    since: brain.ports.clock(),
+  await retireLessonAt(brain, lessonId, expectedRevision, {
+    actor: brain.ports.actorOf(reader),
+    as: "owner",
   });
-  if (!moved) {
-    throw brainErrors.create("brain.revision_conflict");
-  }
 };
 
 /**

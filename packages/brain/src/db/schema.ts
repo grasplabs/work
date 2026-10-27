@@ -637,8 +637,11 @@ export const brainLessons = sqliteTable(
       enum: ["supported", "contested"],
     }).notNull(),
     state: text({ enum: ["candidate", "retired"] }).notNull(),
-    /** Who retired it: its owner's correction outranks repetition. */
-    retiredBy: text("retired_by", { enum: ["owner", "evidence"] }),
+    /**
+     * Who retired it: its owner, or an admin for a shared one, whose
+     * correction outranks repetition; or its evidence going.
+     */
+    retiredBy: text("retired_by", { enum: ["owner", "admin", "evidence"] }),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
