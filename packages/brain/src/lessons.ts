@@ -760,18 +760,14 @@ const wordingOf = (answer: string): string =>
   answer.replaceAll(controlCharacters, " ").trim().slice(0, wordingMaxLength);
 
 /**
- * Asks the host to word `scope`'s open lessons whose current revision has
- * no wording yet, at most {@link wordingsPerJob}: each from what the lesson
- * holds alone, never a task's content or anyone's identity. The wording is
- * kept beside the lesson's text, never instead of it; a revision is worded
- * once (a job made again finds it worded and asks nothing), and a refusal
- * or failure is kept too, leaving the text as it is. Returns how many it
- * worded.
+ * One pass of `wordLessons`: how many lessons it asked to word, whether
+ * written, failed or refused; how many it worded; and whether the budget
+ * refused one, which the next pass would be refused too.
  */
-export const wordLessons = async <C>(
+const wordingPass = async <C>(
   brain: Brain<C>,
   scope: ConsolidationScope
-): Promise<number> => {
+): Promise<{ asked: number; worded: number; refused: boolean }> => {
   const { db } = brain;
   const unworded = await db
     .select({
@@ -800,6 +796,7 @@ export const wordLessons = async <C>(
     .orderBy(asc(brainLessons.updatedAt), asc(brainLessons.id))
     .limit(wordingsPerJob);
   let worded = 0;
+  let refused = false;
   for (const lesson of unworded) {
     // oxlint-disable-next-line no-await-in-loop -- one bounded call at a time
     const counts = await db
@@ -858,7 +855,25 @@ export const wordLessons = async <C>(
     if (written.state === "written") {
       worded += 1;
     }
+    refused ||= written.state === "refused";
   }
+  return { asked: unworded.length, worded, refused };
+};
+
+/**
+ * Asks the host to word `scope`'s open lessons whose current revision has
+ * no wording yet, at most {@link wordingsPerJob}: each from what the lesson
+ * holds alone, never a task's content or anyone's identity. The wording is
+ * kept beside the lesson's text, never instead of it; a revision is worded
+ * once (a job made again finds it worded and asks nothing), and a refusal
+ * or failure is kept too, leaving the text as it is. Returns how many it
+ * worded.
+ */
+export const wordLessons = async <C>(
+  brain: Brain<C>,
+  scope: ConsolidationScope
+): Promise<number> => {
+  const { worded } = await wordingPass(brain, scope);
   return worded;
 };
 
@@ -1139,18 +1154,24 @@ export const runConsolidation = async <C>(
   });
   // Its own steps: a wording that fails or is refused never undoes a
   // patch. A bounded pass at a time, until one finds fewer to word than it
-  // may (none left, or the budget spent), at most as many as it patched.
+  // may (none left) or the budget refuses one, at most as many as it
+  // patched. A wording that failed counts as asked, so it never ends the
+  // passes before the lessons after it are worded.
   for (let pass = 0; pass < wordingPassesPerJob; pass += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one bounded pass after another
-    const worded = await step.do(
+    const passed = await step.do(
       `word-${pass}`,
       consolidationConfig,
-      async () => ({
-        worded: await wordLessons(brain, scope),
-      })
+      async () => await wordingPass(brain, scope)
     );
-    const done = z.object({ worded: z.int() }).safeParse(worded);
-    if (!done.success || done.data.worded < wordingsPerJob) {
+    const done = z
+      .object({ asked: z.int(), refused: z.boolean() })
+      .safeParse(passed);
+    if (
+      !done.success ||
+      done.data.refused ||
+      done.data.asked < wordingsPerJob
+    ) {
       break;
     }
   }

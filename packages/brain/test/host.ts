@@ -55,7 +55,12 @@ export const testHost = (
    * How the host words lessons: what it answers, or the refusal it
    * throws instead.
    */
-  wording: { answer?: string; refuse?: BrainErrorCode } = {}
+  wording: {
+    answer?: string;
+    refuse?: BrainErrorCode;
+    /** Fails, as a model would, the wordings of lessons it holds of. */
+    failsFor?: (facts: LessonFacts) => boolean;
+  } = {}
 ): {
   brain: Brain<Caller>;
   reads: { caller: string; record: ReadRecord }[];
@@ -128,6 +133,9 @@ export const testHost = (
       worded.push(facts);
       if (wording.refuse !== undefined) {
         throw brainErrors.create(wording.refuse);
+      }
+      if (wording.failsFor?.(facts) === true) {
+        throw new Error("The model failed");
       }
       return await Promise.resolve(
         wording.answer ?? `In short: ${facts.instruction}`

@@ -212,6 +212,44 @@ describe("wording lessons", () => {
     });
   });
 
+  it("words every lesson a job patched though one's wording fails", async () => {
+    const { brain, worded } = testHost(undefined, {
+      failsFor: ({ taskType }) => taskType === "workflow:app/job-0",
+    });
+    const ann = named("ann");
+    for (let n = 0; n < wordingsPerJob + 2; n += 1) {
+      for (let m = 0; m < 3; m += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await recordOutcome(brain, failed(ann, `workflow:app/job-${n}`));
+      }
+    }
+
+    await runConsolidation(
+      brain,
+      { scope: "person", scopeId: ann },
+      { do: async (_name, _config, fn) => await fn() }
+    );
+    const lessons = await lessonsOf(brain, { scope: "person", scopeId: ann });
+    const states = await Promise.all(
+      lessons.map(async ({ id }) => {
+        const kept = await stored(id);
+        return kept?.state ?? null;
+      })
+    );
+
+    expect({
+      asked: worded.length,
+      written: states.filter((state) => state === "written").length,
+      failed: states.filter((state) => state === "failed").length,
+      unworded: states.filter((state) => state === null).length,
+    }).toStrictEqual({
+      asked: wordingsPerJob + 2,
+      written: wordingsPerJob + 1,
+      failed: 1,
+      unworded: 0,
+    });
+  });
+
   it("hides a version's wording wherever its text is hidden", async () => {
     const { brain } = testHost(undefined, { answer: "Turns kept failing." });
     const chat = named("chat");
