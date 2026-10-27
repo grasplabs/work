@@ -103,7 +103,7 @@ describe("an organization's Setup", () => {
         `${acme.clientId}.`,
         "Healthy",
         acme.release.id,
-        "Ring 1",
+        "Beta",
         "Open its Grasp",
         "Its activity",
         "Open in Cloudflare",
@@ -243,16 +243,20 @@ describe("an organization's Setup", () => {
       inOrder: lines
         .map((line) => needs.indexOf(line))
         .every((at, index, all) => index === 0 || at > (all[index - 1] ?? 0)),
-      ring: textOf(sectionOf(status.html, "How it stands")).includes("Ring 2"),
+      ring: textOf(sectionOf(status.html, "How it stands")).includes(
+        "Production"
+      ),
       last: [
         "Workers: done",
         "Smoke check: failed",
         "Address: to come",
         "It stopped: smoke_check_failed",
       ].map((text) => last.includes(text)),
-      done: ["Moved it to ring 2.", "Rotated its secrets.", staff.email].map(
-        (text) => done.includes(text)
-      ),
+      done: [
+        "Moved it to Production.",
+        "Rotated its secrets.",
+        staff.email,
+      ].map((text) => done.includes(text)),
       // What the system did itself isn't by hand.
       created: done.includes("client.create"),
       secretsLive: textOf(sectionOf(settings.html, "Its secrets")).includes(
@@ -288,9 +292,7 @@ describe("an organization's Setup", () => {
     expect({
       status: odd.status,
       onStatus: odd.html.includes("From contract to go"),
-      ring: textOf(sectionOf(odd.html, "How it stands")).includes(
-        "Ring 0, first"
-      ),
+      ring: textOf(sectionOf(odd.html, "How it stands")).includes("Alpha"),
       unknown: unknown.status,
     }).toStrictEqual({
       status: 200,

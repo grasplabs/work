@@ -183,6 +183,13 @@
       "when": 1792884156264,
       "tag": "0025_client_watch",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1793038186916,
+      "tag": "0026_release_feature",
+      "breakpoints": true
     }
   ]
 }

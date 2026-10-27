@@ -27,11 +27,11 @@ describe("the admin's own hostname", () => {
 
   it("moves an address under /admin to the same page at the root, for good", async () => {
     const response = await answer(
-      await asStaff(`https://${adminHost}/admin/sources?x=1`)
+      await asStaff(`https://${adminHost}/admin/ask?x=1`)
     );
     expect([response.status, response.headers.get("location")]).toStrictEqual([
       301,
-      "/sources?x=1",
+      "/ask?x=1",
     ]);
   });
 
@@ -56,7 +56,7 @@ describe("the admin's own hostname", () => {
   it("moves every page load on another hostname to the same page on the admin's", async () => {
     const locations = await Promise.all(
       [
-        "https://ops.grasp.test/sources?day=1",
+        "https://ops.grasp.test/ask?day=1",
         "https://ops.grasp.test/organizations/acme/setup",
         "https://ops.grasp.test/no-such-page",
       ].map(async (url) => {
@@ -65,7 +65,7 @@ describe("the admin's own hostname", () => {
       })
     );
     expect(locations).toStrictEqual([
-      [302, `https://${adminHost}/sources?day=1`],
+      [302, `https://${adminHost}/ask?day=1`],
       [302, `https://${adminHost}/organizations/acme/setup`],
       [302, `https://${adminHost}/no-such-page`],
     ]);
@@ -90,9 +90,7 @@ describe("the admin's own hostname", () => {
   });
 
   it("serves the admin's pages on its own hostname", async () => {
-    const response = await answer(
-      await asStaff(`https://${adminHost}/sources`)
-    );
+    const response = await answer(await asStaff(`https://${adminHost}/ask`));
     expect(response.status).toBe(200);
   });
 
@@ -116,7 +114,7 @@ describe("the admin's own hostname", () => {
 
   it("moves nothing without ADMIN_HOST", async () => {
     const response = await answer(
-      await asStaff("https://ops.grasp.test/sources"),
+      await asStaff("https://ops.grasp.test/ask"),
       ""
     );
     expect(response.status).not.toBe(302);
