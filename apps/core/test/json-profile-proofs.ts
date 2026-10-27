@@ -3,6 +3,7 @@ import { v } from "@grasp-os/sdk";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -25,7 +26,7 @@ import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { admitRunEvent } from "../src/workflows/run-events.ts";
 import { allEvents } from "./audit-events.ts";
-import { liveStatus, resumed, stopped } from "./runs.ts";
+import { liveStatus, resumed, runObject, stopped } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
@@ -162,11 +163,23 @@ const waiting = async (runId: string): Promise<void> => {
   );
 };
 
-/** Stops run `runId` while it waits, as a deploy does, then resumes it. */
-const restarted = async (runId: string): Promise<void> => {
+/**
+ * Restarts run `runId` while it waits, as a deploy or a crash does: the
+ * engine stops it, its object is restarted where it is, losing all it held
+ * in memory, and the engine resumes it, replaying its journal in a fresh
+ * activation. Answers when it was stopped.
+ */
+const restarted = async (runId: string): Promise<number> => {
   await waiting(runId);
+  const stoppedAt = Date.now();
   await stopped(runId);
+  await runInDurableObject(runObject(runId), (_instance, state) => {
+    state.abort("Restarted by the proof");
+  }).catch(() => {
+    // Aborting fails the call that aborted: that is the restart.
+  });
   await resumed(runId);
+  return stoppedAt;
 };
 
 /** The audit entries of `action` about `target`. */
@@ -521,7 +534,7 @@ export const profileProofs = (where: string): void => {
           ],
         });
         const runId = await started(by, workflow.id);
-        await restarted(runId);
+        const stoppedAt = await restarted(runId);
         const run = await ended(by, workflow.id, runId);
         const [at, r] = z
           .object({ status: z.string() })
@@ -530,9 +543,9 @@ export const profileProofs = (where: string): void => {
           .map(Number);
         expect({
           status: run.status,
-          // Recorded before the wait and the restart: asked again after
-          // them, the time would be at least two seconds later.
-          recorded: Date.parse(run.endedAt ?? "") - (at ?? 0) >= 2000,
+          // Recorded before the restart: asked again as the run replayed
+          // after it, the time would be after the run was stopped.
+          recorded: (at ?? Number.POSITIVE_INFINITY) <= stoppedAt,
           fraction: (r ?? -1) >= 0 && (r ?? 1) < 1,
         }).toStrictEqual({
           status: "completed",
