@@ -10400,6 +10400,10 @@ msgstr "liest die Daten der Domäne"
 msgid "Ready"
 msgstr "Bereit"
 
+#: src/chat/thread.tsx
+msgid "Reasoning"
+msgstr "Überlegungen"
+
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Receipt"
 msgstr "Beleg"
@@ -13631,6 +13635,10 @@ msgstr "Diese Version der App wurde widerrufen und läuft nicht mehr. Ein Admin 
 msgid "This version's data change is still being applied. Try again in a moment."
 msgstr "Die Datenänderung dieser Version wird noch angewendet. Versuchen Sie es gleich noch einmal."
 
+#: src/chat/thread.tsx
+msgid "Thought for {time}"
+msgstr "Hat {time} nachgedacht"
+
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
 msgstr "Über Composio, das den Zugriff in seiner eigenen Cloud aufbewahrt. Ihre Workflows können es nach dem Verbinden nutzen, nur für das, was Sie erlauben."
@@ -15448,6 +15456,11 @@ msgstr "Schreibvorgänge, die ein Modell steuern kann: {target}"
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Schreibt"
+
+#. placeholder {0}: version.wording
+#: src/brain/lessons-view.tsx
+msgid "Written by a model: {0}"
+msgstr "Von einem Modell geschrieben: {0}"
 
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Written down"

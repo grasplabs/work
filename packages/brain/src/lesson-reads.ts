@@ -225,6 +225,7 @@ export const lessonLineage = async <C>(
         revision: version.revision,
         supersedes: version.supersedes,
         instruction: whole ? stored.instruction : null,
+        wording: whole ? version.wording : null,
         evidenceStatus: whole ? stored.evidenceStatus : null,
         episodes: seen.slice(0, lessonEvidenceMax).map((each) => ({
           episodeId: each.episodeId,

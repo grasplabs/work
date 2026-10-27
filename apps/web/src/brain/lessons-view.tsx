@@ -146,6 +146,11 @@ const LessonPanel = ({
             ) : (
               <span className="text-sm">{version.instruction}</span>
             )}
+            {version.wording === null ? null : (
+              <span className="text-muted-foreground text-sm">
+                <Trans>Written by a model: {version.wording}</Trans>
+              </span>
+            )}
             <ul className="text-muted-foreground flex flex-col gap-0.5 text-xs">
               {version.episodes.map((episode) => (
                 <li key={episode.episodeId}>

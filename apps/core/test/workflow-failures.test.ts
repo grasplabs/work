@@ -15,6 +15,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import type { Settled } from "../src/workflows/code.ts";
+import { cpuLimitKill } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
@@ -737,7 +738,12 @@ const hostOf = async (
   /** The attempt the engine claims of step `name`: the first, unless given. */
   attemptOf: (name: string) => number = () => 1,
   /** Steps the engine times out, as it ends an attempt it gave up on. */
-  timesOut: ReadonlySet<string> = new Set()
+  timesOut: ReadonlySet<string> = new Set(),
+  /**
+   * How the engine answers each step: as it journaled them, each step's
+   * failure replayed (`failed`), and what each attempt failed with, kept.
+   */
+  journal: { failed?: ReadonlyMap<string, unknown>; kept?: unknown[] } = {}
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
     "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -752,10 +758,18 @@ const hostOf = async (
       if (timesOut.has(name)) {
         throw namedError("TimeoutError", "The step ran out of time.");
       }
-      return await fn({
-        attempt: attemptOf(name),
-        idempotencyKey: `key:${name}:${count}`,
-      });
+      if (journal.failed?.has(name) === true) {
+        throw journal.failed.get(name);
+      }
+      try {
+        return await fn({
+          attempt: attemptOf(name),
+          idempotencyKey: `key:${name}:${count}`,
+        });
+      } catch (error) {
+        journal.kept?.push(error);
+        throw error;
+      }
     },
     sleep: async () => {
       await Promise.resolve();
@@ -817,6 +831,15 @@ const raiseStep = async (host: ResourceRunHost) =>
   );
 
 /** A module's catch step for `guard`, recording `caught` (the host's, unset). */
+/** Step `task:count` on `host`, its module stopped past its CPU time. */
+const countIn = async (host: ResourceRunHost): Promise<void> => {
+  await host.do(
+    "task:count",
+    data,
+    async () => await Promise.reject(cpuLimitKill())
+  );
+};
+
 const catchStep = async (
   host: ResourceRunHost,
   caught?: boolean,
@@ -1142,6 +1165,44 @@ describe("a call that runs its effect once, cut off", () => {
         await hostOf(by, workflow.id, () => 1, new Set(["task:charge-card"]))
       ),
     }).toStrictEqual({ leftOpen: notTaken, timedOut: notTaken });
+  });
+
+  it("lets a catch of timeouts take a timeout on the last attempt that may run, never tried again", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, [
+        guarded([{ count: { set: { status: "counted" } } }], {
+          errors: { with: { type: `${standardTypes}timeout`, status: 408 } },
+        }),
+      ])
+    );
+    // Its third attempt, the last that may run: stopped past its CPU time.
+    const kept: unknown[] = [];
+    await countIn(await hostOf(by, workflow.id, () => 3, new Set(), { kept }));
+    // The next activation, which replays the step's failure as the engine
+    // journaled it, and runs the catch.
+    const [failure] = kept;
+    const next = await hostOf(by, workflow.id, () => 1, new Set(), {
+      failed: new Map([["task:count", failure]]),
+    });
+    await countIn(next);
+    expect({
+      failure:
+        failure instanceof Error
+          ? {
+              name: failure.name,
+              code: "code" in failure ? failure.code : null,
+            }
+          : failure,
+      caught: await catchStep(next),
+    }).toStrictEqual({
+      // Never tried again, and still a timeout.
+      failure: {
+        name: "NonRetryableError",
+        code: "operation.deadline_exceeded",
+      },
+      caught: { output: input, caught: true },
+    });
   });
 
   it("lets a catch of timeouts take a timeout of a step whose work changes nothing outside", async () => {

@@ -15,7 +15,7 @@ import {
   ChevronDownIcon,
   FileTextIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { createContext, use, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { loadFromCore } from "../load-from-core.tsx";
@@ -109,23 +109,21 @@ export const ChatSources = ({
  * The documents a stored answer cites (`cited`: its chat and message), as
  * core looks them up as the chat's agent for the person when the answer
  * shows, each with the spans of the answer that cite it: a document either
- * can no longer read isn't among them. None until core answers, when it
- * can't, or for an answer that cites nothing.
+ * can no longer read isn't among them. None until core answers, or when it
+ * can't.
  */
-export const useCited = (cited?: {
+export const useCited = ({
+  chatId,
+  messageId,
+}: {
   chatId: string;
   messageId: number;
 }): ChatCitedDocument[] => {
   const core = useCore();
   const [documents, setDocuments] = useState<ChatCitedDocument[]>([]);
-  const chatId = cited?.chatId;
-  const messageId = cited?.messageId;
   useEffect(() => {
     let current = true;
     const read = async (): Promise<void> => {
-      if (chatId === undefined || messageId === undefined) {
-        return;
-      }
       const found = await loadFromCore(
         core,
         async (session) => await session.chats.cited(chatId, messageId)
@@ -140,6 +138,32 @@ export const useCited = (cited?: {
     };
   }, [core, chatId, messageId]);
   return documents;
+};
+
+/** No document cited. */
+const noneCited: readonly ChatCitedDocument[] = [];
+
+/**
+ * What the answer being shown cites (`useCited`), for its words and its
+ * row of actions alike; none for an answer that cites nothing, which never
+ * asks core.
+ */
+const CitedDocuments = createContext<readonly ChatCitedDocument[]>(noneCited);
+
+/** The documents the answer being shown cites (`AnswerCited`). */
+export const useCitedDocuments = (): readonly ChatCitedDocument[] =>
+  use(CitedDocuments);
+
+/** A stored answer that cites documents (`cited`), with what it cites. */
+export const AnswerCited = ({
+  cited,
+  children,
+}: {
+  cited: { chatId: string; messageId: number };
+  children?: ReactNode;
+}) => {
+  const documents = useCited(cited);
+  return <CitedDocuments value={documents}>{children}</CitedDocuments>;
 };
 
 /**
