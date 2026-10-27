@@ -48,23 +48,25 @@ jobs:
           export-env: true
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-ops/cloudflare/account-id
-          CLOUDFLARE_API_TOKEN: op://grasp-os-ops/cloudflare/api-token
-          SECRETS_STORE_ID: op://grasp-os-ops/cloudflare/secrets-store-id
+          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-ops/env/CLOUDFLARE_ACCOUNT_ID
+          CLOUDFLARE_API_TOKEN: op://grasp-os-ops/env/CLOUDFLARE_API_TOKEN
+          SECRETS_STORE_ID: op://grasp-os-ops/env/SECRETS_STORE_ID
       # The shared secrets, as this step's outputs only (masked in logs):
       # never exported to the job's env, so no other step, deploys included,
-      # sees them. Each is a field of the `shared` item, named as the Worker
-      # secret it becomes.
+      # sees them. Each is a field of the `env` item in the grasp-os-ops
+      # vault, named as the Worker secret it becomes, as is everything else
+      # this workflow reads: OP_SERVICE_ACCOUNT_TOKEN, the environment's
+      # secret, is the only value kept in GitHub.
       - id: shared
         uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
         with:
           export-env: false
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          ENTRA_CLIENT_SECRET: op://grasp-os-ops/shared/ENTRA_CLIENT_SECRET
-          MICROSOFT_CLIENT_SECRET: op://grasp-os-ops/shared/MICROSOFT_CLIENT_SECRET
-          GOOGLE_CLIENT_SECRET: op://grasp-os-ops/shared/GOOGLE_CLIENT_SECRET
-          COMPOSIO_API_KEY: op://grasp-os-ops/shared/COMPOSIO_API_KEY
+          ENTRA_CLIENT_SECRET: op://grasp-os-ops/env/ENTRA_CLIENT_SECRET
+          MICROSOFT_CLIENT_SECRET: op://grasp-os-ops/env/MICROSOFT_CLIENT_SECRET
+          GOOGLE_CLIENT_SECRET: op://grasp-os-ops/env/GOOGLE_CLIENT_SECRET
+          COMPOSIO_API_KEY: op://grasp-os-ops/env/COMPOSIO_API_KEY
       # Secrets Store keeps each secret by an ID of its own: an existing one
       # is updated by that ID, a missing one created. Values go to wrangler
       # on stdin, never as an argument or in a log line, and are written
@@ -88,7 +90,7 @@ jobs:
           empty=()
           for name in "${names[@]}"; do
             if [ -z "${!name}" ]; then
-              empty+=("shared/$name")
+              empty+=("env/$name")
             fi
           done
           if [ "${#empty[@]}" -gt 0 ]; then
@@ -148,12 +150,12 @@ jobs:
       # The admin verifies every request's Access JWT against its Access
       # application (apps/admin/src/access.ts) and refuses everyone
       # without these, so a deploy without them would lock staff out: stop
-      # before deploying. They're the `grasp-os-ops` environment's variables,
-      # not secrets: the AUD tag and the team URL identify the app, they
-      # grant nothing. So is CLIENT_DOMAIN, the domain clients are served
-      # under: without it the admin provisions and deploys no client, but
-      # works otherwise, so it's passed only when set (keep_vars keeps the
-      # last one). So are ENTRA_CLIENT_ID and GOOGLE_CLIENT_ID, Grasp's
+      # before deploying. They're fields of the `env` item in the
+      # grasp-os-ops vault, but not secrets: the AUD tag and the team URL
+      # identify the app, they grant nothing. So is CLIENT_DOMAIN, the
+      # domain clients are served under: without it the admin provisions
+      # and deploys no client, but works otherwise, so it's passed only when
+      # set (keep_vars keeps the last one). So are ENTRA_CLIENT_ID and GOOGLE_CLIENT_ID, Grasp's
       # OAuth apps' client ids, which each client's core signs people in
       # with: a client whose sign-in names an IdP without one isn't deployed.
       # So is GRASP_CLIENT_ID, Grasp's own client, whose core answers Ask
@@ -167,24 +169,38 @@ jobs:
       # So are DISCORD_PUBLIC_KEY and DISCORD_STAFF_IDS, Grasp's Discord
       # application's public key and the staff's Discord user ids
       # (apps/admin/src/admin/discord.ts): without them the bot answers
-      # no one.
+      # no one. Being settings, not secrets, they're read with the 1Password
+      # CLI the first step installed rather than loaded as secrets, so they
+      # aren't masked in the log, and one left out of the item reads as
+      # empty.
+      - id: admin
+        if: ${{ !inputs.secrets-only }}
+        run: |
+          set -euo pipefail
+          item=$(op item get env --vault grasp-os-ops --format json)
+          for name in CF_ACCESS_AUD CF_ACCESS_ISS CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID GRASP_CLIENT_ID ROOMS_ORIGIN ADMIN_HOST DISCORD_PUBLIC_KEY DISCORD_STAFF_IDS; do
+            value=$(jq -r --arg name "$name" '[.fields[] | select(.label == $name) | .value // ""][0] // ""' <<< "$item")
+            echo "$name=$value" >> "$GITHUB_OUTPUT"
+          done
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
       - name: Deploy the admin with its Access settings
         if: ${{ !inputs.secrets-only }}
         env:
-          CF_ACCESS_AUD: ${{ vars.CF_ACCESS_AUD }}
-          CF_ACCESS_ISS: ${{ vars.CF_ACCESS_ISS }}
-          CLIENT_DOMAIN: ${{ vars.CLIENT_DOMAIN }}
-          ENTRA_CLIENT_ID: ${{ vars.ENTRA_CLIENT_ID }}
-          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-          GRASP_CLIENT_ID: ${{ vars.GRASP_CLIENT_ID }}
-          ROOMS_ORIGIN: ${{ vars.ROOMS_ORIGIN }}
-          ADMIN_HOST: ${{ vars.ADMIN_HOST }}
-          DISCORD_PUBLIC_KEY: ${{ vars.DISCORD_PUBLIC_KEY }}
-          DISCORD_STAFF_IDS: ${{ vars.DISCORD_STAFF_IDS }}
+          CF_ACCESS_AUD: ${{ steps.admin.outputs.CF_ACCESS_AUD }}
+          CF_ACCESS_ISS: ${{ steps.admin.outputs.CF_ACCESS_ISS }}
+          CLIENT_DOMAIN: ${{ steps.admin.outputs.CLIENT_DOMAIN }}
+          ENTRA_CLIENT_ID: ${{ steps.admin.outputs.ENTRA_CLIENT_ID }}
+          GOOGLE_CLIENT_ID: ${{ steps.admin.outputs.GOOGLE_CLIENT_ID }}
+          GRASP_CLIENT_ID: ${{ steps.admin.outputs.GRASP_CLIENT_ID }}
+          ROOMS_ORIGIN: ${{ steps.admin.outputs.ROOMS_ORIGIN }}
+          ADMIN_HOST: ${{ steps.admin.outputs.ADMIN_HOST }}
+          DISCORD_PUBLIC_KEY: ${{ steps.admin.outputs.DISCORD_PUBLIC_KEY }}
+          DISCORD_STAFF_IDS: ${{ steps.admin.outputs.DISCORD_STAFF_IDS }}
         run: |
           set -euo pipefail
           if [ -z "$CF_ACCESS_AUD" ] || [ -z "$CF_ACCESS_ISS" ]; then
-            echo "::error::Set CF_ACCESS_AUD and CF_ACCESS_ISS as variables of the grasp-os-ops environment; nothing deployed"
+            echo "::error::Fill in CF_ACCESS_AUD and CF_ACCESS_ISS in the env item of the grasp-os-ops vault in 1Password; nothing deployed"
             exit 1
           fi
           vars=(--var "CF_ACCESS_AUD:$CF_ACCESS_AUD" --var "CF_ACCESS_ISS:$CF_ACCESS_ISS")

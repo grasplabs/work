@@ -4,6 +4,9 @@
 # when nothing in Stephen changed. Its numbers go to the run's summary, to
 # the issue `STEPHEN_EVAL_ISSUE` names when set, and its report and every
 # model exchange to the run's artifact. Also by hand, from the Actions tab.
+# Those settings, like its Cloudflare token, are fields of the `env` item in
+# the grasp-os-staging vault; an empty one takes its default, and with no
+# issue named nothing is posted.
 name: Stephen's eval, weekly
 
 on:
@@ -44,28 +47,41 @@ jobs:
           export-env: true
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-staging/cloudflare/account-id
-          CLOUDFLARE_API_TOKEN: op://grasp-os-staging/cloudflare/api-token
+          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-staging/env/CLOUDFLARE_ACCOUNT_ID
+          CLOUDFLARE_API_TOKEN: op://grasp-os-staging/env/CLOUDFLARE_API_TOKEN
+      # Settings, not secrets: read with the CLI the step above installed,
+      # so they aren't masked in the eval's log (ci.yml's stephen-eval does
+      # the same). A field left out reads as empty.
+      - id: settings
+        run: |
+          set -euo pipefail
+          item=$(op item get env --vault grasp-os-staging --format json)
+          for name in STEPHEN_EVAL_MODEL STEPHEN_WEEKLY_BUDGET_USD STEPHEN_WEEKLY_GATEWAY STEPHEN_EVAL_ISSUE; do
+            value=$(jq -r --arg name "$name" '[.fields[] | select(.label == $name) | .value // ""][0] // ""' <<< "$item")
+            echo "$name=$value" >> "$GITHUB_OUTPUT"
+          done
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
       - name: Run Stephen's eval with the real model
         run: |
           set -o pipefail
           vp -C apps/core test -c vite.stephen-model.config.ts 2>&1 | tee stephen-eval.log
         env:
-          STEPHEN_MODEL: ${{ vars.STEPHEN_EVAL_MODEL }}
-          STEPHEN_MODEL_BUDGET_USD: ${{ vars.STEPHEN_WEEKLY_BUDGET_USD || '22' }}
-          STEPHEN_MODEL_GATEWAY: ${{ vars.STEPHEN_WEEKLY_GATEWAY || 'default' }}
+          STEPHEN_MODEL: ${{ steps.settings.outputs.STEPHEN_EVAL_MODEL }}
+          STEPHEN_MODEL_BUDGET_USD: ${{ steps.settings.outputs.STEPHEN_WEEKLY_BUDGET_USD || '22' }}
+          STEPHEN_MODEL_GATEWAY: ${{ steps.settings.outputs.STEPHEN_WEEKLY_GATEWAY || 'default' }}
       - name: Report the numbers
         if: always()
         run: node scripts/stephen-eval.ts report stephen-eval.log > stephen-eval.md
       - name: Post the numbers on the eval's issue
-        if: always() && vars.STEPHEN_EVAL_ISSUE != ''
+        if: always() && steps.settings.outputs.STEPHEN_EVAL_ISSUE != ''
         run: |
           if [ -s stephen-eval.md ]; then
             gh issue comment "$ISSUE" --repo "$REPO" --body-file stephen-eval.md
           fi
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE: ${{ vars.STEPHEN_EVAL_ISSUE }}
+          ISSUE: ${{ steps.settings.outputs.STEPHEN_EVAL_ISSUE }}
           REPO: ${{ github.repository }}
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
