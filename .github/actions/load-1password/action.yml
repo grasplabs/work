@@ -72,6 +72,10 @@ runs:
           ops) id=__OP_ENVIRONMENT_OPS__ ;;
           *) echo "::error::No 1Password Environment called $ENVIRONMENT"; exit 1 ;;
         esac
+        if [[ ! "$id" =~ ^[a-z0-9]{26}$ ]]; then
+          echo "::error::The $ENVIRONMENT 1Password Environment's id isn't set in .github/actions/load-1password."
+          exit 1
+        fi
         # The values exist only inside this inner shell, op's child; it
         # writes the listed ones to the job's env and nothing to the log.
         op run --no-masking --environment="$id" -- bash -c '
