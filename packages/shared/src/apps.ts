@@ -789,12 +789,12 @@ export const appErrors = defineErrorFamily({
   "app.call_invalid":
     "That input doesn't match what the App's export takes, or isn't JSON.",
   "app.call_too_large":
-    "The input or the answer of a call to another domain is too large.",
+    "The input or the answer of a call to another App is too large.",
   "app.call_cycle":
     "An App can't call an App whose call is already under way in this one.",
-  "app.call_too_deep": "Too many domains call one another in this one call.",
+  "app.call_too_deep": "Too many Apps call one another in this one call.",
   "app.call_deadlock":
-    "The domain called is itself waiting, directly or through other domains, for this call's domain, so neither could go on. This call was stopped so the other can. Try again in a moment.",
+    "The App called is itself waiting, directly or through other Apps, for this call's App, so neither could go on. This call was stopped so the other can. Try again in a moment.",
   "app.conflict":
     "Someone else changed this domain at the same time. Try again.",
   "app.candidate_busy":
@@ -814,7 +814,7 @@ export const appErrors = defineErrorFamily({
   "app.stops_pending":
     "Runs the domain started are still being stopped from when it was archived. Try restoring it again in a few minutes.",
   "app.not_published":
-    "The domain isn't published, so other domains and workflows can't call it.",
+    "The App isn't published, so other Apps and workflows can't call it.",
   "app.build_failed": "The domain's server code doesn't build.",
   "app.method_invalid": "The App's server has no method by that name.",
   "app.failed": "The domain's server code failed.",

@@ -654,7 +654,7 @@ export const permissionErrors = defineErrorFamily({
   "permission.not_found": "There's no such permission.",
   "permission.not_requested": "Only a requested permission can be granted.",
   "permission.conflict":
-    "This domain or agent already has a permission with that binding name.",
+    "This App or agent already has a permission with that binding name.",
   "permission.admin_decides":
     "A shared connection is granted by an admin. You can withdraw the request.",
   "permission.denied_before":
