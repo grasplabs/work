@@ -45,6 +45,19 @@ describe("ranking a pull request's complexity", () => {
     ).toBe("High");
   });
 
+  it("counts each connector as a workspace of its own", () => {
+    expect(
+      assess(
+        [
+          "apps/connect/src/call.ts",
+          "packages/connector-kit/src/manifest.ts",
+          "packages/connectors/microsoft-365/src/mail.ts",
+          "packages/connectors/hubspot/src/deals.ts",
+        ].map((filename) => changed(filename, 2))
+      ).complexity
+    ).toBe("High");
+  });
+
   it("weighs a test line a quarter of a code line", () => {
     const withTests = (testLines: number): string =>
       assess([

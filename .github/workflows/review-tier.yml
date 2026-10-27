@@ -68,8 +68,14 @@ jobs:
           case "$labels" in
             *"Complexity: High"*) complexity=High ;;
           esac
-          for other in Low Medium High; do
-            [ "$other" = "$complexity" ] || gh pr edit "$PR" --repo "$REPO" --remove-label "Complexity: $other" 2>/dev/null || true
+          # Only the labels below it come off, and only those the PR has: a
+          # label raised while this job runs stays, and a failed removal
+          # fails the job.
+          for lower in Low Medium; do
+            [ "$lower" = "$complexity" ] && break
+            case ",$labels," in
+              *",Complexity: $lower,"*) gh pr edit "$PR" --repo "$REPO" --remove-label "Complexity: $lower" ;;
+            esac
           done
           gh pr edit "$PR" --repo "$REPO" --add-label "Complexity: $complexity"
           if [ "$security" = true ]; then

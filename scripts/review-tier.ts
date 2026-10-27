@@ -74,9 +74,16 @@ const testWeight = 0.25;
 /** Apps or packages a High PR spans, at least. */
 const highAreas = 4;
 
-/** `apps/core`, `packages/sdk`, or the repository's root. */
+/**
+ * The workspace a file belongs to: `apps/core`, `packages/sdk`, each
+ * connector (`packages/connectors/microsoft-365`), or the repository's
+ * root.
+ */
 const areaOf = (filename: string): string => {
-  const [top, name] = filename.split("/");
+  const [top, name, connector] = filename.split("/");
+  if (top === "packages" && name === "connectors" && connector !== undefined) {
+    return `packages/connectors/${connector}`;
+  }
   return (top === "apps" || top === "packages") && name !== undefined
     ? `${top}/${name}`
     : "root";
