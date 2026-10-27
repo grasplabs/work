@@ -1,4 +1,3 @@
-import { canBuild } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { LayoutGridIcon } from "lucide-react";
@@ -57,12 +56,7 @@ const AppPageView = () => {
       <SiteHeader
         crumbs={[{ label: t`Domains`, to: "/domains" }, { label: app.name }]}
       />
-      <AppPage
-        app={app}
-        builds={canBuild(identity.role)}
-        contents={contents}
-        open={open}
-      >
+      <AppPage app={app} identity={identity} contents={contents} open={open}>
         {open === undefined ? null : (
           <ScreenFrame
             app={id}
