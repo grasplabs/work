@@ -530,6 +530,28 @@ const drawTickets = async (ids: Ids) => {
   );
 };
 
+/** Max's interview as he saves it, saying `zendesk` and `handoff`. */
+const maxSays = (zendesk: string, handoff: string): InterviewProgress => {
+  const facts = [
+    fact("m1", "step", "Opens the ticket in Zendesk."),
+    fact("m2", "system", zendesk),
+    fact("m3", "handoff", handoff),
+  ];
+  return {
+    person: "completed",
+    told: true,
+    mode: "type",
+    lines: [{ from: "stephen", text: "What starts one?" }],
+    facts,
+    phase: "readback",
+    wants: "end",
+    startedAt: Date.now(),
+    confirmed: facts.length,
+    adding: false,
+    addedAt: 0,
+  };
+};
+
 /** A team through the onboarding, its tickets drawn, waiting for the brain. */
 const drawnTeam = async () => {
   const ids = await team();
@@ -1128,6 +1150,130 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       written: 1,
       after: [],
       restsOn: [],
+    });
+  });
+
+  it("tells two takings-back apart in the same millisecond: support taken back while the claims were put together never counts", async () => {
+    const ids = await drawnTeam();
+    await intake(ids);
+    const link = await openLink(ids.max);
+    // Every clock in this test reads the same millisecond.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse("2026-10-26T09:00:00.000Z"));
+    try {
+      // Max takes back his handover line; he still counts on the rest.
+      await onLink({
+        action: "save",
+        ...link,
+        version: 1,
+        progress: maxSays(
+          "Tickets arrive in Zendesk.",
+          "Billing goes elsewhere."
+        ),
+      });
+      await drawTickets(ids);
+      // And, while the claims are put together, his Zendesk line too.
+      let changed = false;
+      const reply = claimsReply([zendeskClaim]);
+      await answeringWith(
+        async (requests) => {
+          if (!changed) {
+            changed = true;
+            await onLink({
+              action: "save",
+              ...link,
+              version: 2,
+              progress: maxSays(
+                "Tickets arrive in Freshdesk.",
+                "Billing goes elsewhere."
+              ),
+            });
+          }
+          return reply(requests);
+        },
+        async () => await onboardingStore(env).intakeNext()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+    await onboardingStore(env).purgeBrain();
+    const member = await signedInApi(idp, "user");
+    // Four still stand behind it: it goes.
+    await expect(statementsFor(member.api, ids)).resolves.toStrictEqual([]);
+  });
+
+  it("keeps a drawing drawn again the same, from the same people, through intake after intake", async () => {
+    const ids = await drawnTeam();
+    await intake(ids);
+    const drawings = async () => {
+      const records = await kept(ids);
+      return records
+        .filter(({ type }) => type === "workflowVersion")
+        .map(({ id }) => id);
+    };
+    const first = await drawings();
+    // Max changes a line he had approved: his support goes, and the
+    // drawing with it.
+    const maxFacts = [
+      fact("m1", "step", "Opens the ticket in Zendesk."),
+      fact("m2", "system", "Tickets arrive in Zendesk."),
+      fact("m3", "handoff", "Max hands billing questions to Noor."),
+    ];
+    const link = await openLink(ids.max);
+    const changedFacts = maxFacts.map((each) =>
+      each.id === "m2"
+        ? { ...each, record: "Tickets arrive in Freshdesk." }
+        : each
+    );
+    await onLink({
+      action: "save",
+      ...link,
+      version: 1,
+      progress: {
+        person: "completed",
+        told: true,
+        mode: "type",
+        lines: [{ from: "stephen", text: "What starts one?" }],
+        facts: changedFacts,
+        phase: "readback",
+        wants: "end",
+        startedAt: Date.now(),
+        confirmed: changedFacts.length,
+        adding: false,
+        addedAt: 0,
+      },
+    });
+    await onboardingStore(env).purgeBrain();
+    const gone = await drawings();
+    // He puts it back as it was, and approves it again: the same drawing,
+    // the same day, from the same people, so the same record.
+    await agree(ids.max, maxFacts, 2);
+    await drawTickets(ids);
+    await intake(ids);
+    await onboardingStore(env).purgeBrain();
+    const back = await drawings();
+    // Mia agrees again to what she had: drawn again, given again.
+    await agree(
+      ids.mia,
+      [
+        fact("i1", "system", "Tickets arrive in Zendesk."),
+        fact(
+          "i2",
+          "wish",
+          "Would like the customer number filled in for them."
+        ),
+      ],
+      1
+    );
+    await drawTickets(ids);
+    await intake(ids);
+    await onboardingStore(env).purgeBrain();
+    const again = await drawings();
+    expect({ gone, back, again }).toStrictEqual({
+      gone: [],
+      // The record drawn first, back, and still there.
+      back: first,
+      again: first,
     });
   });
 
