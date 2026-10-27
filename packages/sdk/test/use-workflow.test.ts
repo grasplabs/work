@@ -532,7 +532,7 @@ describe("what a hook shows", () => {
     });
   });
 
-  it("clears a run refused as unavailable, showing only why, and keeps following it until the host shows it again", async () => {
+  it("shows a followed run whose access ends as unavailable, never thrown, and keeps following it until the host shows it again", async () => {
     const page = host();
     const hook = await showing(page, snapshotOf(), 2);
     const subscription = page.one("run-1");
@@ -549,12 +549,13 @@ describe("what a hook shows", () => {
     }).toMatchObject({
       refused: {
         view: {
-          status: "loading",
+          status: "unavailable",
+          runId: "run-1",
           waits: [],
           canPause: false,
           canCancel: false,
         },
-        error: "workflow.run_unavailable",
+        error: undefined,
       },
       following: 1,
       back: { status: "running", canPause: true, canCancel: true },
@@ -577,7 +578,7 @@ describe("what a hook shows", () => {
     });
   });
 
-  it("follows a run again, later, once its subscription is refused as unavailable", async () => {
+  it("follows a run again, later, once its subscription is refused as unavailable, shown as unavailable", async () => {
     const page = host();
     const hook = await showing(page);
     page.one("run-1").lose();
@@ -594,8 +595,8 @@ describe("what a hook shows", () => {
       error: hook.error()?.code,
     }).toMatchObject({
       following: 1,
-      view: { status: "loading", canPause: false, canCancel: false },
-      error: "workflow.run_unavailable",
+      view: { status: "unavailable", canPause: false, canCancel: false },
+      error: undefined,
     });
   });
 
