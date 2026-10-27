@@ -22,7 +22,9 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 // - a member learns that a collection they can't read holds a name they
 //   know (the probe #1203 closed), from a proposal or a refusal;
 // - a decision is made by someone who can't read both sides, or without
-//   evidence, or goes unaudited.
+//   evidence, or goes unaudited;
+// - someone who reads both sides replaces another's decision without
+//   being an admin.
 
 const idp = mockIdp();
 
@@ -33,13 +35,15 @@ describe("entity matches for the signed-in person", setUpTime, () => {
   it("proposes a match only to a person who reads both collections, and lets only them decide it, audited", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
+    // Reads both sides, but neither decided nor an admin.
+    const colleague = await signedInApi(idp, "user");
     const name = `Rosa ${unique()}`;
     const { id: open } = await admin.api.knowledge.createCollection({
       name: `Sales ${unique()}`,
       access: "everyone",
     });
     // A team's the member isn't in: hidden from them.
-    const board = await newTeam(admin, [admin]);
+    const board = await newTeam(admin, [admin, colleague]);
     const { id: hidden } = await admin.api.knowledge.createCollection({
       name: `Board ${unique()}`,
       access: "teams",
@@ -100,6 +104,12 @@ describe("entity matches for the signed-in person", setUpTime, () => {
       const byMember = await outcome(memberBrain.decideEntityMatch(decision));
       const memberSees = hers(await memberBrain.entityMatches());
       const decided = await adminBrain.decideEntityMatch(decision);
+      const byColleague = await outcome(
+        colleague.api.knowledge.decideEntityMatch({
+          entities: [first, second],
+          decision: "different",
+        })
+      );
       const events = await allEvents();
 
       expect({
@@ -109,6 +119,7 @@ describe("entity matches for the signed-in person", setUpTime, () => {
         memberSees,
         byMember,
         decided: decided.decision,
+        byColleague,
         left: hers(await adminBrain.entityMatches()),
         audited: events.filter(
           ({ action, target }) =>
@@ -122,6 +133,8 @@ describe("entity matches for the signed-in person", setUpTime, () => {
         memberSees: [],
         byMember: "brain.not_found",
         decided: "same",
+        // Only the decider or an admin replaces a decision.
+        byColleague: "brain.denied",
         left: [],
         audited: 1,
       });
