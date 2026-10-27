@@ -9,7 +9,7 @@ import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { brainErrors } from "./contract.ts";
 import type { BrainSourceRef } from "./contract.ts";
-import { inList } from "./db/d1.ts";
+import { inList, insertChunks } from "./db/d1.ts";
 import {
   brainEntities,
   brainEntityKeys,
@@ -112,9 +112,6 @@ const identifiersPerMention = 5;
 const kindMaxLength = 40;
 const nameMaxLength = 200;
 const identifierMaxLength = 320;
-
-/** Mention rows per insert: each binds 13, and D1 binds at most 100. */
-const mentionsPerInsert = 7;
 
 /** Sources the sweep looks at, each minute. */
 const sweepBatch = 20;
@@ -938,12 +935,10 @@ const commit = async <C>(
     resolution: mention.resolution,
     candidates: JSON.stringify(mention.candidates),
   }));
-  const inserts: BatchItem<"sqlite">[] = [];
-  for (let at = 0; at < rows.length; at += mentionsPerInsert) {
-    inserts.push(
-      db.insert(brainMentions).values(rows.slice(at, at + mentionsPerInsert))
-    );
-  }
+  const inserts = insertChunks(
+    rows,
+    (row) => db.insert(brainMentions).values(row).toSQL().params.length
+  ).map((chunk) => db.insert(brainMentions).values(chunk));
   // The new entities and their keys in the commit's own batch, so a
   // commit fenced out (a purge landed meanwhile) leaves none behind. A key
   // another run took first refuses the batch, and the retry links to its
