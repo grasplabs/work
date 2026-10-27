@@ -272,6 +272,47 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
   await expect(messages.getByRole("alert")).toHaveCount(0);
 });
 
+test("Grasp asks a person questions with choices in place of the box, and they pick, send, and read the answer", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener, replies } = modelScripts.questions;
+  const [, answer] = replies;
+  const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
+  await page.goto("/");
+
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+
+  // The questions take the box's place, one at a time.
+  const asked = page.getByRole("region", { name: "Grasp asks" });
+  await expect(asked).toContainText("Grasp asks, 1 of 2", { timeout: 30_000 });
+  await expect(page.getByLabel("Your question")).toBeHidden();
+  await expect(asked).toContainText("How often should the report go out?");
+  const next = asked.getByRole("button", { name: "Next" });
+  await expect(next).toBeDisabled();
+  // A pick sends nothing: it only answers.
+  await asked.getByRole("radio", { name: "Weekly" }).click();
+  await next.click();
+  await expect(asked).toContainText("Who should get it?");
+  await asked.getByRole("radio", { name: "My team" }).click();
+  await asked.getByRole("button", { name: "Send" }).click();
+
+  // The answers are the person's own message, numbered: never the
+  // questions. The agent goes on, and the box comes back.
+  const messages = page.getByRole("list", { name: "Messages" });
+  await expect(
+    messages.getByRole("listitem").filter({ hasText: "1. Weekly" })
+  ).toHaveText("1. Weekly 2. My team");
+  await expect(messages.getByText(answer.text)).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(messages.getByText("Asked you 2 questions")).toBeVisible();
+  await expect(asked).toBeHidden();
+  await expect(page.getByLabel("Your question")).toBeVisible();
+});
+
 test("a person groups chats in a project with a goal and a document, moves them in and out, and deletes it", async ({
   pageOf,
 }) => {

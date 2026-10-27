@@ -23,12 +23,41 @@ const says = (text: string): Answer => ({
   outputTokens: 20,
 });
 
+/** The agent asks the person `questions` with choices (`askQuestions`). */
+const asks = (
+  questions: readonly { question: string; choices: readonly string[] }[]
+): Answer => ({
+  text: "",
+  toolCalls: [
+    { id: "call_questions", name: "askQuestions", arguments: { questions } },
+  ],
+  inputTokens: 200,
+  outputTokens: 40,
+});
+
 export const modelScripts = {
   /** A chat turn, end to end: the person asks, the agent answers. */
   answers: {
     opener: "What should the weekly sales report cover?",
     replies: [
       says("Revenue by region, the deals that closed, and the pipeline."),
+    ],
+  },
+  /**
+   * The agent asks the person two questions with choices (GRA-1001), and
+   * goes on once their answers come as their next message.
+   */
+  questions: {
+    opener: "Set up the weekly sales report for me.",
+    replies: [
+      asks([
+        {
+          question: "How often should the report go out?",
+          choices: ["Daily", "Weekly", "Monthly"],
+        },
+        { question: "Who should get it?", choices: ["Just me", "My team"] },
+      ]),
+      says("Weekly, to your team: I'll set that up."),
     ],
   },
 } as const satisfies Record<string, ModelScript>;
