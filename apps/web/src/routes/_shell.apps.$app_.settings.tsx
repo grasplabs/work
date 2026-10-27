@@ -2,9 +2,11 @@ import { appLimits } from "@grasp-os/shared/app-limits";
 import type {
   App,
   AppChanges,
+  AppIntegration,
   AppMember,
   ViewedApp,
 } from "@grasp-os/shared/apps";
+import type { OfferedCatalog } from "@grasp-os/shared/connect";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
@@ -22,7 +24,10 @@ import { ArchiveIcon, ArrowLeftIcon, LayoutGridIcon } from "lucide-react";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { timeoutMs, withTimeout } from "../core.ts";
+import type { Session } from "../core.ts";
 import { readPeople } from "../directory.ts";
+import { AppIntegrations } from "../engines/app-integrations.tsx";
 import { buildsApp } from "../engines/app-role.ts";
 import {
   ArchiveDialog,
@@ -169,11 +174,15 @@ const AppSettings = ({
   app,
   members,
   people,
+  integrations,
+  catalog,
   builds,
 }: {
   app: ViewedApp;
   members: readonly AppMember[];
   people: ReadonlyMap<string, string>;
+  integrations: readonly AppIntegration[];
+  catalog: OfferedCatalog["entries"] | null;
   builds: boolean;
 }) => {
   const { t } = useLingui();
@@ -360,6 +369,12 @@ const AppSettings = ({
           </div>
         </SettingsBody>
       </SettingsSection>
+      <AppIntegrations
+        app={app}
+        builds={builds}
+        catalog={catalog}
+        integrations={integrations}
+      />
       {builds ? (
         <SettingsSection
           description={t`An archived domain is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
@@ -376,6 +391,21 @@ const AppSettings = ({
   );
 };
 
+/** The catalog's entries, or null when it can't be read in time. */
+const catalogOrNone = async (
+  session: Session
+): Promise<OfferedCatalog["entries"] | null> => {
+  try {
+    const { entries } = await withTimeout(
+      session.connections.catalog(),
+      timeoutMs / 2
+    );
+    return entries;
+  } catch {
+    return null;
+  }
+};
+
 const AppSettingsPage = () => {
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
@@ -390,7 +420,7 @@ const AppSettingsPage = () => {
       />
     );
   }
-  const { app, members, people } = page.data;
+  const { app, members, people, integrations, catalog } = page.data;
   return (
     <>
       <SiteHeader
@@ -405,6 +435,8 @@ const AppSettingsPage = () => {
         builds={buildsApp(app, identity)}
         members={members}
         people={people}
+        integrations={integrations}
+        catalog={catalog}
       />
     </>
   );
@@ -415,14 +447,19 @@ export const Route = createFileRoute("/_shell/apps/$app_/settings")({
   component: AppSettingsPage,
   loader: async ({ context: { core, identity }, params }) =>
     await loadFromCore(core, async (session) => {
-      const [app, members, people] = await Promise.all([
+      const [app, members, people, integrations, catalog] = await Promise.all([
         session.apps.get(params.app),
         session.apps.members.list(params.app),
         // Everyone's names only for an admin, who may list members.
         isAdmin(identity.role)
           ? readPeople(session)
           : Promise.resolve(new Map<string, string>()),
+        session.apps.integrations.list(params.app),
+        // Only for names and what may be added: a catalog slow to answer
+        // (Composio), or refused, leaves integrations by their IDs and
+        // nothing to add, said so.
+        catalogOrNone(session),
       ]);
-      return { app, members, people };
+      return { app, members, people, integrations, catalog };
     }),
 });
