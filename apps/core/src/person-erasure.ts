@@ -189,19 +189,26 @@ const channels: ErasureStep = {
   erase: async (env, userId) => {
     const db = drizzle(env.DB);
     const [erasure] = await db
-      .select({ emailHash: personErasures.emailHash })
+      .select({
+        emailHash: personErasures.emailHash,
+        keyVersion: personErasures.emailKeyVersion,
+      })
       .from(personErasures)
       .where(eq(personErasures.userId, userId));
     if (erasure === undefined) {
       return;
     }
+    // Under the key their hash was made with only: one made with an older
+    // key matches no address hashed now (erased-people.ts), so their
+    // invitations aren't found, and stay, until a rotation re-keys it.
+    const sameKey = erasure.keyVersion === emailKeyVersion;
     const invited = await db
       .select({ id: invitations.id, email: invitations.email })
       .from(invitations);
     const theirs: string[] = [];
     for (const { id, email } of invited) {
       // oxlint-disable-next-line no-await-in-loop -- one address at a time
-      if ((await emailHashOf(env, email)) === erasure.emailHash) {
+      if (sameKey && (await emailHashOf(env, email)) === erasure.emailHash) {
         theirs.push(id);
       }
     }
