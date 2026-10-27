@@ -623,6 +623,8 @@ export const createFromBlueprint = async (
     statusChangedAt: null,
     statusChangedBy: null,
     createdAt: now,
+    removedAt: null,
+    removedBy: null,
   };
   const versionRow: VersionRow = {
     appId: app,
