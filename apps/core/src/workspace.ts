@@ -3438,6 +3438,20 @@ export class Workspace extends DurableObject<Env> {
   // the chat's agent, having checked the person's role in the App and the
   // agent's permission first.
 
+  /**
+   * When the chat's draft of App `appId` was last written, in ms; null
+   * when it has none: whether its authoring goes on, as the reaping of
+   * Apps a chat created and nobody accepted asks (app-removal.ts).
+   */
+  draftWrittenAt(chatId: ChatId, appId: string): number | null {
+    const row = this.#db
+      .select({ at: chatDrafts.updatedAt })
+      .from(chatDrafts)
+      .where(and(eq(chatDrafts.chatId, chatId), eq(chatDrafts.appId, appId)))
+      .get();
+    return row?.at.getTime() ?? null;
+  }
+
   /** The chat's draft of App `appId`; revision 0 while it has none. */
   draft(chatId: ChatId, appId: string): Draft {
     const row = this.#db

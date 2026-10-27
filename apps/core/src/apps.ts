@@ -211,6 +211,18 @@ export const changeEntry = (
   detail,
 });
 
+/** Where a chat's agent created an App, while nobody accepted it yet. */
+export interface ProvisionalOrigin {
+  readonly workspaceId: string;
+  readonly chatId: string;
+}
+
+/** An App row's provisional columns, for `origin` or none. */
+export const provisionalColumns = (origin: ProvisionalOrigin | undefined) => ({
+  provisionalWorkspaceId: origin?.workspaceId ?? null,
+  provisionalChatId: origin?.chatId ?? null,
+});
+
 /**
  * The App `input` names, which must exist and not be removed: a removed
  * App (app-removal.ts) is answered as one that isn't there.
@@ -565,7 +577,12 @@ export const createApp = async (
   by: Acting,
   input: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
-  admit?: () => Promise<void>
+  admit?: () => Promise<void>,
+  /**
+   * Where a chat's agent creates it: provisional there until its first
+   * version is made current (app-removal.ts, `reapAbandonedApps`).
+   */
+  provisional?: ProvisionalOrigin
 ): Promise<App> => {
   requireBuilder(by);
   const { name, description, blueprint } = appErrors.parse(
@@ -590,6 +607,7 @@ export const createApp = async (
     createdAt: new Date(),
     removedAt: null,
     removedBy: null,
+    ...provisionalColumns(provisional),
   };
   const app = toApp(row);
   const db = drizzle(env.DB);
@@ -1650,6 +1668,10 @@ export const makeCurrent = async (
           .set({
             currentVersion: number,
             pendingVersion: sql`CASE WHEN ${apps.pendingVersion} = ${number} THEN NULL ELSE ${apps.pendingVersion} END`,
+            // Accepted: an App a chat created is provisional no more, and
+            // is never reaped (app-removal.ts).
+            provisionalWorkspaceId: null,
+            provisionalChatId: null,
           })
           .where(
             and(

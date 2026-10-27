@@ -35,6 +35,7 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
 import { exportsIn } from "./app-exports.ts";
+import type { ProvisionalOrigin, AppRow, VersionRow } from "./apps.ts";
 import {
   appFor,
   blueprintFiles,
@@ -46,6 +47,7 @@ import {
   editableApp,
   findVersion,
   latestVersion,
+  provisionalColumns,
   readTree,
   storeBlueprintTree,
   storeTree,
@@ -55,7 +57,6 @@ import {
   versionTree,
   workflowsIn,
 } from "./apps.ts";
-import type { AppRow, VersionRow } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
@@ -543,7 +544,9 @@ export const createFromBlueprint = async (
   id: unknown,
   input: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
-  admit?: () => Promise<void>
+  admit?: () => Promise<void>,
+  /** Where a chat's agent creates it: provisional there (`createApp`). */
+  provisional?: ProvisionalOrigin
 ): Promise<CreatedFromBlueprint> => {
   requireBuilder(by);
   requireNotStaff(by);
@@ -624,6 +627,7 @@ export const createFromBlueprint = async (
     createdAt: now,
     removedAt: null,
     removedBy: null,
+    ...provisionalColumns(provisional),
   };
   const versionRow: VersionRow = {
     appId: app,
