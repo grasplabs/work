@@ -1949,7 +1949,7 @@ const readableSides = async <C>(
   reader: C,
   ids: readonly string[]
 ): Promise<{
-  sides: Map<string, { kind: string }>;
+  sides: Map<string, { kind: string; collections: Set<string> }>;
   rows: ReadableMention[];
 }> => {
   const rows = await readableMentions(
@@ -1958,14 +1958,27 @@ const readableSides = async <C>(
     and(eq(brainMentions.state, "linked"), inList(brainMentions.entityId, ids)),
     { memories: false }
   );
-  const sides = new Map<string, { kind: string }>();
+  const sides = new Map<string, { kind: string; collections: Set<string> }>();
   for (const { entityId, kind, collectionId } of rows) {
     if (entityId !== null && collectionId !== null) {
-      sides.set(entityId, { kind });
+      const side = sides.get(entityId) ?? { kind, collections: new Set() };
+      side.collections.add(collectionId);
+      sides.set(entityId, side);
     }
   }
   return { sides, rows };
 };
+
+/**
+ * Whether the reader sees the two sides in different collections: two
+ * entities that only one collection links are that collection's own
+ * business, not a match across collections.
+ */
+const acrossCollections = (
+  one: { collections: Set<string> },
+  other: { collections: Set<string> }
+): boolean =>
+  [...one.collections].some((a) => [...other.collections].some((b) => a !== b));
 
 /**
  * Records that two entities of different collections are one (`same`) or
@@ -1999,6 +2012,7 @@ export const decideEntityMatch = async <C>(
   }
   if (
     one.kind !== other.kind ||
+    !acrossCollections(one, other) ||
     (decision === "same") !== (evidence !== undefined)
   ) {
     throw brainErrors.create("brain.invalid");
@@ -2065,24 +2079,42 @@ export const sameAsFor = async <C>(
   reader: C,
   entityId: string
 ): Promise<string[]> => {
-  const decided = await brain.db
-    .select({ a: brainEntityMatches.entityA, b: brainEntityMatches.entityB })
-    .from(brainEntityMatches)
-    .where(
-      and(
-        eq(brainEntityMatches.decision, "same"),
-        sql`(${brainEntityMatches.entityA} = ${entityId} OR ${brainEntityMatches.entityB} = ${entityId})`
+  // Every direct decision, a page at a time, so none is dropped before
+  // the visibility check.
+  const readable: string[] = [];
+  let after: { a: string; b: string } | undefined;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time, keyset-ordered
+    const page = await brain.db
+      .select({ a: brainEntityMatches.entityA, b: brainEntityMatches.entityB })
+      .from(brainEntityMatches)
+      .where(
+        and(
+          eq(brainEntityMatches.decision, "same"),
+          sql`(${brainEntityMatches.entityA} = ${entityId} OR ${brainEntityMatches.entityB} = ${entityId})`,
+          after === undefined
+            ? undefined
+            : sql`(${brainEntityMatches.entityA}, ${brainEntityMatches.entityB}) > (${after.a}, ${after.b})`
+        )
       )
-    )
-    .limit(decisionBatch);
-  const others = decided.map(({ a, b }) => (a === entityId ? b : a));
-  if (others.length === 0) {
-    return [];
+      .orderBy(brainEntityMatches.entityA, brainEntityMatches.entityB)
+      .limit(decisionBatch);
+    if (page.length === 0) {
+      break;
+    }
+    const others = page.map(({ a, b }) => (a === entityId ? b : a));
+    // oxlint-disable-next-line no-await-in-loop -- each page's visibility before the next
+    const { sides } = await readableSides(brain, reader, [entityId, ...others]);
+    if (!sides.has(entityId)) {
+      return [];
+    }
+    readable.push(...others.filter((id) => sides.has(id)));
+    after = page.at(-1);
+    if (page.length < decisionBatch) {
+      break;
+    }
   }
-  const { sides } = await readableSides(brain, reader, [entityId, ...others]);
-  return sides.has(entityId)
-    ? others.filter((id) => sides.has(id)).toSorted()
-    : [];
+  return readable.toSorted();
 };
 
 /** How far linking is over what a reader may read. */
