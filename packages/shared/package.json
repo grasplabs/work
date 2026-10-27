@@ -100,6 +100,7 @@
     "./org-settings": "./src/org-settings.ts",
     "./organization": "./src/organization.ts",
     "./onboarding-choices": "./src/onboarding-choices.ts",
+    "./onboarding-context": "./src/onboarding-context.ts",
     "./onboarding-documents": "./src/onboarding-documents.ts",
     "./onboarding-gate": "./src/onboarding-gate.ts",
     "./onboarding-organization": "./src/onboarding-organization.ts",

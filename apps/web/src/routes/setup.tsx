@@ -38,6 +38,7 @@ import {
   settledAs,
   stepIndex,
   steps,
+  suitesFor,
   waysFrom,
 } from "../onboarding/setup.ts";
 import type { Kept, ReviewItemId, SetupStep } from "../onboarding/setup.ts";
@@ -418,7 +419,15 @@ const Setup = () => {
           {/* Each step drawn anew, fading in unless it is one finished before (setup-steps.tsx). */}
           <SetupStepBody
             cramped={cramped}
-            data={{ ...data, admin, sendingDomain, signIn, suites, identity }}
+            data={{
+              ...data,
+              admin,
+              sendingDomain,
+              signIn,
+              // The sign-ins the kickoff named, where it named any.
+              suites: suitesFor(suites, data.view.context),
+              identity,
+            }}
             go={go}
             listening={listening}
             message={kept.message}

@@ -446,6 +446,14 @@ msgstr "{devices, plural, one {Ingelogd op # apparaat. Log elk apparaat uit dat 
 msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
 msgstr "{doc} in {where} is {late, plural, one {# dag} other {# dagen}} over de reviewdatum."
 
+#: src/onboarding/setup-steps.tsx
+msgid "{documentKinds}, and whatever explains how you work. Share what you have. Drafts are fine too."
+msgstr "{documentKinds}, en alles wat uitlegt hoe jullie werken. Deel wat je hebt. Concepten zijn ook prima."
+
+#: src/onboarding/setup-steps.tsx
+msgid "{documentKinds}. Connect where they live, and I’ll only read what you share with me."
+msgstr "{documentKinds}. Koppel waar ze staan, en ik lees alleen wat je met me deelt."
+
 #: src/brain/brain-atlas.ts
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# document} other {# documenten}}"
@@ -912,6 +920,10 @@ msgstr "{name} is voor het eerst gezien op {firstSeen}, meer dan een maand geled
 msgid "{name}, per {key}"
 msgstr "{name}, per {key}"
 
+#: src/onboarding/about-story.tsx
+msgid "{name}, where does the time go in your week?"
+msgstr "{name}, waar gaat de tijd heen in jouw week?"
+
 #: src/dashboard/report.ts
 msgid "{name}: {count}"
 msgstr "{name}: {count}"
@@ -1233,8 +1245,8 @@ msgid "{sponsor} gave me the big picture. Now I need the details."
 msgstr "{sponsor} gaf me het grote plaatje. Nu heb ik de details nodig."
 
 #: src/onboarding/setup-steps.tsx
-msgid "{sponsor} told me a lot about your company in our first conversation. Before we start, which language do you prefer?"
-msgstr "{sponsor} heeft me in ons eerste gesprek veel over jullie bedrijf verteld. Voordat we beginnen: welke taal heeft je voorkeur?"
+msgid "{sponsor} told me a lot about your company in our first conversation."
+msgstr "{sponsor} heeft me in ons eerste gesprek veel over jullie bedrijf verteld."
 
 #: src/brain/brain.ts
 msgid "{statements, plural, one {# statement: {breakdown}} other {# statements: {breakdown}}}"
@@ -3698,10 +3710,6 @@ msgstr "In rekening brengen"
 msgid "Charge {amount} for this model call?"
 msgstr "{amount} in rekening brengen voor deze modelaanroep?"
 
-#: src/onboarding/about-story.tsx
-msgid "Chasing paperwork. Half of every file is waiting for payslips."
-msgstr "Achter papieren aan. De helft van elk dossier is wachten op loonstroken."
-
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
 msgid "Chat"
@@ -4442,10 +4450,6 @@ msgstr "Klantgegevens"
 msgid "Customer records, messages, tickets, CRM fields or files that identify customers."
 msgstr "Klantgegevens, berichten, tickets, CRM-velden of bestanden die klanten identificeren."
 
-#: src/onboarding/about-story.tsx
-msgid "Customer service"
-msgstr "Klantenservice"
-
 #: src/frame/person-menu.tsx
 msgid "Dark"
 msgstr "Donker"
@@ -4779,6 +4783,14 @@ msgstr "Dit signaal over {name} verbergen"
 #: src/activity/audit-words.ts
 msgid "Dismissed a knowledge signal"
 msgstr "Een kennissignaal genegeerd"
+
+#: src/routes/_shell.settings.onboarding.tsx
+msgid "Do it now"
+msgstr "Nu doen"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Do this later"
+msgstr "Later doen"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Do you have anything that explains how you work?"
@@ -5263,10 +5275,6 @@ msgstr "Elk uitgenodigd team geïnterviewd"
 #: src/routes/_shell.settings.notifications.tsx
 msgid "Every Monday: hours, runs, and what is waiting."
 msgstr "Elke maandag: uren, runs en wat er wacht."
-
-#: src/onboarding/about-story.tsx
-msgid "Every morning I copy new tickets into a spreadsheet. There goes my first hour."
-msgstr "Elke ochtend kopieer ik nieuwe tickets naar een spreadsheet. Daar gaat mijn eerste uur."
 
 #: src/brain/brain-atlas.ts
 msgid "Every one of them is interviewed."
@@ -6304,8 +6312,12 @@ msgid "How long"
 msgstr "Hoe lang"
 
 #: src/onboarding/about-story.tsx
-msgid "How long does one of those take you, Tim?"
-msgstr "Hoe lang ben je met zo’n factuur bezig, Tim?"
+msgid "How long does one of those take you, {name}?"
+msgstr "Hoe lang ben je met zo’n factuur bezig, {name}?"
+
+#: src/onboarding/about-story.tsx
+msgid "How long does that take you, {name}?"
+msgstr "Hoe lang ben je daarmee bezig, {name}?"
 
 #: src/workflows/chosen-at-run-time.tsx
 msgid "how long it waits"
@@ -7541,10 +7553,6 @@ msgctxt "button: note the one reminder as sent"
 msgid "Mark reminded"
 msgstr "Als herinnerd markeren"
 
-#: src/onboarding/about-story.tsx
-msgid "Mark, where does the time go on a mortgage file?"
-msgstr "Mark, waar gaat de tijd heen bij een hypotheekdossier?"
-
 #: src/export/export-menu.tsx
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
@@ -7745,10 +7753,6 @@ msgstr "Er is meer verstuurd dan hierboven staat. Lees precies wat is verstuurd.
 #: src/chat/held-writes.tsx
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 msgstr "Er wordt meer verstuurd dan hierboven staat. Lees precies wat er wordt verstuurd voordat je bevestigt."
-
-#: src/onboarding/about-story.tsx
-msgid "Mortgage advice"
-msgstr "Hypotheekadvies"
 
 #: src/routes/_shell.landscape.index.tsx
 msgid "Mosaic"
@@ -11938,6 +11942,10 @@ msgstr "Stephen vraagt hun welk werk het vaakst terugkomt. Om naar een stuk werk
 msgid "Stephen can offer it in Microsoft Teams to anyone who may start it. It starts only when they press Start, and runs as them."
 msgstr "Stephen kan hem in Microsoft Teams aanbieden aan iedereen die hem mag starten. Hij start pas als ze op Starten drukken, en draait namens hen."
 
+#: src/routes/_shell.settings.onboarding.tsx
+msgid "Stephen talks to nobody until you pick the day the interviews start."
+msgstr "Stephen praat met niemand totdat je de dag kiest waarop de interviews beginnen."
+
 #: src/routes/interview.tsx
 msgid "Stephen, drawn in dots."
 msgstr "Stephen, getekend in stippen."
@@ -13676,6 +13684,10 @@ msgstr "Te doen"
 msgctxt "inbox tab: what waits on you"
 msgid "To do"
 msgstr "Te doen"
+
+#: src/routes/_shell.settings.onboarding.tsx
+msgid "To do: let your team know, and send the interview links"
+msgstr "Te doen: laat je team het weten en verstuur de interviewlinks"
 
 #: src/onboarding/setup-steps.tsx
 msgid "To everyone"

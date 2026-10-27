@@ -232,15 +232,15 @@ test("the story plays through in Dutch, with the sound on and off, and goes on t
   await page.getByRole("button", { name: "Nederlands" }).click();
   await page.getByRole("button", { name: "Laten we beginnen" }).click();
 
-  // Sound on: Stephen tells it, and in the sample interview Mark, Lisa and
-  // Tim answer in voices of their own, all in Dutch.
+  // Sound on: Stephen tells it, and in the one sample interview Tim
+  // answers in a voice of his own, all in Dutch.
   await expect(page.getByText(story.summary)).toBeVisible({ timeout: 90_000 });
   const told = asked.filter((line) => line.language === "nl");
   expect({
     voices: new Set(told.map((line) => line.speaker ?? "stephen")),
     second: told.some((line) => line.text === story.second),
   }).toStrictEqual({
-    voices: new Set(["stephen", "mark", "lisa", "tim"]),
+    voices: new Set(["stephen", "tim"]),
     second: true,
   });
   await page.getByRole("button", { name: "Doorgaan" }).click();

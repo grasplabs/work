@@ -1,6 +1,8 @@
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
+import { noContext } from "@grasp-os/shared/onboarding-context";
+import type { OnboardingContext } from "@grasp-os/shared/onboarding-context";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -52,13 +54,18 @@ const page = (children: ReactElement): string => {
   );
 };
 
-const view = (paused: boolean, sponsor: string | null): OnboardingView => ({
+const view = (
+  paused: boolean,
+  sponsor: string | null,
+  context: OnboardingContext
+): OnboardingView => ({
   roster: null,
   plan: { start: "2026-10-12", days: 14 },
   progress: null,
   agreed: true,
   paused,
   sponsor,
+  context,
   waiting: 0,
 });
 
@@ -70,6 +77,7 @@ interface Shown {
   seen?: boolean;
   choices?: SetupChoices;
   documents?: OnboardingDocument[];
+  context?: OnboardingContext;
 }
 
 /** A step as it is drawn as it arrives, its markup and all. */
@@ -79,6 +87,7 @@ const drawn = (
     paused = false,
     settled = [],
     sponsor = null,
+    context = noContext,
     seen = false,
     choices = noChoices,
     documents = [],
@@ -90,7 +99,7 @@ const drawn = (
   const data: SetupData = {
     admin: "Ada",
     company: null,
-    view: view(paused, sponsor),
+    view: view(paused, sponsor, context),
     links: [],
     documents,
     sendingDomain: "mail.example.test",
@@ -209,6 +218,26 @@ describe("the welcome", () => {
       expect(said("welcome", { sponsor })).toContain(says);
     }
   );
+});
+
+describe("what Stephen says of the company", () => {
+  const context: OnboardingContext = {
+    suites: [],
+    sources: [],
+    words: {
+      en: {
+        business: "You build and renovate homes for housing associations.",
+        documents: ["calculations", "supplier invoices"],
+        example: null,
+      },
+    },
+  };
+
+  it("says what the company does as he says hello, before asking for the language", () => {
+    expect(said("welcome", { sponsor: "Anna", context })).toContain(
+      "Anna told me a lot about your company in our first conversation. You build and renovate homes for housing associations. Before we start, which language do you prefer?"
+    );
+  });
 });
 
 /** Whether anything on a step comes in as it arrives: a fade, a slide, a check drawn. */

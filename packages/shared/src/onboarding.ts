@@ -8,6 +8,7 @@ import { defineErrorFamily } from "./errors.ts";
 import type { OnboardingHrApi } from "./hr.ts";
 import type { KickoffApi } from "./kickoff.ts";
 import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
+import type { OnboardingContext } from "./onboarding-context.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
 import type {
   OrganizationChangeInput,
@@ -272,6 +273,12 @@ export interface OnboardingView {
    * is in, or when it did not. The one word of the kickoff the admin sees.
    */
   sponsor: string | null;
+  /**
+   * What the kickoff told about the company that the onboarding speaks
+   * of: its suites and places, and Stephen's words about its work. Empty
+   * before the kickoff is in, or where it said nothing of it.
+   */
+  context: OnboardingContext;
   /**
    * How many who take part wait for the admin to confirm the organization
    * before their link can go out: new on a list saved while a plan was set.
