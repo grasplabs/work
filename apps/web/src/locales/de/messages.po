@@ -12172,6 +12172,10 @@ msgstr "Speicher {store} eines Workflows. Dies kann jeden Datensatz von {reads} 
 msgid "Store {store}, a workflow's. This can read every record of {reads}, whoever owns it"
 msgstr "Speicher {store} eines Workflows. Dies kann jeden Datensatz von {reads} lesen, egal wem er gehört"
 
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. What these operations reach can't be shown now"
+msgstr "Speicher {store} eines Workflows. Was diese Vorgänge erreichen, kann gerade nicht angezeigt werden"
+
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
 msgstr "Speicher-ID: {store}"

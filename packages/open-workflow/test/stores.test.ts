@@ -216,6 +216,41 @@ describe("stores a workflow declares", () => {
     });
   });
 
+  it("gives the same operation over another table, alike in every field, another fingerprint", async () => {
+    const result = await validated({
+      intake: {
+        tables: { orders: orderTable(), quotes: orderTable() },
+        operations: {
+          getOrder: { kind: "get", table: "orders" },
+          getQuote: { kind: "get", table: "quotes" },
+          addOrder: { kind: "insert", table: "orders" },
+          addQuote: { kind: "insert", table: "quotes" },
+          ordersOf: { kind: "list", table: "orders", index: "byCustomer" },
+          quotesOf: { kind: "list", table: "quotes", index: "byCustomer" },
+          settleOrder: { kind: "patch", table: "orders" },
+          settleQuote: { kind: "patch", table: "quotes" },
+        },
+      },
+    });
+    const prints = result.ok
+      ? result.workflow.stores.get("intake")?.fingerprints
+      : undefined;
+    const pairs = [
+      ["getOrder", "getQuote"],
+      ["addOrder", "addQuote"],
+      ["ordersOf", "quotesOf"],
+      ["settleOrder", "settleQuote"],
+    ] as const;
+
+    // Each names its table's IDs, so a version that moves an operation to
+    // another table changes its contract, and a consumer's pin refuses it.
+    expect(
+      pairs.map(
+        ([a, b]) => prints?.[a] !== undefined && prints[a] !== prints[b]
+      )
+    ).toStrictEqual([true, true, true, true]);
+  });
+
   it("refuses an operation that isn't a generated kind over a declared table and index, pointing at it", async () => {
     const intake = (ops: Record<string, unknown>) => ({
       intake: { tables: { orders: orderTable() }, operations: ops },
