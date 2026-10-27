@@ -25,6 +25,8 @@ export default defineConnector({
   name: "google-workspace",
   version: "0.4.0",
   provider: "google",
+  // The most any class asks for: connect asks only the rights of the
+  // classes a company turned on (apps/connect/src/provider-rights.ts).
   scopes: [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/calendar.events",

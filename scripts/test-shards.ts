@@ -16,6 +16,8 @@ export const byKey = (a: string, b: string): number => {
 export interface ShardFile {
   /** Unique: the project's name and the file's path in it. */
   readonly key: string;
+  /** The project's name: a shard starts each of its projects' pools. */
+  readonly project: string;
   /** The project's `sequence.groupOrder`: a shard runs its groups one after another. */
   readonly group: number;
   /** Whether the project runs its files one at a time (`fileParallelism: false`). */
@@ -39,6 +41,15 @@ export const concurrentFiles = 2.5;
  */
 export const fileOverheadSeconds = 1;
 
+/**
+ * What starting a project's pools in a shard takes: its global setup,
+ * its workers' runtimes and, for core's projects, the built-ins' install,
+ * before its first file. A shard of one group that ran small files of a
+ * dozen projects worked through only 1.25 files at a time (October 2026,
+ * GRA-1094): counted, it keeps a project's files on few shards.
+ */
+export const projectStartSeconds = 30;
+
 const costOf = (file: ShardFile): number =>
   Math.max(file.seconds, fileOverheadSeconds);
 
@@ -49,7 +60,8 @@ const workOf = (files: readonly ShardFile[]): number =>
 /**
  * How long a shard with `files` takes, roughly: its groups one after
  * another, each as long as its work spread over the files it runs at
- * once, and never shorter than its longest file.
+ * once, and never shorter than its longest file, and the start of each
+ * of its projects.
  */
 export const shardSeconds = (files: readonly ShardFile[]): number => {
   const groups = new Map<
@@ -66,7 +78,8 @@ export const shardSeconds = (files: readonly ShardFile[]): number => {
     group.longest = Math.max(group.longest, costOf(file));
     groups.set(file.group, group);
   }
-  let total = 0;
+  let total =
+    new Set(files.map(({ project }) => project)).size * projectStartSeconds;
   for (const { work, longest, serial } of groups.values()) {
     total += Math.max(serial ? work : work / concurrentFiles, longest);
   }
@@ -74,25 +87,48 @@ export const shardSeconds = (files: readonly ShardFile[]): number => {
 };
 
 /**
- * `files` split into `count` shards: the longest first, each into the
- * shard it lengthens least, and of shards it lengthens alike, the one
- * with the least work. The same files always split the same way, on every
- * runner.
+ * A project whose files, run at once, take no longer than this goes to
+ * one shard whole: spread out to even the shards' times, it started its
+ * pools on each of them for a few seconds of tests.
  */
-export const splitIntoShards = (
+export const wholeProjectSeconds = 2 * projectStartSeconds;
+
+/**
+ * `files` in the units the split places: a small project's files
+ * together (`wholeProjectSeconds`), every other file on its own.
+ */
+const unitsOf = (files: readonly ShardFile[]): ShardFile[][] => {
+  const projects = Map.groupBy(files, ({ project }) => project);
+  return [...projects.values()].flatMap((own) =>
+    workOf(own) / (own[0]?.serial === true ? 1 : concurrentFiles) <=
+    wholeProjectSeconds
+      ? [own]
+      : own.map((file) => [file])
+  );
+};
+
+/** A unit by its first file's key, for an order that is the same on every runner. */
+const keyOfUnit = (unit: readonly ShardFile[]): string => unit[0]?.key ?? "";
+
+/**
+ * `files` spread over `count` shards: the longest unit first, each into
+ * the shard it lengthens least, and of shards it lengthens alike, the one
+ * with the least work.
+ */
+export const spreadOver = (
   files: readonly ShardFile[],
   count: number
 ): ShardFile[][] => {
   const shards: ShardFile[][] = Array.from({ length: count }, () => []);
-  const longestFirst = files.toSorted(
-    (a, b) => b.seconds - a.seconds || byKey(a.key, b.key)
+  const longestFirst = unitsOf(files).toSorted(
+    (a, b) => workOf(b) - workOf(a) || byKey(keyOfUnit(a), keyOfUnit(b))
   );
-  for (const file of longestFirst) {
+  for (const unit of longestFirst) {
     let best = 0;
     let bestSeconds = Number.POSITIVE_INFINITY;
     let bestWork = Number.POSITIVE_INFINITY;
     for (const [index, shard] of shards.entries()) {
-      const seconds = shardSeconds([...shard, file]);
+      const seconds = shardSeconds([...shard, ...unit]);
       const work = workOf(shard);
       if (
         seconds < bestSeconds ||
@@ -103,9 +139,58 @@ export const splitIntoShards = (
         bestWork = work;
       }
     }
-    shards[best]?.push(file);
+    shards[best]?.push(...unit);
   }
   return shards;
+};
+
+/**
+ * `files` split into `count` shards of one group each, the group's files
+ * spread over its shards with `spreadOver`. A shard that held two groups
+ * ran them one after another, each starting its projects' pools after the
+ * last file of the one before had ended: up to two minutes of start-up
+ * per group on a CI runner, for a group of one file (October 2026,
+ * GRA-1094). Of one group each, a shard starts only its own, and a group
+ * kept apart to run alone (vite.brain.config.ts) has its runner to itself.
+ * Each group gets one shard, and each shard left over goes to the group
+ * whose shards would end last. The same files always split the same way,
+ * on every runner.
+ */
+export const splitIntoShards = (
+  files: readonly ShardFile[],
+  count: number
+): ShardFile[][] => {
+  const groups = Map.groupBy(files, ({ group }) => group);
+  const order = [...groups.keys()].toSorted((a, b) => a - b);
+  if (count < order.length) {
+    throw new Error(
+      `${count} shards can't hold the tests' ${order.length} groups apart: run at least ${order.length}.`
+    );
+  }
+  const shardsOf = new Map(
+    order.map((group) => [group, spreadOver(groups.get(group) ?? [], 1)])
+  );
+  const longestOf = (shards: readonly ShardFile[][]): number =>
+    Math.max(...shards.map(shardSeconds));
+  for (let left = count - order.length; left > 0; left -= 1) {
+    let slowest = order[0] ?? 0;
+    for (const group of order) {
+      if (
+        longestOf(shardsOf.get(group) ?? []) >
+        longestOf(shardsOf.get(slowest) ?? [])
+      ) {
+        slowest = group;
+      }
+    }
+    shardsOf.set(
+      slowest,
+      spreadOver(
+        groups.get(slowest) ?? [],
+        (shardsOf.get(slowest)?.length ?? 0) + 1
+      )
+    );
+  }
+  return order.flatMap((group) => shardsOf.get(group) ?? []);
 };
 
 /** A file as the order within its project sees it: its time, if anyone took it. */

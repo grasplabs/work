@@ -2,6 +2,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
 import { applyPartial } from "@grasp-os/shared/chat";
 import type {
+  ChatMessage,
   ChatPartial,
   ChatProvenance,
   ChatReplyUsage,
@@ -134,6 +135,12 @@ const shown = (follower: Follower) =>
     role: message.role,
     text: message.text,
   }));
+
+/** What the last message the person read thought, when it is an answer. */
+const thought = (messages: readonly ChatMessage[]) => {
+  const answer = messages.at(-1);
+  return answer?.role === "assistant" ? answer.reasoning : undefined;
+};
 
 /** Anthropic's models, as pi's catalog gives them. */
 const anthropicModels: Readonly<Record<string, Model<Api>>> = ANTHROPIC_MODELS;
@@ -1004,13 +1011,20 @@ describe("chats", () => {
     expect(follower.messages()).toStrictEqual([]);
   });
 
-  it("ask the model to think as hard as the question says, and show its answer without the thinking", async () => {
+  it("ask the model to think as hard as the question says, stream its thinking, and keep it with the answer and how long it took", async () => {
     const ann = await person();
     const opus = "anthropic/claude-opus-4-8";
+    // The model thinks, then holds its thought open until the test lets it
+    // go on: the time it thought covers the hold.
+    const thinking = Promise.withResolvers<boolean>();
     const gateway = fakeGateway({
       ...says("Two plus two is four."),
       outputTokens: 80,
-      thinking: { text: "Add two to two.", tokens: 60 },
+      thinking: {
+        text: "Add two to two.",
+        tokens: 60,
+        pause: { until: thinking.promise },
+      },
     });
     await pointAtGateway(objectOf(ann), gateway, {
       config: { gateway: "grasp-os-test", models: [opus] },
@@ -1023,6 +1037,19 @@ describe("chats", () => {
       model: opus,
       effort: "max",
     });
+    // Streamed while the model still thinks, before it says a word.
+    await vi.waitFor(
+      () => {
+        expect(follower.now()).toMatchObject({
+          running: true,
+          partial: { text: "", code: [], reasoning: "Add two to two." },
+        });
+      },
+      { timeout: 10_000 }
+    );
+    const heldMs = 200;
+    await scheduler.wait(heldMs);
+    thinking.resolve(true);
     await settled(follower);
 
     expect(gateway.requests[0]?.body).toMatchObject({
@@ -1032,6 +1059,31 @@ describe("chats", () => {
       { role: "user", text: "What is 2 + 2?" },
       { role: "assistant", text: "Two plus two is four." },
     ]);
+    const kept = thought(follower.messages());
+    expect(kept?.text).toBe("Add two to two.");
+    expect(kept?.ms).toBeGreaterThanOrEqual(heldMs);
+    // The time it took is the thinking's, not the whole answer's.
+    expect(kept?.ms).toBeLessThan(10_000);
+
+    // Kept as it was, for whoever follows the chat again: after a reload.
+    const again = await follow(ann.chats, chat.id);
+    await vi.waitFor(
+      () => {
+        expect(thought(again.messages())).toStrictEqual(kept);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
+  it("show no thinking for an answer the model wrote without it", async () => {
+    const ann = await person();
+    await answering(ann, says("Four."));
+    const chat = await ann.chats.create("Quick");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "What is 2 + 2?", model });
+    await settled(follower);
+    const answer = follower.messages().at(-1);
+    expect(answer?.role === "assistant" && "reasoning" in answer).toBeFalsy();
   });
 
   it("show a failed answer with the gateway's reason, and nothing as stopped", async () => {

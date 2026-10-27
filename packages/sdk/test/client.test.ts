@@ -12,7 +12,7 @@ import { api } from "./notes/.grasp/references.ts";
 
 // The session client against the network and the page it reaches through:
 // what it does with what comes back, where core's own route isn't what
-// is tested (apps/core/test/screen-client.test.ts goes through that).
+// is tested (apps/core/test/screen-client*.test.ts go through that).
 // The page refuses for the person's request budget; core answers a call's
 // result, or a failure; and a connection loses answers. Each case is one
 // a screen meets: a budget used up by re-reads, a sandbox that went away
@@ -59,7 +59,7 @@ const network = (
         atOnce -= 1;
       }
     },
-    // Live queries are core's own test (screen-client.test.ts): these
+    // Live queries are core's own test (screen-client-live.test.ts): these
     // cases only make calls.
     watch: async () => {
       await Promise.resolve();

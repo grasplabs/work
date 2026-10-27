@@ -59,6 +59,13 @@ import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import {
+  inProgramme,
+  nextReport,
+  programmeWeek,
+  reportWindow,
+  todayUtc,
+} from "./cadence.ts";
+import {
   connectDirectory,
   onboardingDirectory,
   readOnboardingDirectory,
@@ -124,10 +131,18 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         await gateView(this.#env, view, now),
         now
       );
+      const start = mondayOf(view.plan.start);
+      const today = todayUtc(new Date(now));
+      const week = programmeWeek(start, today);
       return {
-        start: mondayOf(view.plan.start),
+        start,
         weeks: programmeWeeks,
         stage: stage === "none" ? null : stage,
+        today,
+        week,
+        inProgramme: inProgramme(week),
+        nextReport: nextReport(start, today),
+        reportWindow: reportWindow(start, today),
       };
     });
   }

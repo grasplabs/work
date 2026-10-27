@@ -74,8 +74,10 @@ export const teams = sqliteTable("teams", {
    */
   mappedAt: text("mapped_at"),
   /**
-   * The lead's agreement (their `agreedAt`) its map, as it stands, was
-   * last drawn from (GRA-329). Its pieces of work reach the brain only
+   * The lead's agreement its map, as it stands, was last drawn from
+   * (GRA-329): their admission's generation then, when that interview
+   * began and how often something they approved stopped counting, as
+   * `startedAt|revocations` (GRA-1089). Its pieces of work reach the brain only
    * while that lead's facts still count, as they were when it was drawn:
    * an edit or a withdrawal since keeps them out until it is drawn again.
    */
@@ -234,7 +236,11 @@ export const interviewStates = sqliteTable("interview_states", {
    * is drawn from then on.
    */
   agreedAt: text("agreed_at"),
-  /** When what they agreed to was last drawn (ISO 8601); null before it ever was. */
+  /**
+   * The generation of what they agreed to that was last drawn,
+   * `agreedAt|revocations` (GRA-1089); null before it ever was. Due again
+   * while it isn't theirs now.
+   */
   drawnAt: text("drawn_at"),
   /**
    * When something they had approved last stopped counting (ISO 8601): an
@@ -242,6 +248,13 @@ export const interviewStates = sqliteTable("interview_states", {
    * what was read before then is thrown away.
    */
   revokedAt: text("revoked_at"),
+  /**
+   * How often something they had approved stopped counting: one more each
+   * time `revokedAt` is set. Part of their admission's generation, which
+   * two revocations in one millisecond would leave the same as a time
+   * (GRA-1089).
+   */
+  revocations: integer().notNull().default(0),
   updatedAt: text("updated_at").notNull(),
 });
 
@@ -401,6 +414,24 @@ export const drawnWorks = sqliteTable("drawn_works", {
 export const settledWorks = sqliteTable("settled_works", {
   work: text().primaryKey(),
   holds: text({ enum: ["both", "first", "other"] }).notNull(),
+  at: text().notNull(),
+});
+
+/**
+ * The pieces of work whose step told two ways the brain's intake checked
+ * five or more people behind, each way (GRA-1084, drawing-support.ts),
+ * and the drawing it checked: the review shows that difference only while
+ * that drawing stands, and only as it was checked, the two ways with every
+ * name the roster had then taken out (`way`, `other`), so a name changed
+ * on the roster since never brings one back. Goes with the piece of work.
+ */
+export const checkedDifferences = sqliteTable("checked_differences", {
+  work: text().primaryKey(),
+  drawnAt: text("drawn_at").notNull(),
+  /** The step as one way tells it, names taken out. */
+  way: text().notNull(),
+  /** The other way, names taken out. */
+  other: text().notNull(),
   at: text().notNull(),
 });
 

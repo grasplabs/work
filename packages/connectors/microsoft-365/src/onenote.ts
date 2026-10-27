@@ -16,7 +16,7 @@ import {
   topSchema,
   v1,
 } from "./graph.ts";
-import { decoded } from "./text.ts";
+import { htmlText } from "./text.ts";
 
 // OneNote, of one person per call, as `/users/{mailbox}` like To Do, so a
 // call's capability binds every request to them. These reach only the
@@ -220,41 +220,6 @@ const listPages = defineTool({
 /** The most of a page's HTML read, in bytes. */
 const maxPageBytes = 2 * 1024 * 1024;
 
-const blockEnd =
-  /<\/(?:p|div|h[1-6]|li|tr|table|ul|ol|pre|blockquote)\s*>|<br\s*\/?>/giu;
-const cellEnd = /<\/t[dh]\s*>/giu;
-const hidden = /<(?<element>script|style|head)\b[\s\S]*?<\/\k<element>\s*>/giu;
-const tag = /<[^>]*>/gu;
-const htmlEntities: Readonly<Record<string, string>> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-};
-const blankLines = /\n{2,}/gu;
-const trailingSpace = /[ \t]+\n/gu;
-
-/**
- * A OneNote page's text, from the HTML Graph gives it in: a line per
- * paragraph, heading, list item and table row, cells apart by a tab, and
- * no blank lines. Images, ink and attachments aren't text, and are left
- * out.
- */
-const pageText = (html: string): string =>
-  decoded(
-    html
-      .replaceAll(hidden, "")
-      .replaceAll(cellEnd, "\t")
-      .replaceAll(blockEnd, "\n")
-      .replaceAll(tag, ""),
-    htmlEntities
-  )
-    .replaceAll(trailingSpace, "\n")
-    .replaceAll(blankLines, "\n")
-    .trim();
-
 const readPage = defineTool({
   name: "onenote.read",
   description:
@@ -294,7 +259,7 @@ const readPage = defineTool({
         mailbox,
         page: pageOutputOf(found),
         sectionId: found.parentSection?.id ?? null,
-        text: pageText(new TextDecoder().decode(bytes)),
+        text: htmlText(new TextDecoder().decode(bytes)),
       },
       provenance: [found.id],
     };

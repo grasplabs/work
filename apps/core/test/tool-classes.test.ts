@@ -218,6 +218,38 @@ describe("the classes a company turned on", setUpTime, () => {
     );
   });
 
+  it("keep Read others' words off by default, refusing the agent's read of Teams chats in core until an admin turns it on", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "user");
+    const { id, mailbox } = await connectShared(admin, everyRightGrant);
+    const chat = await chatOf(
+      person.userId,
+      codeStep(
+        `export default async (self, env) => {
+          try { await env.connections.call("TEAMS", "chats.list", { mailbox: ${JSON.stringify(mailbox)} }); return "read"; } catch (error) { return error.message; }
+        };`
+      ),
+      says("Done.")
+    );
+    await requestGranted(idp, admin, {
+      subject: chat.agent,
+      object: { type: "connection", connectionId: id },
+      actions: ["chats.list"],
+      binding: "TEAMS",
+    });
+
+    expect(defaultToolClassAudiences["read-others"]).toStrictEqual({
+      who: "nobody",
+    });
+    await chat.ask("What did Lisa ask me in Teams?");
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    expect(result?.text).toBe(`Returned:\n${off}`);
+    const calls = await connectCalls(id);
+    expect(
+      calls.filter(({ detail }) => detail.action === "chats.list")
+    ).toStrictEqual([]);
+  });
+
   it("let a class on for one team through for its people only, and the send still waits for the person", async () => {
     const admin = await signedInApi(idp, "admin");
     const inTeam = await signedInApi(idp, "user");
@@ -423,7 +455,7 @@ describe("the classes a company turned on", setUpTime, () => {
     });
 
     expect({
-      before: before.includes("Mail.Send"),
+      before: before.includes("Mail.Send") || before.includes("Chat.Read"),
       sending: sending.includes("Mail.Send"),
       afterSending,
       afterChanging: await statusOf(),
@@ -433,5 +465,17 @@ describe("the classes a company turned on", setUpTime, () => {
       afterSending: "active",
       afterChanging: "needs_reauth",
     });
+
+    // Turned on, Read others' words asks for the person's chats and the
+    // transcripts of their meetings too.
+    await admin.api.connections.setToolClass("read-others", {
+      who: "everyone",
+    });
+    const reading = await asked();
+    expect(
+      ["Chat.Read", "OnlineMeetingTranscript.Read.All"].filter((right) =>
+        reading.includes(right)
+      )
+    ).toStrictEqual(["Chat.Read", "OnlineMeetingTranscript.Read.All"]);
   });
 });

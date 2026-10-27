@@ -9,6 +9,16 @@ import type { Json } from "./json.ts";
 import type { Provenance } from "./knowledge.ts";
 import type { MemoryAudience } from "./memories.ts";
 
+/** What a lesson's wording is written from: what the lesson holds. */
+export interface LessonFacts {
+  taskType: string;
+  versions: readonly string[];
+  failures: number;
+  completions: number;
+  evidenceStatus: "supported" | "contested";
+  instruction: string;
+}
+
 // The Brain as its modules take it: its database and its host's ports,
 // made once per request by the host (core's ports.ts `brainOf`), so no
 // module reaches `Env` or the host itself.
@@ -152,6 +162,13 @@ export interface BrainPorts<C> {
    * Memory records in a recall (GRA-298), as the host decides whom they
    * serve: the Brain matches within what it answers and widens nothing.
    */
+  /**
+   * A model's wording of a lesson for a person (GRA-301, lessons.ts),
+   * through the host's model gateway under its own budget: given only
+   * what the lesson holds, never a task's content or anyone's identity.
+   * Throws to refuse (`brain.budget_exceeded` when its budget is spent).
+   */
+  wordLesson: (facts: LessonFacts) => Promise<string>;
   memories: {
     /**
      * Whom `reader`'s recall serves: the scopes it may read (none for a

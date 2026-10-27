@@ -9,6 +9,7 @@ import type {
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -17,7 +18,14 @@ import type { SpokenKey } from "../src/speech-cache.ts";
 import { answeringGateway } from "./ai-gateway.ts";
 import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, approve, gatewayConfig, onLink } from "./interview-link.ts";
+import {
+  answering,
+  approve,
+  gatewayConfig,
+  holdAlarm,
+  onLink,
+  participate,
+} from "./interview-link.ts";
 import {
   agree,
   fact,
@@ -185,21 +193,6 @@ const inTheBrain = async (ids: Ids, said: Said) => {
   await toldWith(ids, said);
   await drawAll(ids);
   await givenToBrain(ids);
-};
-
-/**
- * Holds the store's own alarm for the test: each test draws what is due
- * and gives the team to the brain itself, step by step, as the alarm would
- * (`drawAll`, `intakeNext`). A delete or a drawing sets the alarm half a
- * second on, and on a slow runner it got there first: its drawing's
- * `model.call` landed amid a delete's audit events, or it gave the team to
- * the brain before the test did. Deleting the alarm isn't enough: the next
- * delete or drawing sets it again, and one already going runs on.
- */
-const holdAlarm = async (): Promise<void> => {
-  await runInDurableObject(onboardingStore(env), (instance) => {
-    vi.spyOn(instance, "alarm").mockResolvedValue();
-  });
 };
 
 /** Every value in the store's tables, by table, as text. */
@@ -386,6 +379,21 @@ const goneFromStore = async (person: string): Promise<void> => {
   throw new Error("The interview was not deleted");
 };
 
+/** Lea's interview as she saves it at the read-back, with `facts`. */
+const leaSaves = (facts: InterviewFact[]): InterviewProgress => ({
+  person: "completed",
+  told: true,
+  mode: "type",
+  lines: [{ from: "stephen", text: "What starts one?" }],
+  facts,
+  phase: "readback",
+  wants: "end",
+  startedAt: Date.now(),
+  confirmed: facts.length,
+  adding: false,
+  addedAt: 0,
+});
+
 describe("deleting an interview", { timeout: 180_000 }, () => {
   beforeEach(holdAlarm);
 
@@ -536,6 +544,48 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       },
       restsOn: [],
     });
+  });
+
+  it("of a team's lead, begun anew, keeps the map of their old interview out of the brain until it is drawn again", async () => {
+    const store = onboardingStore(env);
+    const ids = await team();
+    const said = sentinels();
+    await inTheBrain(ids, said);
+    await deleteOnLink(ids.lea);
+    // Lea begins anew and agrees again: her new interview has taken
+    // nothing back yet, as her old one hadn't when its map was drawn.
+    const anew = await openLink(ids.lea);
+    const facts = [fact("l1", "work", "Max, Mia and Mo handle new tickets.")];
+    // A new start saves at the version the link's session gives now.
+    const begun = await onLink({ action: "session", ...anew });
+    const { version } = z
+      .object({ version: z.number() })
+      .parse(await begun.json());
+    await participate(anew);
+    await onLink({
+      action: "save",
+      ...anew,
+      version,
+      progress: leaSaves(facts),
+    });
+    await approve(anew, facts);
+    // Her map can't be drawn again, until it is given up.
+    const failing: GatewayReply = {
+      status: 400,
+      errorType: "invalid_request_error",
+    };
+    for (const later of [0, 2, 10, 40]) {
+      // oxlint-disable-next-line no-await-in-loop -- one try at a time, each later, as the alarm tries
+      await answering(
+        [failing],
+        async () => await store.drawNext(Date.now() + later * 60_000)
+      );
+    }
+    await drawAll(ids);
+    await givenToBrain(ids);
+    await store.purgeBrain();
+    const after = await brainOf(ids);
+    expect(after.drawings).toBeNull();
   });
 
   it("that leaves a team under five people takes all of the team's interviews out of the brain until five agree again (W5)", async () => {
@@ -965,6 +1015,56 @@ describe(
         statements: edited.statements.length,
         redrawn: redrawn.drawings !== null,
       }).toStrictEqual({ edited: null, statements: 2, redrawn: true });
+    });
+
+    it("a lead's second take-back in the millisecond their map was drawn from makes it due again, and keeps the team's work out of the brain until then (T2, maps)", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      const said = sentinels();
+      await inTheBrain(ids, said);
+      const lea = await openLink(ids.lea);
+      const once = [
+        fact("l1", "work", "Max, Mia and Mo handle new tickets."),
+        fact("l2", "system", "The team lives in Zendesk and a shared rota."),
+      ];
+      // Every clock from here reads the same millisecond.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.parse("2026-10-26T09:00:00.000Z"));
+      try {
+        // Lea puts a line right and approves it: the map is drawn again
+        // from that, in this millisecond.
+        await onLink({
+          action: "save",
+          ...lea,
+          version: 1,
+          progress: leaSaves(once),
+        });
+        await approve(lea, once);
+        await answering([mapReply(ids)], async () => await store.drawNext());
+        // She puts the same line right again, in the same millisecond:
+        // what the map was drawn from no longer counts.
+        const twice = [
+          once[0] ?? fact("l1", "work", ""),
+          fact("l2", "system", "The team lives in Zendesk alone."),
+        ];
+        await onLink({
+          action: "save",
+          ...lea,
+          version: 2,
+          progress: leaSaves(twice),
+        });
+        await store.purgeBrain();
+      } finally {
+        vi.useRealTimers();
+      }
+      const records = await kept(ids);
+      const due = await store.drawsDue();
+      expect({
+        // Drawn from what no longer counts: due to be drawn again, and
+        // the team's work kept out of the brain until it is.
+        due: due.includes(ids.lea),
+        workflows: records.some(({ type }) => type === "workflow"),
+      }).toStrictEqual({ due: true, workflows: false });
     });
 
     it("keeps the voice's lines of a withdrawn interview waiting while the cache can't be reached, and takes them out once it can (T5)", async () => {

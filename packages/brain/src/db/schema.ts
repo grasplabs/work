@@ -637,8 +637,11 @@ export const brainLessons = sqliteTable(
       enum: ["supported", "contested"],
     }).notNull(),
     state: text({ enum: ["candidate", "retired"] }).notNull(),
-    /** Who retired it: its owner's correction outranks repetition. */
-    retiredBy: text("retired_by", { enum: ["owner", "evidence"] }),
+    /**
+     * Who retired it: its owner, or an admin for a shared one, whose
+     * correction outranks repetition; or its evidence going.
+     */
+    retiredBy: text("retired_by", { enum: ["owner", "admin", "evidence"] }),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
@@ -670,6 +673,27 @@ export const brainLessonVersions = sqliteTable(
     content: text().notNull(),
     patchKey: text("patch_key").notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * A model's wording of it for a person (../lessons.ts): beside its text
+     * of record, never instead of it; shown under the same rule.
+     */
+    wording: text(),
+    /**
+     * Whether its wording was written, or refused (budget) or failed; or
+     * claimed by a wording pass now asking for it (`wording_claimed_at`),
+     * so two jobs never pay for the same wording.
+     */
+    wordingState: text("wording_state", {
+      enum: ["claimed", "written", "refused", "failed"],
+    }),
+    /**
+     * The claim of the consolidation job wording it: a token the job keeps
+     * in its durable steps, so a retry of the job takes its own claims
+     * back, and another job never takes them while they last.
+     */
+    wordingClaim: text("wording_claim"),
+    /** When a job claimed it: past its lease, another job may. */
+    wordingClaimedAt: timestamp("wording_claimed_at"),
   },
   (table) => [
     primaryKey({ columns: [table.lessonId, table.revision] }),
@@ -874,5 +898,57 @@ export const brainMentions = sqliteTable(
       table.kind,
       table.alias
     ),
+  ]
+);
+
+/**
+ * Typed relations the Brain's sources state between their entities
+ * (../relations.ts): what a source says (`observed`), never an accepted
+ * fact, with the passage that says it (`evidence`) and when it holds
+ * (`valid_from`, `valid_to`, ISO dates, either open). Each version's
+ * commit supersedes the source's relations before it (`superseded_at`),
+ * so what was known when stays answerable; an erasure deletes them all.
+ * Removing the source removes its rows.
+ */
+export const brainAssertions = sqliteTable(
+  "brain_assertions",
+  {
+    id: text().primaryKey(),
+    source: text()
+      .notNull()
+      .references(() => brainLinkJobs.source, { onDelete: "cascade" }),
+    documentId: text("document_id"),
+    memoryId: text("memory_id"),
+    /** The source's version (a memory's revision) it was read from. */
+    version: integer().notNull(),
+    partition: text().notNull(),
+    subjectEntityId: text("subject_entity_id")
+      .notNull()
+      .references(() => brainEntities.id, { onDelete: "cascade" }),
+    /** The subject's name as the source wrote it. */
+    subjectName: text("subject_name").notNull(),
+    /** The relation, in the extractor's words, folded (`owns`). */
+    predicate: text().notNull(),
+    objectEntityId: text("object_entity_id")
+      .notNull()
+      .references(() => brainEntities.id, { onDelete: "cascade" }),
+    objectName: text("object_name").notNull(),
+    validFrom: text("valid_from"),
+    validTo: text("valid_to"),
+    /** The passage that states it, as the source wrote it. */
+    evidence: text().notNull(),
+    state: text({ enum: ["observed"] }).notNull(),
+    /** When the Brain read it. */
+    recordedAt: timestamp("recorded_at").notNull(),
+    /** When a later version of its source replaced it. */
+    supersededAt: timestamp("superseded_at"),
+  },
+  (table) => [
+    index("brain_assertions_subject_idx").on(
+      table.subjectEntityId,
+      table.predicate
+    ),
+    index("brain_assertions_object_idx").on(table.objectEntityId),
+    index("brain_assertions_source_idx").on(table.source),
   ]
 );

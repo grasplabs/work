@@ -1,9 +1,9 @@
-// Deployed only to grasp-os-ops, by hand with deploy-ops (never to staging, where
-// it would have no route), behind Cloudflare Access (company sign-in + MFA).
+// Deployed only by hand, with deploy-ops (never by CI on a merge), behind
+// Cloudflare Access (company sign-in + MFA).
 // The Worker verifies the Access JWT on every request itself (src/access.ts),
 // against the CF_ACCESS_AUD and CF_ACCESS_ISS vars; without them it refuses
-// everything. Deploy-ops passes them from the grasp-os-ops environment's
-// variables with `--var`, and stops if either is missing.
+// everything. Deploy-ops passes them from the ops 1Password Environment
+// with `--var`, and stops if either is missing.
 // The token it reaches client accounts with lives in Secrets Store, never in
 // the database.
 {

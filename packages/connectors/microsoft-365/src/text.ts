@@ -35,3 +35,38 @@ export const decoded = (
   }
   return out + text.slice(last);
 };
+
+const blockEnd =
+  /<\/(?:p|div|h[1-6]|li|tr|table|ul|ol|pre|blockquote)\s*>|<br\s*\/?>/giu;
+const cellEnd = /<\/t[dh]\s*>/giu;
+const hidden = /<(?<element>script|style|head)\b[\s\S]*?<\/\k<element>\s*>/giu;
+const tag = /<[^>]*>/gu;
+const htmlEntities: Readonly<Record<string, string>> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+const blankLines = /\n{2,}/gu;
+const trailingSpace = /[ \t]+\n/gu;
+
+/**
+ * The text of HTML as Graph gives it (a OneNote page, a Teams message): a
+ * line per paragraph, heading, list item and table row, cells apart by a
+ * tab, and no blank lines. Images, ink and attachments aren't text, and
+ * are left out.
+ */
+export const htmlText = (html: string): string =>
+  decoded(
+    html
+      .replaceAll(hidden, "")
+      .replaceAll(cellEnd, "\t")
+      .replaceAll(blockEnd, "\n")
+      .replaceAll(tag, ""),
+    htmlEntities
+  )
+    .replaceAll(trailingSpace, "\n")
+    .replaceAll(blankLines, "\n")
+    .trim();

@@ -400,6 +400,7 @@ const inOwnMailbox: Readonly<Record<CompanyToolClass, CompanyToolClass>> = {
   "change-own": "change-own",
   "change-company": "change-own",
   "reach-others": "reach-others",
+  "read-others": "read-others",
 };
 
 /**

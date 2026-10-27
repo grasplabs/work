@@ -17,14 +17,15 @@ import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import { acmeDomain, acmeTenant } from "./provider-config.ts";
 
-// Asking Microsoft only for the rights of the classes a company turned on
-// (GRA-717). These start from the ways it can fail: a consent asks a right
-// no class that is on needs (sending mail while Reach others is off, a
-// shared mailbox nobody pointed Stephen at); a class turned on runs on a
-// grant that lacks its rights, instead of asking its person to connect
-// again; a connection asked to connect again comes back as another, losing
-// its permissions; a right Entra names in another case, or by its full
-// URI, counts as missing.
+// Asking Microsoft and Google only for the rights of the classes a company
+// turned on (GRA-717, GRA-756). These start from the ways it can fail: a
+// consent asks a right no class that is on needs (sending mail while Reach
+// others is off, a shared mailbox nobody pointed Stephen at); a class
+// turned on runs on a grant that lacks its rights, instead of asking its
+// person to connect again; a connection asked to connect again comes back
+// as another, losing its permissions; a right Entra names in another case,
+// or by its full URI, counts as missing; Gmail's modifying, which sends
+// too, is taken for less than it is.
 
 const providers = fakeProviders();
 // Registered after the providers, so their requests go on to them.
@@ -135,36 +136,44 @@ describe("a consent", () => {
     ).toStrictEqual([]);
   });
 
-  it("keeps their own scopes for Google and the admin connections that share Microsoft's sign-in, whatever the classes", async () => {
+  it("keeps their own scopes for the admin connections that share a suite's sign-in, whatever the classes", async () => {
     const admin = someone("admin");
     const scopesOf = async (
-      provider: "google" | "microsoft-documents" | "microsoft-landscape",
+      provider:
+        | "google-documents"
+        | "microsoft-documents"
+        | "microsoft-landscape",
       classes?: CompanyToolClass[]
     ) => {
       const url = await startAs(admin, {
         provider,
-        scope: provider === "google" ? "personal" : "shared",
-        tenant: provider === "google" ? acmeDomain : acmeTenant,
+        scope: "shared",
+        tenant: provider === "google-documents" ? acmeDomain : acmeTenant,
         ...(classes === undefined ? {} : { classes }),
       });
       return url.searchParams.get("scope");
     };
     const others = [
-      "google",
+      "google-documents",
       "microsoft-documents",
       "microsoft-landscape",
     ] as const;
     const withClasses = await Promise.all(
       others.map(
         async (provider) =>
-          await scopesOf(provider, ["read-own", "change-own", "reach-others"])
+          await scopesOf(provider, [
+            "read-own",
+            "change-own",
+            "change-company",
+            "reach-others",
+          ])
       )
     );
     const without = await Promise.all(
       others.map(async (provider) => await scopesOf(provider))
     );
     expect(withClasses).toStrictEqual(without);
-    expect(withClasses.join(" ")).not.toContain("Mail.Send");
+    expect(withClasses.join(" ")).not.toMatch(/Mail\.Send|gmail/u);
   });
 });
 
@@ -216,6 +225,57 @@ describe("a shared mailbox pointed at", () => {
       bens: await stored(bens),
       carls: await stored(carls),
     }).toStrictEqual({ annas: askedAgain, bens: active, carls: active });
+  });
+});
+
+describe("Read others' words", () => {
+  const teamsRights = [
+    "Chat.Read",
+    "OnlineMeetings.Read",
+    "OnlineMeetingTranscript.Read.All",
+  ];
+
+  it("is asked of Microsoft only once the company turns it on", async () => {
+    const off = await Promise.all(
+      (
+        [
+          undefined,
+          ["read-own", "change-own"],
+          [
+            "read-own",
+            "read-company",
+            "change-own",
+            "change-company",
+            "reach-others",
+          ],
+        ] as const
+      ).map(async (classes) => await askedFor(classes && [...classes]))
+    );
+    expect(
+      off.flat().filter((right) => teamsRights.includes(right ?? ""))
+    ).toStrictEqual([]);
+    // On its own it reads the calendar too, to find the meetings.
+    await expect(askedFor(["read-others"])).resolves.toStrictEqual(
+      rights(...signIn, "Calendars.Read", ...teamsRights)
+    );
+  });
+
+  it("asks the connections granted without it to connect again once turned on", async () => {
+    const anna = someone();
+    const annas = await connectAccount(providers, anna, {
+      ...ownAccount(anna),
+      granted: defaultGrant,
+    });
+    // Made before grants were kept: the old wide set never read chats.
+    const ben = someone();
+    const bens = await connectAccount(providers, ben, ownAccount(ben));
+
+    await exports.default.requireClassRights({ classes: ["read-others"] });
+
+    expect({
+      annas: await stored(annas),
+      bens: await stored(bens),
+    }).toStrictEqual({ annas: askedAgain, bens: askedAgain });
   });
 });
 
@@ -298,14 +358,8 @@ describe("a class turned on", () => {
     await expect(stored(annas)).resolves.toStrictEqual(askedAgain);
   });
 
-  it("leaves a Google connection and a disconnected one as they are", async () => {
-    const anna = someone();
+  it("leaves a disconnected connection as it is", async () => {
     const ben = someone();
-    const annas = await connectAccount(
-      providers,
-      anna,
-      ownAccount(anna, "google")
-    );
     const bens = await connectAccount(providers, ben, {
       ...ownAccount(ben),
       granted: defaultGrant,
@@ -317,9 +371,178 @@ describe("a class turned on", () => {
     });
 
     const { status } = await stored(bens);
-    expect({ annas: await stored(annas), bens: status }).toStrictEqual({
-      annas: active,
-      bens: "disconnected",
+    expect(status).toBe("disconnected");
+  });
+});
+
+/** A Google OAuth scope, by its name under Google's prefix. */
+const googleScope = (name: string): string =>
+  `https://www.googleapis.com/auth/${name}`;
+
+const googleSignIn = ["openid", "email", "profile"];
+
+/** The rights a consent asks Google for, the company having `classes` on. */
+const googleAskedFor = async (classes?: CompanyToolClass[]) => {
+  const url = await startAs(someone(), {
+    provider: "google",
+    ...(classes === undefined ? {} : { classes }),
+  });
+  return url.searchParams.get("scope")?.split(" ").toSorted();
+};
+
+/** The defaults' rights at Google: Read own and Change own. */
+const googleDefaults = [
+  ...googleSignIn,
+  googleScope("gmail.modify"),
+  googleScope("calendar.events"),
+  googleScope("calendar.calendarlist.readonly"),
+  googleScope("drive.file"),
+];
+
+/**
+ * What the defaults' consent is granted, as Google's answer lists it: the
+ * sign-in's by their full URIs.
+ */
+const googleDefaultGrant = [
+  "openid",
+  googleScope("userinfo.email"),
+  googleScope("userinfo.profile"),
+  ...googleDefaults.slice(googleSignIn.length),
+].join(" ");
+
+/** Connects `person`'s own Google account, granted `granted`. */
+const connectGoogle = async (granted?: string) => {
+  const person = someone();
+  const connectionId = await connectAccount(providers, person, {
+    ...ownAccount(person, "google"),
+    ...(granted === undefined ? {} : { granted }),
+  });
+  return { person, connectionId };
+};
+
+describe("Google Workspace", () => {
+  it("asks Google only for the rights of the classes the company turned on", async () => {
+    await expect(googleAskedFor()).resolves.toStrictEqual(
+      rights(...googleDefaults)
+    );
+    await expect(googleAskedFor(["read-own"])).resolves.toStrictEqual(
+      rights(...googleSignIn, googleScope("gmail.readonly"))
+    );
+    await expect(
+      googleAskedFor(["read-own", "read-company"])
+    ).resolves.toStrictEqual(
+      rights(
+        ...googleSignIn,
+        googleScope("gmail.readonly"),
+        googleScope("calendar.events.readonly"),
+        googleScope("drive.readonly")
+      )
+    );
+    // Writing events takes in reading them: asked once, the wider.
+    await expect(
+      googleAskedFor(["read-own", "change-own", "read-company"])
+    ).resolves.toStrictEqual(
+      rights(...googleDefaults, googleScope("drive.readonly"))
+    );
+    // Google has no tool that changes the company's: it asks nothing more.
+    await expect(
+      googleAskedFor(["read-own", "change-own", "change-company"])
+    ).resolves.toStrictEqual(rights(...googleDefaults));
+  });
+
+  it("asks to send only with Reach others, which under gmail.modify only its class holds back", async () => {
+    // Read own alone can't send; Reach others adds sending, and nothing else.
+    await expect(googleAskedFor(["read-own"])).resolves.not.toContain(
+      googleScope("gmail.send")
+    );
+    await expect(
+      googleAskedFor(["read-own", "reach-others"])
+    ).resolves.toStrictEqual(
+      rights(
+        ...googleSignIn,
+        googleScope("gmail.readonly"),
+        googleScope("gmail.send")
+      )
+    );
+    // Change own's labelling and drafting need gmail.modify, which sends
+    // too: Gmail has no right that modifies but can't send. So the consent
+    // is the same with Reach others as without, and the grant could send
+    // either way; core refuses mail.send while the class is off.
+    await expect(
+      googleAskedFor(["read-own", "change-own", "reach-others"])
+    ).resolves.toStrictEqual(await googleAskedFor(["read-own", "change-own"]));
+
+    // So turning Reach others on asks again only a grant that can't send.
+    const modifying = await connectGoogle(googleDefaultGrant);
+    const reading = await connectGoogle(
+      `openid ${googleScope("userinfo.email")} ${googleScope("gmail.readonly")}`
+    );
+    await exports.default.requireClassRights({ classes: ["reach-others"] });
+    expect({
+      modifying: await stored(modifying.connectionId),
+      reading: await stored(reading.connectionId),
+    }).toStrictEqual({ modifying: active, reading: askedAgain });
+  });
+
+  it("asks the connections whose grant lacks a class's rights to connect again, in place, and only those", async () => {
+    const anna = await connectGoogle(googleDefaultGrant);
+    const ben = await connectGoogle(
+      `${googleDefaultGrant} ${googleScope("drive.readonly")}`
+    );
+
+    await exports.default.requireClassRights({ classes: ["read-company"] });
+
+    expect({
+      annas: await stored(anna.connectionId),
+      bens: await stored(ben.connectionId),
+    }).toStrictEqual({ annas: askedAgain, bens: active });
+    const recorded = await audit.events();
+    expect(
+      recorded.filter(
+        ({ action, target }) =>
+          action === "connection.needs_reauth" &&
+          (target?.id === anna.connectionId || target?.id === ben.connectionId)
+      )
+    ).toMatchObject([
+      {
+        target: { type: "connection", id: anna.connectionId },
+        detail: { provider: "google", reason: "class_turned_on" },
+      },
+    ]);
+
+    const url = await startAs(anna.person, {
+      provider: "google",
+      classes: ["read-own", "change-own", "read-company"],
     });
+    expect(url.searchParams.get("scope")?.split(" ")).toContain(
+      googleScope("drive.readonly")
+    );
+    const { connectionId } = await exports.default.finishConnection({
+      person: anna.person,
+      state: stateOf(url),
+      code: providers.authorize(url.href, {
+        ...ownAccount(anna.person, "google"),
+        granted: `${googleDefaultGrant} ${googleScope("drive.readonly")}`,
+      }),
+    });
+    await exports.default.requireClassRights({ classes: ["read-company"] });
+    expect({
+      connectionId,
+      ...(await stored(anna.connectionId)),
+    }).toStrictEqual({ connectionId: anna.connectionId, ...active });
+  });
+
+  it("counts a connection made before grants were kept as holding what Google was asked for then", async () => {
+    // An answer that lists nothing: gmail.modify, reading events and Drive.
+    const { connectionId } = await connectGoogle();
+
+    await exports.default.requireClassRights({
+      classes: ["read-company", "change-company", "reach-others"],
+    });
+    await expect(stored(connectionId)).resolves.toStrictEqual(active);
+
+    // Putting events in the person's own calendar wasn't asked then.
+    await exports.default.requireClassRights({ classes: ["change-own"] });
+    await expect(stored(connectionId)).resolves.toStrictEqual(askedAgain);
   });
 });

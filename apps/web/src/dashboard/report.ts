@@ -1,37 +1,75 @@
 import type {
+  BoardReport,
+  BoardReportPart,
+  SignalCount,
+} from "@grasp-os/shared/dashboard";
+import { expectedMessageOf } from "@grasp-os/shared/errors";
+import type {
+  NextReport,
   OnboardingProgress,
   Programme,
 } from "@grasp-os/shared/onboarding";
-import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { RunActivity } from "@grasp-os/shared/workflows";
 import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg, ph, plural } from "@lingui/core/macro";
 
 import { plainText } from "../chat/chat-markdown.ts";
 import { formatDate } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
-import { signalKinds } from "./board.ts";
-import { inProgramme, programmeWeek } from "./programme.ts";
-import type { NextReport } from "./programme.ts";
+import { byKindOrder } from "./board.ts";
 import { signalKindLooks } from "./signals.tsx";
-import type { Signals } from "./signals.tsx";
 
 // The weekly report, as the prototype's (`lib/report.ts`) where core has
-// what it says: assembled when it is exported, from what the dashboard
-// read, as it stands then. What ran, the decisions runs asked for, each
+// what it says: core reads it in one call (`dashboard.report()`), on the
+// week its own count says, and this words it, as it stands when it is
+// exported. What ran, the decisions runs asked for, each
 // workflow, what could be better, and, for admins, how many people the
 // interviews heard. No hours, euros or goals: core keeps none of them. It
 // is Markdown, which the dialog shows and the export saves or prints
 // (export/export-file.tsx); what people typed (workflow and engine names)
 // is escaped, never read as Markdown.
 
-/** What the report is made from: the dashboard's reads, each as it came. */
+/** What the report says, each part as core read it, or why it couldn't. */
 export interface ReportReads {
   runs: Loaded<RunActivity>;
-  workflows: Loaded<WorkflowSummary[]>;
-  signals: Loaded<Signals>;
+  /** How many of the person's workflows didn't run in the window. */
+  idle: Loaded<number>;
+  /** How many signals of each kind; null for someone who reads none. */
+  better: Loaded<SignalCount[] | null>;
   /** How many the interviews heard; undefined for anyone who may not read it. */
   people: Loaded<OnboardingProgress | null> | undefined;
 }
+
+/** One part of core's report, as a page loads it. */
+const loadedPart = <T>(
+  report: Loaded<BoardReport>,
+  part: (read: BoardReport) => BoardReportPart<T>
+): Loaded<T> => {
+  if (report.state !== "ready") {
+    return report;
+  }
+  const read = part(report.data);
+  // Core's own words for why: not translated.
+  return read.state === "read"
+    ? { state: "ready", data: read.data }
+    : {
+        state: "refused",
+        message: expectedMessageOf(read.code) ?? read.code,
+      };
+};
+
+/** The report's parts, from core's read of it. */
+export const readsOf = (report: Loaded<BoardReport>): ReportReads => {
+  // Core says whether the person may read it; a report that couldn't be
+  // read says so in every other section.
+  const people = report.state === "ready" ? report.data.people : undefined;
+  return {
+    runs: loadedPart(report, ({ runs }) => runs),
+    idle: loadedPart(report, ({ idleWorkflows }) => idleWorkflows),
+    better: loadedPart(report, ({ better }) => better),
+    people: people === undefined ? undefined : loadedPart(report, () => people),
+  };
+};
 
 /** Each stage of the onboarding, as the dashboard's line says it. */
 export const stageNames: Record<
@@ -45,20 +83,15 @@ export const stageNames: Record<
 };
 
 /** The programme's line: "Week 3 of 8 · Under way", or past week 8, "Week 9". */
-export const programmeLine = (
-  programme: Programme,
-  today: string,
-  i18n: I18n
-): string => {
-  const week = programmeWeek(programme.start, today);
-  const { weeks } = programme;
+export const programmeLine = (programme: Programme, i18n: I18n): string => {
+  const { week, weeks, inProgramme } = programme;
   if (programme.stage === null) {
-    return inProgramme(week)
+    return inProgramme
       ? i18n._(msg`Week ${week} of ${weeks}`)
       : i18n._(msg`Week ${week}`);
   }
   const stage = i18n._(stageNames[programme.stage]);
-  return inProgramme(week)
+  return inProgramme
     ? i18n._(msg`Week ${week} of ${weeks} · ${stage}`)
     : i18n._(msg`Week ${week} · ${stage}`);
 };
@@ -141,7 +174,7 @@ const decisionsSection = (runs: Loaded<RunActivity>, i18n: I18n): string[] => {
 /** Each workflow that ran in the window, and how many of the others didn't. */
 const workflowsSection = (
   runs: Loaded<RunActivity>,
-  overview: Loaded<WorkflowSummary[]>,
+  idleRead: Loaded<number>,
   i18n: I18n
 ): string[] => {
   const heading = `## ${i18n._(msg`Workflows`)}`;
@@ -158,15 +191,7 @@ const workflowsSection = (
       )
     );
   });
-  const ranNames = new Set(
-    runs.data.workflows.map(({ app, workflow }) => `${app}/${workflow}`)
-  );
-  const idle =
-    overview.state === "ready"
-      ? overview.data.filter(
-          ({ app, workflow }) => !ranNames.has(`${app}/${workflow}`)
-        ).length
-      : 0;
+  const idle = idleRead.state === "ready" ? idleRead.data : 0;
   const listed =
     ran.length === 0
       ? i18n._(msg`No workflow ran in this time.`)
@@ -187,19 +212,18 @@ const workflowsSection = (
 };
 
 /** How many signals of each kind there are; none for someone who reads none. */
-const betterSection = (signals: Loaded<Signals>, i18n: I18n): string[] => {
+const betterSection = (
+  better: Loaded<SignalCount[] | null>,
+  i18n: I18n
+): string[] => {
   const heading = `## ${i18n._(msg`What could be better`)}`;
-  if (signals.state !== "ready") {
+  if (better.state !== "ready") {
     return [heading, unread(i18n)];
   }
-  const { improvement, knowledge } = signals.data;
-  if (improvement === undefined && knowledge === undefined) {
+  if (better.data === null) {
     return [];
   }
-  const counts = signalKinds([
-    ...(improvement?.signals ?? []),
-    ...(knowledge?.signals ?? []),
-  ]);
+  const counts = byKindOrder(better.data);
   if (counts.length === 0) {
     return [heading, i18n._(msg`Nothing to make better right now.`)];
   }
@@ -255,8 +279,8 @@ export const reportBody = (
     i18n._(msg`As of ${date}.`),
     ...ranSection(reads.runs, i18n),
     ...decisionsSection(reads.runs, i18n),
-    ...workflowsSection(reads.runs, reads.workflows, i18n),
-    ...betterSection(reads.signals, i18n),
+    ...workflowsSection(reads.runs, reads.idle, i18n),
+    ...betterSection(reads.better, i18n),
     ...peopleSection(reads.people, i18n),
     "---",
     i18n._(msg`Made with Grasp on ${date}`),

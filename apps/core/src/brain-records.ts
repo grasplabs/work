@@ -15,6 +15,7 @@ import type {
   TeamCount,
   Step,
   Tool,
+  Goal,
   Workflow,
   WorkflowDrawing,
 } from "@grasp-os/shared/brain";
@@ -42,7 +43,7 @@ import { and, asc, count, eq, gte, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
-import { brainRecords } from "./db/core/schema.ts";
+import { appVersions, apps, brainRecords } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 
 // The brain's records, as core keeps them (`brain_records`), and adding
@@ -200,6 +201,18 @@ const referencesOf = (record: BrainRecord): Reference[] => {
         { type: "workflow", id: record.workflowId },
       ];
     }
+    case "goal": {
+      return [{ type: "source", id: record.sourceId }];
+    }
+    case "goalVersion": {
+      return [
+        { type: "source", id: record.sourceId },
+        { type: "goal", id: record.goalId },
+      ];
+    }
+    case "goalLink": {
+      return [{ type: "goal", id: record.goalId }];
+    }
     default: {
       return [];
     }
@@ -251,6 +264,9 @@ const types = [
   "gap",
   "workflow",
   "workflowVersion",
+  "goal",
+  "goalVersion",
+  "goalLink",
 ] as const;
 
 /** Rows one insert writes: four columns each, within D1's 100 bound parameters. */
@@ -451,6 +467,49 @@ const keepRecords = async (
 };
 
 /**
+ * Refuses a goal link (`goalLink`, `linked`) to a workflow the company
+ * doesn't have: one its App's current version doesn't hold, or an App
+ * that is gone or has no version. Taking one off needs none: a workflow
+ * that went keeps its link until it is taken off.
+ */
+const requireLinkedWorkflows = async (
+  env: Env,
+  records: readonly BrainRecord[]
+): Promise<void> => {
+  const links = records.flatMap((record) =>
+    record.type === "goalLink" && record.linked ? [record] : []
+  );
+  if (links.length === 0) {
+    return;
+  }
+  const rows = await drizzle(env.DB)
+    .select({ id: apps.id, workflows: appVersions.workflows })
+    .from(apps)
+    .innerJoin(
+      appVersions,
+      and(
+        eq(appVersions.appId, apps.id),
+        eq(appVersions.version, apps.currentVersion)
+      )
+    )
+    .where(
+      sql`${apps.id} IN (SELECT value FROM json_each(${JSON.stringify([
+        ...new Set(links.map(({ app }) => app)),
+      ])}))`
+    );
+  const held = new Map(rows.map(({ id, workflows }) => [id, workflows]));
+  for (const link of links) {
+    if (held.get(link.app)?.includes(link.workflow) !== true) {
+      throw brainRecordErrors.create("brain.record_missing", {
+        issues: [
+          `${keyOf(link)}: no workflow ${link.workflow} in App ${link.app}`,
+        ],
+      });
+    }
+  }
+};
+
+/**
  * Adds `input` to the brain's records as `person`, all or none: for admins. A
  * record held already, exactly so, is left as it is. `onboarding` reads
  * what the onboarding gives the brain, when a record names it.
@@ -463,6 +522,7 @@ export const addBrainRecords = async (
 ): Promise<BrainRecordsAdded> => {
   requireAdmin(person);
   const records = recordsOf(input);
+  await requireLinkedWorkflows(env, records);
   return await keepRecords(
     env,
     actorOf(person),
@@ -656,7 +716,17 @@ export interface HeldRecords {
   workflows: Workflow[];
   /** Drawings of workflows, before they join theirs. */
   drawings: ForWorkflow[];
+  /**
+   * The board's goals, each with its wordings in date order and every
+   * workflow linked to it now, whoever may see it.
+   */
+  goals: Goal[];
+  /** Later wordings and links of goals, before they join theirs. */
+  goalChanges: GoalChange[];
 }
+
+/** A later wording of a goal, or a link to it or off it, as added. */
+type GoalChange = Extract<BrainRecord, { type: "goalVersion" | "goalLink" }>;
 
 /** A drawing, by the workflow it is of. */
 interface ForWorkflow {
@@ -739,6 +809,20 @@ const collect = (held: HeldRecords, record: BrainRecord): void => {
       held.drawings.push({ workflowId, value });
       break;
     }
+    case "goal": {
+      const { id, title, howWeNotice, sourceId, date } = record;
+      held.goals.push({
+        id,
+        versions: [{ title, howWeNotice, sourceId, date }],
+        workflows: [],
+      });
+      break;
+    }
+    case "goalVersion":
+    case "goalLink": {
+      held.goalChanges.push(record);
+      break;
+    }
     default: {
       break;
     }
@@ -787,6 +871,44 @@ const withDrawings = (held: HeldRecords): void => {
   held.drawings = [];
 };
 
+/**
+ * Gives each goal its later wordings after its first, in date order (the
+ * newest counts),
+ * and the workflows linked to it now: the newest link for each App's
+ * workflow counts, in the order they were last linked. A change for a
+ * goal that isn't held is left out.
+ */
+const withGoalChanges = (held: HeldRecords): void => {
+  const goals = new Map(held.goals.map((goal) => [goal.id, goal]));
+  const linked = new Map<string, Map<string, Goal["workflows"][number]>>();
+  for (const change of held.goalChanges) {
+    const goal = goals.get(change.goalId);
+    if (goal === undefined) {
+      continue;
+    }
+    if (change.type === "goalVersion") {
+      const { title, howWeNotice, sourceId, date } = change;
+      goal.versions.push({ title, howWeNotice, sourceId, date });
+      continue;
+    }
+    const links =
+      linked.get(goal.id) ?? new Map<string, Goal["workflows"][number]>();
+    linked.set(goal.id, links);
+    const key = `${change.app}/${change.workflow}`;
+    links.delete(key);
+    if (change.linked) {
+      links.set(key, { app: change.app, workflow: change.workflow });
+    }
+  }
+  for (const goal of held.goals) {
+    // Where it was set stays first; later wordings follow by date.
+    const [set, ...later] = goal.versions;
+    goal.versions = set === undefined ? [] : [set, ...byDate(later)];
+    goal.workflows = [...(linked.get(goal.id)?.values() ?? [])];
+  }
+  held.goalChanges = [];
+};
+
 /** Every record core keeps, in the order they were added. */
 export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
   const held: HeldRecords = {
@@ -800,6 +922,8 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
     gaps: [],
     workflows: [],
     drawings: [],
+    goals: [],
+    goalChanges: [],
   };
   const rows = await drizzle(env.DB)
     .select({ body: brainRecords.body })
@@ -832,6 +956,7 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
     datedInOrder(team);
   }
   withDrawings(held);
+  withGoalChanges(held);
   return held;
 };
 
@@ -856,6 +981,9 @@ const notWords: ReadonlySet<string> = new Set([
   "teamId",
   "about",
   "workflowId",
+  "goalId",
+  "app",
+  "workflow",
   "status",
   "state",
   "of",
