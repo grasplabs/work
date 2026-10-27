@@ -2,7 +2,7 @@
  * Deploys the Worker in the current directory with the ids wrangler can't
  * look up filled in: its Secrets Store bindings pointed at the account's
  * own store, and a binding to the router's hostname map at that
- * namespace. Both ids differ per account (grasp-os-staging, grasp-os-ops),
+ * namespace. Both ids differ per account,
  * so the config carries placeholders and this fills them in before
  * `wrangler deploy`:
  * - `"account-secrets-store"`: from SECRETS_STORE_ID when the job sets it
