@@ -1,3 +1,4 @@
+import { appLimits } from "@grasp-os/shared/app-limits";
 import type { App, AppContents } from "@grasp-os/shared/apps";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
@@ -8,7 +9,7 @@ import {
 } from "@grasp-os/ui/components/dropdown-menu";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import {
   ArchiveIcon,
   ChevronDownIcon,
@@ -18,10 +19,13 @@ import {
   SettingsIcon,
   SquarePenIcon,
 } from "lucide-react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { setDockMode } from "../chat/dock-mode.ts";
 import { ErrorText } from "../error-text.tsx";
+import { RenameField } from "../frame/rename-field.tsx";
+import { useCoreAction } from "../use-core-action.ts";
 import { StatusBadge, useStatusMove } from "./app-status.tsx";
 
 // An App's own page (grasplabs/prototype `routes/apps/$appId.tsx`): its bar
@@ -191,6 +195,64 @@ const ScreenTabs = ({
 };
 
 /**
+ * The App's name in its bar, for its builders: a double click, or Enter or
+ * F2 on it, turns it into a field with the name in it, which Enter or
+ * leaving keeps and Escape leaves as it was, saved through core's audited
+ * update (the prototype's `components/apps/app-title.tsx`).
+ */
+const AppTitle = ({ app }: { app: App }) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const { failure, run } = useCoreAction();
+  const [renaming, setRenaming] = useState(false);
+  const { name } = app;
+  if (renaming) {
+    return (
+      <span className="block w-64 max-w-full">
+        <RenameField
+          label={t`Name of the app`}
+          maxLength={appLimits.nameLength}
+          onDone={(next) => {
+            setRenaming(false);
+            const trimmed = next?.trim();
+            if (trimmed === undefined || trimmed === "" || trimmed === name) {
+              return;
+            }
+            void run(async (session) => {
+              await session.apps.update(app.id, { name: trimmed });
+              await router.invalidate();
+            });
+          }}
+          value={name}
+        />
+      </span>
+    );
+  }
+  return (
+    <>
+      <button
+        className="focus-visible:ring-ring/50 max-w-full cursor-text truncate rounded-sm text-left outline-none focus-visible:ring-3"
+        onDoubleClick={() => {
+          setRenaming(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== "F2") {
+            return;
+          }
+          event.preventDefault();
+          setRenaming(true);
+        }}
+        title={t`Double-click to rename`}
+        type="button"
+      >
+        {name}
+      </button>
+      <ErrorText>{failure}</ErrorText>
+    </>
+  );
+};
+
+/**
  * The App's page: its bar, then under it that it is archived, then its
  * open screen (`children`), or that it has none. `builds`: the person
  * builds Apps, so they edit, publish and restore it.
@@ -223,7 +285,9 @@ export const AppPage = ({
           >
             <LayoutGridIcon className="size-4" />
           </span>
-          <h1 className="truncate text-base font-medium">{name}</h1>
+          <h1 className="min-w-0 truncate text-base font-medium">
+            {editable ? <AppTitle app={app} /> : name}
+          </h1>
           <StatusBadge status={app.status} />
         </span>
         <ScreenTabs app={app.id} open={open} screens={contents.screens} />

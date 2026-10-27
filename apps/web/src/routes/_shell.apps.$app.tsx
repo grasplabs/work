@@ -1,9 +1,10 @@
 import { useLingui } from "@lingui/react/macro";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { Await, createFileRoute, useRouter } from "@tanstack/react-router";
 import { LayoutGridIcon } from "lucide-react";
 
 import { AppPage } from "../engines/app-page.tsx";
 import { buildsApp } from "../engines/app-role.ts";
+import { AppsSheetButton, AppsSidebar } from "../engines/apps-sidebar.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -29,7 +30,7 @@ const openScreen = (
 const AppPageView = () => {
   const { app: id } = Route.useParams();
   const { screen: asked } = Route.useSearch();
-  const page = Route.useLoaderData();
+  const { page, apps } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const router = useRouter();
   const { t } = useLingui();
@@ -55,41 +56,67 @@ const AppPageView = () => {
   return (
     <>
       <SiteHeader
+        actions={
+          <Await fallback={null} promise={apps}>
+            {(listed) =>
+              listed.state === "ready" ? (
+                <AppsSheetButton
+                  apps={listed.data}
+                  current={id}
+                  identity={identity}
+                />
+              ) : null
+            }
+          </Await>
+        }
         crumbs={[{ label: t`Domains`, to: "/domains" }, { label: app.name }]}
       />
-      <AppPage
-        app={app}
-        builds={buildsApp(app, identity)}
-        contents={contents}
-        open={open}
-      >
-        {open === undefined ? null : (
-          <ScreenFrame
-            app={id}
-            // The App's bar holds the page's heading, its name.
-            embedded
-            // A navigation to another input of the same screen starts it
-            // afresh, as one to another screen does.
-            key={`${id}/${open}/${opening === undefined ? "" : JSON.stringify(opening)}`}
-            onNavigate={navigate}
-            // Loading the screen again reads the App's current version
-            // again too: its screens may have changed with it.
-            onReload={() => {
-              void router.invalidate();
-            }}
-            screen={open}
-            {...(opening === undefined
-              ? {}
-              : {
-                  route: opening.route,
-                  input: opening.input,
-                  ...(opening.surface === undefined
-                    ? {}
-                    : { surface: opening.surface }),
-                })}
-          />
-        )}
-      </AppPage>
+      <div className="flex min-h-0 flex-1">
+        <Await fallback={null} promise={apps}>
+          {(listed) =>
+            listed.state === "ready" ? (
+              <AppsSidebar
+                apps={listed.data}
+                current={id}
+                identity={identity}
+              />
+            ) : null
+          }
+        </Await>
+        <AppPage
+          app={app}
+          builds={buildsApp(app, identity)}
+          contents={contents}
+          open={open}
+        >
+          {open === undefined ? null : (
+            <ScreenFrame
+              app={id}
+              // The App's bar holds the page's heading, its name.
+              embedded
+              // A navigation to another input of the same screen starts it
+              // afresh, as one to another screen does.
+              key={`${id}/${open}/${opening === undefined ? "" : JSON.stringify(opening)}`}
+              onNavigate={navigate}
+              // Loading the screen again reads the App's current version
+              // again too: its screens may have changed with it.
+              onReload={() => {
+                void router.invalidate();
+              }}
+              screen={open}
+              {...(opening === undefined
+                ? {}
+                : {
+                    route: opening.route,
+                    input: opening.input,
+                    ...(opening.surface === undefined
+                      ? {}
+                      : { surface: opening.surface }),
+                  })}
+            />
+          )}
+        </AppPage>
+      </div>
     </>
   );
 };
@@ -101,12 +128,15 @@ export const Route = createFileRoute("/_shell/apps/$app")({
   // opens the App's first.
   validateSearch: (search: Record<string, unknown>): { screen?: string } =>
     typeof search.screen === "string" ? { screen: search.screen } : {},
-  loader: async ({ context: { core }, params }) =>
-    await loadFromCore(core, async (session) => {
+  loader: async ({ context: { core }, params }) => ({
+    // Not awaited: the sidebar's Apps never keep the App itself waiting.
+    apps: loadFromCore(core, async (session) => await session.apps.list()),
+    page: await loadFromCore(core, async (session) => {
       const [app, contents] = await Promise.all([
         session.apps.get(params.app),
         session.apps.contents(params.app),
       ]);
       return { app, contents };
     }),
+  }),
 });

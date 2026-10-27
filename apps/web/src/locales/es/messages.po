@@ -2315,6 +2315,10 @@ msgctxt "tab listing every workflow"
 msgid "All"
 msgstr "Todos"
 
+#: src/engines/apps-sidebar.tsx
+msgid "All apps"
+msgstr "Todas las aplicaciones"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "All calls"
 msgstr "Todas las llamadas"
@@ -2632,6 +2636,7 @@ msgctxt "kind of thing that waits"
 msgid "App approval"
 msgstr "Aprobación de aplicaciones"
 
+#: src/engines/apps-sidebar.tsx
 #: src/landscape/landscape.ts
 msgid "App name"
 msgstr "Nombre de la aplicación"
@@ -2748,6 +2753,7 @@ msgstr "Aprobado: {who}."
 msgid "Approver for new tools named"
 msgstr "Responsable de aprobar herramientas nombrado"
 
+#: src/engines/apps-sidebar.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Apps"
@@ -2793,6 +2799,7 @@ msgid "Apps to approve"
 msgstr "Aplicaciones por aprobar"
 
 #: src/engines/app-status.tsx
+#: src/engines/apps-sidebar.tsx
 msgid "Archive"
 msgstr "Archivar"
 
@@ -2800,10 +2807,19 @@ msgstr "Archivar"
 msgid "Archive {name}?"
 msgstr "¿Archivar {name}?"
 
+#: src/engines/apps-sidebar.tsx
+msgid "Archive and take offline"
+msgstr "Archivar y desconectar"
+
 #: src/engines/app-status.tsx
 msgctxt "a domain put away"
 msgid "Archived"
 msgstr "Archivado"
+
+#: src/engines/apps-sidebar.tsx
+msgctxt "apps put away"
+msgid "Archived ({count})"
+msgstr "Archivadas ({count})"
 
 #: src/engines/app-status.tsx
 msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
@@ -3861,6 +3877,7 @@ msgstr "Haz clic para abrir Uso"
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/apps-sidebar.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
@@ -4968,6 +4985,10 @@ msgctxt "part of an interview"
 msgid "Done right"
 msgstr "Hacerlo bien"
 
+#: src/engines/app-page.tsx
+msgid "Double-click to rename"
+msgstr "Haz doble clic para renombrar"
+
 #: src/knowledge/uploads.tsx
 msgid "Download {name}"
 msgstr "Descargar {name}"
@@ -4998,6 +5019,11 @@ msgstr "Borrador"
 
 #: src/engines/app-status.tsx
 msgctxt "a domain still being made"
+msgid "Draft"
+msgstr "Borrador"
+
+#: src/engines/apps-sidebar.tsx
+msgctxt "apps still being made"
 msgid "Draft"
 msgstr "Borrador"
 
@@ -5417,6 +5443,10 @@ msgctxt "filter: apps allowed to break a rule"
 msgid "Exceptions"
 msgstr "Excepciones"
 
+#: src/engines/apps-sidebar.tsx
+msgid "Expand the apps"
+msgstr "Desplegar las aplicaciones"
+
 #: src/chat/chat-list.tsx
 msgid "Expand the chats"
 msgstr "Desplegar los chats"
@@ -5693,6 +5723,10 @@ msgstr "Marcadas o bloqueadas"
 #: src/policies/policy.ts
 msgid "Flags or blocks the apps that break it."
 msgstr "Marca o bloquea las aplicaciones que la incumplen."
+
+#: src/engines/apps-sidebar.tsx
+msgid "Fold the apps"
+msgstr "Plegar las aplicaciones"
 
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
@@ -7711,6 +7745,10 @@ msgstr "Más sobre estas conexiones"
 msgid "More about this connection"
 msgstr "Más sobre esta conexión"
 
+#: src/engines/apps-sidebar.tsx
+msgid "More for {name}"
+msgstr "Más para {name}"
+
 #: src/chat/chat-list.tsx
 msgid "More for {title}"
 msgstr "Más para {title}"
@@ -7819,6 +7857,10 @@ msgstr "Nombre"
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
 msgstr "Nombre de un nuevo flujo de trabajo"
+
+#: src/engines/app-page.tsx
+msgid "Name of the app"
+msgstr "Nombre de la aplicación"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Name of your HR platform"
@@ -10150,6 +10192,11 @@ msgctxt "a domain open to the people it is shared with"
 msgid "Published"
 msgstr "Publicado"
 
+#: src/engines/apps-sidebar.tsx
+msgctxt "apps open to the people they are shared with"
+msgid "Published"
+msgstr "Publicada"
+
 #. placeholder {0}: outcome.version
 #: src/workflows/definition-editor.tsx
 msgid "Published as version {0}."
@@ -10561,6 +10608,7 @@ msgid "Removed: it acts for whoever uses the domain, with everything the domain 
 msgstr "Eliminado: actúa en nombre de quien use el dominio, con todo lo que el dominio tiene"
 
 #: src/chat/chat-list.tsx
+#: src/engines/apps-sidebar.tsx
 msgid "Rename"
 msgstr "Cambiar nombre"
 
@@ -10624,6 +10672,7 @@ msgstr "Recursos"
 
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
+#: src/engines/apps-sidebar.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Restaurar"
@@ -11331,6 +11380,7 @@ msgid "Set. Type a new value to replace it."
 msgstr "Establecido. Escribe un valor nuevo para reemplazarlo."
 
 #: src/engines/app-page.tsx
+#: src/engines/apps-sidebar.tsx
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx

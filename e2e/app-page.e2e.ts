@@ -9,7 +9,8 @@ import type { Person } from "./people.ts";
 // as tabs, settings, Edit and the Publish menu; its screen under the bar;
 // that it is only described while it has no screen; and, once archived,
 // a notice with Restore. Only its builders edit, publish or restore it,
-// and a draft is theirs alone.
+// and a draft is theirs alone. Beside it, the Apps by where they stand,
+// where a builder renames an App and archives or restores it.
 
 const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
@@ -77,6 +78,12 @@ const screenShowing = async (page: Page, screen: string, title: string) => {
   });
 };
 
+/** The App's status, beside its name in its bar (the sidebar beside names its groups alike). */
+const statusOf = (page: Page) =>
+  page
+    .getByRole("heading", { level: 1 })
+    .locator("xpath=following-sibling::*[1]");
+
 test("a builder opens an App's page, moves between its screens, unpublishes and publishes it, and edits it in the chat", async ({
   pageOf,
 }) => {
@@ -106,7 +113,7 @@ test("a builder opens an App's page, moves between its screens, unpublishes and 
   await page.getByRole("button", { name: "Published" }).click();
   await page.getByRole("menuitem", { name: /^Unpublish/u }).click();
   await expect(page.getByRole("button", { name: "Publish" })).toBeVisible();
-  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
+  await expect(statusOf(page)).toHaveText("Draft");
   await page.getByRole("button", { name: "Publish" }).click();
   await page.getByRole("menuitem", { name: /^Publish/u }).click();
   await expect(page.getByRole("button", { name: "Published" })).toBeVisible();
@@ -122,6 +129,54 @@ test("a builder opens an App's page, moves between its screens, unpublishes and 
   await expect(page).toHaveURL(new RegExp(`/domains/${app}$`, "u"));
 });
 
+test("a builder finds the Apps beside an App's page by where they stand, renames one there, and archives and restores it from its menu", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("appPage");
+  const published = `Shown ${crypto.randomUUID()}`;
+  const draft = `Sketch ${crypto.randomUUID()}`;
+  const renamed = `Renamed ${crypto.randomUUID()}`;
+  const app = await newApp(builder, published, twoScreens);
+  await newApp(builder, draft);
+  const page = await pageOf(builder);
+  await page.goto(`/apps/${app}`);
+
+  const apps = page.getByRole("navigation", { name: "Apps" });
+  const group = (title: string) =>
+    apps.getByRole("region", { name: title }).or(
+      apps.locator("section").filter({
+        has: page.getByRole("heading", { name: title, exact: true }),
+      })
+    );
+  await expect(
+    group("Published").getByRole("link", { name: published })
+  ).toHaveAttribute("aria-current", "page");
+  await expect(group("Draft").getByRole("link", { name: draft })).toBeVisible();
+
+  // A double click renames it in place, through core's audited update.
+  await apps.getByRole("link", { name: draft }).dblclick();
+  const field = apps.getByRole("textbox", { name: "App name" });
+  await field.fill(renamed);
+  await field.press("Enter");
+  await expect(apps.getByRole("link", { name: renamed })).toBeVisible();
+
+  // Archived only once asked; Archived is folded until opened.
+  await apps.getByRole("button", { name: `More for ${renamed}` }).click();
+  await page.getByRole("menuitem", { name: "Archive" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Archive" })
+    .click();
+  await expect(apps.getByRole("link", { name: renamed })).toBeHidden();
+  await apps.getByRole("button", { name: /^Archived/u }).click();
+  await expect(apps.getByRole("link", { name: renamed })).toBeVisible();
+  await apps.getByRole("button", { name: `More for ${renamed}` }).click();
+  await page.getByRole("menuitem", { name: "Restore" }).click();
+  await expect(
+    group("Draft").getByRole("link", { name: renamed })
+  ).toBeVisible();
+});
+
 test("an App with no screen yet is only described, and its builder designs it in the chat", async ({
   pageOf,
 }) => {
@@ -132,7 +187,7 @@ test("an App with no screen yet is only described, and its builder designs it in
   await page.goto(`/apps/${app}`);
 
   await expect(page.getByText("Only described")).toBeVisible();
-  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
+  await expect(statusOf(page)).toHaveText("Draft");
   // Nothing to publish before it has a version.
   await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
   await page.getByRole("button", { name: "Design it in the chat" }).click();
@@ -173,7 +228,7 @@ test("an archived App says so under its bar, opens no screen, and its builder re
   await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Restore" }).click();
-  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
+  await expect(statusOf(page)).toHaveText("Draft");
   await expect(page.getByText("This app is archived.")).toHaveCount(0);
   await screenShowing(page, "board", "The board");
   await expect(page.getByRole("button", { name: "Publish" })).toBeEnabled();
