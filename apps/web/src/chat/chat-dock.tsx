@@ -326,6 +326,10 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
       compact
       messages={view.messages}
       onAnswer={(answers) => {
+        // As a question sent from the bar does: the reply shows.
+        if (mode === "bar") {
+          moveTo("frame");
+        }
         void ask(answers);
       }}
       label={words.title}
