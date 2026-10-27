@@ -3115,6 +3115,17 @@ const deletedOnce = async (
       sql`${workflowResourceDraftInspections.workflowResourceId} IN (SELECT id
         FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
     ),
+    // Its versions bind its stores no more (GRA-682): none of them runs
+    // again, nothing running was left (`boundSql`), so an admin may delete
+    // a store it declared. The stores and their records stay: deleting a
+    // workflow never deletes them (spec 40.8).
+    db.delete(sdkResourceBindings).where(
+      and(
+        eq(sdkResourceBindings.kind, "store"),
+        sql`${sdkResourceBindings.resourceId} IN (SELECT id
+          FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
+      )
+    ),
   ]);
   return deleted.length > 0;
 };
