@@ -74,14 +74,14 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
   await expect(
     page.getByRole("region", { name: "Waiting elsewhere" })
   ).toHaveCount(0);
-  // The board is there, with nothing on it yet: core counts no hours,
-  // goals or teams' work, and there are no workflows in their columns.
+  // The board is there, with nothing of theirs on it yet: core counts no
+  // hours or teams' work, and there are no workflows in their columns. The
+  // board's goals are the company's: another journey's may be on it
+  // (e2e/board-goals.e2e.ts).
   await expect(
     page.getByRole("region", { name: "Return a month" })
   ).toContainText("No workflow with counted hours here yet.");
-  await expect(page.getByRole("region", { name: "Board goals" })).toContainText(
-    "No goals yet."
-  );
+  await expect(page.getByRole("region", { name: "Board goals" })).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Teams with AI" })
   ).toContainText("No teams yet.");

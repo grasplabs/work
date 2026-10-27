@@ -1,5 +1,6 @@
+import { isAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouteContext } from "@tanstack/react-router";
 import { BrainIcon } from "lucide-react";
 
 import { BackButton } from "../brain/back-button.tsx";
@@ -15,11 +16,13 @@ import {
 import type { BrainSection } from "../brain/brain-sections.ts";
 import { folderTree, groupLabel } from "../brain/brain.ts";
 import type { Note, NoteKind } from "../brain/brain.ts";
+import { GoalsEditor } from "../brain/goals-editor.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { NotFoundState } from "../frame/page-states.tsx";
 
 // One part of the brain on its own page, as the prototype has it
-// (`routes/brain/sections.$sectionId.tsx`).
+// (`routes/brain/sections.$sectionId.tsx`). On the Vision page, admins
+// also change the board's goals (goals-editor.tsx).
 
 /** The kind whose colour a part's page takes. */
 const sectionKind: Record<BrainSection["group"], NoteKind> = {
@@ -79,7 +82,8 @@ const NoteBlock = ({
 const SectionPage = () => {
   const { t, i18n } = useLingui();
   const { sectionId } = Route.useParams();
-  const { brain } = useBrainData();
+  const { brain, workspace } = useBrainData();
+  const { identity } = useRouteContext({ from: "/_shell" });
   const section = brainSections.find(
     (candidate) => candidate.slug === sectionId
   );
@@ -114,6 +118,9 @@ const SectionPage = () => {
             {i18n._(section.description)}
           </p>
         </header>
+        {section.group === "vision" && isAdmin(identity.role) ? (
+          <GoalsEditor goals={workspace.goals} />
+        ) : null}
         {noteGroups(folder).map((group) => (
           <section className="flex flex-col gap-3" key={group.key}>
             {group.name === undefined ? null : (

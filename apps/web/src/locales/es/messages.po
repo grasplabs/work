@@ -399,6 +399,10 @@ msgstr "{count, plural, one {# versión} other {# versiones}}"
 msgid "{count, plural, one {# wish} other {# wishes}}"
 msgstr "{count, plural, one {# deseo} other {# deseos}}"
 
+#: src/brain/goals-editor.tsx
+msgid "{count, plural, one {# workflow serves it} other {# workflows serve it}}"
+msgstr "{count, plural, one {# flujo de trabajo lo sirve} other {# flujos de trabajo lo sirven}}"
+
 #: src/onboarding/place-picker.tsx
 msgid "{count, plural, one {Add # document} other {Add # documents}}"
 msgstr "{count, plural, one {Añadir # documento} other {Añadir # documentos}}"
@@ -2006,6 +2010,10 @@ msgstr "Añadir una tarjeta"
 msgid "Add a domain for a second brand or an old one."
 msgstr "Añade un dominio de una segunda marca o uno antiguo."
 
+#: src/brain/goals-editor.tsx
+msgid "Add a goal"
+msgstr "Añadir un objetivo"
+
 #: src/onboarding/organization-dialogs.tsx
 #: src/routes/_shell.onboarding.organization.$team.tsx
 #: src/routes/_shell.onboarding.organization.index.tsx
@@ -3240,6 +3248,10 @@ msgstr "Bloqueo"
 msgid "Blockers"
 msgstr "Bloqueos"
 
+#: src/brain/goals-editor.tsx
+msgid "Board goals"
+msgstr "Objetivos del consejo"
+
 #: src/dashboard/widget-board.tsx
 msgctxt "dashboard widget"
 msgid "Board goals"
@@ -3431,6 +3443,7 @@ msgstr "Puede {verbs} datos de la empresa"
 msgid "Can’t be read"
 msgstr "No se puede leer"
 
+#: src/brain/goals-editor.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
@@ -5917,6 +5930,7 @@ msgid "Go to Grasp"
 msgstr "Ir a Grasp"
 
 #: src/brain/brain.ts
+#: src/brain/goals-editor.tsx
 #: src/chat/project-dialog.tsx
 msgid "Goal"
 msgstr "Objetivo"
@@ -6364,6 +6378,14 @@ msgstr "Cómo lo notarían: aún no se ha dicho."
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
 msgstr "¿Qué tal ha sido hablar con {who}?"
+
+#: src/brain/goals-editor.tsx
+msgid "How we notice it"
+msgstr "Cómo lo notamos"
+
+#: src/brain/goals-editor.tsx
+msgid "How will the company see that it is met?"
+msgstr "¿Cómo verá la empresa que se ha cumplido?"
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
@@ -7946,6 +7968,10 @@ msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Nunca"
 
+#: src/brain/goals-editor.tsx
+msgid "New board goal"
+msgstr "Nuevo objetivo del consejo"
+
 #: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
@@ -8186,6 +8212,7 @@ msgstr "Sin cambios en archivos."
 msgid "No files yet."
 msgstr "Todavía no hay archivos."
 
+#: src/brain/goals-editor.tsx
 #: src/dashboard/standard-widgets.tsx
 msgid "No goals yet."
 msgstr "Aún no hay objetivos."
@@ -10814,6 +10841,18 @@ msgstr "¿Revocar los paquetes de {domain}?"
 msgid "Revoked a permission"
 msgstr "Revocó un permiso"
 
+#: src/brain/goals-editor.tsx
+msgid "Reword"
+msgstr "Reformular"
+
+#: src/brain/goals-editor.tsx
+msgid "Reword {title}"
+msgstr "Reformular {title}"
+
+#: src/brain/goals-editor.tsx
+msgid "Reword the goal"
+msgstr "Reformular el objetivo"
+
 #: src/landscape/landscape-overview.ts
 msgid "Right to deletion"
 msgstr "Derecho de supresión"
@@ -11081,6 +11120,7 @@ msgstr "Ha dicho que sí"
 msgid "Same version, different contents: {changed}"
 msgstr "Misma versión, contenido distinto: {changed}"
 
+#: src/brain/goals-editor.tsx
 #: src/chat/project-dialog.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -12777,6 +12817,10 @@ msgstr "Las estadísticas propias del dominio, y las de la plataforma con el per
 msgid "The domains this chat builds didn't load."
 msgstr "Los dominios que crea este chat no se cargaron."
 
+#: src/brain/goals-editor.tsx
+msgid "The earlier wording stays in the goal's history."
+msgstr "La redacción anterior queda en el historial del objetivo."
+
 #: src/policies/policy.ts
 msgid "the EU"
 msgstr "la UE"
@@ -13305,6 +13349,10 @@ msgstr "Aún no hay colecciones que puedas leer."
 #: src/routes/_shell.domains.index.tsx
 msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 msgstr "Aún no hay dominios que puedas abrir. Los dominios se crean en el chat: describe una parte de tu trabajo y Grasp construye sus flujos de trabajo y aplicaciones."
+
+#: src/brain/goals-editor.tsx
+msgid "There are no workflows to link yet."
+msgstr "Aún no hay flujos de trabajo que vincular."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."
@@ -14586,6 +14634,10 @@ msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Qué cuenta como éxito"
 
+#: src/brain/goals-editor.tsx
+msgid "What does the board want to reach?"
+msgstr "¿Qué quiere lograr el consejo?"
+
 #: src/settings/person-limits.tsx
 msgid "What each person's model calls may cost a month, and how many messages they may send an hour. A person's own exception goes first, then their team's, then the default."
 msgstr "Lo que pueden costar al mes las llamadas a modelos de cada persona y cuántos mensajes puede enviar por hora. Primero cuenta la excepción propia de la persona, luego la de su equipo y luego la predeterminada."
@@ -15340,6 +15392,7 @@ msgstr "Fallan pruebas de flujos de trabajo:"
 msgid "workflow.json"
 msgstr "workflow.json"
 
+#: src/brain/goals-editor.tsx
 #: src/chat/builds.tsx
 #: src/dashboard/report.ts
 #: src/dashboard/widget-board.tsx
@@ -15398,10 +15451,18 @@ msgctxt "what Grasp knows, by source"
 msgid "Workflows known"
 msgstr "Flujos de trabajo conocidos"
 
+#: src/brain/goals-editor.tsx
+msgid "Workflows of {title}"
+msgstr "Flujos de trabajo de {title}"
+
 #: src/dashboard/failed-workflows.tsx
 #: src/dashboard/to-do.tsx
 msgid "Workflows that failed"
 msgstr "Flujos de trabajo que fallaron"
+
+#: src/brain/goals-editor.tsx
+msgid "Workflows that serve {title}"
+msgstr "Flujos de trabajo que sirven a {title}"
 
 #: src/dashboard/spend-widget.tsx
 msgid "Workflows that spent most"
