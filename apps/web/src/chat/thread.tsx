@@ -1,5 +1,6 @@
 import type {
   ChatCitation,
+  ChatCitedDocument,
   ChatCode,
   ChatMessage,
   ChatOutput,
@@ -39,7 +40,7 @@ import {
 } from "./message.tsx";
 import { signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
-import { AnswerSources } from "./sources.tsx";
+import { AnswerSources, useCited } from "./sources.tsx";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
 
 // A chat as the person reads it, in the prototype's look
@@ -242,17 +243,17 @@ const WorkedFor = ({ seconds }: { seconds: number }) => {
 /** The quiet row of actions under an answer, with what it cites when it cites any. */
 const ReplyActions = ({
   cited,
+  sources,
   children,
 }: {
   cited?: { chatId: string; messageId: number };
+  sources: readonly ChatCitedDocument[];
   children: ReactNode;
 }) =>
   cited === undefined ? (
     <MessageActions>{children}</MessageActions>
   ) : (
-    <AnswerSources chatId={cited.chatId} messageId={cited.messageId}>
-      {children}
-    </AnswerSources>
+    <AnswerSources cited={sources}>{children}</AnswerSources>
   );
 
 /** One response of the agent's, stored or being written. */
@@ -288,6 +289,7 @@ const Reply = ({
   cited?: { chatId: string; messageId: number };
 }) => {
   const { t } = useLingui();
+  const sources = useCited(cited);
   const answer = reply.text.trim();
   const quiet = writing || sign !== undefined;
   return (
@@ -298,6 +300,7 @@ const Reply = ({
           {answer === "" ? null : (
             <MessageResponse
               cited={reply.citations?.map(({ documentId }) => documentId)}
+              sources={sources}
               text={reply.text}
             />
           )}
@@ -340,7 +343,7 @@ const Reply = ({
           <GraspSign said={reply.text.length} state={sign} />
         )}
         {quiet || (answer === "" && onRetry === undefined) ? null : (
-          <ReplyActions cited={cited}>
+          <ReplyActions cited={cited} sources={sources}>
             {answer === "" ? null : <CopyAnswer text={answer} />}
             {onRetry === undefined || reply.end === "failed" ? null : (
               <MessageAction label={t`Ask again`} onClick={onRetry}>

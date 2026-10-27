@@ -15,7 +15,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AnswerSources } from "./sources.tsx";
+import { AnswerSources, useCited } from "./sources.tsx";
 
 // The documents an answer cites, under it, against core's chats as the
 // page reaches them over RPC, faked: beside the answer's actions, "Based
@@ -25,6 +25,19 @@ import { AnswerSources } from "./sources.tsx";
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
+
+/** The row under answer `messageId` of chat `chatId`, as the thread shows it. */
+const Sources = ({
+  chatId,
+  messageId,
+}: {
+  chatId: string;
+  messageId: number;
+}) => (
+  <AnswerSources cited={useCited({ chatId, messageId })}>
+    <button type="button">Copy</button>
+  </AnswerSources>
+);
 
 /** Lets the page's work after a core answer run. */
 const settled = async (): Promise<void> => {
@@ -64,11 +77,7 @@ const shown = async (
   const answer = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => (
-      <AnswerSources chatId={chatId} messageId={messageId}>
-        <button type="button">Copy</button>
-      </AnswerSources>
-    ),
+    component: () => <Sources chatId={chatId} messageId={messageId} />,
   });
   const collection = createRoute({
     getParentRoute: () => rootRoute,
@@ -105,6 +114,7 @@ const plan: ChatCitedDocument = {
   title: "Route plan",
   path: "routes/plan.md",
   snippet: "Where the route goes, and when.",
+  spans: [],
 };
 
 const leave: ChatCitedDocument = {
@@ -113,6 +123,7 @@ const leave: ChatCitedDocument = {
   title: "Parental leave",
   path: "leave.md",
   snippet: "Parental leave lasts sixteen weeks.",
+  spans: [],
 };
 
 describe(AnswerSources, () => {

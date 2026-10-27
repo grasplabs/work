@@ -106,36 +106,32 @@ export const ChatSources = ({
 };
 
 /**
- * Under a stored answer: its quiet row of actions (`children`), with
- * "Based on N sources" beside them, which opens the documents it cites,
- * numbered in the order it first links to them, each with its path and the
- * start of what it says, and each opening on its collection's page
- * (`?doc=`). Core looks them up as the chat's agent for the person, when
- * the answer shows: a document either can no longer read isn't among
- * them. Until core answers, or when it can't or lists none, the row holds
- * only the actions: the answer's own links still open each document.
+ * The documents a stored answer cites (`cited`: its chat and message), as
+ * core looks them up as the chat's agent for the person when the answer
+ * shows, each with the spans of the answer that cite it: a document either
+ * can no longer read isn't among them. None until core answers, when it
+ * can't, or for an answer that cites nothing.
  */
-export const AnswerSources = ({
-  chatId,
-  messageId,
-  children,
-}: {
+export const useCited = (cited?: {
   chatId: string;
   messageId: number;
-  children?: ReactNode;
-}) => {
-  const { t } = useLingui();
+}): ChatCitedDocument[] => {
   const core = useCore();
-  const [cited, setCited] = useState<ChatCitedDocument[]>([]);
+  const [documents, setDocuments] = useState<ChatCitedDocument[]>([]);
+  const chatId = cited?.chatId;
+  const messageId = cited?.messageId;
   useEffect(() => {
     let current = true;
     const read = async (): Promise<void> => {
+      if (chatId === undefined || messageId === undefined) {
+        return;
+      }
       const found = await loadFromCore(
         core,
         async (session) => await session.chats.cited(chatId, messageId)
       );
       if (current && found.state === "ready") {
-        setCited(found.data);
+        setDocuments(found.data);
       }
     };
     void read();
@@ -143,6 +139,26 @@ export const AnswerSources = ({
       current = false;
     };
   }, [core, chatId, messageId]);
+  return documents;
+};
+
+/**
+ * Under a stored answer: its quiet row of actions (`children`), with
+ * "Based on N sources" beside them, which opens the documents it cites
+ * (`useCited`), numbered in the order it first links to them, as its
+ * inline citations number them, each with its path and the start of what
+ * it says, and each opening on its collection's page (`?doc=`). Until
+ * core answers, or when it can't or lists none, the row holds only the
+ * actions: the answer's own links still open each document.
+ */
+export const AnswerSources = ({
+  cited,
+  children,
+}: {
+  cited: readonly ChatCitedDocument[];
+  children?: ReactNode;
+}) => {
+  const { t } = useLingui();
   // The same elements before and after core answers, so the actions keep
   // their focus and state (Copied) while the trigger joins them.
   return (

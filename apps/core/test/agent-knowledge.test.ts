@@ -626,6 +626,15 @@ describe("a chat's Knowledge", setUpTime, () => {
               title: "Parental leave",
               path: "leave.md",
               snippet: "Parental leave lasts sixteen weeks.",
+              spans: [
+                { at: 14, text: "Parental leave", quote: null },
+                {
+                  at: `Sixteen weeks [Parental leave](grasp:note/${read}), as `
+                    .length,
+                  text: "the policy",
+                  quote: null,
+                },
+              ],
             },
           ],
         },
@@ -666,7 +675,7 @@ describe("a chat's Knowledge", setUpTime, () => {
         {
           collectionId: plans,
           path: "routes/plan.md",
-          text: `---\ndescription: Where the route goes, and when.\n---\n# Route plan\n\nDeparts at nine.`,
+          text: `---\ndescription: Where the route goes, and when.\n---\n# Route plan\n\nDeparts at nine\nfrom the depot.`,
         },
         {
           collectionId: handbook,
@@ -680,7 +689,12 @@ describe("a chat's Knowledge", setUpTime, () => {
     );
     const ids = [leaveDoc?.id, travel?.id, plan?.id, rules?.id];
     // Cites the plan first, then leave; travel was read, and isn't cited.
-    const answer = `It departs at nine [Route plan](grasp:note/${plan?.id}), and leave lasts sixteen weeks [Parental leave](grasp:note/${leaveDoc?.id}). Be on time [House rules](grasp:note/${rules?.id}).`;
+    // Each span quotes its document: the plan across a line break, leave
+    // once in its words and once in words it doesn't say, the rules not.
+    const answer = `It departs at nine [from the depot](grasp:note/${plan?.id} "Departs at nine from the depot."), and leave lasts [sixteen weeks](grasp:note/${leaveDoc?.id} "Parental leave  lasts sixteen weeks."), [paid in full](grasp:note/${leaveDoc?.id} "Leave is paid in full."). Be on time [House rules](grasp:note/${rules?.id}).`;
+    /** Where the words `linked` start in the answer as it is stored and shown, its quotes left out. */
+    const at = (linked: string): number =>
+      answer.replaceAll(/ "[^"]*"\)/gu, ")").indexOf(`[${linked}]`);
     const { ask, agent } = await chatOf(
       person.userId,
       codeStep(
@@ -708,6 +722,16 @@ describe("a chat's Knowledge", setUpTime, () => {
       title: "Parental leave",
       path: "leave.md",
       snippet: "Parental leave lasts sixteen weeks.",
+      spans: [
+        {
+          at: at("sixteen weeks"),
+          text: "sixteen weeks",
+          // Its whitespace folded, as the document's is.
+          quote: "Parental leave lasts sixteen weeks.",
+        },
+        // Words leave doesn't say: the span cites it, quoting nothing.
+        { at: at("paid in full"), text: "paid in full", quote: null },
+      ],
     };
     const rulesCited = {
       documentId: rules?.id,
@@ -716,6 +740,7 @@ describe("a chat's Knowledge", setUpTime, () => {
       path: "rules.md",
       // Cut to the most a snippet holds, and marked so.
       snippet: `${rule.repeat(20).slice(0, citedSnippetMax - 1)}…`,
+      spans: [{ at: at("House rules"), text: "House rules", quote: null }],
     };
     expect({ first: first.cited, again: again.cited }).toStrictEqual({
       first: [
@@ -726,10 +751,18 @@ describe("a chat's Knowledge", setUpTime, () => {
           path: "routes/plan.md",
           // Its description, as its author put it.
           snippet: "Where the route goes, and when.",
+          spans: [
+            {
+              at: at("from the depot"),
+              text: "from the depot",
+              quote: "Departs at nine from the depot.",
+            },
+          ],
         },
         leaveCited,
         rulesCited,
       ],
+      // The plan, its span and its quote, gone with the person's access.
       again: [leaveCited, rulesCited],
     });
   });
@@ -815,6 +848,7 @@ describe("a chat's Knowledge", setUpTime, () => {
           title: "Parental leave",
           path: "leave.md",
           snippet: "Parental leave lasts sixteen weeks.",
+          spans: [{ at: 14, text: "Parental leave", quote: null }],
         },
       ],
     });
