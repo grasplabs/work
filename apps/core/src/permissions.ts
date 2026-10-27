@@ -505,10 +505,10 @@ const requireApps = async (
 /**
  * A collection a permission names must exist, and not be someone's
  * personal collection: Apps and agents never read those (see
- * knowledge/access.ts), so nobody can be asked to grant one.
+ * brain/access.ts), so nobody can be asked to grant one.
  *
- * Nor is an App given the Apps collection (knowledge/apps-collection.ts).
- * It is open to everyone as a collection, but Knowledge shows each entry
+ * Nor is an App given the Apps collection (brain/apps-collection.ts).
+ * It is open to everyone as a collection, but the Brain shows each entry
  * only to whoever may open its App, and provenance (app-provenance.ts)
  * judges a collection by the collection's access alone. So an App that
  * read it could hold another App's AGENTS.md, and be shared with someone
@@ -524,7 +524,7 @@ const requireCollection = async (
   if (object.type !== "collection") {
     return;
   }
-  const found = await drizzle(env.KNOWLEDGE)
+  const found = await drizzle(env.BRAIN_DB)
     .select({ access: collections.access, source: collections.source })
     .from(collections)
     .where(eq(collections.id, object.collectionId))
@@ -1897,7 +1897,7 @@ export const grantedPermissions = async (
  * or `permission.person_inactive` otherwise.
  *
  * It doesn't intersect the grant with the person's own access (R5): connect
- * does that for personal connections, and the Knowledge queries for
+ * does that for personal connections, and the Brain queries for
  * collections.
  */
 export const authorize = async (

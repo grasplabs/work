@@ -1,8 +1,8 @@
 import { z } from "zod";
 
+import type { Provenance } from "./brain-documents.ts";
 import { appIdSchema } from "./ids.ts";
 import type { AppId, CollectionId, DocumentId } from "./ids.ts";
-import type { Provenance } from "./knowledge.ts";
 
 // Memory: the Markdown files an agent always has in its context. The
 // company's AGENTS.md and MEMORY.md and each agent's AGENTS.md are
@@ -10,7 +10,7 @@ import type { Provenance } from "./knowledge.ts";
 // own Personal collection, and an App's AGENTS.md is the file of that name
 // in its code. Which of them an agent gets depends on where it works
 // (`MemoryContext`), each has a size limit, and they are saved, versioned
-// and read like any other Knowledge document.
+// and read like any other Brain document.
 
 /** The names of memory files. */
 export const memoryFileNames = ["AGENTS.md", "MEMORY.md", "USER.md"] as const;
@@ -115,7 +115,7 @@ export interface MemoryApi {
   /**
    * The Memory collection and the person's own, which it creates if it
    * doesn't exist yet: the Memory collection only for an admin. Their
-   * files are read and saved through `knowledge`.
+   * files are read and saved through `brain`.
    */
   collections: () => Promise<MemoryCollections>;
 }

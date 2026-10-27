@@ -111,7 +111,7 @@ const costSchema = z.object({
 });
 
 /**
- * The same Knowledge search that found nothing, asked again: by an App's
+ * The same Brain search that found nothing, asked again: by an App's
  * code and runs (the App's signal), or by people and agents (the
  * deployment's). Grouped by the search's key, an HMAC of its words, never
  * the words.

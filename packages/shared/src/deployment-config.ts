@@ -241,7 +241,7 @@ export const defaultRoleModels: Readonly<Partial<Record<ModelRole, string>>> = {
  * Chosen on the Brain baseline's real-model runs: DeepSeek V4.1 Flash
  * answered best and followed the answer protocol, well within the cost
  * target; GLM 5.3 Flash is the cheapest to complete a task with. Both
- * search Knowledge with tools, which Llama 3.3, the earlier default, never
+ * search Brain with tools, which Llama 3.3, the earlier default, never
  * did.
  */
 export const defaultGatewayModels = [

@@ -7,15 +7,15 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { keepAudience } from "../src/knowledge/access.ts";
-import type { Reader } from "../src/knowledge/access.ts";
-import { brainOf } from "../src/knowledge/ports.ts";
+import { keepAudience } from "../src/brain/access.ts";
+import type { Reader } from "../src/brain/access.ts";
+import { brainOf } from "../src/brain/ports.ts";
 import { isRestricted } from "../src/restricted.ts";
 import type { WorkContext } from "../src/restricted.ts";
 import { requestGranted } from "./apps.ts";
+import { newTeam } from "./brain-collections.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Recall over the Brain's memory records (GRA-298, slice 3; the threat
@@ -51,7 +51,7 @@ const seed = async (
 ): Promise<string> => {
   const id = crypto.randomUUID();
   const now = record.recordedAt ?? new Date();
-  await drizzle(env.KNOWLEDGE)
+  await drizzle(env.BRAIN_DB)
     .insert(brainMemories)
     .values({
       id,
@@ -194,7 +194,7 @@ describe("recalling the Brain's memory records", setUpTime, () => {
     });
 
     // A prefix of the word finds them, as a section's words are found.
-    const pack = await ada.api.knowledge.recall({ query: word.slice(0, 8) });
+    const pack = await ada.api.brain.recall({ query: word.slice(0, 8) });
     const both_ = pack.items.find(({ statement }) =>
       statement.includes(markers.both)
     );
@@ -297,7 +297,7 @@ describe("recalling the Brain's memory records", setUpTime, () => {
       scopeId: admin.userId,
       ownerId: admin.userId,
     });
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
@@ -318,12 +318,12 @@ describe("recalling the Brain's memory records", setUpTime, () => {
         runId: runIdSchema.parse(crypto.randomUUID()),
       }),
       narrowed: memoryItems(
-        await admin.api.knowledge.recall({
+        await admin.api.brain.recall({
           query: word,
           filters: { collectionIds: [collectionId] },
         })
       ),
-      whole: memoryItems(await admin.api.knowledge.recall({ query: word })),
+      whole: memoryItems(await admin.api.brain.recall({ query: word })),
     }).toStrictEqual({ app: 0, run: 0, narrowed: 0, whole: 2 });
   });
 
@@ -333,13 +333,13 @@ describe("recalling the Brain's memory records", setUpTime, () => {
     const ben = await signedInApi(idp, "user");
     const adaOnly = await newTeam(admin, [ada]);
     const agent = await agentWithBrain(admin);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Salaries ${unique()}`,
       access: "teams",
       teams: [adaOnly],
       sensitive: true,
     });
-    const { id: documentId } = await admin.api.knowledge.saveDocument({
+    const { id: documentId } = await admin.api.brain.saveDocument({
       collectionId,
       path: "note.md",
       text: "# Note\nBands are reviewed in March.",
@@ -398,7 +398,7 @@ describe("recalling the Brain's memory records", setUpTime, () => {
       ownerId: admin.userId,
     });
     const findsWord = async (word: string) => {
-      const pack = await admin.api.knowledge.recall({ query: word });
+      const pack = await admin.api.brain.recall({ query: word });
       return pack.items.length;
     };
     const found = {
@@ -406,12 +406,12 @@ describe("recalling the Brain's memory records", setUpTime, () => {
       retired: await findsWord(retiredWord),
     };
 
-    const db = drizzle(env.KNOWLEDGE);
+    const db = drizzle(env.BRAIN_DB);
     await db
       .update(brainMemories)
       .set({ statement: `Remember ${after}.`, revision: 2 })
       .where(eq(brainMemories.id, corrected));
-    await admin.api.knowledge.memoriesRetire(
+    await admin.api.brain.memoriesRetire(
       { memoryId: retired },
       { idempotencyKey: `key-${unique()}`, expectedRevision: 1 }
     );
@@ -454,7 +454,7 @@ describe("recalling the Brain's memory records", setUpTime, () => {
       recordedAt: older,
     });
     const order = async () => {
-      const pack = await ada.api.knowledge.recall({
+      const pack = await ada.api.brain.recall({
         query: `${common} ${rare}`,
       });
       return pack.items.map(({ id }) => id);
@@ -483,11 +483,11 @@ describe("recalling the Brain's memory records", setUpTime, () => {
   it("takes sections and records in turn within the budget, and says when it cut", async () => {
     const admin = await signedInApi(idp, "admin");
     const word = rareWord();
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    await admin.api.knowledge.saveDocument({
+    await admin.api.brain.saveDocument({
       collectionId,
       path: "a.md",
       text: `# A\n${word} in a section.`,
@@ -502,8 +502,8 @@ describe("recalling the Brain's memory records", setUpTime, () => {
       });
     }
 
-    const full = await admin.api.knowledge.recall({ query: word });
-    const cut = await admin.api.knowledge.recall({
+    const full = await admin.api.brain.recall({ query: word });
+    const cut = await admin.api.brain.recall({
       query: word,
       budget: { maxItems: 2 },
     });

@@ -1,5 +1,5 @@
-import { isBuiltinDocumentType } from "@grasp-os/shared/knowledge";
-import type { BuiltinDocumentType } from "@grasp-os/shared/knowledge";
+import { isBuiltinDocumentType } from "@grasp-os/shared/brain-documents";
+import type { BuiltinDocumentType } from "@grasp-os/shared/brain-documents";
 import type { Role } from "@grasp-os/shared/roles";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";

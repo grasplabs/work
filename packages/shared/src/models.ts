@@ -226,7 +226,7 @@ export interface ModelRulesSettings {
   } | null;
   /**
    * Which models may take sensitive data: from a sensitive collection
-   * (marked in Knowledge), from a connection listed here, or in a chat, App
+   * (marked in the Brain), from a connection listed here, or in a chat, App
    * or run that read either. Null for no data rule.
    */
   sensitive: { models: string[]; connections: string[] } | null;

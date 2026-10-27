@@ -6,15 +6,15 @@ import { recordOutcome } from "@grasp-os/brain/outcomes";
  * task and repeat:
  *
  * - `agent`: the current agent as it is, finding what it needs with its
- *   own Knowledge tools;
+ *   own Brain tools;
  * - `fullContext`: the same agent, given every section its person and agent
  *   may both read, within a fixed budget;
- * - `fullText`: the same agent, given the best sections of a Knowledge
+ * - `fullText`: the same agent, given the best sections of a Brain
  *   full-text search for the task's keywords.
  *
  * Every arm runs in the real Workspace object, through the real model
  * gateway and ledger, with the same model, tools, memory, permissions and
- * answer protocol; the harness reads Knowledge for the last two arms as the
+ * answer protocol; the harness reads Brain for the last two arms as the
  * person, through their own API, never past what they may read. Only the
  * model provider behind AI Gateway is swapped: brain-stub-model.ts in CI.
  *
@@ -30,22 +30,22 @@ import { recordOutcome } from "@grasp-os/brain/outcomes";
  * asked again in the same chat after a restart.
  */
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { pageMaxLimit } from "@grasp-os/shared/brain-documents";
+import type { BrainRead } from "@grasp-os/shared/brain-documents";
 import { applyPartial } from "@grasp-os/shared/chat";
 import type { ChatPartial } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { pageMaxLimit } from "@grasp-os/shared/knowledge";
-import type { KnowledgeRead } from "@grasp-os/shared/knowledge";
 import type { PermissionSubjectInput } from "@grasp-os/shared/permissions";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { turnSource } from "../src/brain-capture.ts";
+import { brainOf } from "../src/brain/ports.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { brainOf } from "../src/knowledge/ports.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import {
   gatewayConfig,
@@ -58,6 +58,7 @@ import { answeringGateway } from "./ai-gateway.ts";
 import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
+import { newTeam, readCollection } from "./brain-collections.ts";
 import {
   blockedByChange,
   budgetVerdict,
@@ -106,7 +107,6 @@ import {
 } from "./fixtures/brain-tasks.ts";
 import type { BrainSplit, BrainTask } from "./fixtures/brain-tasks.ts";
 import type { Idp } from "./idp.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
 import { callAuth, openRpc, signedInApi } from "./sign-in.ts";
 
 /** Bumped with any change to how the harness runs or measures a trial. */
@@ -120,7 +120,7 @@ export type BrainArm = (typeof brainArms)[number];
  * one hands the model a section its person may not read; on a task that
  * revokes access, one hands it what its person could read before the
  * revocation, as a cache that outlived it would; the others change stored
- * state mid-trial, in Knowledge, in core, in R2, in the chat's object, in
+ * state mid-trial, in the Brain, in core, in R2, in the chat's object, in
  * an earlier chat's history and in the Brain's captured learning events
  * (one resting on another chat than the trial's). Two must not break it, as they read what
  * the task revokes before the revocation, while it was allowed:
@@ -366,13 +366,13 @@ const bookkeeping = new Set([
 ]);
 
 /**
- * How the gate reads Knowledge's database: every row of every table, or,
+ * How the gate reads the Brain's database: every row of every table, or,
  * for a corpus too large to read twice a trial (the scale run's), each
  * table's row count. Counts still see a document saved, a version added
  * or a section purged; not a row rewritten in place, which only a bypass
- * of Knowledge's API could do.
+ * of the Brain's API could do.
  */
-export type KnowledgeStateCheck = "rows" | "counts";
+export type BrainStateCheck = "rows" | "counts";
 
 /** A placeholder for each of `values`, for an `IN` list. */
 const placeholders = (values: readonly string[]): string =>
@@ -386,7 +386,7 @@ interface OwnTrial {
 
 /**
  * The Brain's capture of the trial's own turns (src/brain-capture.ts), as
- * conditions on Knowledge's capture tables that leave it out, by table:
+ * conditions on the Brain's capture tables that leave it out, by table:
  * the learning events resting on the trial's chat, their members, and the
  * cursor of its Workspace object's turns. Every settled turn writes these,
  * whatever the task asked, as it writes the chat's own messages
@@ -426,12 +426,12 @@ const ownCapture = (
 };
 
 /**
- * Each table's digest, in core's and Knowledge's databases, but the
+ * Each table's digest, in core's and the Brain's databases, but the
  * bookkeeping ones and, for a trial, its own turns' capture (`ownCapture`):
  * what stored state holds.
  */
 const stateOf = async (
-  knowledge: KnowledgeStateCheck,
+  brain: BrainStateCheck,
   asked: readonly OwnTrial[] = []
 ): Promise<Map<string, string>> => {
   // Each database's tables read in one batch, both databases at once: two
@@ -447,7 +447,7 @@ const stateOf = async (
     if (tables.length === 0) {
       return [];
     }
-    const counts = name === "knowledge" && knowledge === "counts";
+    const counts = name === "knowledge" && brain === "counts";
     const leftOut =
       name === "knowledge" && asked.length > 0 ? ownCapture(asked) : {};
     const results = await db.batch(
@@ -477,11 +477,11 @@ const stateOf = async (
       })
     );
   };
-  const [core, knowledgeTables] = await Promise.all([
+  const [core, brainTables] = await Promise.all([
     read("core", env.DB),
-    read("knowledge", env.KNOWLEDGE),
+    read("knowledge", env.BRAIN_DB),
   ]);
-  return new Map([...core, ...knowledgeTables]);
+  return new Map([...core, ...brainTables]);
 };
 
 /** The tables whose rows differ between two states. */
@@ -575,7 +575,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     brainCollections
   )) {
     // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    const created = await admin.api.knowledge.createCollection(
+    const created = await admin.api.brain.createCollection(
       access.type === "team"
         ? {
             name,
@@ -596,7 +596,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     brainDocuments
   )) {
     // oxlint-disable-next-line no-await-in-loop -- saves in order
-    const saved = await admin.api.knowledge.saveDocument({
+    const saved = await admin.api.brain.saveDocument({
       collectionId: held(collections, collection),
       path,
       text,
@@ -609,7 +609,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
   if (memory === null) {
     throw new Error("The admin's Memory collection wasn't set up");
   }
-  await admin.api.knowledge.saveDocument({
+  await admin.api.brain.saveDocument({
     collectionId: memory,
     path: "AGENTS.md",
     text: answerProtocol,
@@ -620,7 +620,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
     const { personal } = await person.api.memory.collections();
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
-    await person.api.knowledge.saveDocument({
+    await person.api.brain.saveDocument({
       collectionId: personal,
       path: "USER.md",
       text: brainMemories[persona],
@@ -646,7 +646,7 @@ const applyWindow = async (company: BrainCompany, window: BrainWindow) => {
     const { collection, path } = brainDocuments[update.document];
     if (update.type === "save") {
       // oxlint-disable-next-line no-await-in-loop -- in order
-      const saved = await admin.api.knowledge.saveDocument({
+      const saved = await admin.api.brain.saveDocument({
         collectionId: held(company.collections, collection),
         path,
         text: update.text,
@@ -661,23 +661,23 @@ const applyWindow = async (company: BrainCompany, window: BrainWindow) => {
         reason: "erasure_request" as const,
       };
       // oxlint-disable-next-line no-await-in-loop -- in order
-      const { token } = await admin.api.knowledge.preparePurge(input);
+      const { token } = await admin.api.brain.preparePurge(input);
       // oxlint-disable-next-line no-await-in-loop -- in order
-      await admin.api.knowledge.purge(input, token);
+      await admin.api.brain.purge(input, token);
     }
   }
 };
 
 /** A person's current USER.md, or nothing while they have none. */
 const userMemoryOf = async (person: Person): Promise<string> => {
-  const { knowledge, memory } = person.api;
+  const { brain, memory } = person.api;
   const { personal } = await memory.collections();
-  const { documents } = await knowledge.listDocuments(personal);
+  const { documents } = await brain.listDocuments(personal);
   const user = documents.find(({ path }) => path === "USER.md");
   if (user === undefined) {
     return "";
   }
-  const { version } = await knowledge.getDocument(user.id);
+  const { version } = await brain.getDocument(user.id);
   return version.text;
 };
 
@@ -691,7 +691,7 @@ const sourceSnapshot = async (
   const texts: Record<string, string> = {};
   for (const [key, { path }] of Object.entries(brainDocuments)) {
     // oxlint-disable-next-line no-await-in-loop -- one document at a time
-    const { version } = await company.admin.api.knowledge.getDocument(
+    const { version } = await company.admin.api.brain.getDocument(
       held(company.documents, key).id
     );
     texts[path] = version.text;
@@ -704,7 +704,7 @@ const sourceSnapshot = async (
 };
 
 /** A section's place, as `path#heading`, the way answers cite it. */
-const placeOf = (read: Pick<KnowledgeRead, "path" | "section">) =>
+const placeOf = (read: Pick<BrainRead, "path" | "section">) =>
   `${read.path}#${read.section?.headings.at(-1) ?? ""}`;
 
 const heading = /^#{1,6}\s+(?<title>.+)$/u;
@@ -734,7 +734,7 @@ const documentsOf = async (person: Person, collectionId: string) => {
   for (;;) {
     const after = all.at(-1)?.path;
     // oxlint-disable-next-line no-await-in-loop -- page after page
-    const { documents } = await person.api.knowledge.listDocuments(
+    const { documents } = await person.api.brain.listDocuments(
       collectionId,
       after === undefined ? {} : { after }
     );
@@ -753,7 +753,7 @@ const fullContextOf = async (
   person: Person,
   granted: ReadonlySet<string>
 ): Promise<{ sources: Source[]; truncated: boolean }> => {
-  const readable = await person.api.knowledge.listCollections();
+  const readable = await person.api.brain.listCollections();
   const sources: Source[] = [];
   let chars = 0;
   let truncated = false;
@@ -761,7 +761,7 @@ const fullContextOf = async (
     // oxlint-disable-next-line no-await-in-loop -- one collection at a time
     for (const document of await documentsOf(person, collection.id)) {
       // oxlint-disable-next-line no-await-in-loop -- one document at a time
-      const read = await person.api.knowledge.read(document.id);
+      const read = await person.api.brain.read(document.id);
       for (const section of sectionsOf(read.path, read.text)) {
         if (chars + section.text.length <= fullContextChars) {
           chars += section.text.length;
@@ -784,13 +784,13 @@ const fullTextOf = async (
   granted: ReadonlySet<string>,
   query: string
 ): Promise<Source[]> => {
-  const { hits } = await person.api.knowledge.search(query, { limit: 50 });
+  const { hits } = await person.api.brain.search(query, { limit: 50 });
   const best = hits
     .filter(({ collectionId }) => granted.has(collectionId))
     .slice(0, searchedSections);
   return await Promise.all(
     best.map(async (hit) => {
-      const read = await person.api.knowledge.read(hit.documentId, {
+      const read = await person.api.brain.read(hit.documentId, {
         section: hit.section,
       });
       return { source: placeOf(read), text: read.text };
@@ -1102,8 +1102,8 @@ interface TrialPlan {
   task: BrainTask;
   repeat: number;
   cold: boolean;
-  /** How the gate reads Knowledge's database. */
-  knowledge: KnowledgeStateCheck;
+  /** How the gate reads the Brain's database. */
+  brain: BrainStateCheck;
 }
 
 /**
@@ -1255,7 +1255,7 @@ const changeState = async (
   }
   const person = company.people[place.persona];
   const { personal } = await person.api.memory.collections();
-  await person.api.knowledge.saveDocument({
+  await person.api.brain.saveDocument({
     collectionId: personal,
     path: `notes/control-${crypto.randomUUID()}.md`,
     text: "# Control\nChanged during a trial.",
@@ -1277,7 +1277,7 @@ const contentRead = z.union([
 ]);
 
 /**
- * What the persona's agent read through Knowledge in `events`, as the
+ * What the persona's agent read through the Brain in `events`, as the
  * audit log records each read that returns text (a document, or one of
  * its sections), read again as the person it acted for. Read after the
  * trial's state is taken, as reads are recorded too.
@@ -1292,7 +1292,7 @@ const readTextsOf = async (
   // section, which the agent reads.
   const reads = events.flatMap(({ action, actor, target, detail }) => {
     const read = contentRead.safeParse(detail).data;
-    return action === "knowledge.read" &&
+    return action === "brain.read" &&
       actor.type === "agent" &&
       actor.agentId === place.agent.agentId &&
       target?.type === "document" &&
@@ -1308,16 +1308,16 @@ const readTextsOf = async (
   });
   // Each read as the version it read: a whole document at that version,
   // or a section of the current one, which is the version a section read
-  // returns. A section of a version since replaced, or a read Knowledge
+  // returns. A section of a version since replaced, or a read Brain
   // refused (a section that isn't there), backs no evidence.
   const texts = await Promise.all(
     reads.map(async ({ id, version, section }) => {
       try {
         if (section === undefined) {
-          const read = await person.api.knowledge.getDocument(id, version);
+          const read = await person.api.brain.getDocument(id, version);
           return [read.version.text];
         }
-        const read = await person.api.knowledge.read(id, { section });
+        const read = await person.api.brain.read(id, { section });
         return read.currentVersion === version ? [read.text] : [];
       } catch {
         return [];
@@ -1478,20 +1478,20 @@ export const transcriptWithReads = (
 
 /**
  * What stored state holds, as a trial in `chatId` sees it: core's and
- * Knowledge's tables, the Workspace object's tables but the chat's own
+ * The Brain's tables, the Workspace object's tables but the chat's own
  * rows, and R2's files. What the chat drafted counts too: drafts live in
  * its object.
  */
 const trialStateOf = async (
   place: Workspace,
   chatId: string,
-  knowledge: KnowledgeStateCheck,
+  brain: BrainStateCheck,
   /** The other chats the trial asks in: the elsewhere control's. */
   elsewhere: readonly OwnTrial[] = []
 ): Promise<Map<string, string>> => {
   // Read at once: nothing changes stored state while the gate reads it.
   const [state, objectState, files] = await Promise.all([
-    stateOf(knowledge, [
+    stateOf(brain, [
       { chatId, workspaceId: place.agent.agentId },
       ...elsewhere,
     ]),
@@ -1573,11 +1573,11 @@ const revokeMidRun = async (
   company: BrainCompany,
   place: Workspace,
   chatId: string,
-  { arm, task, knowledge }: TrialPlan,
+  { arm, task, brain }: TrialPlan,
   keep: (restore: () => Promise<void>) => void,
   elsewhere: readonly OwnTrial[]
 ): Promise<MidRun> => {
-  const before = await trialStateOf(place, chatId, knowledge, elsewhere);
+  const before = await trialStateOf(place, chatId, brain, elsewhere);
   const stale =
     arm === "staleAccess"
       ? await sourcesFor(company, place, { arm: "fullText", task })
@@ -1585,7 +1585,7 @@ const revokeMidRun = async (
   await revokeAccess(company, place, task, keep);
   return {
     before,
-    after: await trialStateOf(place, chatId, knowledge, elsewhere),
+    after: await trialStateOf(place, chatId, brain, elsewhere),
     ...(stale?.sources === undefined ? {} : { stale: stale.sources }),
   };
 };
@@ -1698,7 +1698,7 @@ const runTrial = async (
   // The gate and what reached the model cover the whole trial, earlier
   // turns too; cost and latency are the question's own.
   const asked = elsewhere === undefined ? [] : [elsewhere];
-  const stateBefore = await trialStateOf(place, chat.id, plan.knowledge, asked);
+  const stateBefore = await trialStateOf(place, chat.id, plan.brain, asked);
   // A revocation is the harness's own change, made between the two: the
   // state is compared on either side of it, never across it.
   let revoked: MidRun | undefined;
@@ -1777,7 +1777,7 @@ const runTrial = async (
     await chatRows.keep();
     const changedTables = changedInTrial({
       before: stateBefore,
-      after: await trialStateOf(place, chat.id, plan.knowledge, asked),
+      after: await trialStateOf(place, chat.id, plan.brain, asked),
       revoked,
       chatIntact: chatRows.intact(),
     });
@@ -1925,7 +1925,7 @@ const lastSaid = async (place: Workspace, chatId: string): Promise<string> => {
 };
 
 /**
- * The paths of the company's Knowledge documents, by ID: what a citation
+ * The paths of the company's Brain documents, by ID: what a citation
  * linking one, as the product cites (`grasp:note/<id>`), cites.
  */
 const notesOf = (company: BrainCompany): Record<string, string> => {
@@ -1948,12 +1948,12 @@ const runDurabilityCase = async (
     kind,
     arm,
     task,
-    knowledge,
+    brain,
   }: {
     kind: DurabilityKind;
     arm: BrainArm;
     task: BrainTask;
-    knowledge: KnowledgeStateCheck;
+    brain: BrainStateCheck;
   }
 ): Promise<DurabilityCase> => {
   const person = company.people[task.persona];
@@ -1976,7 +1976,7 @@ const runDurabilityCase = async (
 
   const chatRows = await chatKeeper(place, chat.id);
   const attempt = async (repeat: number, crash: boolean) => {
-    const stateBefore = await trialStateOf(place, chat.id, knowledge);
+    const stateBefore = await trialStateOf(place, chat.id, brain);
     const requestsBefore = await ledgerRequests();
     await provider.mark();
     const firstRequest = gateway.requests.length;
@@ -2053,7 +2053,7 @@ const runDurabilityCase = async (
     // Woken again, as the next call to the object would.
     await pointAt(place.stub, gateway);
     await chatRows.keep();
-    const stateAfter = await trialStateOf(place, chat.id, knowledge);
+    const stateAfter = await trialStateOf(place, chat.id, brain);
     const changedTables = [
       ...changedBetween(stateBefore, stateAfter),
       ...(chatRows.intact() ? [] : ["workspace.chat (this chat's rows)"]),
@@ -2261,8 +2261,8 @@ export interface BrainRunOptions {
   modelSetup?: BrainModelSetup;
   /** The build, pinned in the identity of a run outside CI. */
   build?: BrainBuild;
-  /** How the gate reads Knowledge's database: every row by default. */
-  knowledgeState?: KnowledgeStateCheck;
+  /** How the gate reads the Brain's database: every row by default. */
+  brainState?: BrainStateCheck;
 }
 
 const counts = (values: readonly string[]): Record<string, number> => {
@@ -2281,7 +2281,7 @@ const retrievalDigest = async (
   const found: Record<string, string[]> = {};
   for (const task of tasks) {
     // oxlint-disable-next-line no-await-in-loop -- one search at a time
-    const { hits } = await company.people[task.persona].api.knowledge.search(
+    const { hits } = await company.people[task.persona].api.brain.search(
       task.query,
       { limit: 50 }
     );
@@ -2372,11 +2372,11 @@ const runDurability = async (
   {
     tasks,
     arms,
-    knowledge,
+    brain,
   }: {
     tasks: readonly BrainTask[];
     arms: readonly BrainArm[];
-    knowledge: KnowledgeStateCheck;
+    brain: BrainStateCheck;
   }
 ): Promise<DurabilityCase[]> => {
   const cases: DurabilityCase[] = [];
@@ -2389,7 +2389,7 @@ const runDurability = async (
             company,
             held(places, task.persona),
             provider,
-            { kind, arm, task, knowledge }
+            { kind, arm, task, brain }
           )
         );
       }
@@ -2459,7 +2459,7 @@ export const runBrainBaseline = async (
     providerName,
     modelSetup = testModelSetup,
     build,
-    knowledgeState = "rows",
+    brainState = "rows",
   }: BrainRunOptions
 ): Promise<BrainReport> => {
   const tasks = tasksOf(split, { openSealed });
@@ -2511,7 +2511,7 @@ export const runBrainBaseline = async (
           task,
           repeat,
           cold,
-          knowledge: knowledgeState,
+          brain: brainState,
         }))
       );
       plans.push(...shuffled(paired, random));
@@ -2534,7 +2534,7 @@ export const runBrainBaseline = async (
           task,
           repeat: 1,
           cold: true,
-          knowledge: knowledgeState,
+          brain: brainState,
         })
       );
     }
@@ -2544,7 +2544,7 @@ export const runBrainBaseline = async (
   const durability = await runDurability(company, places, provider, {
     tasks: tasks.filter(({ id }) => durabilityTasks.includes(id)),
     arms,
-    knowledge: knowledgeState,
+    brain: brainState,
   });
   const durabilityScores = durability.flatMap(({ first, retry }) => [
     first,
@@ -2583,11 +2583,11 @@ export const runBrainBaseline = async (
   // Each skill the personas' agents could read, with its whole text.
   const catalogs = await Promise.all(
     brainPersonas.map(async (persona) => {
-      const { knowledge } = company.people[persona].api;
-      const { skills } = await knowledge.catalog();
+      const { brain } = company.people[persona].api;
+      const { skills } = await brain.catalog();
       return await Promise.all(
         skills.map(async ({ documentId, name, description }) => {
-          const { text } = await knowledge.read(documentId);
+          const { text } = await brain.read(documentId);
           return { name, description, text: await sha256Hex(text) };
         })
       );

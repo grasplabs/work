@@ -44,12 +44,12 @@ import {
   proposeDraft,
 } from "./apps.ts";
 import type { Acting, Member } from "./auth/identity.ts";
+import { appsCollectionId } from "./brain/app-entries.ts";
 import { queuedJob } from "./build-admission.ts";
 import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff, jobView } from "./build-job-records.ts";
 import type { BuildJobView } from "./build-job-records.ts";
 import { workspace } from "./durable-objects.ts";
-import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
 import { requireResourceRole } from "./permission-resources.ts";
@@ -120,7 +120,7 @@ import type { Draft } from "./workspace.ts";
 // its App), and changing one a builder's role in it.
 // The agent needs a permission of its own too: `write` on the Apps
 // collection, the company's catalog of Apps, which no one writes as
-// Knowledge (it is read only), so granting it means only this. A chat
+// Brain (it is read only), so granting it means only this. A chat
 // that read restricted data writes no App code: what it read would reach
 // everyone who builds the App. Every call is audited as `agent.call`, and
 // what changes an App (`app.created`, `app.committed`,
@@ -1425,7 +1425,7 @@ build: {
      * panel (empty while nobody has it open): any problem fails the check,
      * so fix what it says and check again. A preview reaches nothing
      * outside it: a function's resource call (a connection, another App,
-     * Knowledge, a model) rejects with \`resource.unavailable\`, and a
+     * Brain, a model) rejects with \`resource.unavailable\`, and a
      * screen's workflow run with \`app.preview_side_effect\`. Handle either
      * as a failed call, as a screen must live. \`seen\` is false when the preview reported
      * nothing on this write within a few seconds: nobody has it open, or
@@ -1461,7 +1461,7 @@ build: {
    * path (\`"notes.create"\`) and \`args\` its input object. It runs on the
    * draft sealed as a release, on a store of its own, which keeps what
    * calls write until the next \`env.build.write\` empties it, with no
-   * connections, Knowledge or models (\`resource.unavailable\`); what it
+   * connections, Brain or models (\`resource.unavailable\`); what it
    * wrote with \`console\`, in the next check's \`preview.logs\`. A failure
    * the draft's to fix comes back as \`ok: false\`: a path that names none
    * of its functions, code that doesn't seal, or a function's own failure

@@ -74,7 +74,7 @@ const readSourceNames = async (
   session: Session
 ): Promise<ReadonlyMap<string, SourceName>> => {
   const [collections, connections] = await Promise.allSettled([
-    session.knowledge.listCollections(),
+    session.brain.listCollections(),
     session.connections.list(),
   ]);
   const names = new Map<string, SourceName>();

@@ -35,8 +35,8 @@ import { withDraftReferences } from "../src/draft-references.ts";
 import { buildScreens } from "../src/screens.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { grantReviewed, racingDb, serverBuilt } from "./apps.ts";
+import { collectionWithNote, storedGrant } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, storedGrant } from "./knowledge.ts";
 import { calledAs } from "./sealed-apps.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -471,14 +471,14 @@ describe("the built-in blueprints", () => {
       await expect(install(declared)).resolves.toBeTruthy();
       await expect(install(declared)).resolves.toBeTruthy();
     });
-    const collection = await env.KNOWLEDGE.prepare(
+    const collection = await env.BRAIN_DB.prepare(
       "SELECT name, owner, access, source FROM collections WHERE id = ?"
     )
       .bind(id)
       .first();
     const save = async (person: typeof admin) =>
       await outcome(
-        person.api.knowledge.saveDocument({
+        person.api.brain.saveDocument({
           collectionId: id,
           path: `hello-${unique()}.md`,
           text: "# Hello",
@@ -489,7 +489,7 @@ describe("the built-in blueprints", () => {
       collection,
       created: events.filter(
         ({ action, target }) =>
-          action === "knowledge.collection.created" && target?.id === id
+          action === "brain.collection.created" && target?.id === id
       ).length,
       admin: await save(admin),
       builder: await save(builder),
@@ -502,7 +502,7 @@ describe("the built-in blueprints", () => {
       },
       created: 1,
       admin: "ok",
-      builder: "knowledge.forbidden",
+      builder: "brain.forbidden",
     });
 
     await reinstall();

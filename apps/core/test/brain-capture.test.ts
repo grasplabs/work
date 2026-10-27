@@ -9,9 +9,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { eraseRunCaptures } from "../src/brain-capture.ts";
+import { brainOf } from "../src/brain/ports.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { brainOf } from "../src/knowledge/ports.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { projectStatus } from "../src/workflows/runs.ts";
 import { model, pointAtGateway, says } from "./agent-chat.ts";
@@ -39,10 +39,10 @@ import { workflowFiles, workflowsApp } from "./workflow-apps.ts";
 const idp = mockIdp();
 
 /** The Brain's database, as the tests' env binds it. */
-const knowledge = env.KNOWLEDGE;
+const brain = env.BRAIN_DB;
 
 /** The Brain's database, with every batch failing: out of reach. */
-const unreachable = new Proxy(knowledge, {
+const unreachable = new Proxy(brain, {
   get: (target, property) => {
     if (property === "batch") {
       return async () => {
@@ -61,9 +61,9 @@ const unreachable = new Proxy(knowledge, {
  * The Brain's database, with `first` run just before its first batch
  * lands: a change made between a delivery's check and its write.
  */
-const racingKnowledge = (first: () => Promise<unknown>): D1Database => {
+const racingBrain = (first: () => Promise<unknown>): D1Database => {
   let raced = false;
-  return new Proxy(knowledge, {
+  return new Proxy(brain, {
     get: (target, property) => {
       if (property === "batch") {
         return async (statements: D1PreparedStatement[]) => {
@@ -96,7 +96,7 @@ const lostReply = (
   }
 ): D1Database => {
   let lost = false;
-  return new Proxy(knowledge, {
+  return new Proxy(brain, {
     get: (target, property) => {
       if (property === "batch") {
         return async (statements: D1PreparedStatement[]) => {
@@ -253,7 +253,7 @@ describe("a workflow run's outcome", () => {
     const { builder, app } = await newApp(true);
     const run = await runningRun(app, builder.userId);
 
-    await completed(run, { ...env, KNOWLEDGE: unreachable });
+    await completed(run, { ...env, BRAIN_DB: unreachable });
     await failedOnce(run);
     const lost = await eventsOf(run);
     // The clock's catch-up, with the Brain back.
@@ -295,10 +295,7 @@ describe("a workflow run's outcome", () => {
     expect({
       events: await executionsOf(run),
       intent: await runIntent(run),
-      recorded: await audited(
-        "knowledge.episode.recorded",
-        `workflow.run:${run}`
-      ),
+      recorded: await audited("brain.episode.recorded", `workflow.run:${run}`),
     }).toStrictEqual({ events: ["completed"], intent: null, recorded: 1 });
   });
 
@@ -320,7 +317,7 @@ describe("a workflow run's outcome", () => {
     const run = await runningRun(app, builder.userId);
     const admin = await signedInApi(idp, "admin");
 
-    await completed(run, { ...env, KNOWLEDGE: unreachable });
+    await completed(run, { ...env, BRAIN_DB: unreachable });
     await failedOnce(run);
     await admin.api.members.remove(builder.userId);
     await runCron();
@@ -335,11 +332,11 @@ describe("a workflow run's outcome", () => {
     const { builder, app } = await newApp(true);
     const run = await runningRun(app, builder.userId);
     const admin = await signedInApi(idp, "admin");
-    const racing = racingKnowledge(
+    const racing = racingBrain(
       async () => await admin.api.members.remove(builder.userId)
     );
 
-    await completed(run, { ...env, KNOWLEDGE: racing });
+    await completed(run, { ...env, BRAIN_DB: racing });
     await vi.waitFor(
       async () => {
         await expect(runIntent(run)).resolves.toBeNull();
@@ -350,11 +347,8 @@ describe("a workflow run's outcome", () => {
     expect({
       events: await eventsOf(run),
       // Recorded, then taken back: each audited once.
-      recorded: await audited(
-        "knowledge.episode.recorded",
-        `workflow.run:${run}`
-      ),
-      erased: await audited("knowledge.episode.erased", `workflow.run:${run}`),
+      recorded: await audited("brain.episode.recorded", `workflow.run:${run}`),
+      erased: await audited("brain.episode.erased", `workflow.run:${run}`),
     }).toStrictEqual({ events: [], recorded: 1, erased: 1 });
   });
 
@@ -363,7 +357,7 @@ describe("a workflow run's outcome", () => {
     const run = await runningRun(app, builder.userId);
     const admin = await signedInApi(idp, "admin");
 
-    await completed(run, { ...env, KNOWLEDGE: lostReply() });
+    await completed(run, { ...env, BRAIN_DB: lostReply() });
     await failedOnce(run);
     const recordedBefore = await executionsOf(run);
     await admin.api.members.remove(builder.userId);
@@ -400,7 +394,7 @@ describe("a workflow run's outcome", () => {
       }
     );
 
-    await completed(run, { ...env, KNOWLEDGE: racing });
+    await completed(run, { ...env, BRAIN_DB: racing });
     await vi.waitFor(
       () => {
         expect(lost).toBeTruthy();
@@ -412,10 +406,7 @@ describe("a workflow run's outcome", () => {
     expect({
       events: await eventsOf(run),
       intent: await runIntent(run),
-      recorded: await audited(
-        "knowledge.episode.recorded",
-        `workflow.run:${run}`
-      ),
+      recorded: await audited("brain.episode.recorded", `workflow.run:${run}`),
     }).toStrictEqual({ events: [], intent: null, recorded: 0 });
   });
 
@@ -426,7 +417,7 @@ describe("a workflow run's outcome", () => {
     // A personal purge needs the person's own collection.
     await builder.api.memory.collections();
 
-    await completed(run, { ...env, KNOWLEDGE: lostReply() });
+    await completed(run, { ...env, BRAIN_DB: lostReply() });
     await failedOnce(run);
     const recordedBefore = await executionsOf(run);
     const input = {
@@ -434,8 +425,8 @@ describe("a workflow run's outcome", () => {
       userId: builder.userId,
       reason: "offboarding" as const,
     };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    await admin.api.knowledge.purge(input, plan.token);
+    const plan = await admin.api.brain.preparePurge(input);
+    await admin.api.brain.purge(input, plan.token);
     // Still a member: the delivery made again finds the run eligible.
     await runCron();
 
@@ -443,10 +434,7 @@ describe("a workflow run's outcome", () => {
       recordedBefore,
       events: await eventsOf(run),
       intent: await runIntent(run),
-      recorded: await audited(
-        "knowledge.episode.recorded",
-        `workflow.run:${run}`
-      ),
+      recorded: await audited("brain.episode.recorded", `workflow.run:${run}`),
     }).toStrictEqual({
       recordedBefore: ["completed"],
       events: [],
@@ -470,7 +458,7 @@ describe("a workflow run's outcome", () => {
       }
     );
 
-    await completed(run, { ...env, KNOWLEDGE: racing });
+    await completed(run, { ...env, BRAIN_DB: racing });
     await vi.waitFor(
       () => {
         expect(lost).toBeTruthy();
@@ -482,10 +470,7 @@ describe("a workflow run's outcome", () => {
     expect({
       events: await eventsOf(run),
       intent: await runIntent(run),
-      recorded: await audited(
-        "knowledge.episode.recorded",
-        `workflow.run:${run}`
-      ),
+      recorded: await audited("brain.episode.recorded", `workflow.run:${run}`),
     }).toStrictEqual({ events: [], intent: null, recorded: 0 });
   });
 
@@ -510,7 +495,7 @@ describe("a workflow run's outcome", () => {
     expect({
       captured,
       after: await eventsOf(run),
-      erased: await audited("knowledge.episode.erased", run),
+      erased: await audited("brain.episode.erased", run),
     }).toStrictEqual({ captured: 1, after: [], erased: 1 });
   });
 });
@@ -541,7 +526,7 @@ const turnIntents = async (
   );
 
 /** Sets the object's Brain database binding, as its env has it. */
-const objectKnowledge = async (
+const objectBrain = async (
   stub: ReturnType<typeof workspace>,
   binding: D1Database
 ): Promise<void> => {
@@ -550,7 +535,7 @@ const objectKnowledge = async (
     if (typeof objectEnv !== "object" || objectEnv === null) {
       throw new TypeError("The Workspace object has no env");
     }
-    Object.assign(objectEnv, { KNOWLEDGE: binding });
+    Object.assign(objectEnv, { BRAIN_DB: binding });
   });
 };
 
@@ -587,7 +572,7 @@ describe("a chat turn's outcome", () => {
 
   it("survives the Brain being out of reach as the turn settles, through the object's alarm", async () => {
     const { stub, id, ask } = await chatter(says("Floor 3."));
-    await objectKnowledge(stub, unreachable);
+    await objectBrain(stub, unreachable);
     try {
       await ask();
       await vi.waitFor(
@@ -600,7 +585,7 @@ describe("a chat turn's outcome", () => {
       );
     } finally {
       // Objects may share the tests' env: the binding as it was.
-      await objectKnowledge(stub, knowledge);
+      await objectBrain(stub, brain);
     }
     const lost = await eventsOf(id);
 

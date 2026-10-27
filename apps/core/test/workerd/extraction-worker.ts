@@ -5,9 +5,9 @@ import { unzipSync, zipSync } from "fflate";
 import {
   ExtractorUnavailableError,
   localExtractor,
-} from "../../src/knowledge/extract.ts";
-import type { LocalExtractorEnv } from "../../src/knowledge/extract.ts";
-import { extractorAsset } from "../../src/knowledge/extractor/asset.ts";
+} from "../../src/brain/extract.ts";
+import type { LocalExtractorEnv } from "../../src/brain/extract.ts";
+import { extractorAsset } from "../../src/brain/extractor/asset.ts";
 import { transcriptOf } from "../../src/onboarding/kickoff.ts";
 
 // Extracting an upload's text on plain workerd

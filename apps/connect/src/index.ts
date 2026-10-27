@@ -250,7 +250,7 @@ const codeOf = (error: unknown): string | undefined =>
 
 /**
  * The connector layer. Every external call from agents, Apps and the
- * knowledge indexer passes through here: scoped, approved, logged.
+ * brain indexer passes through here: scoped, approved, logged.
  *
  * Only core reaches it, over its service binding; it has no route and no
  * public address. Even so it trusts no call on its own: each one carries a

@@ -1,7 +1,7 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
+import { purgedMarker } from "@grasp-os/shared/brain-documents";
+import type { PurgeInput } from "@grasp-os/shared/brain-documents";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
-import { purgedMarker } from "@grasp-os/shared/knowledge";
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -113,7 +113,7 @@ const noteOf = async (
   text: string
 ) => {
   const { personal } = await person.api.memory.collections();
-  return await person.api.knowledge.saveDocument({
+  return await person.api.brain.saveDocument({
     collectionId: personal,
     path: `notes/${unique()}.md`,
     text,
@@ -194,8 +194,8 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       },
     ]);
 
-    const asAdmin = await admin.api.brain.read();
-    const asMember = await member.api.brain.read();
+    const asAdmin = await admin.api.brain.readWorkspace();
+    const asMember = await member.api.brain.readWorkspace();
 
     expect({
       sales: asAdmin.teams.find(({ id }) => id === team),
@@ -300,7 +300,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     // A kickoff-only team takes no values: its id is its place in the
     // reading, which reading the kickoff again moves.
     await bringInKickoff();
-    const withKickoff = await admin.api.brain.read();
+    const withKickoff = await admin.api.brain.readWorkspace();
     const kickoffTeams = withKickoff.teams
       .map(({ id }) => id)
       .filter((id) => id.startsWith("team.kickoff-"));
@@ -428,7 +428,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       "DELETE FROM brain_records WHERE body LIKE '%\"src-roster\"%'"
     ).run();
     const sourcesOf = async () => {
-      const read = await member.api.brain.read();
+      const read = await member.api.brain.readWorkspace();
       return read.sources
         .map(({ id }) => id)
         .filter((id) => id === "src-roster");
@@ -494,8 +494,8 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         people: 2,
       },
     ]);
-    const asMember = await member.api.brain.read();
-    const asAdmin = await admin.api.brain.read();
+    const asMember = await member.api.brain.readWorkspace();
+    const asAdmin = await admin.api.brain.readWorkspace();
     const sales = asMember.teams.find(({ id }) => id === team);
 
     expect({
@@ -548,7 +548,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       close: await outcome(admin.api.brain.closeGap(ids.gap)),
       ask: await outcome(admin.api.brain.askAboutGap(ids.gap)),
     };
-    const read = await member.api.brain.read();
+    const read = await member.api.brain.readWorkspace();
     const today = new Date().toISOString().slice(0, 10);
 
     expect({
@@ -651,7 +651,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     await rosterWith(admin, "Head of finance", leaver);
     await admin.api.members.remove(leaver.userId);
     const removed = await outcome(admin.api.brain.askAboutGap(ids.gap));
-    const read = await admin.api.brain.read();
+    const read = await admin.api.brain.readWorkspace();
 
     expect({
       noTitle,
@@ -782,7 +782,7 @@ describe("the brain's gap answers", { timeout: 120_000 }, () => {
     await env.DB.prepare("UPDATE users SET name = ? WHERE id = ?")
       .bind("Renamed Person", member.userId)
       .run();
-    const read = await admin.api.brain.read();
+    const read = await admin.api.brain.readWorkspace();
 
     expect({
       byStaff,
@@ -809,7 +809,7 @@ describe("the brain's gap answers", { timeout: 120_000 }, () => {
     const events = await auditedDuring(async () => {
       redacted = await admin.api.brain.redactGapAnswer(ids.gap);
     });
-    const read = await member.api.brain.read();
+    const read = await member.api.brain.readWorkspace();
     const gap = read.gaps.find(({ id }) => id === ids.gap);
 
     expect({
@@ -855,18 +855,18 @@ describe("the brain's gap answers", { timeout: 120_000 }, () => {
       terms: [name],
       reason: "erasure_request",
     };
-    const contentPlan = await admin.api.knowledge.preparePurge(content);
-    await admin.api.knowledge.purge(content, contentPlan.token);
-    const readAfterContent = await admin.api.brain.read();
+    const contentPlan = await admin.api.brain.preparePurge(content);
+    await admin.api.brain.purge(content, contentPlan.token);
+    const readAfterContent = await admin.api.brain.readWorkspace();
     const afterContent = readAfterContent.gaps.find(({ id }) => id === ids.gap);
     const personal: PurgeInput = {
       type: "personal",
       userId: leaver.userId,
       reason: "offboarding",
     };
-    const personalPlan = await admin.api.knowledge.preparePurge(personal);
-    await admin.api.knowledge.purge(personal, personalPlan.token);
-    const readAfterPersonal = await admin.api.brain.read();
+    const personalPlan = await admin.api.brain.preparePurge(personal);
+    await admin.api.brain.purge(personal, personalPlan.token);
+    const readAfterPersonal = await admin.api.brain.readWorkspace();
     const afterPersonal = readAfterPersonal.gaps.find(
       ({ id }) => id === ids.gap
     );
@@ -898,12 +898,12 @@ describe("the brain's gap answers", { timeout: 120_000 }, () => {
       terms: [name],
       reason: "erasure_request",
     };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    // The Knowledge database records the purge, then refuses the batch
+    const plan = await admin.api.brain.preparePurge(input);
+    // The Brain database records the purge, then refuses the batch
     // that rewrites the document's versions.
-    const real = env.KNOWLEDGE;
+    const real = env.BRAIN_DB;
     let rewriting = false;
-    const knowledge: D1Database = {
+    const brain: D1Database = {
       prepare: (query) => {
         rewriting ||= query.startsWith('update "versions"');
         return real.prepare(query);
@@ -920,11 +920,11 @@ describe("the brain's gap answers", { timeout: 120_000 }, () => {
       withSession: (constraint) => real.withSession(constraint),
     };
     const { core } = await openRpc(admin.session, {
-      coreEnv: { ...env, KNOWLEDGE: knowledge },
+      coreEnv: { ...env, BRAIN_DB: brain },
     });
     const failing = await core.authenticate();
-    const purged = await outcome(failing.knowledge.purge(input, plan.token));
-    const read = await admin.api.brain.read();
+    const purged = await outcome(failing.brain.purge(input, plan.token));
+    const read = await admin.api.brain.readWorkspace();
 
     expect({
       purged: purged === "ok",

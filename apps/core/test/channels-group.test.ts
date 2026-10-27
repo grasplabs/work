@@ -6,9 +6,9 @@ import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { newTeam, readCollection } from "./brain-collections.ts";
 import { botConnectorMembersUrl, teamsBot } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 import {
@@ -27,7 +27,7 @@ import type { TeamsPerson } from "./teams-door.ts";
 // Stephen asked in a Teams group chat or channel (src/channels/door.ts):
 // only a message that @mentions him is taken, and its answer reads only
 // what everyone in the conversation may read, as Teams' roster names them
-// (src/knowledge/access.ts). The turn runs in the asker's own Workspace
+// (src/brain/access.ts). The turn runs in the asker's own Workspace
 // object, with the model gateway faked behind it, and the roster and the
 // answer go through connect to the fake Bot Connector.
 
@@ -109,24 +109,24 @@ const handbookAndTeamNotes = async () => {
   const admin = await signedInApi(idp, "admin");
   const teamId = await newTeam(admin, []);
   const [handbook, team] = await Promise.all([
-    admin.api.knowledge.createCollection({
+    admin.api.brain.createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     }),
-    admin.api.knowledge.createCollection({
+    admin.api.brain.createCollection({
       name: `Bonus ${unique()}`,
       access: "teams",
       teams: [teamId],
     }),
   ]);
   const [lunch, bonus] = await Promise.all([
-    admin.api.knowledge.saveDocument({
+    admin.api.brain.saveDocument({
       collectionId: handbook.id,
       path: "lunch.md",
       text: "# Lunch\n\nLunch is served at noon.",
       ifVersion: 0,
     }),
-    admin.api.knowledge.saveDocument({
+    admin.api.brain.saveDocument({
       collectionId: team.id,
       path: "bonus.md",
       text: "# Bonus\n\nThe bonus pool is forty thousand.",
@@ -153,7 +153,7 @@ const readsBoth = (lunchId: string, bonusId: string) =>
   codeStep(`export default async (self, env) => {
   const read = async (id) => {
     try {
-      return (await env.knowledge.read(id)).text;
+      return (await env.brain.read(id)).text;
     } catch {
       return "unreadable";
     }
@@ -288,7 +288,7 @@ describe("in a group chat", setUpTime, () => {
 
   it("gives the agent no way to act or hold a write, only to read", async () => {
     const actsWith = codeStep(
-      `export default async (self, env) => ["connections", "apps", "build", "workflows", "memory", "brain", "knowledge"].filter((name) => env[name] !== undefined).join(",");`
+      `export default async (self, env) => ["connections", "apps", "build", "workflows", "memory", "brain", "brain"].filter((name) => env[name] !== undefined).join(",");`
     );
     const ann = await member(
       idp,
@@ -306,7 +306,7 @@ describe("in a group chat", setUpTime, () => {
     const told = (index: number) =>
       JSON.stringify(ann.gateway.requests[index]?.body ?? null);
     expect(told(1)).toContain("connections,apps,build,workflows,memory");
-    expect(told(3)).toContain('\\"knowledge\\"');
+    expect(told(3)).toContain('\\"brain\\"');
     expect(told(3)).not.toContain("connections,");
   });
 

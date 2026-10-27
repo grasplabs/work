@@ -50,7 +50,7 @@ import type { ResourceRunMemory } from "./resource-runs.ts";
 // - It reaches what a test may not: the run acts for the fixture's
 //   principal, no member of anything, and its host refuses every call that
 //   leaves its own sealed modules (resource-host.ts, `fixture`): Apps,
-//   stores, models, connections, Knowledge, templates and actions. It
+//   stores, models, connections, Brain, templates and actions. It
 //   holds no binding, approval or grant, and none is read or written.
 // - It takes the organization's quotas or shares: nothing of it is
 //   admitted against a lineage or the client's queue (`unadmitted`); its

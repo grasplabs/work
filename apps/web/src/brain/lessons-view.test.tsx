@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { LessonsView } from "./lessons-view.tsx";
 
-// The Brain's lessons, against core's knowledge API as the page reaches
+// The Brain's lessons, against core's brain API as the page reaches
 // it over RPC, faked: a lesson's versions show as far as their reader was
 // part of them, an older one resting on turns they weren't in without its
 // text, and a retirement goes against the revision read and reads the
@@ -44,7 +44,7 @@ const summary = (revision: number, state: "candidate" | "retired") => ({
 const shown = async (admin: boolean, refuse = false) => {
   const calls: string[] = [];
   let retired = false;
-  const knowledge = {
+  const brain = {
     lessonsList: async () => {
       await Promise.resolve();
       calls.push("list");
@@ -100,8 +100,8 @@ const shown = async (admin: boolean, refuse = false) => {
   };
   const core = {
     withSession: async <T,>(
-      action: (session: { knowledge: typeof knowledge }) => Promise<T>
-    ): Promise<T> => await action({ knowledge }),
+      action: (session: { brain: typeof brain }) => Promise<T>
+    ): Promise<T> => await action({ brain }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({

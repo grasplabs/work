@@ -7,7 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   ExtractorUnavailableError,
   localExtractor,
-} from "../src/knowledge/extract.ts";
+} from "../src/brain/extract.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
 import {
   sandboxCallIdHeader,

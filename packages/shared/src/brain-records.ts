@@ -11,7 +11,7 @@ import { appIdSchema, workflowIdSchema } from "./ids.ts";
 // interviewed for them, `stakeholder`), and what isn't known yet, with who
 // can answer it (`gap`). Shaped as the
 // prototype's (`grasplabs/prototype`, packages/grasp/src/data/types.ts at
-// `ddd235d`), so `brain.read` serves them as the brain's own types.
+// `ddd235d`), so `brain.readWorkspace` serves them as the brain's own types.
 //
 // A record names only what the brain holds or its call adds before it:
 // its source, tools, candidate, the statement it follows up, the records
@@ -44,7 +44,7 @@ import { appIdSchema, workflowIdSchema } from "./ids.ts";
 /** Most records one `brain.addRecords` call adds, each named in its audit event. */
 export const brainRecordsMaxPerCall = 50;
 
-/** Most records of each type core keeps, so `brain.read` stays bounded. */
+/** Most records of each type core keeps, so `brain.readWorkspace` stays bounded. */
 export const brainRecordsMaxPerType = {
   source: 500,
   tool: 500,

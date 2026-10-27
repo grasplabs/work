@@ -1,5 +1,5 @@
 // What a search's audit event says of where an empty search came closest:
-// written by Knowledge's search (search.ts), read back by the host's usage
+// written by the Brain's search (search.ts), read back by the host's usage
 // signals (core's usage-tally.ts), so both keep to one format.
 
 /** Most collections an empty search of every collection is put down to. */

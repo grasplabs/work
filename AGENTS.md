@@ -6,7 +6,7 @@ One codebase, deployed once per client into the client's own Cloudflare account 
 
 | Path | What it is |
 | --- | --- |
-| `apps/core` | Core Worker: sign-in, knowledge, Apps, workflows, model gateway, audit |
+| `apps/core` | Core Worker: sign-in, brain, Apps, workflows, model gateway, audit |
 | `apps/connect` | Connector Worker: the connector layer, the only place OAuth tokens live |
 | `apps/web` | Grasp OS frontend: React SPA, served as static files by core |
 | `apps/admin` | Grasp's admin, where staff manage every client (TanStack Start); production runs in grasp-os-ops |
@@ -33,7 +33,7 @@ Vite+ (`vp`) is the toolchain. Run from the repo root:
 - `vp run e2e`: Playwright end-to-end tests (`*.e2e.ts` in `e2e/`)
 - `vp run smoke:workerd`: boot core on plain workerd (on-prem readiness)
 - `vp run dev`: run the frontend (localhost:5173) with core and connect behind it (localhost:8787); `vp -C apps/admin dev` for the admin
-- `vp run seed`: while `vp run dev` runs, fill it with a demo company (`scripts/seed/`): people in teams, engines with 30 days of runs, Knowledge and chats; sign in as admin@acme.test. It adds only what's missing; to start over, stop dev and delete `apps/core/.wrangler/state`
+- `vp run seed`: while `vp run dev` runs, fill it with a demo company (`scripts/seed/`): people in teams, engines with 30 days of runs, Brain and chats; sign in as admin@acme.test. It adds only what's missing; to start over, stop dev and delete `apps/core/.wrangler/state`
 - `vp run -r typegen`: regenerate `worker-configuration.d.ts` after changing a `wrangler.jsonc`
 - `vp run -r db:generate`: generate migrations after changing a schema
 

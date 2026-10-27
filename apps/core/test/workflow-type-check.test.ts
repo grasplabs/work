@@ -440,7 +440,7 @@ describe(
           binding: "MAIL",
         })
       );
-      const { id: collectionId } = await admin.api.knowledge.createCollection({
+      const { id: collectionId } = await admin.api.brain.createCollection({
         name: `Mail ${crypto.randomUUID()}`,
         access: "everyone",
       });

@@ -1007,10 +1007,10 @@ const usesOf = (
     seen.add(use);
     if (isResource(use)) {
       // Every resource reaches outside the App: a model, a connection,
-      // knowledge or a template. Only an action may.
+      // brain or a template. Only an action may.
       if (fn.kind !== "action") {
         refuse(
-          `\`${path}\` is a ${fn.kind}: only an action uses resources, and queries and mutations never call models, connections, knowledge or templates.`
+          `\`${path}\` is a ${fn.kind}: only an action uses resources, and queries and mutations never call models, connections, brain or templates.`
         );
       }
       if (resources.get(use.alias) !== use) {

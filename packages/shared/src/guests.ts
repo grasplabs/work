@@ -6,7 +6,7 @@ import { defineErrorFamily } from "./errors.ts";
 // grants it (`{ type: "platform" }`, action `guests`), invites someone who
 // isn't a member to a short chat with a model, guided by one of the
 // release's Grasp skills, through a link only they get. The guest reaches
-// nothing: no Knowledge, no connections, no Apps, no memory, no tools. The
+// nothing: no Brain, no connections, no Apps, no memory, no tools. The
 // model only talks with them, and what they write is kept, as untrusted
 // text, for the App to read back and for people to review before any of
 // it is used. The link is a secret of 256 random bits, kept by core only

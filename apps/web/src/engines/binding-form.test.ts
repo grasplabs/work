@@ -20,13 +20,13 @@ const typed = (fields: Partial<BudgetFields>): BudgetFields => ({
   ...fields,
 });
 
-/** Knowledge declared with `collections`, offered `permissions`. */
-const knowledge = (
+/** Brain declared with `collections`, offered `permissions`. */
+const brain = (
   collections: string[],
   permissions: string[] = ["p-handbook", "p-salaries"]
 ): DeclaredResource => ({
   alias: "help",
-  kind: "knowledge",
+  kind: "brain",
   contract: null,
   actions: [],
   operations: ["search"],
@@ -38,7 +38,7 @@ const knowledge = (
   state: "unbound",
   binding: null,
   choices: {
-    kind: "knowledge",
+    kind: "brain",
     permissions: permissions.map((permissionId) => ({
       permissionId,
       collectionId: `c-${permissionId}`,
@@ -60,7 +60,7 @@ describe("a resource's bind form", () => {
     // Chosen while `handbook` and `salaries` were declared; then a newer
     // version declares `handbook` and `policies`.
     const chosen = { handbook: "p-handbook", salaries: "p-salaries" };
-    const now = knowledge(["handbook", "policies"]);
+    const now = brain(["handbook", "policies"]);
     const unfinished = targetOf(now, choicesOf(now), "", chosen);
     const finished = targetOf(now, choicesOf(now), "", {
       ...chosen,
@@ -74,14 +74,14 @@ describe("a resource's bind form", () => {
       ready: false,
       unfinished: undefined,
       finished: {
-        kind: "knowledge",
+        kind: "brain",
         collections: { handbook: "p-handbook", policies: "p-salaries" },
       },
     });
   });
 
   it("names nothing that isn't offered now", () => {
-    const resource = knowledge(["handbook"]);
+    const resource = brain(["handbook"]);
     const model: BindingChoices = {
       kind: "model",
       models: ["a/b"],
@@ -99,15 +99,14 @@ describe("a resource's bind form", () => {
   });
 
   it("starts afresh when the declaration, the version or the offers change", () => {
-    const before = knowledge(["handbook", "salaries"]);
+    const before = brain(["handbook", "salaries"]);
     const key = formKey("app", 1, before);
     expect({
-      same: formKey("app", 1, knowledge(["handbook", "salaries"])) === key,
-      declaration: formKey("app", 1, knowledge(["handbook"])) === key,
+      same: formKey("app", 1, brain(["handbook", "salaries"])) === key,
+      declaration: formKey("app", 1, brain(["handbook"])) === key,
       version: formKey("app", 2, before) === key,
       offers:
-        formKey("app", 1, knowledge(["handbook", "salaries"], ["p-other"])) ===
-        key,
+        formKey("app", 1, brain(["handbook", "salaries"], ["p-other"])) === key,
     }).toStrictEqual({
       same: true,
       declaration: false,

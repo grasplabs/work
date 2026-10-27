@@ -33,7 +33,7 @@ const notFoundCodes = new Set([
   "workflow.not_found",
   "workflow.run_not_found",
   "workflow.resource_unavailable",
-  "knowledge.not_found",
+  "brain.document_not_found",
   "decision.not_found",
   "screen.not_found",
 ]);

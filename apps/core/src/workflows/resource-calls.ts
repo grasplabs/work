@@ -36,11 +36,11 @@ import type {
   FrozenCatalogBinding,
 } from "./resource-authority.ts";
 import {
-  callKnowledge,
+  callBrainCollection,
   callTemplate,
-  requireKnowledgeRequest,
+  requireBrainRequest,
 } from "./resource-reads.ts";
-import type { KnowledgeCall } from "./resource-reads.ts";
+import type { BrainCall } from "./resource-reads.ts";
 import { callFiles, requireFilesArguments } from "./run-files.ts";
 import type { FilesCallOperation } from "./run-files.ts";
 
@@ -143,10 +143,10 @@ export type BuiltCall =
       readonly maxOutputTokens?: Json;
     }
   | {
-      /** A Knowledge collection's search, read or recall, by an action (GRA-700). */
-      readonly name: "grasp.knowledge";
+      /** A Brain collection's search, read or recall, by an action (GRA-700). */
+      readonly name: "grasp.brain";
       readonly binding: string;
-      readonly operation: KnowledgeCall["operation"];
+      readonly operation: BrainCall["operation"];
       readonly arguments: Json;
     }
   | {
@@ -167,7 +167,7 @@ const kindOf = {
   "grasp.operation": "operation",
   "grasp.connector": "connector",
   "grasp.model": "model",
-  "grasp.knowledge": "knowledge",
+  "grasp.brain": "brain",
   "grasp.template": "template",
   "grasp.files": "files",
 } as const;
@@ -713,8 +713,8 @@ const candidateAnswer = async (
       requireModelRequest(call);
       return requireShape(JSON.stringify(call.outputSchema), answer, "output");
     }
-    case "grasp.knowledge": {
-      requireKnowledgeRequest(call);
+    case "grasp.brain": {
+      requireBrainRequest(call);
       return boundedAnswer(answer, "output");
     }
     case "grasp.template": {
@@ -751,7 +751,7 @@ export const makeCall = async (
   // A test run of a draft's checkpoint calls nothing: whatever the call,
   // its answer is the one the run's start gave its binding, before any
   // binding, authority or receipt is looked at, so nothing of it can
-  // reach connect, a model, an App, a store or Knowledge.
+  // reach connect, a model, an App, a store or Brain.
   if (run.candidate !== undefined) {
     return await candidateAnswer(env, run.candidate, call);
   }
@@ -824,8 +824,8 @@ export const makeCall = async (
         output = await callModel(env, run, task, binding, call, effect);
         break;
       }
-      case "grasp.knowledge": {
-        output = await callKnowledge(env, run, binding, call);
+      case "grasp.brain": {
+        output = await callBrainCollection(env, run, binding, call);
         break;
       }
       case "grasp.template": {

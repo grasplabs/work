@@ -1,5 +1,5 @@
 import type { App } from "@grasp-os/shared/apps";
-import type { KnowledgeSignal } from "@grasp-os/shared/knowledge-signals";
+import type { BrainSignal } from "@grasp-os/shared/brain-signals";
 import type { ImprovementSignal } from "@grasp-os/shared/signals";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 
@@ -92,8 +92,8 @@ export const enginesOf = (
   return { engines, others: all.length - engines.length };
 };
 
-/** Every kind of signal the board counts, improvement and Knowledge; an unanswered question is one kind for both. */
-export type SignalKind = ImprovementSignal["kind"] | KnowledgeSignal["kind"];
+/** Every kind of signal the board counts, improvement and Brain; an unanswered question is one kind for both. */
+export type SignalKind = ImprovementSignal["kind"] | BrainSignal["kind"];
 
 /** The order kinds with as many signals come in: what a run waits or fails on first. */
 const kindOrder: readonly SignalKind[] = [

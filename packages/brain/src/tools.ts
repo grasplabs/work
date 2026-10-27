@@ -6,6 +6,18 @@ import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { collections, documents, links, sections } from "./db/schema.ts";
 import {
+  documentTypeOf,
+  followMaxEntries,
+  collectionErrors,
+  readOptionsSchema,
+} from "./documents-contract.ts";
+import type {
+  DocumentLink,
+  FollowResult,
+  BrainRead,
+  SkillFile,
+} from "./documents-contract.ts";
+import {
   backlinkRows,
   documentMaxLinks,
   getDocument,
@@ -13,20 +25,8 @@ import {
   toSummary,
 } from "./documents.ts";
 import { documentIdSchema } from "./ids.ts";
-import {
-  documentTypeOf,
-  followMaxEntries,
-  knowledgeErrors,
-  readOptionsSchema,
-} from "./knowledge.ts";
-import type {
-  DocumentLink,
-  FollowResult,
-  KnowledgeRead,
-  SkillFile,
-} from "./knowledge.ts";
 
-// The agent's Knowledge tools (Code Mode: a typed API it filters in code):
+// The agent's Brain tools (Code Mode: a typed API it filters in code):
 // a small catalog always in its context (core's catalog.ts), then search
 // (search.ts), read and follow on demand. They read through the same access check as every other
 // read (`allowedFor`), and every read but the catalog goes through
@@ -44,9 +44,9 @@ export const read = async <C>(
   reader: C,
   documentId: unknown,
   options?: unknown
-): Promise<KnowledgeRead> => {
-  const { section } = knowledgeErrors.parse(
-    "knowledge.invalid",
+): Promise<BrainRead> => {
+  const { section } = collectionErrors.parse(
+    "brain.document_invalid",
     readOptionsSchema,
     options
   );
@@ -87,7 +87,7 @@ export const read = async <C>(
         .get()
     : undefined;
   if (!found) {
-    throw knowledgeErrors.create("knowledge.not_found");
+    throw collectionErrors.create("brain.document_not_found");
   }
   const { document, collection, section: row } = found;
   // Recorded before a missing section is refused, as a missing version is:
@@ -95,7 +95,7 @@ export const read = async <C>(
   const provenance = await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       target: { type: "document", id: document.id },
       detail: {
         read: "section",
@@ -106,7 +106,7 @@ export const read = async <C>(
     collection
   );
   if (row === null) {
-    throw knowledgeErrors.create("knowledge.not_found");
+    throw collectionErrors.create("brain.document_not_found");
   }
   return {
     ...toSummary(document),
@@ -222,7 +222,7 @@ export const follow = async <C>(
   const provenance = await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       target: { type: "document", id: document.id },
       detail: {
         read: "follow",

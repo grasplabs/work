@@ -95,7 +95,7 @@ import type { Draft } from "./workspace.ts";
 //   the workflow; a preview binds no resource, so they are refused
 //   (`resource.unavailable`) before anything is read, whatever the alias.
 // - The draft reaches outside systems: no resource is bound for its
-//   invocations (no connection, Knowledge, model or other App), so every
+//   invocations (no connection, Brain, model or other App), so every
 //   resource request is refused by the operation host
 //   (`resource.unavailable`). Its code runs in the release runner's
 //   isolates, with no network and no env (release-runner.ts).

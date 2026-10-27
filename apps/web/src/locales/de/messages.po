@@ -27,7 +27,7 @@ msgstr ", absteigend sortiert"
 msgid "“{text}”"
 msgstr "„{text}“"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "(company)"
 msgstr "(Unternehmen)"
 
@@ -36,7 +36,7 @@ msgctxt "a number that changed: what it was before"
 msgid "(was {before})"
 msgstr "(vorher {before})"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "(yours)"
 msgstr "(Ihre)"
 
@@ -322,7 +322,7 @@ msgstr "{count, plural, one {# Dokument hinzugefügt. Ich lese es.} other {# Dok
 msgid "{count, plural, one {# employee interviewed} other {# employees interviewed}}"
 msgstr "{count, plural, one {# Mitarbeitende interviewt} other {# Mitarbeitende interviewt}}"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "{count, plural, one {# file} other {# files}}"
 msgstr "{count, plural, one {# Datei} other {# Dateien}}"
 
@@ -391,7 +391,7 @@ msgstr "{count, plural, one {# Zeitfresser} other {# Zeitfresser}}"
 msgid "{count, plural, one {# tool allowed} other {# tools allowed}}"
 msgstr "{count, plural, one {# Tool erlaubt} other {# Tools erlaubt}}"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 msgid "{count, plural, one {# version} other {# versions}}"
 msgstr "{count, plural, one {# Version} other {# Versionen}}"
 
@@ -423,7 +423,7 @@ msgstr "In {count} von {finished} Interviews wurde am Ende gesagt, wie es war."
 msgid "{count} of {of} steps are told by too few people"
 msgstr "{count} von {of} Schritten haben zu wenige Personen beschrieben"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "{count} or more files"
 msgstr "{count} oder mehr Dateien"
 
@@ -554,7 +554,7 @@ msgid "{fixtures, plural, one {It runs on its # fixture when the version is seal
 msgstr "{fixtures, plural, one {Sie läuft auf ihrem # Testdatensatz, wenn die Version versiegelt wird, vor jedem Datensatz} other {Sie läuft auf ihren # Testdatensätzen, wenn die Version versiegelt wird, vor jedem Datensatz}}"
 
 #. Earlier events on a timeline, folded away
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
 msgstr "{folded, plural, one {# frühere} other {# frühere}}"
@@ -1070,11 +1070,11 @@ msgstr "{people}, oder {fewer} und ein Dokument"
 msgid "{percent}% known now"
 msgstr "{percent} % bekannt, jetzt"
 
-#: src/onboarding/knowledge-bar.tsx
+#: src/onboarding/brain-bar.tsx
 msgid "{percent}% known. Your team can start at {threshold}%, and I keep learning after that."
 msgstr "{percent} % bekannt. Ihr Team kann bei {threshold} % starten, und ich lerne danach weiter."
 
-#: src/onboarding/knowledge-bar.tsx
+#: src/onboarding/brain-bar.tsx
 msgid "{percent}% known. Your team can start at {threshold}%."
 msgstr "{percent} % bekannt. Ihr Team kann bei {threshold} % starten."
 
@@ -1646,6 +1646,10 @@ msgstr "50 bis 99 Nutzende"
 msgid "A .txt, .vtt, .srt or .docx file, or pasted text."
 msgstr "Eine .txt-, .vtt-, .srt- oder .docx-Datei oder eingefügter Text."
 
+#: src/dashboard/signals.tsx
+msgid "A Brain search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
+msgstr "Eine Gehirnssuche aus {about} hat {searches, plural, one {einmal} other {#-mal}} nichts gefunden, bei {askers, plural, one {# fragenden Person} other {# fragenden Personen}}."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
@@ -1734,10 +1738,6 @@ msgstr "Ein Gast hat eine Nachricht geschrieben"
 #: src/workflows/resource-params.tsx
 msgid "A JSON value"
 msgstr "Ein JSON-Wert"
-
-#: src/dashboard/signals.tsx
-msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
-msgstr "Eine Wissenssuche aus {about} hat {searches, plural, one {einmal} other {#-mal}} nichts gefunden, bei {askers, plural, one {# fragenden Person} other {# fragenden Personen}}."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "A lead's team"
@@ -2132,7 +2132,7 @@ msgctxt "what a permission lets an app do with company data"
 msgid "administer"
 msgstr "verwalten"
 
-#: src/knowledge/collection-markers.tsx
+#: src/brain-collections/collection-markers.tsx
 msgid "Admins"
 msgstr "Admins"
 
@@ -2418,7 +2418,7 @@ msgstr "Ein Admin ändert sie, unter Mitglieder und Rollen."
 msgid "An admin connects this for everyone."
 msgstr "Ein Admin verbindet dies für alle."
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "An admin hasn't set up company memory yet."
 msgstr "Ein Admin hat das Unternehmensgedächtnis noch nicht eingerichtet."
 
@@ -3106,7 +3106,7 @@ msgstr "Zurück zur neuesten"
 msgid "Back to policies"
 msgstr "Zurück zu den Richtlinien"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Back to the current version"
 msgstr "Zurück zur aktuellen Version"
 
@@ -3251,8 +3251,13 @@ msgstr "Gebunden"
 msgid "Bound to"
 msgstr "Gebunden an"
 
+#: src/brain-collections/frame.tsx
+#: src/brain-collections/nav.tsx
 #: src/brain/brain-nav.tsx
+#: src/engines/resource-bindings.tsx
 #: src/frame/app-sidebar.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
 msgid "Brain"
@@ -3271,7 +3276,7 @@ msgstr "Zweig {name}"
 msgid "Breadcrumb"
 msgstr "Brotkrümelnavigation"
 
-#: src/knowledge/frame.tsx
+#: src/brain-collections/frame.tsx
 msgid "Browse"
 msgstr "Durchsuchen"
 
@@ -3429,6 +3434,7 @@ msgstr "Kann Unternehmensdaten {verbs}"
 msgid "Can’t be read"
 msgstr "Nicht lesbar"
 
+#: src/brain-collections/document.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
@@ -3438,7 +3444,6 @@ msgstr "Nicht lesbar"
 #: src/engines/app-status.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
-#: src/knowledge/document.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
@@ -3632,8 +3637,8 @@ msgid "Changed a workflow's parameter"
 msgstr "Einen Parameter eines Workflows geändert"
 
 #: src/activity/audit-words.ts
-msgid "Changed knowledge"
-msgstr "Wissen geändert"
+msgid "Changed brain"
+msgstr ""
 
 #: src/chat/builds.tsx
 msgid "Changed parameter {name}"
@@ -3860,6 +3865,7 @@ msgstr "Suche und Filter zurücksetzen"
 msgid "Click to open Usage"
 msgstr "Klicken, um die Nutzung zu öffnen"
 
+#: src/brain-collections/frame.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/connections/request-app-dialog.tsx
@@ -3868,7 +3874,6 @@ msgstr "Klicken, um die Nutzung zu öffnen"
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
-#: src/knowledge/frame.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
@@ -3883,8 +3888,8 @@ msgctxt "button: close a dialog"
 msgid "Close"
 msgstr "Schließen"
 
+#: src/brain-collections/nav.tsx
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
 msgid "Close {name}"
 msgstr "{name} schließen"
 
@@ -3927,8 +3932,8 @@ msgstr "Code-Schritt"
 msgid "colleagues talked"
 msgstr "Kolleginnen und Kollegen gesprochen"
 
-#: src/knowledge/document.tsx
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/brain-collections/document.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Collection"
 msgstr "Sammlung"
 
@@ -3940,16 +3945,16 @@ msgstr "Sammlung {collectionId}"
 msgid "Collection for {collection}"
 msgstr "Sammlung für {collection}"
 
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Collection not found"
 msgstr "Sammlung nicht gefunden"
 
 #: src/engines/resource-bindings.tsx
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Collections"
 msgstr "Sammlungen"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
 msgstr "Sammlungen enthalten die Dokumente, die Grasp und seine Agenten lesen dürfen. Ein Admin teilt sie mit Ihnen, oder Sie legen eigene an."
 
@@ -4685,7 +4690,7 @@ msgid "Designed"
 msgstr "Neu gestaltet"
 
 #: src/activity/audit-log.tsx
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 #: src/landscape/landscape-audit.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Details"
@@ -4790,8 +4795,8 @@ msgid "Dismiss this signal about {name}"
 msgstr "Diesen Hinweis zu {name} ausblenden"
 
 #: src/activity/audit-words.ts
-msgid "Dismissed a knowledge signal"
-msgstr "Ein Wissenssignal verworfen"
+msgid "Dismissed a brain signal"
+msgstr ""
 
 #: src/onboarding/setup-steps.tsx
 msgid "Do you have anything that explains how you work?"
@@ -4801,7 +4806,7 @@ msgstr "Haben Sie etwas, das erklärt, wie Sie arbeiten?"
 msgid "Document"
 msgstr "Dokument"
 
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Document not found"
 msgstr "Dokument nicht gefunden"
 
@@ -4824,7 +4829,7 @@ msgstr "Geteilte Dokumente"
 msgid "Documents written by employees, workspace files, user profiles and internal collaboration."
 msgstr "Von Mitarbeitenden verfasste Dokumente, Workspace-Dateien, Nutzerprofile und interne Zusammenarbeit."
 
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Hier geschriebene Dokumente und hochgeladene Dateien erscheinen hier, damit Grasp und seine Agenten sie lesen können."
 
@@ -4924,7 +4929,7 @@ msgstr "Domänen"
 msgid "Domains and agents with a permission"
 msgstr "Domänen und Agenten mit einer Berechtigung"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
 msgstr "Laden Sie keine Interviewaufnahmen oder deren Untertitel hoch: Interviews laufen über den Interviewablauf."
 
@@ -4972,7 +4977,7 @@ msgctxt "part of an interview"
 msgid "Done right"
 msgstr "Richtig erledigt"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Download {name}"
 msgstr "{name} herunterladen"
 
@@ -5043,7 +5048,7 @@ msgstr "Als Workflow skizziert"
 msgid "Drawn as a workflow: {workflow}"
 msgstr "Als Workflow skizziert: {workflow}"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "Drop files here"
 msgstr "Dateien hier ablegen"
@@ -5114,8 +5119,8 @@ msgstr "Frühere Version"
 msgid "Earlier versions"
 msgstr "Frühere Versionen"
 
+#: src/brain-collections/document.tsx
 #: src/engines/app-page.tsx
-#: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Edit"
 msgstr "Bearbeiten"
@@ -5314,7 +5319,7 @@ msgstr "Jedes seiner Werkzeuge gehört zu einer dieser Arten. Jede ist für die 
 msgid "Every tool it has: domains and agents use only what they are granted."
 msgstr "Jedes seiner Tools: Domänen und Agenten nutzen nur, was ihnen erlaubt ist."
 
-#: src/knowledge/collection-markers.tsx
+#: src/brain-collections/collection-markers.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Everyone"
 msgstr "Alle"
@@ -5372,7 +5377,7 @@ msgstr "Alles"
 msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
 msgstr "Alles, was in Grasp getan wurde, von wem und wann, in einer Kette, die niemand unbemerkt ändern kann."
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
 msgstr "Alles, was Grasp und seine Agenten lesen dürfen, in Sammlungen: Ihre eigenen, die Ihrer Teams und die Ihrer Organisation. Agenten lesen ein Dokument, wenn sie es brauchen, und haben die Memory-Dateien immer im Blick."
 
@@ -5429,8 +5434,8 @@ msgstr "Chats ausklappen"
 msgid "Expand the filters"
 msgstr "Filter ausklappen"
 
+#: src/brain-collections/nav.tsx
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
 msgid "Expand the navigation"
 msgstr "Navigation ausklappen"
 
@@ -5491,7 +5496,7 @@ msgctxt "thinking effort"
 msgid "Extra high"
 msgstr "Sehr hoch"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Extracting"
 msgstr "Wird ausgelesen"
 
@@ -5499,10 +5504,10 @@ msgstr "Wird ausgelesen"
 msgid "Facts agreed"
 msgstr "Bestätigte Fakten"
 
+#: src/brain-collections/uploads.tsx
 #: src/chat/thread.tsx
 #: src/dashboard/runs-widget.tsx
 #: src/inbox/items.ts
-#: src/knowledge/uploads.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflow-diagram.tsx
@@ -5563,7 +5568,7 @@ msgid "File"
 msgstr "Datei"
 
 #: src/chat/builds.tsx
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Files"
 msgstr "Dateien"
 
@@ -5710,8 +5715,8 @@ msgstr "Chats einklappen"
 msgid "Fold the filters"
 msgstr "Filter einklappen"
 
+#: src/brain-collections/nav.tsx
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
 msgid "Fold the navigation"
 msgstr "Navigation einklappen"
 
@@ -6261,7 +6266,7 @@ msgstr "Hoch"
 msgid "High confidence"
 msgstr "Hohe Belastbarkeit"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 #: src/landscape/overview-tab.tsx
 msgid "History"
 msgstr "Verlauf"
@@ -6846,7 +6851,7 @@ msgstr "Erledigt"
 msgid "It's gone, or you can't read it."
 msgstr "Sie wurde entfernt, oder Sie dürfen sie nicht lesen."
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "It's past the first {pageMaxLimit} files listed: open it from here."
 msgstr "Sie steht nach den ersten {pageMaxLimit} aufgelisteten Dateien: Öffnen Sie sie von hier."
 
@@ -7078,14 +7083,6 @@ msgstr "Art"
 msgid "Kind of statement"
 msgstr "Art der Aussage"
 
-#: src/engines/resource-bindings.tsx
-#: src/knowledge/frame.tsx
-#: src/knowledge/nav.tsx
-#: src/routes/_shell.knowledge.$collection.tsx
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Knowledge"
-msgstr "Wissen"
-
 #: src/brain/atlas-overlays.tsx
 msgid "Known"
 msgstr "Bekannt"
@@ -7265,7 +7262,7 @@ msgstr "Lektionen"
 msgid "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it."
 msgstr "Lassen Sie eine KI-App wie Claude oder ChatGPT mit Grasp arbeiten. Sie liest, was Grasp weiß, und kann Ihnen eine Seite zeigen. Für alles andere fragt sie Sie zuerst hier: Nichts ändert sich, solange Sie es nicht erlauben."
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "Let go to add them"
 msgstr "Loslassen, um sie hinzuzufügen"
@@ -7367,7 +7364,7 @@ msgstr "Links verschickt seit {since}"
 msgid "Links out: {count} of {of}"
 msgstr "Links verschickt: {count} von {of}"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Links to"
 msgstr "Verweist auf"
 
@@ -7429,9 +7426,9 @@ msgid "Loading"
 msgstr "Wird geladen"
 
 #: src/activity/audit-log.tsx
+#: src/brain-collections/nav.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
-#: src/knowledge/nav.tsx
 #: src/landscape/audit-trail.tsx
 #: src/workflows/history-view.tsx
 msgid "Loading…"
@@ -7598,7 +7595,7 @@ msgstr "Mitglieder und Rollen"
 #: src/brain/brain-nav.tsx
 #: src/brain/memory-page.tsx
 #: src/labels.ts
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Memory"
 msgstr "Gedächtnis"
 
@@ -8179,8 +8176,8 @@ msgstr "Keine Ausnahmen."
 msgid "No file changes."
 msgstr "Keine Dateiänderungen."
 
-#: src/knowledge/nav.tsx
-#: src/routes/_shell.knowledge.index.tsx
+#: src/brain-collections/nav.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "No files yet."
 msgstr "Noch keine Dateien."
 
@@ -8266,7 +8263,7 @@ msgstr "Aus dem Interview der Teamleitung ist keine Karte der Arbeit entstanden"
 msgid "No matches"
 msgstr "Keine Treffer"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "No memory files are written yet."
 msgstr "Es wurden noch keine Gedächtnisdateien geschrieben."
 
@@ -8744,8 +8741,8 @@ msgid "Not every choice could be checked: some may be missing from the list."
 msgstr "Nicht jede Auswahl konnte geprüft werden: Einige fehlen womöglich in der Liste."
 
 #: src/frame/page-states.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 #: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/_shell.landscape.$appId.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Not found"
@@ -8994,7 +8991,7 @@ msgstr "Auf {connection} wird nichts gesendet oder geändert, bis Sie es genehmi
 msgid "Nothing is sent or changed on {connection}."
 msgstr "In {connection} wird nichts gesendet oder geändert."
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Nothing matched."
 msgstr "Nichts gefunden."
 
@@ -9282,10 +9279,10 @@ msgid "Only the first way"
 msgstr "Nur der erste Weg"
 
 #: src/routes/_shell.settings.models.tsx
-msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
-msgstr "Nur die als geeignet für sensible Daten markierten Modelle dürfen Daten aus einer sensiblen Sammlung (markiert unter Wissen) oder einer sensiblen Verbindung erhalten, oder aus einem Chat, einer Domäne oder einem Lauf, der eine davon gelesen hat."
+msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Brain) or a sensitive connection, or from a chat, domain or run that read one."
+msgstr "Nur die als geeignet für sensible Daten markierten Modelle dürfen Daten aus einer sensiblen Sammlung (markiert unter Gehirn) oder einer sensiblen Verbindung erhalten, oder aus einem Chat, einer Domäne oder einem Lauf, der eine davon gelesen hat."
 
-#: src/knowledge/collection-markers.tsx
+#: src/brain-collections/collection-markers.tsx
 msgid "Only the owner"
 msgstr "Nur die Eigentümerperson"
 
@@ -9363,9 +9360,9 @@ msgctxt "open an app"
 msgid "Open"
 msgstr "Öffnen"
 
+#: src/brain-collections/nav.tsx
+#: src/brain-collections/uploads.tsx
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
-#: src/knowledge/uploads.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/work-list.tsx
 #: src/routes/_shell.onboarding.organization.$team.tsx
@@ -9519,7 +9516,7 @@ msgstr "Öffnet bei {threshold} %"
 msgid "Operations"
 msgstr "Operationen"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "or choose them from your computer"
 msgstr "oder wählen Sie sie auf Ihrem Computer aus"
@@ -9720,7 +9717,7 @@ msgstr "Fügen Sie das Transkript des ersten Gesprächs mit dem Sponsor ein"
 msgid "Pasted on {when}. Bring it in again to read it again."
 msgstr "Eingefügt am {when}. Bringen Sie es erneut ein, um es neu lesen zu lassen."
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Path"
 msgstr "Pfad"
 
@@ -9776,7 +9773,7 @@ msgstr "PDF"
 msgid "PDF, Word, Excel, PowerPoint or text"
 msgstr "PDF, Word, Excel, PowerPoint oder Text"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Pending"
 msgstr "Ausstehend"
 
@@ -10276,12 +10273,12 @@ msgid "Read"
 msgstr "Lesen"
 
 #: src/activity/audit-words.ts
-msgid "Read a domain's statistics"
-msgstr "Die Statistiken einer Domäne gelesen"
+msgid "Read a brain document"
+msgstr ""
 
 #: src/activity/audit-words.ts
-msgid "Read a knowledge document"
-msgstr "Ein Wissensdokument gelesen"
+msgid "Read a domain's statistics"
+msgstr "Die Statistiken einer Domäne gelesen"
 
 #: src/engines/package-approvals.tsx
 msgid "Read again"
@@ -10296,8 +10293,8 @@ msgid "Read everyone's calls of unknown outcome"
 msgstr "Die Aufrufe mit unbekanntem Ergebnis aller gelesen"
 
 #: src/activity/audit-words.ts
-msgid "Read how knowledge is used"
-msgstr "Gelesen, wie Wissen genutzt wird"
+msgid "Read how brain is used"
+msgstr ""
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Read it"
@@ -10343,8 +10340,8 @@ msgstr "Gelesen, was sich bei einer Verbindung geändert hat"
 msgid "Read what could be improved"
 msgstr "Gelesen, was sich verbessern ließe"
 
+#: src/brain-collections/collection-markers.tsx
 #: src/chat/draft-versions.tsx
-#: src/knowledge/collection-markers.tsx
 msgid "Read-only"
 msgstr "Nur lesen"
 
@@ -10403,7 +10400,7 @@ msgstr "Liest"
 msgid "reads the domain's data"
 msgstr "liest die Daten der Domäne"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 #: src/onboarding/setup-frame.tsx
 msgid "Ready"
 msgstr "Bereit"
@@ -10588,7 +10585,7 @@ msgstr "Wiederholt sich, einmal pro Element:"
 msgid "Replace the binding of {alias}"
 msgstr "Bindung von {alias} ersetzen"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Replace version {newerVersion} with mine"
 msgstr "Version {newerVersion} durch meine ersetzen"
 
@@ -10634,17 +10631,17 @@ msgstr "Ressource"
 msgid "Resources"
 msgstr "Ressourcen"
 
+#: src/brain-collections/timeline.tsx
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
-#: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Wiederherstellen"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 msgid "Restore version {number}"
 msgstr "Version {number} wiederherstellen"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 msgid "Restored version {restoredFrom}"
 msgstr "Version {restoredFrom} wiederhergestellt"
 
@@ -10671,7 +10668,7 @@ msgstr "Ergebnis"
 msgid "Result: not measured yet"
 msgstr "Ergebnis: noch nicht gemessen"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Results"
 msgstr "Ergebnisse"
 
@@ -10740,7 +10737,7 @@ msgstr "Prüfen"
 msgid "Review and answer"
 msgstr "Prüfen und antworten"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Review by"
 msgstr "Prüfen bis"
 
@@ -11075,8 +11072,8 @@ msgstr "Hat zugestimmt"
 msgid "Same version, different contents: {changed}"
 msgstr "Gleiche Version, anderer Inhalt: {changed}"
 
+#: src/brain-collections/document.tsx
 #: src/chat/project-dialog.tsx
-#: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/settings/person-limits.tsx
 #: src/workflows/resource-params.tsx
@@ -11161,6 +11158,10 @@ msgstr "Anwendung suchen"
 msgid "Search apps"
 msgstr "Apps suchen"
 
+#: src/brain-collections/nav.tsx
+msgid "Search Brain"
+msgstr "Gehirn durchsuchen"
+
 #: src/onboarding/interview-people.tsx
 msgid "Search by name"
 msgstr "Nach Namen suchen"
@@ -11176,10 +11177,6 @@ msgstr "Ereignisse durchsuchen"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search integrations"
 msgstr "Integrationen durchsuchen"
-
-#: src/knowledge/nav.tsx
-msgid "Search Knowledge"
-msgstr "Wissen durchsuchen"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Search members"
@@ -11198,7 +11195,7 @@ msgstr "Personen suchen"
 msgid "Search people and devices"
 msgstr "Personen und Geräte suchen"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "Die Suche durchsucht jede Sammlung, die Sie lesen dürfen. Versuchen Sie andere oder weniger Wörter."
 
@@ -11207,8 +11204,8 @@ msgid "Search the transcript"
 msgstr "Im Transkript suchen"
 
 #: src/activity/audit-words.ts
-msgid "Searched knowledge"
-msgstr "Im Wissen gesucht"
+msgid "Searched brain"
+msgstr ""
 
 #: src/activity/audit-words.ts
 msgid "Searched the audit trail"
@@ -11281,7 +11278,7 @@ msgstr "Anfrage senden"
 msgid "Send the link now"
 msgstr "Link jetzt senden"
 
-#: src/knowledge/collection-markers.tsx
+#: src/brain-collections/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
 msgid "Sensitive"
@@ -11440,7 +11437,7 @@ msgstr "Im Gehirn zeigen"
 msgid "Show less"
 msgstr "Weniger anzeigen"
 
-#: src/knowledge/nav.tsx
+#: src/brain-collections/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
 #: src/routes/_shell.settings.packages.index.tsx
@@ -11476,7 +11473,7 @@ msgstr "Die Pakete für {domain} anzeigen"
 msgid "Showing {showing} of {shownCount}"
 msgstr "{showing} von {shownCount} angezeigt"
 
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Showing the first {pageMaxLimit} files."
 msgstr "Die ersten {pageMaxLimit} Dateien werden angezeigt."
 
@@ -11761,7 +11758,7 @@ msgstr "Anfangen"
 msgid "Start a test run"
 msgstr "Testlauf starten"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Start again from version {newerVersion}"
 msgstr "Neu beginnen ab Version {newerVersion}"
 
@@ -11962,7 +11959,7 @@ msgstr "Beschriebene Schritte"
 msgid "steps told by enough people"
 msgstr "Schritte von genug Personen beschrieben"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Still being read. It shows in the file list once it's ready."
 msgstr "Wird noch gelesen. Sie erscheint in der Dateiliste, sobald sie fertig ist."
 
@@ -12304,8 +12301,8 @@ msgstr "Teamgröße unbekannt"
 msgid "Team size unknown."
 msgstr "Teamgröße unbekannt."
 
+#: src/brain-collections/collection-markers.tsx
 #: src/brain/brain.ts
-#: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/person-limits.tsx
 msgid "Teams"
@@ -12406,7 +12403,7 @@ msgstr "Wird getestet…"
 msgid "Tests"
 msgstr "Tests"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Text"
 msgstr "Text"
 
@@ -12744,12 +12741,12 @@ msgid "The domain's actions can't use it until an admin binds it."
 msgstr "Die Aktionen der Domäne können sie erst nutzen, wenn ein Admin sie bindet."
 
 #: src/engines/resource-bindings.tsx
-msgid "The domain's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-msgstr "Die Aktionen der Domäne erreichen ein Modell, eine Integration, Wissen oder eine Vorlage nur über eine Bindung, die ein Admin hier genehmigt. Eine Deklaration gewährt nichts, und das Widerrufen einer Bindung stoppt die nächste Anfrage darüber."
+msgid "The domain's actions reach a model, an integration, brain or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+msgstr ""
 
 #: src/engines/resource-bindings.tsx
-msgid "The domain's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
-msgstr "Die Aktionen der Domäne erreichen ein Modell, eine Integration, Wissen oder eine Vorlage nur über eine Bindung, die ein Admin deiner Organisation genehmigt."
+msgid "The domain's actions reach a model, an integration, brain or a template only through a binding an admin of your organization approves."
+msgstr ""
 
 #: src/engines/resource-bindings.tsx
 msgid "The domain's current version declares no resource for its actions."
@@ -12913,8 +12910,8 @@ msgid "The list is full: remove a line to add another."
 msgstr "Die Liste ist voll: Entfernen Sie eine Zeile, um eine weitere hinzuzufügen."
 
 #: src/brain/brain-home.tsx
-msgid "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
-msgstr "Die Gedächtnisdateien, Skills und hochgeladenen Dateien, die Ihre Agenten lesen, finden Sie unter <0>Wissen</0>."
+msgid "The memory files, skills and uploads your agents read are in <0>Brain</0>."
+msgstr "Die Gedächtnisdateien, Skills und hochgeladenen Dateien, die Ihre Agenten lesen, finden Sie unter <0>Gehirn</0>."
 
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
@@ -13292,7 +13289,7 @@ msgstr "In {name} sind mehr Personen, als ich aufnehmen kann: bis zu {peopleMost
 msgid "There are more people in {signIn} than I can take: up to {peopleMost} people in up to {teamsMost} teams. A staff list of those taking part works."
 msgstr "In {signIn} sind mehr Personen, als ich aufnehmen kann: bis zu {peopleMost} Personen in bis zu {teamsMost} Teams. Eine Mitarbeiterliste derer, die mitmachen, geht auch."
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "There are no collections you can read yet."
 msgstr "Es gibt noch keine Sammlungen, die Sie lesen können."
 
@@ -13438,7 +13435,7 @@ msgstr "Dieser Chat hat seine Länge erreicht. Klicken Sie auf Beenden, um ihn a
 msgid "This chat read restricted data: this may send it out"
 msgstr "Dieser Chat hat eingeschränkte Daten gelesen: Dies kann sie nach außen senden"
 
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "This collection has no files yet."
 msgstr "Diese Sammlung hat noch keine Dateien."
 
@@ -13470,11 +13467,11 @@ msgstr "Diese Bereitstellung erlaubt kein Modell."
 msgid "This device"
 msgstr "Dieses Gerät"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
 msgstr "Dieses Dokument hat sich geändert, seit Sie es geöffnet haben. Version {newerVersion} steht unten; Ihr Text bleibt erhalten. Beginnen Sie von dieser Version neu oder ersetzen Sie sie durch Ihren Text."
 
-#: src/knowledge/markdown.tsx
+#: src/brain-collections/markdown.tsx
 msgid "This document is empty."
 msgstr "Dieses Dokument ist leer."
 
@@ -14078,11 +14075,11 @@ msgstr "Bis {upTo} Minuten"
 msgid "Updated Grasp"
 msgstr "Grasp aktualisiert"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Upload"
 msgstr "Hochladen"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
 msgstr "Laden Sie eine PDF-, Word- oder Excel-Datei oder Untertitel (.vtt) hoch"
 
@@ -14092,14 +14089,14 @@ msgid "Uploaded"
 msgstr "Hochgeladen"
 
 #: src/activity/audit-words.ts
-msgid "Uploaded to knowledge"
-msgstr "In das Wissen hochgeladen"
+msgid "Uploaded to brain"
+msgstr ""
 
 #: src/brain/brain.ts
 msgid "Uploaded to Policies"
 msgstr "In Richtlinien hochgeladen"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Uploading…"
 msgstr "Wird hochgeladen…"
 
@@ -14135,8 +14132,8 @@ msgid "Use another platform"
 msgstr "Andere Plattform wählen"
 
 #: src/routes/_shell.settings.members.tsx
-msgid "Use the chat, Knowledge and the apps shared with them"
-msgstr "Den Chat, Wissen und die mit ihnen geteilten Apps nutzen"
+msgid "Use the chat, Brain and the apps shared with them"
+msgstr "Den Chat, Gehirn und die mit ihnen geteilten Apps nutzen"
 
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
@@ -14150,8 +14147,8 @@ msgstr "Melden Sie sich mit dem Konto Ihrer Organisation an, um fortzufahren."
 msgid "Used a connected tool"
 msgstr "Ein verbundenes Tool verwendet"
 
+#: src/brain-collections/document.tsx
 #: src/engines/resource-bindings.tsx
-#: src/knowledge/document.tsx
 msgid "Used by"
 msgstr "Verwendet von"
 
@@ -14227,9 +14224,9 @@ msgstr "Fakten zu Anbieter, Datenverarbeitung und Governance."
 msgid "Verified"
 msgstr "Verifiziert"
 
+#: src/brain-collections/document.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
-#: src/knowledge/document.tsx
 #: src/routes/_shell.onboarding.interviewers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -14252,7 +14249,7 @@ msgstr "Version {0}; jetzt ist es Version {1}"
 msgid "Version {currentVersion}"
 msgstr "Version {currentVersion}"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 msgid "Version {number}"
 msgstr "Version {number}"
 
@@ -14260,7 +14257,7 @@ msgstr "Version {number}"
 msgid "Version {number} of {latest}"
 msgstr "Version {number} von {latest}"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 msgid "Version {number}, current"
 msgstr "Version {number}, aktuell"
 
@@ -14566,7 +14563,7 @@ msgctxt "inbox sort"
 msgid "What blocks first, then newest"
 msgstr "Was blockiert zuerst, dann neueste"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
 msgstr "Was sich geändert hat"
@@ -14596,7 +14593,7 @@ msgstr "Was jede Rolle in Grasp darf. Ein Admin gibt jedem Mitglied seine."
 msgid "What each workflow's model calls cost this month, most first, and how often it ran."
 msgstr "Was die Modellaufrufe jedes Workflows diesen Monat gekostet haben, die höchsten zuerst, und wie oft er gelaufen ist."
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "What every agent has in its context, all the time."
 msgstr "Was jeder Agent ständig im Kontext hat."
 
@@ -15289,8 +15286,8 @@ msgid "Worked out daily, last on {date}."
 msgstr "Täglich ermittelt, zuletzt am {date}."
 
 #: src/activity/audit-words.ts
-msgid "Worked out how knowledge is used"
-msgstr "Ermittelt, wie Wissen genutzt wird"
+msgid "Worked out how brain is used"
+msgstr ""
 
 #: src/activity/audit-words.ts
 msgid "Worked out what could be improved"
@@ -15512,8 +15509,8 @@ msgstr "Ja, das stimmt."
 msgid "Yes: its hash matches, and it links to the event before it."
 msgstr "Ja: Sein Hash stimmt, und es ist mit dem vorherigen Ereignis verknüpft."
 
+#: src/brain-collections/timeline.tsx
 #: src/connections/connection-list.tsx
-#: src/knowledge/timeline.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
@@ -15592,7 +15589,7 @@ msgstr "Sie:"
 msgid "You’re about to visit an external website."
 msgstr "Sie sind dabei, eine externe Website zu besuchen."
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
 msgstr "Sie lesen Version {number}, gespeichert am {saved}. Die aktuelle Version ist {current}."
 
@@ -15717,7 +15714,7 @@ msgctxt "part of an interview"
 msgid "Your story"
 msgstr "Ihre Geschichte"
 
-#: src/onboarding/knowledge-bar.tsx
+#: src/onboarding/brain-bar.tsx
 msgid "Your team can start at {threshold}%"
 msgstr "Ihr Team kann bei {threshold} % starten"
 

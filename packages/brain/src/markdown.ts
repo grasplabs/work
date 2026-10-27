@@ -1,4 +1,4 @@
-import { linkPath, wikiLinkPattern } from "./knowledge.ts";
+import { linkPath, wikiLinkPattern } from "./documents-contract.ts";
 
 // How a document's Markdown becomes sections and links. Line based, and
 // deliberately small: ATX headings (`# Title`) start sections, `[[links]]`

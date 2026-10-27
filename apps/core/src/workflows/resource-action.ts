@@ -4,7 +4,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { isolateArgumentDepth } from "@grasp-os/shared/stores";
 import { passedBound } from "@grasp-os/shared/value-bounds";
-import { knowledgeUseOperations } from "@grasp-os/shared/workflow-modules";
+import { brainUseOperations } from "@grasp-os/shared/workflow-modules";
 import type { SealedUse } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { RpcTarget } from "cloudflare:workers";
@@ -62,8 +62,8 @@ import { filesCallOperations } from "./run-files.ts";
 //   (`ActionEffects.refused`) before the task fails: once per attempt,
 //   from what the host knows, a binding named only when it is declared.
 //   A refusal `make` gave has its own receipt there already.
-// - Reading more than its knowledge or template uses name (GRA-700). A
-//   knowledge use reaches its binding's one collection, with only the
+// - Reading more than its brain or template uses name (GRA-700). A
+//   brain use reaches its binding's one collection, with only the
 //   operations it declares; a template use, its binding's pinned version.
 //   What each reads, as the run's person may, is resource-reads.ts's.
 // - A revoked package acting on (GRA-700). An action's module may import
@@ -110,11 +110,11 @@ const modelRequestSchema = z.strictObject({
 });
 
 /**
- * What an action asks of a knowledge binding: one of the operations of its
+ * What an action asks of a brain binding: one of the operations of its
  * collection, and its request (GRA-700). The collection is the binding's.
  */
-const knowledgeRequestSchema = z.strictObject({
-  operation: z.enum(knowledgeUseOperations),
+const brainRequestSchema = z.strictObject({
+  operation: z.enum(brainUseOperations),
   arguments: jsonSchema,
 });
 
@@ -218,7 +218,7 @@ class ActionHost extends RpcTarget {
           kind: use.kind,
           operations: new Set(
             use.kind === "connector" ||
-              use.kind === "knowledge" ||
+              use.kind === "brain" ||
               use.kind === "files"
               ? use.operations
               : []
@@ -385,8 +385,8 @@ class ActionHost extends RpcTarget {
         ordinal
       );
     }
-    if (kind === "knowledge") {
-      const parsed = knowledgeRequestSchema.safeParse(request);
+    if (kind === "brain") {
+      const parsed = brainRequestSchema.safeParse(request);
       if (!parsed.success) {
         return this.#refuse(
           "request_invalid",
@@ -404,7 +404,7 @@ class ActionHost extends RpcTarget {
       }
       return await this.#effects.make(
         {
-          name: "grasp.knowledge",
+          name: "grasp.brain",
           binding: alias,
           operation: parsed.data.operation,
           arguments: parsed.data.arguments,

@@ -8,7 +8,7 @@ import { resource } from "../src/action.ts";
 
 /** Why declaring `kind` use `docs` with `options` was refused. */
 const refusalOf = (
-  kind: "knowledge" | "connector" | "files",
+  kind: "brain" | "connector" | "files",
   options: unknown
 ): string => {
   try {
@@ -24,17 +24,12 @@ describe("an action's declared uses", () => {
     ["no operations", []],
     ["the same operation twice", ["search", "search"]],
     ["more operations than there are", ["search", "read", "recall", "search"]],
-  ])(
-    "a knowledge use with %s is refused as a knowledge use's",
-    (_case, operations) => {
-      expect(refusalOf("knowledge", { operations })).toMatch(
-        /knowledge use's/u
-      );
-    }
-  );
+  ])("a brain use with %s is refused as a brain use's", (_case, operations) => {
+    expect(refusalOf("brain", { operations })).toMatch(/brain use's/u);
+  });
 
-  test("a knowledge use of an operation it has no such name for is refused", () => {
-    expect(refusalOf("knowledge", { operations: ["delete"] })).toMatch(
+  test("a brain use of an operation it has no such name for is refused", () => {
+    expect(refusalOf("brain", { operations: ["delete"] })).toMatch(
       /"search", "read" and "recall"/u
     );
   });

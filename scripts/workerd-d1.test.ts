@@ -247,7 +247,7 @@ describe("the on-prem D1 service", () => {
     });
   });
 
-  it("searches full text with FTS5, as core's knowledge search does", async () => {
+  it("searches full text with FTS5, as core's brain search does", async () => {
     const served = await serve(
       [
         {

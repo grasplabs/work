@@ -57,7 +57,7 @@ interface __BaseEnv_Env {
    * browser. Without it they carry the AI binding's placeholder.
    */
   AI_GATEWAY_TOKEN?: string;
-  /** Memory files' size limits, in tokens (src/knowledge/memory-files.ts): JSON. */
+  /** Memory files' size limits, in tokens (src/brain/memory-files.ts): JSON. */
   MEMORY_LIMITS?: unknown;
   /**
    * Lower limits on an App's npm packages than the defaults
@@ -110,7 +110,7 @@ interface __BaseEnv_Env {
   /**
    * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts),
    * and for an extraction, a screen build and a package build on the
-   * sandbox host (src/knowledge/extract.ts, src/platform-sandbox.ts).
+   * sandbox host (src/brain/extract.ts, src/platform-sandbox.ts).
    */
   SANDBOX_DEADLINE_MS?: string;
   /**

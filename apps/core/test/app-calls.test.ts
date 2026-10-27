@@ -1,9 +1,9 @@
 import { appCallLimits } from "@grasp-os/shared/apps";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import type { BrainDocumentsApi } from "@grasp-os/shared/brain-documents";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import type { AppId } from "@grasp-os/shared/ids";
 import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
-import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
@@ -20,8 +20,12 @@ import { callExport } from "../src/app-calls.ts";
 import { callApp, callTimeoutMs, waitsForAskMs } from "../src/app.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { release, requestGranted, serverBuilt } from "./apps.ts";
+import {
+  collectionWithNote,
+  newTeam,
+  readCollection,
+} from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -1395,10 +1399,10 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
 
   it("carry restricted mode from the App that read restricted data to the other, both ways", async () => {
     const admin = await personApi("admin");
-    const knowledge: { knowledge: KnowledgeApi } = {
-      knowledge: admin.api.knowledge,
+    const brain: { brain: BrainDocumentsApi } = {
+      brain: admin.api.brain,
     };
-    const payroll = await collectionWithNote(knowledge, {
+    const payroll = await collectionWithNote(brain, {
       name: "Payroll",
       access: "teams",
       teams: [await newTeam(admin, [])],
@@ -1460,7 +1464,7 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
   it("restrict the calling App when the called one fails after reading restricted data", async () => {
     const admin = await personApi("admin");
     const payroll = await collectionWithNote(
-      { knowledge: admin.api.knowledge },
+      { brain: admin.api.brain },
       {
         name: "Payroll",
         access: "teams",
@@ -1507,7 +1511,7 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     ]);
     const teamId = await newTeam(admin, [member]);
     const finance = await collectionWithNote(
-      { knowledge: admin.api.knowledge },
+      { brain: admin.api.brain },
       { name: "Finance", access: "teams", teams: [teamId] }
     );
     const [reader, crm, writer, bystander, quiet] = await Promise.all([
@@ -1576,7 +1580,7 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       });
       const admin = await personApi("admin");
       const { collectionId } = await collectionWithNote(
-        { knowledge: admin.api.knowledge },
+        { brain: admin.api.brain },
         { name: "Handbook", access: "everyone" }
       );
       const [invoicing, crm] = await Promise.all([

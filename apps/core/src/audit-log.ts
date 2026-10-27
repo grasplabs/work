@@ -48,12 +48,12 @@ import type {
   ChainLink,
   StretchVerification,
 } from "./audit-chain.ts";
+import { BrainTallier } from "./brain/usage-tally.ts";
+import type { BrainTally } from "./brain/usage-tally.ts";
 import migrations from "./db/audit-log/migrations/migrations.js";
 import { archives, events } from "./db/audit-log/schema.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import { inJurisdiction } from "./durable-objects.ts";
-import { KnowledgeTallier } from "./knowledge/usage-tally.ts";
-import type { KnowledgeTally } from "./knowledge/usage-tally.ts";
 import { SignalTallier } from "./signal-tally.ts";
 import type { SignalTally } from "./signal-tally.ts";
 
@@ -258,14 +258,14 @@ export interface SearchRange {
 export interface TallyWanted {
   /** The improvement signals': of the entries received from `from` on. */
   signals?: { from: string };
-  /** Knowledge's usage signals': reads and questions, each from its time. */
-  knowledge?: { readsFrom: string; questionsFrom: string };
+  /** The Brain's usage signals': reads and questions, each from its time. */
+  brain?: { readsFrom: string; questionsFrom: string };
 }
 
 /** A stretch's partial totals, for those that wanted them. */
 export interface StretchTally {
   signals?: SignalTally;
-  knowledge?: KnowledgeTally;
+  brain?: BrainTally;
   /** Where to carry on, or `null` once the range is read. */
   next: number | null;
 }
@@ -571,8 +571,8 @@ export class AuditLog extends DurableObject<Env> {
    * {@link searchScanMax} entries, so only partial totals leave the
    * object: for the improvement signals, model calls' cost per workflow
    * run and searches that found nothing (src/signal-tally.ts); for
-   * Knowledge's usage signals, the documents read and the searches that
-   * found nothing by collection (src/knowledge/usage-tally.ts). Each only
+   * The Brain's usage signals, the documents read and the searches that
+   * found nothing by collection (src/brain/usage-tally.ts). Each only
    * while `wanted` asks for it. `next` says where to carry on, or is
    * `null` once the range is read. `null` instead when retention has
    * archived where it would read.
@@ -588,16 +588,13 @@ export class AuditLog extends DurableObject<Env> {
       wanted.signals === undefined
         ? undefined
         : new SignalTallier(wanted.signals.from);
-    const knowledge =
-      wanted.knowledge === undefined
+    const brain =
+      wanted.brain === undefined
         ? undefined
-        : new KnowledgeTallier(
-            wanted.knowledge.readsFrom,
-            wanted.knowledge.questionsFrom
-          );
+        : new BrainTallier(wanted.brain.readsFrom, wanted.brain.questionsFrom);
     const totals = (next: number | null): StretchTally => ({
       signals: signals?.totals(),
-      knowledge: knowledge?.totals(),
+      brain: brain?.totals(),
       next,
     });
     if (low > range.high) {
@@ -623,7 +620,7 @@ export class AuditLog extends DurableObject<Env> {
       const event = parseStored(entry.event);
       if (event !== null) {
         signals?.add(event, entry.receivedAt);
-        knowledge?.add(event, entry.receivedAt);
+        brain?.add(event, entry.receivedAt);
       }
     }
     return totals(last === undefined || last >= range.high ? null : last);

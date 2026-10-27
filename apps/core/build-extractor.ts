@@ -1,9 +1,9 @@
 /**
- * Builds the extractor (src/knowledge/extractor/worker.ts) into one ES
+ * Builds the extractor (src/brain/extractor/worker.ts) into one ES
  * module among core's static assets, once per release at core's build
  * time, as the App compiler is. Core reads it from there for each
  * extraction and runs it in a Dynamic Worker of its own
- * (src/knowledge/extract.ts); its libraries (pdf.js above all) never load
+ * (src/brain/extract.ts); its libraries (pdf.js above all) never load
  * in core's own isolate.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -13,7 +13,7 @@ import path from "node:path";
 import { build } from "vite-plus";
 import type { Rolldown } from "vite-plus";
 
-import { extractorAsset } from "./src/knowledge/extractor/asset.ts";
+import { extractorAsset } from "./src/brain/extractor/asset.ts";
 
 const root = import.meta.dirname;
 
@@ -32,7 +32,7 @@ const bundleExtractor = async (): Promise<string> => {
     resolve: { conditions: ["workerd", "worker", "browser"] },
     ssr: { noExternal: true, target: "webworker" },
     build: {
-      ssr: "src/knowledge/extractor/worker.ts",
+      ssr: "src/brain/extractor/worker.ts",
       write: false,
       minify: true,
       target: "es2022",

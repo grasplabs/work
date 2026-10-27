@@ -8,21 +8,21 @@ import { callAppFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, setCurrentVersion } from "../src/apps.ts";
-import { createCollection } from "../src/knowledge/collection-rules.ts";
-import { saveDocument } from "../src/knowledge/person-writes.ts";
+import { createCollection } from "../src/brain/collection-rules.ts";
+import { saveDocument } from "../src/brain/person-writes.ts";
 import {
   grantPermission,
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
-import { knowledgeFingerprintOf } from "../src/resource-knowledge.ts";
+import { brainFingerprintOf } from "../src/resource-brain.ts";
 import { isRestricted } from "../src/restricted.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
 // An App's skills (GRA-310): `skillsSelect` and `skillsRead` operations of
-// a knowledge resource, served by the Brain's one selection and pinned
+// a brain resource, served by the Brain's one selection and pinned
 // read, under the same grants as the App's recall (brain-app-recall.test.ts;
 // the threat model is on the issue). How it can fail, and what each test
 // holds it to:
@@ -49,7 +49,7 @@ export default defineSchema({
   "operations/skills.ts": `import { resource, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const how = resource.knowledge("how", {
+export const how = resource.brain("how", {
   operations: ["skillsSelect", "skillsRead"],
   collections: ["company", "secret"],
 });
@@ -218,7 +218,7 @@ const skillsApp = async () => {
   await approveResourceBinding(env, admin, {
     app: sealed.app,
     alias: "how",
-    target: { kind: "knowledge", collections },
+    target: { kind: "brain", collections },
     reviewed: { version: 1 },
   });
   return {
@@ -362,21 +362,21 @@ describe("an App's skills", setUpTime, () => {
   });
 
   it("keeps the fingerprint of an App that declares no skill operation as it was approved, and changes only theirs that do", async () => {
-    // The knowledge contract's fingerprint before the skill operations,
-    // which every knowledge approval until then holds.
+    // The brain contract's fingerprint before the skill operations,
+    // which every brain approval until then holds.
     const approvedBefore =
-      "d2f36f61d3234407ab3e46b7445410ad4cab0a6dbd71d984859bcbeb684265dd";
+      "eff993d49ede9aaa9847e1855c645eb55a602340e5d62855cf50616721fd6743";
 
     expect({
-      search: await knowledgeFingerprintOf(["search"]),
-      readAndRecall: await knowledgeFingerprintOf(["read", "recall"]),
-      all: await knowledgeFingerprintOf(["search", "read", "recall"]),
+      search: await brainFingerprintOf(["search"]),
+      readAndRecall: await brainFingerprintOf(["read", "recall"]),
+      all: await brainFingerprintOf(["search", "read", "recall"]),
       skills:
-        (await knowledgeFingerprintOf(["recall", "skillsSelect"])) ===
+        (await brainFingerprintOf(["recall", "skillsSelect"])) ===
         approvedBefore,
       inAnyOrder:
-        (await knowledgeFingerprintOf(["skillsRead", "skillsSelect"])) ===
-        (await knowledgeFingerprintOf(["skillsSelect", "skillsRead"])),
+        (await brainFingerprintOf(["skillsRead", "skillsSelect"])) ===
+        (await brainFingerprintOf(["skillsSelect", "skillsRead"])),
     }).toStrictEqual({
       search: approvedBefore,
       readAndRecall: approvedBefore,

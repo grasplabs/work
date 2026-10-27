@@ -282,7 +282,7 @@ export const portfolioOf = (views: AdminView[]): Portfolio => {
     views.reduce((total, view) => total + of(view), 0);
   return {
     orgs: views.length,
-    ready: views.filter((view) => view.knowledge.ready && !view.open).length,
+    ready: views.filter((view) => view.brain.ready && !view.open).length,
     open: views.filter((view) => view.open).length,
     fees: sum((view) => (view.contract.running ? view.contract.fee : 0)),
     spend: sum((view) => view.usage.thisMonth.spend),

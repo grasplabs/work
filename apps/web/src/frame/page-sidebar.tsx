@@ -13,7 +13,7 @@ import type { ReactElement, ReactNode } from "react";
 import { keepFolded, readFolded } from "../fold.ts";
 
 // The column beside a page's content, the same on every page that has one
-// (Chat, Knowledge): 288px open, with the page's first choice in its top
+// (Chat, Brain): 288px open, with the page's first choice in its top
 // row and the button that folds it beside that; folded, a 48px rail of
 // icons as wide as the site header's square for the sidebar trigger, so its
 // edge continues the line beside that trigger and nothing moves when it

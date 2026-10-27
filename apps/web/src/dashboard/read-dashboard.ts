@@ -1,7 +1,7 @@
 import type { AuditRecord } from "@grasp-os/shared/audit-log";
+import type { BrainSignals } from "@grasp-os/shared/brain-signals";
 import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
 import { expectedMessageOf } from "@grasp-os/shared/errors";
-import type { KnowledgeSignals } from "@grasp-os/shared/knowledge-signals";
 import type {
   OnboardingProgress,
   Programme,
@@ -216,10 +216,10 @@ const readSignals = async (
   session: Session,
   identity: Identity
 ): Promise<Signals> => {
-  const [apps, models, knowledge] = await Promise.all([
+  const [apps, models, brain] = await Promise.all([
     openableApps(session),
     listedOrNone(session.chats.models()),
-    orNone<KnowledgeSignals>(session.knowledgeSignals.list()),
+    orNone<BrainSignals>(session.brainSignals.list()),
   ]);
   const improvement = await readImprovement(
     session,
@@ -228,7 +228,7 @@ const readSignals = async (
   );
   return {
     improvement,
-    knowledge,
+    brain,
     engines: new Map(apps.map(({ id, name }) => [id, name])),
     model: models[0],
   };

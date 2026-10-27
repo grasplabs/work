@@ -1,4 +1,4 @@
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
+import type { PurgeInput } from "@grasp-os/shared/brain-documents";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import { compatibilityDate } from "@grasp-os/shared/runtime";
 import {
@@ -13,20 +13,20 @@ import { zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { localExtractor } from "../src/knowledge/extract.ts";
-import { extractorAsset } from "../src/knowledge/extractor/asset.ts";
+import { localExtractor } from "../src/brain/extract.ts";
+import { extractorAsset } from "../src/brain/extractor/asset.ts";
 import {
   extractUpload,
   extractionRunId,
   failUpload,
   originalKey,
   uploadFile,
-} from "../src/knowledge/uploads.ts";
+} from "../src/brain/uploads.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
+import { newTeam, storedVersionTexts } from "./brain-collections.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, storedVersionTexts } from "./knowledge.ts";
 import { finished } from "./runs.ts";
 import { signInConfig } from "./sign-in-config.ts";
 import {
@@ -40,7 +40,7 @@ import {
   whoami,
 } from "./sign-in.ts";
 
-// Files uploaded into Knowledge, through the API people use: each becomes
+// Files uploaded into the Brain, through the API people use: each becomes
 // a document at its name, its text extracted by core's own workflow on the
 // engine, searchable by section once ready; the same name again is the
 // next version; a file that can't be read fails with a reason its
@@ -61,7 +61,7 @@ const fixture = async (name: string): Promise<Uint8Array> => {
 /** Someone signed in, with a collection of their own. */
 const personWithCollection = async () => {
   const person = await signedInApi(idp, "user");
-  const collection = await person.api.knowledge.createCollection({
+  const collection = await person.api.brain.createCollection({
     name: `Files ${unique()}`,
     access: "me",
   });
@@ -333,7 +333,7 @@ describe("uploads", { timeout: 60_000 }, () => {
       uploaded(person, "offices.xlsx"),
     ]);
     const search = async (query: string) => {
-      const { hits } = await person.api.knowledge.search(query, {
+      const { hits } = await person.api.brain.search(query, {
         collectionId: person.collectionId,
       });
       return hits.map(({ path, title, type, headings }) => ({
@@ -358,11 +358,11 @@ describe("uploads", { timeout: 60_000 }, () => {
       audited: [pdf, docx, xlsx].map(({ id, documentId }) => ({
         received: events.some(
           ({ action, target }) =>
-            action === "knowledge.upload.received" && target?.id === id
+            action === "brain.upload.received" && target?.id === id
         ),
         saved: events.some(
           ({ action, target }) =>
-            action === "knowledge.document.saved" && target?.id === documentId
+            action === "brain.document.saved" && target?.id === documentId
         ),
       })),
     }).toStrictEqual({
@@ -419,10 +419,10 @@ describe("uploads", { timeout: 60_000 }, () => {
       "travel-policy-2.docx",
       "Policy.docx"
     );
-    const document = await person.api.knowledge.getDocument(
+    const document = await person.api.brain.getDocument(
       second.documentId ?? ""
     );
-    const { versions } = await person.api.knowledge.history(document.id);
+    const { versions } = await person.api.brain.history(document.id);
 
     expect({
       first: [first.status, first.version],
@@ -453,9 +453,7 @@ describe("uploads", { timeout: 60_000 }, () => {
     });
     await runCron();
     const ended_ = await ended(person.api, earlier);
-    const document = await person.api.knowledge.getDocument(
-      later.documentId ?? ""
-    );
+    const document = await person.api.brain.getDocument(later.documentId ?? "");
 
     expect({
       earlier: ended_.failure?.code,
@@ -473,10 +471,10 @@ describe("uploads", { timeout: 60_000 }, () => {
     });
     // Someone saves the document between the extraction's read of its
     // version and its save.
-    const knowledge = racing(
-      env.KNOWLEDGE,
+    const brain = racing(
+      env.BRAIN_DB,
       async () =>
-        await person.api.knowledge.saveDocument({
+        await person.api.brain.saveDocument({
           collectionId: person.collectionId,
           path: "Policy.docx",
           text: "# Policy\nEdited by hand.",
@@ -484,20 +482,18 @@ describe("uploads", { timeout: 60_000 }, () => {
         })
     );
     const raced = await outcome(
-      extractUpload({ ...env, KNOWLEDGE: knowledge }, second)
+      extractUpload({ ...env, BRAIN_DB: brain }, second)
     );
     // The step's retry.
     await extractUpload(env, second);
-    const { versions } = await person.api.knowledge.history(
-      first.documentId ?? ""
-    );
+    const { versions } = await person.api.brain.history(first.documentId ?? "");
 
     expect({
       raced,
       saved: await person.api.uploads.get(second),
       history: versions.map(({ number, message }) => [number, message]),
     }).toMatchObject({
-      raced: "knowledge.conflict",
+      raced: "brain.conflict",
       saved: { status: "ready", version: 3 },
       history: [
         [3, "Uploaded Policy.docx"],
@@ -511,7 +507,7 @@ describe("uploads", { timeout: 60_000 }, () => {
     const person = await personWithCollection();
     const failed = await uploaded(person, "broken.pdf");
     const events = await allEvents();
-    const { documents } = await person.api.knowledge.listDocuments(
+    const { documents } = await person.api.brain.listDocuments(
       person.collectionId
     );
 
@@ -535,8 +531,8 @@ describe("uploads", { timeout: 60_000 }, () => {
       stored: false,
       documents: 0,
       audited: [
-        ["knowledge.upload.received", null],
-        ["knowledge.upload.failed", "upload.unreadable"],
+        ["brain.upload.received", null],
+        ["brain.upload.failed", "upload.unreadable"],
       ],
     });
   });
@@ -587,7 +583,7 @@ describe("uploads", { timeout: 60_000 }, () => {
   it("read a sheet of thousands of rows", async () => {
     const person = await personWithCollection();
     const upload = await uploaded(person, "orders.xlsx");
-    const { hits } = await person.api.knowledge.search("Zebra Logistics", {
+    const { hits } = await person.api.brain.search("Zebra Logistics", {
       collectionId: person.collectionId,
     });
 
@@ -718,7 +714,7 @@ describe("uploads", { timeout: 60_000 }, () => {
 
     expect(failures).toStrictEqual({
       malformed: "upload.unreadable",
-      oversized: "knowledge.too_large",
+      oversized: "brain.too_large",
       unknownReason: "upload.unreadable",
     });
   });
@@ -803,7 +799,7 @@ export default class extends WorkerEntrypoint {
     const person = await personWithCollection();
     const upload = await uploaded(person, "offices-relative.xlsx");
     const headingsOf = async (query: string) => {
-      const { hits } = await person.api.knowledge.search(query, {
+      const { hits } = await person.api.brain.search(query, {
         collectionId: person.collectionId,
       });
       return hits.map(({ headings }) => headings);
@@ -831,9 +827,7 @@ export default class extends WorkerEntrypoint {
       ),
     });
     const read = await ended(person.api, upload.id);
-    const document = await person.api.knowledge.getDocument(
-      read.documentId ?? ""
-    );
+    const document = await person.api.brain.getDocument(read.documentId ?? "");
 
     expect({
       status: read.status,
@@ -874,7 +868,7 @@ export default class extends WorkerEntrypoint {
       cleanups: cleanups?.n,
       failed: events.some(
         ({ action, target }) =>
-          action === "knowledge.upload.failed" && target?.id === id
+          action === "brain.upload.failed" && target?.id === id
       ),
     }).toStrictEqual({
       upload: { status: "ready", failure: null },
@@ -894,13 +888,13 @@ export default class extends WorkerEntrypoint {
       terms: ["facilities@example.com"],
       reason: "erasure_request",
     };
-    const { token } = await admin.api.knowledge.preparePurge(input);
+    const { token } = await admin.api.brain.preparePurge(input);
     const uploader = await person.api.whoami();
     // The purge lands while the next upload's original is being stored.
     const purgeThenPut = async (
       ...args: Parameters<R2Bucket["put"]>
     ): ReturnType<R2Bucket["put"]> => {
-      await admin.api.knowledge.purge(input, token);
+      await admin.api.brain.purge(input, token);
       return await env.FILES.put(...args);
     };
     const files = new Proxy(env.FILES, {
@@ -952,8 +946,8 @@ export default class extends WorkerEntrypoint {
       terms: ["Zanzibar"],
       reason: "erasure_request",
     };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    const result = await admin.api.knowledge.purge(input, plan.token);
+    const plan = await admin.api.brain.preparePurge(input);
+    const result = await admin.api.brain.purge(input, plan.token);
 
     expect({
       planned: [plan.documents, plan.originals],
@@ -971,7 +965,7 @@ export default class extends WorkerEntrypoint {
   it("read a workbook whose parts prefix their namespace", async () => {
     const person = await personWithCollection();
     const upload = await uploaded(person, "offices-prefixed.xlsx");
-    const { hits } = await person.api.knowledge.search("upkeep", {
+    const { hits } = await person.api.brain.search("upkeep", {
       collectionId: person.collectionId,
     });
 
@@ -1027,7 +1021,7 @@ export default class extends WorkerEntrypoint {
     const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
     const { userId } = await whoami(staffSession);
     const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
@@ -1064,7 +1058,7 @@ export default class extends WorkerEntrypoint {
       closed: await statusOf(afterClosing),
     }).toStrictEqual({
       open: { status: "ready", failure: null },
-      closed: { status: "failed", failure: "knowledge.forbidden" },
+      closed: { status: "failed", failure: "brain.forbidden" },
     });
   });
 
@@ -1072,7 +1066,7 @@ export default class extends WorkerEntrypoint {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
     const team = await newTeam(admin, [member]);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Team files ${unique()}`,
       access: "teams",
       teams: [team],
@@ -1086,11 +1080,11 @@ export default class extends WorkerEntrypoint {
       .bind(member.userId)
       .run();
     await runCron();
-    const { documents } = await admin.api.knowledge.listDocuments(collectionId);
+    const { documents } = await admin.api.brain.listDocuments(collectionId);
 
     await expect(ended(member.api, id)).resolves.toMatchObject({
       status: "failed",
-      failure: { code: "knowledge.forbidden" },
+      failure: { code: "brain.forbidden" },
     });
     expect(documents).toStrictEqual([]);
   });
@@ -1108,13 +1102,13 @@ export default class extends WorkerEntrypoint {
       terms: ["facilities@example.com"],
       reason: "erasure_request",
     };
-    const { token } = await admin.api.knowledge.preparePurge(input);
+    const { token } = await admin.api.brain.preparePurge(input);
     // The purge lands once the extraction has read the file, before it
     // reads the document's version.
     const readThenPurge = async (key: string) => {
       const original = await env.FILES.get(key);
       const bytes = await original?.arrayBuffer();
-      await admin.api.knowledge.purge(input, token);
+      await admin.api.brain.purge(input, token);
       return bytes === undefined
         ? null
         : { arrayBuffer: async () => await Promise.resolve(bytes) };
@@ -1170,8 +1164,8 @@ export default class extends WorkerEntrypoint {
       reason: "erasure_request",
     };
     const purgeOnce = async () => {
-      const { token } = await admin.api.knowledge.preparePurge(input);
-      return await outcome(admin.api.knowledge.purge(input, token));
+      const { token } = await admin.api.brain.preparePurge(input);
+      return await outcome(admin.api.brain.purge(input, token));
     };
     const whileSaving = await purgeOnce();
     const textsWhileSaving = await versionTexts(saved.documentId ?? "");
@@ -1187,7 +1181,7 @@ export default class extends WorkerEntrypoint {
       upload: await outcome(person.api.uploads.get(saving)),
       purged: texts.every((text) => !text.includes("facilities@example.com")),
     }).toStrictEqual({
-      whileSaving: "knowledge.conflict",
+      whileSaving: "brain.conflict",
       unchanged: 1,
       after: "ok",
       upload: "upload.not_found",
@@ -1213,9 +1207,7 @@ export default class extends WorkerEntrypoint {
         await finished(again);
       })
     );
-    const { versions } = await person.api.knowledge.history(
-      ready.documentId ?? ""
-    );
+    const { versions } = await person.api.brain.history(ready.documentId ?? "");
 
     expect({
       ready: await person.api.uploads.get(ready.id),
@@ -1266,7 +1258,7 @@ export default class extends WorkerEntrypoint {
       bytes,
     });
     // Everyone reads it; only its owner and admins change it.
-    const handbook = await admin.api.knowledge.createCollection({
+    const handbook = await admin.api.brain.createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
@@ -1289,8 +1281,8 @@ export default class extends WorkerEntrypoint {
       othersUpload: await outcome(other.api.uploads.get(upload.id)),
       ownUpload: await outcome(owner.api.uploads.get(upload.id)),
     }).toStrictEqual({
-      othersCollection: "knowledge.not_found",
-      onlyRead: "knowledge.forbidden",
+      othersCollection: "brain.document_not_found",
+      onlyRead: "brain.forbidden",
       othersUpload: "upload.not_found",
       ownUpload: "ok",
     });
@@ -1326,7 +1318,7 @@ export default class extends WorkerEntrypoint {
       signedOut: signedOut.status,
       audited: events.some(
         ({ action, target, detail }) =>
-          action === "knowledge.read" &&
+          action === "brain.read" &&
           target?.id === upload.documentId &&
           detail.read === "original"
       ),
@@ -1415,8 +1407,8 @@ export default class extends WorkerEntrypoint {
       terms: ["facilities@example.com"],
       reason: "erasure_request",
     };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    await admin.api.knowledge.purge(input, plan.token);
+    const plan = await admin.api.brain.preparePurge(input);
+    await admin.api.brain.purge(input, plan.token);
 
     expect({
       stored: await originalStored(person.collectionId, upload.id),
@@ -1437,8 +1429,8 @@ export default class extends WorkerEntrypoint {
       userId: person.userId,
       reason: "offboarding",
     };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    await admin.api.knowledge.purge(input, plan.token);
+    const plan = await admin.api.brain.preparePurge(input);
+    await admin.api.brain.purge(input, plan.token);
 
     expect({
       ready: upload.status,
@@ -1464,10 +1456,10 @@ export default class extends WorkerEntrypoint {
       userId: person.userId,
       reason: "offboarding",
     };
-    const { token } = await admin.api.knowledge.preparePurge(input);
-    // Knowledge refusing the batch that deletes the collection, once the
+    const { token } = await admin.api.brain.preparePurge(input);
+    // Brain refusing the batch that deletes the collection, once the
     // originals are gone.
-    const refusing = new Proxy(env.KNOWLEDGE, {
+    const refusing = new Proxy(env.BRAIN_DB, {
       get: (target, property) => {
         if (property === "batch") {
           return async (statements: D1PreparedStatement[]) => {
@@ -1489,11 +1481,11 @@ export default class extends WorkerEntrypoint {
       },
     });
     const { core } = await openRpc(admin.session, {
-      coreEnv: { ...env, KNOWLEDGE: refusing },
+      coreEnv: { ...env, BRAIN_DB: refusing },
     });
     let failed = "";
     try {
-      failed = await outcome(core.authenticate().knowledge.purge(input, token));
+      failed = await outcome(core.authenticate().brain.purge(input, token));
     } finally {
       core[Symbol.dispose]();
     }
@@ -1502,7 +1494,7 @@ export default class extends WorkerEntrypoint {
         const events = await allEvents();
         const purged = events.filter(
           (event) =>
-            event.action === "knowledge.purged" && event.target?.id === personal
+            event.action === "brain.purged" && event.target?.id === personal
         );
         if (purged.length === 0) {
           throw new Error("Not recorded yet");
@@ -1512,7 +1504,7 @@ export default class extends WorkerEntrypoint {
       { timeout: 10_000, interval: 100 }
     );
 
-    const { documents } = await person.api.knowledge.listDocuments(personal);
+    const { documents } = await person.api.brain.listDocuments(personal);
 
     expect({
       failed: failed !== "ok",

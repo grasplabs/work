@@ -47,13 +47,13 @@ import { auditableCode } from "./workflows/host.ts";
 // Improvement signals, level 1: where to look to improve the Apps'
 // workflows (@grasp-os/shared/signals has what each one means). Each is a
 // query over runs and decisions (the core database) and the audit log
-// (model calls' cost, Knowledge searches that found nothing), over the
+// (model calls' cost, Brain searches that found nothing), over the
 // last `signalWindowDays` days.
 //
 // They're computed once a UTC day and kept in `improvement_signals`, so
 // reading them is a few indexed queries. The first run of the 15-minute
 // cron trigger of a day that claims it (src/daily-claims.ts) computes
-// them, reading the audit log in the same pass as Knowledge's usage
+// them, reading the audit log in the same pass as the Brain's usage
 // signals (src/daily-signals.ts).
 //
 // A computation writes its signals under its own ID, in as many batches
@@ -728,7 +728,7 @@ const costSignals = (
   });
 
 /**
- * Unanswered Knowledge questions: searches that found nothing the asker
+ * Unanswered Brain questions: searches that found nothing the asker
  * could read, by their key (an HMAC of their words), for the App workflow
  * or App whose code asked, or the deployment for people and agents. The
  * most asked of each, at most `questionsPerScope`.

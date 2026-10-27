@@ -27,8 +27,8 @@ import type { Components, Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
+import { plainComponents, plainUrl } from "../brain-collections/markdown.tsx";
 import { downloadText } from "../export/export-file.tsx";
-import { plainComponents, plainUrl } from "../knowledge/markdown.tsx";
 import {
   cellsOf,
   codeOf,

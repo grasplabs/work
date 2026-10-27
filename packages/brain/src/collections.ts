@@ -6,10 +6,10 @@ import { auditedBatch, outboxedIfChanged } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { collections } from "./db/schema.ts";
+import { collectionErrors } from "./documents-contract.ts";
 import type { DetailValue } from "./events.ts";
 import { collectionIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
-import { knowledgeErrors } from "./knowledge.ts";
 
 export type CollectionRow = typeof collections.$inferSelect;
 
@@ -41,7 +41,7 @@ export const readableCollection = async (
         .get()
     : undefined;
   if (!row) {
-    throw knowledgeErrors.create("knowledge.not_found");
+    throw collectionErrors.create("brain.document_not_found");
   }
   return row;
 };
@@ -64,7 +64,7 @@ export const ensureCollection = async <C>(
     db.insert(collections).values(row).onConflictDoNothing(),
     outboxedIfChanged(brain, {
       actor,
-      action: "knowledge.collection.created",
+      action: "brain.collection.created",
       target: { type: "collection", id: row.id },
       detail: { ...detail, access, sensitive, source },
     }),

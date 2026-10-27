@@ -3,23 +3,23 @@ import { recall } from "@grasp-os/brain/recall";
 import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type {
   CollectionReader,
-  KnowledgeApi,
-} from "@grasp-os/shared/knowledge";
+  BrainDocumentsApi,
+} from "@grasp-os/shared/brain-documents";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { brainOf } from "../src/knowledge/ports.ts";
+import { brainOf } from "../src/brain/ports.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { newTeam, readCollection } from "./brain-collections.ts";
 import { actingFor, collectionIn, envOf } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
-// The Brain's recall (knowledge/recall.ts), through the boundaries callers
-// reach it by: a person's Knowledge RPC and a collection's stub; a chat's
-// own, `env.brain.recall`, is tested with the chat (agent-knowledge.test.ts).
+// The Brain's recall (brain/recall.ts), through the boundaries callers
+// reach it by: a person's Brain RPC and a collection's stub; a chat's
+// own, `env.brain.recall`, is tested with the chat (agent-brain.test.ts).
 // These tests start from the ways it can fail (GRA-296's threat note):
 // forged authority in the arguments, a filter wider than the caller's
 // reach, evidence from a collection the caller can't read, a binding kept
@@ -34,8 +34,8 @@ const setUpTime = { timeout: 60_000 };
 
 const personOf = async (role: Role) => {
   const person = await signedInApi(idp, role);
-  const knowledge: KnowledgeApi = person.api.knowledge;
-  return { ...person, knowledge };
+  const brain: BrainDocumentsApi = person.api.brain;
+  return { ...person, brain };
 };
 
 type Person = Awaited<ReturnType<typeof personOf>>;
@@ -69,11 +69,11 @@ const collectionSaying = async (
   access: "everyone" | "me",
   text: string
 ) => {
-  const { id: collectionId } = await owner.knowledge.createCollection({
+  const { id: collectionId } = await owner.brain.createCollection({
     name: `Handbook ${unique()}`,
     access,
   });
-  const document = await owner.knowledge.saveDocument({
+  const document = await owner.brain.saveDocument({
     collectionId,
     path: "onboarding.md",
     text,
@@ -114,14 +114,14 @@ describe("the Brain's recall", setUpTime, () => {
       "everyone",
       `# Onboarding\n\n## Owner\nJan owns ${word}.`
     );
-    const first = await admin.knowledge.recall({ query: word });
-    await admin.knowledge.saveDocument({
+    const first = await admin.brain.recall({ query: word });
+    await admin.brain.saveDocument({
       collectionId,
       path: "onboarding.md",
       text: `# Onboarding\n\n## Owner\nPriya owns ${word} now.`,
       ifVersion: 1,
     });
-    const second = await admin.knowledge.recall({ query: word });
+    const second = await admin.brain.recall({ query: word });
     expect({
       first: cited(first),
       second: cited(second).sources,
@@ -170,7 +170,7 @@ describe("the Brain's recall", setUpTime, () => {
         `On weekdays the ${word} depot opens at seven in the morning.`,
       ].join("\n")
     );
-    const pack = await admin.knowledge.recall({
+    const pack = await admin.brain.recall({
       query: `When does the ${word} depot open on weekdays?`,
       filters: { collectionIds: [collectionId] },
     });
@@ -202,23 +202,23 @@ describe("the Brain's recall", setUpTime, () => {
         async (forged) =>
           // SAFETY: invalid on purpose; the service must refuse it.
           // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-          await outcome(user.knowledge.recall(forged as RecallInput))
+          await outcome(user.brain.recall(forged as RecallInput))
       )
     );
     // Another person's collection and one that doesn't exist answer alike.
     const hidden = await outcome(
-      user.knowledge.recall({
+      user.brain.recall({
         query: word,
         filters: { collectionIds: [mine.collectionId] },
       })
     );
     const missing = await outcome(
-      user.knowledge.recall({
+      user.brain.recall({
         query: word,
         filters: { collectionIds: ["no-such-collection"] },
       })
     );
-    const unfiltered = await user.knowledge.recall({ query: word });
+    const unfiltered = await user.brain.recall({ query: word });
     expect({
       refused,
       hidden,
@@ -320,12 +320,12 @@ describe("the Brain's recall", setUpTime, () => {
         `## Three\n${word} three.`,
       ].join("\n\n")
     );
-    const all = await admin.knowledge.recall({ query: word });
-    const one = await admin.knowledge.recall({
+    const all = await admin.brain.recall({ query: word });
+    const one = await admin.brain.recall({
       query: word,
       budget: { maxItems: 1 },
     });
-    const fewTokens = await admin.knowledge.recall({
+    const fewTokens = await admin.brain.recall({
       query: word,
       budget: { maxTokens: 1 },
     });
@@ -361,8 +361,8 @@ describe("the Brain's recall", setUpTime, () => {
       "everyone",
       `# Long\n\n## Section\n${word} ${"filler ".repeat(2000)}`
     );
-    const found = await user.knowledge.recall({ query: word });
-    const nothing = await user.knowledge.recall({ query: rareWord() });
+    const found = await user.brain.recall({ query: word });
+    const nothing = await user.brain.recall({ query: rareWord() });
     const logged = await allEvents();
     const events = logged.filter(
       ({ actor }) => actor.type === "person" && actor.userId === user.userId
@@ -375,20 +375,20 @@ describe("the Brain's recall", setUpTime, () => {
       ]);
     // A collection the person can read is added: what they may read changed.
     await collectionSaying(user, "me", "# Mine\nNothing here.");
-    const afterNew = await user.knowledge.recall({ query: word });
+    const afterNew = await user.brain.recall({ query: word });
     expect({
       quoted: found.items[0]?.statement.length,
       recalls,
       emptySearches: events.filter(
-        ({ action }) => action === "knowledge.search.empty"
+        ({ action }) => action === "brain.search.empty"
       ).length,
       sameAccess: nothing.accessRevision === found.accessRevision,
       changedAccess: afterNew.accessRevision === found.accessRevision,
     }).toStrictEqual({
       quoted: 4000,
       recalls: [
-        ["knowledge.search", true],
-        ["knowledge.search", false],
+        ["brain.search", true],
+        ["brain.search", false],
       ],
       emptySearches: 0,
       sameAccess: true,
@@ -402,12 +402,12 @@ describe("the Brain's recall", setUpTime, () => {
     const agent = newAgent();
     const word = rareWord();
     const team = await newTeam(admin, [admin]);
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await admin.brain.createCollection({
       name: `Team ${unique()}`,
       access: "teams",
       teams: [team],
     });
-    await admin.knowledge.saveDocument({
+    await admin.brain.saveDocument({
       collectionId,
       path: "plan.md",
       text: `# Plan\n${word}`,
@@ -446,7 +446,7 @@ describe("the Brain's recall", setUpTime, () => {
       "everyone",
       `# Long\n\n## Section\n${"filler ".repeat(1500)}${word} closes the matter. ${"tail ".repeat(400)}`
     );
-    const pack = await admin.knowledge.recall({ query: word });
+    const pack = await admin.brain.recall({ query: word });
     const statement = pack.items[0]?.statement ?? "";
     expect({
       holdsTheMatch: statement.includes(`${word} closes the matter.`),
@@ -461,7 +461,7 @@ describe("the Brain's recall", setUpTime, () => {
     const mine = await collectionSaying(admin, "me", `# Private\n${word}`);
     const asked = async (collectionId: string) =>
       await outcome(
-        user.knowledge.recall({
+        user.brain.recall({
           query: word,
           filters: { collectionIds: [collectionId] },
           budget: { deadlineMs: 1 },

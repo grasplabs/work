@@ -163,7 +163,7 @@ test("names each member's actions for them, and asks before making someone an ad
 });
 
 for (const [where, path, landed] of [
-  ["a shell page", "/knowledge", "Knowledge"],
+  ["a shell page", "/brain/collections", "Brain"],
   // Outside the shell, in the app's frame all the same.
   [
     "a decision page",
@@ -452,7 +452,7 @@ test("sends someone whose session ended elsewhere to sign in, and back to the pa
 }) => {
   const { member } = peopleIn("sessionEnded");
   await signInTo(context, member);
-  await page.goto("/knowledge");
+  await page.goto("/brain/collections");
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: "Domains" })).toBeVisible();
 

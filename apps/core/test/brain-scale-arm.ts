@@ -2,7 +2,7 @@
  * One arm of the Brain baseline at scale as CI runs it (GRA-678): the
  * smallest scale size, the frozen company grown by its generated
  * distractor chunks, over a cold and a warm repeat, with the gate reading
- * Knowledge by its row counts. Each arm runs in a file of its own
+ * Brain by its row counts. Each arm runs in a file of its own
  * (brain-scale.test.ts, brain-scale-agent.test.ts,
  * brain-scale-full-context.test.ts), on a company of its own: one run of
  * all three took over three minutes in CI, a shard's floor (GRA-1094).
@@ -63,7 +63,7 @@ export const brainScaleRun = (
         split: "dev",
         repeats,
         arms: [arm],
-        knowledgeState: "counts",
+        brainState: "counts",
         controls,
         controlTasks,
       }))();

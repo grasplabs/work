@@ -3,7 +3,7 @@
  * and 0101) can't be rewritten by an insert either: whatever form asks to
  * write over a key a table already holds, primary, unique or the implicit
  * rowid, the database refuses it and the row stays as it was. A new key is
- * written as before. Knowledge's sections refuse the same (knowledge
+ * written as before. The Brain's sections refuse the same (brain
  * migration 0014), so no replace leaves a search row behind. And a
  * migration sample's receipt is append-only: neither updated nor deleted.
  */
@@ -439,7 +439,7 @@ describe("immutable records", () => {
   });
 
   it("refuses a section written over its key or rowid, which would leave its search row", async () => {
-    const db = env.KNOWLEDGE;
+    const db = env.BRAIN_DB;
     const id = crypto.randomUUID();
     const section = (position: number): Row => ({
       document_id: `doc-${id}`,

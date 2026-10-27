@@ -6,10 +6,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { sourcesOfApps } from "../src/app-provenance.ts";
-import { mayRead } from "../src/knowledge/access.ts";
+import { mayRead } from "../src/brain/access.ts";
 import { outlook, published, requestGranted } from "./apps.ts";
+import { newTeam, readCollection, storedGrant } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, readCollection, storedGrant } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
 import {
   auditedDuring,
@@ -73,7 +73,7 @@ const collectionFor = async (
   team: string,
   sensitive = false
 ): Promise<string> => {
-  const { id } = await admin.api.knowledge.createCollection({
+  const { id } = await admin.api.brain.createCollection({
     name: `HR ${unique()}`,
     access: "teams",
     teams: [team],
@@ -123,11 +123,11 @@ const shareRefusal = async (
   }
 };
 
-/** The same reads, by Knowledge and by `mayRead`. */
-const same = (reads: boolean[]) => ({ knowledge: reads, mayRead: reads });
+/** The same reads, by the Brain and by `mayRead`. */
+const same = (reads: boolean[]) => ({ brain: reads, mayRead: reads });
 
 describe("who reads a collection the App read", () => {
-  it("is decided just as Knowledge decides who reads it", async () => {
+  it("is decided just as Brain decides who reads it", async () => {
     const admin = await personApi("admin");
     const [member, outsider] = await Promise.all([
       personApi("user"),
@@ -136,23 +136,23 @@ describe("who reads a collection the App read", () => {
     const team = await newTeam(admin, [member]);
     // Everyone's, a team's that its owner isn't in, and someone's own.
     const made = await Promise.all([
-      admin.api.knowledge.createCollection({
+      admin.api.brain.createCollection({
         name: `All ${unique()}`,
         access: "everyone",
       }),
-      admin.api.knowledge.createCollection({
+      admin.api.brain.createCollection({
         name: `Team ${unique()}`,
         access: "teams",
         teams: [team],
       }),
-      member.api.knowledge.createCollection({
+      member.api.brain.createCollection({
         name: `Mine ${unique()}`,
         access: "me",
       }),
     ]);
     const decided = async (person: Person) => {
       const [listed, { teams }] = await Promise.all([
-        person.api.knowledge.listCollections(),
+        person.api.brain.listCollections(),
         person.api.whoami(),
       ]);
       const reader = {
@@ -161,7 +161,7 @@ describe("who reads a collection the App read", () => {
         admin: false,
       };
       return {
-        knowledge: made.map(({ id }) => listed.some((one) => one.id === id)),
+        brain: made.map(({ id }) => listed.some((one) => one.id === id)),
         mayRead: made.map(({ access, owner, teams: teamIds }) =>
           mayRead(reader, { access, owner, teamIds })
         ),

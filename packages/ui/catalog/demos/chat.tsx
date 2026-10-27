@@ -130,7 +130,7 @@ const messages = [
   { id: "m1", text: "Hello there!", mine: true },
   { id: "m2", text: "Hi! How can I help?", mine: false },
   { id: "m3", text: "Where is the Q3 report?", mine: true },
-  { id: "m4", text: "In Knowledge, under Reports.", mine: false },
+  { id: "m4", text: "In Brain, under Reports.", mine: false },
 ];
 
 const MessageScrollerDemo = () => (

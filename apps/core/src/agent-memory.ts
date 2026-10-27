@@ -11,10 +11,10 @@ import {
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { forSandbox } from "./bindings.ts";
-import { saveUserMemory } from "./knowledge/memory.ts";
+import { saveUserMemory } from "./brain/memory.ts";
 
 // Memory for a chat's code: `await env.memory.saveUser({ text, ifVersion })`.
-// The chat is its person's own (`own` in knowledge/memory.ts), so its agent
+// The chat is its person's own (`own` in brain/memory.ts), so its agent
 // keeps what it knows about them in their USER.md, which every chat of
 // theirs then has in its memory. Saved as the chat's agent acting for
 // them, in their Personal collection: each version is in its history and
@@ -29,7 +29,7 @@ export class MemoryApi extends WorkerEntrypoint<Env, AgentScope> {
     await requireOpenRun(this.env, scope, "memory.saveUser");
     const method = "memory.saveUser";
     try {
-      // Recorded here when refused: knowledge records only a save.
+      // Recorded here when refused: brain records only a save.
       await admitEffect(this.env, scope, "memory.saveUser");
       const saved = await saveUserMemory(
         this.env,
@@ -42,7 +42,7 @@ export class MemoryApi extends WorkerEntrypoint<Env, AgentScope> {
           await admitEffect(this.env, scope, "memory.saveUser");
         }
       );
-      // Knowledge records the save; the chat shows it here.
+      // The Brain records the save; the chat shows it here.
       await recordToolCall(this.env, scope, {
         method,
         detail: { version: saved.currentVersion },

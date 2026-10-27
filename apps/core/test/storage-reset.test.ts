@@ -44,7 +44,7 @@ describe("the reset between test files", () => {
     const id = env.MODEL_LEDGER.newUniqueId();
     await leaveNote(namedLedger(name));
     await leaveNote(ledgerById(id));
-    await env.KNOWLEDGE.exec("CREATE TABLE left_behind (note TEXT)");
+    await env.BRAIN_DB.exec("CREATE TABLE left_behind (note TEXT)");
     await env.AUDIT_ARCHIVE.put("left-behind", "note");
 
     await scheduler.wait(quietMs);
@@ -54,7 +54,7 @@ describe("the reset between test files", () => {
     await expect(noteOf(namedLedger(name))).resolves.toBeUndefined();
     await expect(noteOf(ledgerById(id))).resolves.toBeUndefined();
     await expect(
-      env.KNOWLEDGE.prepare(
+      env.BRAIN_DB.prepare(
         "SELECT name FROM sqlite_master WHERE name = 'left_behind'"
       ).first()
     ).resolves.toBeNull();

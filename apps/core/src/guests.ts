@@ -1,5 +1,6 @@
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
+import { splitFrontmatterBlock } from "@grasp-os/shared/brain-documents";
 import { sha256Hex, randomToken } from "@grasp-os/shared/encoding";
 import { isExpectedError, requestErrors } from "@grasp-os/shared/errors";
 import {
@@ -20,7 +21,6 @@ import type {
 } from "@grasp-os/shared/guests";
 import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
-import { splitFrontmatterBlock } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { bindingTargetSchema } from "@grasp-os/shared/resource-bindings";
@@ -50,6 +50,7 @@ import {
 } from "./audit-outbox.ts";
 import { signInConfig } from "./auth/config.ts";
 import { memberRole, teamsOf } from "./auth/identity.ts";
+import { graspSkills } from "./brain/grasp-skills.ts";
 import {
   appResourceBindings,
   apps,
@@ -57,7 +58,6 @@ import {
   guestMessages,
 } from "./db/core/schema.ts";
 import { errorResponse } from "./errors.ts";
-import { graspSkills } from "./knowledge/grasp-skills.ts";
 import { gatewaySettings, models } from "./models.ts";
 import { authorize } from "./permissions.ts";
 import { boundedText, jsonOf } from "./request-body.ts";
@@ -87,7 +87,7 @@ import { boundedText, jsonOf } from "./request-body.ts";
 // - The guest reaching the company's data: the model is called with no
 //   tools, only the skill's guidance and the chat so far, through the
 //   model gateway (its allowlist, rules and budgets), as the App for the
-//   member it was made for. There is no Knowledge, connection, App, memory
+//   member it was made for. There is no Brain, connection, App, memory
 //   or agent in reach: nothing is there to read or change.
 // - The guest's words taken as instructions later: they are kept as plain
 //   text, apart from everything else, and an App reads them back only

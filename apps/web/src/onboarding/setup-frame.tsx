@@ -5,8 +5,8 @@ import type { ReactNode } from "react";
 import { GraspMark } from "../grasp-mark.tsx";
 import { LanguageButton } from "../language-picker.tsx";
 import { SoundControls } from "../voice/sound-controls.tsx";
-import { KnowledgeCorner } from "./knowledge-bar.tsx";
-import type { Knowledge } from "./knowledge-bar.tsx";
+import { BrainCorner } from "./brain-bar.tsx";
+import type { Brain } from "./brain-bar.tsx";
 import { stepIndex, steps, wizardSteps } from "./setup.ts";
 import type { SetupStep } from "./setup.ts";
 
@@ -71,14 +71,14 @@ const StepDots = ({
 export const SetupFrame = ({
   step,
   reached,
-  knowledge,
+  brain,
   onGo,
   onExit,
   children,
 }: {
   step: SetupStep;
   reached: number;
-  knowledge: Knowledge;
+  brain: Brain;
   onGo: (step: SetupStep) => void;
   onExit: () => void;
   children: ReactNode;
@@ -114,9 +114,7 @@ export const SetupFrame = ({
     <div className="bg-background flex min-h-svh flex-col text-sm">
       {/* Nothing up here but how much Grasp knows, in the middle. */}
       <header className="flex h-18 flex-none items-center justify-center px-4 sm:px-10">
-        {index >= stepIndex("company") ? (
-          <KnowledgeCorner {...knowledge} />
-        ) : null}
+        {index >= stepIndex("company") ? <BrainCorner {...brain} /> : null}
       </header>
       <main className="flex flex-1 flex-col items-center px-4 py-2">
         <div className="my-auto flex w-full justify-center">{children}</div>

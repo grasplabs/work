@@ -1,13 +1,14 @@
 /**
  * What the company brain is built from: everything steps 1 and 2 of the
  * onboarding collected, as records. The prototype read these from its mock
- * workspace; here they are what core assembles (`brain.read`, core's
+ * workspace; here they are what core assembles (`brain.readWorkspace`, core's
  * brain-rpc.ts) and the web app's brain is built from. Only the fields the
  * brain reads are here, as the prototype named them.
  */
 
 import { z } from "zod";
 
+import type { BrainDocumentsApi, DocumentType } from "./brain-documents.ts";
 import type {
   BrainRecordInput,
   BrainRecordsAdded,
@@ -16,7 +17,6 @@ import type {
 import { defineErrorFamily } from "./errors.ts";
 import { documentIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
-import type { DocumentType } from "./knowledge.ts";
 
 /** The standard business processes a workflow belongs to. */
 export type ProcessId = "o2c" | "i2r" | "p2p" | "r2c" | "r2r" | "h2r";
@@ -129,7 +129,7 @@ export interface Tool {
 }
 
 /**
- * Most Knowledge documents with a transcript `brain.read` lists as
+ * Most Brain documents with a transcript `brain.readWorkspace` lists as
  * sources, the newest saved first: each by how many turns it has, never
  * the turns, which `brain.transcript` reads when the source is opened.
  */
@@ -186,13 +186,13 @@ export interface Source {
   /** An interview written up as an article, paragraph by paragraph. */
   article?: string[];
   /**
-   * How many turns its transcript has, when it has one: `brain.read` says
+   * How many turns its transcript has, when it has one: `brain.readWorkspace` says
    * only this; `brain.transcript(id)` reads the turns and chapters.
    */
   transcriptTurns?: number;
   /**
    * The whole conversation, word for word; its statements are highlights
-   * in it. Never sent by `brain.read`: the page puts here what
+   * in it. Never sent by `brain.readWorkspace`: the page puts here what
    * `brain.transcript` read.
    */
   transcript?: Transcript;
@@ -376,8 +376,8 @@ export interface Workspace {
  * onboarding, the brain's records and the connections. Each part as the
  * person may read it; what core has no source for yet comes back empty.
  */
-export interface BrainApi {
-  read: () => Promise<Workspace>;
+export interface BrainApi extends BrainDocumentsApi {
+  readWorkspace: () => Promise<Workspace>;
   /**
    * The board's goals (`Workspace.goals`) alone, for the dashboard, as
    * `read` gives them: every member reads them, each with the workflows
@@ -455,7 +455,7 @@ export type BrainChangesOptions = z.input<typeof brainChangesOptionsSchema>;
  */
 export type BrainChange =
   | {
-      /** A Knowledge document added or changed: what a listing shows of it, never its text. */
+      /** A Brain document added or changed: what a listing shows of it, never its text. */
       kind: "document";
       /** ISO 8601: when it was last changed. */
       at: string;
@@ -471,7 +471,7 @@ export type BrainChange =
     }
   | {
       /**
-       * A source the onboarding gave the brain, as `brain.read`'s sources
+       * A source the onboarding gave the brain, as `brain.readWorkspace`'s sources
        * name it (the kickoff, the staff list): for admins, who read them.
        */
       kind: "source";
@@ -515,7 +515,7 @@ export interface BrainNoteLink {
 }
 
 /**
- * One note of the brain: what core records today, a Knowledge document,
+ * One note of the brain: what core records today, a Brain document,
  * what a listing shows of it (never its text) and its links. A union on
  * `kind` once core keeps other records.
  */

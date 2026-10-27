@@ -22,7 +22,7 @@ import {
   voiceClock,
 } from "../voice/voice.ts";
 import type { Tone } from "../voice/voice.ts";
-import { KnowledgeBar } from "./knowledge-bar.tsx";
+import { BrainBar } from "./brain-bar.tsx";
 import { Explained, Primary, tones } from "./setup-parts.tsx";
 import type { StepProps } from "./setup-steps.tsx";
 import { readingSeconds } from "./setup.ts";
@@ -591,7 +591,7 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
           !gate && "opacity-0"
         )}
       >
-        <KnowledgeBar
+        <BrainBar
           caption={told ? t`${percent}% known now` : undefined}
           gate={gate}
           parts={shown}

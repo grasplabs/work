@@ -288,7 +288,7 @@ export const templateAdapter: ResourceAdapter<"template"> = {
             if (read === undefined) {
               throw operationErrors.create("resource.unavailable");
             }
-            // Recorded as Knowledge records an App's reads, through the
+            // Recorded as the Brain records an App's reads, through the
             // outbox, which never fails the read.
             await keepAuditEvent(env, drizzle(env.DB), {
               actor: caller.actor,

@@ -8,6 +8,12 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  graspSkills,
+  graspSkillsCollectionId,
+  syncGraspSkills,
+} from "../src/brain/grasp-skills.ts";
+import type { GraspSkill } from "../src/brain/grasp-skills.ts";
+import {
   builtins,
   builtinsInstaller,
   builtinsRetryMs,
@@ -16,13 +22,7 @@ import {
   release,
 } from "../src/builtins.ts";
 import worker from "../src/index.ts";
-import {
-  graspSkills,
-  graspSkillsCollectionId,
-  syncGraspSkills,
-} from "../src/knowledge/grasp-skills.ts";
-import type { GraspSkill } from "../src/knowledge/grasp-skills.ts";
-import { storedCurrentTexts } from "./knowledge.ts";
+import { storedCurrentTexts } from "./brain-collections.ts";
 import { auditedDuring } from "./sign-in.ts";
 
 // What ships with the release, installed once per release on the first
@@ -90,16 +90,16 @@ const forgetInstall = async (...paths: string[]): Promise<void> => {
 };
 
 const skillSaves = (events: { action: string }[]) =>
-  events.filter(({ action }) => action === "knowledge.document.saved");
+  events.filter(({ action }) => action === "brain.document.saved");
 
 const insertsVersion = /^insert into "versions"/iu;
 
 /**
- * The Knowledge database, but the first batch that writes a version
+ * The Brain database, but the first batch that writes a version
  * fails: an outage in the middle of an install.
  */
-const knowledgeFailingOnce = (): D1Database => {
-  const real = env.KNOWLEDGE;
+const brainFailingOnce = (): D1Database => {
+  const real = env.BRAIN_DB;
   let writing = false;
   let failed = false;
   return {
@@ -253,7 +253,7 @@ describe("the built-ins", () => {
     const paths = firstPaths(2);
     await forgetInstall(...paths);
 
-    const failing: Env = { ...env, KNOWLEDGE: knowledgeFailingOnce() };
+    const failing: Env = { ...env, BRAIN_DB: brainFailingOnce() };
     const partial = await runInDurableObject(
       builtins(env),
       async (_instance, state) =>

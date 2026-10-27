@@ -1,0 +1,905 @@
+import { readableCollection } from "@grasp-os/brain/collections";
+import type { CollectionRow } from "@grasp-os/brain/collections";
+import { findByPath, writeVersion } from "@grasp-os/brain/documents";
+import type { ErasedFiles, OnErase } from "@grasp-os/brain/purge";
+import { collections } from "@grasp-os/brain/schema";
+import { actorOf, auditActorSchema } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
+import { collectionErrors } from "@grasp-os/shared/brain-documents";
+import {
+  authErrors,
+  internalErrors,
+  isExpectedError,
+  requestErrors,
+} from "@grasp-os/shared/errors";
+import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
+import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import {
+  uploadErrors,
+  uploadExtensionOf,
+  uploadInputSchema,
+  uploadMaxBytes,
+  uploadMediaTypeSchema,
+  uploadTypes,
+} from "@grasp-os/shared/uploads";
+import type {
+  Upload,
+  UploadExtension,
+  UploadMediaType,
+} from "@grasp-os/shared/uploads";
+import { and, asc, count, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { stringify } from "yaml";
+
+import { auditedBatch, outboxed, outboxedWhere } from "../audit-outbox.ts";
+import {
+  identifyFull,
+  memberRole,
+  staffRole,
+  teamsOf,
+} from "../auth/identity.ts";
+import { uploadCleanups, uploads } from "../db/core/schema.ts";
+import { errorResponse } from "../errors.ts";
+import { auditStaffRoute } from "../staff-audit.ts";
+import { runEngine } from "../workflows/engine.ts";
+import { allowedCollections, noteProvenance } from "./access.ts";
+import { requireWritable } from "./collection-rules.ts";
+import { ExtractorUnavailableError, extractorFor } from "./extract.ts";
+import type { Extracted } from "./extract.ts";
+import { brainOf } from "./ports.ts";
+
+// Files uploaded into the Brain (see @grasp-os/shared/uploads). An upload
+// is checked by what arrived (its size, and that its first bytes are the
+// type its name says), recorded as `pending` with its audit event, its
+// original stored in R2 (checked against its hash), and its extraction
+// started: a run of core's own workflow (extraction.ts) on the engine,
+// whose one step extracts the text in a sandbox (extract.ts) and saves it
+// as the next version of the document at the file's name, then marks the
+// upload ready. The uploader's access is checked again just before that
+// save. Whatever fails ends the upload failed, with the code of why.
+//
+// Uploads are core's records, in core's database; the document is
+// The Brain's. So no batch holds both, and an upload is claimed for its
+// save first (`saving`), which a purge's forgetting refuses
+// (`uploadErasure`): a purge never forgets an upload whose text is being
+// saved, and an upload it forgot is never saved, so no extracted text
+// lands after a purge that named its document.
+//
+// Each upload has an original of its own, kept while the upload is: for
+// downloading the original of a document's version, which comes as an
+// attachment only (threat model R20). Its delete is recorded outbox-style
+// (`upload_cleanups`) in the batch that records the upload, before the
+// original is stored, and cleared in the batch that makes the upload
+// ready. So an original is deleted whenever its upload doesn't end ready:
+// by the failure that fails it, or by the cron trigger once its upload is
+// gone (a purge forgot it, say, while its original was still being
+// stored) or failed, and old enough that nothing is still storing it.
+
+/** The key of an upload's original in R2: its collection and its ID. */
+export const originalKey = (collectionId: string, uploadId: string): string =>
+  `brain/${collectionId}/${uploadId}`;
+
+/** An upload's extraction run: its instance on the engine. */
+export const extractionRunId = (uploadId: string): string =>
+  `upload-${uploadId}`;
+
+type UploadRow = typeof uploads.$inferSelect;
+
+/** The states of an upload that hasn't ended. */
+const unended = ["pending", "extracting", "saving"] as const;
+
+/** Bytes, as the first bytes of a file are compared. */
+const bytesOf = (text: string): number[] => [...new TextEncoder().encode(text)];
+
+/** Whether `bytes` start with `prefix`. */
+const startsWith = (bytes: Uint8Array, prefix: readonly number[]): boolean =>
+  prefix.every((byte, index) => bytes[index] === byte);
+
+/** UTF-8's byte order mark. */
+const byteOrderMark = [0xef, 0xbb, 0xbf];
+
+/** What ends WebVTT's signature: a space, a tab, a line break, or the file. */
+const afterVttSignature: ReadonlySet<number | undefined> = new Set([
+  0x20,
+  0x09,
+  0x0a,
+  0x0d,
+  undefined,
+]);
+
+const vttSignature = bytesOf("WEBVTT");
+
+/**
+ * Whether a file starts as its type does: a PDF's header, a ZIP's for
+ * Office files, and WebVTT's signature (after a byte order mark, if any)
+ * as the WebVTT spec defines it.
+ */
+const signatures: Readonly<
+  Record<UploadExtension, (bytes: Uint8Array) => boolean>
+> = {
+  pdf: (bytes) => startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]),
+  docx: (bytes) => startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]),
+  xlsx: (bytes) => startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]),
+  vtt: (bytes) => {
+    const text = startsWith(bytes, byteOrderMark)
+      ? bytes.subarray(byteOrderMark.length)
+      : bytes;
+    return (
+      startsWith(text, vttSignature) &&
+      afterVttSignature.has(text[vttSignature.length])
+    );
+  },
+};
+
+const hex = (buffer: ArrayBuffer): string =>
+  Array.from(new Uint8Array(buffer), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+
+/** An upload's type, one core stored from the types allowed. */
+const mediaTypeOf = (row: UploadRow): UploadMediaType =>
+  uploadMediaTypeSchema.parse(row.mediaType);
+
+/** The message people see for a stored failure code. */
+const failureMessage = (code: string): string => {
+  const coded = { code };
+  const upload = uploadErrors.codeOf(coded);
+  if (upload !== undefined) {
+    return uploadErrors.create(upload).message;
+  }
+  const brain = collectionErrors.codeOf(coded);
+  if (brain !== undefined) {
+    return collectionErrors.create(brain).message;
+  }
+  return internalErrors.create("internal.unexpected").message;
+};
+
+const toUpload = (row: UploadRow): Upload => ({
+  id: row.id,
+  collectionId: collectionIdSchema.parse(row.collectionId),
+  name: row.path,
+  mediaType: mediaTypeOf(row),
+  bytes: row.bytes,
+  // Being saved is still extracting, as people see it.
+  status: row.status === "saving" ? "extracting" : row.status,
+  documentId:
+    row.documentId === null ? null : documentIdSchema.parse(row.documentId),
+  version: row.version,
+  failure:
+    row.failure === null
+      ? null
+      : { code: row.failure, message: failureMessage(row.failure) },
+  createdAt: row.createdAt.toISOString(),
+  updatedAt: row.updatedAt.toISOString(),
+});
+
+/**
+ * How long after an upload is recorded its original may still be being
+ * stored: far more than storing 10 MB and starting a run take.
+ */
+const storingMs = 10 * 60_000;
+
+/** Deletes the original at `key` from R2, then clears its cleanup. */
+const cleanUp = async (
+  env: Env,
+  db: DrizzleD1Database,
+  key: string
+): Promise<void> => {
+  await env.FILES.delete(key);
+  await db.delete(uploadCleanups).where(eq(uploadCleanups.key, key));
+};
+
+/**
+ * Fails the upload with `code`, unless it is ready or failed already: in
+ * one batch with its audit event and its cleanup, then deletes its
+ * original. Only if this batch failed it: an upload that became ready
+ * meanwhile keeps its original.
+ */
+export const failUpload = async (
+  env: Env,
+  uploadId: string,
+  code: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const row = await db
+    .select()
+    .from(uploads)
+    .where(eq(uploads.id, uploadId))
+    .get();
+  if (row === undefined || row.status === "ready" || row.status === "failed") {
+    return;
+  }
+  const now = new Date();
+  // Whether this batch failed it: failed, at the time it stamped.
+  const failedNow = sql`EXISTS (SELECT 1 FROM ${uploads} WHERE ${uploads.id} = ${uploadId} AND ${uploads.status} = 'failed' AND ${uploads.updatedAt} = ${now.getTime()})`;
+  await auditedBatch(env, db, [
+    db
+      .update(uploads)
+      .set({ status: "failed", failure: code, updatedAt: now })
+      .where(and(eq(uploads.id, uploadId), inArray(uploads.status, unended))),
+    outboxedWhere(
+      db,
+      {
+        actor: { type: "system" },
+        action: "brain.upload.failed",
+        target: { type: "upload", id: uploadId },
+        detail: { collectionId: row.collectionId, reason: code },
+      },
+      failedNow
+    ),
+    db
+      .insert(uploadCleanups)
+      .select(
+        sql`SELECT ${originalKey(row.collectionId, row.id)}, ${uploadId}, 0 WHERE ${failedNow}`
+      )
+      .onConflictDoNothing(),
+  ]);
+  const failed = await db
+    .select({ id: uploads.id })
+    .from(uploads)
+    .where(and(eq(uploads.id, uploadId), failedNow))
+    .get();
+  if (failed !== undefined) {
+    await cleanUp(env, db, originalKey(row.collectionId, row.id));
+  }
+};
+
+/**
+ * Uploads a file into a collection `person` may change, and starts
+ * extracting its text. Returns the upload, `pending`.
+ */
+export const uploadFile = async (
+  env: Env,
+  person: Identity,
+  input: unknown
+): Promise<Upload> => {
+  const { collectionId, name, bytes } = uploadErrors.parse(
+    "upload.invalid",
+    uploadInputSchema,
+    input
+  );
+  // By the bytes that arrived, never by a size anyone reported.
+  if (bytes.byteLength > uploadMaxBytes) {
+    throw uploadErrors.create("upload.too_large", {
+      bytes: bytes.byteLength,
+      maxBytes: uploadMaxBytes,
+    });
+  }
+  const extension = uploadExtensionOf(name);
+  if (extension === undefined || !signatures[extension](bytes)) {
+    throw uploadErrors.create("upload.unsupported");
+  }
+  const brain = drizzle(env.BRAIN_DB);
+  const collection = await readableCollection(
+    brain,
+    await allowedCollections(env, brain, { type: "person", person }),
+    collectionId
+  );
+  requireWritable(env, person, collection);
+  const db = drizzle(env.DB);
+  const sha256 = hex(await crypto.subtle.digest("SHA-256", bytes));
+  const now = new Date();
+  const actor = actorOf(person);
+  const row: UploadRow = {
+    id: crypto.randomUUID(),
+    collectionId: collection.id,
+    path: name,
+    mediaType: uploadTypes[extension],
+    bytes: bytes.byteLength,
+    sha256,
+    uploadedBy: person.userId,
+    actor: JSON.stringify(actor),
+    status: "pending",
+    failure: null,
+    documentId: null,
+    version: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await auditedBatch(env, db, [
+    db.insert(uploads).values(row),
+    // Before the original is stored: if the upload never ends ready, its
+    // original is deleted, however far storing it got.
+    db.insert(uploadCleanups).values({
+      key: originalKey(collection.id, row.id),
+      uploadId: row.id,
+      createdAt: now,
+    }),
+    outboxed(db, {
+      actor,
+      action: "brain.upload.received",
+      target: { type: "upload", id: row.id },
+      detail: {
+        collectionId: collection.id,
+        mediaType: row.mediaType,
+        bytes: row.bytes,
+      },
+    }),
+  ]);
+  try {
+    // R2 checks what it stores against the hash its key names.
+    await env.FILES.put(originalKey(collection.id, row.id), bytes, {
+      sha256,
+    });
+    await runEngine(env).createInternal({
+      id: extractionRunId(row.id),
+      workflow: "extraction",
+      input: { uploadId: row.id },
+    });
+  } catch (error) {
+    // Failed at once, so its uploader sees why; if even that fails, the
+    // cron trigger finds it pending and starts its run (`sweepUploads`).
+    try {
+      await failUpload(env, row.id, "internal.unexpected");
+    } catch (cleanupError) {
+      log.error("upload.fail_failed", errorFields(cleanupError));
+    }
+    throw error;
+  }
+  return toUpload(row);
+};
+
+/** An upload `person` made; `upload.not_found` for anyone else's. */
+export const getUpload = async (
+  env: Env,
+  person: Identity,
+  uploadId: unknown
+): Promise<Upload> => {
+  const row =
+    typeof uploadId === "string"
+      ? await drizzle(env.DB)
+          .select()
+          .from(uploads)
+          .where(
+            and(eq(uploads.id, uploadId), eq(uploads.uploadedBy, person.userId))
+          )
+          .get()
+      : undefined;
+  if (row === undefined) {
+    throw uploadErrors.create("upload.not_found");
+  }
+  return toUpload(row);
+};
+
+/** The title of a file's document: its name without the extension. */
+const fileTitle = (name: string): string => {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
+};
+
+/**
+ * The document for a file's Markdown: frontmatter naming the original,
+ * then the text. The frontmatter is written here, so text that starts
+ * with `---` stays text.
+ */
+const documentText = (row: UploadRow, markdown: string): string =>
+  `---\n${stringify({
+    type: "file",
+    title: fileTitle(row.path),
+    original: row.path,
+    mediaType: row.mediaType,
+  })}---\n\n${markdown}\n`;
+
+const headingMarks = /^#{1,6}\s/gmu;
+const tableSyntax = /[\s|-]/gu;
+const pageHeading = /^#{1,6} Page \d+$/gmu;
+
+/**
+ * Whether Markdown holds any text: a heading's counts, table rules and
+ * the page headings a PDF's sections get don't.
+ */
+const hasText = (markdown: string): boolean =>
+  markdown
+    .replaceAll(pageHeading, "")
+    .replaceAll(headingMarks, "")
+    .replaceAll(tableSyntax, "") !== "";
+
+/**
+ * Whether an upload of the same name to the same collection, made after
+ * `row`, is saved already: its version is the later one. Uploads made in
+ * the same millisecond are ordered by ID, so any two are ordered.
+ */
+const laterUploadSaved = async (
+  db: DrizzleD1Database,
+  row: UploadRow
+): Promise<boolean> =>
+  (await db
+    .select({ id: uploads.id })
+    .from(uploads)
+    .where(
+      and(
+        eq(uploads.collectionId, row.collectionId),
+        eq(uploads.path, row.path),
+        eq(uploads.status, "ready"),
+        or(
+          gt(uploads.createdAt, row.createdAt),
+          and(eq(uploads.createdAt, row.createdAt), gt(uploads.id, row.id))
+        )
+      )
+    )
+    .limit(1)
+    .get()) !== undefined;
+
+/** Errors extracting may end with that no retry changes. */
+export const finalFailures: ReadonlySet<string> = new Set([
+  "upload.unreadable",
+  "upload.too_complex",
+  "upload.no_text",
+  "upload.original_missing",
+  "upload.superseded",
+  "brain.too_large",
+  "brain.too_many_sections",
+  "brain.too_many_links",
+  "brain.document_invalid",
+  "brain.read_only",
+  "brain.forbidden",
+]);
+
+/**
+ * Refuses the save of `row` into `collection` unless its uploader may
+ * still change the collection, as they are now, the way `identify` would
+ * see them: a member still, with their role and teams now; Grasp staff
+ * while the staff window is open and they are on the staff list, with the
+ * config's role. Then reading it, and allowed to write it
+ * (`requireWritable`). Someone removed from the organization or the team
+ * it is shared with, or staff whose window closed, gets nothing saved in
+ * their name.
+ */
+const requireStillWritable = async (
+  env: Env,
+  db: DrizzleD1Database,
+  row: UploadRow,
+  collection: CollectionRow
+): Promise<void> => {
+  const staff = auditActorSchema.parse(JSON.parse(row.actor)).type === "staff";
+  // Staff who reach the onboarding alone reach no Brain.
+  let role: Role | undefined = undefined;
+  if (staff) {
+    const access = await staffRole(env, row.uploadedBy);
+    role = access?.scope === "full" ? access.role : undefined;
+  } else {
+    role = await memberRole(env.DB, row.uploadedBy);
+  }
+  if (role === undefined) {
+    throw collectionErrors.create("brain.forbidden");
+  }
+  const person: Identity = {
+    userId: row.uploadedBy,
+    email: "",
+    name: "",
+    role,
+    teams: staff ? [] : await teamsOf(env.DB, row.uploadedBy),
+    staff,
+    expiresAt: "",
+  };
+  const readable = await db
+    .select({ id: collections.id })
+    .from(collections)
+    .where(
+      and(
+        eq(collections.id, collection.id),
+        await allowedCollections(env, db, { type: "person", person })
+      )
+    )
+    .get();
+  if (readable === undefined) {
+    throw collectionErrors.create("brain.forbidden");
+  }
+  requireWritable(env, person, collection);
+};
+
+/**
+ * Text for the extractor's errors: an expected one (`upload.too_complex`,
+ * a document limit) and "couldn't reach it" as they are, anything else as
+ * a file it couldn't read.
+ */
+const extractionError = (uploadId: string, error: unknown): unknown => {
+  if (error instanceof ExtractorUnavailableError || isExpectedError(error)) {
+    return error;
+  }
+  // The error's name only: a parser's message may quote the file.
+  log.warn("upload.unreadable", {
+    uploadId,
+    errorName: error instanceof Error ? error.name : typeof error,
+  });
+  return uploadErrors.create("upload.unreadable");
+};
+
+/**
+ * The extraction run's one step: extracts the upload's text with the
+ * extractor its collection gets (extract.ts), after recording that the
+ * file is sent out when the extractor is Workers AI, and saves it as the
+ * next version of its document, marking the upload ready and recording
+ * which extractor read it in the same batch. Safe to run again:
+ * an upload that is ready or failed, or forgotten (its collection deleted,
+ * or purged), is left as it is. Throws an expected error for what the run
+ * fails the upload with, and anything else for what a retry may fix.
+ */
+export const extractUpload = async (
+  env: Env,
+  uploadId: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const brain = drizzle(env.BRAIN_DB);
+  const row = await db
+    .select()
+    .from(uploads)
+    .where(eq(uploads.id, uploadId))
+    .get();
+  if (row === undefined || ["ready", "failed"].includes(row.status)) {
+    return;
+  }
+  const collection = await brain
+    .select()
+    .from(collections)
+    .where(eq(collections.id, row.collectionId))
+    .get();
+  if (collection === undefined) {
+    // Its collection is gone (a personal purge): left to be forgotten.
+    return;
+  }
+  await db
+    .update(uploads)
+    .set({ status: "extracting", updatedAt: new Date() })
+    .where(and(eq(uploads.id, uploadId), eq(uploads.status, "pending")));
+  const original = await env.FILES.get(originalKey(row.collectionId, row.id));
+  if (original === null) {
+    throw uploadErrors.create("upload.original_missing");
+  }
+  const bytes = new Uint8Array(await original.arrayBuffer());
+  const extractor = extractorFor(env, collection, mediaTypeOf(row));
+  if (extractor.name === "workers-ai") {
+    // Recorded before the file leaves the Worker, so a failure after it
+    // left is on record too; one that can't be recorded fails the step,
+    // which is retried, and nothing is sent.
+    await auditedBatch(env, db, [
+      outboxed(db, {
+        actor: { type: "system" },
+        action: "brain.upload.sent",
+        target: { type: "upload", id: uploadId },
+        detail: { collectionId: row.collectionId, extractor: extractor.name },
+      }),
+    ]);
+  }
+  let extracted: Extracted;
+  try {
+    extracted = await extractor.extract({
+      name: row.path,
+      mediaType: mediaTypeOf(row),
+      bytes,
+    });
+  } catch (error) {
+    throw extractionError(uploadId, error);
+  }
+  const { markdown, transcript } = extracted;
+  if (!hasText(markdown)) {
+    throw uploadErrors.create("upload.no_text");
+  }
+  // The version first, then a later upload: one saved after this read
+  // moves the version on, and the save below conflicts.
+  const current = await findByPath(brain, row.collectionId, row.path);
+  const ifVersion = current?.currentVersion ?? 0;
+  if (await laterUploadSaved(db, row)) {
+    throw uploadErrors.create("upload.superseded");
+  }
+  await requireStillWritable(env, brain, row, collection);
+  const actor: AuditActor = auditActorSchema.parse(JSON.parse(row.actor));
+  // Claimed for the save, unless it was forgotten meanwhile (a purge of
+  // its document, whose text this would save again) or ended: then it is
+  // left. A purge's forgetting refuses a claimed upload, so none forgets
+  // it from here on.
+  const [claimed] = await db
+    .update(uploads)
+    .set({ status: "saving", updatedAt: new Date() })
+    .where(and(eq(uploads.id, uploadId), inArray(uploads.status, unended)))
+    .returning({ id: uploads.id });
+  if (claimed === undefined) {
+    return;
+  }
+  // A conflict (someone saved the document meanwhile) throws, and the
+  // step's retry saves on top of their version.
+  const saved = await writeVersion(
+    brainOf(env),
+    { actor, userId: row.uploadedBy },
+    {
+      collection,
+      path: row.path,
+      text: documentText(row, markdown),
+      ifVersion,
+      message: `Uploaded ${row.path}`,
+      restoredFrom: null,
+      // A WebVTT file's turns: the version's own, which a later upload or
+      // edit without one takes away.
+      ...(transcript === undefined ? {} : { transcript }),
+    }
+  );
+  await auditedBatch(env, db, [
+    db
+      .update(uploads)
+      .set({
+        status: "ready",
+        documentId: saved.id,
+        version: saved.currentVersion,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(uploads.id, uploadId), eq(uploads.status, "saving"))),
+    // Ready, so its original stays.
+    db
+      .delete(uploadCleanups)
+      .where(eq(uploadCleanups.key, originalKey(row.collectionId, row.id))),
+    outboxed(db, {
+      actor: { type: "system" },
+      action: "brain.upload.extracted",
+      target: { type: "upload", id: uploadId },
+      detail: {
+        collectionId: row.collectionId,
+        extractor: extractor.name,
+        version: saved.currentVersion,
+      },
+    }),
+  ]);
+};
+
+/** Most uploads, and cleanups, looked at at once. */
+const sweepBatch = 20;
+
+/**
+ * Deletes the originals recorded for deleting whose upload is gone or
+ * failed, and that nothing can still be storing, a few at a time, and
+ * clears each once done. Never throws: whoever recorded them has committed
+ * already, and the cron trigger deletes what's left.
+ */
+export const cleanUpOriginals = async (env: Env): Promise<void> => {
+  const db = drizzle(env.DB);
+  try {
+    const cleanups = await db
+      .select({ key: uploadCleanups.key })
+      .from(uploadCleanups)
+      .where(
+        and(
+          lt(uploadCleanups.createdAt, new Date(Date.now() - storingMs)),
+          sql`NOT EXISTS (SELECT 1 FROM ${uploads} WHERE ${uploads.id} = ${uploadCleanups.uploadId} AND ${uploads.status} != 'failed')`
+        )
+      )
+      .orderBy(asc(uploadCleanups.createdAt))
+      .limit(sweepBatch);
+    for (const { key } of cleanups) {
+      // oxlint-disable-next-line no-await-in-loop -- a few at a time
+      await cleanUp(env, db, key);
+    }
+  } catch (error) {
+    log.error("upload.cleanup_failed", errorFields(error));
+  }
+};
+
+/** The uploads of `scope`: a collection's, or those under a document's name. */
+const uploadsOf = (scope: ErasedFiles): SQL =>
+  ("path" in scope
+    ? and(
+        eq(uploads.collectionId, scope.collectionId),
+        eq(uploads.path, scope.path)
+      )
+    : eq(uploads.collectionId, scope.collectionId)) ?? sql`0`;
+
+/**
+ * Forgets the uploads of `scope` and records their originals for deleting,
+ * then deletes what it can: one batch, which fails while one of them is
+ * claimed for its save (`saving`), as `brain.conflict`: running the
+ * purge again a moment later forgets it, or finds its text saved.
+ */
+const forgetUploads = async (env: Env, scope: ErasedFiles): Promise<void> => {
+  const db = drizzle(env.DB);
+  const where = uploadsOf(scope);
+  const saving = and(where, eq(uploads.status, "saving"));
+  try {
+    await db.batch([
+      // Fails the batch while one is being saved: it inserts a cleanup
+      // without a key, which NOT NULL refuses; D1 has no other way to
+      // abort a batch on a condition.
+      db
+        .insert(uploadCleanups)
+        .select(
+          sql`SELECT NULL, NULL, NULL WHERE EXISTS (SELECT 1 FROM ${uploads} WHERE ${saving})`
+        ),
+      db
+        .insert(uploadCleanups)
+        .select(
+          db
+            .select({
+              key: sql<string>`'brain/' || ${uploads.collectionId} || '/' || ${uploads.id}`.as(
+                "key"
+              ),
+              uploadId: uploads.id,
+              // One that ended has its original written: deleted at once.
+              // One still pending may still be storing it: its cleanup
+              // waits until it can't be.
+              createdAt:
+                sql<Date>`CASE WHEN ${uploads.status} IN ('ready', 'failed') THEN 0 ELSE ${uploads.createdAt} END`.as(
+                  "created_at"
+                ),
+            })
+            .from(uploads)
+            .where(where)
+        )
+        .onConflictDoNothing(),
+      db.delete(uploads).where(where),
+    ]);
+  } catch (error) {
+    const stillSaving = await db
+      .select({ id: uploads.id })
+      .from(uploads)
+      .where(saving)
+      .get();
+    if (stillSaving !== undefined) {
+      throw collectionErrors.create("brain.conflict");
+    }
+    throw error;
+  }
+  await cleanUpOriginals(env);
+};
+
+/**
+ * The uploads as a Brain purge reaches them (purge.ts `OnErase`): the
+ * originals of the files uploaded as the documents it purges hold the data
+ * too, so it forgets the uploads and deletes their originals.
+ */
+export const uploadErasure = (
+  env: Env
+): Pick<OnErase, "countFiles" | "forgetFiles"> => ({
+  countFiles: async (scopes) => {
+    if (scopes.length === 0) {
+      return 0;
+    }
+    const [found] = await drizzle(env.DB)
+      .select({ count: count() })
+      .from(uploads)
+      .where(or(...scopes.map(uploadsOf)));
+    return found?.count ?? 0;
+  },
+  forgetFiles: async (_person, scope) => {
+    await forgetUploads(env, scope);
+  },
+});
+
+/** How long an upload may go unchanged before the cron trigger looks at it. */
+const staleAfterMs = 10 * 60_000;
+
+/** Where the engine has a run that has ended. */
+const endedStatuses: ReadonlySet<string> = new Set([
+  "complete",
+  "errored",
+  "terminated",
+]);
+
+/**
+ * Every minute (index.ts): deletes the originals whose cleanup a failure
+ * interrupted, and looks at uploads unchanged for a while that haven't
+ * ended: one whose run never started (core stopped between recording it
+ * and starting it) gets its run, and one whose run ended without ending it
+ * fails.
+ */
+export const sweepUploads = async (env: Env): Promise<void> => {
+  await cleanUpOriginals(env);
+  const stale = await drizzle(env.DB)
+    .select({ id: uploads.id })
+    .from(uploads)
+    .where(
+      and(
+        inArray(uploads.status, unended),
+        lt(uploads.updatedAt, new Date(Date.now() - staleAfterMs))
+      )
+    )
+    // In no order: uploads whose runs are still going (retrying, say)
+    // stay stale for a while, and mustn't keep the rest from being seen.
+    .orderBy(sql`random()`)
+    .limit(sweepBatch);
+  const engine = runEngine(env);
+  for (const { id } of stale) {
+    // oxlint-disable-next-line no-await-in-loop -- a few at a time
+    const run = await engine.status(extractionRunId(id));
+    if (run === undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- a few at a time
+      await engine.createInternal({
+        id: extractionRunId(id),
+        workflow: "extraction",
+        input: { uploadId: id },
+      });
+    } else if (endedStatuses.has(run.status)) {
+      // oxlint-disable-next-line no-await-in-loop -- a few at a time
+      await failUpload(env, id, "internal.unexpected");
+    }
+  }
+};
+
+const noStore = "private, no-store";
+
+/** A filename for `Content-Disposition`: ASCII, with the name in full after. */
+const contentDisposition = (name: string): string => {
+  const fallback = name.replaceAll(/[^\u0020-\u007E]|["\\]/gu, "_");
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+};
+
+/**
+ * `GET /api/brain/uploads/<id>/original`: the original of an upload
+ * saved as a document the signed-in person may read, recorded as a read
+ * of that document. Only ever as a download (threat model R20): an
+ * attachment, with the type its extension allowed (never one a browser
+ * runs) and `nosniff` (security-headers.ts), so no uploaded file runs on
+ * the product's origin.
+ */
+export const originalResponse = async (
+  request: Request,
+  env: Env,
+  uploadId: string,
+  requestId: string
+): Promise<Response> => {
+  const notFound = () =>
+    errorResponse(404, requestErrors.create("request.not_found"), requestId);
+  if (request.method !== "GET") {
+    return notFound();
+  }
+  const person = await identifyFull(env, request.headers);
+  if (person === undefined) {
+    return errorResponse(
+      401,
+      authErrors.create("auth.unauthenticated"),
+      requestId
+    );
+  }
+  // A staff member's view is in the client's audit log (staff-audit.ts).
+  await auditStaffRoute(env, person, "uploads.original", { uploadId });
+  const brain = drizzle(env.BRAIN_DB);
+  const reader = { type: "person", person } as const;
+  const ready = await drizzle(env.DB)
+    .select()
+    .from(uploads)
+    .where(and(eq(uploads.id, uploadId), eq(uploads.status, "ready")))
+    .get();
+  const collection =
+    ready === undefined
+      ? undefined
+      : await brain
+          .select()
+          .from(collections)
+          .where(
+            and(
+              eq(collections.id, ready.collectionId),
+              await allowedCollections(env, brain, reader)
+            )
+          )
+          .get();
+  const found =
+    ready === undefined || collection === undefined
+      ? undefined
+      : { upload: ready, collection };
+  const original = found
+    ? await env.FILES.get(originalKey(found.collection.id, found.upload.id))
+    : null;
+  const documentId = found?.upload.documentId ?? null;
+  if (!(found && original) || documentId === null) {
+    return notFound();
+  }
+  const { upload } = found;
+  await noteProvenance(
+    env,
+    reader,
+    {
+      action: "brain.read",
+      target: { type: "document", id: documentId },
+      detail: { read: "original", upload: upload.id, version: upload.version },
+    },
+    found.collection
+  );
+  return new Response(original.body, {
+    headers: {
+      "content-type": mediaTypeOf(upload),
+      "content-disposition": contentDisposition(upload.path),
+      "content-length": String(original.size),
+      "cache-control": noStore,
+    },
+  });
+};

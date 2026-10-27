@@ -6,12 +6,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { createFromBlueprint } from "../src/app-blueprints.ts";
 import { outlook, release, requestGranted } from "./apps.ts";
-import { mockIdp } from "./idp.ts";
 import {
   collectionWithNote,
   readCollection,
   storedGrant,
-} from "./knowledge.ts";
+} from "./brain-collections.ts";
+import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { racingDb } from "./racing-db.ts";
 import { calledAs } from "./sealed-apps.ts";

@@ -101,7 +101,7 @@ const noteRead = async <C>(
   lessons: number
 ): Promise<void> => {
   await brain.ports.onRead(reader, {
-    action: "knowledge.read",
+    action: "brain.read",
     detail: { read, lessons },
   });
 };

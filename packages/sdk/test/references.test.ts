@@ -1552,11 +1552,11 @@ describe("browser resources", () => {
 
   test("share one namespace of aliases with the actions' resources", () => {
     const files = resource.files("help", { operations: ["read"] });
-    const knowledge = resource.knowledge("help", {
+    const brain = resource.brain("help", {
       operations: ["search"],
       collections: ["handbook"],
     });
-    expect(refusal(() => small({ uses: [files, knowledge] }))).toContain(
+    expect(refusal(() => small({ uses: [files, brain] }))).toContain(
       "Two of the App's resources have alias `help`"
     );
   });

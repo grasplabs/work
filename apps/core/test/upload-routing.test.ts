@@ -4,10 +4,10 @@ import type { Upload } from "@grasp-os/shared/uploads";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { extractUpload, originalKey } from "../src/knowledge/uploads.ts";
+import { extractUpload, originalKey } from "../src/brain/uploads.ts";
 import { allEvents } from "./audit-events.ts";
+import { newTeam } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Which extractor reads an uploaded file: Workers AI's document conversion
@@ -100,7 +100,7 @@ const extractorOf = async (upload: Upload): Promise<unknown> => {
   const events = await allEvents();
   return events.find(
     ({ action, target }) =>
-      action === "knowledge.upload.extracted" && target?.id === upload.id
+      action === "brain.upload.extracted" && target?.id === upload.id
   )?.detail.extractor;
 };
 
@@ -109,7 +109,7 @@ const timesSent = async (upload: Upload): Promise<number> => {
   const events = await allEvents();
   return events.filter(
     ({ action, target, detail }) =>
-      action === "knowledge.upload.sent" &&
+      action === "brain.upload.sent" &&
       target?.id === upload.id &&
       detail.extractor === "workers-ai"
   ).length;
@@ -142,7 +142,7 @@ const euOnly = {
 describe("upload routing", { timeout: 60_000 }, () => {
   it("send a normal collection's file to Workers AI, and save what it returns", async () => {
     const person = await signedInApi(idp, "user");
-    const { id: collectionId } = await person.api.knowledge.createCollection({
+    const { id: collectionId } = await person.api.brain.createCollection({
       name: `Files ${unique()}`,
       access: "me",
     });
@@ -154,7 +154,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
         upload = await uploadedTo(person.api, collectionId);
       }
     );
-    const { hits } = await person.api.knowledge.search("economy", {
+    const { hits } = await person.api.brain.search("economy", {
       collectionId,
     });
     const docx = await fixture("travel-policy.docx");
@@ -185,7 +185,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
   it("never send a sensitive collection's file to Workers AI", async () => {
     const admin = await signedInApi(idp, "admin");
     const team = await newTeam(admin, []);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Payroll ${unique()}`,
       access: "teams",
       teams: [team],
@@ -208,7 +208,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
 
   it("keep every file of a deployment whose rules keep everything in the EU in the Worker", async () => {
     const person = await signedInApi(idp, "user");
-    const { id: collectionId } = await person.api.knowledge.createCollection({
+    const { id: collectionId } = await person.api.brain.createCollection({
       name: `Files ${unique()}`,
       access: "me",
     });
@@ -239,7 +239,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
 
   it("keep a file in the Worker while the deployment's rules don't parse", async () => {
     const person = await signedInApi(idp, "user");
-    const { id: collectionId } = await person.api.knowledge.createCollection({
+    const { id: collectionId } = await person.api.brain.createCollection({
       name: `Files ${unique()}`,
       access: "me",
     });
@@ -271,7 +271,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
 
   it("send nothing to Workers AI while the record that it's sent can't be written", async () => {
     const person = await signedInApi(idp, "user");
-    const { id: collectionId } = await person.api.knowledge.createCollection({
+    const { id: collectionId } = await person.api.brain.createCollection({
       name: `Files ${unique()}`,
       access: "me",
     });
@@ -324,7 +324,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
 
   it("extract every file in the Worker without an AI binding, as on-prem", async () => {
     const person = await signedInApi(idp, "user");
-    const { id: collectionId } = await person.api.knowledge.createCollection({
+    const { id: collectionId } = await person.api.brain.createCollection({
       name: `Files ${unique()}`,
       access: "me",
     });
@@ -345,7 +345,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
 
   it("retry Workers AI while it can't be reached, recording each time the file was sent, then fail", async () => {
     const person = await signedInApi(idp, "user");
-    const { id: collectionId } = await person.api.knowledge.createCollection({
+    const { id: collectionId } = await person.api.brain.createCollection({
       name: `Files ${unique()}`,
       access: "me",
     });
@@ -385,7 +385,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
 
   it("fail a file Workers AI can't convert at once, with a record that it was sent", async () => {
     const person = await signedInApi(idp, "user");
-    const { id: collectionId } = await person.api.knowledge.createCollection({
+    const { id: collectionId } = await person.api.brain.createCollection({
       name: `Files ${unique()}`,
       access: "me",
     });

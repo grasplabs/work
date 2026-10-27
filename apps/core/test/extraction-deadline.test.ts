@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { busyPlan } from "../src/knowledge/extraction.ts";
+import { busyPlan } from "../src/brain/extraction.ts";
 
 // How long an upload waits for a place in the sandbox (extraction.ts): an
 // hour from its first busy try, which no wait or try runs past. Pure

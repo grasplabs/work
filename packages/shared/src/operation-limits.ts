@@ -124,12 +124,12 @@ export const usesMaxEntries = 64;
 export const resourceAliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
 /**
- * The most UTF-16 code units of a knowledge search's text: Knowledge's own
- * limit (`searchQuerySchema`), which an App's knowledge resource is held
+ * The most UTF-16 code units of a brain search's text: the Brain's own
+ * limit (`searchQuerySchema`), which an App's brain resource is held
  * to as well, so a longer one is refused up front as arguments that don't
- * fit, never deep in Knowledge.
+ * fit, never deep in the Brain.
  */
-export { searchQueryMaxLength as knowledgeSearchMaxLength } from "@grasp-os/brain/limits";
+export { searchQueryMaxLength as brainSearchMaxLength } from "@grasp-os/brain/limits";
 
 // Foreground streaming actions (spec 10.7.6): an action that declares
 // `stream` emits bounded progress snapshots while it runs, each complete,

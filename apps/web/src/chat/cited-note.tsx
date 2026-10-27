@@ -39,7 +39,7 @@ export const CitedNote = ({
   const open = async (): Promise<void> => {
     const found = await loadFromCore(
       core,
-      async (session) => await session.knowledge.getDocument(documentId)
+      async (session) => await session.brain.getDocument(documentId)
     );
     if (found.state !== "ready") {
       toast.add({
@@ -53,7 +53,7 @@ export const CitedNote = ({
       return;
     }
     await navigate({
-      to: "/knowledge/$collection",
+      to: "/brain/collections/$collection",
       params: { collection: found.data.collectionId },
       search: { doc: documentId },
     });

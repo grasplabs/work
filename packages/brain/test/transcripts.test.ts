@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { ensureCollection } from "../src/collections.ts";
 import type { CollectionRow } from "../src/collections.ts";
+import { collectionErrors } from "../src/documents-contract.ts";
 import { writeVersion } from "../src/documents.ts";
 import type { Writer } from "../src/documents.ts";
-import { knowledgeErrors } from "../src/knowledge.ts";
 import { preparePurge, purge } from "../src/purge.ts";
 import { search } from "../src/search.ts";
 import {
@@ -36,7 +36,7 @@ const outcome = async (promise: Promise<unknown>): Promise<string> => {
     await promise;
     return "ok";
   } catch (error) {
-    return knowledgeErrors.codeOf(error) ?? String(error);
+    return collectionErrors.codeOf(error) ?? String(error);
   }
 };
 
@@ -106,7 +106,7 @@ const readOf = async (
 /** How many transcript purges of `documentId` the audit outbox holds. */
 const recordedPurges = async (documentId: string): Promise<number> => {
   const { results } = await env.BRAIN.prepare(
-    "SELECT event FROM audit_outbox WHERE instr(event, 'knowledge.transcript.purged') > 0 AND instr(event, ?) > 0"
+    "SELECT event FROM audit_outbox WHERE instr(event, 'brain.transcript.purged') > 0 AND instr(event, ?) > 0"
   )
     .bind(documentId)
     .all();
@@ -197,12 +197,12 @@ describe("a document's transcript", () => {
       },
       recorded: [
         {
-          action: "knowledge.read",
+          action: "brain.read",
           read: "transcripts",
           ours: [allowed.id, shared.id].toSorted(),
         },
-        { action: "knowledge.read", read: "transcript", ours: [shared.id] },
-        { action: "knowledge.read", read: "transcript", ours: [allowed.id] },
+        { action: "brain.read", read: "transcript", ours: [shared.id] },
+        { action: "brain.read", read: "transcript", ours: [allowed.id] },
       ],
     });
   });
@@ -257,7 +257,7 @@ describe("a document's transcript", () => {
       removed: events
         .filter(
           ({ action, target }) =>
-            action === "knowledge.transcript.removed" && target?.id === first.id
+            action === "brain.transcript.removed" && target?.id === first.id
         )
         .map(({ detail }) => detail),
     }).toStrictEqual({
@@ -311,7 +311,7 @@ describe("a document's transcript", () => {
 
     expect({ outcomes, documents: results[0]?.n }).toStrictEqual({
       outcomes: Object.fromEntries(
-        Object.keys(refused).map((what) => [what, "knowledge.invalid"])
+        Object.keys(refused).map((what) => [what, "brain.document_invalid"])
       ),
       documents: 0,
     });
@@ -421,7 +421,7 @@ describe("a document's transcript", () => {
     const result = await purge(brain, admin, input, plan.token, noCopies);
     const found = await readTranscript(brain, caller, call.id);
     const read = found?.read;
-    const purged = events.find(({ action }) => action === "knowledge.purged");
+    const purged = events.find(({ action }) => action === "brain.purged");
 
     expect({
       plan: { documents: plan.documents, versions: plan.versions },
@@ -430,7 +430,7 @@ describe("a document's transcript", () => {
       holds: JSON.stringify(read?.transcript).includes(name),
       stored: await storedHolds(name),
       recorded: events
-        .filter(({ action }) => action === "knowledge.transcript.purged")
+        .filter(({ action }) => action === "brain.transcript.purged")
         .map(({ target, detail }) => ({ target, detail })),
     }).toStrictEqual({
       plan: { documents: 1, versions: 0 },
@@ -595,7 +595,7 @@ describe("a document's transcript", () => {
       stored: await storedHolds(inTranscript, inBoth),
     }).toStrictEqual({
       other: 0,
-      saving: "knowledge.conflict",
+      saving: "brain.conflict",
       afterRace: { inTranscript: false, inBoth: true },
       again: 0,
       stored: false,
@@ -616,7 +616,7 @@ describe("a document's transcript", () => {
     await save(brain, notes, "call.md", "# Call\nEdited.", { ifVersion: 1 });
     const saved = events.find(
       ({ action, target, detail }) =>
-        action === "knowledge.document.saved" &&
+        action === "brain.document.saved" &&
         target?.id === call.id &&
         detail?.version === 1
     );

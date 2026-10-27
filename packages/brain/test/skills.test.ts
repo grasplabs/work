@@ -3,9 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 import type { CollectionRow } from "../src/collections.ts";
 import { brainErrors } from "../src/contract.ts";
 import type { SkillSelection } from "../src/contract.ts";
+import { collectionErrors } from "../src/documents-contract.ts";
 import { writeVersion } from "../src/documents.ts";
 import { collectionIdSchema } from "../src/ids.ts";
-import { knowledgeErrors } from "../src/knowledge.ts";
 import { preparePurge, purge } from "../src/purge.ts";
 import {
   readSkill,
@@ -87,7 +87,7 @@ const outcome = async (promise: Promise<unknown>): Promise<string> => {
     return "ok";
   } catch (error) {
     return (
-      brainErrors.codeOf(error) ?? knowledgeErrors.codeOf(error) ?? "unknown"
+      brainErrors.codeOf(error) ?? collectionErrors.codeOf(error) ?? "unknown"
     );
   }
 };
@@ -336,7 +336,7 @@ describe("selecting a skill", () => {
     const recorded = reads
       .filter(
         ({ caller: who, record }) =>
-          who === "recorded" && record.action === "knowledge.skill.select"
+          who === "recorded" && record.action === "brain.skill.select"
       )
       .map(({ record }) => ({
         task: record.detail.task,
@@ -1115,8 +1115,8 @@ describe("a skill's manifest", () => {
         saved(skills, "payouts", "tasks: [payout]\nstatus: forced")
       ),
     }).toStrictEqual({
-      itself: "knowledge.invalid",
-      status: "knowledge.invalid",
+      itself: "brain.document_invalid",
+      status: "brain.document_invalid",
     });
   });
 });

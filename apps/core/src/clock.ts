@@ -21,6 +21,9 @@ import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
 import { reconcileRunCaptures } from "./brain-capture.ts";
 import { reconcileConsolidation } from "./brain-consolidation.ts";
+import { indexApps } from "./brain/apps-collection.ts";
+import { brainOf } from "./brain/ports.ts";
+import { sweepUploads } from "./brain/uploads.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
 import { renewGmailWatch } from "./channels/gmail.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
@@ -28,9 +31,6 @@ import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
-import { indexApps } from "./knowledge/apps-collection.ts";
-import { brainOf } from "./knowledge/ports.ts";
-import { sweepUploads } from "./knowledge/uploads.ts";
 import { syncLandscapes } from "./landscape.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
@@ -83,19 +83,19 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: retryAccessRevocations,
   },
-  { name: "knowledge.uploads", period: "minute", run: sweepUploads },
-  // Knowledge payloads no version refers to (src/knowledge/payloads.ts).
+  { name: "brain.uploads", period: "minute", run: sweepUploads },
+  // Brain payloads no version refers to (src/brain/payloads.ts).
   {
-    name: "knowledge.payloads",
+    name: "brain.payloads",
     period: "minute",
     run: async (env, at) => {
       await sweepPayloads(brainOf(env), at);
     },
   },
   // Documents whose indexing never started or ended unfinished, and failed
-  // ones due another run (src/knowledge/indexing.ts).
+  // ones due another run (src/brain/indexing.ts).
   {
-    name: "knowledge.indexing",
+    name: "brain.indexing",
     period: "minute",
     run: async (env, at) => {
       await sweepIndexing(brainOf(env), at);
@@ -105,7 +105,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // unfinished, and failed ones due another run (packages/brain's
   // entities.ts).
   {
-    name: "knowledge.linking",
+    name: "brain.linking",
     period: "minute",
     run: async (env, at) => {
       await sweepLinking(brainOf(env), at);
@@ -181,16 +181,16 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: refreshDailySignals,
   },
   {
-    name: "knowledge.apps",
+    name: "brain.apps",
     period: "quarterHour",
     run: async (env) => {
       await indexApps(env);
     },
   },
   { name: "statistics.sweep", period: "quarterHour", run: sweepStatistics },
-  // Brain command receipts past their retention (src/knowledge/memories.ts).
+  // Brain command receipts past their retention (src/brain/memories.ts).
   {
-    name: "knowledge.brain_receipts",
+    name: "brain.brain_receipts",
     period: "quarterHour",
     run: async (env, at) => {
       await sweepBrainReceipts(brainOf(env), at);

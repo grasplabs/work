@@ -192,13 +192,13 @@ const betterSection = (signals: Loaded<Signals>, i18n: I18n): string[] => {
   if (signals.state !== "ready") {
     return [heading, unread(i18n)];
   }
-  const { improvement, knowledge } = signals.data;
-  if (improvement === undefined && knowledge === undefined) {
+  const { improvement, brain } = signals.data;
+  if (improvement === undefined && brain === undefined) {
     return [];
   }
   const counts = signalKinds([
     ...(improvement?.signals ?? []),
-    ...(knowledge?.signals ?? []),
+    ...(brain?.signals ?? []),
   ]);
   if (counts.length === 0) {
     return [heading, i18n._(msg`Nothing to make better right now.`)];

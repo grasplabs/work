@@ -67,7 +67,7 @@ import type { EngineStatus } from "./runs.ts";
 //
 // - A test with an effect. A test run calls nothing: every named call it
 //   makes, a task's or an action's (connector, operation, model,
-//   Knowledge, template), is answered from the start's `fixtures` by the
+//   Brain, template), is answered from the start's `fixtures` by the
 //   binding it goes through, in `makeCall` before any binding, authority
 //   or receipt is looked at (resource-calls.ts); a call through a binding
 //   with no answer fails the run (`workflow.candidate_unfixtured`). Its

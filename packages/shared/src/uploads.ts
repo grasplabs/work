@@ -5,7 +5,7 @@ import { collectionIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
 
 // Uploads: a file (PDF, Word, Excel or WebVTT captions) uploaded into a
-// Knowledge collection becomes a document there, at the file's name,
+// Brain collection becomes a document there, at the file's name,
 // holding the file's text; a WebVTT file's turns become the document's
 // transcript too.
 // Core keeps the original and extracts its text in the background; the
@@ -128,7 +128,7 @@ export interface UploadsApi {
  * may read its document: always as an attachment.
  */
 export const uploadOriginalPath = (uploadId: string): string =>
-  `/api/knowledge/uploads/${uploadId}/original`;
+  `/api/brain/uploads/${uploadId}/original`;
 
 export const uploadErrors = defineErrorFamily({
   "upload.not_found": "There's no such upload, or you can't see it.",

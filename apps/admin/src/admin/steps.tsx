@@ -51,7 +51,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { Done, KnowledgeDots, Panel, PanelRow, Tile } from "./parts.tsx";
+import { Done, BrainCollectionDots, Panel, PanelRow, Tile } from "./parts.tsx";
 import { sectionTo } from "./sections.ts";
 import {
   formatDate,
@@ -751,8 +751,8 @@ const Interviews = ({
 };
 
 /** Each place what Grasp knows comes from, by name. */
-const knowledgeWords: Record<
-  OrgView["knowledge"]["sources"][number]["source"],
+const brainWords: Record<
+  OrgView["brain"]["sources"][number]["source"],
   string
 > = {
   vision: "The first conversation and the research",
@@ -768,17 +768,17 @@ const knowledgeWords: Record<
 
 /** Where Grasp's go stands, in a line under the percentage. */
 const goLine = (view: OrgView): ReactNode => {
-  const { knowledge, org } = view;
-  const { threshold } = knowledge;
-  if (knowledge.opened !== null) {
+  const { brain, org } = view;
+  const { threshold } = brain;
+  if (brain.opened !== null) {
     return (
       <Done>
-        Open since {dayDate(view, knowledge.opened)}. {org.name} is in, and
-        Stephen keeps learning from here.
+        Open since {dayDate(view, brain.opened)}. {org.name} is in, and Stephen
+        keeps learning from here.
       </Done>
     );
   }
-  if (knowledge.ready) {
+  if (brain.ready) {
     return (
       <span className="text-status-attention">
         Enough is known: it is past {threshold}%. {org.name} comes in the moment
@@ -809,8 +809,8 @@ const goLine = (view: OrgView): ReactNode => {
  * to the company as still open.
  */
 const Opens = ({ view, clientId }: { view: OrgView; clientId: string }) => {
-  const { knowledge } = view;
-  const known = `${knowledge.percent}% of what Grasp needs is known.`;
+  const { brain } = view;
+  const known = `${brain.percent}% of what Grasp needs is known.`;
   const blocked = view.works.filter((work) => work.state === "blocked");
   const open = view.works.filter(
     (work) => work.state === "mapping" || work.state === "saturating"
@@ -825,12 +825,12 @@ const Opens = ({ view, clientId }: { view: OrgView; clientId: string }) => {
         <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
           <div className="flex min-w-0 flex-col gap-3">
             <span className="text-2xl leading-none font-medium tabular-nums">
-              {knowledge.percent}%
+              {brain.percent}%
             </span>
-            <KnowledgeDots count={40} knowledge={knowledge} label={known} />
+            <BrainCollectionDots count={40} brain={brain} label={known} />
           </div>
           <span className="text-muted-foreground">
-            Opens at {knowledge.threshold}%
+            Opens at {brain.threshold}%
           </span>
         </div>
         <div>{goLine(view)}</div>
@@ -839,21 +839,21 @@ const Opens = ({ view, clientId }: { view: OrgView; clientId: string }) => {
       <div className="flex flex-col gap-0.5 border-t px-5 py-4">
         <span className="font-medium">How the brain fills</span>
         <p className="text-muted-foreground">
-          {knowledge.sources.length > 0
+          {brain.sources.length > 0
             ? "Every source adds its own share, and only once it is in. The brain never guesses."
             : "The company’s own Grasp counts what is known and sends the whole, not each source’s share."}
         </p>
       </div>
-      {knowledge.sources.length > 0 ? (
+      {brain.sources.length > 0 ? (
         <ul className="flex flex-col">
-          {knowledge.sources.map((each) => (
+          {brain.sources.map((each) => (
             <li
               className="grid items-center gap-x-6 gap-y-1.5 border-t px-5 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,14rem)_4.5rem]"
               key={each.source}
             >
-              <span className="min-w-0">{knowledgeWords[each.source]}</span>
+              <span className="min-w-0">{brainWords[each.source]}</span>
               <Progress
-                aria-label={knowledgeWords[each.source]}
+                aria-label={brainWords[each.source]}
                 value={each.known * 100}
               />
               <span className="text-muted-foreground tabular-nums sm:text-right">

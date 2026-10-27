@@ -1,26 +1,29 @@
-import type { KnowledgeApi, KnowledgeTools } from "@grasp-os/shared/knowledge";
+import type {
+  BrainDocumentsApi,
+  BrainTools,
+} from "@grasp-os/shared/brain-documents";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { indexApps } from "../src/knowledge/apps-collection.ts";
+import { indexApps } from "../src/brain/apps-collection.ts";
 import {
   grantReviewed,
   release,
   requestGranted,
   verifiedCandidate,
 } from "./apps.ts";
-import { actingFor, envOf, knowledgeIn } from "./contexts.ts";
-import { runQuarterHourCron } from "./cron.ts";
-import { mockIdp } from "./idp.ts";
 import {
-  knowledgeRacing,
+  brainRacing,
   newTeam,
   readCollection,
   storedGrant,
   storedVersionTexts,
-} from "./knowledge.ts";
+} from "./brain-collections.ts";
+import { actingFor, envOf, brainIn } from "./contexts.ts";
+import { runQuarterHourCron } from "./cron.ts";
+import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
   letSessionRecheckPass,
@@ -40,7 +43,7 @@ import {
 // finding more than the person it acts for, or anything without a grant;
 // an App given the collection, keeping another App's AGENTS.md for
 // whoever it is shared with; and anyone, admins too, writing the
-// collection through Knowledge.
+// collection through the Brain.
 
 const idp = mockIdp();
 
@@ -51,8 +54,8 @@ const appsCollection = "apps";
 
 const personOf = async (role: Role) => {
   const person = await signedInApi(idp, role);
-  const knowledge: KnowledgeApi = person.api.knowledge;
-  return { ...person, knowledge };
+  const brain: BrainDocumentsApi = person.api.brain;
+  return { ...person, brain };
 };
 
 type Person = Awaited<ReturnType<typeof personOf>>;
@@ -77,42 +80,42 @@ const releasedApp = async (
   return { id, name };
 };
 
-/** The Apps `knowledge` finds `word` in, by entry path. */
+/** The Apps `brain` finds `word` in, by entry path. */
 const entriesFound = async (
-  knowledge: Pick<KnowledgeTools, "search">,
+  brain: Pick<BrainTools, "search">,
   word: string
 ): Promise<string[]> => {
-  const { hits } = await knowledge.search(word);
+  const { hits } = await brain.search(word);
   return hits
     .filter(({ collectionId }) => collectionId === appsCollection)
     .map(({ path }) => path);
 };
 
-/** For each of `words`, the Apps `knowledge` finds it in. */
+/** For each of `words`, the Apps `brain` finds it in. */
 const foundFor = async (
-  knowledge: Pick<KnowledgeTools, "search">,
+  brain: Pick<BrainTools, "search">,
   ...words: string[]
 ): Promise<Record<string, string[]>> =>
   Object.fromEntries(
     await Promise.all(
       words.map(async (word): Promise<[string, string[]]> => [
         word,
-        await entriesFound(knowledge, word),
+        await entriesFound(brain, word),
       ])
     )
   );
 
 const entryPath = (app: string) => `${app}/AGENTS.md`;
 
-/** Whether `knowledge` lists the document `id` in the Apps collection. */
-const listed = async (knowledge: KnowledgeApi, id: string) => {
-  const { documents } = await knowledge.listDocuments(appsCollection);
+/** Whether `brain` lists the document `id` in the Apps collection. */
+const listed = async (brain: BrainDocumentsApi, id: string) => {
+  const { documents } = await brain.listDocuments(appsCollection);
   return documents.some((document) => document.id === id);
 };
 
 /** The entry of `app`, as its owner reads it. */
 const entryOf = async (owner: Person, app: string) => {
-  const { documents } = await owner.knowledge.listDocuments(appsCollection);
+  const { documents } = await owner.brain.listDocuments(appsCollection);
   const entry = documents.find(({ path }) => path === entryPath(app));
   if (!entry) {
     throw new Error(`App ${app} has no entry`);
@@ -132,8 +135,8 @@ const entryState = async (owner: Person, app: string, words: string[]) => {
     env.DB.prepare("SELECT version FROM app_entries WHERE app_id = ?")
       .bind(app)
       .first<{ version: number }>(),
-    owner.knowledge.history(id),
-    foundFor(owner.knowledge, ...words),
+    owner.brain.history(id),
+    foundFor(owner.brain, ...words),
   ]);
   return {
     current: currentVersion,
@@ -194,9 +197,10 @@ describe("indexing", setUpTime, () => {
     const path = entryPath(app.id);
     // Its name is searched too.
     const named = app.name.split(" ")[1] ?? "";
-    await expect(
-      foundFor(owner.knowledge, first, named)
-    ).resolves.toStrictEqual({ [first]: [path], [named]: [path] });
+    await expect(foundFor(owner.brain, first, named)).resolves.toStrictEqual({
+      [first]: [path],
+      [named]: [path],
+    });
     const entry = await entryOf(owner, app.id);
     expect(entry).toMatchObject({ title: app.name, currentVersion: 1 });
 
@@ -205,12 +209,13 @@ describe("indexing", setUpTime, () => {
       async () =>
         await release(owner, app.id, { "AGENTS.md": agentsMd(second) })
     );
-    await expect(
-      foundFor(owner.knowledge, first, second)
-    ).resolves.toStrictEqual({ [first]: [], [second]: [path] });
+    await expect(foundFor(owner.brain, first, second)).resolves.toStrictEqual({
+      [first]: [],
+      [second]: [path],
+    });
     expect(events).toContainEqual(
       expect.objectContaining({
-        action: "knowledge.document.saved",
+        action: "brain.document.saved",
         actor: { type: "system" },
         target: { type: "document", id: entry.id },
       })
@@ -218,9 +223,10 @@ describe("indexing", setUpTime, () => {
 
     // Back to the first version: its text is the entry's again.
     await owner.api.apps.versions.setCurrent(app.id, 1);
-    await expect(
-      foundFor(owner.knowledge, first, second)
-    ).resolves.toStrictEqual({ [first]: [path], [second]: [] });
+    await expect(foundFor(owner.brain, first, second)).resolves.toStrictEqual({
+      [first]: [path],
+      [second]: [],
+    });
   });
 
   it("indexes an App without AGENTS.md by its name and description", async () => {
@@ -229,21 +235,21 @@ describe("indexing", setUpTime, () => {
     const { id } = await owner.api.apps.create({ name });
     await release(owner, id, { "notes.md": "# Notes\n" });
     await expect(
-      entriesFound(owner.knowledge, name.split(" ")[1] ?? "")
+      entriesFound(owner.brain, name.split(" ")[1] ?? "")
     ).resolves.toStrictEqual([entryPath(id)]);
   });
 
-  it("indexes an App whose AGENTS.md is over Knowledge's limits without it", async () => {
+  it("indexes an App whose AGENTS.md is over Brain's limits without it", async () => {
     const owner = await personOf("builder");
     // Within an App's limits, over a document's 500 links.
     const links = Array.from({ length: 501 }, (_, index) => `[[l${index}]]`);
     const word = term();
     const app = await releasedApp(owner, `# ${word}\n${links.join(" ")}\n`);
     const entry = await entryOf(owner, app.id);
-    const { version } = await owner.knowledge.getDocument(entry.id);
+    const { version } = await owner.brain.getDocument(entry.id);
     expect(version.text).toContain("This App's AGENTS.md is too large");
     await expect(
-      foundFor(owner.knowledge, word, app.name.split(" ")[1] ?? "")
+      foundFor(owner.brain, word, app.name.split(" ")[1] ?? "")
     ).resolves.toStrictEqual({
       [word]: [],
       [app.name.split(" ")[1] ?? ""]: [entryPath(app.id)],
@@ -267,12 +273,10 @@ describe("indexing", setUpTime, () => {
       ({ id } = await api.apps.create({ name: `Leave ${term()}` }));
       await release({ api }, id, { "AGENTS.md": agentsMd(word) });
     });
-    await expect(entriesFound(owner.knowledge, word)).resolves.toStrictEqual(
-      []
-    );
+    await expect(entriesFound(owner.brain, word)).resolves.toStrictEqual([]);
 
     await runQuarterHourCron();
-    await expect(entriesFound(owner.knowledge, word)).resolves.toStrictEqual([
+    await expect(entriesFound(owner.brain, word)).resolves.toStrictEqual([
       entryPath(id),
     ]);
     // Caught up: the next run writes nothing.
@@ -299,15 +303,15 @@ describe("indexing", setUpTime, () => {
       name: `Leave ${renamed}`,
       description: `Leave, ${described} included.`,
     });
-    const atOnce = await foundFor(owner.knowledge, old, renamed, described);
+    const atOnce = await foundFor(owner.brain, old, renamed, described);
 
     const later = term();
     await withIndexingFailing(owner, async (api) => {
       await api.apps.update(app.id, { name: `Leave ${later}` });
     });
-    const failed = await foundFor(owner.knowledge, renamed, later);
+    const failed = await foundFor(owner.brain, renamed, later);
     await runQuarterHourCron();
-    const caughtUp = await foundFor(owner.knowledge, renamed, later);
+    const caughtUp = await foundFor(owner.brain, renamed, later);
 
     expect({ atOnce, failed, caughtUp }).toStrictEqual({
       atOnce: { [old]: [], [renamed]: [path], [described]: [path] },
@@ -336,7 +340,7 @@ describe("indexing", setUpTime, () => {
     const events = await auditedDuring(async () => {
       await indexApps({
         ...env,
-        KNOWLEDGE: knowledgeRacing(async () => {
+        BRAIN_DB: brainRacing(async () => {
           await owner.api.apps.versions.setCurrent(app.id, 3);
         }),
       });
@@ -367,7 +371,7 @@ describe("indexing", setUpTime, () => {
     // write lands after: the entry holds version 2's text, and says so.
     await indexApps({
       ...env,
-      KNOWLEDGE: knowledgeRacing(async () => {
+      BRAIN_DB: brainRacing(async () => {
         await owner.api.apps.versions.setCurrent(app.id, 1);
       }),
     });
@@ -399,15 +403,15 @@ describe("who finds an App", setUpTime, () => {
     const app = await releasedApp(owner, agentsMd(word));
     const { id: entryId } = await entryOf(owner, app.id);
 
-    const readsOf = async ({ knowledge }: Person) => ({
-      search: await entriesFound(knowledge, word),
-      listed: await listed(knowledge, entryId),
-      get: await outcome(knowledge.getDocument(entryId)),
-      history: await outcome(knowledge.history(entryId)),
-      backlinks: await outcome(knowledge.backlinks(entryId)),
-      read: await outcome(knowledge.read(entryId)),
-      section: await outcome(knowledge.read(entryId, { section: 0 })),
-      follow: await outcome(knowledge.follow(entryId)),
+    const readsOf = async ({ brain }: Person) => ({
+      search: await entriesFound(brain, word),
+      listed: await listed(brain, entryId),
+      get: await outcome(brain.getDocument(entryId)),
+      history: await outcome(brain.history(entryId)),
+      backlinks: await outcome(brain.backlinks(entryId)),
+      read: await outcome(brain.read(entryId)),
+      section: await outcome(brain.read(entryId, { section: 0 })),
+      follow: await outcome(brain.follow(entryId)),
     });
     const found = {
       search: [entryPath(app.id)],
@@ -422,12 +426,12 @@ describe("who finds an App", setUpTime, () => {
     const notFound = {
       search: [],
       listed: false,
-      get: "knowledge.not_found",
-      history: "knowledge.not_found",
-      backlinks: "knowledge.not_found",
-      read: "knowledge.not_found",
-      section: "knowledge.not_found",
-      follow: "knowledge.not_found",
+      get: "brain.document_not_found",
+      history: "brain.document_not_found",
+      backlinks: "brain.document_not_found",
+      read: "brain.document_not_found",
+      section: "brain.document_not_found",
+      follow: "brain.document_not_found",
     };
     await expect(readsOf(owner)).resolves.toStrictEqual(found);
     await expect(readsOf(other)).resolves.toStrictEqual(notFound);
@@ -457,13 +461,13 @@ describe("who finds an App", setUpTime, () => {
       id: anna.userId,
       role: "user",
     });
-    await expect(entriesFound(anna.knowledge, word)).resolves.toStrictEqual([
+    await expect(entriesFound(anna.brain, word)).resolves.toStrictEqual([
       entryPath(app.id),
     ]);
 
     // Then the App is granted a collection of a team Anna isn't in.
     const hr = await newTeam(admin, [owner]);
-    const { id: collectionId } = await admin.knowledge.createCollection({
+    const { id: collectionId } = await admin.brain.createCollection({
       name: `HR ${unique()}`,
       access: "teams",
       teams: [hr],
@@ -477,8 +481,8 @@ describe("who finds an App", setUpTime, () => {
     await expect(
       Promise.all([
         outcome(anna.api.apps.get(app.id)),
-        entriesFound(anna.knowledge, word),
-        entriesFound(owner.knowledge, word),
+        entriesFound(anna.brain, word),
+        entriesFound(owner.brain, word),
       ])
     ).resolves.toStrictEqual(["app.unreadable", [], [entryPath(app.id)]]);
   });
@@ -489,10 +493,8 @@ describe("who finds an App", setUpTime, () => {
     const member = await personOf("user");
     const word = term();
     const app = await releasedApp(owner, agentsMd(word));
-    await expect(entriesFound(member.knowledge, word)).resolves.toStrictEqual(
-      []
-    );
-    await expect(entriesFound(admin.knowledge, word)).resolves.toStrictEqual([
+    await expect(entriesFound(member.brain, word)).resolves.toStrictEqual([]);
+    await expect(entriesFound(admin.brain, word)).resolves.toStrictEqual([
       entryPath(app.id),
     ]);
 
@@ -503,7 +505,7 @@ describe("who finds an App", setUpTime, () => {
       role: "user",
     });
     using _clock = letSessionRecheckPass();
-    await expect(entriesFound(member.knowledge, word)).resolves.toStrictEqual([
+    await expect(entriesFound(member.brain, word)).resolves.toStrictEqual([
       entryPath(app.id),
     ]);
   });
@@ -528,11 +530,11 @@ describe("who finds an App", setUpTime, () => {
     const { id: sharedEntry } = await entryOf(owner, shared.id);
     const { id: hiddenEntry } = await entryOf(owner, hidden.id);
 
-    const byOwner = await owner.knowledge.follow(sharedEntry);
+    const byOwner = await owner.brain.follow(sharedEntry);
     expect(byOwner.links).toMatchObject([{ documentId: hiddenEntry }]);
     expect(byOwner.backlinks).toMatchObject([{ documentId: hiddenEntry }]);
 
-    const byOther = await other.knowledge.follow(sharedEntry);
+    const byOther = await other.brain.follow(sharedEntry);
     expect(byOther.links).toStrictEqual([
       {
         path: entryPath(hidden.id),
@@ -542,9 +544,9 @@ describe("who finds an App", setUpTime, () => {
       },
     ]);
     expect(byOther.backlinks).toStrictEqual([]);
-    await expect(other.knowledge.backlinks(sharedEntry)).resolves.toMatchObject(
-      { backlinks: [] }
-    );
+    await expect(other.brain.backlinks(sharedEntry)).resolves.toMatchObject({
+      backlinks: [],
+    });
   });
 
   it("gives an agent the Apps of the person it acts for, and only under a grant", async () => {
@@ -554,17 +556,17 @@ describe("who finds an App", setUpTime, () => {
     const word = term();
     const app = await releasedApp(owner, agentsMd(word));
     const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
-    const toolsFor = async (person: Person): Promise<KnowledgeTools> => {
-      const tools = knowledgeIn(await envOf(actingFor(agent, person.userId)));
+    const toolsFor = async (person: Person): Promise<BrainTools> => {
+      const tools = brainIn(await envOf(actingFor(agent, person.userId)));
       if (!tools) {
-        throw new Error("No KNOWLEDGE binding");
+        throw new Error("No BRAIN_DB binding");
       }
       return tools;
     };
 
-    // No grant, no Knowledge tools at all.
+    // No grant, no Brain tools at all.
     expect(
-      knowledgeIn(await envOf(actingFor(agent, owner.userId)))
+      brainIn(await envOf(actingFor(agent, owner.userId)))
     ).toBeUndefined();
 
     await requestGranted(idp, admin, readCollection(agent, appsCollection));
@@ -644,7 +646,7 @@ const purgeOf = (id: string, word: string) => ({
 });
 
 const readOnlySchema = z.object({
-  code: z.literal("knowledge.read_only"),
+  code: z.literal("brain.read_only"),
   details: z.object({ issues: z.array(z.string()) }),
 });
 
@@ -653,8 +655,8 @@ const purgeRefusal = async (
   admin: Person,
   input: ReturnType<typeof purgeOf>
 ): Promise<string[]> =>
-  readOnlySchema.parse(await refusal(admin.knowledge.preparePurge(input)))
-    .details.issues;
+  readOnlySchema.parse(await refusal(admin.brain.preparePurge(input))).details
+    .issues;
 
 /** The version the entry of `app` is at. */
 const entryVersion = async (owner: Person, app: string): Promise<number> => {
@@ -679,7 +681,7 @@ describe("read-only", setUpTime, () => {
       // oxlint-disable-next-line no-await-in-loop -- one person at a time
       const tries = await Promise.all([
         outcome(
-          person.knowledge.saveDocument({
+          person.brain.saveDocument({
             collectionId: appsCollection,
             path: entryPath(app.id),
             text: "# Mine now\n",
@@ -687,7 +689,7 @@ describe("read-only", setUpTime, () => {
           })
         ),
         outcome(
-          person.knowledge.saveDocument({
+          person.brain.saveDocument({
             collectionId: appsCollection,
             path: "new.md",
             text: "# New\n",
@@ -695,7 +697,7 @@ describe("read-only", setUpTime, () => {
           })
         ),
         outcome(
-          person.knowledge.restoreVersion({
+          person.brain.restoreVersion({
             documentId: id,
             version: 1,
             ifVersion: 1,
@@ -703,9 +705,9 @@ describe("read-only", setUpTime, () => {
         ),
       ]);
       expect(tries).toStrictEqual([
-        "knowledge.read_only",
-        "knowledge.read_only",
-        "knowledge.read_only",
+        "brain.read_only",
+        "brain.read_only",
+        "brain.read_only",
       ]);
     }
     // While the App holds the term, a purge would last only until the next
@@ -716,7 +718,7 @@ describe("read-only", setUpTime, () => {
     expect({
       issues: await purgeRefusal(admin, input),
       entry: await entryVersion(owner, app.id),
-      found: await entriesFound(owner.knowledge, word),
+      found: await entriesFound(owner.brain, word),
     }).toStrictEqual({
       issues: [inAgentsMd],
       entry: 1,
@@ -740,8 +742,8 @@ describe("read-only", setUpTime, () => {
     // Once the App's current version leaves it out, the purge rewrites the
     // entry's history.
     await release(owner, app.id, { "AGENTS.md": agentsMd(term()) });
-    const plan = await admin.knowledge.preparePurge(input);
-    const result = await admin.knowledge.purge(input, plan.token);
+    const plan = await admin.brain.preparePurge(input);
+    const result = await admin.brain.purge(input, plan.token);
     expect({
       planned: plan.versions,
       purged: result.versions,
@@ -765,8 +767,8 @@ describe("read-only", setUpTime, () => {
     ]);
 
     await owner.api.apps.update(appId, { name: "Leave requests" });
-    const plan = await admin.knowledge.preparePurge(input);
-    await admin.knowledge.purge(input, plan.token);
+    const plan = await admin.brain.preparePurge(input);
+    await admin.brain.purge(input, plan.token);
     await expect(versionsHolding(id, word)).resolves.toBe(0);
 
     // An App whose current version can't be read can't be checked: the

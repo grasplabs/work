@@ -164,7 +164,7 @@ export const chatSources = sqliteTable(
 );
 
 /**
- * The Knowledge documents a chat's code was given, each once, with the
+ * The Brain documents a chat's code was given, each once, with the
  * chat's last message when it first was (`givenAfter`, 0 before any): a
  * search's hits, a read's document, and what a follow resolved to a
  * document. What its answers may cite (`ChatCitation`): an answer stored

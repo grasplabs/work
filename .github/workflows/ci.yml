@@ -659,7 +659,7 @@ jobs:
       # deploy.
       - name: Create the audit archive bucket in the EU
         run: vp exec wrangler r2 bucket info grasp-os-audit-archive --jurisdiction eu || vp exec wrangler r2 bucket create grasp-os-audit-archive --jurisdiction eu
-      # And the bucket of Knowledge's version texts (core's BRAIN_OBJECTS).
+      # And the bucket of Brain's version texts (core's BRAIN_OBJECTS).
       - name: Create the Brain objects bucket in the EU
         run: vp exec wrangler r2 bucket info grasp-os-brain-objects --jurisdiction eu || vp exec wrangler r2 bucket create grasp-os-brain-objects --jurisdiction eu
       # Each applies its Worker's D1 migrations from the release, then

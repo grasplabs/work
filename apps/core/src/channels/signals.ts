@@ -30,7 +30,7 @@ export type ChannelSignal =
 
 /**
  * The answer time buckets' upper bounds, in milliseconds: the plan's p90
- * bars (8 s for knowledge, 12 s with an app) fall on a bound, so a
+ * bars (8 s for brain, 12 s with an app) fall on a bound, so a
  * bucket's bound says which side of them an answer was.
  */
 const answerBucketsMs = [

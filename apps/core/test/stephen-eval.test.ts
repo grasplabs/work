@@ -12,7 +12,7 @@ import type {
 import { stephenRuleNames } from "./stephen-rules.ts";
 
 // Stephen's eval (GRA-720) as CI runs it: every case of the suite, through
-// the real Workspace object, Knowledge, the agent's code, connect with
+// the real Workspace object, Brain, the agent's code, connect with
 // Graph played by core's fake, the permissions, the model gateway and the
 // ledger, with only the model provider stubbed (stephen-stub.ts). The stub
 // answers as a careful Stephen would, and only from what reached it, so

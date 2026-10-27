@@ -4,15 +4,15 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { allEvents } from "./audit-events.ts";
+import { collectionWithNote, newTeam } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, newTeam } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // What changed in the brain since a moment (`brain.changes`,
 // brain-changes.ts), as each person may read it. From its threat model:
 // a document's existence or title reaching someone who can't read it (a
 // team's, someone's own: the admins' collections, which only the platform
-// makes, go by the same condition, knowledge-admins-access.test.ts); paging that skips, repeats or
+// makes, go by the same condition, brain-admins-access.test.ts); paging that skips, repeats or
 // shows what the person can't read; a cursor that isn't core's. The
 // onboarding's sources are in brain.test.ts.
 
@@ -72,11 +72,11 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
     const outsider = await signedInApi(idp, "user");
     const teamId = await newTeam(admin, [member]);
     // A document from before the moment, changed after it.
-    const handbook = await admin.api.knowledge.createCollection({
+    const handbook = await admin.api.brain.createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    await admin.api.knowledge.saveDocument({
+    await admin.api.brain.saveDocument({
       collectionId: handbook.id,
       path: "rules.md",
       text: "# Rules\nBe kind.",
@@ -85,7 +85,7 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
     // The clock past its first save, so the moment comes after it.
     await scheduler.wait(5);
     const since = justBefore();
-    await admin.api.knowledge.saveDocument({
+    await admin.api.brain.saveDocument({
       collectionId: handbook.id,
       path: "rules.md",
       text: "# Rules\nBe kind and quick.",
@@ -127,12 +127,12 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
       outsider: ["handbook/rules.md changed"],
       later: [],
     });
-    // Recorded as the Knowledge read it is, by whom.
+    // Recorded as the Brain read it is, by whom.
     const events = await allEvents();
     expect(
       events.some(
         ({ action, actor, detail }) =>
-          action === "knowledge.read" &&
+          action === "brain.read" &&
           actor.type === "person" &&
           actor.userId === outsider.userId &&
           detail.read === "changes"
@@ -143,7 +143,7 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
   it("record every document of a full page in the read's audit event, and go back 90 days at most", async () => {
     const admin = await signedInApi(idp, "admin");
     const since = justBefore();
-    const { id } = await admin.api.knowledge.createCollection({
+    const { id } = await admin.api.brain.createCollection({
       name: `Many ${unique()}`,
       access: "everyone",
     });
@@ -151,7 +151,7 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
       Array.from(
         { length: brainChangesMaxLimit },
         async (_, index) =>
-          await admin.api.knowledge.saveDocument({
+          await admin.api.brain.saveDocument({
             collectionId: id,
             path: `many-${index}.md`,
             text: `# Many ${index}`,
@@ -169,7 +169,7 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
     const events = await allEvents();
     const recorded = events.find(
       ({ action, actor, detail, provenance }) =>
-        action === "knowledge.read" &&
+        action === "brain.read" &&
         actor.type === "person" &&
         actor.userId === admin.userId &&
         detail.read === "changes" &&
@@ -179,7 +179,7 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
     // One of them last changed 100 days ago: past what the feed goes
     // back to, whatever moment is asked about.
     const old = saved[0]?.id ?? "";
-    await env.KNOWLEDGE.prepare(
+    await env.BRAIN_DB.prepare(
       "UPDATE documents SET updated_at = ? WHERE id = ?"
     )
       .bind(Date.now() - 100 * 24 * 60 * 60 * 1000, old)
@@ -209,13 +209,13 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
   it("page through every change once, newest first, and refuse a cursor core didn't make", async () => {
     const admin = await signedInApi(idp, "admin");
     const since = justBefore();
-    const { id } = await admin.api.knowledge.createCollection({
+    const { id } = await admin.api.brain.createCollection({
       name: `Notes ${unique()}`,
       access: "everyone",
     });
     for (const index of [1, 2, 3, 4, 5]) {
       // oxlint-disable-next-line no-await-in-loop -- one after another, in order
-      await admin.api.knowledge.saveDocument({
+      await admin.api.brain.saveDocument({
         collectionId: id,
         path: `note-${index}.md`,
         text: `# Note ${index}`,
@@ -244,7 +244,7 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
     const newestFirst = paths(await changesOf(admin, since, 2));
     // Changed at the same moment, as saves in one millisecond are: a page
     // ends between two of them, and the next goes on from there.
-    await env.KNOWLEDGE.prepare(
+    await env.BRAIN_DB.prepare(
       "UPDATE documents SET updated_at = ? WHERE collection_id = ?"
     )
       .bind(Date.now(), id)

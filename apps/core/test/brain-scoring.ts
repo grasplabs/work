@@ -27,7 +27,7 @@ export interface TrialObservation {
    * The chat as the model read it, request after request, each part marked
    * by who wrote it. Evidence counts where a source gave it before the
    * model wrote it, or where a tool result holds a whole line that the
-   * Knowledge reads of its own step returned (its `backing`), before the
+   * The Brain reads of its own step returned (its `backing`), before the
    * model wrote that line itself: never words the model only wrote, or
    * made in code, without reading them.
    */
@@ -51,7 +51,7 @@ export interface TrialObservation {
   /** Why the trial failed, if it did: it still counts, as not completed. */
   error?: string;
   /**
-   * The paths of the run's Knowledge documents, by ID: what a citation
+   * The paths of the run's Brain documents, by ID: what a citation
    * linking one (`grasp:note/<id>`) cites.
    */
   notes?: Readonly<Record<string, string>>;
@@ -300,7 +300,7 @@ export const isAbstention = (answer: string): boolean =>
 const sourceLabel = /^source:\s*/iu;
 
 /**
- * A link to a Knowledge document as the product's agent is told to cite
+ * A link to a Brain document as the product's agent is told to cite
  * one (src/agent.ts): `[its words](grasp:note/<documentId> "a quote")`,
  * the quote its title, or none.
  */
@@ -789,7 +789,7 @@ export interface ArmSummary {
      * removed, another chat's, revoked), the share that abstained.
      */
     notAllowedRecall: number | null;
-    /** Of the tasks Knowledge has no answer for, the share that abstained. */
+    /** Of the tasks the Brain has no answer for, the share that abstained. */
     emptyRecall: number | null;
   };
   /** Trials that leaked or changed state: a hard gate. */

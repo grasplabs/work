@@ -9,8 +9,8 @@ import { expectTypeOf } from "vite-plus/test";
 import { action, resource, v } from "../src/action.ts";
 import type {
   ActionCtx,
-  KnowledgeDocument,
-  KnowledgeHit,
+  BrainSourceDocument,
+  BrainHit,
   ModelRequest,
   RunFile,
   TemplateContent,
@@ -25,7 +25,7 @@ const writer = resource.model("writer", {
   output: v.object({ line: v.string(), score: v.number() }),
 });
 
-const docs = resource.knowledge("docs", { operations: ["search"] });
+const docs = resource.brain("docs", { operations: ["search"] });
 const letter = resource.template("letter");
 
 declare const ctx: ActionCtx<
@@ -39,19 +39,19 @@ declare const ctx: ActionCtx<
 >;
 
 expectTypeOf(ctx.resources.docs.search).returns.resolves.toEqualTypeOf<
-  KnowledgeHit[]
+  BrainHit[]
 >();
 expectTypeOf(
   ctx.resources.letter.read
 ).returns.resolves.toEqualTypeOf<TemplateContent>();
 
-// A knowledge operation the use didn't declare.
+// A brain operation the use didn't declare.
 // @ts-expect-error -- only "search"
 void ctx.resources.docs.read;
 
-// A knowledge use calls only search and read.
+// A brain use calls only search and read.
 // @ts-expect-error -- no such operation
-resource.knowledge("docs", { operations: ["delete"] });
+resource.brain("docs", { operations: ["delete"] });
 
 // A files use: only the operations it declares (GRA-724).
 const files = resource.files("files", { operations: ["write", "read"] });
@@ -75,11 +75,11 @@ const html: FileWrite["type"] = "text/html";
 void html;
 
 declare const reading: ActionCtx<
-  readonly [ReturnType<typeof resource.knowledge<"docs", "read">>]
+  readonly [ReturnType<typeof resource.brain<"docs", "read">>]
 >;
 expectTypeOf(
   reading.resources.docs.read
-).returns.resolves.toEqualTypeOf<KnowledgeDocument>();
+).returns.resolves.toEqualTypeOf<BrainSourceDocument>();
 
 expectTypeOf(ctx.resources.mail.call)
   .parameter(0)

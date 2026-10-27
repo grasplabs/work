@@ -118,7 +118,7 @@ export type PermissionSubjectType = PermissionSubject["type"];
 /** A subject as a client sends it, with a plain string ID. */
 export type PermissionSubjectInput = z.input<typeof permissionSubjectSchema>;
 
-/** A Knowledge collection, as a permission's object. */
+/** A Brain collection, as a permission's object. */
 const collectionObjectSchema = z.strictObject({
   type: z.literal("collection"),
   collectionId: collectionIdSchema,
@@ -148,7 +148,7 @@ const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
 
 /**
  * What a permission gives access to: a connection (all of it, or one
- * resource in it, such as one mailbox), a Knowledge collection, an
+ * resource in it, such as one mailbox), a Brain collection, an
  * independent workflow (to follow its runs, `read`, start it, `start`,
  * or send events to its runs, `send`, which neither of the others
  * implies), another App's exports: the methods of its server
@@ -290,7 +290,7 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "GOOGLE_DOCUMENTS_CLIENT_SECRET",
   // Where the deployment receives mail (core's src/workflows/overview.ts).
   "INBOUND_MAIL_DOMAIN",
-  "KNOWLEDGE",
+  "BRAIN_DB",
   "LOADER",
   // Who core's mail is from (core's src/mail.ts).
   "MAIL_FROM",
@@ -428,7 +428,7 @@ export type PermissionRequest = z.input<typeof permissionRequestSchema>;
  * what its App asked for as it was marked): a request without its
  * subject, which is every App created from it. Only a collection (for a
  * built-in, one it declares: `declaredCollectionSchema` in
- * `@grasp-os/shared/knowledge`), or what the platform offers (its
+ * `@grasp-os/shared/brain-documents`), or what the platform offers (its
  * statistics, guest chats): the things that name the same thing for
  * whoever creates from it, where a connection is someone's or set up for
  * one App, and a workflow or exports name an App its creator may not see.
@@ -582,7 +582,7 @@ export interface PermissionsApi {
  * member; it doesn't intersect the grant with the person's own access. That
  * part of "never more than the person" (R5) is enforced where the access
  * lives: connect limits personal connections to their owner, and the
- * Knowledge queries limit collections to what the person may read.
+ * Brain queries limit collections to what the person may read.
  */
 export const authoritySchema = z
   .strictObject({

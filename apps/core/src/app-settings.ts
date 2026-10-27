@@ -11,8 +11,8 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { appFor, toApp } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
+import { indexAppNow } from "./brain/apps-collection.ts";
 import { appMembers, apps, teamMembers, teams } from "./db/core/schema.ts";
-import { indexAppNow } from "./knowledge/apps-collection.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { openTo } from "./workflows/owners.ts";
 

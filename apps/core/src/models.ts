@@ -498,7 +498,7 @@ export const modelEffortsOf = (ref: string): ModelEfforts => {
 /**
  * Whether the deployment's config keeps every call in the EU
  * (`eu.deployment`): for what sends data out of the Worker without being a model call,
- * such as Workers AI's document conversion (knowledge/extract.ts), which
+ * such as Workers AI's document conversion (brain/extract.ts), which
  * then stays in the Worker. A config whose rules don't parse keeps it
  * there too: it fails closed. The default config has no EU rule.
  */
@@ -569,7 +569,7 @@ const sessionShape = {
        */
       z.strictObject({ onboarding: z.literal(true) }),
       /**
-       * Core's own upkeep of the Brain (knowledge/entities.ts): reading a
+       * Core's own upkeep of the Brain (brain/entities.ts): reading a
        * source's text for the entities it names. Judged as onboarding's
        * is, as carrying sensitive data, for no one in particular, but
        * kept apart from it in spend and audit (`platform` in its events).

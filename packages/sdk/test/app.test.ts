@@ -253,7 +253,7 @@ describe("resources", () => {
       structuredOutput: v.object({ summary: v.string() }),
       maxOutputTokens: 100,
     });
-    const knowledge = resource.knowledge("help", {
+    const brain = resource.brain("help", {
       operations: ["search"],
       collections: ["handbook"],
     });
@@ -269,9 +269,9 @@ describe("resources", () => {
         ? model.structuredOutput.fields
         : {};
     expect({
-      operation: Reflect.set(knowledge.operations, 0, "read"),
-      added: Reflect.set(knowledge.operations, 1, "read"),
-      collection: Reflect.set(knowledge.collections, 0, "secret"),
+      operation: Reflect.set(brain.operations, 0, "read"),
+      added: Reflect.set(brain.operations, 1, "read"),
+      collection: Reflect.set(brain.collections, 0, "secret"),
       action: Reflect.set(connector.actions, 0, "delete"),
       output: Reflect.set(fields, "extra", { kind: "string" }),
       outputKind: Reflect.set(model.structuredOutput ?? {}, "kind", "string"),
@@ -286,7 +286,7 @@ describe("resources", () => {
       contract: false,
     });
     expect([
-      knowledge.operations,
+      brain.operations,
       connector.actions,
       model.structuredOutput?.kind,
     ]).toStrictEqual([["search"], ["send"], "object"]);

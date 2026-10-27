@@ -1,0 +1,230 @@
+import { splitFrontmatterBlock } from "@grasp-os/shared/brain-documents";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/ui/components/table";
+import { Trans } from "@lingui/react/macro";
+import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import Markdown, { defaultUrlTransform } from "react-markdown";
+import type { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+import { CitedNote, citedNoteLink } from "../chat/cited-note.tsx";
+import { remarkWikiLinks } from "./wiki-links.ts";
+import type { ResolveLink } from "./wiki-links.ts";
+
+// A Brain document, rendered. Its text is whatever anyone who may
+// change the collection wrote, or whatever an uploaded file held, so
+// nothing in it runs or loads: raw HTML is dropped (`skipHtml`), a link
+// keeps its address only for a safe protocol (http, https, mailto and a
+// few more; react-markdown's `defaultUrlTransform` empties any other, such
+// as `javascript:`), and opens in a tab of its own without this page as
+// its opener. Images show their alt text: loading one would tell its host
+// who read the document, and when. A `[[link]]` to a document of the
+// collection opens it here (wiki-links.ts). The agent's answers render the
+// same way (`PlainMarkdown`): they may repeat whatever the agent read.
+
+/**
+ * A document's Markdown without its frontmatter, found as core finds it.
+ * Text that opens a block it never closes (core never saves one) shows
+ * whole.
+ */
+export const bodyOf = (text: string): string =>
+  splitFrontmatterBlock(text)?.body ?? text;
+
+/** `body` without a first `# heading` that only repeats `title`. */
+const withoutTitle = (body: string, title: string | undefined): string => {
+  const [first = "", ...rest] = body.split("\n");
+  return title !== undefined && first.trim() === `# ${title}`
+    ? rest.join("\n").trim()
+    : body;
+};
+
+/** A resolved `[[link]]`'s address (`documentHref`), or one written so. */
+const documentLink = /^\?doc=[^&#]+$/u;
+
+/**
+ * The document a link on this page opens, if it is one. Read with
+ * `URLSearchParams`, which never throws on a malformed escape, as
+ * `decodeURIComponent` would, in the middle of rendering.
+ */
+const documentOf = (href: string): string | undefined =>
+  documentLink.test(href)
+    ? (new URLSearchParams(href.slice(1)).get("doc") ?? undefined)
+    : undefined;
+
+/**
+ * A link that leaves the page: in a tab of its own, without this page as
+ * its opener. An address the transform emptied was unsafe: the text stays,
+ * as text.
+ */
+const OutsideLink = ({
+  href,
+  children,
+}: {
+  href?: string | undefined;
+  children?: ReactNode;
+}) =>
+  href === undefined || href === "" ? (
+    <span>{children}</span>
+  ) : (
+    <a
+      className="underline"
+      href={href}
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      {children}
+    </a>
+  );
+
+const components: Components = {
+  h1: ({ children }) => <h1 className="text-2xl font-medium">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-xl font-medium">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-lg font-medium">{children}</h3>,
+  h4: ({ children }) => <h4 className="font-medium">{children}</h4>,
+  h5: ({ children }) => <h5 className="font-medium">{children}</h5>,
+  h6: ({ children }) => <h6 className="font-medium">{children}</h6>,
+  ul: ({ children }) => <ul className="list-disc pl-6">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal pl-6">{children}</ol>,
+  blockquote: ({ children }) => (
+    <blockquote className="text-muted-foreground border-l-2 pl-4">
+      {children}
+    </blockquote>
+  ),
+  pre: ({ children }) => (
+    <pre className="bg-muted overflow-x-auto rounded-md p-3 text-sm">
+      {children}
+    </pre>
+  ),
+  code: ({ children }) => <code className="font-mono text-sm">{children}</code>,
+  table: ({ children }) => <Table>{children}</Table>,
+  thead: ({ children }) => <TableHeader>{children}</TableHeader>,
+  tbody: ({ children }) => <TableBody>{children}</TableBody>,
+  tr: ({ children }) => <TableRow>{children}</TableRow>,
+  th: ({ children }) => <TableHead>{children}</TableHead>,
+  td: ({ children }) => <TableCell>{children}</TableCell>,
+  a: ({ href, children }) => {
+    const documentId = href === undefined ? undefined : documentOf(href);
+    if (documentId !== undefined) {
+      return (
+        <Link
+          className="underline"
+          from="/brain/collections/$collection"
+          search={{ doc: documentId }}
+        >
+          {children}
+        </Link>
+      );
+    }
+    // Any other, a `#heading` too, opens apart from this page.
+    return <OutsideLink href={href}>{children}</OutsideLink>;
+  },
+  img: ({ alt }) =>
+    alt === undefined || alt === "" ? null : <span>{alt}</span>,
+};
+
+/** How a link that leaves the page is drawn: `OutsideLink`, unless one that asks first. */
+export type LeavingLink = (props: {
+  href: string | undefined;
+  children: ReactNode;
+}) => ReactNode;
+
+/**
+ * The same, for text that isn't a document of a collection (the agent's
+ * answers): every link leaves the page (`Leaving` draws it), but for a
+ * note `cited` names, which opens it here (`CitedNote`). A note link to
+ * any other shows as its text, whatever the answer says.
+ */
+export const plainComponents = (
+  cited: readonly string[],
+  Leaving: LeavingLink = OutsideLink
+): Components => ({
+  ...components,
+  a: ({ href, children }) => {
+    const note = href === undefined ? undefined : citedNoteLink.exec(href);
+    const documentId = note?.groups?.id;
+    if (documentId !== undefined) {
+      return cited.includes(documentId) ? (
+        <CitedNote documentId={documentId}>{children}</CitedNote>
+      ) : (
+        <span>{children}</span>
+      );
+    }
+    return <Leaving href={href}>{children}</Leaving>;
+  },
+});
+
+/** No note cited. */
+const noneCited: readonly string[] = [];
+
+/**
+ * A link's address as the page may follow it: a cited note's as it is,
+ * any other as react-markdown keeps safe ones (`defaultUrlTransform`).
+ */
+export const plainUrl = (url: string): string =>
+  citedNoteLink.test(url) ? url : defaultUrlTransform(url);
+
+/**
+ * Markdown that isn't a Brain document, such as the agent's answers,
+ * as safely as a document: no raw HTML, safe links only, no images. Its
+ * links to the notes `cited` names open them; no other note link does.
+ */
+export const PlainMarkdown = ({
+  text,
+  cited = noneCited,
+}: {
+  text: string;
+  cited?: readonly string[];
+}) => (
+  <div className="flex flex-col gap-3">
+    <Markdown
+      components={plainComponents(cited)}
+      remarkPlugins={[remarkGfm]}
+      skipHtml
+      urlTransform={plainUrl}
+    >
+      {text}
+    </Markdown>
+  </div>
+);
+
+/**
+ * A document's text, frontmatter left out, as safe rendered Markdown, its
+ * `[[links]]` resolved by `resolve`.
+ */
+export const DocumentMarkdown = ({
+  text,
+  resolve,
+  title,
+}: {
+  text: string;
+  resolve: ResolveLink;
+  /** The title the page already shows: a first heading saying it again is left out. */
+  title?: string;
+}) => {
+  const body = withoutTitle(bodyOf(text).trim(), title);
+  if (body === "") {
+    return (
+      <p className="text-muted-foreground text-sm">
+        <Trans>This document is empty.</Trans>
+      </p>
+    );
+  }
+  return (
+    <article className="flex flex-col gap-3">
+      <Markdown
+        components={components}
+        remarkPlugins={[remarkGfm, [remarkWikiLinks, { resolve }]]}
+        skipHtml
+      >
+        {body}
+      </Markdown>
+    </article>
+  );
+};

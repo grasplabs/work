@@ -1,8 +1,8 @@
-import { appIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type {
   CollectionReader,
-  KnowledgeTools,
-} from "@grasp-os/shared/knowledge";
+  BrainTools,
+} from "@grasp-os/shared/brain-documents";
+import { appIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type {
   Authority,
@@ -94,9 +94,9 @@ export const collectionIn = (
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   bindings[name] as CollectionReader | undefined;
 
-/** An agent's Knowledge tools in its env, if it may read any collection. */
-export const knowledgeIn = (bindings: Bindings): KnowledgeTools | undefined =>
-  // SAFETY: `bindingsFor` gives `KNOWLEDGE` a `KnowledgeBinding`, whose
-  // methods are those of `KnowledgeTools`.
+/** An agent's Brain tools in its env, if it may read any collection. */
+export const brainIn = (bindings: Bindings): BrainTools | undefined =>
+  // SAFETY: `bindingsFor` gives `BRAIN_DB` a `BrainCollectionBinding`, whose
+  // methods are those of `BrainTools`.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  bindings.KNOWLEDGE as KnowledgeTools | undefined;
+  bindings.BRAIN_DB as BrainTools | undefined;

@@ -5,13 +5,13 @@ import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { keepAudience } from "../src/knowledge/access.ts";
-import { forContext } from "../src/knowledge/memory.ts";
+import { keepAudience } from "../src/brain/access.ts";
+import { forContext } from "../src/brain/memory.ts";
 import { isRestricted } from "../src/restricted.ts";
 import type { WorkContext } from "../src/restricted.ts";
+import { newTeam } from "./brain-collections.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
 // The Brain's scoped memory in a chat's context (GRA-298; the threat model
@@ -45,7 +45,7 @@ const seed = async (
   }
 ): Promise<void> => {
   const now = new Date();
-  await drizzle(env.KNOWLEDGE)
+  await drizzle(env.BRAIN_DB)
     .insert(brainMemories)
     .values({
       id: crypto.randomUUID(),
@@ -305,13 +305,13 @@ describe("a chat's Brain memory", setUpTime, () => {
   it("restricts the chat before handing over a record that cites a sensitive collection, and records the read", async () => {
     const admin = await signedInApi(idp, "admin");
     const team = await newTeam(admin, [admin]);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Salaries ${unique()}`,
       access: "teams",
       teams: [team],
       sensitive: true,
     });
-    const { id: documentId } = await admin.api.knowledge.saveDocument({
+    const { id: documentId } = await admin.api.brain.saveDocument({
       collectionId,
       path: "pay.md",
       text: "# Pay\nBands.",

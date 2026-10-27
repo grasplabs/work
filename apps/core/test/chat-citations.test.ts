@@ -5,7 +5,7 @@ import { citedIn } from "../src/chat-messages.ts";
 
 // How an answer's note links become its citations: a parser, so unit
 // tests. That core records what a chat's code was given, and shows its
-// answers with these, is tested through a chat (agent-knowledge.test.ts).
+// answers with these, is tested through a chat (agent-brain.test.ts).
 
 const given =
   (...ids: string[]) =>

@@ -81,7 +81,7 @@ const shown = async (
   });
   const collection = createRoute({
     getParentRoute: () => rootRoute,
-    path: "/knowledge/$collection",
+    path: "/brain/collections/$collection",
     component: () => null,
   });
   const router = createRouter({
@@ -175,7 +175,7 @@ describe(AnswerSources, () => {
         "1Route planroutes/plan.mdWhere the route goes, and when.",
         "2Parental leaveleave.mdParental leave lasts sixteen weeks.",
       ],
-      at: "/knowledge/handbook",
+      at: "/brain/collections/handbook",
       search: { doc: "leave" },
     });
   });

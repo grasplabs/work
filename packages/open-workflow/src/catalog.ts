@@ -18,7 +18,7 @@ export const bindingKinds = [
   "compute",
   "decision",
   "event",
-  "knowledge",
+  "brain",
   "template",
   "files",
 ] as const;
@@ -381,7 +381,7 @@ const requiredFields: Readonly<
   event: ["events"],
   // Served by the host's own contract (search and read; a pinned version's
   // content): an action's use is all that reaches one.
-  knowledge: [],
+  brain: [],
   template: [],
   // The run's own files (GRA-724): the host's own contract too.
   files: [],

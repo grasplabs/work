@@ -56,8 +56,8 @@ const startEmpty = async (): Promise<void> => {
     migrationsSchema.parse(testBinding("CORE_MIGRATIONS"))
   );
   await applyD1Migrations(
-    env.KNOWLEDGE,
-    migrationsSchema.parse(testBinding("KNOWLEDGE_MIGRATIONS"))
+    env.BRAIN_DB,
+    migrationsSchema.parse(testBinding("BRAIN_DB_MIGRATIONS"))
   );
 
   // Connect's database too: core's tests call the real connect Worker, which

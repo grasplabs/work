@@ -173,7 +173,7 @@ export const recordSources = async (
   env: Env,
   { workspaceId, chatId, runId }: AgentScope,
   sources: readonly string[],
-  /** The Knowledge documents the call hands over, which answers may cite. */
+  /** The Brain documents the call hands over, which answers may cite. */
   documentIds: readonly string[] = [],
   /**
    * What the run's result rests on, if not `sources`: a connection call's
@@ -196,7 +196,7 @@ export const recordSources = async (
 
 /**
  * Records with the run alone what a call read that isn't the chat's
- * provenance (an App's answer or files, the Knowledge catalog), before the
+ * provenance (an App's answer or files, the Brain catalog), before the
  * call hands it over, so the run's result is withheld from the model once
  * the agent may no longer read it for its person (history-access.ts). A
  * run that ended since the call began records nothing, and the call is
@@ -288,7 +288,7 @@ export type CallOutcome = "ok" | "refused" | "failed";
 /**
  * Records a call of the chat's code as `agent.call`, by the workspace's
  * agent acting for the chat's person, in the chat: for the calls nothing
- * below records (a Knowledge read, a connection call and a model request
+ * below records (a Brain read, a connection call and a model request
  * record themselves). Through core's outbox, which never fails the call
  * (`keepAuditEvent`).
  */

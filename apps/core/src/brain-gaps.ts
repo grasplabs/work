@@ -49,7 +49,7 @@ import { onboardingStore } from "./onboarding/store.ts";
 //   user id, and the brain shows that person's name as it is now.
 // - An answer that can't be erased: an admin redacts one; a content purge
 //   rewrites every answer holding its terms; a personal purge forgets the
-//   person as anyone's answerer (knowledge/purge.ts).
+//   person as anyone's answerer (brain/purge.ts).
 // - An answer written over, or a closed gap reopened: every close is
 //   guarded in SQL (`closed_at IS NULL`), so of two racing answers one
 //   lands and the other is refused, and nothing reopens a gap.
@@ -497,7 +497,7 @@ const eraseGapAnswerer = async (
 };
 
 /**
- * The gap answers as a Knowledge purge reaches them: they hold people's
+ * The gap answers as a Brain purge reaches them: they hold people's
  * words too, so a purge rewrites them and forgets who gave them.
  */
 export const gapAnswerErasure = (

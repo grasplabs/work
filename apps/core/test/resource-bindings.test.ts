@@ -2,7 +2,7 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
 import type { ModelBindingSpend } from "@grasp-os/shared/models";
-import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
+import { brainSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type {
@@ -20,13 +20,13 @@ import { callAppFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { createCollection } from "../src/brain/collection-rules.ts";
+import { saveDocument } from "../src/brain/person-writes.ts";
 import {
   appMembers,
   appResourceBindings,
   permissions as permissionRows,
 } from "../src/db/core/schema.ts";
-import { createCollection } from "../src/knowledge/collection-rules.ts";
-import { saveDocument } from "../src/knowledge/person-writes.ts";
 import {
   grantPermission,
   requestPermission,
@@ -276,7 +276,7 @@ const call = async (
 const codeOfError = (error: unknown): string =>
   error instanceof Error ? String(Reflect.get(error, "code")) : "?";
 
-/** Knowledge hits, as an action answers them. */
+/** Brain hits, as an action answers them. */
 const hitsSchema = z.array(
   z.strictObject({ title: z.string(), excerpt: z.string() })
 );
@@ -326,13 +326,13 @@ const writerApproval = (sealed: Sealed) => ({
   reviewed: { version: 1 },
 });
 
-/** An App whose actions search and read two Knowledge collections. */
-const knowledgeFiles = (): Record<string, string> => ({
+/** An App whose actions search and read two Brain collections. */
+const brainCollectionFiles = (): Record<string, string> => ({
   "schema.ts": modelFiles()["schema.ts"] ?? "",
   "operations/help.ts": `import { resource, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const help = resource.knowledge("help", {
+export const help = resource.brain("help", {
   operations: ["search", "read"],
   collections: ["handbook", "salaries"],
 });
@@ -415,8 +415,8 @@ const grantedCollection = async (
  * sensitive salaries collection of a team its owner is in, and one more
  * collection it was never granted; each holds one document.
  */
-const knowledgeApp = async () => {
-  const sealed = await sealedApp(knowledgeFiles());
+const brainCollectionApp = async () => {
+  const sealed = await sealedApp(brainCollectionFiles());
   const admin = await person("admin");
   const team = crypto.randomUUID();
   await env.DB.batch([
@@ -469,7 +469,7 @@ const knowledgeApp = async () => {
   const binding = await approveResourceBinding(env, admin, {
     app: sealed.app,
     alias: "help",
-    target: { kind: "knowledge", collections: permissions },
+    target: { kind: "brain", collections: permissions },
     reviewed: { version: 1 },
   });
   return {
@@ -1173,7 +1173,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 6001 });
   });
 
   it("search and read only the bound collections, as the person may", async () => {
-    const { sealed, documents, collections } = await knowledgeApp();
+    const { sealed, documents, collections } = await brainCollectionApp();
     const found = await answerOf(sealed, "help.find", { text: "leave" });
     const opened = await answerOf(sealed, "help.open", {
       id: documents.leave,
@@ -1214,7 +1214,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 6001 });
   });
 
   it("search what the person may read of the bound collections, and nothing else", async () => {
-    const { sealed, documents, collections, team } = await knowledgeApp();
+    const { sealed, documents, collections, team } = await brainCollectionApp();
     // The App's owner leaves the payroll team: its salaries collection is
     // still bound, but no longer theirs to read.
     await env.DB.prepare(
@@ -1244,13 +1244,13 @@ export const idle = resource.model("idle", { maxOutputTokens: 6001 });
     });
   });
 
-  it("search with text up to Knowledge's own limit, and refuse longer up front", async () => {
-    const { sealed } = await knowledgeApp();
+  it("search with text up to Brain's own limit, and refuse longer up front", async () => {
+    const { sealed } = await brainCollectionApp();
     const atLimit = await answerOf(sealed, "help.find", {
-      text: searchTextOf(knowledgeSearchMaxLength),
+      text: searchTextOf(brainSearchMaxLength),
     });
     const pastLimit = await answerOf(sealed, "help.find", {
-      text: searchTextOf(knowledgeSearchMaxLength + 1),
+      text: searchTextOf(brainSearchMaxLength + 1),
     });
     expect({
       atLimit: hitsSchema
@@ -1264,7 +1264,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 6001 });
   });
 
   it("carry a sensitive source's classification and restrict the App", async () => {
-    const { sealed, documents, collections } = await knowledgeApp();
+    const { sealed, documents, collections } = await brainCollectionApp();
     const authority = {
       subject: { type: "app" as const, appId: sealed.app },
       onBehalfOf: sealed.owner.userId,
@@ -1292,7 +1292,7 @@ export const idle = resource.model("idle", { maxOutputTokens: 6001 });
   });
 
   it("hand what a call read to the gateway's data rules", async () => {
-    const { sealed, documents } = await knowledgeApp();
+    const { sealed, documents } = await brainCollectionApp();
     await approveModel(sealed, "writer");
     // Sensitive data may go to another model only.
     const { gateway, gatewayEnv: withGateway } = gatewayEnv(
@@ -1317,8 +1317,8 @@ export const idle = resource.model("idle", { maxOutputTokens: 6001 });
     });
   });
 
-  it("stop knowledge whose collection permission was revoked", async () => {
-    const { sealed, admin, permissions } = await knowledgeApp();
+  it("stop brain whose collection permission was revoked", async () => {
+    const { sealed, admin, permissions } = await brainCollectionApp();
     await revokePermission(env, admin, permissions.salaries);
     const found = await answerOf(sealed, "help.find", { text: "leave" });
     expect(outcomeOf(found.result)).toStrictEqual({
@@ -1326,16 +1326,16 @@ export const idle = resource.model("idle", { maxOutputTokens: 6001 });
     });
   });
 
-  it("bind knowledge only to the App's own grants, for every collection declared", async () => {
-    const { sealed, admin, permissions } = await knowledgeApp();
-    const other = await sealedApp(knowledgeFiles());
+  it("bind brain only to the App's own grants, for every collection declared", async () => {
+    const { sealed, admin, permissions } = await brainCollectionApp();
+    const other = await sealedApp(brainCollectionFiles());
     const refusal = async (collections: Record<string, string>, app = sealed) =>
       await failure(
         async () =>
           await approveResourceBinding(env, admin, {
             app: app.app,
             alias: "help",
-            target: { kind: "knowledge", collections },
+            target: { kind: "brain", collections },
             reviewed: { version: 1 },
           })
       );
@@ -2197,7 +2197,7 @@ describe("model binding spend", { timeout: 120_000 }, () => {
 
 /**
  * An App whose actions use a model (unless `withWriter` is false), two
- * Knowledge collections and a template of `contract`.
+ * Brain collections and a template of `contract`.
  */
 const deskFiles = (
   contract: string,
@@ -2209,7 +2209,7 @@ import { action } from "#grasp/server";
 
 ${withWriter ? `export const writer = resource.model("writer", { maxOutputTokens: 300 });` : ""}
 
-export const help = resource.knowledge("help", {
+export const help = resource.brain("help", {
   operations: ["search"],
   collections: ["handbook", "salaries"],
 });
@@ -2260,7 +2260,7 @@ export default app({
 `,
 });
 
-/** An App whose actions search knowledge `aliases`, each of `names`. */
+/** An App whose actions search brain `aliases`, each of `names`. */
 const manyCollectionFiles = (
   aliases: readonly string[],
   names: readonly string[]
@@ -2271,7 +2271,7 @@ import { action } from "#grasp/server";
 
 ${aliases
   .map(
-    (alias) => `export const ${alias} = resource.knowledge("${alias}", {
+    (alias) => `export const ${alias} = resource.brain("${alias}", {
   operations: ["search"],
   collections: ${JSON.stringify(names)},
 });
@@ -2347,7 +2347,7 @@ const bindDesk = async ({ sealed, admin, permission, template }: Desk) => {
     });
   await approve("writer", { kind: "model", model: allowedModel });
   await approve("help", {
-    kind: "knowledge",
+    kind: "brain",
     collections: { handbook: permission, salaries: permission },
   });
   await approve("letter", {
@@ -2398,7 +2398,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       resources: [
         {
           alias: "help",
-          kind: "knowledge",
+          kind: "brain",
           contract: null,
           actions: [],
           operations: ["search"],
@@ -2411,7 +2411,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
           binding: null,
           // The App's own grant to read, and no other collection.
           choices: {
-            kind: "knowledge",
+            kind: "brain",
             permissions: [
               {
                 permissionId: permission,
@@ -2601,7 +2601,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
   });
 
   it("names bound collections past D1's 100 bound parameters", async () => {
-    // Four knowledge resources of 26 collections each, every one bound to
+    // Four brain resources of 26 collections each, every one bound to
     // a collection of its own: 104 permissions and collections to name.
     const aliases = ["k1", "k2", "k3", "k4"];
     const names = Array.from({ length: 26 }, (_, index) => `c${index}`);
@@ -2646,7 +2646,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       await approveResourceBinding(env, admin, {
         app: sealed.app,
         alias,
-        target: { kind: "knowledge", collections: collectionsOf },
+        target: { kind: "brain", collections: collectionsOf },
         reviewed: { version: 1 },
       });
     }

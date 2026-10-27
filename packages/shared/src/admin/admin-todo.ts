@@ -208,11 +208,11 @@ export const todosAt = (view: OrgView, stage: Stage): Todo[] => {
   return [
     {
       kind: "known",
-      done: view.knowledge.ready,
-      percent: view.knowledge.percent,
-      threshold: view.knowledge.threshold,
+      done: view.brain.ready,
+      percent: view.brain.percent,
+      threshold: view.brain.threshold,
     },
-    { kind: "go", done: view.knowledge.opened !== null },
+    { kind: "go", done: view.brain.opened !== null },
   ];
 };
 

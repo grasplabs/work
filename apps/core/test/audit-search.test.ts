@@ -211,7 +211,7 @@ describe("audit log search", () => {
       event({ action: "connection.call.provenance", provenance: [resource] }),
       event({
         actor: staff,
-        action: "knowledge.document.read",
+        action: "brain.document.read",
         detail: { resource },
       })
     );

@@ -7,7 +7,7 @@ import type { Brain, BrainPorts } from "./brain.ts";
 import { auditOutbox } from "./db/schema.ts";
 import type { BrainEvent } from "./events.ts";
 
-// Knowledge's audit events: each is stored in Knowledge's own outbox in
+// The Brain's audit events: each is stored in the Brain's own outbox in
 // the batch of the change it records (`outboxed`, `outboxedWhere`), so
 // nothing changes unrecorded, and the host's `audit` port drains the
 // outbox into its log.

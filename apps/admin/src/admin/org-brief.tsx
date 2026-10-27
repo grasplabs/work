@@ -16,7 +16,7 @@ import { SparklesIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { needSection, sectionTo } from "./sections.ts";
-import { knowledgeWords, needLine, stageWords, whole } from "./words.ts";
+import { brainWords, needLine, stageWords, whole } from "./words.ts";
 
 const linkClass =
   "focus-visible:ring-ring/50 rounded-sm text-left underline-offset-4 outline-none hover:underline focus-visible:ring-3";
@@ -102,8 +102,7 @@ export const OrgBrief = ({
           <BriefList title="Not known yet">
             {brief.missing.map((each) => (
               <BriefItem key={each.source}>
-                {knowledgeWords[each.source]}: {Math.round(each.known * 100)}%
-                in
+                {brainWords[each.source]}: {Math.round(each.known * 100)}% in
               </BriefItem>
             ))}
             {questions > 0 ? (

@@ -1,9 +1,9 @@
 import { candidateStates } from "@grasp-os/shared/apps";
 import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
+import { brainSignalKinds } from "@grasp-os/shared/brain-signals";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
-import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
 import type {
   BlueprintWorkflow,
   DeclaredPermission,
@@ -379,7 +379,7 @@ export const channelSignals = sqliteTable(
 
 /**
  * Who is in a chat that others share, a group chat or channel on a chat
- * platform, as its agent reads for it (`knowledge/access.ts`): kept by the
+ * platform, as its agent reads for it (`brain/access.ts`): kept by the
  * Workspace object that holds the chat, before each turn, from the
  * platform's roster then. The agent reads only what every member may
  * read, and nothing at all with `outsiders` in it: anyone Grasp can't name
@@ -1173,7 +1173,7 @@ export const sdkResourceBindings = sqliteTable(
         "model",
         "decision",
         "event",
-        "knowledge",
+        "brain",
         "template",
         "files",
       ],
@@ -1467,7 +1467,7 @@ export const appResourceBindings = sqliteTable(
       enum: [
         "model",
         "connector",
-        "knowledge",
+        "brain",
         "template",
         "store",
         "statistics",
@@ -4059,7 +4059,7 @@ export const workflowCatalogContracts = sqliteTable(
         "model",
         "decision",
         "event",
-        "knowledge",
+        "brain",
         "template",
         "files",
       ],
@@ -4096,7 +4096,7 @@ export const workflowBindingApprovals = sqliteTable(
         "model",
         "decision",
         "event",
-        "knowledge",
+        "brain",
         "template",
         "files",
       ],
@@ -4458,7 +4458,7 @@ export const landscapeStagedPeople = sqliteTable(
 export const brainRecords = sqliteTable(
   "brain_records",
   {
-    /** The order records were added in: `brain.read` keeps it. */
+    /** The order records were added in: `brain.readWorkspace` keeps it. */
     position: integer().primaryKey({ autoIncrement: true }),
     type: text({
       enum: [
@@ -4481,7 +4481,7 @@ export const brainRecords = sqliteTable(
     body: text().notNull(),
     addedAt: timestamp("added_at").notNull(),
     /**
-     * When a Knowledge content purge last rewrote `body` (brain-records.ts
+     * When a Brain content purge last rewrote `body` (brain-records.ts
      * `brainRecordErasure`): the record is the company's as purged from
      * then on, and the same id sent again is left as it is, never its
      * words put back.
@@ -4508,17 +4508,17 @@ export const brainGapStates = sqliteTable("brain_gap_states", {
   answeredBy: text("answered_by"),
 });
 
-// Knowledge's host tables: Grasp's own records about Knowledge, kept here
-// and not in Knowledge's database, which holds only the Brain's own
+// The Brain's host tables: Grasp's own records about Brain, kept here
+// and not in the Brain's database, which holds only the Brain's own
 // (collections, documents, versions, sections, links, payloads, search).
-// They name Knowledge's collections and documents by ID, with no foreign
+// They name the Brain's collections and documents by ID, with no foreign
 // key: no batch holds both databases.
 
-/** The teams that may read a `teams` collection (knowledge/access.ts). */
+/** The teams that may read a `teams` collection (brain/access.ts). */
 export const collectionTeams = sqliteTable(
   "collection_teams",
   {
-    /** A collection in Knowledge. */
+    /** A collection in the Brain. */
     collectionId: text("collection_id").notNull(),
     teamId: text("team_id").notNull(),
   },
@@ -4530,7 +4530,7 @@ export const collectionTeams = sqliteTable(
 
 /**
  * Which version of each App its entry in the Apps collection holds
- * (knowledge/apps-collection.ts): written once the entry is, so it never
+ * (brain/apps-collection.ts): written once the entry is, so it never
  * names a version the entry doesn't have. An App whose current version
  * differs, or that has no row, is indexed again.
  */
@@ -4546,7 +4546,7 @@ export const appEntries = sqliteTable("app_entries", {
 });
 
 /**
- * A file uploaded into a collection (knowledge/uploads.ts): its original,
+ * A file uploaded into a collection (brain/uploads.ts): its original,
  * kept in R2 under its hash, and where extracting its text into the
  * document at `path` stands. Only the person who uploaded it sees it.
  */
@@ -4554,7 +4554,7 @@ export const uploads = sqliteTable(
   "uploads",
   {
     id: text().primaryKey(),
-    /** A collection in Knowledge. */
+    /** A collection in the Brain. */
     collectionId: text("collection_id").notNull(),
     /** The file's name, and the path of its document. */
     path: text().notNull(),
@@ -4568,7 +4568,7 @@ export const uploads = sqliteTable(
     actor: text().notNull(),
     /**
      * `saving`: claimed for the save of its text, which a purge's
-     * forgetting refuses (knowledge/uploads.ts).
+     * forgetting refuses (brain/uploads.ts).
      */
     status: text({
       enum: ["pending", "extracting", "saving", "ready", "failed"],
@@ -4593,7 +4593,7 @@ export const uploads = sqliteTable(
 );
 
 /**
- * Originals to delete from R2 (knowledge/uploads.ts), by key: recorded
+ * Originals to delete from R2 (brain/uploads.ts), by key: recorded
  * with the upload, before its original is stored, and cleared once it is
  * saved; recorded again by a purge. Deleted by the failure that makes one
  * unneeded, or by the cron trigger once its upload is gone or failed.
@@ -4611,11 +4611,11 @@ export const uploadCleanups = sqliteTable("upload_cleanups", {
 });
 
 /**
- * The daily computations of Knowledge's usage signals
- * (knowledge/signals.ts), one row per attempt, as
+ * The daily computations of the Brain's usage signals
+ * (brain/signals.ts), one row per attempt, as
  * `improvement_signal_computations` has them (src/daily-claims.ts).
  */
-export const knowledgeSignalComputations = sqliteTable(
+export const brainSignalComputations = sqliteTable(
   "knowledge_signal_computations",
   {
     id: text().primaryKey(),
@@ -4643,17 +4643,17 @@ export const knowledgeSignalComputations = sqliteTable(
  * and lost its row fails on the foreign key. `evidence` is JSON, IDs and
  * counts only; `evidence_at` is when its latest evidence was seen (a
  * question's latest search), null for a document's. Reads check the
- * collection (and the document) in Knowledge, and so never show a signal
+ * collection (and the document) in the Brain, and so never show a signal
  * about one that's gone.
  */
-export const knowledgeSignals = sqliteTable(
+export const brainSignals = sqliteTable(
   "knowledge_signals",
   {
     computation: text()
       .notNull()
-      .references(() => knowledgeSignalComputations.id),
+      .references(() => brainSignalComputations.id),
     id: text().notNull(),
-    kind: text({ enum: knowledgeSignalKinds }).notNull(),
+    kind: text({ enum: brainSignalKinds }).notNull(),
     collectionId: text("collection_id").notNull(),
     subject: text().notNull(),
     /** User ID: the collection's owner when it was computed. */
@@ -4692,10 +4692,10 @@ export const knowledgeSignals = sqliteTable(
  * signal it no longer has, or has with newer evidence, so a signal that
  * went away and came back shows again.
  */
-export const knowledgeSignalDismissals = sqliteTable(
+export const brainSignalDismissals = sqliteTable(
   "knowledge_signal_dismissals",
   {
-    kind: text({ enum: knowledgeSignalKinds }).notNull(),
+    kind: text({ enum: brainSignalKinds }).notNull(),
     collectionId: text("collection_id").notNull(),
     subject: text().notNull(),
     dismissedAt: timestamp("dismissed_at").notNull(),

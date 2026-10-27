@@ -366,7 +366,7 @@ const Setup = () => {
   const sendingDomain = sendingDomainOf(window.location.hostname);
   return (
     <SetupFrame
-      knowledge={{ parts, percent, threshold: data.gate.threshold }}
+      brain={{ parts, percent, threshold: data.gate.threshold }}
       onExit={() => {
         if (!revealing) {
           void navigate({ to: "/" });

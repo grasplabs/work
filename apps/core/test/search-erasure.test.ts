@@ -33,7 +33,7 @@ const holds = (
 
 /** The rebuilds purges owe, by ID. */
 const owed = async (): Promise<string[]> => {
-  const { results } = await env.KNOWLEDGE.prepare(
+  const { results } = await env.BRAIN_DB.prepare(
     "SELECT id FROM search_rebuilds ORDER BY id"
   ).all<{ id: string }>();
   return results.map(({ id }) => id);
@@ -41,11 +41,11 @@ const owed = async (): Promise<string[]> => {
 
 describe("a purged term's page separators", () => {
   it("are on in a new database, from its migrations, before any purge", async () => {
-    const settings = await env.KNOWLEDGE.batch([
-      env.KNOWLEDGE.prepare(
+    const settings = await env.BRAIN_DB.batch([
+      env.BRAIN_DB.prepare(
         "SELECT v FROM search_words_config WHERE k = 'secure-delete'"
       ),
-      env.KNOWLEDGE.prepare(
+      env.BRAIN_DB.prepare(
         "SELECT v FROM search_trigrams_config WHERE k = 'secure-delete'"
       ),
     ]);
@@ -110,7 +110,7 @@ describe("a purged term's page separators", () => {
   });
 
   it("stay owed a rebuild until one runs after the purge's writes are done, or surely over", async () => {
-    const db = drizzle(env.KNOWLEDGE);
+    const db = drizzle(env.BRAIN_DB);
     // A purge still writing, one whose writes are done, and one that
     // recorded its rebuild long ago and never said (its request died).
     await db.batch([
@@ -119,7 +119,7 @@ describe("a purged term's page separators", () => {
       rebuildOwed(db, "c-died"),
     ]);
     await owedWritesDone(db, "b-done");
-    await env.KNOWLEDGE.prepare(
+    await env.BRAIN_DB.prepare(
       "UPDATE search_rebuilds SET owed_at = owed_at - ? WHERE id = 'c-died'"
     )
       .bind(owedRebuildStaleMs + 1000)

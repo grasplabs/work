@@ -440,7 +440,7 @@ describe("permissions", () => {
     );
   });
 
-  it("build an env with a stub for each active grant, its Knowledge tools, and nothing else", async () => {
+  it("build an env with a stub for each active grant, its Brain tools, and nothing else", async () => {
     const admin = await permissionApi("admin");
     const app = await newApp(admin.api);
     const grant = async (request: PermissionRequest) => {
@@ -451,7 +451,7 @@ describe("permissions", () => {
     await admin.api.permissions.request(outlook(app.appId, "ASKED"));
     const gone = await grant(outlook(app.appId, "GONE"));
     await admin.api.permissions.revoke(gone.id);
-    const policies = await admin.api.knowledge.createCollection({
+    const policies = await admin.api.brain.createCollection({
       name: `Policies ${unique()}`,
       access: "everyone",
     });
@@ -465,11 +465,11 @@ describe("permissions", () => {
     await grant(outlook(other.appId, "SOMEONE_ELSES"));
 
     const bindings = await envOf(actingFor(app, admin.userId));
-    // With a collection to read, the Knowledge tools across all of them.
+    // With a collection to read, the Brain tools across all of them.
     expect(Object.keys(bindings)).toStrictEqual([
       "OUTLOOK",
       "POLICIES",
-      "KNOWLEDGE",
+      "BRAIN_DB",
     ]);
   });
 
@@ -531,7 +531,7 @@ describe("permissions", () => {
   // have no write): `write` would be granted and give them nothing.
   it("let only an agent write a collection", async () => {
     const admin = await permissionApi("admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Notes ${unique()}`,
       access: "everyone",
     });
@@ -600,7 +600,7 @@ describe("permissions", () => {
     // Test-only bindings aside, every name in core's env is the platform's.
     const testOnly = new Set([
       "CORE_MIGRATIONS",
-      "KNOWLEDGE_MIGRATIONS",
+      "BRAIN_DB_MIGRATIONS",
       "CONNECT_DB",
       "CONNECT_MIGRATIONS",
       "CONNECT_PROVIDERS",

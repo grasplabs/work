@@ -12,8 +12,12 @@ import {
 } from "../src/resource-bindings.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { release as nextVersion, requestGranted } from "./apps.ts";
+import {
+  collectionWithNote,
+  newTeam,
+  readCollection,
+} from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
 import {
   appWith,
@@ -58,7 +62,7 @@ const idp = mockIdp();
 // takes longer than Vitest's default five seconds: the sensitive-collection
 // test, with two workflows to activate and two runs, timed out there.
 // Sixty seconds fits two runs' waits with room for the setup, as
-// app-roles.test.ts and knowledge-access.test.ts give theirs.
+// app-roles.test.ts and brain-access.test.ts give theirs.
 describe("model rules", { timeout: 60_000 }, () => {
   const hello = callsInAnApp(idp);
 

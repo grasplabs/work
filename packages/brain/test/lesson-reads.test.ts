@@ -369,7 +369,7 @@ describe("inspecting lessons", () => {
       scopeId: chat,
     });
     const { results } = await env.BRAIN.prepare(
-      "SELECT event FROM audit_outbox WHERE instr(event, 'knowledge.lesson.retired') > 0 AND instr(event, ?) > 0"
+      "SELECT event FROM audit_outbox WHERE instr(event, 'brain.lesson.retired') > 0 AND instr(event, ?) > 0"
     )
       .bind(ann)
       .all<{ event: string }>();

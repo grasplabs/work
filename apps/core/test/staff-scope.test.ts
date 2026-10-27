@@ -21,7 +21,7 @@ import {
 // sees Grasp's access and can end it at once. The ways it can fail,
 // tried here:
 //
-// - Staff with the onboarding scope reaching Knowledge, Apps, chats,
+// - Staff with the onboarding scope reaching Brain, Apps, chats,
 //   connections or the audit log, over `/rpc` or a route of its own.
 // - Their access outliving the onboarding by more than a week.
 // - The company unable to see or end it, or staff ending it for them.

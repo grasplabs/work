@@ -27,15 +27,15 @@ export type AuditEventType = z.infer<typeof auditEventTypeSchema>;
 
 /**
  * The type of each action. The first rule whose `action` is the event's
- * action, or a dotted prefix of it, gives the type (`knowledge` covers
- * `knowledge.document.saved`); a rule with `sideEffect` or `access` applies
+ * action, or a dotted prefix of it, gives the type (`brain` covers
+ * `brain.document.saved`); a rule with `sideEffect` or `access` applies
  * only to an event whose `detail.sideEffect` or `detail.access` is that
  * value. An action no rule names has no type: it is still found by every
  * other filter. New actions add a rule.
  *
  * Actions are stored in the hash-chained log, so they are a data contract:
  * never rename one, add a rule instead. A new action is `noun.verbed`, in
- * dotted segments from the general to the specific (`knowledge.document.
+ * dotted segments from the general to the specific (`brain.document.
  * saved`, `workflow.run.started`), so a prefix finds its family. Older
  * actions that don't follow it (`connection.call`, `connection.offer_changed`)
  * keep their names.
@@ -110,17 +110,17 @@ const typeRules: readonly {
   { action: "brain.gap.answers_purged", type: "action" },
   { action: "brain.gap.answerer_erased", type: "action" },
   { action: "brain.gap", type: "decision" },
-  { action: "knowledge.search", type: "read" },
+  { action: "brain.search", type: "read" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
-  { action: "knowledge.skill", type: "read" },
-  { action: "knowledge.read", type: "read" },
-  // Knowledge usage signals: the daily computation, an owner reading those
+  { action: "brain.skill", type: "read" },
+  { action: "brain.read", type: "read" },
+  // Brain usage signals: the daily computation, an owner reading those
   // of their collections, and dismissing one.
-  { action: "knowledge.signals.computed", type: "action" },
-  { action: "knowledge.signals.read", type: "read" },
-  { action: "knowledge.signal.dismissed", type: "decision" },
-  { action: "knowledge.collection", type: "config" },
-  { action: "knowledge", type: "action" },
+  { action: "brain.signals.computed", type: "action" },
+  { action: "brain.signals.read", type: "read" },
+  { action: "brain.signal.dismissed", type: "decision" },
+  { action: "brain.collection", type: "config" },
+  { action: "brain", type: "action" },
   // A person making, renaming or deleting one of their chats.
   { action: "chat", type: "action" },
   // A call of the chat agent's code that nothing else records: a listing,

@@ -58,6 +58,8 @@ import {
 import type { AppRow, VersionRow } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
+import { appMemoryPath } from "./brain/memory-files.ts";
+import { brainOf } from "./brain/ports.ts";
 import {
   appOrigins,
   apps,
@@ -66,8 +68,6 @@ import {
   blueprints,
   permissions,
 } from "./db/core/schema.ts";
-import { appMemoryPath } from "./knowledge/memory-files.ts";
-import { brainOf } from "./knowledge/ports.ts";
 import {
   appBindingKinds,
   bindingKindsOf,
@@ -205,7 +205,7 @@ type Row = typeof blueprints.$inferSelect;
 
 /**
  * The owner of the collections the built-ins declare: nobody's, open to
- * everyone, changed by admins only (`canWrite` in knowledge).
+ * everyone, changed by admins only (`canWrite` in brain).
  */
 const releaseOwner = "grasp";
 
@@ -1076,7 +1076,7 @@ const deleteReplacedTrees = async (
  * isn't there, or changed if its name, description, code or what it
  * declares each App created from it asks for differ from what's stored,
  * in one audited batch, so installing it again writes nothing. The
- * collections it declares are created first, in Knowledge's database,
+ * collections it declares are created first, in the Brain's database,
  * each only if it isn't there yet, and audited only then, and so are the
  * catalog contracts its workflows bind, in core's. Apps created
  * from it earlier keep their code and their permissions. The trees of its

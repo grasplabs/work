@@ -2,15 +2,15 @@ import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { readableCollection } from "./collections.ts";
 import { collections } from "./db/schema.ts";
+import type { Provenance } from "./documents-contract.ts";
 import type { CollectionId } from "./ids.ts";
-import type { Provenance } from "./knowledge.ts";
 import { searchSections } from "./search.ts";
 import type { FoundSection } from "./search.ts";
 
 // What recall (recall.ts) reads, and nothing more: the Brain's narrow
 // store (the Brain design's "Keep SQL inside the storage boundary"). Each
 // method states a read's intent; none takes SQL or a table. The D1 store
-// reads through Knowledge's one access predicate (access.ts), so recall
+// reads through the Brain's one access predicate (access.ts), so recall
 // never decides what may be read itself.
 
 /** A read of evidence for words, in some collections or all a reader may. */
@@ -34,7 +34,7 @@ export interface BrainStore<C> {
    */
   requireBrainGrant: (reader: C) => Promise<void>;
   /**
-   * Refuses, as `knowledge.not_found`, unless `reader` may read every one
+   * Refuses, as `brain.document_not_found`, unless `reader` may read every one
    * of `collectionIds`: the same answer whether one is missing or hidden.
    * Reads nothing of what they hold.
    */
@@ -55,7 +55,7 @@ export interface BrainStore<C> {
   accessKey: (reader: C) => Promise<string>;
 }
 
-/** The Brain's store over Knowledge's D1 database. */
+/** The Brain's store over the Brain's D1 database. */
 export const d1BrainStore = <C>(brain: Brain<C>): BrainStore<C> => ({
   requireBrainGrant: async (reader) => {
     await brain.ports.recall.require(reader);

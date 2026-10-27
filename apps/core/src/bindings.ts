@@ -18,11 +18,8 @@ import { workflowErrors } from "@grasp-os/shared/workflows";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
-import type {
-  CollectionBinding,
-  CollectionGrant,
-} from "./knowledge/binding.ts";
-import type { KnowledgeBinding } from "./knowledge/tools-binding.ts";
+import type { CollectionBinding, CollectionGrant } from "./brain/binding.ts";
+import type { BrainCollectionBinding } from "./brain/tools-binding.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
@@ -461,8 +458,8 @@ const collectionStubOf = (authority: Authority, context: WorkContext) => {
  * `authority.onBehalfOf` and keeping its restricted mode in `context`.
  * Throws `permission.person_inactive` when that person has left.
  *
- * With a permission to read a collection, it also has `KNOWLEDGE`, the
- * agent's Knowledge tools across all of them (`KnowledgeBinding`); a
+ * With a permission to read a collection, it also has `BRAIN_DB`, the
+ * agent's Brain tools across all of them (`BrainCollectionBinding`); a
  * permission can't take that name, which is core's own binding's. Without
  * one, it has nothing to read, so the env stays as empty as its
  * permissions.
@@ -480,7 +477,7 @@ export const bindingsFor = async (
     string,
     | Fetcher<ConnectionBinding>
     | Fetcher<CollectionBinding>
-    | Fetcher<KnowledgeBinding>
+    | Fetcher<BrainCollectionBinding>
   >
 > => {
   const grantOf = connectionGrantOf(context);
@@ -494,14 +491,14 @@ export const bindingsFor = async (
       ? collectionOf(permission)
       : exports.ConnectionBinding({ props: { ...grant, authority } });
   });
-  const readsKnowledge = permissions.some(
+  const readsCollections = permissions.some(
     ({ object, actions }) =>
       object.type === "collection" && actions.includes("read")
   );
-  return readsKnowledge
+  return readsCollections
     ? {
         ...stubs,
-        KNOWLEDGE: exports.KnowledgeBinding({
+        BRAIN_DB: exports.BrainCollectionBinding({
           props: { authority, context },
         }),
       }

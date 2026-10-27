@@ -1,7 +1,7 @@
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
-import { bodyOf, PlainMarkdown } from "../knowledge/markdown.tsx";
+import { bodyOf, PlainMarkdown } from "../brain-collections/markdown.tsx";
 
 // What every export in Grasp can become, by the person's choice: a
 // Markdown file, or a PDF. A PDF is made by the browser's own print dialog

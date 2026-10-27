@@ -1,13 +1,13 @@
 import type { Source, Transcript } from "@grasp-os/shared/brain";
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
+import type { PurgeInput } from "@grasp-os/shared/brain-documents";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import type { Upload } from "@grasp-os/shared/uploads";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { eventsAfter, logHead } from "./audit-events.ts";
+import { newTeam } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import {
   callAuth,
   letSessionRecheckPass,
@@ -18,9 +18,9 @@ import {
 } from "./sign-in.ts";
 
 // Transcripts on the brain's sources, from the producer people use: a
-// WebVTT file uploaded into Knowledge, its text extracted in the sandbox,
+// WebVTT file uploaded into the Brain, its text extracted in the sandbox,
 // its turns saved with its document (src/brain-transcripts.ts,
-// packages/brain transcripts.ts). `brain.read` lists such a source by how
+// packages/brain transcripts.ts). `brain.readWorkspace` lists such a source by how
 // many turns it has; `brain.transcript` opens one. That a team's
 // interviews have none, for anyone, is tried in brain-intake.test.ts, and
 // the kickoff's absence in brain.test.ts. The ways it can leak, tried here:
@@ -59,7 +59,7 @@ NOTE Exported by the meeting tool.
 /** A person with a collection of their own (`me`), and what they upload. */
 const personWithCollection = async (role: "user" | "admin" = "user") => {
   const person = await signedInApi(idp, role);
-  const collection = await person.api.knowledge.createCollection({
+  const collection = await person.api.brain.createCollection({
     name: `Meetings ${unique()}`,
     access: role === "admin" ? "everyone" : "me",
   });
@@ -93,20 +93,20 @@ const uploaded = async (
   return await ended(person.api, upload.id);
 };
 
-/** A Knowledge document's source id, as the brain names it. */
+/** A Brain document's source id, as the brain names it. */
 const sourceIdOf = (documentId: string | null): string =>
-  `src.knowledge-${documentId}`;
+  `src.brain-${documentId}`;
 
-/** The brain's listed source for a Knowledge document, as `api` reads the brain. */
+/** The brain's listed source for a Brain document, as `api` reads the brain. */
 const listedOf = async (
   api: SessionApi,
   documentId: string | null
 ): Promise<Source | undefined> => {
-  const { sources } = await api.brain.read();
+  const { sources } = await api.brain.readWorkspace();
   return sources.find(({ id }) => id === sourceIdOf(documentId));
 };
 
-/** A Knowledge document's transcript, as `api` opens its source. */
+/** A Brain document's transcript, as `api` opens its source. */
 const openedOf = async (
   api: SessionApi,
   documentId: string | null
@@ -123,7 +123,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     const document =
       upload.documentId === null
         ? null
-        : await owner.api.knowledge.getDocument(upload.documentId);
+        : await owner.api.brain.getDocument(upload.documentId);
 
     expect({
       status: upload.status,
@@ -182,7 +182,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     const owner = await signedInApi(idp, "admin");
     const reader = await signedInApi(idp, "user");
     const teamId = await newTeam(owner, [reader]);
-    const collection = await owner.api.knowledge.createCollection({
+    const collection = await owner.api.brain.createCollection({
       name: `Finance ${unique()}`,
       access: "teams",
       teams: [teamId],
@@ -231,7 +231,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
   it("opens nothing for a source id that isn't one, and refuses one that isn't an id", async () => {
     const owner = await personWithCollection();
     expect({
-      notADocument: await owner.api.brain.transcript("src.knowledge-nope"),
+      notADocument: await owner.api.brain.transcript("src.brain-nope"),
       unknown: await owner.api.brain.transcript("src-kickoff"),
       tooLong: await outcome(owner.api.brain.transcript("x".repeat(201))),
     }).toStrictEqual({
@@ -269,9 +269,9 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
     const document =
       upload.documentId === null
         ? null
-        : await owner.api.knowledge.getDocument(upload.documentId);
+        : await owner.api.brain.getDocument(upload.documentId);
     const body = (document?.version.text ?? "").split("\n---\n").at(-1) ?? "";
-    const links = await env.KNOWLEDGE.prepare(
+    const links = await env.BRAIN_DB.prepare(
       "SELECT count(*) AS n FROM links WHERE from_document_id = ?"
     )
       .bind(upload.documentId)
@@ -370,7 +370,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       "Silence.vtt",
       "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<b> </b>&#8203;\n"
     );
-    const { documents } = await owner.api.knowledge.listDocuments(
+    const { documents } = await owner.api.brain.listDocuments(
       owner.collectionId
     );
 
@@ -396,7 +396,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
         ),
       })
     );
-    const { documents } = await owner.api.knowledge.listDocuments(
+    const { documents } = await owner.api.brain.listDocuments(
       owner.collectionId
     );
 
@@ -414,7 +414,7 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       meetingVtt(`Bo${unique()}`)
     );
     const before = await listedOf(owner.api, upload.documentId);
-    await owner.api.knowledge.saveDocument({
+    await owner.api.brain.saveDocument({
       collectionId: owner.collectionId,
       path: "Standup.vtt",
       text: "# Standup\n\nRewritten as notes, without the call.",
@@ -440,10 +440,10 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       terms: [name],
       reason: "erasure_request",
     };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    const result = await admin.api.knowledge.purge(input, plan.token);
+    const plan = await admin.api.brain.preparePurge(input);
+    const result = await admin.api.brain.purge(input, plan.token);
     const after = await openedOf(reader.api, upload.documentId);
-    const { hits } = await reader.api.knowledge.search(name);
+    const { hits } = await reader.api.brain.search(name);
 
     expect({
       before: before?.turns.map(({ speaker }) => speaker),
@@ -475,8 +475,8 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       userId: leaver.userId,
       reason: "offboarding",
     };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    await admin.api.knowledge.purge(input, plan.token);
+    const plan = await admin.api.brain.preparePurge(input);
+    await admin.api.brain.purge(input, plan.token);
 
     expect({
       before: before?.turns.length,
@@ -504,20 +504,20 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
         .map(({ action }) => action)
         .toSorted(),
       saved: ofDocument
-        .filter(({ action }) => action === "knowledge.document.saved")
+        .filter(({ action }) => action === "brain.document.saved")
         .map(({ detail }) => ({
           turns: detail?.transcriptTurns,
           chapters: detail?.transcriptChapters,
         })),
       reads: ofDocument
-        .filter(({ action }) => action === "knowledge.read")
+        .filter(({ action }) => action === "brain.read")
         .map(({ detail }) => String(detail?.read))
         .toSorted(),
       holds: [name, "Visser", "budget", "invoices", "Friday"].filter((words) =>
         recorded.includes(words)
       ),
     }).toStrictEqual({
-      upload: ["knowledge.upload.extracted", "knowledge.upload.received"],
+      upload: ["brain.upload.extracted", "brain.upload.received"],
       saved: [{ turns: 3, chapters: 0 }],
       reads: ["transcript", "transcripts"],
       holds: [],

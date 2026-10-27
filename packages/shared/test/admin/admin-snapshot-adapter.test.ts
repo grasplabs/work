@@ -403,7 +403,7 @@ describe("an organization from core's admin snapshot", () => {
   it("knows what core knows, against core's threshold, and stays closed without Grasp's go", () => {
     const { view } = shown();
 
-    const { percent, threshold, ready, opened } = view.knowledge;
+    const { percent, threshold, ready, opened } = view.brain;
     expect({
       percent,
       threshold,
@@ -419,7 +419,7 @@ describe("an organization from core's admin snapshot", () => {
     });
     expect(view.needs.map((need) => need.kind)).not.toContain("go");
     // Core sends its number without its parts: no breakdown that wouldn't add up to it.
-    expect(view.knowledge.sources).toStrictEqual([]);
+    expect(view.brain.sources).toStrictEqual([]);
   });
 
   it("waits for the works council, and keeps an interview deleted as its person asked", () => {
@@ -522,7 +522,7 @@ describe("an organization from core's admin snapshot", () => {
     );
 
     const view = adminViewOf(opened.org, opened.state, "2026-10-14");
-    expect([view.knowledge.opened, view.open, view.stages.open]).toStrictEqual([
+    expect([view.brain.opened, view.open, view.stages.open]).toStrictEqual([
       7,
       true,
       "done",
@@ -589,7 +589,7 @@ describe("an organization from core's admin snapshot", () => {
     expect({
       day: view.day,
       closed: view.closed,
-      opened: view.knowledge.opened,
+      opened: view.brain.opened,
       talked: view.interviews.map((each) => each.id).toSorted(),
       tom: view.people.find((each) => each.person.id === "tom")?.state,
     }).toStrictEqual({

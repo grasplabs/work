@@ -313,14 +313,14 @@ const modelCall = (
   cost: { amount, currency: "USD" },
 });
 
-/** A Knowledge search that found nothing, by `actor`. */
+/** A Brain search that found nothing, by `actor`. */
 const emptySearch = (
   actor: z.input<typeof auditEventSchema>["actor"],
   queryKey: string,
   collection?: string
 ) => ({
   actor,
-  action: "knowledge.search.empty",
+  action: "brain.search.empty",
   ...(collection === undefined
     ? {}
     : { target: { type: "collection", id: collection } }),
@@ -745,7 +745,7 @@ describe("improvement signals", () => {
     ]);
   });
 
-  it("group Knowledge searches that found nothing by their key, an App's with the App and people's, through the agent too, with the deployment", async () => {
+  it("group Brain searches that found nothing by their key, an App's with the App and people's, through the agent too, with the deployment", async () => {
     const { api, app } = await builderWithApp();
     const admin = await signedInApi(idp, "admin");
     const now = nextDay();

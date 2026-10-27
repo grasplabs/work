@@ -10,17 +10,17 @@ import { chatAuthority, chatContext, connectionReadOf } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { appFor } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
+import { collectionsAllowed } from "./brain/access.ts";
+import { appsCollectionId } from "./brain/app-entries.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { inList } from "./db/d1.ts";
-import { collectionsAllowed } from "./knowledge/access.ts";
-import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { grantedPermissions } from "./permissions.ts";
 
 // What a chat's earlier code results may still send to the model (GRA-690).
 // A result rests on what its run read, each recorded with the run:
 // collections and each connection call, with the action and resource its
 // grant allowed (`recordSources`), and an App's answer, exports or files
-// and the Knowledge catalog's collections (`recordRunReads`). Before every
+// and the Brain catalog's collections (`recordRunReads`). Before every
 // model request the chat asks which of those its agent may still read for
 // its person, as a read made now would be decided, and withholds the
 // results of every run that read one it may not (`withholdRuns` in
@@ -212,7 +212,7 @@ const readableApps = async (
 
 /**
  * Of `sourceIds`, those the chat's agent may read for its person now: a
- * collection a Knowledge read would allow now (granted to the agent, and
+ * collection a Brain read would allow now (granted to the agent, and
  * readable by the person: `collectionsAllowed`); a connection call a
  * grant the agent holds in this chat now covers, on a connection not
  * disconnected that the person may use themselves; an App read the
@@ -229,7 +229,7 @@ export const readableSources = async (
   if (sourceIds.length === 0) {
     return new Set();
   }
-  const db = drizzle(env.KNOWLEDGE);
+  const db = drizzle(env.BRAIN_DB);
   const { condition } = await collectionsAllowed(env, db, {
     type: "delegate",
     authority: chatAuthority(scope),

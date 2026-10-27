@@ -73,13 +73,13 @@ import {
   declaredFingerprints,
   servedIn,
 } from "./resource-apps.ts";
+import { brainAdapter } from "./resource-brain.ts";
 import { connectorAdapter, contractReader } from "./resource-connector.ts";
 import type {
   ConnectionGrantRow,
   ContractReader,
 } from "./resource-connector.ts";
 import { guestsAdapter } from "./resource-guests.ts";
-import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter, modelAnswers, tokensOfBound } from "./resource-model.ts";
 import { platformGrantsOf } from "./resource-platform.ts";
 import type { PlatformAction } from "./resource-platform.ts";
@@ -90,7 +90,7 @@ import { auditStoreRefusal } from "./store-operations.ts";
 import type { StoreGrant } from "./store-operations.ts";
 
 // Approved resource bindings (spec 12, 16.1, 32.3): what lets an action of
-// an App of spec 8's layout reach a model, a connection, knowledge, a
+// an App of spec 8's layout reach a model, a connection, brain, a
 // template, another store or the platform's statistics through
 // `ctx.resources.<alias>`. Threat model, and how each is
 // closed:
@@ -138,7 +138,7 @@ const adapters: {
   readonly [Kind in BindingTarget["kind"]]: ResourceAdapter<Kind>;
 } = {
   model: modelAdapter,
-  knowledge: knowledgeAdapter,
+  brain: brainAdapter,
   connector: connectorAdapter,
   template: templateAdapter,
   store: storeAdapter,
@@ -295,7 +295,7 @@ const targetDetail = (target: BindingTarget): Record<string, Json> => {
   if (target.kind === "connector" || target.kind === "store") {
     return { permissionId: target.permissionId };
   }
-  if (target.kind === "knowledge") {
+  if (target.kind === "brain") {
     // A detail is one identifier-sized value: the permissions, joined,
     // when they fit; their number otherwise (the row keeps them all).
     const ids = [...new Set(Object.values(target.collections))].toSorted();
@@ -835,7 +835,7 @@ const reviewGrants = async (
   const named =
     ids.length === 0
       ? []
-      : await drizzle(env.KNOWLEDGE)
+      : await drizzle(env.BRAIN_DB)
           .select({ id: collections.id, name: collections.name })
           .from(collections)
           .where(inList(collections.id, ids));
@@ -992,7 +992,7 @@ const choicesFor = async (
     };
   }
   return {
-    kind: "knowledge",
+    kind: "brain",
     permissions: grants.collections.rows.map((row) => ({
       permissionId: row.id,
       collectionId: row.objectId,
@@ -1124,7 +1124,7 @@ const usersOf = (
  * How a review names each of `rows`' own bound target, for anyone who may
  * read the review, builders included: a connector binding's connection,
  * as `by` can see it in their own connections (connect lists them a
- * person's personal ones and the shared ones), and a knowledge binding's
+ * person's personal ones and the shared ones), and a brain binding's
  * collections by name. Only the targets bound, never what else the App
  * holds: that is an admin's choices.
  */
@@ -1146,9 +1146,7 @@ const targetLabels = async (
         if (target.kind === "connector") {
           return [target.permissionId];
         }
-        return target.kind === "knowledge"
-          ? Object.values(target.collections)
-          : [];
+        return target.kind === "brain" ? Object.values(target.collections) : [];
       })
     ),
   ];
@@ -1167,7 +1165,7 @@ const targetLabels = async (
     ? await env.CONNECT.listConnections(await personOf(env, by))
     : [];
   const collectionIds = [...targets.values()].flatMap((target) =>
-    target.kind === "knowledge"
+    target.kind === "brain"
       ? Object.values(target.collections).flatMap(
           (id) => objectOf.get(id) ?? []
         )
@@ -1176,7 +1174,7 @@ const targetLabels = async (
   const named =
     collectionIds.length === 0
       ? []
-      : await drizzle(env.KNOWLEDGE)
+      : await drizzle(env.BRAIN_DB)
           .select({ id: collections.id, name: collections.name })
           .from(collections)
           .where(inList(collections.id, [...new Set(collectionIds)]));
@@ -1197,7 +1195,7 @@ const targetLabels = async (
         collections: {},
       };
     }
-    if (target?.kind === "knowledge") {
+    if (target?.kind === "brain") {
       return {
         connection: null,
         collections: Object.fromEntries(
@@ -1218,12 +1216,12 @@ const targetLabels = async (
 };
 
 /**
- * Knowledge's, statistics' or guests' declared operations, or a store's paths; none
+ * The Brain's, statistics' or guests' declared operations, or a store's paths; none
  * for other kinds.
  */
 const operationsOf = (declaration: AnyResource): string[] => {
   if (
-    declaration["~resource"] === "knowledge" ||
+    declaration["~resource"] === "brain" ||
     declaration["~resource"] === "statistics" ||
     declaration["~resource"] === "guests"
   ) {
@@ -1247,7 +1245,7 @@ const declaredOf = (declaration: AnyResource) => {
       kind === "connector" || kind === "template" ? declaration.contract : null,
     actions: kind === "connector" ? [...declaration.actions] : [],
     operations: operationsOf(declaration),
-    collections: kind === "knowledge" ? [...declaration.collections] : [],
+    collections: kind === "brain" ? [...declaration.collections] : [],
     measures: kind === "statistics" ? [...declaration.platform] : [],
     maxOutputTokens: kind === "model" ? declaration.maxOutputTokens : null,
     structuredOutput: kind === "model" && declaration.structuredOutput !== null,

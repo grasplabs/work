@@ -72,9 +72,9 @@ import { runFilesRemoved } from "./run-files.ts";
 // - A chat started to fix a failed run keeps the failure report it was
 //   started with, message included, as the chat's attachment
 //   (workspace.ts), for as long as the chat is kept.
-// - What a workflow wrote elsewhere: its App's own storage, Knowledge,
+// - What a workflow wrote elsewhere: its App's own storage, Brain,
 //   mail it sent.
-// - The engine's records of core's own runs (Knowledge's extractions),
+// - The engine's records of core's own runs (Brain's extractions),
 //   which aren't Apps' runs: the engine keeps those as long as the
 //   account's plan lets it, 30 days at most.
 //

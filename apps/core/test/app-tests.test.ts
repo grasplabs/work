@@ -79,7 +79,7 @@ export const setMotto = mutation({
   handler: async (ctx, args) => await ctx.db.insert("mottos", args),
 });
 
-export const help = resource.knowledge("help", {
+export const help = resource.brain("help", {
   operations: ["search"],
   collections: ["handbook"],
 });

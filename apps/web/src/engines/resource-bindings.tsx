@@ -71,7 +71,7 @@ import {
 import type { BudgetFields, BudgetProblem } from "./binding-form.ts";
 
 // What an engine's actions reach through its declared resources (core's
-// resource-bindings.ts): the models, integrations, knowledge and templates
+// resource-bindings.ts): the models, integrations, brain and templates
 // its current version declares, whether a binding serves each now and,
 // when it doesn't, why. An admin binds each one to something that may
 // serve it, replaces or revokes a binding, and publishes template
@@ -91,7 +91,7 @@ const kindLabels: Readonly<
 > = {
   model: msg`Model`,
   connector: msg`Integration`,
-  knowledge: msg`Knowledge`,
+  brain: msg`Brain`,
   template: msg`Template`,
   store: msg`Store`,
   statistics: msg`Statistics`,
@@ -307,7 +307,7 @@ const NothingToChoose = ({
         every action it declares. Grant one first.
       </Trans>
     ),
-    knowledge: (
+    brain: (
       <Trans>
         The domain has no permission to read a collection. Grant one first.
       </Trans>
@@ -502,8 +502,7 @@ const BindForm = ({
   // Every collection declared now needs its own choice before binding;
   // what is sent names those, and only those.
   const chosen =
-    choices.kind !== "knowledge" ||
-    allChosen(resource.collections, collections);
+    choices.kind !== "brain" || allChosen(resource.collections, collections);
   const submit = () => {
     const target = targetOf(resource, choices, picked, collections);
     if (target === undefined) {
@@ -631,7 +630,7 @@ const BindForm = ({
           })}
         </Choice>
       ) : null}
-      {choices.kind === "knowledge"
+      {choices.kind === "brain"
         ? resource.collections.map((collection) => (
             <Choice
               key={collection}
@@ -1034,15 +1033,15 @@ export const ResourceBindings = ({
       <p className="text-muted-foreground max-w-prose">
         {decides ? (
           <Trans>
-            The domain&apos;s actions reach a model, an integration, knowledge
-            or a template only through a binding an admin approves here.
-            Declaring one grants nothing, and revoking a binding stops the next
-            request through it.
+            The domain&apos;s actions reach a model, an integration, brain or a
+            template only through a binding an admin approves here. Declaring
+            one grants nothing, and revoking a binding stops the next request
+            through it.
           </Trans>
         ) : (
           <Trans>
-            The domain&apos;s actions reach a model, an integration, knowledge
-            or a template only through a binding an admin of your organization
+            The domain&apos;s actions reach a model, an integration, brain or a
+            template only through a binding an admin of your organization
             approves.
           </Trans>
         )}

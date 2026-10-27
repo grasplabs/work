@@ -18,7 +18,7 @@ import { signedInApi } from "./sign-in.ts";
 // A chat's preview of its draft of an App: the draft's screens and server
 // code, run for the chat's person with no side effects. These tests start
 // from the ways it can fail: the draft's code writes to the App's real
-// storage or Knowledge, calls a connection or another App, records a
+// storage or Brain, calls a connection or another App, records a
 // statistic, reaches the network, or reads real data it could show; a
 // name a permission asked for and not granted gives the preview reaches
 // what only a grant allows; a preview keeps what an earlier draft wrote;

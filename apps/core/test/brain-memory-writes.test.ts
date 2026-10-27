@@ -3,12 +3,12 @@ import { memoriesPublish } from "@grasp-os/brain/memories";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { keepAudience } from "../src/knowledge/access.ts";
-import { forContext } from "../src/knowledge/memory.ts";
-import { brainOf } from "../src/knowledge/ports.ts";
+import { keepAudience } from "../src/brain/access.ts";
+import { forContext } from "../src/brain/memory.ts";
+import { brainOf } from "../src/brain/ports.ts";
+import { newTeam } from "./brain-collections.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
 
 // Writing the Brain's shared memory, and correcting a person's own
@@ -41,11 +41,11 @@ const codeOf = async (call: Promise<unknown>): Promise<string> => {
 /** A document holding `text` in a new collection of `owner`'s. */
 const documentIn = async (
   owner: Person,
-  collection: Parameters<Person["api"]["knowledge"]["createCollection"]>[0]
+  collection: Parameters<Person["api"]["brain"]["createCollection"]>[0]
 ) => {
   const { id: collectionId } =
-    await owner.api.knowledge.createCollection(collection);
-  const { id: documentId } = await owner.api.knowledge.saveDocument({
+    await owner.api.brain.createCollection(collection);
+  const { id: documentId } = await owner.api.brain.saveDocument({
     collectionId,
     path: "note.md",
     text: "# Note\nFloor 3 is quiet.",
@@ -108,37 +108,37 @@ describe("publishing to the Brain's shared memory", setUpTime, () => {
 
     const outcomes = {
       company: await codeOf(
-        admin.api.knowledge.memoriesPublish(
+        admin.api.brain.memoriesPublish(
           { scope: "company", ...note("Company") },
           { idempotencyKey: key() }
         )
       ),
       companyByMember: await codeOf(
-        ada.api.knowledge.memoriesPublish(
+        ada.api.brain.memoriesPublish(
           { scope: "company", ...note("Not hers") },
           { idempotencyKey: key() }
         )
       ),
       team: await codeOf(
-        ada.api.knowledge.memoriesPublish(
+        ada.api.brain.memoriesPublish(
           { scope: "team", scopeId: team, ...note("Team") },
           { idempotencyKey: key() }
         )
       ),
       teamByOutsider: await codeOf(
-        ben.api.knowledge.memoriesPublish(
+        ben.api.brain.memoriesPublish(
           { scope: "team", scopeId: team, ...note("Not his team") },
           { idempotencyKey: key() }
         )
       ),
       session: await codeOf(
-        ada.api.knowledge.memoriesPublish(
+        ada.api.brain.memoriesPublish(
           { scope: "session", scopeId: shared.chatId, ...note("Session") },
           { idempotencyKey: key() }
         )
       ),
       sessionByOutsider: await codeOf(
-        ben.api.knowledge.memoriesPublish(
+        ben.api.brain.memoriesPublish(
           { scope: "session", scopeId: shared.chatId, ...note("Not his chat") },
           { idempotencyKey: key() }
         )
@@ -202,7 +202,7 @@ describe("publishing to the Brain's shared memory", setUpTime, () => {
       ref: typeof everyone
     ) =>
       await codeOf(
-        by.api.knowledge.memoriesPublish(
+        by.api.brain.memoriesPublish(
           {
             ...target,
             kind: "fact",
@@ -243,14 +243,14 @@ describe("publishing to the Brain's shared memory", setUpTime, () => {
       text: `Once ${unique()}`,
     };
 
-    const first = await admin.api.knowledge.memoriesPublish(input, {
+    const first = await admin.api.brain.memoriesPublish(input, {
       idempotencyKey,
     });
-    const retried = await admin.api.knowledge.memoriesPublish(input, {
+    const retried = await admin.api.brain.memoriesPublish(input, {
       idempotencyKey,
     });
     const other = await codeOf(
-      admin.api.knowledge.memoriesPublish(
+      admin.api.brain.memoriesPublish(
         { ...input, text: "Something else" },
         { idempotencyKey }
       )
@@ -268,7 +268,7 @@ describe("correcting one's own memory", setUpTime, () => {
     const ada = await signedInApi(idp, "user");
     const ben = await signedInApi(idp, "user");
     const u = unique();
-    const remembered = await ada.api.knowledge.remember(
+    const remembered = await ada.api.brain.remember(
       { kind: "preference", text: `I like long answers ${u}` },
       { idempotencyKey: key() }
     );
@@ -283,26 +283,23 @@ describe("correcting one's own memory", setUpTime, () => {
     const idempotencyKey = key();
 
     const byBen = await codeOf(
-      ben.api.knowledge.memoriesProposeChange(correction, {
+      ben.api.brain.memoriesProposeChange(correction, {
         idempotencyKey: key(),
         expectedRevision: 1,
       })
     );
-    const corrected = await ada.api.knowledge.memoriesProposeChange(
-      correction,
-      {
-        idempotencyKey,
-        expectedRevision: 1,
-      }
-    );
+    const corrected = await ada.api.brain.memoriesProposeChange(correction, {
+      idempotencyKey,
+      expectedRevision: 1,
+    });
     // The reply is lost: the same call again.
-    const retried = await ada.api.knowledge.memoriesProposeChange(correction, {
+    const retried = await ada.api.brain.memoriesProposeChange(correction, {
       idempotencyKey,
       expectedRevision: 1,
     });
     // Made against the revision the correction retired.
     const stale = await codeOf(
-      ada.api.knowledge.memoriesProposeChange(
+      ada.api.brain.memoriesProposeChange(
         { ...correction, statement: `Something else ${u}` },
         { idempotencyKey: key(), expectedRevision: 1 }
       )
@@ -311,10 +308,10 @@ describe("correcting one's own memory", setUpTime, () => {
     if (next?.kind !== "memory") {
       throw new Error("A correction answers its record");
     }
-    const old = await ada.api.knowledge.memoriesGet({
+    const old = await ada.api.brain.memoriesGet({
       memoryId: original.memoryId,
     });
-    const now = await ada.api.knowledge.memoriesGet({
+    const now = await ada.api.brain.memoriesGet({
       memoryId: next.memoryId,
     });
     const reads = await memoryTextOf(ada);
@@ -376,17 +373,17 @@ describe("shared memory over time", setUpTime, () => {
         { idempotencyKey: key() }
       )
     );
-    const company = await admin.api.knowledge.memoriesPublish(
+    const company = await admin.api.brain.memoriesPublish(
       { scope: "company", kind: "fact", text: `Company rule ${u}` },
       { idempotencyKey: key() }
     );
-    const teamRecord = await ada.api.knowledge.memoriesPublish(
+    const teamRecord = await ada.api.brain.memoriesPublish(
       { scope: "team", scopeId: team, kind: "fact", text: `Team rule ${u}` },
       { idempotencyKey: key() }
     );
     const retire = async (by: Person, memoryId: string) =>
       await codeOf(
-        by.api.knowledge.memoriesRetire(
+        by.api.brain.memoriesRetire(
           { memoryId },
           { idempotencyKey: key(), expectedRevision: 1 }
         )
@@ -425,7 +422,7 @@ describe("shared memory over time", setUpTime, () => {
     const ben = await signedInApi(idp, "user");
     const team = await newTeam(admin, [ada, ben]);
     const u = unique();
-    await ada.api.knowledge.memoriesPublish(
+    await ada.api.brain.memoriesPublish(
       { scope: "team", scopeId: team, kind: "fact", text: `Team rule ${u}` },
       { idempotencyKey: key() }
     );
@@ -454,7 +451,7 @@ describe("shared memory over time", setUpTime, () => {
       teams: [readers],
     });
     const u = unique();
-    await ada.api.knowledge.memoriesPublish(
+    await ada.api.brain.memoriesPublish(
       {
         scope: "team",
         scopeId: team,
@@ -470,7 +467,7 @@ describe("shared memory over time", setUpTime, () => {
       members: [ada.userId, ben.userId],
       outsiders: false,
     });
-    await ada.api.knowledge.memoriesPublish(
+    await ada.api.brain.memoriesPublish(
       {
         scope: "session",
         scopeId: shared.chatId,
@@ -533,17 +530,17 @@ describe("what a published record rests on", setUpTime, () => {
       name: `Mine ${unique()}`,
       access: "me",
     });
-    const remembered = await ada.api.knowledge.remember(
+    const remembered = await ada.api.brain.remember(
       { kind: "fact", text: `From my notes ${unique()}`, sourceRefs: [own] },
       { idempotencyKey: key() }
     );
-    const corrected = await ada.api.knowledge.memoriesProposeChange(
+    const corrected = await ada.api.brain.memoriesProposeChange(
       { memoryId: idOf(remembered), statement: `Corrected ${unique()}` },
       { idempotencyKey: key(), expectedRevision: 1 }
     );
 
     const published = await codeOf(
-      ada.api.knowledge.memoriesPublish(
+      ada.api.brain.memoriesPublish(
         {
           scope: "team",
           scopeId: team,

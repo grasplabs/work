@@ -7,16 +7,16 @@ import {
   brainNotesOptionsSchema,
 } from "@grasp-os/shared/brain";
 import type { BrainNote, BrainNotePage } from "@grasp-os/shared/brain";
+import { documentTypeOf } from "@grasp-os/shared/brain-documents";
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
-import { documentTypeOf } from "@grasp-os/shared/knowledge";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
-import type { Reader } from "./knowledge/access.ts";
+import type { Reader } from "./brain/access.ts";
 
 // Every note in the brain with its links (`brain.notes`), a page at a
-// time, as the person may read them: what core records today, Knowledge
+// time, as the person may read them: what core records today, Brain
 // documents and their links. Goals, questions and workflow suggestions
 // join as other kinds once core keeps them (GRA-527).
 //
@@ -24,8 +24,8 @@ import type { Reader } from "./knowledge/access.ts";
 // the reads it is built from, and what closes it:
 //
 // - A note outside the person's access: the documents are read through
-//   `allowedFor`'s condition inside the query, the one every Knowledge
-//   read uses (knowledge/access.ts), never filtered after.
+//   `allowedFor`'s condition inside the query, the one every Brain
+//   read uses (brain/access.ts), never filtered after.
 // - A link showing a document the person can't read: its target is
 //   resolved to an ID through the same condition, so an App's entry the
 //   person can't open stays unresolved. The path it names is in the
@@ -158,7 +158,7 @@ export const brainNotes = async (
   await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       documentIds: ids,
       detail: { read: "notes", count: ids.length },
     },

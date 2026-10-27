@@ -569,7 +569,7 @@ test("the chat dock on every other page carries on the open chat, which is the s
   await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toHaveCount(0);
 
   // A new chat from the dock starts afresh.
-  await page.goto("/knowledge");
+  await page.goto("/brain/collections");
   await page.getByRole("button", { name: "Open the chat" }).click();
   await dock.getByRole("button", { name: "New chat" }).click();
   await expect(dock.getByRole("list", { name: "Messages" })).toHaveCount(0);

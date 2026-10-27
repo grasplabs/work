@@ -13,7 +13,7 @@ import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
 
 // The brain's open questions in the brain's chat (GRA-531, GRA-936), as
-// in the prototype (`knowledge/brain-chat.tsx`): each to answer there, in
+// in the prototype (`brain/brain-chat.tsx`): each to answer there, in
 // the person's own words, or to ask the role that can: core delivers the
 // question to the members holding that role on the staff list, in their
 // inbox, and refuses when nobody can receive it, so "asked" only shows

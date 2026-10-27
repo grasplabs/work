@@ -13,7 +13,7 @@ test("follows the browser's language, then the one the person picks", async ({
   const { member } = peopleIn("languages");
   const page = await pageOf(member, { locale: "de-DE" });
 
-  await page.goto("/knowledge");
+  await page.goto("/brain/collections");
   const nav = page.getByRole("navigation", { name: "Hauptmenü" });
   await expect(nav.getByRole("link", { name: "Gehirn" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "de");

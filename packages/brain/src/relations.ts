@@ -261,7 +261,7 @@ export const relationsFor = async <C>(
   await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       documentIds: [
         ...new Set(rows.flatMap(({ documentId }) => documentId ?? [])),
       ].slice(0, 20),

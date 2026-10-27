@@ -27,7 +27,7 @@ import { auditLog } from "./audit-log.ts";
 import type { AuditLogEnv } from "./audit-log.ts";
 import { auditOutbox } from "./db/core/schema.ts";
 
-// A change to the core or Knowledge database that must be audited stores
+// A change to the core or Brain database that must be audited stores
 // its event in that database's outbox (each has an `audit_outbox` table) in
 // the same batch as the change: both are kept, or neither. Connect keeps an
 // outbox of its own the same way. Draining an outbox appends its oldest
@@ -48,7 +48,7 @@ const drainMaxBatches = 50;
 /** One outbox, as a drain reads it: its oldest events, and settling them. */
 interface Outbox {
   /** Named in logs. */
-  name: "core" | "knowledge" | "connect" | "workspace";
+  name: "core" | "brain" | "connect" | "workspace";
   /** Its oldest events, at most {@link auditOutboxTakeMax}, in order. */
   take: () => Promise<readonly OutboxedAuditEvent[]>;
   /**
@@ -351,7 +351,7 @@ export const drainObjectOutbox = async (
 };
 
 /**
- * Drains every outbox: the core and Knowledge databases' and connect's,
+ * Drains every outbox: the core and Brain databases' and connect's,
  * each on its own, so one that fails (connect unreachable, say) is logged
  * and leaves the others to drain. Returns how many events it appended.
  * The cron trigger calls it.
@@ -360,7 +360,7 @@ export const drainAuditOutboxes = async (env: Env): Promise<number> => {
   const counts = await Promise.all(
     [
       databaseOutbox("core", env.DB),
-      databaseOutbox("knowledge", env.KNOWLEDGE),
+      databaseOutbox("brain", env.BRAIN_DB),
       connectOutbox(env),
     ].map(async (outbox) => await drainLogged(env, outbox, drainMaxBatches))
   );
@@ -368,9 +368,9 @@ export const drainAuditOutboxes = async (env: Env): Promise<number> => {
 };
 
 /** What draining core's own outboxes needs. */
-export type OutboxEnv = AuditLogEnv & Pick<Env, "KNOWLEDGE">;
+export type OutboxEnv = AuditLogEnv & Pick<Env, "BRAIN_DB">;
 
-/** Core's or Knowledge's database, as `drizzle` gives it: with its binding. */
+/** Core's or the Brain's database, as `drizzle` gives it: with its binding. */
 type AuditedDatabase = DrizzleD1Database & { $client: D1Database };
 
 /**
@@ -380,19 +380,19 @@ type AuditedDatabase = DrizzleD1Database & { $client: D1Database };
  * trigger drains the event later.
  */
 const drainSoon = (env: OutboxEnv, db: AuditedDatabase): void => {
-  const name = db.$client === env.KNOWLEDGE ? "knowledge" : "core";
+  const name = db.$client === env.BRAIN_DB ? "brain" : "core";
   waitUntil(drainLogged(env, databaseOutbox(name, db.$client), 1));
 };
 
-/** Drains Knowledge's outbox soon, as `drainSoon` does: its `audit` port. */
-export const drainKnowledgeOutboxSoon = (env: OutboxEnv): void => {
-  waitUntil(drainLogged(env, databaseOutbox("knowledge", env.KNOWLEDGE), 1));
+/** Drains the Brain's outbox soon, as `drainSoon` does: its `audit` port. */
+export const drainBrainOutboxSoon = (env: OutboxEnv): void => {
+  waitUntil(drainLogged(env, databaseOutbox("brain", env.BRAIN_DB), 1));
 };
 
 /**
- * The audit event for an entry the Brain records (knowledge/ports.ts
+ * The audit event for an entry the Brain records (brain/ports.ts
  * `audit.eventOf`), checked as every event is, with its ID: what the
- * Brain stores in Knowledge's outbox.
+ * Brain stores in the Brain's outbox.
  */
 export const brainEventOf = (
   entry: BrainEvent
@@ -450,7 +450,7 @@ export const storedEvent = (id: string): SQL =>
  * changed a row, so a conditional update that changed nothing records
  * nothing.
  *
- * Not in a Knowledge batch that writes sections earlier (a save, restore,
+ * Not in a Brain batch that writes sections earlier (a save, restore,
  * purge, or anything in `writeVersion`'s `also`): FTS5 flushes its index
  * when the next statement opens a savepoint, and that flush sets
  * `changes()` to 1, so this would record an event for a change that
@@ -507,7 +507,7 @@ export const keepAuditEvent = async (
 
 /**
  * Runs an audited change: `statements` (the change and its `outboxed`
- * events) in one batch on `db`, core's or Knowledge's database, then drains
+ * events) in one batch on `db`, core's or the Brain's database, then drains
  * its outbox in the background. A batch that fails stores and drains
  * nothing.
  */

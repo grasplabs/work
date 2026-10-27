@@ -1,4 +1,4 @@
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
+import type { PurgeInput } from "@grasp-os/shared/brain-documents";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -8,12 +8,12 @@ import {
   graspSkills,
   graspSkillsCollectionId,
   syncGraspSkills,
-} from "../src/knowledge/grasp-skills.ts";
-import type { GraspSkill } from "../src/knowledge/grasp-skills.ts";
+} from "../src/brain/grasp-skills.ts";
+import type { GraspSkill } from "../src/brain/grasp-skills.ts";
 import { requestGranted } from "./apps.ts";
-import { actingFor, envOf, knowledgeIn, newChat } from "./contexts.ts";
+import { brainRacing, readCollection } from "./brain-collections.ts";
+import { actingFor, envOf, brainIn, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { knowledgeRacing, readCollection } from "./knowledge.ts";
 import {
   auditedDuring,
   outcome,
@@ -48,7 +48,7 @@ type Person = Awaited<ReturnType<typeof personOf>>;
 
 /** The Grasp skills' documents, in path order, as `person` lists them. */
 const graspDocuments = async (person: Person) => {
-  const { documents } = await person.api.knowledge.listDocuments(
+  const { documents } = await person.api.brain.listDocuments(
     graspSkillsCollectionId
   );
   return documents;
@@ -67,7 +67,7 @@ const graspDocument = async (person: Person, path: string) => {
 
 /** The current text of `documentId`, as `person` reads it. */
 const textOf = async (person: Person, documentId: string): Promise<string> => {
-  const { version } = await person.api.knowledge.getDocument(documentId);
+  const { version } = await person.api.brain.getDocument(documentId);
   return version.text;
 };
 
@@ -75,9 +75,9 @@ const textOf = async (person: Person, documentId: string): Promise<string> => {
 const releaseChanging = (path: string, text: string): GraspSkill[] =>
   graspSkills.map((skill) => (skill.path === path ? { path, text } : skill));
 
-const knowledgeActions = <Event extends { action: string }>(
+const brainActions = <Event extends { action: string }>(
   events: Event[]
-): Event[] => events.filter(({ action }) => action.startsWith("knowledge."));
+): Event[] => events.filter(({ action }) => action.startsWith("brain."));
 
 describe("the Grasp skills", setUpTime, () => {
   it("are every skill folder of the release, and only those", () => {
@@ -121,7 +121,7 @@ describe("the Grasp skills", setUpTime, () => {
       await syncGraspSkills(env);
     });
     await expect(graspDocuments(admin)).resolves.toStrictEqual(documents);
-    expect(knowledgeActions(events)).toStrictEqual([]);
+    expect(brainActions(events)).toStrictEqual([]);
   });
 
   it("take a release's changed skill as its next version, written once when another sync gets there first", async () => {
@@ -141,7 +141,7 @@ describe("the Grasp skills", setUpTime, () => {
       await syncGraspSkills(
         {
           ...env,
-          KNOWLEDGE: knowledgeRacing(async () => {
+          BRAIN_DB: brainRacing(async () => {
             await syncGraspSkills(env, next);
           }),
         },
@@ -158,7 +158,7 @@ describe("the Grasp skills", setUpTime, () => {
         path === skill.path ? currentVersion + 1 : currentVersion,
       ])
     );
-    const { version } = await admin.api.knowledge.getDocument(changed.id);
+    const { version } = await admin.api.brain.getDocument(changed.id);
     expect([
       version.number,
       version.author,
@@ -171,14 +171,14 @@ describe("the Grasp skills", setUpTime, () => {
       changedText,
     ]);
     expect(
-      knowledgeActions(events).map(({ action, actor, target }) => ({
+      brainActions(events).map(({ action, actor, target }) => ({
         action,
         actor,
         target,
       }))
     ).toStrictEqual([
       {
-        action: "knowledge.document.saved",
+        action: "brain.document.saved",
         actor: { type: "system" },
         target: { type: "document", id: changed.id },
       },
@@ -186,7 +186,7 @@ describe("the Grasp skills", setUpTime, () => {
 
     // A rollback to this release puts its text back, as a version too.
     await syncGraspSkills(env);
-    const rolledBack = await admin.api.knowledge.getDocument(changed.id);
+    const rolledBack = await admin.api.brain.getDocument(changed.id);
     expect([rolledBack.version.number, rolledBack.version.text]).toStrictEqual([
       changed.currentVersion + 2,
       skill.text,
@@ -205,7 +205,7 @@ describe("the Grasp skills", setUpTime, () => {
     await expect(
       Promise.all([
         outcome(
-          admin.api.knowledge.saveDocument({
+          admin.api.brain.saveDocument({
             collectionId: graspSkillsCollectionId,
             path: document.path,
             text: "---\nname: mine\ndescription: Mine now.\n---",
@@ -213,7 +213,7 @@ describe("the Grasp skills", setUpTime, () => {
           })
         ),
         outcome(
-          admin.api.knowledge.saveDocument({
+          admin.api.brain.saveDocument({
             collectionId: graspSkillsCollectionId,
             path: "new/SKILL.md",
             text: "---\nname: new\ndescription: A new one.\n---",
@@ -221,7 +221,7 @@ describe("the Grasp skills", setUpTime, () => {
           })
         ),
         outcome(
-          admin.api.knowledge.restoreVersion({
+          admin.api.brain.restoreVersion({
             documentId: document.id,
             version: 1,
             ifVersion: document.currentVersion,
@@ -229,13 +229,13 @@ describe("the Grasp skills", setUpTime, () => {
         ),
       ])
     ).resolves.toStrictEqual([
-      "knowledge.read_only",
-      "knowledge.read_only",
-      "knowledge.read_only",
+      "brain.read_only",
+      "brain.read_only",
+      "brain.read_only",
     ]);
     await expect(
       refusal(
-        admin.api.knowledge.preparePurge({
+        admin.api.brain.preparePurge({
           type: "content",
           documentIds: [document.id],
           terms: ["workflow"],
@@ -243,7 +243,7 @@ describe("the Grasp skills", setUpTime, () => {
         })
       )
     ).resolves.toMatchObject({
-      code: "knowledge.read_only",
+      code: "brain.read_only",
       details: {
         issues: [
           `documentIds: document ${document.id} is a Grasp skill, which is read-only: it holds the release's text, and the next sync would put back anything changed`,
@@ -261,7 +261,7 @@ describe("copying a Grasp skill", setUpTime, () => {
 
     let copyId = "";
     const events = await auditedDuring(async () => {
-      const copy = await admin.api.knowledge.copySkill({
+      const copy = await admin.api.brain.copySkill({
         documentId: document.id,
       });
       copyId = copy.id;
@@ -277,8 +277,8 @@ describe("copying a Grasp skill", setUpTime, () => {
       await textOf(admin, document.id)
     );
     expect(
-      knowledgeActions(events)
-        .filter(({ action }) => action !== "knowledge.collection.created")
+      brainActions(events)
+        .filter(({ action }) => action !== "brain.collection.created")
         .map(({ action, actor, target, detail }) => ({
           action,
           actor,
@@ -287,13 +287,13 @@ describe("copying a Grasp skill", setUpTime, () => {
         }))
     ).toStrictEqual([
       {
-        action: "knowledge.document.saved",
+        action: "brain.document.saved",
         actor: { type: "person", userId: admin.userId },
         target: { type: "document", id: copyId },
         detail: { collectionId: clientSkillsCollectionId, version: 1 },
       },
       {
-        action: "knowledge.skill.copied",
+        action: "brain.skill.copied",
         actor: { type: "person", userId: admin.userId },
         target: { type: "document", id: document.id },
         detail: {
@@ -303,7 +303,7 @@ describe("copying a Grasp skill", setUpTime, () => {
       },
     ]);
 
-    const adapted = await admin.api.knowledge.saveDocument({
+    const adapted = await admin.api.brain.saveDocument({
       collectionId: clientSkillsCollectionId,
       path: document.path,
       text: `${await textOf(admin, copyId)}\nAsk Anna de Vries first.\n`,
@@ -316,8 +316,8 @@ describe("copying a Grasp skill", setUpTime, () => {
       terms: ["Anna de Vries"],
       reason: "erasure_request",
     };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    await admin.api.knowledge.purge(input, plan.token);
+    const plan = await admin.api.brain.preparePurge(input);
+    await admin.api.brain.purge(input, plan.token);
     await expect(textOf(admin, copyId)).resolves.toContain(
       "Ask (removed) first."
     );
@@ -327,34 +327,32 @@ describe("copying a Grasp skill", setUpTime, () => {
     const admin = await personOf("admin");
     const user = await personOf("user");
     const document = await graspDocument(admin, "run-a-baseline/SKILL.md");
-    const copy = await admin.api.knowledge.copySkill({
+    const copy = await admin.api.brain.copySkill({
       documentId: document.id,
     });
 
     await expect(
-      refusal(admin.api.knowledge.copySkill({ documentId: document.id }))
+      refusal(admin.api.brain.copySkill({ documentId: document.id }))
     ).resolves.toMatchObject({
-      code: "knowledge.conflict",
+      code: "brain.conflict",
       details: { documentId: copy.id, latestVersion: 1 },
     });
     await expect(
-      refusal(admin.api.knowledge.copySkill({ documentId: copy.id }))
+      refusal(admin.api.brain.copySkill({ documentId: copy.id }))
     ).resolves.toMatchObject({
-      code: "knowledge.invalid",
+      code: "brain.document_invalid",
       details: { issues: ["documentId: not a Grasp skill"] },
     });
     await expect(
       Promise.all([
-        outcome(user.api.knowledge.copySkill({ documentId: document.id })),
-        outcome(
-          admin.api.knowledge.copySkill({ documentId: crypto.randomUUID() })
-        ),
-        outcome(admin.api.knowledge.copySkill({ documentId: "" })),
+        outcome(user.api.brain.copySkill({ documentId: document.id })),
+        outcome(admin.api.brain.copySkill({ documentId: crypto.randomUUID() })),
+        outcome(admin.api.brain.copySkill({ documentId: "" })),
       ])
     ).resolves.toStrictEqual([
-      "knowledge.forbidden",
-      "knowledge.not_found",
-      "knowledge.invalid",
+      "brain.forbidden",
+      "brain.document_not_found",
+      "brain.document_invalid",
     ]);
   });
 });
@@ -368,17 +366,17 @@ describe("the skill catalog", setUpTime, () => {
       grasp: graspSkillsCollectionId,
       client: clientSkillsCollectionId,
     };
-    await expect(admin.api.knowledge.skillCollections()).resolves.toStrictEqual(
+    await expect(admin.api.brain.skillCollections()).resolves.toStrictEqual(
       both
     );
-    const copy = await admin.api.knowledge.copySkill({
+    const copy = await admin.api.brain.copySkill({
       documentId: document.id,
     });
 
-    await expect(user.api.knowledge.skillCollections()).resolves.toStrictEqual(
+    await expect(user.api.brain.skillCollections()).resolves.toStrictEqual(
       both
     );
-    const catalog = await user.api.knowledge.catalog();
+    const catalog = await user.api.brain.catalog();
     const ids = new Set<string>([
       graspSkillsCollectionId,
       clientSkillsCollectionId,
@@ -399,9 +397,9 @@ describe("the skill catalog", setUpTime, () => {
     const admin = await personOf("admin");
     const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
     await syncGraspSkills(env);
-    await admin.api.knowledge.skillCollections();
+    await admin.api.brain.skillCollections();
     const name = `ours-${unique()}`;
-    const ours = await admin.api.knowledge.saveDocument({
+    const ours = await admin.api.brain.saveDocument({
       collectionId: clientSkillsCollectionId,
       path: `${name}/SKILL.md`,
       text: `---\nname: ${name}\ndescription: How we do it here.\n---\n# Ours`,
@@ -409,10 +407,10 @@ describe("the skill catalog", setUpTime, () => {
     });
     const grasp = await graspDocuments(admin);
     const graspIds = grasp.map(({ id }) => id);
-    // The agent's Knowledge tools, which it has only once it may read a
+    // The agent's Brain tools, which it has only once it may read a
     // collection.
     const toolsNow = async () =>
-      knowledgeIn(
+      brainIn(
         await envOf(actingFor(agent, admin.userId), await newChat(agent))
       );
     const ungranted = await toolsNow();

@@ -66,14 +66,14 @@ describe("audit event types", () => {
     expect(typeOf("connection.call.provenance")).toBe("read");
   });
 
-  it("files reading Knowledge as a read, and changing it as an action", () => {
+  it("files reading Brain as a read, and changing it as an action", () => {
     expect(
       [
-        "knowledge.read",
-        "knowledge.search",
-        "knowledge.search.empty",
-        "knowledge.document.saved",
-        "knowledge.collection.created",
+        "brain.read",
+        "brain.search",
+        "brain.search.empty",
+        "brain.document.saved",
+        "brain.collection.created",
       ].map((action) => typeOf(action))
     ).toStrictEqual(["read", "read", "read", "action", "config"]);
   });

@@ -34,9 +34,9 @@ import {
 } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { newTeam } from "./brain-collections.ts";
 import { actingFor, envOf } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { intentFor, named, plain, publish } from "./npm.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { racingDb } from "./racing-db.ts";

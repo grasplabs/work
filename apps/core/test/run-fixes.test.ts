@@ -19,13 +19,13 @@ import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { runQuarterHourCron } from "./cron.ts";
-import { mockIdp } from "./idp.ts";
 import {
   collectionWithNote,
   readCollection,
   storedGrant,
-} from "./knowledge.ts";
+} from "./brain-collections.ts";
+import { runQuarterHourCron } from "./cron.ts";
+import { mockIdp } from "./idp.ts";
 import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
@@ -225,7 +225,7 @@ describe("asking the agent to fix a failed run", slow, () => {
       result: [true, true, true],
       codeRuns: 1,
       held: 0,
-      calls: ["chat.attachments", "knowledge.catalog"],
+      calls: ["brain.catalog", "chat.attachments"],
       audited: [
         ["chat.created", null],
         ["workflow.run.fix_asked", chat.id],
@@ -247,7 +247,7 @@ describe("asking the agent to fix a failed run", slow, () => {
     const failed = await endedRun(owner, app, "careless");
     const ended = await endedRun(owner, app, "fine");
     // A run that acted for the user, whose report they saw, until the App
-    // read what they can't read (a collection Knowledge doesn't know).
+    // read what they can't read (a collection the Brain doesn't know).
     const ownRun = await endedRun(user, app, "careless");
     await storedGrant(
       { type: "app", id: app },
@@ -395,7 +395,7 @@ describe("asking the agent to fix a failed run", slow, () => {
       readCollection({ type: "app", appId: app }, collectionId)
     );
     // More than one statement of the object's SQLite could take a row
-    // each of: collections it was granted that Knowledge doesn't know.
+    // each of: collections it was granted that the Brain doesn't know.
     const archives = Array.from({ length: 40 }, () => crypto.randomUUID());
     await Promise.all(
       archives.map(

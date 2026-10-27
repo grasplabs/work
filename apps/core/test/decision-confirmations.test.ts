@@ -3,10 +3,10 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { answerDecision } from "../src/decisions/decisions.ts";
 import { allEvents } from "./audit-events.ts";
+import { newTeam } from "./brain-collections.ts";
 import { asking, confirmedAnswer, outputOf, week } from "./decisions.ts";
 import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { racingDb } from "./racing-db.ts";
 import { endLiveRuns, whileEngineRefuses } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { startRun } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
+import { newTeam } from "./brain-collections.ts";
 import { runCron } from "./cron.ts";
 import {
   approvalApp,
@@ -21,7 +22,6 @@ import {
 } from "./decisions.ts";
 import type { Ask, Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import {
   aroundEngine,
   endLiveRuns,

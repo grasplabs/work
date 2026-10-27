@@ -23,7 +23,7 @@ import { intakeAlike } from "./onboarding-team.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
-// A document shared in the onboarding, purged from Knowledge (GRA-970,
+// A document shared in the onboarding, purged from the Brain (GRA-970,
 // onboarding/documents.ts `documentReadingErasure`, the store's
 // `forgetDocuments`). Each document here holds a word nobody else says (a
 // sentinel), which its reading, the admin's answer and a drawing take up,
@@ -73,7 +73,7 @@ const readingWith = (word: string): GatewayReply => ({
   outputTokens: 150,
 });
 
-/** Shares a document named `name` holding `word`, as `admin`, answers its question, and waits for Knowledge to hold it. */
+/** Shares a document named `name` holding `word`, as `admin`, answers its question, and waits for Brain to hold it. */
 const share = async (
   admin: SessionApi,
   name: string,
@@ -118,8 +118,8 @@ const purge = async (
     terms,
     reason: "erasure_request" as const,
   };
-  const plan = await admin.knowledge.preparePurge(input);
-  return await admin.knowledge.purge(input, plan.token);
+  const plan = await admin.brain.preparePurge(input);
+  return await admin.brain.purge(input, plan.token);
 };
 
 /** The people of a team, by key. */
@@ -405,9 +405,9 @@ const d1ColumnsWith = async (
   return found;
 };
 
-/** Whether Knowledge's words index still finds `word` as a token: its pages don't keep it in one piece. */
+/** Whether the Brain's words index still finds `word` as a token: its pages don't keep it in one piece. */
 const indexFinds = async (word: string): Promise<boolean> =>
-  (await env.KNOWLEDGE.prepare(
+  (await env.BRAIN_DB.prepare(
     "SELECT 1 AS held FROM search_words WHERE search_words MATCH ? LIMIT 1"
   )
     .bind(`"${word}"`)
@@ -424,8 +424,8 @@ const leftOf = async (admin: SessionApi, ids: Ids, word: string) => {
   return {
     store: await storeTablesWith(word),
     core: await d1ColumnsWith(env.DB, word),
-    knowledge: [
-      ...(await d1ColumnsWith(env.KNOWLEDGE, word)),
+    brain: [
+      ...(await d1ColumnsWith(env.BRAIN_DB, word)),
       ...((await indexFinds(word)) ? ["search_words"] : []),
     ],
     audit: JSON.stringify(events).toLowerCase().includes(word),
@@ -435,7 +435,7 @@ const leftOf = async (admin: SessionApi, ids: Ids, word: string) => {
         .toLowerCase()
         .includes(word),
       brief: brief.toLowerCase().includes(word),
-      brain: JSON.stringify(await admin.brain.read())
+      brain: JSON.stringify(await admin.brain.readWorkspace())
         .toLowerCase()
         .includes(word),
     },
@@ -455,7 +455,7 @@ const ticketsOf = async (teamId: string) => {
 };
 
 describe(
-  "a document shared in the onboarding, purged from Knowledge",
+  "a document shared in the onboarding, purged from Brain",
   { timeout: 180_000 },
   () => {
     it("takes its reading, the answer and every drawing made with it out of the store, both databases, the audit log and the turns, and draws the work again", async () => {
@@ -503,7 +503,7 @@ describe(
         after: {
           store: [],
           core: [],
-          knowledge: [],
+          brain: [],
           audit: false,
           turns: false,
           shown: { documents: false, brief: false, brain: false },
@@ -519,7 +519,7 @@ describe(
       const named = await share(admin, `named-${unique()}.docx`, other);
       const holding = await share(admin, `holding-${unique()}.docx`, word);
       const kept = await share(admin, `kept-${unique()}.docx`, sentinelOf());
-      const plan = await admin.knowledge.preparePurge({
+      const plan = await admin.brain.preparePurge({
         type: "content",
         documentIds: [named.document],
         terms: [word],

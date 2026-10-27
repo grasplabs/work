@@ -136,8 +136,8 @@ describe("client state coverage", () => {
             ...core,
             d1: [
               {
-                binding: "KNOWLEDGE",
-                database: "knowledge",
+                binding: "BRAIN_DB",
+                database: "brain",
                 migrationsDir: undefined,
               },
             ],
@@ -147,7 +147,7 @@ describe("client state coverage", () => {
         },
       })
     ).toStrictEqual([
-      "D1 database core: KNOWLEDGE (knowledge) has no registry entry.",
+      "D1 database core: BRAIN_DB (brain) has no registry entry.",
       "The registry's D1 database core: DB (core) no longer exists.",
       "R2 bucket core: ARCHIVE (archive) has no registry entry.",
       "The registry's R2 bucket core: FILES (files) no longer exists.",

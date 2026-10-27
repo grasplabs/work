@@ -3,9 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { codeStep, pausedReply, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { readCollection } from "./brain-collections.ts";
 import { botConnectorStreamsUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
@@ -44,11 +44,11 @@ const streamedIn = async (conversation: string) => {
 describe("a member's answer", setUpTime, () => {
   it("streams in order, then ends as the whole answer with its sources", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    const saved = await admin.api.knowledge.saveDocument({
+    const saved = await admin.api.brain.saveDocument({
       collectionId,
       path: "leave.md",
       text: "# Parental leave\n\nParental leave lasts sixteen weeks.",
@@ -70,7 +70,7 @@ describe("a member's answer", setUpTime, () => {
     const { teams } = await member(
       idp,
       codeStep(
-        `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(saved.id)})).text;`
+        `export default async (self, env) => (await env.brain.read(${JSON.stringify(saved.id)})).text;`
       ),
       reply
     );
@@ -101,7 +101,7 @@ describe("a member's answer", setUpTime, () => {
       aiLabel: whole?.includes("AIGeneratedContent"),
       source: sources?.includes("1. Parental leave"),
       sourceLink: sources?.includes(
-        `${clientOrigin}/knowledge/${collectionId}?doc=${saved.id}`
+        `${clientOrigin}/brain/${collectionId}?doc=${saved.id}`
       ),
     }).toStrictEqual({
       text: `${answer} Parental leave`,

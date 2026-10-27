@@ -235,7 +235,7 @@ const resourceOf = (
         callHost(alias, { operation, arguments: args }),
     };
   }
-  if (kind === "knowledge") {
+  if (kind === "brain") {
     // Every method; the host refuses one the use didn't declare.
     return {
       // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks

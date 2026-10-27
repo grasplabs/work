@@ -627,8 +627,8 @@ export const logOf = (view: OrgView): LogEvent[] => {
         events.push({ kind: "talked", on: on(day), count, stopped, order: 4 });
       }
     }
-    if (view.knowledge.opened !== null && view.knowledge.opened <= view.day) {
-      events.push({ kind: "go", on: on(view.knowledge.opened), order: 5 });
+    if (view.brain.opened !== null && view.brain.opened <= view.day) {
+      events.push({ kind: "go", on: on(view.brain.opened), order: 5 });
     }
     if (view.closed) {
       events.push({

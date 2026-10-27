@@ -24,7 +24,7 @@ import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 //
 // They apply whenever they are configured. The rule that keeps the whole
 // deployment in the EU also keeps uploads' text extraction in the Worker,
-// off Workers AI (knowledge/extract.ts): it is what the client agreed to.
+// off Workers AI (brain/extract.ts): it is what the client agreed to.
 //
 // "Hosted in the EU" is the config's word for a model: the client's
 // provider serves it in the EU (its EU data residency, with the keys AI
@@ -116,13 +116,13 @@ const euOnlyBecause = (
  * query, whatever their number.
  */
 const namesSensitiveCollection = async (
-  env: Pick<Env, "KNOWLEDGE">,
+  env: Pick<Env, "BRAIN_DB">,
   ids: readonly string[]
 ): Promise<boolean> => {
   if (ids.length === 0) {
     return false;
   }
-  const db = drizzle(env.KNOWLEDGE);
+  const db = drizzle(env.BRAIN_DB);
   const found = await db
     .select({ id: collections.id })
     .from(collections)
@@ -147,11 +147,11 @@ const namesSensitiveCollection = async (
 };
 
 /**
- * Cheapest check first: the config, then Knowledge; then the context's
+ * Cheapest check first: the config, then Brain; then the context's
  * restricted mode, already read.
  */
 const sensitiveBecause = async (
-  env: Pick<Env, "KNOWLEDGE">,
+  env: Pick<Env, "BRAIN_DB">,
   sensitive: NonNullable<ModelRules["sensitive"]>,
   input: RulesInput,
   restricted: boolean
@@ -243,7 +243,7 @@ const restrictedWork = async (
  * no call gets past a rule with a context that isn't its own, or none.
  */
 export const judgeCall = async (
-  env: RestrictedEnv & Pick<Env, "KNOWLEDGE">,
+  env: RestrictedEnv & Pick<Env, "BRAIN_DB">,
   rules: ModelRules,
   input: RulesInput
 ): Promise<{ ok: true; judged: Judged } | ({ ok: false } & Refusal)> => {

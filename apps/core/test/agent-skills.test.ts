@@ -1,7 +1,7 @@
 import { skillCapabilitySchema } from "@grasp-os/brain/contract";
 import { selectSkill } from "@grasp-os/brain/skills";
+import type { BrainDocumentsApi } from "@grasp-os/shared/brain-documents";
 import { connectionIdSchema } from "@grasp-os/shared/ids";
-import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -10,9 +10,9 @@ import { withheldResult } from "../src/agent.ts";
 import {
   graspSkillsCollectionId,
   syncGraspSkills,
-} from "../src/knowledge/grasp-skills.ts";
-import { brainOf } from "../src/knowledge/ports.ts";
-import { capabilitiesOf } from "../src/knowledge/skill-capabilities.ts";
+} from "../src/brain/grasp-skills.ts";
+import { brainOf } from "../src/brain/ports.ts";
+import { capabilitiesOf } from "../src/brain/skill-capabilities.ts";
 import {
   chatOf,
   codeResults,
@@ -22,8 +22,8 @@ import {
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { newTeam, readCollection } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // Skills for a chat's code (`env.brain.skillsSelect` / `skillsRead`,
@@ -100,18 +100,18 @@ describe("a chat's skills", setUpTime, () => {
   it("selects a skill only under the agent's grants, pins it, and reads that version after it is retired, until its read is revoked", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
-    const knowledge: KnowledgeApi = admin.api.knowledge;
-    const { id: collectionId } = await knowledge.createCollection({
+    const brain: BrainDocumentsApi = admin.api.brain;
+    const { id: collectionId } = await brain.createCollection({
       name: `Skills ${unique()}`,
       access: "everyone",
     });
-    const refunds = await knowledge.saveDocument({
+    const refunds = await brain.saveDocument({
       collectionId,
       path: "refunds/SKILL.md",
       text: skillText("refunds", "tasks: [refund]"),
       ifVersion: 0,
     });
-    await knowledge.saveDocument({
+    await brain.saveDocument({
       collectionId,
       path: "payouts/SKILL.md",
       text: skillText(
@@ -159,7 +159,7 @@ describe("a chat's skills", setUpTime, () => {
     const granted = await newChat();
     await granted.ask("How do I refund, and pay out?");
 
-    await knowledge.saveDocument({
+    await brain.saveDocument({
       collectionId,
       path: "refunds/SKILL.md",
       text: skillText("refunds", "tasks: [refund]\nstatus: retired"),
@@ -190,7 +190,7 @@ describe("a chat's skills", setUpTime, () => {
         const all = await allEvents();
         const events = all.filter(
           ({ actor, action }) =>
-            action === "knowledge.skill.select" &&
+            action === "brain.skill.select" &&
             actor.type === "agent" &&
             actor.agentId === agent.agentId
         );
@@ -236,23 +236,23 @@ describe("a chat's skills", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
     const team = await newTeam(admin, [admin, member]);
-    const { id: companyId } = await admin.api.knowledge.createCollection({
+    const { id: companyId } = await admin.api.brain.createCollection({
       name: `Company skills ${unique()}`,
       access: "everyone",
     });
-    const { id: teamId } = await admin.api.knowledge.createCollection({
+    const { id: teamId } = await admin.api.brain.createCollection({
       name: `Team skills ${unique()}`,
       access: "teams",
       teams: [team],
     });
-    await admin.api.knowledge.saveDocument({
+    await admin.api.brain.saveDocument({
       collectionId: companyId,
       path: "invoices/SKILL.md",
       text: skillText("invoices", "tasks: [invoice]"),
       ifVersion: 0,
     });
     // A member of the team writes their own, meant to take its place.
-    await member.api.knowledge.saveDocument({
+    await member.api.brain.saveDocument({
       collectionId: teamId,
       path: "invoices-fast/SKILL.md",
       text: skillText(
@@ -284,11 +284,11 @@ describe("a chat's skills", setUpTime, () => {
   it("counts a capability the agent holds by a grant of the calling chat alone, and only in that chat", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Skills ${unique()}`,
       access: "everyone",
     });
-    await admin.api.knowledge.saveDocument({
+    await admin.api.brain.saveDocument({
       collectionId,
       path: "mailing/SKILL.md",
       text: skillText(
@@ -370,12 +370,12 @@ describe("a chat's skills", setUpTime, () => {
   it("keeps what a skill read rests on with the chat: once the agent may no longer read its collection, the read is withheld from every later request", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Skills ${unique()}`,
       access: "everyone",
     });
     const secret = `zq${crypto.randomUUID().replaceAll("-", "")}`;
-    const skill = await admin.api.knowledge.saveDocument({
+    const skill = await admin.api.brain.saveDocument({
       collectionId,
       path: "payroll/SKILL.md",
       text: skillText("payroll", "tasks: [payroll]").replace(
@@ -441,7 +441,7 @@ describe("a chat's skills", setUpTime, () => {
       baseline: await selected("baseline.run"),
       boardPage: await selected("board-page.write"),
     };
-    const { documents } = await admin.api.knowledge.listDocuments(
+    const { documents } = await admin.api.brain.listDocuments(
       graspSkillsCollectionId
     );
     const baseline = documents.find(
@@ -452,7 +452,7 @@ describe("a chat's skills", setUpTime, () => {
     }
 
     // An admin copies it into the company's skills to adapt it.
-    const copy = await admin.api.knowledge.copySkill({
+    const copy = await admin.api.brain.copySkill({
       documentId: baseline.id,
     });
     const afterCopy = await selectSkill(brainOf(env), person, {

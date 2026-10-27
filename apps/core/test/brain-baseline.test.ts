@@ -19,7 +19,7 @@ import { mockIdp } from "./idp.ts";
 
 // The Brain baseline (GRA-295, experiment E01) as CI runs it: the dev split
 // of the frozen suite, its three arms paired over two repeats, through the
-// real Workspace object, Knowledge, permissions, model gateway and ledger,
+// real Workspace object, Brain, permissions, model gateway and ledger,
 // with only the model provider stubbed (brain-stub-model.ts). It proves the
 // harness measures what it reports and that its security gate holds and
 // would fail, access revoked mid-run included, and how a run breaks and is
@@ -98,7 +98,7 @@ const idsOf = (...families: string[]) =>
     .map(({ id }) => id);
 
 describe("the Brain baseline", { timeout: 300_000 }, () => {
-  it("holds its security gate in every arm: nothing unreadable reaches a model, and nothing in D1, Knowledge, R2 or the Workspace object changes (other objects' storage isn't checked)", async () => {
+  it("holds its security gate in every arm: nothing unreadable reaches a model, and nothing in D1, Brain, R2 or the Workspace object changes (other objects' storage isn't checked)", async () => {
     const { gate, arms, scores } = await run();
     expect({
       gate,

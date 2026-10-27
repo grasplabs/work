@@ -7,19 +7,19 @@ import {
   brainErrors,
 } from "@grasp-os/shared/brain";
 import type { BrainChange, BrainChangePage } from "@grasp-os/shared/brain";
+import { documentTypeOf } from "@grasp-os/shared/brain-documents";
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
-import { documentTypeOf } from "@grasp-os/shared/knowledge";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, desc, eq, gt, lt, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
-import type { Reader } from "./knowledge/access.ts";
+import type { Reader } from "./brain/access.ts";
 
 // What changed in the brain since a moment (`brain.changes`): one feed of
 // what core records today, newest first, a page at a time, as the person
-// may read it. A change is a `kind`: Knowledge documents added or changed,
-// and, for admins, the onboarding's sources, as `brain.read` shows them
+// may read it. A change is a `kind`: Brain documents added or changed,
+// and, for admins, the onboarding's sources, as `brain.readWorkspace` shows them
 // (brain-rpc.ts). Goals, questions and workflow suggestions join the union
 // once core keeps them (GRA-527); nothing is made up for them here.
 //
@@ -28,9 +28,9 @@ import type { Reader } from "./knowledge/access.ts";
 //
 // - A document outside the person's access, or its title: the documents
 //   are read through `allowedFor`'s condition inside the query, the one
-//   every Knowledge read uses (knowledge/access.ts), never filtered after.
+//   every Brain read uses (brain/access.ts), never filtered after.
 // - The onboarding through the feed: its sources come only for an admin,
-//   decided as `brain.read` decides it (brain-rpc.ts, `onboardingFacts`).
+//   decided as `brain.readWorkspace` decides it (brain-rpc.ts, `onboardingFacts`).
 // - Hidden changes inferred from paging: a page, its size and where the
 //   next starts are made from what the person may read alone. The cursor
 //   is a position the server parses, never a filter: malformed cursors
@@ -44,11 +44,11 @@ import type { Reader } from "./knowledge/access.ts";
 // - A read the audit log can't hold: a page's documents and their
 //   collections fit in its event's provenance (`brainChangesMaxLimit`).
 //
-// The read is audited as any Knowledge read is (`noteProvenance`): one
-// `knowledge.read`, with the collections and documents it names. Deleted
+// The read is audited as any Brain read is (`noteProvenance`): one
+// `brain.read`, with the collections and documents it names. Deleted
 // documents leave no row, so the feed doesn't show them.
 
-/** An onboarding source, as a change: its ID and title as `brain.read` names it, and when. */
+/** An onboarding source, as a change: its ID and title as `brain.readWorkspace` names it, and when. */
 export interface SourceChange {
   id: string;
   title: string;
@@ -127,7 +127,7 @@ interface Placed {
 
 /**
  * The person's changes in the brain since `options.since`, newest first, a
- * page at a time: the Knowledge documents they may read added or changed,
+ * page at a time: the Brain documents they may read added or changed,
  * and `sources` (the onboarding's, which only an admin is given).
  */
 export const brainChanges = async (
@@ -219,7 +219,7 @@ export const brainChanges = async (
   await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       documentIds: shown.map(({ id }) => id),
       detail: { read: "changes", count: shown.length },
     },

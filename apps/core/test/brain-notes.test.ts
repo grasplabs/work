@@ -9,8 +9,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { collectionWithNote, newTeam } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, newTeam } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Every note in the brain with its links (`brain.notes`, brain-notes.ts),
@@ -107,12 +107,12 @@ describe("the brain's notes", { timeout: 120_000 }, () => {
       member: [...pair("diary"), ...pair("finance"), ...pair("handbook")],
       outsider: pair("handbook"),
     });
-    // Recorded as the Knowledge read it is, by whom.
+    // Recorded as the Brain read it is, by whom.
     const events = await allEvents();
     expect(
       events.some(
         ({ action, actor, detail }) =>
-          action === "knowledge.read" &&
+          action === "brain.read" &&
           actor.type === "person" &&
           actor.userId === outsider.userId &&
           detail.read === "notes"
@@ -160,7 +160,7 @@ describe("the brain's notes", { timeout: 120_000 }, () => {
 
   it("carry a note's first 50 links, and count the rest", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { id } = await admin.api.knowledge.createCollection({
+    const { id } = await admin.api.brain.createCollection({
       name: `Linked ${unique()}`,
       access: "everyone",
     });
@@ -168,7 +168,7 @@ describe("the brain's notes", { timeout: 120_000 }, () => {
       { length: brainNoteMaxLinks + 3 },
       (_, index) => `[[spoke-${String(index).padStart(2, "0")}.md]]`
     );
-    const hub = await admin.api.knowledge.saveDocument({
+    const hub = await admin.api.brain.saveDocument({
       collectionId: id,
       path: "hub.md",
       text: `# Hub\n${spokes.join("\n")}\n`,

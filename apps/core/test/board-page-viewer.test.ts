@@ -82,7 +82,7 @@ describe("the board page's viewer", () => {
 
     // A is saved while B is opened, and B's open fails.
     const openB = shown.open("b");
-    await answer("b", { error: "knowledge.not_found" });
+    await answer("b", { error: "brain.document_not_found" });
     await openB;
     const refreshA = shown.saved("a");
     await answer("a", { ok: snapshot("a", 2) });
@@ -92,7 +92,12 @@ describe("the board page's viewer", () => {
     await answer("a", { ok: snapshot("a", 3) });
     await again;
 
-    expect(seen).toStrictEqual(["a@1", "knowledge.not_found", "a@2", "a@3"]);
+    expect(seen).toStrictEqual([
+      "a@1",
+      "brain.document_not_found",
+      "a@2",
+      "a@3",
+    ]);
   });
 
   it("shows only the answer to the latest open, and refreshes after a save only the snapshot shown", async () => {

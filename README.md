@@ -1,6 +1,6 @@
 # Grasp OS
 
-An internal operating system for AI at work: company knowledge, Apps with their screens and durable workflows, agents, and the controls around them. Every model call goes through one gateway, every external call through one connector layer, and everything that happens lands in an audit log.
+An internal operating system for AI at work: company brain, Apps with their screens and durable workflows, agents, and the controls around them. Every model call goes through one gateway, every external call through one connector layer, and everything that happens lands in an audit log.
 
 Built on Cloudflare Workers with TypeScript, React and Vite+.
 
@@ -8,7 +8,7 @@ Built on Cloudflare Workers with TypeScript, React and Vite+.
 
 | Path | What it is |
 | --- | --- |
-| `apps/core` | Core Worker: sign-in, knowledge, Apps, workflows, model gateway, audit |
+| `apps/core` | Core Worker: sign-in, brain, Apps, workflows, model gateway, audit |
 | `apps/connect` | Connector Worker: access to outside systems |
 | `apps/web` | The frontend |
 | `apps/admin` | Grasp's admin: clients, deployments and releases |

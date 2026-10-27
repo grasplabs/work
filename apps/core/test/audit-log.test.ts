@@ -15,7 +15,7 @@ const newLog = () => env.AUDIT_LOG.getByName(crypto.randomUUID());
 
 type Log = ReturnType<typeof newLog>;
 
-const newEvent = (action = "knowledge.read"): AuditEvent => ({
+const newEvent = (action = "brain.read"): AuditEvent => ({
   id: crypto.randomUUID(),
   at: new Date().toISOString(),
   source: "core",
@@ -166,7 +166,7 @@ describe("AuditLog", () => {
     const event = newEvent();
     await log.append([event]);
 
-    const changed = { ...event, action: "knowledge.deleted" };
+    const changed = { ...event, action: "brain.deleted" };
     await expect(
       log.append([changed, { ...changed, id: event.id.toUpperCase() }])
     ).resolves.toStrictEqual({

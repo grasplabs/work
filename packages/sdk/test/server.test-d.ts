@@ -246,7 +246,7 @@ const mail = resource.connector("mail", {
   contract: "microsoft-365.mail@1",
   actions: ["send"],
 });
-const help = resource.knowledge("help", {
+const help = resource.brain("help", {
   operations: ["search"],
   collections: ["handbook"],
 });

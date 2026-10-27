@@ -1,8 +1,8 @@
 import { ensureCollection } from "@grasp-os/brain/collections";
 import type { OnErase } from "@grasp-os/brain/purge";
 import { actorOf, auditActorSchema } from "@grasp-os/shared/audit";
+import { collectionErrors } from "@grasp-os/shared/brain-documents";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import {
   documentErrors,
@@ -19,16 +19,16 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import { localExtractor } from "../knowledge/extract.ts";
-import { brainOf } from "../knowledge/ports.ts";
-import { uploadFile } from "../knowledge/uploads.ts";
+import { localExtractor } from "../brain/extract.ts";
+import { brainOf } from "../brain/ports.ts";
+import { uploadFile } from "../brain/uploads.ts";
 import { gatewaySettings, modelForRole, models } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
 import { NAMED } from "./stephen.ts";
 import { onboardingStore } from "./store.ts";
 
 // A document the company's admin shares in the onboarding (GRA-298), from
-// the prototype's `worker/onboarding-document.ts`: kept in Knowledge, in a
+// the prototype's `worker/onboarding-document.ts`: kept in the Brain, in a
 // collection only admins read and the model gateway treats as sensitive,
 // and read at once through the gateway, as data and never as
 // instructions: what it is about, the tools and teams it names, and what
@@ -36,7 +36,7 @@ import { onboardingStore } from "./store.ts";
 // the admin one question only when he can't use it without: an old version
 // or a draft, or a team he can't tell.
 //
-// The reading is a copy of the document, so a Knowledge purge reaches it
+// The reading is a copy of the document, so a Brain purge reaches it
 // (`documentReadingErasure`): one naming the document, or a term the
 // reading holds, forgets it whole, with every drawing made since it was
 // shared and what of those the brain holds (the store's
@@ -169,7 +169,7 @@ const requireReadable = (name: string): keyof typeof uploadTypes => {
   return extension as keyof typeof uploadTypes;
 };
 
-/** Keeps the file in Knowledge, in the onboarding's collection: its upload's ID. */
+/** Keeps the file in the Brain, in the onboarding's collection: its upload's ID. */
 const keep = async (
   env: Env,
   person: Identity,
@@ -202,7 +202,7 @@ const readingTimeoutMs = 60_000;
  * Shares a document: its text read in the extractor's sandbox (never
  * through Workers AI: it stays in the Worker) and read through the model
  * gateway as the onboarding's, which the rules judge as sensitive; then,
- * once read, kept in Knowledge. Counted as reading.
+ * once read, kept in the Brain. Counted as reading.
  */
 export const shareDocument = async (
   env: Env,
@@ -216,7 +216,7 @@ export const shareDocument = async (
   }
   const store = onboardingStore(env);
   // Read before anything is kept: a document that can't be read leaves no
-  // file behind in Knowledge, and sharing it again makes no second one.
+  // file behind in the Brain, and sharing it again makes no second one.
   let text: string;
   try {
     ({ markdown: text } = await localExtractor(env)({
@@ -228,7 +228,7 @@ export const shareDocument = async (
     // Too large or complex stays so, however often it is tried again.
     const permanent =
       uploadErrors.codeOf(error) === "upload.too_complex" ||
-      knowledgeErrors.codeOf(error) === "knowledge.too_large";
+      collectionErrors.codeOf(error) === "brain.too_large";
     throw documentErrors.create(
       permanent ? "document.too_complex" : "document.not_read"
     );
@@ -294,8 +294,8 @@ const textsOf = ({ name, reading, answer }: OnboardingDocument): string[] => [
 ];
 
 /**
- * The shared documents' readings as a Knowledge purge reaches them
- * (knowledge/purge.ts `OnErase`): a content purge forgets each holding a
+ * The shared documents' readings as a Brain purge reaches them
+ * (brain/purge.ts `OnErase`): a content purge forgets each holding a
  * term, and each of a document it names, by its path in the onboarding's
  * collection, which is the name it was shared by.
  */

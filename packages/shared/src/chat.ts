@@ -264,7 +264,7 @@ export interface ChatReplyUsage {
 }
 
 /**
- * A note an answer cites: a Knowledge document the chat's code was given
+ * A note an answer cites: a Brain document the chat's code was given
  * by one of its reads before the answer, which the answer links to as
  * `[title](grasp:note/<documentId>)`. Only its ID: who reads the answer
  * resolves it with their own access.

@@ -1,7 +1,7 @@
+import type { CollectionReader } from "@grasp-os/shared/brain-documents";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { RunId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { CollectionReader } from "@grasp-os/shared/knowledge";
 import {
   paramDeclarationSchema,
   paramDeclarationsSchema,
@@ -484,7 +484,7 @@ export interface ConnectionBinding {
 }
 
 /**
- * A Knowledge collection the run's App may read, by its binding name:
+ * A Brain collection the run's App may read, by its binding name:
  * `await env.HANDBOOK.search("refunds")`. A run recalls through the Brain
  * binding (`WorkflowBrainBinding`), never a collection's.
  */

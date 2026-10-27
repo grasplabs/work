@@ -20,7 +20,7 @@ import { ADMIN_SOURCES } from "./admin-sources.ts";
 import type { AdminSource } from "./admin-sources.ts";
 import { byUrgency } from "./admin-view.ts";
 import type { AdminView } from "./admin-view.ts";
-import type { KnowledgeSource, Need, Stage } from "./onboarding-admin.ts";
+import type { BrainSource, Need, Stage } from "./onboarding-admin.ts";
 import { LISTEN_DAYS } from "./onboarding.ts";
 
 /**
@@ -217,7 +217,7 @@ const STAGE: Record<Stage, string> = {
   open: "Grasp opens",
 };
 
-const SOURCE: Record<KnowledgeSource, string> = {
+const SOURCE: Record<BrainSource, string> = {
   vision: "the first conversation and the research",
   directory: "who works where, from the sign-in",
   sources: "where the documents live",
@@ -542,7 +542,7 @@ const dealOf = ({ contract }: AdminView): string => {
 
 /** One organization in a line: for lists. */
 const lineOf = (view: AdminView, names: Names): string =>
-  `- ${orgRef(names, view)}: ${PHASE[phaseOf(view)]}; ${view.knowledge.percent}% known; ${dealOf(view)}; AI this month ${euroCents(view.usage.thisMonth.spend)}; ${view.needs.length} things need Grasp`;
+  `- ${orgRef(names, view)}: ${PHASE[phaseOf(view)]}; ${view.brain.percent}% known; ${dealOf(view)}; AI this month ${euroCents(view.usage.thisMonth.spend)}; ${view.needs.length} things need Grasp`;
 
 /** The contract as one organization's summary says it. */
 const contractText = ({ contract }: AdminView): string => {
@@ -577,7 +577,7 @@ export const summaryOf = (
   const lines = [
     `## Organization ${orgRef(names, view)}`,
     `Phase: ${PHASE[phaseOf(view)]}. Step: ${STAGE[view.stage]}. Counted up to ${view.asOf}.`,
-    `Known: ${view.knowledge.percent}% of what Grasp needs; it opens at ${view.knowledge.threshold}%.`,
+    `Known: ${view.brain.percent}% of what Grasp needs; it opens at ${view.brain.threshold}%.`,
     contractText(view),
     `Members: ${view.seats.used} of ${view.seats.of} seats. Integrations: ${integrations}.`,
     `AI: ${euroCents(view.usage.thisMonth.spend)} this month, ${euroCents(view.usage.total.spend)} in all.`,
@@ -668,7 +668,7 @@ export const digestOf = (
   const count = (phase: AdminPhase) =>
     views.filter((view) => phaseOf(view) === phase).length;
   const past = views.filter(
-    (view) => !view.open && view.knowledge.percent >= MILESTONE
+    (view) => !view.open && view.brain.percent >= MILESTONE
   );
   const ready = views.filter((view) => phaseOf(view) === "ready");
   const needs = everyNeed(views).map(
@@ -678,7 +678,7 @@ export const digestOf = (
   const lines = [
     `Grasp, ${today}: ${many(views.length, "organization", "organizations")}. ${ADMIN_PHASES.map((phase) => `${count(phase)} ${phase}`).join(", ")}.`,
     past.length > 0
-      ? `Past ${MILESTONE}% known: ${past.map((view) => `${orgRef(names, view)} (${view.knowledge.percent}%)`).join(", ")}.`
+      ? `Past ${MILESTONE}% known: ${past.map((view) => `${orgRef(names, view)} (${view.brain.percent}%)`).join(", ")}.`
       : `Nobody is past ${MILESTONE}% known and still closed.`,
     ready.length > 0
       ? `Waiting for Grasp’s go: ${ready.map((view) => orgRef(names, view)).join(", ")}.`
@@ -878,7 +878,7 @@ export const findOrganization = (
 const measureOf = (view: AdminView, measure: Measure): number => {
   switch (measure) {
     case "known": {
-      return view.knowledge.percent;
+      return view.brain.percent;
     }
     case "talked": {
       return view.asked === 0
@@ -955,7 +955,7 @@ const ANSWERS: Record<AdminToolName, (asked: Asked) => AdminToolAnswer> = {
         organizations: shown.map((view) => ({
           id: view.org.id,
           phase: phaseOf(view),
-          known: view.knowledge.percent,
+          known: view.brain.percent,
           needs: view.needs.length,
         })),
       },

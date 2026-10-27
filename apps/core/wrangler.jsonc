@@ -14,7 +14,7 @@
   "workers_dev": true,
   "preview_urls": false,
   // Durable Objects bundle their Drizzle migrations as text, and the Grasp
-  // skills (skills/, src/knowledge/grasp-skills.ts) ship as text too.
+  // skills (skills/, src/brain/grasp-skills.ts) ship as text too.
   "rules": [
     {
       "type": "Text",
@@ -164,7 +164,7 @@
       "migrations_dir": "src/db/core/migrations",
     },
     {
-      "binding": "KNOWLEDGE",
+      "binding": "BRAIN_DB",
       "database_name": "grasp-os-knowledge",
       // The Brain's own migrations: the package owns its whole database.
       "migrations_dir": "../../packages/brain/src/db/migrations",
@@ -183,8 +183,8 @@
       "bucket_name": "grasp-os-audit-archive",
       "jurisdiction": "eu",
     },
-    // The texts of Knowledge's versions, each an immutable object written
-    // once (src/knowledge/payloads.ts). One bucket per deployment, private,
+    // The texts of Brain's versions, each an immutable object written
+    // once (src/brain/payloads.ts). One bucket per deployment, private,
     // in the EU; only core reads and writes it.
     {
       "binding": "BRAIN_OBJECTS",
@@ -197,7 +197,7 @@
   // workflows' schedules as they come due, and more (src/index.ts). Every
   // 15 minutes, on its own: the day's improvement signals, until they're
   // computed (src/signals.ts), and Apps whose entry in the Apps collection
-  // isn't of their current version (src/knowledge/apps-collection.ts).
+  // isn't of their current version (src/brain/apps-collection.ts).
   "triggers": { "crons": ["* * * * *", "*/15 * * * *"] },
   // The model gateway's transport to AI Gateway (src/models.ts); core never
   // holds a raw provider key.

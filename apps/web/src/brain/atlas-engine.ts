@@ -23,7 +23,7 @@ import { pairAlongCurve, seeded } from "./reveal-motion.ts";
 /**
  * The atlas's drawing: the company brain in 3D in dots, or a region's map of neurons, on a canvas,
  * with the camera, the pointer and the names pinned over it. Ported from the drawing inside the
- * prototype's atlas (grasplabs/prototype, packages/grasp: components/knowledge/brain-atlas.tsx),
+ * prototype's atlas (grasplabs/prototype, packages/grasp: components/brain/brain-atlas.tsx),
  * number for number; it is cut into steps here so each stays readable. The component around it
  * (atlas-canvas.tsx) hands it what the view asks for, each render, through `latest`.
  */

@@ -7,7 +7,7 @@ import {
 import type { ConsolidationScope } from "@grasp-os/brain/lessons";
 import { errorFields, log } from "@grasp-os/shared/log";
 
-import { brainOf } from "./knowledge/ports.ts";
+import { brainOf } from "./brain/ports.ts";
 import { runEngine } from "./workflows/engine.ts";
 
 // When the Brain consolidates a scope's episodes into lesson candidates

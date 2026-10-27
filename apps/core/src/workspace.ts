@@ -78,7 +78,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
-import { agentApis } from "./agent-apis.ts";
+import { agentApis, sharedAgentApis } from "./agent-apis.ts";
 import {
   auditAgentCall,
   chatAuthority,
@@ -105,6 +105,17 @@ import {
   turnSource,
 } from "./brain-capture.ts";
 import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
+import {
+  audienceMaxMembers,
+  audienceOf,
+  keepAudience,
+} from "./brain/access.ts";
+import { readAsDelegate } from "./brain/binding.ts";
+import { catalog, noteListedSkills } from "./brain/catalog.ts";
+import { cited } from "./brain/citations.ts";
+import { forContext } from "./brain/memory.ts";
+import { brainOf } from "./brain/ports.ts";
+import { hasBrainGrant } from "./brain/recall-grants.ts";
 import { buildDequeued } from "./build-admission.ts";
 import { BuildJobRecords } from "./build-job-records.ts";
 import type {
@@ -162,17 +173,6 @@ import {
 } from "./db/workspace/schema.ts";
 import { DraftVersions } from "./draft-versions.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
-import {
-  audienceMaxMembers,
-  audienceOf,
-  keepAudience,
-} from "./knowledge/access.ts";
-import { readAsDelegate } from "./knowledge/binding.ts";
-import { catalog, noteListedSkills } from "./knowledge/catalog.ts";
-import { cited } from "./knowledge/citations.ts";
-import { forContext } from "./knowledge/memory.ts";
-import { brainOf } from "./knowledge/ports.ts";
-import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
@@ -382,7 +382,7 @@ const platformTitles: Readonly<Record<string, string>> = {
 /**
  * A chat others share on a chat platform, as its door names it: the Chat
  * SDK's thread, whether it is a group chat or a channel, and who is in it
- * now (`Audience` in knowledge/access.ts).
+ * now (`Audience` in brain/access.ts).
  */
 const sharedChatSchema = z.strictObject({
   thread: z.string().min(1).max(2048),
@@ -401,15 +401,8 @@ export type SharedChat = z.infer<typeof sharedChatSchema>;
 const sharedTitle = (platform: string, kind: SharedChat["kind"]): string =>
   `${platformTitles[platform] ?? platform} ${kind === "group" ? "group chat" : "channel"}`;
 
-/**
- * What a chat others share gets of the agent's APIs: its chat, and
- * Knowledge, read for everyone in it. No connections, so nothing is read
- * from or written to anyone's own accounts, and nothing is held for a
- * person to confirm; no Apps, builds, workflows or memory saves, which act
- * as the one person who asked; no brain, which reads as that person.
- */
-const sharedApiNames: ReadonlySet<string> = new Set(["chat", "knowledge"]);
-const sharedApis = agentApis.filter(({ name }) => sharedApiNames.has(name));
+/** What a chat others share gets of the agent's APIs (agent-apis.ts). */
+const sharedApis = sharedAgentApis;
 
 export const questionSchema = z.strictObject({
   text: z.string().trim().min(1).max(100_000),
@@ -1647,7 +1640,7 @@ export class Workspace extends DurableObject<Env> {
   /**
    * What the model reads this turn besides the question: the memory of the
    * person's own chat (the company's files and their USER.md, read now and
-   * recorded as sources), the skills in the chat's Knowledge catalog, and
+   * recorded as sources), the skills in the chat's Brain catalog, and
    * whether the chat is in a project (whose goal and documents its code
    * reads, `chatProject`).
    */
@@ -1666,7 +1659,7 @@ export class Workspace extends DurableObject<Env> {
     );
     this.#keepSources(work.chatId, memory.provenance.collectionIds);
     // The skills listed go into the prompt: a read of their collections,
-    // noted as any Knowledge read is (restricting the chat first were any
+    // noted as any Brain read is (restricting the chat first were any
     // sensitive), and carried as the chat's sources like memory.
     const { collections, skills, listed } = await readAsDelegate(
       this.env,
@@ -1688,7 +1681,7 @@ export class Workspace extends DurableObject<Env> {
     this.#keepSources(work.chatId, listed.collectionIds);
     // Recorded as the code's catalog call is: what the agent saw listed.
     await auditAgentCall(this.env, scope, {
-      method: "knowledge.catalog",
+      method: "brain.catalog",
       detail: {
         collections: collections.length,
         skills: skills.length,
@@ -2569,7 +2562,7 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * `#cited` for a turn that has answered: the answer is stored and shown
-   * by then, so documents that can't be looked up now (Knowledge's
+   * by then, so documents that can't be looked up now (Brain's
    * database, or what the agent may read, failing) leave the turn's result
    * without any, and never fail an answered turn. The page asks again
    * (`cited`).
@@ -2591,7 +2584,7 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Records with the run alone what an API call of it read (an App's
-   * answer or files, the Knowledge catalog), before the call hands it
+   * answer or files, the Brain catalog), before the call hands it
    * over: what the run's result rests on (`#withheldRuns`), never the
    * chat's provenance, which the model rules judge (`recordSources`). The
    * same refusal once the run isn't open.

@@ -718,7 +718,7 @@ const idle = () => {
 
 /**
  * The company brain in 3D, drawn in dots, to explore, as in the prototype (grasplabs/prototype,
- * packages/grasp: components/knowledge/brain-atlas.tsx); the drawing itself is atlas-engine.ts.
+ * packages/grasp: components/brain/brain-atlas.tsx); the drawing itself is atlas-engine.ts.
  * Seen whole it turns slowly either side of rest, and dragging turns it all the way round; its
  * dots are shaded by where the light falls as it turns, as in print, and the far side never shows
  * through; its stem runs on down as a spine. Clicking a region turns that part to face you, then

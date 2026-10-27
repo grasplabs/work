@@ -55,7 +55,7 @@ import { asWord, termsOf } from "./search.ts";
 
 // The Brain's memory commands (GRA-297; the Brain design's "Brain SDK and
 // API" and "Memory model"): `remember`, `receipts.get`, `memories.get`
-// and `memories.list`, over Knowledge's database, the Brain's store.
+// and `memories.list`, over the Brain's database, the Brain's store.
 //
 // A remember is retry-safe. Its key is keyed to the deployment and scoped
 // to the caller and the operation, so another caller's same key is
@@ -322,7 +322,7 @@ export const eraseStatements = async <C>(
       brain,
       {
         actor,
-        action: "knowledge.memory.purged",
+        action: "brain.memory.purged",
         target: { type: "memory", id },
         detail: {
           purgeId,
@@ -673,7 +673,7 @@ export const remember = async <C>(
         brain,
         {
           actor: brain.ports.actorOf(reader),
-          action: "knowledge.memory.remember",
+          action: "brain.memory.remember",
           target: { type: "memory", id: memoryId },
           provenance: sourceRefs
             .map((ref) =>
@@ -1359,7 +1359,7 @@ export const memoriesPublish = async <C>(
         brain,
         {
           actor: brain.ports.actorOf(reader),
-          action: "knowledge.memory.published",
+          action: "brain.memory.published",
           target: { type: "memory", id: memoryId },
           provenance: refIds(sourceRefs),
           detail: {
@@ -1497,7 +1497,7 @@ export const memoriesProposeChange = async <C>(
         brain,
         {
           actor: brain.ports.actorOf(reader),
-          action: "knowledge.memory.corrected",
+          action: "brain.memory.corrected",
           target: { type: "memory", id: memoryId },
           provenance: refIds(sourceRefs),
           detail: { corrects: request.memoryId, revision: expectedRevision },
@@ -1613,7 +1613,7 @@ export const memoriesRetire = async <C>(
         brain,
         {
           actor: brain.ports.actorOf(reader),
-          action: "knowledge.memory.retired",
+          action: "brain.memory.retired",
           target: { type: "memory", id: memoryId },
           detail: {
             scope: row.scope,

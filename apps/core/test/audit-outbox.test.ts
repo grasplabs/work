@@ -11,7 +11,7 @@ import { outcome } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
 // Every audit event waits in an outbox, written with its change, until a
-// drain appends it to the log: core's and Knowledge's own in the background
+// drain appends it to the log: core's and the Brain's own in the background
 // right after each change and on every cron run, connect's on every cron
 // run, over RPC. These tests break the drain in the ways it can break and
 // check that each event still reaches the chain exactly once, in the order

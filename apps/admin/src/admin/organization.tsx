@@ -46,7 +46,7 @@ import type { ComponentProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import { AdminHeader, AdminPage, PageHeading } from "./page.tsx";
-import { KnowledgeDots } from "./parts.tsx";
+import { BrainCollectionDots } from "./parts.tsx";
 import {
   needSection,
   orgSections,
@@ -85,7 +85,7 @@ export const useOrganization = (): AnsweredOrganization => {
 };
 
 /** How many dots say how much is known, in the column. */
-const knowledgeDots = 20;
+const brainCollectionDots = 20;
 
 /** The section the page is on: the overview unless another's path is. */
 const useSection = (clientId: string): OrgSection => {
@@ -245,7 +245,7 @@ const OrgColumn = ({
   const [folded, setFolded] = useState(false);
   const waiting = new Set(view.needs.map(needSection));
   const opens = stageLines(view).open;
-  const waits = view.knowledge.ready && view.knowledge.opened === null;
+  const waits = view.brain.ready && view.brain.opened === null;
   const date = formatDate(dateOn(view.org, view.day));
   // The last day the links worked: the plan's days count from day 0.
   const lastDay = formatDate(dateOn(view.org, listenDays(view.org) - 1));
@@ -296,9 +296,9 @@ const OrgColumn = ({
           clientId={clientId}
           section="steps"
         >
-          <KnowledgeDots
-            count={knowledgeDots}
-            knowledge={view.knowledge}
+          <BrainCollectionDots
+            count={brainCollectionDots}
+            brain={view.brain}
             label={opens}
           />
           <span

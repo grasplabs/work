@@ -5,7 +5,7 @@
 import { STAGES } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   LinkState,
-  OrgKnowledge,
+  OrgBrain,
   PersonView,
   Stage,
   StageStatus,
@@ -62,17 +62,17 @@ const dotSlack = 1e-9;
  * in, filling from the left, with a mark at the share where Grasp opens.
  * Dark up to the mark is ready.
  */
-export const KnowledgeDots = ({
-  knowledge,
+export const BrainCollectionDots = ({
+  brain,
   count,
   label,
 }: {
-  knowledge: Pick<OrgKnowledge, "percent" | "threshold">;
+  brain: Pick<OrgBrain, "percent" | "threshold">;
   count: number;
   label: string;
 }) => {
-  const filled = Math.floor((knowledge.percent / 100) * count + dotSlack);
-  const gate = Math.round((knowledge.threshold / 100) * count);
+  const filled = Math.floor((brain.percent / 100) * count + dotSlack);
+  const gate = Math.round((brain.threshold / 100) * count);
   const mark = (
     <span
       aria-hidden

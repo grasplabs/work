@@ -22,8 +22,8 @@ import { CoreRpcTarget } from "../src/rpc-target.ts";
 import { ScreenFrameRpc } from "../src/screens-rpc.ts";
 import { SessionRpc } from "../src/session-rpc.ts";
 import { staffAudited } from "../src/staff-audit.ts";
+import { collectionWithNote } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote } from "./knowledge.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -135,15 +135,9 @@ describe("Grasp staff's views, audited", () => {
     const uploadId = crypto.randomUUID();
     const app = crypto.randomUUID();
     const reads: [string, () => Promise<unknown>][] = [
-      [
-        "knowledge.listCollections",
-        async () => await api.knowledge.listCollections(),
-      ],
-      ["knowledge.search", async () => await api.knowledge.search(secret)],
-      [
-        "knowledge.getDocument",
-        async () => await api.knowledge.getDocument(noteId),
-      ],
+      ["brain.listCollections", async () => await api.brain.listCollections()],
+      ["brain.search", async () => await api.brain.search(secret)],
+      ["brain.getDocument", async () => await api.brain.getDocument(noteId)],
       ["memory.collections", async () => await api.memory.collections()],
       ["brain.notes", async () => await api.brain.notes()],
       ["chats.list", async () => await api.chats.list()],
@@ -313,9 +307,8 @@ describe("Grasp staff's views, audited", () => {
     );
     expect({
       actors: [...new Set(all.map(({ actor }) => actor.type))],
-      document: all.find(
-        ({ detail }) => detail.surface === "knowledge.getDocument"
-      )?.provenance,
+      document: all.find(({ detail }) => detail.surface === "brain.getDocument")
+        ?.provenance,
       upload: all.find(({ detail }) => detail.surface === "uploads.original")
         ?.provenance,
       content: JSON.stringify(all).includes(secret),
@@ -349,9 +342,9 @@ describe("Grasp staff's views, audited", () => {
       async () => {
         for (let time = 0; time < 5; time += 1) {
           // oxlint-disable-next-line no-await-in-loop -- a page asking again
-          await api.knowledge.getDocument(first.noteId);
+          await api.brain.getDocument(first.noteId);
         }
-        await api.knowledge.getDocument(second.noteId);
+        await api.brain.getDocument(second.noteId);
       },
       { staffAccesses: true }
     );
@@ -362,8 +355,8 @@ describe("Grasp staff's views, audited", () => {
         provenance,
       ])
     ).toStrictEqual([
-      ["knowledge.getDocument", [first.noteId]],
-      ["knowledge.getDocument", [second.noteId]],
+      ["brain.getDocument", [first.noteId]],
+      ["brain.getDocument", [second.noteId]],
     ]);
   });
 
@@ -383,7 +376,7 @@ describe("Grasp staff's views, audited", () => {
       async () => {
         for (const query of asked) {
           // oxlint-disable-next-line no-await-in-loop -- one ask after another
-          await api.knowledge.search(query);
+          await api.brain.search(query);
         }
       },
       { staffAccesses: true }
@@ -398,7 +391,7 @@ describe("Grasp staff's views, audited", () => {
       ]),
       leaked: asked.filter((query) => JSON.stringify(views).includes(query)),
     }).toStrictEqual({
-      entries: asked.map(() => ["knowledge.search", "query", []]),
+      entries: asked.map(() => ["brain.search", "query", []]),
       leaked: [],
     });
   });
@@ -471,7 +464,7 @@ describe("Grasp staff's views, audited", () => {
         await Promise.all(
           Array.from(
             { length: 5 },
-            async () => await api.knowledge.getDocument(noteId)
+            async () => await api.brain.getDocument(noteId)
           )
         );
         for (const frame of frames) {
@@ -485,7 +478,7 @@ describe("Grasp staff's views, audited", () => {
     expect(
       staffViews(events).map(({ detail }) => detail.surface)
     ).toStrictEqual([
-      "knowledge.getDocument",
+      "brain.getDocument",
       "screenFrame.delivery",
       "screenFrame.delivery",
     ]);
@@ -500,8 +493,8 @@ describe("Grasp staff's views, audited", () => {
 
     const events = await auditedDuring(
       async () => {
-        await admin.api.knowledge.getDocument(noteId);
-        await admin.api.knowledge.search("handbook");
+        await admin.api.brain.getDocument(noteId);
+        await admin.api.brain.search("handbook");
         await admin.api.chats.list();
         await routed(`${auditExportPath}?format=csv`, {
           headers: { cookie: admin.session },

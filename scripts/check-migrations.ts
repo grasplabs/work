@@ -45,11 +45,11 @@ const errors: string[] = [];
 /**
  * Migration folders squashed away in a hard cut: their database was reset
  * once and now applies its migrations from the folder named, so main's
- * files there may go. Knowledge's moved into the Brain package as one
+ * files there may go. The Brain's moved into the Brain package as one
  * migration (GRA-1037), before any client had it.
  */
 const squashed: Readonly<Record<string, string>> = {
-  "apps/core/src/db/knowledge/migrations/": "packages/brain/src/db/migrations/",
+  "apps/core/src/db/brain/migrations/": "packages/brain/src/db/migrations/",
 };
 
 const isSquashed = (file: string): boolean =>

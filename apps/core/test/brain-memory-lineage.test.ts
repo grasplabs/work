@@ -7,10 +7,10 @@ import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { Reader } from "../src/knowledge/access.ts";
-import { portsOf } from "../src/knowledge/ports.ts";
+import type { Reader } from "../src/brain/access.ts";
+import { portsOf } from "../src/brain/ports.ts";
+import { newTeam } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Inspecting a Brain memory record's lineage, and its correction (GRA-298,
@@ -54,7 +54,7 @@ const seed = async (
 ): Promise<string> => {
   const id = record.id ?? crypto.randomUUID();
   const now = record.recordedAt ?? new Date();
-  await drizzle(env.KNOWLEDGE)
+  await drizzle(env.BRAIN_DB)
     .insert(brainMemories)
     .values({
       id,
@@ -76,11 +76,11 @@ const seed = async (
 /** A document holding a note, in a new collection of `owner`'s. */
 const documentIn = async (
   owner: Person,
-  collection: Parameters<Person["api"]["knowledge"]["createCollection"]>[0]
+  collection: Parameters<Person["api"]["brain"]["createCollection"]>[0]
 ) => {
   const { id: collectionId } =
-    await owner.api.knowledge.createCollection(collection);
-  const { id: documentId } = await owner.api.knowledge.saveDocument({
+    await owner.api.brain.createCollection(collection);
+  const { id: documentId } = await owner.api.brain.saveDocument({
     collectionId,
     path: "note.md",
     text: "# Note\nFloor 3 is quiet.",
@@ -137,7 +137,7 @@ describe("a memory record's lineage", setUpTime, () => {
       access: "everyone",
     });
     const first = idOf(
-      await ada.api.knowledge.remember(
+      await ada.api.brain.remember(
         {
           kind: "fact",
           text: `Quiet floor ${unique()}`,
@@ -147,22 +147,22 @@ describe("a memory record's lineage", setUpTime, () => {
       )
     );
     const correction = idOf(
-      await ada.api.knowledge.memoriesProposeChange(
+      await ada.api.brain.memoriesProposeChange(
         { memoryId: first, statement: "Floor 4 is the quiet one." },
         { idempotencyKey: key(), expectedRevision: 1 }
       )
     );
     const stale = await codeOf(
-      ada.api.knowledge.memoriesProposeChange(
+      ada.api.brain.memoriesProposeChange(
         { memoryId: first, statement: "Floor 5." },
         { idempotencyKey: key(), expectedRevision: 1 }
       )
     );
 
-    const ofCorrection = await ada.api.knowledge.memoriesLineage({
+    const ofCorrection = await ada.api.brain.memoriesLineage({
       memoryId: correction,
     });
-    const ofFirst = await ada.api.knowledge.memoriesLineage({
+    const ofFirst = await ada.api.brain.memoriesLineage({
       memoryId: first,
     });
     const document = ofFirst.restsOn.find((node) => node.kind === "document");
@@ -224,7 +224,7 @@ describe("a memory record's lineage", setUpTime, () => {
       state: "retired",
     });
     const lineageOf = async (person: Person, memoryId: string) =>
-      await codeOf(person.api.knowledge.memoriesLineage({ memoryId }));
+      await codeOf(person.api.brain.memoriesLineage({ memoryId }));
 
     expect({
       personal: await lineageOf(ben, personal),
@@ -282,9 +282,9 @@ describe("a memory record's lineage", setUpTime, () => {
       sourceRefs: [adasTeamDocument],
     });
 
-    const asBen = await ben.api.knowledge.memoriesLineage({ memoryId: shared });
-    const asAda = await ada.api.knowledge.memoriesLineage({ memoryId: shared });
-    const ownAsAda = await ada.api.knowledge.memoriesLineage({ memoryId: own });
+    const asBen = await ben.api.brain.memoriesLineage({ memoryId: shared });
+    const asAda = await ada.api.brain.memoriesLineage({ memoryId: shared });
+    const ownAsAda = await ada.api.brain.memoriesLineage({ memoryId: own });
 
     expect({
       ben: { by: asBen.record.by !== null, restsOn: nodesOf(asBen) },
@@ -325,7 +325,7 @@ describe("a memory record's lineage", setUpTime, () => {
       sourceRefs: [{ kind: "memory", memoryId: second, revision: 1 }],
     });
 
-    const lineage = await ada.api.knowledge.memoriesLineage({
+    const lineage = await ada.api.brain.memoriesLineage({
       memoryId: second,
     });
 
@@ -366,12 +366,12 @@ describe("a memory record's lineage", setUpTime, () => {
       ownerId: ben.userId,
     });
 
-    const shared = await ben.api.knowledge.memoriesList({ among: "shared" });
+    const shared = await ben.api.brain.memoriesList({ among: "shared" });
     const ids = new Set<string>(shared.records.map(({ id }) => id));
     const teamRecord = shared.records.find(({ id }) => id === team);
-    const mine = await ben.api.knowledge.memoriesList({ limit: 1 });
+    const mine = await ben.api.brain.memoriesList({ limit: 1 });
     const crossed = await codeOf(
-      ben.api.knowledge.memoriesList({
+      ben.api.brain.memoriesList({
         among: "shared",
         cursor: mine.cursor ?? "",
       })
@@ -430,7 +430,7 @@ describe("a memory record's lineage", setUpTime, () => {
     const last = await teamRecord("Last.", 4);
     keptFrom.push(await teamRecord("Hidden three.", 5, true));
     const list = async (limit: number, cursor?: string) =>
-      await ben.api.knowledge.memoriesList({
+      await ben.api.brain.memoriesList({
         among: "shared",
         limit,
         ...(cursor === undefined ? {} : { cursor }),
@@ -477,7 +477,7 @@ describe("a memory record's lineage", setUpTime, () => {
     const mark = `m${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
     const publish = async (text: string, restsOnCited: boolean) =>
       idOf(
-        await ada.api.knowledge.memoriesPublish(
+        await ada.api.brain.memoriesPublish(
           {
             scope: "team",
             scopeId: both,
@@ -507,14 +507,14 @@ describe("a memory record's lineage", setUpTime, () => {
     // copy of it, what it rests on included, newest first in that order.
     const now = Date.now();
     const timed = (id: string, msAgo: number) =>
-      env.KNOWLEDGE.prepare(
+      env.BRAIN_DB.prepare(
         "UPDATE brain_memories SET recorded_at = ? WHERE id = ?"
       ).bind(now - msAgo, id);
     const hidden = [
       restsOnCited,
       ...Array.from({ length: 320 }, () => crypto.randomUUID()),
     ];
-    await env.KNOWLEDGE.batch([
+    await env.BRAIN_DB.batch([
       timed(visible[0] ?? "", 0),
       timed(restsOnCited, 10),
       timed(visible[1] ?? "", 1000),
@@ -522,10 +522,10 @@ describe("a memory record's lineage", setUpTime, () => {
       ...hidden
         .slice(1)
         .flatMap((id, index) => [
-          env.KNOWLEDGE.prepare(
+          env.BRAIN_DB.prepare(
             "INSERT INTO brain_memories SELECT ?, revision, scope, owner_id, kind, statement, source_refs, state, indexing_state, ?, updated_at, scope_id FROM brain_memories WHERE id = ?"
           ).bind(id, now - 11 - index, restsOnCited),
-          env.KNOWLEDGE.prepare(
+          env.BRAIN_DB.prepare(
             "INSERT INTO brain_memory_cites SELECT ?, collection_id FROM brain_memory_cites WHERE memory_id = ?"
           ).bind(id, restsOnCited),
         ]),
@@ -537,7 +537,7 @@ describe("a memory record's lineage", setUpTime, () => {
       let cursor: string | undefined;
       for (let page = 0; page < 10; page += 1) {
         // oxlint-disable-next-line no-await-in-loop -- each page from the last
-        const listed = await ben.api.knowledge.memoriesList({
+        const listed = await ben.api.brain.memoriesList({
           among: "shared",
           kind: "preference",
           limit,
@@ -563,7 +563,7 @@ describe("a memory record's lineage", setUpTime, () => {
     const byTwo = await walk(2);
     // Recall ranks and limits within the same condition: the hidden ones
     // take no place in its memory pass.
-    const pack = await ben.api.knowledge.recall({ query: mark });
+    const pack = await ben.api.brain.recall({ query: mark });
     const recalled = pack.items.flatMap(({ sourceRefs }) =>
       sourceRefs.flatMap((ref) => (ref.kind === "memory" ? [ref.memoryId] : []))
     );
@@ -626,7 +626,7 @@ describe("a memory record's lineage", setUpTime, () => {
       })),
     });
 
-    const lineage = await ada.api.knowledge.memoriesLineage({
+    const lineage = await ada.api.brain.memoriesLineage({
       memoryId: root,
     });
 
@@ -670,7 +670,7 @@ describe("a memory record's lineage", setUpTime, () => {
     const walk = async () => {
       let statements = 0;
       let checks = 0;
-      const real = env.KNOWLEDGE;
+      const real = env.BRAIN_DB;
       const counted: D1Database = {
         prepare: (query) => {
           statements += 1;

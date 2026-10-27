@@ -664,7 +664,7 @@ export interface FunctionAnswer {
   readonly result: OperationResult;
   /**
    * Where what the call read through its resources comes from, with its
-   * classification (spec 32.3): the Knowledge collections, and whether
+   * classification (spec 32.3): the Brain collections, and whether
    * any was sensitive or restricted, and each connection read from with
    * the resources its connector named. Null when no function ran.
    */

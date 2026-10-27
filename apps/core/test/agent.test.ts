@@ -51,8 +51,8 @@ import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { collectionWithNote, readCollection } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, readCollection } from "./knowledge.ts";
 import { signedInApi, signedInWithRole } from "./sign-in.ts";
 
 // A chat's agent, through the Workspace object: the loop, the code it runs
@@ -627,7 +627,7 @@ describe("chat agent sandbox", () => {
 
     expect(result).toStrictEqual({
       isError: false,
-      text: `Returned:\n${JSON.stringify({ given: ["chat", "knowledge", "connections", "apps", "build", "workflows", "memory", "brain"], imported: [], exports: [] })}`,
+      text: `Returned:\n${JSON.stringify({ given: ["chat", "brain", "connections", "apps", "build", "workflows", "memory"], imported: [], exports: [] })}`,
     });
   });
 
@@ -638,7 +638,7 @@ describe("chat agent sandbox", () => {
 
     expect(result?.isError).toBeTruthy();
     expect(result?.text).toContain(
-      "This chat has no API named env.mailbox. It has: env.chat, env.knowledge, env.connections, env.apps, env.build, env.workflows, env.memory, env.brain."
+      "This chat has no API named env.mailbox. It has: env.chat, env.brain, env.connections, env.apps, env.build, env.workflows, env.memory."
     );
   });
 
@@ -1331,9 +1331,9 @@ describe("chat agent turns", () => {
     const { stub, chat, gateway } = await newChat(says("Still here."));
     /** Saves the company's AGENTS.md, over what is there. */
     const saveRules = async (text: string) => {
-      const { documents } = await admin.api.knowledge.listDocuments(memory);
+      const { documents } = await admin.api.brain.listDocuments(memory);
       const current = documents.find(({ path }) => path === "AGENTS.md");
-      await admin.api.knowledge.saveDocument({
+      await admin.api.brain.saveDocument({
         collectionId: memory,
         path: "AGENTS.md",
         text,
@@ -2138,10 +2138,10 @@ describe("chat agent code run leases", () => {
       ),
       says("It ran out of time.")
     );
-    // Knowledge answers two seconds late; the run has a second. The save
+    // The Brain answers two seconds late; the run has a second. The save
     // is let in as it starts, then prepared past the run's end.
-    const { KNOWLEDGE: knowledge } = env;
-    const slow = new Proxy(knowledge, {
+    const { BRAIN_DB: brain } = env;
+    const slow = new Proxy(brain, {
       get: (target, property) => {
         const value: unknown = Reflect.get(target, property);
         if (property === "prepare") {
@@ -2153,11 +2153,11 @@ describe("chat agent code run leases", () => {
       },
     });
     await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1000" });
-    env.KNOWLEDGE = slow;
+    env.BRAIN_DB = slow;
     try {
       await ask("Remember it.");
     } finally {
-      env.KNOWLEDGE = knowledge;
+      env.BRAIN_DB = brain;
       await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "" });
     }
 
@@ -2179,7 +2179,7 @@ describe("chat agent code run leases", () => {
     expect(
       events.filter(
         ({ action, actor }) =>
-          action === "knowledge.document.saved" &&
+          action === "brain.document.saved" &&
           actor.type === "agent" &&
           actor.agentId === agent.agentId
       )

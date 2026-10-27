@@ -11,7 +11,7 @@ import { apps, workflowResourceRuns, workflowRuns } from "./db/core/schema.ts";
 import { appHost, workspace } from "./durable-objects.ts";
 
 // Restricted mode. Once a chat or an App reads restricted data (in
-// Knowledge: what a sensitive collection holds), it is restricted for good,
+// Brain: what a sensitive collection holds), it is restricted for good,
 // and from then on takes no action in outside systems unless the person it
 // acts for confirms it, warned that it may carry what was read. The flag
 // is kept where the chat or App lives (its workspace's or its own Durable
@@ -27,7 +27,7 @@ import { appHost, workspace } from "./durable-objects.ts";
 // manifest declares them, never a server's own word), and every other
 // call, a Composio toolkit's reads too (their input leaves for a third
 // party), is held there for the person (a workflow run waits for their
-// decision). Knowledge, which stays in the deployment, can be read too.
+// decision). Brain, which stays in the deployment, can be read too.
 //
 // The flag is only as good as the boundaries between contexts: it must
 // follow every way data moves from one to another. A workflow run started
@@ -238,7 +238,7 @@ const restrictedEntry = (
  *
  * A run of an independent workflow never enters it after it starts: it
  * starts restricted or not, as its start decided (workflow-starts.ts,
- * `restrictedStart`), and keeps that. It reads no Knowledge, and what it
+ * `restrictedStart`), and keeps that. It reads no Brain, and what it
  * calls answers an unrestricted one nothing restricted (an operation of
  * an App in restricted mode is refused, before and after:
  * workflows/resource-calls.ts). Anything that would restrict an

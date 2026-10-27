@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { eraseCaptured } from "../src/brain-capture.ts";
 import { scheduleConsolidation } from "../src/brain-consolidation.ts";
-import { brainOf } from "../src/knowledge/ports.ts";
+import { brainOf } from "../src/brain/ports.ts";
 import { projectStatus } from "../src/workflows/runs.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -59,7 +59,7 @@ const failedRun = async (app: string, startedBy: string): Promise<string> => {
 const episodesHeld = async (userId: string, count: number) => {
   await vi.waitFor(
     async () => {
-      const { results } = await env.KNOWLEDGE.prepare(
+      const { results } = await env.BRAIN_DB.prepare(
         "SELECT id FROM brain_episodes WHERE owner_id = ?"
       )
         .bind(userId)

@@ -79,11 +79,11 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   let collectionId: string;
   let documentId: string;
   try {
-    ({ id: collectionId } = await api.knowledge.createCollection({
+    ({ id: collectionId } = await api.brain.createCollection({
       name: `Handbook ${crypto.randomUUID()}`,
       access: "everyone",
     }));
-    ({ id: documentId } = await api.knowledge.saveDocument({
+    ({ id: documentId } = await api.brain.saveDocument({
       collectionId,
       path: "leave.md",
       text: "# Leave\n\nSixteen weeks, **paid**.\n",
@@ -94,7 +94,7 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   }
   const page = await pageOf(admin);
 
-  await page.goto(`/knowledge/${collectionId}?doc=${documentId}`);
+  await page.goto(`/brain/collections/${collectionId}?doc=${documentId}`);
   await expect(page.getByText("Sixteen weeks")).toBeVisible(pageRead);
   const document = page.waitForEvent("download");
   await choose(page, "Export", "Markdown (.md)");

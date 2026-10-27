@@ -7,8 +7,8 @@ import { z } from "zod";
 import { appHost } from "../src/durable-objects.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { requestGranted } from "./apps.ts";
+import { newTeam, readCollection } from "./brain-collections.ts";
 import { runCron } from "./cron.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
 import type { Opened, Screens } from "./screen-client.ts";
 import {
@@ -429,7 +429,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const admin = await personApi("admin");
     const member = await personApi("user");
     const team = await newTeam(admin, [member]);
-    const { id: collection } = await admin.api.knowledge.createCollection({
+    const { id: collection } = await admin.api.brain.createCollection({
       name: `HR ${unique()}`,
       access: "teams",
       teams: [team],

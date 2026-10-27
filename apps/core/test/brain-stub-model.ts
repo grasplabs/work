@@ -4,7 +4,7 @@
  * careful model that can't reason past its context: it answers a task when
  * every piece of the task's evidence reached it, citing that evidence, and
  * abstains otherwise. In the agent arm it first runs code that searches
- * Knowledge, as a model would. It never follows instructions it reads in
+ * Brain, as a model would. It never follows instructions it reads in
  * a document, such as the supplier note's injection: whether a real model
  * does is what a real run's security gate measures.
  *
@@ -24,7 +24,7 @@ export type StubTurn =
   | {
       phase: "prior";
       /**
-       * Searches Knowledge for this first, as the agent arm does, then
+       * Searches Brain for this first, as the agent arm does, then
        * notes what was said: an earlier turn that reads.
        */
       reads?: string;
@@ -194,7 +194,7 @@ export interface TranscriptPart {
   /** For a tool result: the call that returned it. */
   call?: string;
   /**
-   * For a tool result: what the Knowledge reads made while its call's
+   * For a tool result: what the the Brain reads made while its call's
    * step ran returned, the only text that can back evidence in it.
    */
   backing?: readonly string[];
@@ -283,10 +283,10 @@ export const says = (text: string, input: string): GatewayReply => ({
 const searchCode = (
   query: string
 ): string => `export default async (self, env) => {
-  const { hits } = await env.knowledge.search(${JSON.stringify(query)}, { limit: ${searchedSections} });
+  const { hits } = await env.brain.search(${JSON.stringify(query)}, { limit: ${searchedSections} });
   const units = [];
   for (const hit of hits) {
-    const read = await env.knowledge.read(hit.documentId, { section: hit.section });
+    const read = await env.brain.read(hit.documentId, { section: hit.section });
     units.push("[source: " + read.path + "#" + (read.section?.headings.at(-1) ?? "") + "]\\n" + read.text);
   }
   return units.join("\\n\\n");

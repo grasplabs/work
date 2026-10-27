@@ -3,14 +3,14 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { noteListedSkills } from "../src/knowledge/catalog.ts";
-import { brainOf } from "../src/knowledge/ports.ts";
+import { noteListedSkills } from "../src/brain/catalog.ts";
+import { brainOf } from "../src/brain/ports.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { newTeam, readCollection, storedGrant } from "./brain-collections.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, readCollection, storedGrant } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // What a chat's agent reads before each question, and what its answer is
@@ -46,11 +46,11 @@ const manyReadable = async (
 ): Promise<string[]> =>
   await Promise.all(
     Array.from({ length: 40 }, async (_, index) => {
-      const { id } = await admin.api.knowledge.createCollection({
+      const { id } = await admin.api.brain.createCollection({
         name: `Team ${index} ${unique()}`,
         access: "everyone",
       });
-      await admin.api.knowledge.saveDocument({
+      await admin.api.brain.saveDocument({
         collectionId: id,
         path,
         text: text(index),
@@ -73,9 +73,9 @@ const saveOver = async (
   path: string,
   text: string
 ) => {
-  const { documents } = await person.api.knowledge.listDocuments(collectionId);
+  const { documents } = await person.api.brain.listDocuments(collectionId);
   const current = documents.find((document) => document.path === path);
-  return await person.api.knowledge.saveDocument({
+  return await person.api.brain.saveDocument({
     collectionId,
     path,
     text,
@@ -93,11 +93,11 @@ describe("a chat's instructions and memory", setUpTime, () => {
       throw new Error("An admin gets the Memory collection");
     }
     await saveOver(admin, memory, "AGENTS.md", `# Rules\n\n${rule}`);
-    const { id: skills } = await admin.api.knowledge.createCollection({
+    const { id: skills } = await admin.api.brain.createCollection({
       name: `Skills ${unique()}`,
       access: "everyone",
     });
-    const skill = await admin.api.knowledge.saveDocument({
+    const skill = await admin.api.brain.saveDocument({
       collectionId: skills,
       path: "invoices/SKILL.md",
       text: "---\nname: book-invoices\ndescription: How we book invoices.\n---\n# Steps",
@@ -151,7 +151,7 @@ describe("a chat's instructions and memory", setUpTime, () => {
     const [withSkill, withoutSkill] = await Promise.all(
       ["Skills", "Notes"].map(
         async (name) =>
-          await admin.api.knowledge.createCollection({
+          await admin.api.brain.createCollection({
             name: `${name} ${unique()}`,
             access: "everyone",
           })
@@ -160,13 +160,13 @@ describe("a chat's instructions and memory", setUpTime, () => {
     if (withSkill === undefined || withoutSkill === undefined) {
       throw new Error("Two collections");
     }
-    const skill = await admin.api.knowledge.saveDocument({
+    const skill = await admin.api.brain.saveDocument({
       collectionId: withSkill.id,
       path: "invoices/SKILL.md",
       text: "---\nname: book-invoices\ndescription: How we book invoices.\n---\n# Steps",
       ifVersion: 0,
     });
-    await admin.api.knowledge.saveDocument({
+    await admin.api.brain.saveDocument({
       collectionId: withoutSkill.id,
       path: "note.md",
       text: "# A note",
@@ -192,7 +192,7 @@ describe("a chat's instructions and memory", setUpTime, () => {
         const events = await allEvents();
         const found = events.filter(
           ({ action, actor, detail }) =>
-            action === "knowledge.read" &&
+            action === "brain.read" &&
             actor.type === "agent" &&
             actor.agentId === agent.agentId &&
             detail.read === "skills"
@@ -224,13 +224,13 @@ describe("a chat's instructions and memory", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
     const teamId = await newTeam(admin, [person]);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Payroll ${unique()}`,
       access: "teams",
       teams: [teamId],
       sensitive: true,
     });
-    const skill = await admin.api.knowledge.saveDocument({
+    const skill = await admin.api.brain.saveDocument({
       collectionId,
       path: "pay/SKILL.md",
       text: "---\nname: run-payroll\ndescription: How we run payroll.\n---\n# Steps",
@@ -296,7 +296,7 @@ describe("a chat's instructions and memory", setUpTime, () => {
     );
     expect(turns.map(({ detail }) => detail)).toStrictEqual(
       Array.from({ length: 2 }, () => ({
-        method: "knowledge.catalog",
+        method: "brain.catalog",
         collections: 0,
         skills: 0,
         turn: true,
@@ -362,7 +362,7 @@ describe("a chat's instructions and memory", setUpTime, () => {
     const { ask, agent, stub, chat } = await chatOf(
       person.userId,
       codeStep(
-        `export default async (self, env) => (await env.knowledge.search(${JSON.stringify(marker)}, { limit: 50 })).hits.length;`
+        `export default async (self, env) => (await env.brain.search(${JSON.stringify(marker)}, { limit: 50 })).hits.length;`
       ),
       says("Found them.")
     );

@@ -9,18 +9,18 @@ import type { Source, Transcript } from "@grasp-os/shared/brain";
 import { documentIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 
-import { brainOf } from "./knowledge/ports.ts";
+import { brainOf } from "./brain/ports.ts";
 
-// The brain's sources' transcripts: `brain.read` (brain-rpc.ts) says only
+// The brain's sources' transcripts: `brain.readWorkspace` (brain-rpc.ts) says only
 // which sources have one, and how many turns (`Source.transcriptTurns`);
 // `brain.transcript` reads one source's turns and chapters when it is
 // opened, authorized and audited as that one read, so a page load never
-// carries every transcript. One producer, and nothing else: a Knowledge
+// carries every transcript. One producer, and nothing else: a Brain
 // document saved with a transcript (an uploaded WebVTT file,
-// knowledge/uploads.ts), listed and read through the Brain
+// brain/uploads.ts), listed and read through the Brain
 // (`listTranscripts`, `readTranscript`), so only from documents the person
 // may read at that moment, as the `authorize` port says, and each
-// recorded as a Knowledge read. Each is a source of its own.
+// recorded as a Brain read. Each is a source of its own.
 //
 // A team's interviews never have a transcript here, for anyone (Nick,
 // GRA-529): members and admins may see only what five or more people
@@ -32,12 +32,12 @@ import { brainOf } from "./knowledge/ports.ts";
 // lines, approved statements, the kickoff's transcript and a team lead's
 // interview never become turns.
 
-/** What a Knowledge document's source id starts with. */
-const knowledgeSourcePrefix = "src.knowledge-";
+/** What a Brain document's source id starts with. */
+const brainSourcePrefix = "src.brain-";
 
-/** A Knowledge document's source, as the brain names it. */
-export const knowledgeSourceId = (documentId: string): string =>
-  `${knowledgeSourcePrefix}${documentId}`;
+/** A Brain document's source, as the brain names it. */
+export const brainSourceId = (documentId: string): string =>
+  `${brainSourcePrefix}${documentId}`;
 
 const msPerSecond = 1000;
 const secondsPerMinute = 60;
@@ -83,11 +83,11 @@ export const shownTranscript = ({
 const dayOf = (moment: Date): string => moment.toISOString().slice(0, 10);
 
 /**
- * The Knowledge documents with a transcript `person` may read now, newest
+ * The Brain documents with a transcript `person` may read now, newest
  * saved first, at most `brainTranscriptSourcesMax`, each as a source with
  * how many turns it has: never the turns.
  */
-export const knowledgeTranscriptSources = async (
+export const brainTranscriptSources = async (
   env: Env,
   person: Identity
 ): Promise<Source[]> => {
@@ -97,7 +97,7 @@ export const knowledgeTranscriptSources = async (
     { limit: brainTranscriptSourcesMax }
   );
   return transcripts.map(({ documentId, title, savedAt, turns }) => ({
-    id: knowledgeSourceId(documentId),
+    id: brainSourceId(documentId),
     kind: "document",
     title,
     date: dayOf(savedAt),
@@ -108,7 +108,7 @@ export const knowledgeTranscriptSources = async (
 /**
  * One source's transcript, as `person` may read it now, or null: alike
  * when the source has none, isn't one they may read, or isn't a source.
- * Only a Knowledge document's, through the Brain (its `authorize` and
+ * Only a Brain document's, through the Brain (its `authorize` and
  * `onRead` ports): a team's interviews have none (see above).
  */
 export const brainTranscript = async (
@@ -117,11 +117,11 @@ export const brainTranscript = async (
   sourceId: unknown
 ): Promise<Transcript | null> => {
   const id = brainErrors.parse("brain.invalid", sourceIdSchema, sourceId);
-  if (!id.startsWith(knowledgeSourcePrefix)) {
+  if (!id.startsWith(brainSourcePrefix)) {
     return null;
   }
   const documentId = documentIdSchema.safeParse(
-    id.slice(knowledgeSourcePrefix.length)
+    id.slice(brainSourcePrefix.length)
   );
   if (!documentId.success) {
     return null;

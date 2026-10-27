@@ -35,7 +35,7 @@ describe("the Brain baseline at a larger scale size", () => {
       split: "dev",
       repeats: scale.repeats,
       // Every row of a large corpus, twice a trial, would take hours.
-      knowledgeState: "counts",
+      brainState: "counts",
     });
     const { baseline: _baseline, ...measured } = report;
     // The opt-in run's report is its output.

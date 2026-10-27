@@ -12,10 +12,10 @@ import type {
   MemoryPack,
   RecallBudget,
 } from "./contract.ts";
+import { collectionErrors, searchMaxLimit } from "./documents-contract.ts";
+import type { Provenance } from "./documents-contract.ts";
 import { toHex } from "./encoding.ts";
 import type { CollectionId } from "./ids.ts";
-import { knowledgeErrors, searchMaxLimit } from "./knowledge.ts";
-import type { Provenance } from "./knowledge.ts";
 import { searchMemories } from "./memories.ts";
 import type { MemoryAudience } from "./memories.ts";
 import { d1BrainStore } from "./recall-store.ts";
@@ -24,10 +24,10 @@ import type { FoundSection } from "./search.ts";
 import { tokensOf } from "./tokens.ts";
 
 // The Brain's recall (GRA-296; the Brain design's "Brain SDK and API"):
-// the one service every caller reaches, a person through Knowledge's RPC,
-// an agent or a run through its stubs, an App through its knowledge
+// the one service every caller reaches, a person through the Brain's RPC,
+// an agent or a run through its stubs, an App through its brain
 // resource. Who reads is the host's `Reader`, never the call's arguments;
-// what may be read is Knowledge's one access predicate, inside every read
+// what may be read is the Brain's one access predicate, inside every read
 // (recall-store.ts). It answers evidence, never analysis: a bounded
 // memory pack of the sections that match, each cited at its exact
 // version, with how far the read got.
@@ -49,8 +49,8 @@ import { tokensOf } from "./tokens.ts";
  */
 export const recallPolicyVersion = "fulltext@3";
 
-/** The search indexes a recall reads: Knowledge's and memory's FTS5 tables. */
-const indexGeneration = "knowledge-fts@2";
+/** The search indexes a recall reads: the Brain's and memory's FTS5 tables. */
+const indexGeneration = "brain-fts@2";
 
 /** Routes this policy doesn't read yet, and why. */
 const omittedRoutes = [{ route: "semantic", reason: "not_enabled" }];
@@ -85,10 +85,10 @@ export const asBrainError = <C>(brain: Brain<C>, error: unknown): unknown => {
   if (brainErrors.codeOf(error) !== undefined) {
     return error;
   }
-  if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
+  if (collectionErrors.codeOf(error) === "brain.document_not_found") {
     return brainErrors.create("brain.not_found");
   }
-  if (knowledgeErrors.codeOf(error) === "knowledge.invalid") {
+  if (collectionErrors.codeOf(error) === "brain.document_invalid") {
     return brainErrors.create("brain.invalid");
   }
   if (brain.ports.recall.isRefusal(error)) {
@@ -412,7 +412,7 @@ const memoriesRead = async <C>(
   return await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       detail: { read: "memory", records: memories.length },
     },
     ...cited.values()
@@ -447,7 +447,7 @@ export const recallWithSources = async <C>(
   input: unknown,
   /**
    * The only collections it may read, for a caller bound to some: a
-   * collection's stub passes its own, an App's knowledge resource those
+   * collection's stub passes its own, an App's brain resource those
    * it binds that its person may read (none reads nothing). A filter
    * naming another is refused as not found.
    */

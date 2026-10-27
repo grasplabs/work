@@ -6,6 +6,7 @@ import type {
   SkillsSelectInput,
 } from "@grasp-os/brain/contract";
 import { originRefusal } from "@grasp-os/shared/app-link-limits";
+import type { ResourceRecallInput } from "@grasp-os/shared/brain-documents";
 import type {
   GuestChat,
   GuestInvitation,
@@ -13,7 +14,6 @@ import type {
   GuestTranscript,
 } from "@grasp-os/shared/guests";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
-import type { ResourceRecallInput } from "@grasp-os/shared/knowledge";
 import {
   resourceAliasPattern,
   storeOperationPathMaxLength,
@@ -42,7 +42,7 @@ import { v } from "./values.ts";
 import type { Infer, InferInput, ObjectInput, ValueShape } from "./values.ts";
 
 // `resource`: how an App says which outside capabilities its actions need
-// (spec 12, 32.3): a model, a connector's actions, knowledge collections,
+// (spec 12, 32.3): a model, a connector's actions, brain collections,
 // a template. A declaration is a requirement, never a grant: it names an
 // adapter contract and an alias, and the host binds it to an approved
 // resource, under the App's grants, or refuses. It holds no ID, key or
@@ -73,7 +73,7 @@ import type { Infer, InferInput, ObjectInput, ValueShape } from "./values.ts";
 export type ResourceKind =
   | "model"
   | "connector"
-  | "knowledge"
+  | "brain"
   | "template"
   | "store"
   | "statistics"
@@ -154,19 +154,19 @@ export interface ConnectorConfig<
 }
 
 /**
- * The knowledge operations an action may ask for. `recall`, `skillsSelect`
+ * The brain operations an action may ask for. `recall`, `skillsSelect`
  * and `skillsRead` are the Brain's (`brain.ts`): each answers only once an
  * admin also grants the App the Brain's permission.
  */
-export type KnowledgeOperation =
+export type BrainResourceOperation =
   | "search"
   | "read"
   | "recall"
   | "skillsSelect"
   | "skillsRead";
 
-/** Every knowledge operation, as a declaration names it. */
-const knowledgeOperations: readonly KnowledgeOperation[] = [
+/** Every brain operation, as a declaration names it. */
+const brainResourceOperations: readonly BrainResourceOperation[] = [
   "search",
   "read",
   "recall",
@@ -174,9 +174,9 @@ const knowledgeOperations: readonly KnowledgeOperation[] = [
   "skillsRead",
 ];
 
-/** What a declaration's config may say about knowledge. */
-export interface KnowledgeConfig<
-  Operations extends readonly KnowledgeOperation[],
+/** What a declaration's config may say about brain. */
+export interface BrainConfig<
+  Operations extends readonly BrainResourceOperation[],
 > {
   readonly operations: Operations;
   /**
@@ -305,12 +305,12 @@ export interface ConnectorResource<
   readonly actions: Actions;
 }
 
-/** A knowledge requirement. */
-export interface KnowledgeResource<
+/** A brain requirement. */
+export interface BrainResource<
   Alias extends string = string,
-  Operations extends readonly KnowledgeOperation[] =
-    readonly KnowledgeOperation[],
-> extends DeclarationBase<"knowledge", Alias> {
+  Operations extends readonly BrainResourceOperation[] =
+    readonly BrainResourceOperation[],
+> extends DeclarationBase<"brain", Alias> {
   readonly operations: Operations;
   readonly collections: readonly string[];
 }
@@ -450,21 +450,21 @@ export interface WorkflowConfig<
 export type AnyResource =
   | ModelResource<string, unknown>
   | ConnectorResource
-  | KnowledgeResource
+  | BrainResource
   | TemplateResource
   | StoreResource
   | StatisticsResource
   | GuestsResource
   | AppResource;
 
-/** One search result from knowledge: a title and an excerpt of it. */
-export interface KnowledgeHit {
+/** One search result from brain: a title and an excerpt of it. */
+export interface BrainHit {
   title: string;
   excerpt: string;
 }
 
-/** A document read from knowledge. */
-export interface KnowledgeDocument {
+/** A document read from brain. */
+export interface BrainSourceDocument {
   title: string;
   text: string;
 }
@@ -517,19 +517,19 @@ export interface ConnectorClient<
   ) => Promise<ContractAction<Contract, Action>["output"]>;
 }
 
-/** What `ctx.resources.<alias>` is for knowledge, by its operations. */
-export type KnowledgeClient<Operations extends readonly KnowledgeOperation[]> =
+/** What `ctx.resources.<alias>` is for brain, by its operations. */
+export type BrainClient<Operations extends readonly BrainResourceOperation[]> =
   ("search" extends Operations[number]
     ? {
         /**
          * The best matches for `text` in the declared collections: 1 to
-         * `knowledgeSearchMaxLength` (500) code units, Knowledge's own
+         * `brainSearchMaxLength` (500) code units, the Brain's own
          * limit; a longer text is refused as `contract.invalid_args`.
          */
         readonly search: (request: {
           readonly text: string;
           readonly limit?: number;
-        }) => Promise<KnowledgeHit[]>;
+        }) => Promise<BrainHit[]>;
       }
     : unknown) &
     ("read" extends Operations[number]
@@ -537,7 +537,7 @@ export type KnowledgeClient<Operations extends readonly KnowledgeOperation[]> =
           /** One document of the declared collections, by its ID. */
           readonly read: (request: {
             readonly id: string;
-          }) => Promise<KnowledgeDocument>;
+          }) => Promise<BrainSourceDocument>;
         }
       : unknown) &
     ("recall" extends Operations[number]
@@ -694,11 +694,8 @@ interface ResourceClients<Resource> {
   >
     ? ConnectorClient<Contract, Actions>
     : never;
-  readonly knowledge: Resource extends KnowledgeResource<
-    string,
-    infer Operations
-  >
-    ? KnowledgeClient<Operations>
+  readonly brain: Resource extends BrainResource<string, infer Operations>
+    ? BrainClient<Operations>
     : never;
   readonly template: TemplateClient;
   readonly store: Resource extends StoreResource<string, infer Operations>
@@ -1169,35 +1166,35 @@ export const resource = Object.freeze({
       actions: checkedList(checked.actions, "actions"),
     }) as ConnectorResource<Alias, Contract, Actions>;
   },
-  /** Search and reading of some knowledge collections. */
-  knowledge: <
+  /** Search and reading of some brain collections. */
+  brain: <
     const Alias extends string,
     const Operations extends readonly [
-      KnowledgeOperation,
-      ...KnowledgeOperation[],
+      BrainResourceOperation,
+      ...BrainResourceOperation[],
     ],
   >(
     alias: Alias,
-    config: KnowledgeConfig<Operations>
-  ): KnowledgeResource<Alias, Operations> => {
+    config: BrainConfig<Operations>
+  ): BrainResource<Alias, Operations> => {
     const checked = checkedConfig(config, ["operations", "collections"]);
     const operations = checkedList(
       checked.operations,
       "operations",
-      knowledgeOperations
-    ).filter((operation): operation is KnowledgeOperation =>
-      knowledgeOperations.some((known) => known === operation)
+      brainResourceOperations
+    ).filter((operation): operation is BrainResourceOperation =>
+      brainResourceOperations.some((known) => known === operation)
     );
     // SAFETY: built from what was checked of the arguments the type is
     // inferred from: the alias given, and lists holding exactly the names
     // given, in order.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     return declared({
-      "~resource": "knowledge",
+      "~resource": "brain",
       alias: checkedAlias(alias),
       operations,
       collections: checkedList(checked.collections, "collections"),
-    }) as KnowledgeResource<Alias, Operations>;
+    }) as BrainResource<Alias, Operations>;
   },
   /** An immutable template, pinned by its contract. */
   template: <const Alias extends string>(
@@ -1450,8 +1447,8 @@ export const readResourceDeclaration = (
   if (kind === "connector") {
     return resource.connector(alias, loose);
   }
-  if (kind === "knowledge") {
-    return resource.knowledge(alias, loose);
+  if (kind === "brain") {
+    return resource.brain(alias, loose);
   }
   if (kind === "template") {
     return resource.template(alias, loose);

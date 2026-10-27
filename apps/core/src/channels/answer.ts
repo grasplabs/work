@@ -32,7 +32,7 @@ import { postOffers } from "./workflow-offers.ts";
 // cited; the answer goes back to the conversation they wrote in. The door
 // has already checked who wrote (door.ts), so the Workspace takes its word.
 // Asked in a group chat or channel, it is their one chat for that thread,
-// and its agent reads only what everyone in it may (knowledge/access.ts).
+// and its agent reads only what everyone in it may (brain/access.ts).
 //
 // While the turn runs, the platform shows Stephen typing, sent again every
 // few seconds, as a typing indicator lasts only that long, until the
@@ -319,7 +319,7 @@ const answerOne = async (
   }
   const sources = answer.cited.map(({ title, collectionId, documentId }) => ({
     title,
-    url: `${origin}/knowledge/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
+    url: `${origin}/brain/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
   }));
   const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
   // Without their own Microsoft 365 he answered from what the company

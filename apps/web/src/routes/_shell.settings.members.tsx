@@ -271,7 +271,7 @@ const MemberActions = ({
  */
 const capabilities: { label: MessageDescriptor; roles: Role[] }[] = [
   {
-    label: msg`Use the chat, Knowledge and the apps shared with them`,
+    label: msg`Use the chat, Brain and the apps shared with them`,
     roles: ["admin", "builder", "user"],
   },
   {

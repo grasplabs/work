@@ -8,8 +8,8 @@ import { callAppFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, setCurrentVersion } from "../src/apps.ts";
-import { createCollection } from "../src/knowledge/collection-rules.ts";
-import { saveDocument } from "../src/knowledge/person-writes.ts";
+import { createCollection } from "../src/brain/collection-rules.ts";
+import { saveDocument } from "../src/brain/person-writes.ts";
 import {
   grantPermission,
   requestPermission,
@@ -21,7 +21,7 @@ import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
 // An App's recall of the Brain (GRA-296): a `recall` operation of a
-// knowledge resource, served by the one recall service every caller
+// brain resource, served by the one recall service every caller
 // reaches (@grasp-os/brain/recall), through core's operation host. How it
 // can fail, and what each test holds it to:
 // 1. Apps start with no Brain: collection grants and an approved binding
@@ -35,7 +35,7 @@ import type { Fixture } from "./sealed-apps.ts";
 //    restricting the App.
 // 6. A retained binding keeps recalling after the Brain's grant is gone.
 
-/** An App whose action recalls from two declared Knowledge collections. */
+/** An App whose action recalls from two declared Brain collections. */
 const brainFiles = (): Record<string, string> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
@@ -46,7 +46,7 @@ export default defineSchema({
   "operations/brain.ts": `import { resource, v } from "@grasp-os/sdk";
 import { action } from "#grasp/server";
 
-export const help = resource.knowledge("help", {
+export const help = resource.brain("help", {
   operations: ["recall"],
   collections: ["handbook", "salaries"],
 });
@@ -192,7 +192,7 @@ const brainApp = async () => {
   await approveResourceBinding(env, admin, {
     app: sealed.app,
     alias: "help",
-    target: { kind: "knowledge", collections },
+    target: { kind: "brain", collections },
     reviewed: { version: 1 },
   });
   return {

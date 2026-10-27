@@ -73,7 +73,7 @@ const GoToChat = () => (
   </Button>
 );
 
-/** Not found, in a page that keeps its own frame, such as Knowledge with its sidebar. */
+/** Not found, in a page that keeps its own frame, such as Brain with its sidebar. */
 export const NotFoundState = ({
   title,
   icon: Icon = SearchXIcon,
@@ -162,7 +162,7 @@ const TryAgain = ({ trying, reload }: { trying: boolean; reload: boolean }) => {
   );
 };
 
-/** The error, in a page that keeps its own frame, such as Knowledge with its sidebar. */
+/** The error, in a page that keeps its own frame, such as Brain with its sidebar. */
 export const ErrorState = ({
   reason,
   title,
@@ -259,7 +259,7 @@ export const PageNotLoaded = ({
   return <PageError crumbs={crumbs} reason={notLoadedText(page, i18n)} />;
 };
 
-/** `PageNotLoaded` in a page that keeps its own frame, such as Knowledge with its sidebar. */
+/** `PageNotLoaded` in a page that keeps its own frame, such as Brain with its sidebar. */
 export const NotLoadedState = ({
   page,
   notFound,
@@ -305,7 +305,7 @@ export const LoadingLines = ({ lines = 3 }: { lines?: number }) => {
  * address alone decides what it reads names it as its `pendingComponent`.
  * Not the shell itself, so while it asks who is in again after core was
  * out of reach, what it showed stays; and not a page that reads again as
- * its search changes (a document opened in Knowledge, a tab of Activity),
+ * its search changes (a document opened in the Brain, a tab of Activity),
  * which keeps what it shows rather than turning back into a skeleton.
  */
 export const PageLoading = () => (

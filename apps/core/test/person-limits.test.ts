@@ -11,8 +11,8 @@ import type { ModelCall, ModelsEnv } from "../src/models.ts";
 import { messagesAnHourOf } from "../src/person-limits.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
+import { newTeam } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { openRpc, outcome, signedInApi, signedInWithRole } from "./sign-in.ts";
 
 // The limits a company's admins set per person (D8): reserved against by

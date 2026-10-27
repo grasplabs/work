@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { wordLesson } from "../src/knowledge/lesson-wording.ts";
+import { wordLesson } from "../src/brain/lesson-wording.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 

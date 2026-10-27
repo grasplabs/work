@@ -163,11 +163,11 @@ describe("the admin’s tools", () => {
   it("calls out in the digest who passed the milestone and is still closed", () => {
     const digest = call("daily_digest").text;
     const past = views.filter(
-      (view) => !view.open && view.knowledge.percent >= MILESTONE
+      (view) => !view.open && view.brain.percent >= MILESTONE
     );
     expect(past.length).toBeGreaterThan(0);
     for (const view of past) {
-      expect(digest).toContain(`${view.org.id} (${view.knowledge.percent}%)`);
+      expect(digest).toContain(`${view.org.id} (${view.brain.percent}%)`);
     }
     expect(digest).toContain(`Past ${MILESTONE}% known`);
   });

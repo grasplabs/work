@@ -4,7 +4,7 @@ import { Plural } from "@lingui/react/macro";
 import type { AtlasRegion } from "./brain-atlas.ts";
 
 // The marks of the brain's dots, as in the prototype (grasplabs/prototype,
-// packages/grasp: components/knowledge/region-marks.tsx).
+// packages/grasp: components/brain/region-marks.tsx).
 
 /** The mark a dot of the brain has, drawn the same in the legend and in every list: filled where something is known, hollow where it is still waiting, the attention colour where a question is open. */
 export const Mark = ({ state }: { state: "known" | "waiting" | "open" }) => (

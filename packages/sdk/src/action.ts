@@ -12,7 +12,7 @@ import type { Infer, InferInput, ObjectSchema, ValueShape } from "./values.ts";
 // modules, beside its calculations, and reaches nothing but the bindings
 // it declares in `uses`: other bindings of the same workflow, by alias,
 // of a connector only the operations it names (GRA-704), of a model only
-// the shape it declared its answers take, of a knowledge binding (one
+// the shape it declared its answers take, of a brain binding (one
 // collection) only the operations it names, of a template binding its
 // one pinned version (GRA-700), and of a files binding the run's own
 // files, with only the operations it names (GRA-724).
@@ -59,15 +59,15 @@ export type UseKind =
   | "connector"
   | "operation"
   | "model"
-  | "knowledge"
+  | "brain"
   | "template"
   | "files";
 
 /** What an action may do with its run's own files (GRA-724). */
 export type FilesOperation = "write" | "read" | "list" | "delete";
 
-/** The operations of a Knowledge collection an action may declare. */
-export type KnowledgeOperation = "search" | "read" | "recall";
+/** The operations of a Brain collection an action may declare. */
+export type BrainResourceOperation = "search" | "read" | "recall";
 
 /**
  * A binding an action declares it uses: its alias and kind, and of a
@@ -128,34 +128,34 @@ export interface ModelResource<Output extends AnySchema = AnySchema> {
 }
 
 /**
- * One search hit of a Knowledge collection: its document's ID, which a
+ * One search hit of a Brain collection: its document's ID, which a
  * `read` takes, a title and an excerpt.
  */
-export interface KnowledgeHit {
+export interface BrainHit {
   readonly id: string;
   readonly title: string;
   readonly excerpt: string;
 }
 
-/** A document of a Knowledge collection: its title and text. */
-export interface KnowledgeDocument {
+/** A document of a Brain collection: its title and text. */
+export interface BrainSourceDocument {
   readonly title: string;
   readonly text: string;
 }
 
 /**
- * A knowledge binding (one collection), as an action calls it: only the
+ * A brain binding (one collection), as an action calls it: only the
  * operations its use declared, each reading what the run's person may
  * read of the collection, checked by the host.
  */
-export type KnowledgeResource<Operation extends KnowledgeOperation> =
+export type BrainResource<Operation extends BrainResourceOperation> =
   ("search" extends Operation
     ? {
         /** The best matches for `text`: 1 to 500 characters, up to `limit` (1 to 20). */
         readonly search: (request: {
           readonly text: string;
           readonly limit?: number;
-        }) => Promise<KnowledgeHit[]>;
+        }) => Promise<BrainHit[]>;
       }
     : unknown) &
     ("read" extends Operation
@@ -163,7 +163,7 @@ export type KnowledgeResource<Operation extends KnowledgeOperation> =
           /** One document of the collection, by its ID. */
           readonly read: (request: {
             readonly id: string;
-          }) => Promise<KnowledgeDocument>;
+          }) => Promise<BrainSourceDocument>;
         }
       : unknown) &
     ("recall" extends Operation
@@ -276,9 +276,9 @@ type ResourceOf<U extends AnyUse> = U["~use"]["kind"] extends "connector"
   ? ConnectorResource<Exclude<U["~operation"], undefined>>
   : U["~use"]["kind"] extends "model"
     ? ModelResource<Exclude<U["~output"], undefined>>
-    : U["~use"]["kind"] extends "knowledge"
-      ? KnowledgeResource<
-          Extract<Exclude<U["~operation"], undefined>, KnowledgeOperation>
+    : U["~use"]["kind"] extends "brain"
+      ? BrainResource<
+          Extract<Exclude<U["~operation"], undefined>, BrainResourceOperation>
         >
       : U["~use"]["kind"] extends "template"
         ? TemplateResource
@@ -339,8 +339,8 @@ interface DeclaredUse {
 /** The uses `resource` declared: what makes a value one. */
 const declaredUses = new WeakMap<object, DeclaredUse>();
 
-/** The knowledge operations, as `resource.knowledge` takes them. */
-const knowledgeOperations: ReadonlySet<string> = new Set([
+/** The brain operations, as `resource.brain` takes them. */
+const brainResourceOperations: ReadonlySet<string> = new Set([
   "search",
   "read",
   "recall",
@@ -367,11 +367,11 @@ const maxOperationChars = 256;
 const operationsOf = (
   value: unknown,
   /** Whose operations, as an error names the use. */
-  kind: "connector" | "knowledge" | "files"
+  kind: "connector" | "brain" | "files"
 ): readonly string[] => {
   let most = maxOperations;
-  if (kind === "knowledge") {
-    most = knowledgeOperations.size;
+  if (kind === "brain") {
+    most = brainResourceOperations.size;
   } else if (kind === "files") {
     most = filesOperations.size;
   }
@@ -413,7 +413,7 @@ const isDeclaredUse = (value: unknown): value is DeclaredUse =>
   (value.kind === "connector" ||
     value.kind === "operation" ||
     value.kind === "model" ||
-    value.kind === "knowledge" ||
+    value.kind === "brain" ||
     value.kind === "template" ||
     value.kind === "files") &&
   "operations" in value &&
@@ -455,8 +455,8 @@ export interface ConnectorUseOptions<Operation extends string> {
   readonly operations: readonly Operation[];
 }
 
-/** What a knowledge use declares besides its alias. */
-export interface KnowledgeUseOptions<Operation extends KnowledgeOperation> {
+/** What a brain use declares besides its alias. */
+export interface BrainUseOptions<Operation extends BrainResourceOperation> {
   /** The operations of the binding's collection the action calls. */
   readonly operations: readonly Operation[];
 }
@@ -520,30 +520,32 @@ export const resource = freeze({
       descriptorOf(property.value)
     );
   },
-  knowledge: <
+  brain: <
     const Alias extends string,
-    const Operation extends KnowledgeOperation,
+    const Operation extends BrainResourceOperation,
   >(
     alias: Alias,
-    options: KnowledgeUseOptions<Operation>
-  ): Use<Alias, "knowledge", Operation> => {
+    options: BrainUseOptions<Operation>
+  ): Use<Alias, "brain", Operation> => {
     const property =
       typeof options === "object" && options !== null
         ? getOwnPropertyDescriptor(options, "operations")
         : undefined;
     if (property === undefined || !("value" in property)) {
       return refuse(
-        'Declare the operations a knowledge use calls: `{ operations: ["search", "read"] }`.'
+        'Declare the operations a brain use calls: `{ operations: ["search", "read"] }`.'
       );
     }
-    const operations = operationsOf(property.value, "knowledge");
-    if (operations.some((operation) => !knowledgeOperations.has(operation))) {
+    const operations = operationsOf(property.value, "brain");
+    if (
+      operations.some((operation) => !brainResourceOperations.has(operation))
+    ) {
       return refuse(
-        'A knowledge use calls one or more of "search", "read" and "recall".'
+        'A brain use calls one or more of "search", "read" and "recall".'
       );
     }
-    return declareUse<Alias, "knowledge", AnySchema, Operation>(
-      "knowledge",
+    return declareUse<Alias, "brain", AnySchema, Operation>(
+      "brain",
       alias,
       operations
     );
@@ -611,7 +613,7 @@ export type ContractUse =
     }
   | {
       readonly alias: string;
-      readonly kind: "knowledge";
+      readonly kind: "brain";
       readonly operations: readonly string[];
     }
   | { readonly alias: string; readonly kind: "template" }
@@ -694,7 +696,7 @@ const usesOf = (value: unknown): ActionContract["uses"] => {
           operations: use.operations,
         });
       }
-      if (use.kind === "knowledge" || use.kind === "files") {
+      if (use.kind === "brain" || use.kind === "files") {
         return freeze({
           alias: use.alias,
           kind: use.kind,

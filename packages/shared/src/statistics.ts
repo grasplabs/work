@@ -11,7 +11,7 @@ import { isPlatformMeasure, platformMeasures } from "./platform-measures.ts";
 // measures the platform publishes (`platform.` ones, such as the runs its
 // workflows start) of an App whose runs the person it acts for may see:
 // counts and sums, never one run in detail. What an App keeps for itself stays in the App (its
-// own storage); what the company should remember goes in Knowledge. The
+// own storage); what the company should remember goes in the Brain. The
 // points a method records for a workflow run's step are added up when
 // the step completes, once however often the step runs: a read sees them
 // from then, a step that fails adds none, and one that would make a row

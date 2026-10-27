@@ -133,7 +133,7 @@ test("a person asks the brain on its atlas, in a chat of its own apart from the 
   await expect(firstQuestion("Ask the brain")).toHaveText(ofTheBrain);
 
   // Elsewhere the dock is Grasp's, and starts a chat of its own.
-  await page.goto("/knowledge");
+  await page.goto("/brain/collections");
   await ask("Ask Grasp", elsewhere);
   await expect(firstQuestion("Ask Grasp")).toHaveText(elsewhere);
 

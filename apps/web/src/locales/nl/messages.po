@@ -27,7 +27,7 @@ msgstr ", aflopend gesorteerd"
 msgid "“{text}”"
 msgstr "‘{text}’"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "(company)"
 msgstr "(bedrijf)"
 
@@ -36,7 +36,7 @@ msgctxt "a number that changed: what it was before"
 msgid "(was {before})"
 msgstr "(was {before})"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "(yours)"
 msgstr "(van jou)"
 
@@ -322,7 +322,7 @@ msgstr "{count, plural, one {# document toegevoegd. Ik lees het nu.} other {# do
 msgid "{count, plural, one {# employee interviewed} other {# employees interviewed}}"
 msgstr "{count, plural, one {# medewerker geïnterviewd} other {# medewerkers geïnterviewd}}"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "{count, plural, one {# file} other {# files}}"
 msgstr "{count, plural, one {# bestand} other {# bestanden}}"
 
@@ -391,7 +391,7 @@ msgstr "{count, plural, one {# tijdvreter} other {# tijdvreters}}"
 msgid "{count, plural, one {# tool allowed} other {# tools allowed}}"
 msgstr "{count, plural, one {# tool toegestaan} other {# tools toegestaan}}"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 msgid "{count, plural, one {# version} other {# versions}}"
 msgstr "{count, plural, one {# versie} other {# versies}}"
 
@@ -423,7 +423,7 @@ msgstr "Bij {count} van de {finished} interviews is aan het einde gezegd hoe het
 msgid "{count} of {of} steps are told by too few people"
 msgstr "{count} van {of} stappen zijn door te weinig mensen verteld"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "{count} or more files"
 msgstr "{count} of meer bestanden"
 
@@ -554,7 +554,7 @@ msgid "{fixtures, plural, one {It runs on its # fixture when the version is seal
 msgstr "{fixtures, plural, one {Ze draait op haar # testrecord wanneer de versie wordt verzegeld, vóór elk record} other {Ze draait op haar # testrecords wanneer de versie wordt verzegeld, vóór elk record}}"
 
 #. Earlier events on a timeline, folded away
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
 msgstr "{folded, plural, one {# eerdere} other {# eerdere}}"
@@ -1070,11 +1070,11 @@ msgstr "{people}, of {fewer} en een document"
 msgid "{percent}% known now"
 msgstr "Nu {percent}% bekend"
 
-#: src/onboarding/knowledge-bar.tsx
+#: src/onboarding/brain-bar.tsx
 msgid "{percent}% known. Your team can start at {threshold}%, and I keep learning after that."
 msgstr "{percent}% bekend. Je team kan starten bij {threshold}%, en daarna blijf ik leren."
 
-#: src/onboarding/knowledge-bar.tsx
+#: src/onboarding/brain-bar.tsx
 msgid "{percent}% known. Your team can start at {threshold}%."
 msgstr "{percent}% bekend. Je team kan starten bij {threshold}%."
 
@@ -1646,6 +1646,10 @@ msgstr "50 tot en met 99 gebruikers"
 msgid "A .txt, .vtt, .srt or .docx file, or pasted text."
 msgstr "Een .txt-, .vtt-, .srt- of .docx-bestand, of geplakte tekst."
 
+#: src/dashboard/signals.tsx
+msgid "A Brain search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
+msgstr "Een zoekopdracht in Brein vanuit {about} vond {searches, plural, one {één keer} other {# keer}} niets, bij {askers, plural, one {# vragensteller} other {# vragenstellers}}."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
@@ -1734,10 +1738,6 @@ msgstr "Een gast heeft een bericht geschreven"
 #: src/workflows/resource-params.tsx
 msgid "A JSON value"
 msgstr "Een JSON-waarde"
-
-#: src/dashboard/signals.tsx
-msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
-msgstr "Een zoekopdracht in Kennis vanuit {about} vond {searches, plural, one {één keer} other {# keer}} niets, bij {askers, plural, one {# vragensteller} other {# vragenstellers}}."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "A lead's team"
@@ -2132,7 +2132,7 @@ msgctxt "what a permission lets an app do with company data"
 msgid "administer"
 msgstr "beheren"
 
-#: src/knowledge/collection-markers.tsx
+#: src/brain-collections/collection-markers.tsx
 msgid "Admins"
 msgstr "Beheerders"
 
@@ -2418,7 +2418,7 @@ msgstr "Een beheerder wijzigt die, bij Leden en rollen."
 msgid "An admin connects this for everyone."
 msgstr "Een beheerder koppelt dit voor iedereen."
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "An admin hasn't set up company memory yet."
 msgstr "Een beheerder heeft het bedrijfsgeheugen nog niet ingesteld."
 
@@ -3106,7 +3106,7 @@ msgstr "Terug naar de nieuwste"
 msgid "Back to policies"
 msgstr "Terug naar beleid"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Back to the current version"
 msgstr "Terug naar de huidige versie"
 
@@ -3251,8 +3251,13 @@ msgstr "Gekoppeld"
 msgid "Bound to"
 msgstr "Gekoppeld aan"
 
+#: src/brain-collections/frame.tsx
+#: src/brain-collections/nav.tsx
 #: src/brain/brain-nav.tsx
+#: src/engines/resource-bindings.tsx
 #: src/frame/app-sidebar.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
 msgid "Brain"
@@ -3271,7 +3276,7 @@ msgstr "Tak {name}"
 msgid "Breadcrumb"
 msgstr "Kruimelpad"
 
-#: src/knowledge/frame.tsx
+#: src/brain-collections/frame.tsx
 msgid "Browse"
 msgstr "Bladeren"
 
@@ -3429,6 +3434,7 @@ msgstr "Kan bedrijfsdata {verbs}"
 msgid "Can’t be read"
 msgstr "Niet leesbaar"
 
+#: src/brain-collections/document.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
@@ -3438,7 +3444,6 @@ msgstr "Niet leesbaar"
 #: src/engines/app-status.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
-#: src/knowledge/document.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
@@ -3632,8 +3637,8 @@ msgid "Changed a workflow's parameter"
 msgstr "Een parameter van een workflow gewijzigd"
 
 #: src/activity/audit-words.ts
-msgid "Changed knowledge"
-msgstr "Kennis gewijzigd"
+msgid "Changed brain"
+msgstr ""
 
 #: src/chat/builds.tsx
 msgid "Changed parameter {name}"
@@ -3860,6 +3865,7 @@ msgstr "Zoekopdracht en filters wissen"
 msgid "Click to open Usage"
 msgstr "Klik om Gebruik te openen"
 
+#: src/brain-collections/frame.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/connections/request-app-dialog.tsx
@@ -3868,7 +3874,6 @@ msgstr "Klik om Gebruik te openen"
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
-#: src/knowledge/frame.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
@@ -3883,8 +3888,8 @@ msgctxt "button: close a dialog"
 msgid "Close"
 msgstr "Sluiten"
 
+#: src/brain-collections/nav.tsx
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
 msgid "Close {name}"
 msgstr "{name} sluiten"
 
@@ -3927,8 +3932,8 @@ msgstr "Codestap"
 msgid "colleagues talked"
 msgstr "collega’s gesproken"
 
-#: src/knowledge/document.tsx
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/brain-collections/document.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Collection"
 msgstr "Collectie"
 
@@ -3940,16 +3945,16 @@ msgstr "Collectie {collectionId}"
 msgid "Collection for {collection}"
 msgstr "Collectie voor {collection}"
 
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Collection not found"
 msgstr "Collectie niet gevonden"
 
 #: src/engines/resource-bindings.tsx
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Collections"
 msgstr "Collecties"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
 msgstr "Collecties bevatten de documenten die Grasp en zijn agents mogen lezen. Een admin deelt ze met je, of je voegt je eigen toe."
 
@@ -4685,7 +4690,7 @@ msgid "Designed"
 msgstr "Ontworpen"
 
 #: src/activity/audit-log.tsx
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 #: src/landscape/landscape-audit.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Details"
@@ -4790,8 +4795,8 @@ msgid "Dismiss this signal about {name}"
 msgstr "Dit signaal over {name} verbergen"
 
 #: src/activity/audit-words.ts
-msgid "Dismissed a knowledge signal"
-msgstr "Een kennissignaal genegeerd"
+msgid "Dismissed a brain signal"
+msgstr ""
 
 #: src/onboarding/setup-steps.tsx
 msgid "Do you have anything that explains how you work?"
@@ -4801,7 +4806,7 @@ msgstr "Heb je iets dat uitlegt hoe jullie werken?"
 msgid "Document"
 msgstr "Document"
 
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Document not found"
 msgstr "Document niet gevonden"
 
@@ -4824,7 +4829,7 @@ msgstr "Gedeelde documenten"
 msgid "Documents written by employees, workspace files, user profiles and internal collaboration."
 msgstr "Documenten van medewerkers, bestanden in de werkruimte, gebruikersprofielen en interne samenwerking."
 
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Documenten die hier worden geschreven en bestanden die je uploadt, verschijnen hier zodat Grasp en zijn agents ze kunnen lezen."
 
@@ -4924,7 +4929,7 @@ msgstr "Domeinen"
 msgid "Domains and agents with a permission"
 msgstr "Domeinen en agents met een toestemming"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
 msgstr "Upload geen opnames van interviews of hun ondertitels: interviews gaan via de interviewflow."
 
@@ -4972,7 +4977,7 @@ msgctxt "part of an interview"
 msgid "Done right"
 msgstr "Wanneer het goed is"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Download {name}"
 msgstr "{name} downloaden"
 
@@ -5043,7 +5048,7 @@ msgstr "Uitgetekend als workflow"
 msgid "Drawn as a workflow: {workflow}"
 msgstr "Uitgetekend als workflow: {workflow}"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "Drop files here"
 msgstr "Zet bestanden hier neer"
@@ -5114,8 +5119,8 @@ msgstr "Eerdere versie"
 msgid "Earlier versions"
 msgstr "Eerdere versies"
 
+#: src/brain-collections/document.tsx
 #: src/engines/app-page.tsx
-#: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Edit"
 msgstr "Bewerken"
@@ -5314,7 +5319,7 @@ msgstr "Elk hulpmiddel dat hij heeft hoort bij een van deze soorten. Elke soort 
 msgid "Every tool it has: domains and agents use only what they are granted."
 msgstr "Al zijn tools: domeinen en agents gebruiken alleen wat hun is toegekend."
 
-#: src/knowledge/collection-markers.tsx
+#: src/brain-collections/collection-markers.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Everyone"
 msgstr "Iedereen"
@@ -5372,7 +5377,7 @@ msgstr "Alles"
 msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
 msgstr "Alles wat in Grasp is gedaan, door wie en wanneer, bewaard in een keten die niemand ongemerkt kan wijzigen."
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
 msgstr "Alles wat Grasp en zijn agents mogen lezen, in collecties: die van jezelf, van je teams en van je organisatie. Agents lezen een document wanneer ze het nodig hebben en houden de geheugenbestanden altijd voor ogen."
 
@@ -5429,8 +5434,8 @@ msgstr "Chats uitklappen"
 msgid "Expand the filters"
 msgstr "Filters uitklappen"
 
+#: src/brain-collections/nav.tsx
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
 msgid "Expand the navigation"
 msgstr "Navigatie uitklappen"
 
@@ -5491,7 +5496,7 @@ msgctxt "thinking effort"
 msgid "Extra high"
 msgstr "Extra hoog"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Extracting"
 msgstr "Wordt uitgelezen"
 
@@ -5499,10 +5504,10 @@ msgstr "Wordt uitgelezen"
 msgid "Facts agreed"
 msgstr "Feiten akkoord"
 
+#: src/brain-collections/uploads.tsx
 #: src/chat/thread.tsx
 #: src/dashboard/runs-widget.tsx
 #: src/inbox/items.ts
-#: src/knowledge/uploads.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflow-diagram.tsx
@@ -5563,7 +5568,7 @@ msgid "File"
 msgstr "Bestand"
 
 #: src/chat/builds.tsx
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Files"
 msgstr "Bestanden"
 
@@ -5710,8 +5715,8 @@ msgstr "Chats inklappen"
 msgid "Fold the filters"
 msgstr "Filters inklappen"
 
+#: src/brain-collections/nav.tsx
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
 msgid "Fold the navigation"
 msgstr "Navigatie inklappen"
 
@@ -6261,7 +6266,7 @@ msgstr "Hoog"
 msgid "High confidence"
 msgstr "Hoge betrouwbaarheid"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 #: src/landscape/overview-tab.tsx
 msgid "History"
 msgstr "Geschiedenis"
@@ -6846,7 +6851,7 @@ msgstr "Gedaan"
 msgid "It's gone, or you can't read it."
 msgstr "Ze bestaat niet meer, of je mag ze niet lezen."
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "It's past the first {pageMaxLimit} files listed: open it from here."
 msgstr "Het staat na de eerste {pageMaxLimit} getoonde bestanden: open het van hier."
 
@@ -7078,14 +7083,6 @@ msgstr "Soort"
 msgid "Kind of statement"
 msgstr "Soort uitspraak"
 
-#: src/engines/resource-bindings.tsx
-#: src/knowledge/frame.tsx
-#: src/knowledge/nav.tsx
-#: src/routes/_shell.knowledge.$collection.tsx
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Knowledge"
-msgstr "Kennis"
-
 #: src/brain/atlas-overlays.tsx
 msgid "Known"
 msgstr "Bekend"
@@ -7265,7 +7262,7 @@ msgstr "Lessen"
 msgid "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it."
 msgstr "Laat een AI-app zoals Claude of ChatGPT met Grasp werken. Die leest wat Grasp weet en kan je een pagina laten zien. Voor al het andere vraagt die het je eerst hier: er verandert niets tenzij jij het toestaat."
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "Let go to add them"
 msgstr "Laat los om ze toe te voegen"
@@ -7367,7 +7364,7 @@ msgstr "Links verstuurd sinds {since}"
 msgid "Links out: {count} of {of}"
 msgstr "Links verstuurd: {count} van {of}"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Links to"
 msgstr "Linkt naar"
 
@@ -7429,9 +7426,9 @@ msgid "Loading"
 msgstr "Laden"
 
 #: src/activity/audit-log.tsx
+#: src/brain-collections/nav.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
-#: src/knowledge/nav.tsx
 #: src/landscape/audit-trail.tsx
 #: src/workflows/history-view.tsx
 msgid "Loading…"
@@ -7598,7 +7595,7 @@ msgstr "Leden en rollen"
 #: src/brain/brain-nav.tsx
 #: src/brain/memory-page.tsx
 #: src/labels.ts
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Memory"
 msgstr "Geheugen"
 
@@ -8179,8 +8176,8 @@ msgstr "Geen uitzonderingen."
 msgid "No file changes."
 msgstr "Geen bestandswijzigingen."
 
-#: src/knowledge/nav.tsx
-#: src/routes/_shell.knowledge.index.tsx
+#: src/brain-collections/nav.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "No files yet."
 msgstr "Nog geen bestanden."
 
@@ -8266,7 +8263,7 @@ msgstr "Uit het interview van de teamleider kwam geen kaart van het werk"
 msgid "No matches"
 msgstr "Geen treffers"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "No memory files are written yet."
 msgstr "Er zijn nog geen geheugenbestanden geschreven."
 
@@ -8744,8 +8741,8 @@ msgid "Not every choice could be checked: some may be missing from the list."
 msgstr "Niet elke keuze kon worden gecontroleerd: er kunnen er in de lijst ontbreken."
 
 #: src/frame/page-states.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 #: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/_shell.landscape.$appId.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Not found"
@@ -8994,7 +8991,7 @@ msgstr "Er wordt niets verzonden of gewijzigd op {connection} totdat je het goed
 msgid "Nothing is sent or changed on {connection}."
 msgstr "Er wordt niets verzonden of gewijzigd in {connection}."
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Nothing matched."
 msgstr "Niets gevonden."
 
@@ -9282,10 +9279,10 @@ msgid "Only the first way"
 msgstr "Alleen de eerste manier"
 
 #: src/routes/_shell.settings.models.tsx
-msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
-msgstr "Alleen de modellen die gemarkeerd zijn voor gevoelige gegevens mogen gegevens krijgen uit een gevoelige collectie (gemarkeerd in Kennis) of een gevoelige koppeling, of uit een chat, domein of run die er een heeft gelezen."
+msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Brain) or a sensitive connection, or from a chat, domain or run that read one."
+msgstr "Alleen de modellen die gemarkeerd zijn voor gevoelige gegevens mogen gegevens krijgen uit een gevoelige collectie (gemarkeerd in Brein) of een gevoelige koppeling, of uit een chat, domein of run die er een heeft gelezen."
 
-#: src/knowledge/collection-markers.tsx
+#: src/brain-collections/collection-markers.tsx
 msgid "Only the owner"
 msgstr "Alleen de eigenaar"
 
@@ -9363,9 +9360,9 @@ msgctxt "open an app"
 msgid "Open"
 msgstr "Openen"
 
+#: src/brain-collections/nav.tsx
+#: src/brain-collections/uploads.tsx
 #: src/brain/brain-nav.tsx
-#: src/knowledge/nav.tsx
-#: src/knowledge/uploads.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/work-list.tsx
 #: src/routes/_shell.onboarding.organization.$team.tsx
@@ -9519,7 +9516,7 @@ msgstr "Gaat open bij {threshold}%"
 msgid "Operations"
 msgstr "Bewerkingen"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "or choose them from your computer"
 msgstr "of kies ze op je computer"
@@ -9720,7 +9717,7 @@ msgstr "Plak het transcript van het eerste gesprek met de sponsor"
 msgid "Pasted on {when}. Bring it in again to read it again."
 msgstr "Geplakt op {when}. Breng het opnieuw binnen om het opnieuw te laten lezen."
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Path"
 msgstr "Pad"
 
@@ -9776,7 +9773,7 @@ msgstr "PDF"
 msgid "PDF, Word, Excel, PowerPoint or text"
 msgstr "PDF, Word, Excel, PowerPoint of tekst"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Pending"
 msgstr "In afwachting"
 
@@ -10276,12 +10273,12 @@ msgid "Read"
 msgstr "Lezen"
 
 #: src/activity/audit-words.ts
-msgid "Read a domain's statistics"
-msgstr "De statistieken van een domein gelezen"
+msgid "Read a brain document"
+msgstr ""
 
 #: src/activity/audit-words.ts
-msgid "Read a knowledge document"
-msgstr "Een kennisdocument gelezen"
+msgid "Read a domain's statistics"
+msgstr "De statistieken van een domein gelezen"
 
 #: src/engines/package-approvals.tsx
 msgid "Read again"
@@ -10296,8 +10293,8 @@ msgid "Read everyone's calls of unknown outcome"
 msgstr "De aanroepen met onbekende uitkomst van iedereen gelezen"
 
 #: src/activity/audit-words.ts
-msgid "Read how knowledge is used"
-msgstr "Gelezen hoe kennis wordt gebruikt"
+msgid "Read how brain is used"
+msgstr ""
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Read it"
@@ -10343,8 +10340,8 @@ msgstr "Gelezen wat er bij een verbinding is veranderd"
 msgid "Read what could be improved"
 msgstr "Gelezen wat er beter kan"
 
+#: src/brain-collections/collection-markers.tsx
 #: src/chat/draft-versions.tsx
-#: src/knowledge/collection-markers.tsx
 msgid "Read-only"
 msgstr "Alleen-lezen"
 
@@ -10403,7 +10400,7 @@ msgstr "Leest"
 msgid "reads the domain's data"
 msgstr "leest de gegevens van het domein"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 #: src/onboarding/setup-frame.tsx
 msgid "Ready"
 msgstr "Klaar"
@@ -10588,7 +10585,7 @@ msgstr "Herhaalt, één keer per item:"
 msgid "Replace the binding of {alias}"
 msgstr "Koppeling van {alias} vervangen"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Replace version {newerVersion} with mine"
 msgstr "Versie {newerVersion} vervangen door de mijne"
 
@@ -10634,17 +10631,17 @@ msgstr "Resource"
 msgid "Resources"
 msgstr "Resources"
 
+#: src/brain-collections/timeline.tsx
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
-#: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Herstellen"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 msgid "Restore version {number}"
 msgstr "Versie {number} herstellen"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 msgid "Restored version {restoredFrom}"
 msgstr "Versie {restoredFrom} hersteld"
 
@@ -10671,7 +10668,7 @@ msgstr "Resultaat"
 msgid "Result: not measured yet"
 msgstr "Resultaat: nog niet gemeten"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Results"
 msgstr "Resultaten"
 
@@ -10740,7 +10737,7 @@ msgstr "Beoordelen"
 msgid "Review and answer"
 msgstr "Bekijken en antwoorden"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Review by"
 msgstr "Beoordelen voor"
 
@@ -11075,8 +11072,8 @@ msgstr "Heeft ja gezegd"
 msgid "Same version, different contents: {changed}"
 msgstr "Zelfde versie, andere inhoud: {changed}"
 
+#: src/brain-collections/document.tsx
 #: src/chat/project-dialog.tsx
-#: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/settings/person-limits.tsx
 #: src/workflows/resource-params.tsx
@@ -11161,6 +11158,10 @@ msgstr "Applicatie zoeken"
 msgid "Search apps"
 msgstr "Apps zoeken"
 
+#: src/brain-collections/nav.tsx
+msgid "Search Brain"
+msgstr "Zoeken in Brein"
+
 #: src/onboarding/interview-people.tsx
 msgid "Search by name"
 msgstr "Zoeken op naam"
@@ -11176,10 +11177,6 @@ msgstr "Gebeurtenissen zoeken"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search integrations"
 msgstr "Integraties doorzoeken"
-
-#: src/knowledge/nav.tsx
-msgid "Search Knowledge"
-msgstr "Zoeken in Kennis"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Search members"
@@ -11198,7 +11195,7 @@ msgstr "Personen zoeken"
 msgid "Search people and devices"
 msgstr "Mensen en apparaten zoeken"
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "Zoeken leest elke collectie die je mag lezen. Probeer andere woorden, of minder."
 
@@ -11207,8 +11204,8 @@ msgid "Search the transcript"
 msgstr "Zoek in het transcript"
 
 #: src/activity/audit-words.ts
-msgid "Searched knowledge"
-msgstr "In kennis gezocht"
+msgid "Searched brain"
+msgstr ""
 
 #: src/activity/audit-words.ts
 msgid "Searched the audit trail"
@@ -11281,7 +11278,7 @@ msgstr "Aanvraag versturen"
 msgid "Send the link now"
 msgstr "Link nu versturen"
 
-#: src/knowledge/collection-markers.tsx
+#: src/brain-collections/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
 msgid "Sensitive"
@@ -11440,7 +11437,7 @@ msgstr "Toon in het brein"
 msgid "Show less"
 msgstr "Minder tonen"
 
-#: src/knowledge/nav.tsx
+#: src/brain-collections/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
 #: src/routes/_shell.settings.packages.index.tsx
@@ -11476,7 +11473,7 @@ msgstr "De pakketten voor {domain} tonen"
 msgid "Showing {showing} of {shownCount}"
 msgstr "{showing} van {shownCount} getoond"
 
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "Showing the first {pageMaxLimit} files."
 msgstr "De eerste {pageMaxLimit} bestanden worden getoond."
 
@@ -11761,7 +11758,7 @@ msgstr "Beginnen"
 msgid "Start a test run"
 msgstr "Testrun starten"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Start again from version {newerVersion}"
 msgstr "Opnieuw beginnen vanaf versie {newerVersion}"
 
@@ -11962,7 +11959,7 @@ msgstr "Vertelde stappen"
 msgid "steps told by enough people"
 msgstr "stappen door genoeg mensen verteld"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Still being read. It shows in the file list once it's ready."
 msgstr "Wordt nog gelezen. Het verschijnt in de bestandslijst zodra het klaar is."
 
@@ -12304,8 +12301,8 @@ msgstr "Teamomvang onbekend"
 msgid "Team size unknown."
 msgstr "Teamomvang onbekend."
 
+#: src/brain-collections/collection-markers.tsx
 #: src/brain/brain.ts
-#: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/person-limits.tsx
 msgid "Teams"
@@ -12406,7 +12403,7 @@ msgstr "Testen…"
 msgid "Tests"
 msgstr "Tests"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "Text"
 msgstr "Tekst"
 
@@ -12744,12 +12741,12 @@ msgid "The domain's actions can't use it until an admin binds it."
 msgstr "De acties van het domein kunnen hem pas gebruiken als een beheerder hem koppelt."
 
 #: src/engines/resource-bindings.tsx
-msgid "The domain's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-msgstr "De acties van het domein bereiken een model, een integratie, kennis of een sjabloon alleen via een koppeling die een beheerder hier goedkeurt. Iets declareren verleent niets, en een koppeling intrekken stopt het volgende verzoek erdoor."
+msgid "The domain's actions reach a model, an integration, brain or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+msgstr ""
 
 #: src/engines/resource-bindings.tsx
-msgid "The domain's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
-msgstr "De acties van het domein bereiken een model, een integratie, kennis of een sjabloon alleen via een koppeling die een beheerder van je organisatie goedkeurt."
+msgid "The domain's actions reach a model, an integration, brain or a template only through a binding an admin of your organization approves."
+msgstr ""
 
 #: src/engines/resource-bindings.tsx
 msgid "The domain's current version declares no resource for its actions."
@@ -12913,8 +12910,8 @@ msgid "The list is full: remove a line to add another."
 msgstr "De lijst is vol: verwijder een regel om er een toe te voegen."
 
 #: src/brain/brain-home.tsx
-msgid "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
-msgstr "De geheugenbestanden, skills en uploads die je agents lezen, staan in <0>Kennis</0>."
+msgid "The memory files, skills and uploads your agents read are in <0>Brain</0>."
+msgstr "De geheugenbestanden, skills en uploads die je agents lezen, staan in <0>Brein</0>."
 
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
@@ -13292,7 +13289,7 @@ msgstr "Er staan meer mensen in {name} dan ik aankan: tot {peopleMost} mensen in
 msgid "There are more people in {signIn} than I can take: up to {peopleMost} people in up to {teamsMost} teams. A staff list of those taking part works."
 msgstr "Er staan meer mensen in {signIn} dan ik aankan: tot {peopleMost} mensen in tot {teamsMost} teams. Een personeelslijst van wie meedoet werkt wel."
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "There are no collections you can read yet."
 msgstr "Er zijn nog geen collecties die je kunt lezen."
 
@@ -13438,7 +13435,7 @@ msgstr "Deze chat heeft zijn maximale lengte bereikt. Klik op Afronden om hem te
 msgid "This chat read restricted data: this may send it out"
 msgstr "Deze chat heeft beperkte gegevens gelezen: dit kan ze naar buiten sturen"
 
-#: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.brain_.collections.$collection.tsx
 msgid "This collection has no files yet."
 msgstr "Deze collectie heeft nog geen bestanden."
 
@@ -13470,11 +13467,11 @@ msgstr "Deze installatie staat geen model toe."
 msgid "This device"
 msgstr "Dit apparaat"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
 msgstr "Dit document is gewijzigd sinds je het opende. Versie {newerVersion} staat hieronder; je tekst blijft bewaard. Begin opnieuw vanaf die versie, of vervang die door jouw tekst."
 
-#: src/knowledge/markdown.tsx
+#: src/brain-collections/markdown.tsx
 msgid "This document is empty."
 msgstr "Dit document is leeg."
 
@@ -14078,11 +14075,11 @@ msgstr "Tot {upTo} minuten"
 msgid "Updated Grasp"
 msgstr "Grasp bijgewerkt"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Upload"
 msgstr "Uploaden"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
 msgstr "Upload een PDF-, Word- of Excelbestand, of ondertitels (.vtt)"
 
@@ -14092,14 +14089,14 @@ msgid "Uploaded"
 msgstr "Geüpload"
 
 #: src/activity/audit-words.ts
-msgid "Uploaded to knowledge"
-msgstr "Naar kennis geüpload"
+msgid "Uploaded to brain"
+msgstr ""
 
 #: src/brain/brain.ts
 msgid "Uploaded to Policies"
 msgstr "Geüpload naar Beleid"
 
-#: src/knowledge/uploads.tsx
+#: src/brain-collections/uploads.tsx
 msgid "Uploading…"
 msgstr "Wordt geüpload…"
 
@@ -14135,8 +14132,8 @@ msgid "Use another platform"
 msgstr "Ander platform kiezen"
 
 #: src/routes/_shell.settings.members.tsx
-msgid "Use the chat, Knowledge and the apps shared with them"
-msgstr "De chat, Kennis en de met hen gedeelde apps gebruiken"
+msgid "Use the chat, Brain and the apps shared with them"
+msgstr "De chat, Brein en de met hen gedeelde apps gebruiken"
 
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
@@ -14150,8 +14147,8 @@ msgstr "Gebruik het account van je organisatie om verder te gaan."
 msgid "Used a connected tool"
 msgstr "Een gekoppelde tool gebruikt"
 
+#: src/brain-collections/document.tsx
 #: src/engines/resource-bindings.tsx
-#: src/knowledge/document.tsx
 msgid "Used by"
 msgstr "Gebruikt door"
 
@@ -14227,9 +14224,9 @@ msgstr "Feiten over leverancier, omgang met data en governance."
 msgid "Verified"
 msgstr "Geverifieerd"
 
+#: src/brain-collections/document.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
-#: src/knowledge/document.tsx
 #: src/routes/_shell.onboarding.interviewers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -14252,7 +14249,7 @@ msgstr "versie {0}; nu is het versie {1}"
 msgid "Version {currentVersion}"
 msgstr "Versie {currentVersion}"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 msgid "Version {number}"
 msgstr "Versie {number}"
 
@@ -14260,7 +14257,7 @@ msgstr "Versie {number}"
 msgid "Version {number} of {latest}"
 msgstr "Versie {number} van {latest}"
 
-#: src/knowledge/timeline.tsx
+#: src/brain-collections/timeline.tsx
 msgid "Version {number}, current"
 msgstr "Versie {number}, huidig"
 
@@ -14566,7 +14563,7 @@ msgctxt "inbox sort"
 msgid "What blocks first, then newest"
 msgstr "Wat blokkeert eerst, dan nieuwste"
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
 msgstr "Wat er is gewijzigd"
@@ -14596,7 +14593,7 @@ msgstr "Wat elke rol in Grasp mag. Een admin geeft elk lid de zijne."
 msgid "What each workflow's model calls cost this month, most first, and how often it ran."
 msgstr "Wat de modelaanroepen van elke workflow deze maand kostten, de hoogste eerst, en hoe vaak hij draaide."
 
-#: src/routes/_shell.knowledge.index.tsx
+#: src/routes/_shell.brain_.collections.index.tsx
 msgid "What every agent has in its context, all the time."
 msgstr "Wat elke agent altijd in zijn context heeft."
 
@@ -15289,8 +15286,8 @@ msgid "Worked out daily, last on {date}."
 msgstr "Dagelijks bepaald, laatst op {date}."
 
 #: src/activity/audit-words.ts
-msgid "Worked out how knowledge is used"
-msgstr "Bepaald hoe kennis wordt gebruikt"
+msgid "Worked out how brain is used"
+msgstr ""
 
 #: src/activity/audit-words.ts
 msgid "Worked out what could be improved"
@@ -15512,8 +15509,8 @@ msgstr "Ja, dat klopt."
 msgid "Yes: its hash matches, and it links to the event before it."
 msgstr "Ja: de hash klopt en hij verwijst naar de gebeurtenis ervoor."
 
+#: src/brain-collections/timeline.tsx
 #: src/connections/connection-list.tsx
-#: src/knowledge/timeline.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
@@ -15592,7 +15589,7 @@ msgstr "Jij:"
 msgid "You’re about to visit an external website."
 msgstr "Je gaat naar een externe website."
 
-#: src/knowledge/document.tsx
+#: src/brain-collections/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
 msgstr "Je leest versie {number}, opgeslagen op {saved}. De huidige versie is {current}."
 
@@ -15717,7 +15714,7 @@ msgctxt "part of an interview"
 msgid "Your story"
 msgstr "Jouw verhaal"
 
-#: src/onboarding/knowledge-bar.tsx
+#: src/onboarding/brain-bar.tsx
 msgid "Your team can start at {threshold}%"
 msgstr "Je team kan starten bij {threshold}%"
 

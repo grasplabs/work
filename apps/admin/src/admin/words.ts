@@ -17,7 +17,7 @@ import {
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   ContractState,
-  KnowledgeSource,
+  BrainSource,
   LinkState,
   Need,
   OrgView,
@@ -172,8 +172,8 @@ export const phaseWords: Record<AdminPhase, string> = {
   open: "Open",
 };
 
-/** What each source of what Grasp knows about a company is (`knowledge-words.ts`). */
-export const knowledgeWords: Record<KnowledgeSource, string> = {
+/** What each source of what Grasp knows about a company is (`brain-words.ts`). */
+export const brainWords: Record<BrainSource, string> = {
   vision: "The first conversation and the research",
   directory: "Who works where, from the sign-in",
   sources: "Where the documents live, connected",
@@ -273,7 +273,7 @@ const interviewsLine = (view: OrgView): string => {
 };
 
 const openLine = (view: OrgView): string => {
-  const { percent, threshold, opened, ready } = view.knowledge;
+  const { percent, threshold, opened, ready } = view.brain;
   if (opened !== null) {
     return `Open since ${formatDate(dateOn(view.org, opened))}`;
   }
@@ -441,8 +441,8 @@ export const interviewerNames: Record<Interviewer, string> = {
 export const talkedWords = (count: number, total: number): string =>
   `${count} of ${total} talked`;
 
-/** What each source of what Grasp knows about a company is (the prototype's `knowledge-words.ts`). */
-export const knowledgeSourceWords: Record<KnowledgeSource, string> = {
+/** What each source of what Grasp knows about a company is (the prototype's `brain-words.ts`). */
+export const brainSourceWords: Record<BrainSource, string> = {
   vision: "The first conversation and the research",
   directory: "Who works where, from the sign-in",
   sources: "Where the documents live, connected",

@@ -30,9 +30,9 @@ import {
   listVersions,
   readFiles,
 } from "./apps.ts";
+import { appsCollectionId } from "./brain/app-entries.ts";
 import { appHost } from "./durable-objects.ts";
 import { appRead } from "./history-access.ts";
-import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { grantedPermissions } from "./permissions.ts";
 import { isRestricted, restrict } from "./restricted.ts";
 import { inTurn, runSessionOf } from "./run-sessions.ts";
@@ -40,7 +40,7 @@ import { inTurn, runSessionOf } from "./run-sessions.ts";
 // Apps for a chat's code: `await env.apps.list()`. What the chat's person
 // sees of Apps themselves (agent-person.ts), once the agent may read the
 // Apps collection, where agents find the Apps that already exist before
-// anyone builds another (knowledge/apps-collection.ts): the Apps the
+// anyone builds another (brain/apps-collection.ts): the Apps the
 // person has a role in, and the files and versions of those they build.
 // Every call is audited as the chat's agent acting for them.
 
@@ -336,7 +336,7 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
 const appsDeclaration = `/**
  * The company's Apps that the person has a role in, and the code of those
  * they build. Before suggesting a new App, look for one that already does
- * it: search the Apps collection in Knowledge, then list them here.
+ * it: search the Apps collection in the Brain, then list them here.
  */
 apps: {
   /** The Apps the person has a role in, oldest first. */

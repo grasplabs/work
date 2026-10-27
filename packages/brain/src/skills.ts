@@ -25,11 +25,11 @@ import {
   documents,
   versions,
 } from "./db/schema.ts";
+import type { Provenance } from "./documents-contract.ts";
 import { getDocument } from "./documents.ts";
 import { parseBaseFields, parseFrontmatter } from "./frontmatter.ts";
 import { collectionIdSchema, documentIdSchema } from "./ids.ts";
 import type { CollectionId } from "./ids.ts";
-import type { Provenance } from "./knowledge.ts";
 import { readPayload } from "./payloads.ts";
 import { asBrainError } from "./recall.ts";
 
@@ -594,7 +594,7 @@ export const selectSkillWithSources = async <C>(
   input: unknown,
   /**
    * The only collections it may weigh skills of, for a caller bound to
-   * some, as a recall's `within`: an App's knowledge resource passes those
+   * some, as a recall's `within`: an App's brain resource passes those
    * it binds that its person may read (none weighs nothing).
    */
   within?: readonly CollectionId[]
@@ -627,7 +627,7 @@ export const selectSkillWithSources = async <C>(
     const provenance = await brain.ports.onRead(
       reader,
       {
-        action: "knowledge.skill.select",
+        action: "brain.skill.select",
         documentIds: relevant.map(({ ref }) => ref.documentId),
         detail: {
           task: task.type,

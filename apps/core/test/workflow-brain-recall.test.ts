@@ -4,8 +4,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { readCollection } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
 import { finished } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 import { sampleApp, workflowFiles } from "./workflow-apps.ts";
@@ -28,11 +28,11 @@ const rareWord = (): string =>
 
 /** A collection everyone reads, holding `word` in one document. */
 const collectionSaying = async (admin: Admin, name: string, word: string) => {
-  const { id } = await admin.api.knowledge.createCollection({
+  const { id } = await admin.api.brain.createCollection({
     name: `${name} ${crypto.randomUUID()}`,
     access: "everyone",
   });
-  await admin.api.knowledge.saveDocument({
+  await admin.api.brain.saveDocument({
     collectionId: id,
     path: "plan.md",
     text: `# Plan\n${word} is the plan.`,
@@ -107,11 +107,11 @@ const collectionWithSkill = async (
   name: string,
   task: string
 ) => {
-  const { id } = await admin.api.knowledge.createCollection({
+  const { id } = await admin.api.brain.createCollection({
     name: `${name} ${crypto.randomUUID()}`,
     access: "everyone",
   });
-  await admin.api.knowledge.saveDocument({
+  await admin.api.brain.saveDocument({
     collectionId: id,
     path: `${task}/SKILL.md`,
     text: `---\nname: ${task}\ndescription: Handles ${task}.\ntasks: [${task}]\nrequires: [platform:brain]\n---\n\n# ${task}\n\nCheck the order first.\n`,
@@ -162,7 +162,7 @@ describe("a workflow's recall through the Brain binding", () => {
       output: run.output,
       recorded: events.some(
         ({ action, detail }) =>
-          action === "knowledge.search" &&
+          action === "brain.search" &&
           detail.via === "recall" &&
           detail.run === run.id
       ),
@@ -195,7 +195,7 @@ describe("a workflow's recall through the Brain binding", () => {
       recorded: events
         .filter(
           ({ action, detail }) =>
-            action === "knowledge.skill.select" && detail.run === run.id
+            action === "brain.skill.select" && detail.run === run.id
         )
         .map(({ detail }) => detail.result),
     }).toStrictEqual({

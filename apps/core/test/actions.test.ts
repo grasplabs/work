@@ -205,7 +205,7 @@ const summarizer = resource.model("summarizer", {
   structuredOutput: v.object({ summary: v.string() }),
   maxOutputTokens: 200,
 });
-const help = resource.knowledge("help", {
+const help = resource.brain("help", {
   operations: ["search"],
   collections: ["handbook"],
 });
@@ -1299,7 +1299,7 @@ describe("resources", () => {
     });
   });
 
-  it("check what a model, knowledge and a template answer against their contracts", async () => {
+  it("check what a model, brain and a template answer against their contracts", async () => {
     const fixture = await notes();
     const summarizeWith = async (answer: unknown) =>
       await call(
@@ -1326,7 +1326,7 @@ describe("resources", () => {
         {
           resources: bindingsOf({
             help: bound(
-              "knowledge",
+              "brain",
               null,
               async () => await Promise.resolve(answer)
             ),

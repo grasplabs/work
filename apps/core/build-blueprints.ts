@@ -46,7 +46,7 @@ import path from "node:path";
 
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { fileChangesSchema, fromBlueprintSchema } from "@grasp-os/shared/apps";
-import { declaredCollectionSchema } from "@grasp-os/shared/knowledge";
+import { declaredCollectionSchema } from "@grasp-os/shared/brain-documents";
 import {
   blueprintWorkflowSchema,
   declaredPermissionSchema,

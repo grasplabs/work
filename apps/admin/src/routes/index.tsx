@@ -31,7 +31,7 @@ import { ArrowRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { AdminPage } from "../admin/page.tsx";
-import { KnowledgeDots, StageBar, Tile } from "../admin/parts.tsx";
+import { BrainCollectionDots, StageBar, Tile } from "../admin/parts.tsx";
 import { organizationsOf, unreadWords } from "../admin/views.ts";
 import type { Organization } from "../admin/views.ts";
 import {
@@ -63,7 +63,7 @@ interface AdminSearch {
 const todayItems = 8;
 
 /** How many dots say how much is known. */
-const knowledgeDots = 20;
+const brainCollectionDots = 20;
 
 const healthMark: Record<HealthLevel, string> = {
   none: "bg-border",
@@ -194,7 +194,7 @@ const AnsweredRow = ({
   const line = lines[view.stage];
   const opens = lines.open;
   // Enough is known and the go is still to give: that is Grasp's to do.
-  const waits = view.knowledge.ready && view.knowledge.opened === null;
+  const waits = view.brain.ready && view.brain.opened === null;
   let contractLine = "";
   if (contract.status === "signed" && !view.unknown.contract) {
     contractLine = contract.ending
@@ -234,9 +234,9 @@ const AnsweredRow = ({
         variant="card"
       >
         <span className="flex flex-col gap-1.5">
-          <KnowledgeDots
-            count={knowledgeDots}
-            knowledge={view.knowledge}
+          <BrainCollectionDots
+            count={brainCollectionDots}
+            brain={view.brain}
             label={opens}
           />
           <span

@@ -13,7 +13,7 @@ import {
   listVersions,
   proposeVersion,
 } from "./apps.ts";
-import { indexAppNow } from "./knowledge/apps-collection.ts";
+import { indexAppNow } from "./brain/apps-collection.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -68,7 +68,7 @@ export class AppVersionsRpc extends CoreRpcTarget implements AppVersionsApi {
   /**
    * Makes a version current through a verified candidate, over `expected`
    * when given (app-activation.ts, app-candidates.ts), then indexes the App into the Apps collection
-   * (knowledge/apps-collection.ts): its entry holds the new version once
+   * (brain/apps-collection.ts): its entry holds the new version once
    * this returns, unless indexing failed or raced another; the cron
    * trigger then heals it within 15 minutes.
    */

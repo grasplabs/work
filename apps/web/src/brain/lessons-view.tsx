@@ -23,9 +23,9 @@ import { useCore } from "../use-core.ts";
 // part of them. Core decides what they see and what they may retire; a
 // retirement goes against the revision read. Text is text, never markup.
 
-type Knowledge = Session["knowledge"];
-type Summary = Awaited<ReturnType<Knowledge["lessonsList"]>>[number];
-type Lineage = Awaited<ReturnType<Knowledge["lessonsLineage"]>>;
+type Brain = Session["brain"];
+type Summary = Awaited<ReturnType<Brain["lessonsList"]>>[number];
+type Lineage = Awaited<ReturnType<Brain["lessonsLineage"]>>;
 
 type Read<T> =
   | { state: "loading" }
@@ -35,11 +35,11 @@ type Read<T> =
 /** What `read` answers, or why not; outside components, which can't `try`. */
 const readFrom = async <T,>(
   core: CoreConnection,
-  read: (knowledge: Knowledge) => Promise<T>
+  read: (brain: Brain) => Promise<T>
 ): Promise<Read<T>> => {
   try {
     const data = await core.withSession(
-      async (session) => await read(session.knowledge)
+      async (session) => await read(session.brain)
     );
     return { state: "ready", data };
   } catch (error) {
@@ -94,7 +94,7 @@ const LessonPanel = ({
     const read = async (): Promise<void> => {
       const answer = await readFrom(
         core,
-        async (knowledge) => await knowledge.lessonsLineage({ lessonId })
+        async (brain) => await brain.lessonsLineage({ lessonId })
       );
       if (!left) {
         setAnswered(answer);
@@ -177,7 +177,7 @@ const LessonPanel = ({
               onClick={() => {
                 void (async () => {
                   const retired = await run(async (session) => {
-                    await session.knowledge.lessonsRetire({
+                    await session.brain.lessonsRetire({
                       lessonId: lesson.id,
                       expectedRevision: lesson.revision,
                     });
@@ -216,7 +216,7 @@ const LessonList = ({
     const read = async (): Promise<void> => {
       const answer = await readFrom(
         core,
-        async (knowledge) => await knowledge.lessonsList()
+        async (brain) => await brain.lessonsList()
       );
       if (!left) {
         setListed(answer);

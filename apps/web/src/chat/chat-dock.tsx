@@ -36,7 +36,7 @@ import { ChatThread } from "./thread.tsx";
 import { useAsk } from "./use-ask.ts";
 
 // Grasp's chat on every page but Chat's own, bottom right, as in the
-// prototype (`components/chat/global-chat.tsx`, `knowledge/brain-chat.tsx`):
+// prototype (`components/chat/global-chat.tsx`, `brain/brain-chat.tsx`):
 // the person's open chat, so what is asked anywhere goes on there and shows
 // in its list, and a new chat here is a new one there. A slim bar to ask in;
 // sending, or its arrow, opens a frame around it with the conversation,
@@ -433,7 +433,7 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
  * which is the chat at full size. In the brain (its atlas, a region of
  * it, a note or a part's page) it is the brain's own chat, kept as the
  * person moves about the brain, as in the prototype
- * (`knowledge/brain-chat.tsx`): its own conversation, apart from the one
+ * (`brain/brain-chat.tsx`): its own conversation, apart from the one
  * Chat shows, asked of Grasp's agent through core's chat like any other,
  * whose answers cite the notes they used (`ChatCitation`, opening them as
  * `CitedNote` does).

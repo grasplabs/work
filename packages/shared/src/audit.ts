@@ -281,7 +281,7 @@ export type AuditEntry = Omit<
 >;
 
 /**
- * Most events one take from an outbox returns: core and Knowledge's own,
+ * Most events one take from an outbox returns: core and the Brain's own,
  * and connect's, which core takes over RPC (`ConnectApi.takeAuditEvents`).
  */
 export const auditOutboxTakeMax = 100;

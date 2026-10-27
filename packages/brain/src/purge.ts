@@ -16,6 +16,13 @@ import {
   transcripts,
   versions,
 } from "./db/schema.ts";
+import {
+  collectionErrors,
+  purgeInputSchema,
+  purgeMaxDocuments,
+  purgedMarker,
+} from "./documents-contract.ts";
+import type { PurgePlan, PurgeResult } from "./documents-contract.ts";
 import { checkedText, indexedValuesOf, writeVersion } from "./documents.ts";
 import type { DocumentRow, Writer } from "./documents.ts";
 import { fromBase64Url, sha256Hex, toBase64Url } from "./encoding.ts";
@@ -25,13 +32,6 @@ import { parseBaseFields } from "./frontmatter.ts";
 import { requireCurrentIndexed } from "./indexing.ts";
 import type { Json } from "./json.ts";
 import { canonicalJson } from "./json.ts";
-import {
-  knowledgeErrors,
-  purgeInputSchema,
-  purgeMaxDocuments,
-  purgedMarker,
-} from "./knowledge.ts";
-import type { PurgePlan, PurgeResult } from "./knowledge.ts";
 import { log } from "./log.ts";
 import {
   countStatements,
@@ -68,7 +68,7 @@ import {
 import type { ReadAt, Transcript } from "./transcripts.ts";
 import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 
-// Purging personal data from Knowledge, for good, when someone leaves or
+// Purging personal data from the Brain, for good, when someone leaves or
 // asks (GDPR erasure): an admin prepares a purge, which says how much it
 // removes and returns a token, and confirms it with that token. Two kinds:
 //
@@ -94,7 +94,7 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // A content purge rewrites a named document's transcript (transcripts.ts)
 // as it rewrites its text: every speaker, turn and chapter title, counted
 // in its plan and its check, kept with the version it saves, or rewritten
-// where it stands (audited, `knowledge.transcript.purged`) when no
+// where it stands (audited, `brain.transcript.purged`) when no
 // version's text held a term.
 //
 // A content purge reaches the Brain's memory records too, everyone's,
@@ -108,9 +108,9 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // (`foldedHolds`: "Rene" for "René", "tom-visser" for "tom visser").
 //
 // Both reach the copies of people's words the host keeps outside
-// Knowledge too, through its `OnErase` hook (core's: the brain's gap
+// Brain too, through its `OnErase` hook (core's: the brain's gap
 // answers and records, and the onboarding's readings of the documents
-// shared in it), so Knowledge names none of them: a personal purge forgets
+// shared in it), so Brain names none of them: a personal purge forgets
 // the person as the author of any, a content purge rewrites every one
 // holding a term, whatever documents it names, and forgets every copy made
 // of a document it names, whatever it holds, before its documents. Its plan
@@ -124,7 +124,7 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // uploads.ts), before anything of a document changes: a file holds the
 // data too. A content purge does so for every document it names, whether
 // or not it finds a term in the text, since a file can hold one where
-// Knowledge never read it (an image in a PDF). Preparing one says how
+// Brain never read it (an image in a PDF). Preparing one says how
 // many it erases (`originals`).
 //
 // Then nothing of it is left in the search index (search-erasure.ts): a
@@ -137,7 +137,7 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // and checks the tokens they gave the index the same way, up to caps past
 // which it rebuilds. The cleanup runs after the data is
 // committed, and on every purge, also one with nothing left to change, so
-// when it fails (`knowledge.purge_index_pending`) running the purge again
+// when it fails (`brain.purge_index_pending`) running the purge again
 // finishes it.
 //
 // The audit log can't be purged, so what it records of a purge is who,
@@ -172,7 +172,7 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // with those letters leaves the same; a token with a digit, never three
 // of its characters), beyond what live text holds, the pages SQLite freed, which keep their old bytes
 // until reused (D1 has no `PRAGMA secure_delete`), D1's own point-in-time
-// recovery, and anything outside Knowledge. And it reaches too far where a name is an
+// recovery, and anything outside Brain. And it reaches too far where a name is an
 // ordinary word too (Will, Mark, May): every "will" goes.
 
 /** How long an admin has to confirm a purge they prepared. */
@@ -214,7 +214,7 @@ const sum = (all: Counts[]): Counts => {
  * client's data, whatever their role.
  */
 /**
- * Files a host keeps as Knowledge documents, which a purge erases whole:
+ * Files a host keeps as Brain documents, which a purge erases whole:
  * a collection's, or those under one document's path.
  */
 export type ErasedFiles =
@@ -223,7 +223,7 @@ export type ErasedFiles =
 
 /**
  * How a purge reaches the copies of people's words a host keeps outside
- * Knowledge, so Knowledge itself names none of them. Core's are the
+ * Brain, so Brain itself names none of them. Core's are the
  * brain's gap answers (brain-gaps.ts), the originals of uploaded files
  * (uploads.ts) and the onboarding's readings of the documents shared in
  * it (onboarding/documents.ts).
@@ -251,7 +251,7 @@ export interface OnErase {
   countFiles: (scopes: readonly ErasedFiles[]) => Promise<number>;
   /**
    * Forgets the files of `scope`, as `person`, before the purge writes
-   * anything of it. May refuse (`knowledge.conflict`, for one the host is
+   * anything of it. May refuse (`brain.conflict`, for one the host is
    * saving as a document now), which fails the purge before it changes the
    * document: running it again finishes it.
    */
@@ -279,13 +279,10 @@ export interface ErasedDocument {
 }
 
 const parseInput = (input: unknown): PurgeInput =>
-  knowledgeErrors.parse("knowledge.invalid", purgeInputSchema, input);
+  collectionErrors.parse("brain.document_invalid", purgeInputSchema, input);
 
 const tokenKey = async <C>(brain: Brain<C>): Promise<CryptoKey> =>
-  await brain.ports.keys.hmac("grasp-os knowledge purge token", [
-    "sign",
-    "verify",
-  ]);
+  await brain.ports.keys.hmac("grasp-os brain purge token", ["sign", "verify"]);
 
 /** What a token signs: the admin, the purge as parsed, and its expiry. */
 const tokenData = (by: Writer, input: PurgeInput, expiresAt: number) =>
@@ -294,7 +291,7 @@ const tokenData = (by: Writer, input: PurgeInput, expiresAt: number) =>
 const tokenPattern = /^(?<expiresAt>\d{1,15})\.(?<mac>[\w-]{1,128})$/u;
 
 /**
- * Refuses with `knowledge.purge_expired` unless `token` is one prepared by
+ * Refuses with `brain.purge_expired` unless `token` is one prepared by
  * `person` for exactly `input`, and not yet expired. It holds no purged
  * text: the admin sends the input again.
  */
@@ -321,7 +318,7 @@ const requireToken = async <C>(
     }
   }
   if (!valid) {
-    throw knowledgeErrors.create("knowledge.purge_expired");
+    throw collectionErrors.create("brain.purge_expired");
   }
 };
 
@@ -345,7 +342,7 @@ const tokenFor = async <C>(
 
 /**
  * Runs `cleanup` of the search index, refusing with
- * `knowledge.purge_index_pending` when it fails: the data is deleted
+ * `brain.purge_index_pending` when it fails: the data is deleted
  * already, and running the purge again cleans up again.
  */
 const cleanSearchIndex = async (
@@ -357,17 +354,17 @@ const cleanSearchIndex = async (
     // The data is already deleted by now; running the purge again, which
     // always cleans up, finishes it. The error's name only: a cleanup's
     // query may carry the terms, which its error would repeat.
-    log.error("knowledge.purge.rebuild_failed", {
+    log.error("brain.purge.rebuild_failed", {
       errorName: errorNameOf(error),
     });
-    throw knowledgeErrors.create("knowledge.purge_index_pending");
+    throw collectionErrors.create("brain.purge_index_pending");
   }
 };
 
 /** The audit event of preparing or running a purge: never its terms. */
 const purgeEntry = (
   by: Writer,
-  action: "knowledge.purge.prepared" | "knowledge.purged",
+  action: "brain.purge.prepared" | "brain.purged",
   input: PurgeInput,
   scope: { collectionId?: string; documentIds: string[] },
   counts: Partial<Counts> & {
@@ -471,7 +468,7 @@ const purgePersonal = async <C>(
       brain,
       purgeEntry(
         by,
-        "knowledge.purged",
+        "brain.purged",
         input,
         { collectionId, documentIds },
         { ...counts, ...memoryCounts },
@@ -964,7 +961,7 @@ const rewritten = (
 
 /**
  * A version's text as a purge reads it: its payload's, or, when the object
- * is missing or isn't that text (`knowledge.unavailable`), a tombstone
+ * is missing or isn't that text (`brain.text_unavailable`), a tombstone
  * (`purgedMarker`) marked `unreadable`, which the purge saves in its place:
  * whatever the object holds can't be checked for the terms, so it goes.
  */
@@ -975,7 +972,7 @@ const purgeTextOf = async <C>(
   try {
     return { text: await readPayload(brain, ref), unreadable: false };
   } catch (error) {
-    if (knowledgeErrors.codeOf(error) !== "knowledge.unavailable") {
+    if (collectionErrors.codeOf(error) !== "brain.text_unavailable") {
       throw error;
     }
     return { text: purgedMarker, unreadable: true };
@@ -1007,10 +1004,10 @@ interface Named {
 
 /**
  * The documents a content purge names, in ID order. Refuses with
- * `knowledge.not_found`, naming the ones that don't exist, rather than
+ * `brain.document_not_found`, naming the ones that don't exist, rather than
  * skipping them: a mistyped ID would otherwise leave the text it was meant
  * for where it is, with a purge recorded as done. Refuses the Grasp
- * skills with `knowledge.read_only`, saying why for each: the next sync
+ * skills with `brain.read_only`, saying why for each: the next sync
  * would put their text back.
  */
 const documentsNamed = async (
@@ -1026,7 +1023,7 @@ const documentsNamed = async (
   const existing = new Set(found.map(({ document }) => document.id));
   const missing = documentIds.filter((id) => !existing.has(id));
   if (missing.length > 0) {
-    throw knowledgeErrors.create("knowledge.not_found", {
+    throw collectionErrors.create("brain.document_not_found", {
       documentIds: missing,
     });
   }
@@ -1034,7 +1031,7 @@ const documentsNamed = async (
     ({ collection }) => collection.source === "grasp"
   );
   if (skills.length > 0) {
-    throw knowledgeErrors.create("knowledge.read_only", {
+    throw collectionErrors.create("brain.read_only", {
       issues: skills.map(
         ({ document }) =>
           `documentIds: document ${document.id} is a Grasp skill, which is read-only: it holds the release's text, and the next sync would put back anything changed`
@@ -1071,7 +1068,7 @@ const versionOf = async <C>(
 };
 
 /**
- * Refuses with `knowledge.invalid` unless the current version of `named`,
+ * Refuses with `brain.document_invalid` unless the current version of `named`,
  * with the terms removed, can be saved as its next version: its
  * frontmatter still fits its type, and it is within a document's limits
  * and a memory file's. Checked for every document named, whether or not
@@ -1105,11 +1102,11 @@ const requireSavable = async <C>(
   try {
     await checkedText(brain, collection, document.path, text, false, true);
   } catch (error) {
-    const code = knowledgeErrors.codeOf(error);
+    const code = collectionErrors.codeOf(error);
     if (code === undefined) {
       throw error;
     }
-    throw knowledgeErrors.create("knowledge.invalid", {
+    throw collectionErrors.create("brain.document_invalid", {
       issues: [
         `terms: removing them from document ${document.id} leaves text that can't be saved (${code})`,
       ],
@@ -1119,7 +1116,7 @@ const requireSavable = async <C>(
 };
 
 /**
- * Refuses with `knowledge.invalid` when version `number` of `document`,
+ * Refuses with `brain.document_invalid` when version `number` of `document`,
  * rewritten, is over {@link rewrittenMaxBytes}: D1 would refuse the row.
  */
 const requireStorable = (
@@ -1131,7 +1128,7 @@ const requireStorable = (
   const bytes =
     encoder.encode(text).byteLength + encoder.encode(message ?? "").byteLength;
   if (bytes > rewrittenMaxBytes) {
-    throw knowledgeErrors.create("knowledge.invalid", {
+    throw collectionErrors.create("brain.document_invalid", {
       issues: [
         `terms: removing them makes version ${number} of document ${document.id} too large to store (${bytes} bytes, at most ${rewrittenMaxBytes})`,
       ],
@@ -1143,7 +1140,7 @@ const requireStorable = (
  * A document's transcript as a purge finds it (transcripts.ts): as stored,
  * with the version it was saved with, and with the terms removed from its
  * speakers, words and chapter titles; `changed` when that removed any.
- * Refuses with `knowledge.invalid` when the rewrite would be too large to
+ * Refuses with `brain.document_invalid` when the rewrite would be too large to
  * store, as `requireStorable` does for a version.
  */
 const transcriptPurgeOf = async (
@@ -1173,7 +1170,7 @@ const transcriptPurgeOf = async (
   );
   const bytes = new TextEncoder().encode(JSON.stringify(redacted)).byteLength;
   if (changed && bytes > rewrittenMaxBytes) {
-    throw knowledgeErrors.create("knowledge.invalid", {
+    throw collectionErrors.create("brain.document_invalid", {
       issues: [
         `terms: removing them makes the transcript of document ${document.id} too large to store (${bytes} bytes, at most ${rewrittenMaxBytes})`,
       ],
@@ -1192,7 +1189,7 @@ const replacedEntry = (
   version: number
 ): BrainEvent => ({
   actor,
-  action: "knowledge.payload.replaced",
+  action: "brain.payload.replaced",
   target: { type: "document", id: document.id },
   detail: { version, reason: "unreadable" },
 });
@@ -1289,7 +1286,7 @@ const repointVersions = async <C>(
  * can't be read is replaced by its tombstone, audited. Only counts them
  * unless `write`. Returns how
  * many hold one, how often a term is removed from them (`removedFrom`)
- * and how often one is left in them (`leftIn`). Refuses with `knowledge.invalid`
+ * and how often one is left in them (`leftIn`). Refuses with `brain.document_invalid`
  * when one would be too large to store (`requireStorable`): a purge scans
  * them all first, so one that can't be finished changes nothing.
  */
@@ -1428,7 +1425,7 @@ const countDocument = async <C>(
 
 /**
  * The files the host keeps as a document, which a content purge erases,
- * whatever it finds in the text: they may hold the terms where Knowledge
+ * whatever it finds in the text: they may hold the terms where Brain
  * never read them (an image in an uploaded PDF, say). One still being
  * saved as the document too: forgotten, it isn't saved.
  */
@@ -1449,7 +1446,7 @@ const filesNamed = (document: DocumentRow): ErasedFiles => ({
  * The save is from the version the purge started at, so anyone who saved
  * or restored meanwhile, from text the purge hadn't rewritten yet, makes
  * it fail with
- * `knowledge.conflict`; running the purge again rewrites theirs too. A purge cut short leaves the current version as it
+ * `brain.conflict`; running the purge again rewrites theirs too. A purge cut short leaves the current version as it
  * was, so running it again finishes it; one run again after it finished
  * finds nothing, and writes nothing.
  */
@@ -1496,7 +1493,7 @@ const purgeDocument = async <C>(
       replaceTranscript(db, document.id, transcript.at, transcript.redacted),
       outboxedIfChanged(brain, {
         actor,
-        action: "knowledge.transcript.purged",
+        action: "brain.transcript.purged",
         target: { type: "document", id: document.id },
         detail: { purgeId, version: transcript.version },
       }),
@@ -1693,7 +1690,7 @@ const purgeContent = async <C>(
       brain,
       purgeEntry(
         by,
-        "knowledge.purged",
+        "brain.purged",
         input,
         { documentIds: named.map(({ document }) => document.id) },
         { documents: named.length },
@@ -1774,7 +1771,7 @@ const purgeContent = async <C>(
   );
   const stillFound = inDocuments + memories + hostCopies + inTranscripts;
   if (stillFound > 0) {
-    log.warn("knowledge.purge_still_found", {
+    log.warn("brain.purge_still_found", {
       purgeId,
       documents: inDocuments,
       memories,
@@ -1838,7 +1835,7 @@ export const preparePurge = async <C>(
   await auditedBatch(brain.ports, db, [
     outboxed(
       brain,
-      purgeEntry(by, "knowledge.purge.prepared", parsed, scope, {
+      purgeEntry(by, "brain.purge.prepared", parsed, scope, {
         ...counts,
         ...(parsed.type === "content"
           ? { occurrences: removed, inLongerWords: left, hostCopies }

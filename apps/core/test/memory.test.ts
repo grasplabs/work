@@ -4,7 +4,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { forContext, saveUserMemory } from "../src/knowledge/memory.ts";
+import { forContext, saveUserMemory } from "../src/brain/memory.ts";
 import { restrict } from "../src/restricted.ts";
 import type { WorkContext } from "../src/restricted.ts";
 import { release } from "./apps.ts";
@@ -51,9 +51,9 @@ const saveOver = async (
   path: string,
   text: string
 ) => {
-  const { documents } = await person.api.knowledge.listDocuments(collectionId);
+  const { documents } = await person.api.brain.listDocuments(collectionId);
   const current = documents.find((document) => document.path === path);
-  return await person.api.knowledge.saveDocument({
+  return await person.api.brain.saveDocument({
     collectionId,
     path,
     text,
@@ -101,7 +101,7 @@ const markersIn = (memory: Memory, markers: Record<string, string>) =>
 
 /** The IDs of the collections `person` may read. */
 const collectionsOf = async (person: Person): Promise<string[]> => {
-  const listed = await person.api.knowledge.listCollections();
+  const listed = await person.api.brain.listCollections();
   return listed.map(({ id }) => id);
 };
 
@@ -135,7 +135,7 @@ describe("memory collections", setUpTime, () => {
       ownPersonal: true,
       othersPersonal: false,
       othersCanRead: true,
-      userCanSave: "knowledge.forbidden",
+      userCanSave: "brain.forbidden",
     });
   });
 });
@@ -276,8 +276,8 @@ describe("memory for a context", setUpTime, () => {
         ),
       ])
     ).resolves.toStrictEqual([
-      "knowledge.invalid",
-      "knowledge.invalid",
+      "brain.document_invalid",
+      "brain.document_invalid",
       "permission.context_invalid",
       "permission.context_invalid",
       "permission.context_invalid",
@@ -422,7 +422,7 @@ describe("memory for a context", setUpTime, () => {
         agentId: agent.agentId,
         onBehalfOf: admin.userId,
       },
-      action: "knowledge.read",
+      action: "brain.read",
       provenance: [memory, saved.collectionId, ...documentIds],
       detail: {
         read: "memory",
@@ -511,7 +511,7 @@ describe("memory limits", setUpTime, () => {
     const builder = await personOf("builder");
     const memory = await memoryOf(admin);
     const { personal } = await admin.api.memory.collections();
-    const { id: notes } = await admin.api.knowledge.createCollection({
+    const { id: notes } = await admin.api.brain.createCollection({
       name: `Notes ${unique()}`,
       access: "me",
     });
@@ -560,7 +560,7 @@ describe("memory limits", setUpTime, () => {
         )
       ),
     };
-    const refused = await admin.api.knowledge
+    const refused = await admin.api.brain
       .saveDocument({
         collectionId: personal,
         path: "USER.md",
@@ -579,11 +579,11 @@ describe("memory limits", setUpTime, () => {
           : refused,
     }).toStrictEqual({
       saves: {
-        companyAgents: "knowledge.memory_too_large",
-        companyMemory: "knowledge.memory_too_large",
-        agent: "knowledge.memory_too_large",
-        user: "knowledge.memory_too_large",
-        appCode: "knowledge.memory_too_large",
+        companyAgents: "brain.memory_too_large",
+        companyMemory: "brain.memory_too_large",
+        agent: "brain.memory_too_large",
+        user: "brain.memory_too_large",
+        appCode: "brain.memory_too_large",
         atLimit: "ok",
         userAtLimit: "ok",
         appCodeAtLimit: "ok",
@@ -610,7 +610,7 @@ describe("memory limits", setUpTime, () => {
         outcome(userMemory(asAgent, work, sized(2001))),
         outcome(userMemory(asAgent, work, sized(2000))),
       ])
-    ).resolves.toStrictEqual(["knowledge.memory_too_large", "ok"]);
+    ).resolves.toStrictEqual(["brain.memory_too_large", "ok"]);
   });
 });
 
@@ -633,8 +633,8 @@ describe("an agent's USER.md", setUpTime, () => {
       { text: "Works in Utrecht. Likes tea.", ifVersion: 1, message: "Tea" }
     );
     const { personal } = await user.api.memory.collections();
-    const read = await user.api.knowledge.getDocument(second.id);
-    const history = await user.api.knowledge.history(second.id);
+    const read = await user.api.brain.getDocument(second.id);
+    const history = await user.api.brain.history(second.id);
     const agentActor = {
       type: "agent",
       agentId: agent.agentId,
@@ -653,7 +653,7 @@ describe("an agent's USER.md", setUpTime, () => {
         action,
         target,
       })),
-      otherReads: await outcome(other.api.knowledge.getDocument(second.id)),
+      otherReads: await outcome(other.api.brain.getDocument(second.id)),
       stale: await outcome(userMemory(asAgent, work, "Old", 1)),
     }).toStrictEqual({
       collection: true,
@@ -665,17 +665,17 @@ describe("an agent's USER.md", setUpTime, () => {
       events: [
         {
           actor: agentActor,
-          action: "knowledge.collection.created",
+          action: "brain.collection.created",
           target: { type: "collection", id: personal },
         },
         {
           actor: agentActor,
-          action: "knowledge.document.saved",
+          action: "brain.document.saved",
           target: { type: "document", id: second.id },
         },
       ],
-      otherReads: "knowledge.not_found",
-      stale: "knowledge.conflict",
+      otherReads: "brain.document_not_found",
+      stale: "brain.conflict",
     });
   });
 

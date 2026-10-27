@@ -1,6 +1,6 @@
 /**
  * The Brain baseline's distractors (GRA-678): a generated, seeded corpus
- * that grows Noordwind Freight's Knowledge to the scale sizes the Brain
+ * that grows Noordwind Freight's Brain to the scale sizes the Brain
  * design proposes, around the frozen corpus of brain-corpus.ts, which stays
  * as it is. The frozen tasks and their evidence don't change, so recall at
  * each size compares with recall on the frozen corpus alone.
@@ -51,7 +51,7 @@ export const brainDistractorVersion = "2";
 export const brainDistractorSeed = 678;
 
 /**
- * The scale sizes, in distractor chunks (Knowledge sections): CI runs the
+ * The scale sizes, in distractor chunks (Brain sections): CI runs the
  * first, the others are opt-in (vite.brain-scale.config.ts).
  */
 export const brainScaleSizes = [1000, 100_000, 1_000_000] as const;
@@ -687,7 +687,7 @@ export interface DistractorDocument {
   path: string;
   language: BrainLanguage;
   text: string;
-  /** Its sections, each one chunk: as Knowledge splits it. */
+  /** Its sections, each one chunk: as Brain splits it. */
   sections: number;
 }
 

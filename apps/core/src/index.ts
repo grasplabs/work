@@ -15,7 +15,7 @@ export { AppsApi } from "./agent-apps.ts";
 export { BuildApi } from "./agent-builds.ts";
 export { ConnectionsApi } from "./agent-connections.ts";
 export { BrainAgentApi } from "./agent-brain.ts";
-export { KnowledgeApi } from "./agent-knowledge.ts";
+export { BrainDocumentsApi } from "./agent-brain-documents.ts";
 export { MemoryApi } from "./agent-memory.ts";
 export { WorkflowsApi } from "./agent-workflows.ts";
 export { Builtins } from "./builtins.ts";
@@ -28,9 +28,9 @@ export { AppExportBinding } from "./app-calls.ts";
 export { AppStatisticsBinding } from "./statistics-binding.ts";
 export { AppGuestsBinding } from "./guests-binding.ts";
 export { ConnectionBinding } from "./bindings.ts";
-export { AppCollectionBinding } from "./knowledge/app-binding.ts";
-export { CollectionBinding } from "./knowledge/binding.ts";
-export { KnowledgeBinding } from "./knowledge/tools-binding.ts";
+export { AppCollectionBinding } from "./brain/app-binding.ts";
+export { CollectionBinding } from "./brain/binding.ts";
+export { BrainCollectionBinding } from "./brain/tools-binding.ts";
 export { ActionInvocation } from "./action-invocation.ts";
 export { ChatState } from "@grasp-os/chat/state";
 export { WorkflowRuns } from "./workflows/run-object.ts";
@@ -48,7 +48,7 @@ export default {
   // connected (see src/members.ts), revocations an App's host couldn't be
   // told of, told again (see src/access-revocations.ts), Apps copied from a blueprint left
   // pending (see src/app-blueprints.ts), uploads left behind
-  // (see src/knowledge/uploads.ts), a new version of core, audited as
+  // (see src/brain/uploads.ts), a new version of core, audited as
   // a platform update (see src/platform-updates.ts), and workflows'
   // schedules due by the minute it runs for (see src/workflows/triggers.ts),
   // starts core stopped in the middle of, sent to the engine again (see
@@ -66,10 +66,10 @@ export default {
   //
   // Every 15 minutes, on a trigger of its own so neither shares an
   // invocation with the jobs above: the day's improvement signals and
-  // Knowledge usage signals, until they're computed, from one pass over the audit log (see
+  // Brain usage signals, until they're computed, from one pass over the audit log (see
   // src/daily-signals.ts), and Apps whose entry in the Apps
   // collection isn't of their current version (see
-  // src/knowledge/apps-collection.ts), statistics past their retention
+  // src/brain/apps-collection.ts), statistics past their retention
   // (see src/statistics.ts), and messages email triggers kept, deleted
   // once their days are over (see src/workflows/kept-email.ts), guest
   // chats 30 days after they ended (see src/guests.ts), and the details

@@ -22,6 +22,7 @@ import {
 } from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { published, requestGranted } from "./apps.ts";
+import { collectionWithNote, readCollection } from "./brain-collections.ts";
 import type { jobRowSchema } from "./build-jobs.ts";
 import {
   appName,
@@ -43,7 +44,6 @@ import {
   buildJobsOf,
 } from "./build-jobs.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, readCollection } from "./knowledge.ts";
 import { runInstance } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 

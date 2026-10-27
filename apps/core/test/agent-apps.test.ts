@@ -12,8 +12,8 @@ import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { readCollection, storedGrant } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection, storedGrant } from "./knowledge.ts";
 import { finished } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
@@ -368,7 +368,7 @@ describe("a chat's Apps and workflows", () => {
 
     await chat.ask("What's there?");
     // Then the App is shared with them, but has read what they can't read
-    // (a collection Knowledge doesn't know): its runs are no runs still.
+    // (a collection the Brain doesn't know): its runs are no runs still.
     await builder.api.apps.members.add(app, {
       type: "person",
       id: person.userId,

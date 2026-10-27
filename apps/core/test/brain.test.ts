@@ -15,7 +15,7 @@ import { mailConnection } from "./mail-connection.ts";
 import { openRpc, signedIn, signedInApi, staffPerson } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
-// The company brain's workspace (`brain.read`, brain-rpc.ts), assembled
+// The company brain's workspace (`brain.readWorkspace`, brain-rpc.ts), assembled
 // from what core holds: the onboarding (the kickoff, who works where)
 // and the connections. Each is put in here as the product puts it in:
 // staff bring in the kickoff, the admin gives the roster. AI Gateway is
@@ -219,7 +219,7 @@ const sourcesOf = async (
 describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("is a valid empty workspace while the deployment holds nothing for it", async () => {
     const admin = await signedInApi(idp, "admin");
-    const workspace = await admin.api.brain.read();
+    const workspace = await admin.api.brain.readWorkspace();
     expect({
       ...workspace,
       connections: workspace.connections.every(
@@ -280,9 +280,9 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     await admin.api.onboarding.saveRoster(roster);
     await mailConnection();
 
-    const workspace = await admin.api.brain.read();
+    const workspace = await admin.api.brain.readWorkspace();
     const member = await signedInApi(idp, "user");
-    const asMember = await member.api.brain.read();
+    const asMember = await member.api.brain.readWorkspace();
 
     expect({
       company: workspace.company,
@@ -467,8 +467,8 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       ["Legal"]
     );
 
-    const workspace = await admin.api.brain.read();
-    const asMember = await member.api.brain.read();
+    const workspace = await admin.api.brain.readWorkspace();
+    const asMember = await member.api.brain.readWorkspace();
     const { progress } = await admin.api.onboarding.view();
     const since = daysAgo(15);
     const adminChanges = await sourcesOf(admin, since);
@@ -585,8 +585,8 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       ["Finance"]
     );
 
-    const workspace = await admin.api.brain.read();
-    const asMember = await member.api.brain.read();
+    const workspace = await admin.api.brain.readWorkspace();
+    const asMember = await member.api.brain.readWorkspace();
     // Other tests' documents name tools too: this test's alone.
     const tools = workspace.tools.filter(({ name }) => name.includes(tag));
 
@@ -624,7 +624,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
     const hubspot = async () => {
-      const { connections } = await member.api.brain.read();
+      const { connections } = await member.api.brain.readWorkspace();
       return connections.filter(({ matches }) =>
         matches.some((each) => each.toLowerCase() === "hubspot")
       );

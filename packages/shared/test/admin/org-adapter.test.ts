@@ -304,7 +304,7 @@ describe("a real organization as the admin reads it", () => {
       talked: todosAt(seen, "leads").find(
         (todo) => todo.kind === "leadTalked" && todo.person === "mark"
       )?.done,
-      leadsHeard: seen.knowledge.sources.find(
+      leadsHeard: seen.brain.sources.find(
         (each) => each.source === "leadsHeard"
       )?.known,
     }).toStrictEqual({

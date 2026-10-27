@@ -2,7 +2,7 @@
  * Stephen's eval harness (GRA-720): the bar every change to Stephen is
  * measured against, beside the Brain baseline (brain-harness.ts). It sets
  * Noordkade up in core through its public APIs (fixtures/stephen-world.ts):
- * its people and teams, what it knows in Knowledge, Lisa's own Microsoft
+ * its people and teams, what it knows in the Brain, Lisa's own Microsoft
  * 365 account and the company's, each granted to the person's agent as
  * Settings › Stephen would (her mailbox; the register workbook alone), and
  * Graph's side of them in core's fake Graph (stephen-graph-fake.ts). On
@@ -11,7 +11,7 @@
  * register's drive alone), and Google's side in core's fake Google
  * (stephen-google-fake.ts). Then it asks each case of
  * fixtures/stephen-cases.ts in a new chat, as the Teams door does: through
- * the real Workspace object, Knowledge, the agent's code, connect, the
+ * the real Workspace object, Brain, the agent's code, connect, the
  * permissions, the model gateway and the ledger, with only the model
  * provider swapped (stephen-stub.ts in CI).
  *
@@ -42,6 +42,7 @@ import {
 import { answeringGateway } from "./ai-gateway.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
+import { newTeam, readCollection } from "./brain-collections.ts";
 import { brainBudgetDay, brainBudgetMonth, charged } from "./brain-harness.ts";
 import type { BrainModelSetup } from "./brain-harness.ts";
 import { percentile } from "./brain-scoring.ts";
@@ -94,7 +95,6 @@ import type {
   StephenTeam,
 } from "./fixtures/stephen-world.ts";
 import type { Idp } from "./idp.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
 import { acmeTenant, signInConfig } from "./sign-in-config.ts";
 import { callAuth, routed, signedInApi } from "./sign-in.ts";
@@ -504,7 +504,7 @@ export const setUpStephenCompany = async (
     stephenCollections
   )) {
     // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    const created = await admin.api.knowledge.createCollection(
+    const created = await admin.api.brain.createCollection(
       team === undefined
         ? { name, description, access: "everyone" }
         : { name, description, access: "teams", teams: [held(teams, team)] }
@@ -513,7 +513,7 @@ export const setUpStephenCompany = async (
   }
   for (const { collection, path, text } of Object.values(stephenDocuments)) {
     // oxlint-disable-next-line no-await-in-loop -- saves in order
-    await admin.api.knowledge.saveDocument({
+    await admin.api.brain.saveDocument({
       collectionId: held(collections, collection),
       path,
       text,
@@ -556,7 +556,7 @@ export const setUpStephenCompany = async (
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
     const { personal } = await person.api.memory.collections();
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
-    await person.api.knowledge.saveDocument({
+    await person.api.brain.saveDocument({
       collectionId: personal,
       path: "USER.md",
       text: stephenMemory(persona, mailbox, suite),

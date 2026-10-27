@@ -350,8 +350,8 @@ export const kickoff = sqliteTable(
 
 /**
  * Documents the company's admin shared (onboarding/documents.ts), by their
- * upload in Knowledge: Stephen's reading of each (JSON, `DocumentReading`),
- * and the admin's answer to its question. The file itself is Knowledge's.
+ * upload in the Brain: Stephen's reading of each (JSON, `DocumentReading`),
+ * and the admin's answer to its question. The file itself is the Brain's.
  */
 export const documents = sqliteTable("documents", {
   id: text().primaryKey(),

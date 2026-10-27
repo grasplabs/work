@@ -39,8 +39,6 @@ import { Route as ShellDomainsIndexRouteImport } from './routes/_shell.domains.i
 import { Route as ShellEnginesIndexRouteImport } from './routes/_shell.engines.index'
 import { Route as ShellIntegrationsIndexRouteImport } from './routes/_shell.integrations.index'
 import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shell.integrations.$integration'
-import { Route as ShellKnowledgeIndexRouteImport } from './routes/_shell.knowledge.index'
-import { Route as ShellKnowledgeCollectionRouteImport } from './routes/_shell.knowledge.$collection'
 import { Route as ShellLandscapeIndexRouteImport } from './routes/_shell.landscape.index'
 import { Route as ShellLandscapeAppIdRouteImport } from './routes/_shell.landscape.$appId'
 import { Route as ShellOnboardingIndexRouteImport } from './routes/_shell.onboarding.index'
@@ -73,6 +71,8 @@ import { Route as ShellWorkflowsWorkflowRouteImport } from './routes/_shell.work
 import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
 import { Route as KitExamplesNameRouteImport } from './routes/kit_.examples.$name'
 import { Route as ShellBrainSectionsSectionIdRouteImport } from './routes/_shell.brain.sections.$sectionId'
+import { Route as ShellBrainCollectionsIndexRouteImport } from './routes/_shell.brain_.collections.index'
+import { Route as ShellBrainCollectionsCollectionRouteImport } from './routes/_shell.brain_.collections.$collection'
 import { Route as ShellDomainsEngineIndexRouteImport } from './routes/_shell.domains.$engine.index'
 import { Route as ShellEnginesEngineIndexRouteImport } from './routes/_shell.engines.$engine.index'
 import { Route as ShellLandscapeAppIdIndexRouteImport } from './routes/_shell.landscape.$appId.index'
@@ -251,17 +251,6 @@ const ShellIntegrationsIntegrationRoute =
     path: '/integrations/$integration',
     getParentRoute: () => ShellRoute,
   } as any)
-const ShellKnowledgeIndexRoute = ShellKnowledgeIndexRouteImport.update({
-  id: '/knowledge/',
-  path: '/knowledge/',
-  getParentRoute: () => ShellRoute,
-} as any)
-const ShellKnowledgeCollectionRoute =
-  ShellKnowledgeCollectionRouteImport.update({
-    id: '/knowledge/$collection',
-    path: '/knowledge/$collection',
-    getParentRoute: () => ShellRoute,
-  } as any)
 const ShellLandscapeIndexRoute = ShellLandscapeIndexRouteImport.update({
   id: '/landscape/',
   path: '/landscape/',
@@ -425,6 +414,18 @@ const ShellBrainSectionsSectionIdRoute =
     id: '/sections/$sectionId',
     path: '/sections/$sectionId',
     getParentRoute: () => ShellBrainRoute,
+  } as any)
+const ShellBrainCollectionsIndexRoute =
+  ShellBrainCollectionsIndexRouteImport.update({
+    id: '/brain_/collections/',
+    path: '/brain/collections/',
+    getParentRoute: () => ShellRoute,
+  } as any)
+const ShellBrainCollectionsCollectionRoute =
+  ShellBrainCollectionsCollectionRouteImport.update({
+    id: '/brain_/collections/$collection',
+    path: '/brain/collections/$collection',
+    getParentRoute: () => ShellRoute,
   } as any)
 const ShellDomainsEngineIndexRoute = ShellDomainsEngineIndexRouteImport.update({
   id: '/domains/$engine/',
@@ -609,7 +610,6 @@ export interface FileRoutesByFullPath {
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/brain/memory': typeof ShellBrainMemoryRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
-  '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
   '/landscape/$appId': typeof ShellLandscapeAppIdRouteWithChildren
   '/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
   '/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
@@ -641,13 +641,13 @@ export interface FileRoutesByFullPath {
   '/domains/': typeof ShellDomainsIndexRoute
   '/engines/': typeof ShellEnginesIndexRoute
   '/integrations/': typeof ShellIntegrationsIndexRoute
-  '/knowledge/': typeof ShellKnowledgeIndexRoute
   '/landscape/': typeof ShellLandscapeIndexRoute
   '/onboarding/': typeof ShellOnboardingIndexRoute
   '/policies/': typeof ShellPoliciesIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
+  '/brain/collections/$collection': typeof ShellBrainCollectionsCollectionRoute
   '/landscape/$appId/audit': typeof ShellLandscapeAppIdAuditRoute
   '/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
   '/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
@@ -660,6 +660,7 @@ export interface FileRoutesByFullPath {
   '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/apps/$app/screens/$screen': typeof AppsAppScreensScreenRoute
+  '/brain/collections/': typeof ShellBrainCollectionsIndexRoute
   '/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/engines/$engine/': typeof ShellEnginesEngineIndexRoute
   '/landscape/$appId/': typeof ShellLandscapeAppIdIndexRoute
@@ -698,7 +699,6 @@ export interface FileRoutesByTo {
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/brain/memory': typeof ShellBrainMemoryRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
-  '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
   '/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
   '/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
   '/onboarding/interviewers': typeof ShellOnboardingInterviewersRoute
@@ -729,13 +729,13 @@ export interface FileRoutesByTo {
   '/domains': typeof ShellDomainsIndexRoute
   '/engines': typeof ShellEnginesIndexRoute
   '/integrations': typeof ShellIntegrationsIndexRoute
-  '/knowledge': typeof ShellKnowledgeIndexRoute
   '/landscape': typeof ShellLandscapeIndexRoute
   '/onboarding': typeof ShellOnboardingIndexRoute
   '/policies': typeof ShellPoliciesIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
+  '/brain/collections/$collection': typeof ShellBrainCollectionsCollectionRoute
   '/landscape/$appId/audit': typeof ShellLandscapeAppIdAuditRoute
   '/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
   '/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
@@ -748,6 +748,7 @@ export interface FileRoutesByTo {
   '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/apps/$app/screens/$screen': typeof AppsAppScreensScreenRoute
+  '/brain/collections': typeof ShellBrainCollectionsIndexRoute
   '/domains/$engine': typeof ShellDomainsEngineIndexRoute
   '/engines/$engine': typeof ShellEnginesEngineIndexRoute
   '/landscape/$appId': typeof ShellLandscapeAppIdIndexRoute
@@ -791,7 +792,6 @@ export interface FileRoutesById {
   '/_shell/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/_shell/brain/memory': typeof ShellBrainMemoryRoute
   '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
-  '/_shell/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
   '/_shell/landscape/$appId': typeof ShellLandscapeAppIdRouteWithChildren
   '/_shell/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
   '/_shell/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
@@ -823,13 +823,13 @@ export interface FileRoutesById {
   '/_shell/domains/': typeof ShellDomainsIndexRoute
   '/_shell/engines/': typeof ShellEnginesIndexRoute
   '/_shell/integrations/': typeof ShellIntegrationsIndexRoute
-  '/_shell/knowledge/': typeof ShellKnowledgeIndexRoute
   '/_shell/landscape/': typeof ShellLandscapeIndexRoute
   '/_shell/onboarding/': typeof ShellOnboardingIndexRoute
   '/_shell/policies/': typeof ShellPoliciesIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
   '/_shell/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
+  '/_shell/brain_/collections/$collection': typeof ShellBrainCollectionsCollectionRoute
   '/_shell/landscape/$appId/audit': typeof ShellLandscapeAppIdAuditRoute
   '/_shell/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
   '/_shell/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
@@ -842,6 +842,7 @@ export interface FileRoutesById {
   '/_shell/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/_shell/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/apps/$app/screens/$screen': typeof AppsAppScreensScreenRoute
+  '/_shell/brain_/collections/': typeof ShellBrainCollectionsIndexRoute
   '/_shell/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/_shell/engines/$engine/': typeof ShellEnginesEngineIndexRoute
   '/_shell/landscape/$appId/': typeof ShellLandscapeAppIdIndexRoute
@@ -885,7 +886,6 @@ export interface FileRouteTypes {
     | '/brain/$noteId'
     | '/brain/memory'
     | '/integrations/$integration'
-    | '/knowledge/$collection'
     | '/landscape/$appId'
     | '/onboarding/agreements'
     | '/onboarding/ai-use'
@@ -917,13 +917,13 @@ export interface FileRouteTypes {
     | '/domains/'
     | '/engines/'
     | '/integrations/'
-    | '/knowledge/'
     | '/landscape/'
     | '/onboarding/'
     | '/policies/'
     | '/settings/'
     | '/workflows/'
     | '/brain/sections/$sectionId'
+    | '/brain/collections/$collection'
     | '/landscape/$appId/audit'
     | '/landscape/$appId/connections'
     | '/landscape/$appId/data'
@@ -936,6 +936,7 @@ export interface FileRouteTypes {
     | '/policies/rules/$ruleId'
     | '/workflows/$app/$workflow'
     | '/apps/$app/screens/$screen'
+    | '/brain/collections/'
     | '/domains/$engine/'
     | '/engines/$engine/'
     | '/landscape/$appId/'
@@ -974,7 +975,6 @@ export interface FileRouteTypes {
     | '/brain/$noteId'
     | '/brain/memory'
     | '/integrations/$integration'
-    | '/knowledge/$collection'
     | '/onboarding/agreements'
     | '/onboarding/ai-use'
     | '/onboarding/interviewers'
@@ -1005,13 +1005,13 @@ export interface FileRouteTypes {
     | '/domains'
     | '/engines'
     | '/integrations'
-    | '/knowledge'
     | '/landscape'
     | '/onboarding'
     | '/policies'
     | '/settings'
     | '/workflows'
     | '/brain/sections/$sectionId'
+    | '/brain/collections/$collection'
     | '/landscape/$appId/audit'
     | '/landscape/$appId/connections'
     | '/landscape/$appId/data'
@@ -1024,6 +1024,7 @@ export interface FileRouteTypes {
     | '/policies/rules/$ruleId'
     | '/workflows/$app/$workflow'
     | '/apps/$app/screens/$screen'
+    | '/brain/collections'
     | '/domains/$engine'
     | '/engines/$engine'
     | '/landscape/$appId'
@@ -1066,7 +1067,6 @@ export interface FileRouteTypes {
     | '/_shell/brain/$noteId'
     | '/_shell/brain/memory'
     | '/_shell/integrations/$integration'
-    | '/_shell/knowledge/$collection'
     | '/_shell/landscape/$appId'
     | '/_shell/onboarding/agreements'
     | '/_shell/onboarding/ai-use'
@@ -1098,13 +1098,13 @@ export interface FileRouteTypes {
     | '/_shell/domains/'
     | '/_shell/engines/'
     | '/_shell/integrations/'
-    | '/_shell/knowledge/'
     | '/_shell/landscape/'
     | '/_shell/onboarding/'
     | '/_shell/policies/'
     | '/_shell/settings/'
     | '/_shell/workflows/'
     | '/_shell/brain/sections/$sectionId'
+    | '/_shell/brain_/collections/$collection'
     | '/_shell/landscape/$appId/audit'
     | '/_shell/landscape/$appId/connections'
     | '/_shell/landscape/$appId/data'
@@ -1117,6 +1117,7 @@ export interface FileRouteTypes {
     | '/_shell/policies/rules/$ruleId'
     | '/_shell/workflows/$app/$workflow'
     | '/apps/$app/screens/$screen'
+    | '/_shell/brain_/collections/'
     | '/_shell/domains/$engine/'
     | '/_shell/engines/$engine/'
     | '/_shell/landscape/$appId/'
@@ -1362,20 +1363,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellIntegrationsIntegrationRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/knowledge/': {
-      id: '/_shell/knowledge/'
-      path: '/knowledge'
-      fullPath: '/knowledge/'
-      preLoaderRoute: typeof ShellKnowledgeIndexRouteImport
-      parentRoute: typeof ShellRoute
-    }
-    '/_shell/knowledge/$collection': {
-      id: '/_shell/knowledge/$collection'
-      path: '/knowledge/$collection'
-      fullPath: '/knowledge/$collection'
-      preLoaderRoute: typeof ShellKnowledgeCollectionRouteImport
-      parentRoute: typeof ShellRoute
-    }
     '/_shell/landscape/': {
       id: '/_shell/landscape/'
       path: '/landscape'
@@ -1599,6 +1586,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/brain/sections/$sectionId'
       preLoaderRoute: typeof ShellBrainSectionsSectionIdRouteImport
       parentRoute: typeof ShellBrainRoute
+    }
+    '/_shell/brain_/collections/': {
+      id: '/_shell/brain_/collections/'
+      path: '/brain/collections'
+      fullPath: '/brain/collections/'
+      preLoaderRoute: typeof ShellBrainCollectionsIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/brain_/collections/$collection': {
+      id: '/_shell/brain_/collections/$collection'
+      path: '/brain/collections/$collection'
+      fullPath: '/brain/collections/$collection'
+      preLoaderRoute: typeof ShellBrainCollectionsCollectionRouteImport
+      parentRoute: typeof ShellRoute
     }
     '/_shell/domains/$engine/': {
       id: '/_shell/domains/$engine/'
@@ -1934,21 +1935,21 @@ interface ShellRouteChildren {
   ShellIndexRoute: typeof ShellIndexRoute
   ShellAppsAppRoute: typeof ShellAppsAppRoute
   ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
-  ShellKnowledgeCollectionRoute: typeof ShellKnowledgeCollectionRoute
   ShellLandscapeAppIdRoute: typeof ShellLandscapeAppIdRouteWithChildren
   ShellWorkflowsWorkflowRoute: typeof ShellWorkflowsWorkflowRoute
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
   ShellDomainsIndexRoute: typeof ShellDomainsIndexRoute
   ShellEnginesIndexRoute: typeof ShellEnginesIndexRoute
   ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
-  ShellKnowledgeIndexRoute: typeof ShellKnowledgeIndexRoute
   ShellLandscapeIndexRoute: typeof ShellLandscapeIndexRoute
   ShellPoliciesIndexRoute: typeof ShellPoliciesIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
+  ShellBrainCollectionsCollectionRoute: typeof ShellBrainCollectionsCollectionRoute
   ShellLinksAppSurfaceRoute: typeof ShellLinksAppSurfaceRoute
   ShellPoliciesDocumentsPolicyIdRoute: typeof ShellPoliciesDocumentsPolicyIdRoute
   ShellPoliciesRulesRuleIdRoute: typeof ShellPoliciesRulesRuleIdRoute
   ShellWorkflowsAppWorkflowRoute: typeof ShellWorkflowsAppWorkflowRoute
+  ShellBrainCollectionsIndexRoute: typeof ShellBrainCollectionsIndexRoute
   ShellDomainsEngineIndexRoute: typeof ShellDomainsEngineIndexRoute
   ShellEnginesEngineIndexRoute: typeof ShellEnginesEngineIndexRoute
   ShellDomainsEngineAppsScreenRoute: typeof ShellDomainsEngineAppsScreenRoute
@@ -1972,21 +1973,21 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellIndexRoute: ShellIndexRoute,
   ShellAppsAppRoute: ShellAppsAppRoute,
   ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
-  ShellKnowledgeCollectionRoute: ShellKnowledgeCollectionRoute,
   ShellLandscapeAppIdRoute: ShellLandscapeAppIdRouteWithChildren,
   ShellWorkflowsWorkflowRoute: ShellWorkflowsWorkflowRoute,
   ShellAppsIndexRoute: ShellAppsIndexRoute,
   ShellDomainsIndexRoute: ShellDomainsIndexRoute,
   ShellEnginesIndexRoute: ShellEnginesIndexRoute,
   ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,
-  ShellKnowledgeIndexRoute: ShellKnowledgeIndexRoute,
   ShellLandscapeIndexRoute: ShellLandscapeIndexRoute,
   ShellPoliciesIndexRoute: ShellPoliciesIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
+  ShellBrainCollectionsCollectionRoute: ShellBrainCollectionsCollectionRoute,
   ShellLinksAppSurfaceRoute: ShellLinksAppSurfaceRoute,
   ShellPoliciesDocumentsPolicyIdRoute: ShellPoliciesDocumentsPolicyIdRoute,
   ShellPoliciesRulesRuleIdRoute: ShellPoliciesRulesRuleIdRoute,
   ShellWorkflowsAppWorkflowRoute: ShellWorkflowsAppWorkflowRoute,
+  ShellBrainCollectionsIndexRoute: ShellBrainCollectionsIndexRoute,
   ShellDomainsEngineIndexRoute: ShellDomainsEngineIndexRoute,
   ShellEnginesEngineIndexRoute: ShellEnginesEngineIndexRoute,
   ShellDomainsEngineAppsScreenRoute: ShellDomainsEngineAppsScreenRoute,

@@ -64,6 +64,10 @@ import type { RunCaller } from "../app-functions.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "../audit-outbox.ts";
 import { forSandbox, requireStepKey, runStubCall } from "../bindings.ts";
 import type { ConnectionGrant } from "../bindings.ts";
+import type { Reader } from "../brain/access.ts";
+import { readAsDelegate } from "../brain/binding.ts";
+import type { CollectionBinding } from "../brain/binding.ts";
+import { brainOf } from "../brain/ports.ts";
 import { workflowRuns } from "../db/core/schema.ts";
 import {
   decisionDeadline,
@@ -76,10 +80,6 @@ import type {
   DecisionOutcome,
   DecisionRecipient,
 } from "../decisions/decisions.ts";
-import type { Reader } from "../knowledge/access.ts";
-import { readAsDelegate } from "../knowledge/binding.ts";
-import type { CollectionBinding } from "../knowledge/binding.ts";
-import { brainOf } from "../knowledge/ports.ts";
 import { models } from "../models.ts";
 import { authorize, requireActivePerson } from "../permissions.ts";
 import type { StepModel } from "../resource-bindings.ts";
@@ -2755,7 +2755,7 @@ export class RunHost extends RpcTarget {
    * issue). The same service and checks as every caller's recall: the
    * Brain refuses without the `brain` grant (`brain.denied`), and a filter
    * naming a collection the run may not read (`brain.not_found`); what it
-   * read is recorded with the run (knowledge/access.ts, `noteProvenance`).
+   * read is recorded with the run (brain/access.ts, `noteProvenance`).
    */
   async #callBrain(
     attempt: StepAttempt,

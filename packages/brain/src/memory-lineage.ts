@@ -369,7 +369,7 @@ export const memoriesLineage = async <C>(
   await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       detail: { read: "memory.lineage", records: 1 },
     },
     ...sources.values()

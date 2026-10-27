@@ -19,9 +19,9 @@ import {
   stubsOf,
 } from "./bindings.ts";
 import type { ConnectionGrant } from "./bindings.ts";
+import type { AppCollectionBinding } from "./brain/app-binding.ts";
 import { appHost } from "./durable-objects.ts";
 import type { AppGuestsBinding } from "./guests-binding.ts";
-import type { AppCollectionBinding } from "./knowledge/app-binding.ts";
 import { activePermissions, authorizeExport } from "./permissions.ts";
 import type { AppStatisticsBinding } from "./statistics-binding.ts";
 import { requireAttemptHolds } from "./workflows/attempt-fence.ts";

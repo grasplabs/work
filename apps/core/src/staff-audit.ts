@@ -82,7 +82,7 @@ const targetKeyOf = (target: object): string => {
 };
 
 /**
- * A target's name as a surface's: `KnowledgeRpc` is `knowledge`. Read from
+ * A target's name as a surface's: `BrainDocumentsRpc` is `brain`. Read from
  * its class's name, which holds as core's bundle isn't minified.
  */
 const namespaceOf = (target: object): string => {

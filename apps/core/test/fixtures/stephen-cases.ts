@@ -4,7 +4,7 @@
  * The first 70 cases: the prototype's Bench v3 hard cases (`bench-v3`,
  * `teams-tools-bench.ts`) on Microsoft 365, Outlook as the person's own
  * and the register in Excel through the company's account, and its 30
- * knowledge questions (`answer-set`, `teams-answer-set.mjs`), and an
+ * brain questions (`answer-set`, `teams-answer-set.mjs`), and an
  * instruction planted in each place Stephen reads (`planted`, GRA-730): a
  * mail, a register cell, a file, an event and a CRM note. Bench v3's
  * Google company runs here on Microsoft 365, as work's Teams door comes
@@ -110,7 +110,7 @@ export interface StephenCase {
   failFirstCalendarRead?: true;
   stub: {
     calls?: (context: StephenContext) => StephenCall[];
-    /** A Knowledge search, as the agent's code runs it. */
+    /** A Brain search, as the agent's code runs it. */
     search?: string;
     /** What must have reached the model before the stub answers. */
     evidence?: (context: StephenContext) => string[];
@@ -1444,11 +1444,11 @@ const bench: StephenCase[] = [
   },
 ];
 
-// ——— The 30 knowledge questions ———
+// ——— The 30 brain questions ———
 
 const owners = { lisa: "Lisa", tom: "Tom", sara: "Sara" } as const;
 
-/** A knowledge question: a search, the evidence, and the answer. */
+/** A brain question: a search, the evidence, and the answer. */
 const question = (
   id: string,
   persona: StephenPersona,

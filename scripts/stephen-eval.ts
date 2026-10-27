@@ -17,12 +17,12 @@ import { z } from "zod";
 
 /**
  * Stephen's files: his instructions and tools (the agent and its
- * connections, Knowledge's tools), the card path (the chat door and its
+ * connections, the Brain's tools), the card path (the chat door and its
  * cards, the Chat SDK package), the connectors' tools, whose classes
  * decide what he may do alone, and the eval itself.
  */
 export const stephenFiles =
-  /^(?:apps\/core\/src\/(?:agent(?:-[\w-]+)?\.ts|channels\/.+|knowledge\/tools\.ts)|packages\/chat\/.+|packages\/connectors\/[^/]+\/src\/.+|packages\/connector-kit\/src\/manifest\.ts|apps\/core\/test\/(?:stephen-[^/]+|fixtures\/stephen-[^/]+|brain-gateway-provider\.ts)|apps\/core\/vite\.stephen(?:-model)?\.config\.ts|scripts\/stephen-eval\.ts|\.github\/workflows\/stephen-weekly\.yml)$/u;
+  /^(?:apps\/core\/src\/(?:agent(?:-[\w-]+)?\.ts|channels\/.+|brain\/tools\.ts)|packages\/chat\/.+|packages\/connectors\/[^/]+\/src\/.+|packages\/connector-kit\/src\/manifest\.ts|apps\/core\/test\/(?:stephen-[^/]+|fixtures\/stephen-[^/]+|brain-gateway-provider\.ts)|apps\/core\/vite\.stephen(?:-model)?\.config\.ts|scripts\/stephen-eval\.ts|\.github\/workflows\/stephen-weekly\.yml)$/u;
 
 /** Whether any of `paths` is one of Stephen's files. */
 export const touchesStephen = (paths: readonly string[]): boolean =>

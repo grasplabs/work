@@ -210,7 +210,7 @@ const hasTable = (db: DatabaseSync, table: string): boolean =>
 
 /**
  * The local D1 database that has `table`: core's (`workflow_runs`) or
- * Knowledge's (`collections`), as Miniflare keeps them, one file each.
+ * The Brain's (`collections`), as Miniflare keeps them, one file each.
  */
 export const localD1 = (table: string): DatabaseSync => {
   const dir = path.join(stateDir, "v3/d1/miniflare-D1DatabaseObject");

@@ -14,7 +14,7 @@
  *
  * - each file with the type its extension says, which core checks before
  *   it runs what it read (packages/compiler/src/index.ts,
- *   src/knowledge/extract.ts);
+ *   src/brain/extract.ts);
  * - a path that names no file with the frontend's `index.html`
  *   (`not_found_handling: "single-page-application"`), which src/entry.ts
  *   relies on for the frontend's own routes, and which core's readers take

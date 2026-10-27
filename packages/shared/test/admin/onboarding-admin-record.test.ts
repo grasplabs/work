@@ -198,9 +198,8 @@ describe("counting a workflow as known by hand", () => {
 
   it("raises what Grasp knows about the organization", () => {
     expect(
-      at(noordkade, { counted: ["claims", "renewal", "change"] }).knowledge
-        .percent
-    ).toBeGreaterThan(at(noordkade).knowledge.percent);
+      at(noordkade, { counted: ["claims", "renewal", "change"] }).brain.percent
+    ).toBeGreaterThan(at(noordkade).brain.percent);
   });
 });
 

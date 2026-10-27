@@ -7,7 +7,7 @@ import { appWith, workflowFiles } from "./workflow-apps.ts";
 
 // The board's goals (GRA-516), kept as the brain's records (`goal`,
 // `goalVersion`, `goalLink`) and read by every member in `brain.goals`
-// and `brain.read`. What can go wrong, tried here: someone who isn't an
+// and `brain.readWorkspace`. What can go wrong, tried here: someone who isn't an
 // admin setting or changing a goal; a goal written over, rather than
 // worded again; a wording or link for a goal that doesn't exist, or a link
 // to a workflow the company doesn't have; a goal that names an App, or a
@@ -119,7 +119,7 @@ describe("the board's goals", slow, () => {
       link(ids.goal, app, "chase", false),
       link(ids.goal, app, "chase"),
     ]);
-    const workspace = await user.api.brain.read();
+    const workspace = await user.api.brain.readWorkspace();
     const inRead = workspace.goals.find(({ id }) => id === ids.goal);
 
     expect({
@@ -127,7 +127,7 @@ describe("the board's goals", slow, () => {
       // A member who can't open the App reads the goal, never its workflows.
       outsider: await goalAs(outsider, ids.goal),
       builder: await goalAs(builder, ids.goal),
-      // `brain.read` gives the same goal, with its wordings' sources.
+      // `brain.readWorkspace` gives the same goal, with its wordings' sources.
       read: inRead?.versions.map(({ sourceId, date }) => [sourceId, date]),
       readWorkflows: inRead?.workflows.length,
       readSource: workspace.sources.some(({ id }) => id === ids.source),

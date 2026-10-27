@@ -100,20 +100,20 @@ const probingCode = (
       seen.push("refused: " + String(error?.message ?? error));
     }
   };
-  await attempt(() => env.knowledge.catalog());
+  await attempt(() => env.brain.catalog());
   for (const query of ${JSON.stringify(queries)}) {
     await attempt(async () => {
-      const { hits } = await env.knowledge.search(query, { limit: 10 });
+      const { hits } = await env.brain.search(query, { limit: 10 });
       const reads = [];
       for (const hit of hits) {
-        reads.push(await env.knowledge.read(hit.documentId, { section: hit.section }));
+        reads.push(await env.brain.read(hit.documentId, { section: hit.section }));
       }
       return { hits, reads };
     });
-    await attempt(async () => (await env.knowledge.recall({ query })).items);
+    await attempt(async () => (await env.brain.recall({ query })).items);
   }
   for (const id of ${JSON.stringify(ids)}) {
-    await attempt(() => env.knowledge.read(id));
+    await attempt(() => env.brain.read(id));
   }
   return seen.join("\\n");
 };`;
@@ -207,7 +207,7 @@ const memoryIdOf = async (
   person: Awaited<ReturnType<typeof signedInApi>>
 ): Promise<string> => {
   const { personal } = await person.api.memory.collections();
-  const { documents } = await person.api.knowledge.listDocuments(personal, {});
+  const { documents } = await person.api.brain.listDocuments(personal, {});
   const memory = documents.find(({ path }) => path === "USER.md");
   if (memory === undefined) {
     throw new Error("Expected the persona's USER.md");
@@ -353,7 +353,7 @@ export const askedInWorkspace = async (
       leaked: [],
       read:
         stand.gateway.requests.length > from ||
-        events.some(({ action }) => action.startsWith("knowledge.")),
+        events.some(({ action }) => action.startsWith("brain.")),
       refusedWith,
     };
   }
@@ -412,7 +412,7 @@ export const askedThroughDoor = async (
       leaked: [],
       read:
         stand.gateway.requests.length > from ||
-        events.some(({ action }) => action.startsWith("knowledge.")),
+        events.some(({ action }) => action.startsWith("brain.")),
       refusedWith: `${lines.length} line${lines.length === 1 ? "" : "s"}`,
     };
   }

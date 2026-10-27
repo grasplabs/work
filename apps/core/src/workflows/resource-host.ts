@@ -433,7 +433,7 @@ export interface ResourceHostHooks {
    * A run an App's test started (fixture-runs.ts): it acts for a fixture's
    * principal, no member of the organization, and reaches nothing outside
    * its own code and sealed modules. Every call that would (an App's, a
-   * store's, a model's, a connection's, Knowledge's, a template's, an
+   * store's, a model's, a connection's, the Brain's, a template's, an
    * action's) is refused (`resource.unavailable`) before it is built.
    */
   fixture?: true;

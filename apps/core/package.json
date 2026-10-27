@@ -1,7 +1,7 @@
 {
   "name": "@grasp-os/core",
   "private": true,
-  "description": "The core Worker: sign-in, knowledge, Apps, workflows, model gateway, audit log",
+  "description": "The core Worker: sign-in, brain, Apps, workflows, model gateway, audit log",
   "license": "AGPL-3.0-only",
   "type": "module",
   "imports": {
@@ -15,7 +15,7 @@
     "dev": "vp -C ../web build --mode development && vp run build && node ../connect/build.ts && node ../../scripts/d1-local-migrations.ts --persist-to \"${DEV_PERSIST_TO:-.wrangler/state}\" -c wrangler.jsonc -c ../connect/wrangler.jsonc && wrangler dev -c wrangler.jsonc -c ../connect/wrangler.jsonc --persist-to \"${DEV_PERSIST_TO:-.wrangler/state}\" --var DEV_SKIP_ROUTER_SECRET:true --var DURABLE_OBJECT_JURISDICTION:none --var RUNTIME_PROFILE:workerd --var SANDBOX_IN_PROCESS:unbounded",
     "deploy": "vp run build && wrangler deploy --var RUNTIME_PROFILE:cloudflare",
     "typegen": "wrangler types --include-runtime=false -c wrangler.jsonc -c ../connect/wrangler.jsonc && node build-connector-catalog.ts",
-    "db:migrate": "wrangler d1 migrations apply DB --remote && wrangler d1 migrations apply KNOWLEDGE --remote",
+    "db:migrate": "wrangler d1 migrations apply DB --remote && wrangler d1 migrations apply BRAIN_DB --remote",
     "db:generate": "drizzle-kit generate --config src/db/core/drizzle.config.ts && drizzle-kit generate --config src/db/workspace/drizzle.config.ts && drizzle-kit generate --config src/db/audit-log/drizzle.config.ts && drizzle-kit generate --config src/db/onboarding/drizzle.config.ts && drizzle-kit generate --config src/db/model-ledger/drizzle.config.ts && drizzle-kit generate --config src/db/data-store/drizzle.config.ts"
   },
   "dependencies": {

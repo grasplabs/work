@@ -98,7 +98,7 @@ describe("a release laid out for Wrangler", () => {
       compatibility_date: manifest.compatibilityDate,
       d1_databases: [
         { binding: "DB", database_name: "grasp-os-core" },
-        { binding: "KNOWLEDGE", database_name: "grasp-os-knowledge" },
+        { binding: "BRAIN_DB", database_name: "grasp-os-knowledge" },
       ],
       services: [{ binding: "CONNECT", service: "grasp-os-connect" }],
       assets: { directory: "assets", binding: "ASSETS" },

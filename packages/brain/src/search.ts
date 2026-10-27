@@ -7,22 +7,22 @@ import type { ReadRecord, Allowed } from "./authorize.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { readableCollection } from "./collections.ts";
-import { toHex } from "./encoding.ts";
-import { collectionIdSchema, documentIdSchema } from "./ids.ts";
 import {
   collectionSearchOptionsSchema,
   documentTypeOf,
-  knowledgeErrors,
+  collectionErrors,
   searchCoverageCap,
   searchOptionsSchema,
   searchQuerySchema,
-} from "./knowledge.ts";
+} from "./documents-contract.ts";
 import type {
   Provenance,
   SearchCoverage,
   SearchHit,
   SearchResults,
-} from "./knowledge.ts";
+} from "./documents-contract.ts";
+import { toHex } from "./encoding.ts";
+import { collectionIdSchema, documentIdSchema } from "./ids.ts";
 import { nearestCollectionsMax, nearestDetail } from "./search-detail.ts";
 
 // Full-text search over sections, in two FTS5 indexes kept by triggers on
@@ -347,7 +347,7 @@ const excerptSql = (terms: readonly string[]): SQL => {
   return sql`substr(sections.text, max(1, ${at} - ${sectionTextMax / 2}), ${sectionTextMax})`;
 };
 
-/** A section a search found, as Knowledge holds it: its hit, and more. */
+/** A section a search found, as the Brain holds it: its hit, and more. */
 export interface FoundSection {
   hit: SearchHit;
   /** The document's version the section is of. */
@@ -383,10 +383,9 @@ const queryKey = async <C>(
   brain: Brain<C>,
   terms: string[]
 ): Promise<string> => {
-  const key = await brain.ports.keys.hmac(
-    "grasp-os knowledge search query key",
-    ["sign"]
-  );
+  const key = await brain.ports.keys.hmac("grasp-os brain search query key", [
+    "sign",
+  ]);
   const normalized = terms
     .map((term) => term.normalize("NFKD").replaceAll(/\p{M}/gu, ""))
     .toSorted()
@@ -500,7 +499,7 @@ const searchRecord = async <C>(
   // couldn't find, and automated recalls would skew those.
   if (recall) {
     return {
-      action: "knowledge.search",
+      action: "brain.search",
       target,
       documentIds: hits.map(({ documentId }) => documentId),
       detail: { terms: terms.length, hits: hits.length, via: "recall" },
@@ -508,7 +507,7 @@ const searchRecord = async <C>(
   }
   if (hits.length === 0) {
     return {
-      action: "knowledge.search.empty",
+      action: "brain.search.empty",
       target,
       detail: {
         terms: terms.length,
@@ -518,7 +517,7 @@ const searchRecord = async <C>(
     };
   }
   return {
-    action: "knowledge.search",
+    action: "brain.search",
     target,
     documentIds: hits.map(({ documentId }) => documentId),
     detail: { terms: terms.length, hits: hits.length },
@@ -581,17 +580,21 @@ export const searchSections = async <C>(
   provenance: Provenance;
 }> => {
   const terms = termsOf(
-    knowledgeErrors.parse("knowledge.invalid", searchQuerySchema, query)
+    collectionErrors.parse("brain.document_invalid", searchQuerySchema, query)
   );
   const {
     collectionId: scope,
     type,
     limit,
   } = only === undefined
-    ? knowledgeErrors.parse("knowledge.invalid", searchOptionsSchema, options)
+    ? collectionErrors.parse(
+        "brain.document_invalid",
+        searchOptionsSchema,
+        options
+      )
     : {
-        ...knowledgeErrors.parse(
-          "knowledge.invalid",
+        ...collectionErrors.parse(
+          "brain.document_invalid",
           collectionSearchOptionsSchema,
           options
         ),

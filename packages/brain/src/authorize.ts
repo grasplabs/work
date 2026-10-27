@@ -6,7 +6,7 @@ import { inList, notInList } from "./db/d1.ts";
 import { collections, documents } from "./db/schema.ts";
 import type { DetailValue } from "./events.ts";
 
-// What a reader may read, as the host decides it: Knowledge holds no
+// What a reader may read, as the host decides it: the Brain holds no
 // roles, teams, people or Apps. The host's `authorize` port (ports.ts)
 // answers with the collections a reader may read now and, for a
 // collection whose documents have audiences of their own, the paths in it
@@ -79,18 +79,18 @@ export const allowedFor = async <Caller>(
 ): Promise<Allowed> => allowedOf(await authorize(reader));
 
 /**
- * A read, as Knowledge reports it to the host's `onRead` port (ports.ts),
- * which records it: which read (`knowledge.read`, with `detail.read`
+ * A read, as Brain reports it to the host's `onRead` port (ports.ts),
+ * which records it: which read (`brain.read`, with `detail.read`
  * naming it, or a search), what it was of, and the documents it returned
  * beyond that (a search's hits). Identifiers and counts only, never what
  * was read or searched for.
  */
 export interface ReadRecord {
   action:
-    | "knowledge.read"
-    | "knowledge.search"
-    | "knowledge.search.empty"
-    | "knowledge.skill.select";
+    | "brain.read"
+    | "brain.search"
+    | "brain.search.empty"
+    | "brain.skill.select";
   target?: { type: "document" | "collection"; id: string };
   documentIds?: string[];
   detail: Record<string, DetailValue>;

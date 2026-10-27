@@ -1,7 +1,4 @@
-import type {
-  KnowledgeSignal,
-  KnowledgeSignals,
-} from "@grasp-os/shared/knowledge-signals";
+import type { BrainSignal, BrainSignals } from "@grasp-os/shared/brain-signals";
 import type {
   ImprovementSignal,
   ImprovementSignals,
@@ -37,19 +34,19 @@ import { WidgetBlock } from "./widget-block.tsx";
 
 // What could be better, from the signals core works out daily: workflows
 // that keep failing, waiting or being corrected, what they cost, searches
-// that found nothing, and Knowledge nobody reads or that is past its
+// that found nothing, and Brain nobody reads or that is past its
 // review. Each in plain words, with the counts core gives (never a score
 // or a ranking), linking to what it is about, and "Ask Grasp" where a chat
 // can help: asking the agent to fix a run that failed. Admins see every
 // improvement signal, an engine's builders that engine's, and a
-// collection's owners its Knowledge signals; someone with none to see has
+// collection's owners its Brain signals; someone with none to see has
 // no widget. On the dashboard's widget board, its block counts the
 // signals by kind, and its full view lists every one.
 
 /** What the dashboard read of the signals: each read on its own, none for someone it doesn't apply to. */
 export interface Signals {
   improvement: ImprovementSignals | undefined;
-  knowledge: KnowledgeSignals | undefined;
+  brain: BrainSignals | undefined;
   /** Engine names by ID. */
   engines: ReadonlyMap<string, string>;
   /** The model a fix is asked with, if any. */
@@ -217,7 +214,7 @@ const ImprovementRow = ({
   return (
     <SignalRow kind="unanswered_question">
       <Trans>
-        A Knowledge search from {about} found nothing{" "}
+        A Brain search from {about} found nothing{" "}
         <Plural one="once" other="# times" value={searches} />, by{" "}
         <Plural one="# asker" other="# askers" value={askers} />.
       </Trans>
@@ -225,7 +222,7 @@ const ImprovementRow = ({
   );
 };
 
-/** Dismissing a Knowledge signal until something new comes, as its owner can. */
+/** Dismissing a Brain signal until something new comes, as its owner can. */
 const Dismiss = ({ id, label }: { id: string; label: string }) => {
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
@@ -237,7 +234,7 @@ const Dismiss = ({ id, label }: { id: string; label: string }) => {
         onClick={() => {
           void (async () => {
             await run(async (session) => {
-              await session.knowledgeSignals.dismiss(id);
+              await session.brainSignals.dismiss(id);
             });
             await router.invalidate();
           })();
@@ -252,7 +249,7 @@ const Dismiss = ({ id, label }: { id: string; label: string }) => {
   );
 };
 
-const KnowledgeRow = ({ signal }: { signal: KnowledgeSignal }) => {
+const BrainRow = ({ signal }: { signal: BrainSignal }) => {
   const { t } = useLingui();
   const { collection } = signal;
   const where = (
@@ -260,7 +257,7 @@ const KnowledgeRow = ({ signal }: { signal: KnowledgeSignal }) => {
       className="underline"
       params={{ collection: collection.id }}
       search={{}}
-      to="/knowledge/$collection"
+      to="/brain/collections/$collection"
     >
       {collection.name}
     </Link>
@@ -287,7 +284,7 @@ const KnowledgeRow = ({ signal }: { signal: KnowledgeSignal }) => {
       className="underline"
       params={{ collection: collection.id }}
       search={{ doc: document.id }}
-      to="/knowledge/$collection"
+      to="/brain/collections/$collection"
     >
       {document.title}
     </Link>
@@ -315,11 +312,8 @@ const KnowledgeRow = ({ signal }: { signal: KnowledgeSignal }) => {
 };
 
 /** When the signals were last worked out: the later of the two. */
-const computedOf = ({
-  improvement,
-  knowledge,
-}: Signals): string | undefined => {
-  const at = [improvement?.computedAt, knowledge?.computedAt].filter(
+const computedOf = ({ improvement, brain }: Signals): string | undefined => {
+  const at = [improvement?.computedAt, brain?.computedAt].filter(
     (time): time is string => typeof time === "string"
   );
   return at.toSorted().at(-1);
@@ -343,8 +337,8 @@ const SignalList = ({ signals }: { signals: Signals }) => {
             signal={signal}
           />
         ))}
-        {signals.knowledge?.signals.map((signal) => (
-          <KnowledgeRow key={signal.id} signal={signal} />
+        {signals.brain?.signals.map((signal) => (
+          <BrainRow key={signal.id} signal={signal} />
         ))}
       </ul>
     </div>
@@ -356,7 +350,7 @@ const SignalKinds = ({ signals }: { signals: Signals }) => {
   const { t, i18n } = useLingui();
   const all = [
     ...(signals.improvement?.signals ?? []),
-    ...(signals.knowledge?.signals ?? []),
+    ...(signals.brain?.signals ?? []),
   ];
   if (all.length === 0) {
     return (
@@ -391,7 +385,7 @@ const SignalsInFull = ({ signals }: { signals: Signals }) => {
   const date = computed === undefined ? undefined : formatDate(computed);
   const none =
     (signals.improvement?.signals.length ?? 0) +
-      (signals.knowledge?.signals.length ?? 0) ===
+      (signals.brain?.signals.length ?? 0) ===
     0;
   return (
     <div className="flex flex-col gap-3">

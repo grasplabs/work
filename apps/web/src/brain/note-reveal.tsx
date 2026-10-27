@@ -6,7 +6,7 @@ import { DotsBuild } from "./dots-build.tsx";
 
 /**
  * The way from the brain into a note, as in the prototype (grasplabs/prototype, packages/grasp:
- * components/knowledge/note-reveal.tsx): the atlas goes in on the note's neuron and hands its dots
+ * components/brain/note-reveal.tsx): the atlas goes in on the note's neuron and hands its dots
  * over here; this layer, over the part of the screen the brain and the note share, holds them
  * while the note's page opens underneath, then lets them stream out and lay the page down from
  * its top, the page opening behind them as they land. Quick: it is taken often.

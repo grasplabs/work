@@ -105,7 +105,7 @@ import type { FixtureRunStarted } from "./workflows/fixture-runs.ts";
 //   nothing opens or binds it as a business store, and its object refuses
 //   to be discarded once it is listed (`DataStore.discardFixture`). Its
 //   principals are the fixture's (`fixture-<name>`), never a person of
-//   the organization, and no resource (connection, Knowledge, model) is
+//   the organization, and no resource (connection, Brain, model) is
 //   bound for them: a function that reaches one is refused, as outside
 //   systems aren't the tests' to touch.
 // - A test run dies half-way and leaves its stores: each is recorded

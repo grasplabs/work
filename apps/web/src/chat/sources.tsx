@@ -25,7 +25,7 @@ import { MessageActions } from "./message.tsx";
 // What the chat's answers may hold, in the prototype's sources look
 // (grasplabs/prototype `components/ai-elements/sources.tsx`): the
 // collections and connections core says the chat read from, each
-// collection one link away in Knowledge; and under each answer, the
+// collection one link away in the Brain; and under each answer, the
 // documents it cites, behind "Based on N sources" in the answer's quiet
 // row of actions (`components/chat/citations.tsx` `AnswerSources`). Only
 // what core reports: the page never guesses a source.
@@ -33,7 +33,7 @@ import { MessageActions } from "./message.tsx";
 /** A source the chat read, as the page names it. */
 export interface SourceName {
   name: string;
-  /** A collection opens in Knowledge; a connection is only named. */
+  /** A collection opens in the Brain; a connection is only named. */
   kind: "collection" | "connection";
 }
 
@@ -84,7 +84,7 @@ export const ChatSources = ({
                       className="flex items-center gap-2 font-medium hover:underline"
                       params={{ collection: id }}
                       search={{}}
-                      to="/knowledge/$collection"
+                      to="/brain/collections/$collection"
                     >
                       <BookIcon aria-hidden="true" className="size-4" />
                       {name}
@@ -212,7 +212,7 @@ export const AnswerSources = ({
                   className="group flex items-start gap-2"
                   params={{ collection: collectionId }}
                   search={{ doc: documentId }}
-                  to="/knowledge/$collection"
+                  to="/brain/collections/$collection"
                 >
                   <span className="text-muted-foreground w-4 flex-none text-right tabular-nums">
                     {index + 1}

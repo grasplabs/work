@@ -255,7 +255,7 @@ const everyCard = channelLocales.flatMap((locale) => [
     card: answerCard({
       locale,
       text: "You have a call with Jan at 10:00. [Source 1]",
-      sources: [{ title: "Calls.docx", url: `${grasp}/knowledge/calls` }],
+      sources: [{ title: "Calls.docx", url: `${grasp}/brain/calls` }],
       chatUrl: `${grasp}/chat/1`,
     }),
   },
@@ -266,7 +266,7 @@ const everyCard = channelLocales.flatMap((locale) => [
       text: heavy(200_000),
       sources: Array.from({ length: maxSources + 5 }, (_, index) => ({
         title: heavy(5000),
-        url: `${grasp}/knowledge/${index}/${"a".repeat(2000)}`,
+        url: `${grasp}/brain/${index}/${"a".repeat(2000)}`,
       })),
       chatUrl: `${grasp}/chat/${"a".repeat(2000)}`,
     }),
@@ -418,7 +418,7 @@ describe("Stephen's cards in Teams", () => {
         locale: "fr",
         text: "Voici la réponse.",
         sources: [
-          { title: "Calls [draft]", url: `${grasp}/knowledge/calls` },
+          { title: "Calls [draft]", url: `${grasp}/brain/calls` },
           { title: "Trap", url: ["javascript", "alert(1)"].join(":") },
         ],
         chatUrl: `${grasp}/chat/1`,
@@ -428,7 +428,7 @@ describe("Stephen's cards in Teams", () => {
     expect(texts).toStrictEqual([
       "Voici la réponse.",
       "Sources",
-      `[1. Calls draft](${grasp}/knowledge/calls)`,
+      `[1. Calls draft](${grasp}/brain/calls)`,
       "2. Trap",
     ]);
   });
@@ -463,7 +463,7 @@ describe("Stephen's cards in Teams", () => {
         text: "Here is the answer.",
         sources: Array.from({ length: maxSources + 1 }, (_, index) => ({
           title: `Doc ${index + 1}`,
-          url: `${grasp}/knowledge/${index}`,
+          url: `${grasp}/brain/${index}`,
         })),
         chatUrl: `${grasp}/chat/1`,
       })

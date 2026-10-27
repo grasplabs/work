@@ -13,14 +13,14 @@ import { outcome, signedInApi } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
 // A document the company's admin shares in the onboarding (GRA-298): kept
-// in Knowledge, in a collection only admins read, and read at once through
+// in the Brain, in a collection only admins read, and read at once through
 // the model gateway, which is a fake behind the AI binding here. The ways
 // it can fail, tried here:
 //
 // - The document read as instructions, or its question asked when there's
 //   no answer to pick.
 // - Anyone but an admin sharing or reading it, in the onboarding or in
-//   Knowledge.
+//   Brain.
 // - An old Office file taken, or failing without a way out.
 
 const idp = mockIdp();
@@ -76,11 +76,11 @@ const answering = async <T>(replies: GatewayReply[], run: () => Promise<T>) => {
 
 /** The onboarding's documents collection, as `api` lists it, if it does. */
 const listedBy = async (api: SessionApi) => {
-  const listed = await api.knowledge.listCollections();
+  const listed = await api.brain.listCollections();
   return listed.find(({ id }) => id === onboardingDocumentsCollection);
 };
 
-/** The upload once its extraction in Knowledge has ended. */
+/** The upload once its extraction in the Brain has ended. */
 const ended = async (api: SessionApi, uploadId: string): Promise<Upload> =>
   await vi.waitFor(
     async () => {
@@ -118,7 +118,7 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
     const documents = await admin.onboarding.documents();
     expect({
       reading: shared.reading,
-      knowledge: kept.status,
+      brain: kept.status,
       answer: answered.answer,
       listed: documents.some(({ id }) => id === shared.id),
       asData:
@@ -137,7 +137,7 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
         unclear: reading.unclear,
         ask: { question: reading.question, options: reading.options },
       },
-      knowledge: "ready",
+      brain: "ready",
       answer: "No, it changed",
       listed: true,
       asData: true,
@@ -251,7 +251,7 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
     });
   });
 
-  it("are for admins alone, in the onboarding and in Knowledge", async () => {
+  it("are for admins alone, in the onboarding and in Brain", async () => {
     const { api: user } = await signedInApi(idp, "user");
     const { api: admin } = await signedInApi(idp, "admin");
     await answering([answer(reading)], async () => {
@@ -275,14 +275,14 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
       admin: [forAdmin?.access, forAdmin?.sensitive],
       user: await listedBy(user),
       read: await outcome(
-        user.knowledge.listDocuments(onboardingDocumentsCollection)
+        user.brain.listDocuments(onboardingDocumentsCollection)
       ),
     }).toStrictEqual({
       share: "role.forbidden",
       list: "role.forbidden",
       admin: ["admins", true],
       user: undefined,
-      read: "knowledge.not_found",
+      read: "brain.document_not_found",
     });
   });
 });

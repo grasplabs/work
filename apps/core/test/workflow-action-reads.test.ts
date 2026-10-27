@@ -12,8 +12,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
-import { createCollection } from "../src/knowledge/collection-rules.ts";
-import { saveDocument } from "../src/knowledge/person-writes.ts";
+import { createCollection } from "../src/brain/collection-rules.ts";
+import { saveDocument } from "../src/brain/person-writes.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -34,8 +34,8 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { refusal, unique } from "./sign-in.ts";
 
-// A workflow's own actions reading Knowledge and published templates
-// (resource-reads.ts), from GRA-700's threat model: a knowledge binding is
+// A workflow's own actions reading Brain and published templates
+// (resource-reads.ts), from GRA-700's threat model: a brain binding is
 // one collection, read as the run's person may, with only the operations
 // the action declares; a template binding is one pinned version; each call
 // is decided again and kept as an effect of its own; a sensitive
@@ -103,7 +103,7 @@ const granted = async (
 /** The module of action `look`, declaring `uses` and running `body`. */
 const lookModule = (
   body: string,
-  uses = '[resource.knowledge("docs", { operations: ["search", "read"] }), resource.template("letter")]'
+  uses = '[resource.brain("docs", { operations: ["search", "read"] }), resource.template("letter")]'
 ): string => `import { action, resource, v } from "@grasp-os/sdk/action";
 
 export const look = action({
@@ -152,7 +152,7 @@ const searchesOrReads = lookModule(`if (args.doc.startsWith("search:")) {
 const recalls = lookModule(
   `const pack = await ctx.resources.docs.recall({ query: "leave" });
     return { status: JSON.stringify(pack.items.map(({ citationLocator }) => citationLocator[0] ?? "")) };`,
-  '[resource.knowledge("docs", { operations: ["recall"] }), resource.template("letter")]'
+  '[resource.brain("docs", { operations: ["recall"] }), resource.template("letter")]'
 );
 
 /** The workflow's `brain` permission, granted by `admin`. */
@@ -171,7 +171,7 @@ const brainOf = async (
 /** A definition of `name` calling action `look`, after `before`. */
 const definitionOf = (
   name: string,
-  keys: { knowledge: string; template: string },
+  keys: { brain: string; template: string },
   before: unknown[] = []
 ): string =>
   JSON.stringify({
@@ -187,7 +187,7 @@ const definitionOf = (
           params: {},
           bindings: {
             look: { kind: "operation", contract: "local:code/look.ts#look" },
-            docs: { kind: "knowledge", contract: keys.knowledge },
+            docs: { kind: "brain", contract: keys.brain },
             letter: { kind: "template", contract: keys.template },
           },
         },
@@ -230,12 +230,12 @@ const readingWorkflow = async (
   }: { sensitive?: boolean; team?: boolean; before?: unknown[] } = {}
 ) => {
   const keys = {
-    knowledge: `docs-${unique()}`,
+    brain: `docs-${unique()}`,
     template: `letter-${unique()}`,
   };
   await publishCatalogContract(env, admin, {
-    key: keys.knowledge,
-    kind: "knowledge",
+    key: keys.brain,
+    kind: "brain",
   });
   await publishCatalogContract(env, admin, {
     key: keys.template,
@@ -298,7 +298,7 @@ const readingWorkflow = async (
   });
   await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "docs",
-    target: { kind: "knowledge", permissionId },
+    target: { kind: "brain", permissionId },
     reviewed: { version: 1 },
   });
   const content = { greeting: "Dear" };
@@ -391,7 +391,7 @@ const refusalsOf = async (runId: string) => {
     .map(({ detail }) => ({ call: detail?.call, reason: detail?.reason }));
 };
 
-describe("a workflow action's knowledge and template uses", () => {
+describe("a workflow action's brain and template uses", () => {
   it("search and read their one collection as the run's person, read the pinned template, each call an effect of its own", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -420,9 +420,9 @@ describe("a workflow action's knowledge and template uses", () => {
         },
       },
       receipts: [
-        ["grasp.knowledge", "docs"],
-        ["grasp.knowledge", "docs"],
-        ["grasp.knowledge", "docs"],
+        ["grasp.brain", "docs"],
+        ["grasp.brain", "docs"],
+        ["grasp.brain", "docs"],
         ["grasp.template", "letter"],
       ].flatMap(([call, binding]) =>
         ["started", "done"].map((result) => ({ call, binding, result }))
@@ -447,7 +447,7 @@ describe("a workflow action's knowledge and template uses", () => {
         `const docs = ctx.resources.docs as unknown as Record<string, (request: unknown) => Promise<unknown>>;
     await docs.read?.({ id: args.doc });
     return { status: "read" };`,
-        '[resource.knowledge("docs", { operations: ["search"] }), resource.template("letter")]'
+        '[resource.brain("docs", { operations: ["search"] }), resource.template("letter")]'
       )
     );
     const undeclaredRun = await started(
@@ -627,10 +627,10 @@ describe("a workflow action's knowledge and template uses", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const keys = {
-      knowledge: `docs-${unique()}`,
+      brain: `docs-${unique()}`,
       template: `letter-${unique()}`,
     };
-    for (const kind of ["knowledge", "template"] as const) {
+    for (const kind of ["brain", "template"] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       await publishCatalogContract(env, admin, { key: keys[kind], kind });
     }
@@ -651,7 +651,7 @@ describe("a workflow action's knowledge and template uses", () => {
         const error = await refusal(
           approveWorkflowBinding(env, admin, workflow.id, {
             alias: "docs",
-            target: { kind: "knowledge", permissionId },
+            target: { kind: "brain", permissionId },
             reviewed: { version: 1 },
           })
         );
@@ -675,14 +675,14 @@ describe("a workflow action's knowledge and template uses", () => {
     const personal = await approving(mine);
     const adminsOnly = await approving(board);
     const deleted = await approving(gone);
-    await env.KNOWLEDGE.batch([
-      env.KNOWLEDGE.prepare(
+    await env.BRAIN_DB.batch([
+      env.BRAIN_DB.prepare(
         "UPDATE collections SET access = 'me', owner = ? WHERE id = ?"
       ).bind(ada.userId, mine.id),
-      env.KNOWLEDGE.prepare(
+      env.BRAIN_DB.prepare(
         "UPDATE collections SET access = 'admins' WHERE id = ?"
       ).bind(board.id),
-      env.KNOWLEDGE.prepare("DELETE FROM collections WHERE id = ?").bind(
+      env.BRAIN_DB.prepare("DELETE FROM collections WHERE id = ?").bind(
         gone.id
       ),
     ]);
@@ -710,25 +710,25 @@ describe("a workflow action's knowledge and template uses", () => {
     });
   });
 
-  it("refuse a definition whose action uses a knowledge or template binding as another kind", async () => {
+  it("refuse a definition whose action uses a brain or template binding as another kind", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const keys = {
-      knowledge: `docs-${unique()}`,
+      brain: `docs-${unique()}`,
       template: `letter-${unique()}`,
     };
     await publishCatalogContract(env, admin, {
-      key: keys.knowledge,
-      kind: "knowledge",
+      key: keys.brain,
+      kind: "brain",
     });
     await publishCatalogContract(env, admin, {
       key: keys.template,
       kind: "template",
     });
     for (const uses of [
-      // Uses the template binding as knowledge.
-      '[resource.knowledge("letter", { operations: ["search"] })]',
-      // Uses the knowledge binding as a template.
+      // Uses the template binding as brain.
+      '[resource.brain("letter", { operations: ["search"] })]',
+      // Uses the brain binding as a template.
       '[resource.template("docs")]',
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
@@ -801,7 +801,7 @@ describe("a workflow action's knowledge and template uses", () => {
       allowed: allowedEnd,
       recorded: events.some(
         ({ action, detail }) =>
-          action === "knowledge.search" &&
+          action === "brain.search" &&
           detail.via === "recall" &&
           detail.run === allowedRun
       ),

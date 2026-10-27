@@ -9,9 +9,9 @@ import type { Brain } from "./brain.ts";
 import { brainErrors } from "./contract.ts";
 import { insertChunks } from "./db/d1.ts";
 import { brainPayloads, documents, sections, versions } from "./db/schema.ts";
+import { collectionErrors } from "./documents-contract.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import type { Json } from "./json.ts";
-import { knowledgeErrors } from "./knowledge.ts";
 import { log } from "./log.ts";
 import { splitSections } from "./markdown.ts";
 import type { Section } from "./markdown.ts";
@@ -46,7 +46,7 @@ import { readPayload } from "./payloads.ts";
 // A purge can't wait on that: whatever saved the document, search must hold
 // its current version before the purge reports done
 // (`requireCurrentIndexed`), or the purge fails with
-// `knowledge.purge_index_pending` and its indexing run is started.
+// `brain.purge_index_pending` and its indexing run is started.
 
 /** How the host retries and times a step of an indexing job. */
 export interface StepConfig {
@@ -269,7 +269,7 @@ const startCurrentRun = async <C>(
       await startRun(brain, documentId, version, run + 1);
     }
   } catch (error) {
-    log.warn("knowledge.index_run_start_failed", failureFields(error));
+    log.warn("brain.index_run_start_failed", failureFields(error));
   }
 };
 
@@ -278,13 +278,13 @@ const startCurrentRun = async <C>(
  * terms: the data is rewritten, the index isn't yet. Running the purge
  * again finishes it, as does the indexing run started for it.
  */
-const pending = () => knowledgeErrors.create("knowledge.purge_index_pending");
+const pending = () => collectionErrors.create("brain.purge_index_pending");
 
 /**
  * Starts `documentId`'s indexing now, marks it as one a purge is waiting
  * on (never dropped from the reruns, `rerunFailed`), with the purge's
  * audit event saying it ended pending, and throws
- * `knowledge.purge_index_pending`.
+ * `brain.purge_index_pending`.
  */
 const refusePurgePending = async <C>(
   brain: Brain<C>,
@@ -308,14 +308,14 @@ const refusePurgePending = async <C>(
         ),
       outboxedIfChanged(brain, {
         actor,
-        action: "knowledge.purge.index_pending",
+        action: "brain.purge.index_pending",
         target: { type: "document", id: documentId },
         detail: { version: state?.currentVersion ?? 0 },
       }),
     ]);
   } catch (error) {
     // Pending all the same: the purge says so, whatever this failed with.
-    log.warn("knowledge.index_purge_mark_failed", failureFields(error));
+    log.warn("brain.index_purge_mark_failed", failureFields(error));
   }
   await startCurrentRun(brain, db, documentId);
   throw pending();
@@ -372,7 +372,7 @@ const requireAttempts = 3;
 /**
  * Makes sure search holds `documentId`'s current version, publishing it
  * from its payload when it doesn't: a purge's, so that no generation it
- * hasn't rewritten stays live. Throws `knowledge.purge_index_pending`
+ * hasn't rewritten stays live. Throws `brain.purge_index_pending`
  * when it can't (its indexing run started), never resolving otherwise.
  */
 export const requireCurrentIndexed = async <C>(
@@ -391,7 +391,7 @@ export const requireCurrentIndexed = async <C>(
       // oxlint-disable-next-line no-await-in-loop -- again only after a save
       await indexVersion(brain, documentId, state.currentVersion);
     } catch (error) {
-      log.warn("knowledge.index_purge_failed", failureFields(error));
+      log.warn("brain.index_purge_failed", failureFields(error));
       // oxlint-disable-next-line no-await-in-loop -- once, before refusing
       await refusePurgePending(brain, db, documentId, actor);
     }
@@ -423,10 +423,10 @@ export const publishInline = async <C>(
     }
     return published;
   } catch (error) {
-    if (knowledgeErrors.codeOf(error) === "knowledge.purge_index_pending") {
+    if (collectionErrors.codeOf(error) === "brain.purge_index_pending") {
       throw error;
     }
-    log.warn("knowledge.index_inline_failed", failureFields(error));
+    log.warn("brain.index_inline_failed", failureFields(error));
     if (purgeBy !== undefined) {
       await refusePurgePending(brain, db, documentId, purgeBy);
     }
@@ -437,7 +437,7 @@ export const publishInline = async <C>(
 
 /** Whether `code` is one of the Brain's own codes. */
 const isBrainCode = (code: unknown): code is string =>
-  knowledgeErrors.codeOf({ code }) !== undefined ||
+  collectionErrors.codeOf({ code }) !== undefined ||
   brainErrors.codeOf({ code }) !== undefined;
 
 /** The code an error ends indexing with, as the engine keeps its message. */
@@ -461,7 +461,7 @@ export const runIndexing = async <C>(
         await indexVersion(brain, documentId, version);
       } catch (error) {
         const found =
-          knowledgeErrors.codeOf(error) ?? brainErrors.codeOf(error);
+          collectionErrors.codeOf(error) ?? brainErrors.codeOf(error);
         const code = found ?? "internal.unexpected";
         await db
           .update(documents)
@@ -505,7 +505,7 @@ const rerunAfterMs = (run: number): number =>
 
 /**
  * Gives up on `id`, failed for good at run {@link maxIndexReruns}: once,
- * logged and audited as `knowledge.index_exhausted`. Search keeps the
+ * logged and audited as `brain.index_exhausted`. Search keeps the
  * version it holds until the next save.
  */
 const exhaust = async <C>(
@@ -532,13 +532,13 @@ const exhaust = async <C>(
       .returning({ id: documents.id }),
     outboxedIfChanged(brain, {
       actor: { type: "system" },
-      action: "knowledge.index_exhausted",
+      action: "brain.index_exhausted",
       target: { type: "document", id },
       detail: { version, runs: maxIndexReruns + 1 },
     }),
   ]);
   if (claimed.length > 0) {
-    log.error("knowledge.index_exhausted", { documentId: id, version });
+    log.error("brain.index_exhausted", { documentId: id, version });
   }
 };
 
@@ -605,7 +605,7 @@ const rerunFailed = async <C>(
         await startRun(brain, id, version, run + 1);
       }
     } catch (error) {
-      log.warn("knowledge.index_sweep_failed", failureFields(error));
+      log.warn("brain.index_sweep_failed", failureFields(error));
     }
   }
 };
@@ -661,7 +661,7 @@ export const sweepIndexing = async <C>(
       }
     } catch (error) {
       // One document's trouble doesn't keep the sweep from the rest.
-      log.warn("knowledge.index_sweep_failed", failureFields(error));
+      log.warn("brain.index_sweep_failed", failureFields(error));
     }
   }
   await rerunFailed(brain, db, now);

@@ -4,9 +4,9 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { Readable, ReadRecord } from "./authorize.ts";
 import type { CollectionRow } from "./collections.ts";
 import type { BrainSourceRef, MemoryRecord } from "./contract.ts";
+import type { Provenance } from "./documents-contract.ts";
 import type { BrainEvent } from "./events.ts";
 import type { Json } from "./json.ts";
-import type { Provenance } from "./knowledge.ts";
 import type { MemoryAudience } from "./memories.ts";
 
 /** What a lesson's wording is written from: what the lesson holds. */
@@ -23,7 +23,7 @@ export interface LessonFacts {
 // made once per request by the host (core's ports.ts `brainOf`), so no
 // module reaches `Env` or the host itself.
 
-/** Where Knowledge keeps its payloads: an R2 bucket's calls it uses. */
+/** Where the Brain keeps its payloads: an R2 bucket's calls it uses. */
 export type BlobStore = Pick<R2Bucket, "delete" | "get" | "head" | "put">;
 
 /** A collection, as the host decides whether its skills may be selected. */
@@ -40,7 +40,7 @@ export interface SkillCollection {
  */
 export type SkillAuthority = "shipped" | "admins";
 
-/** A document version's indexing, as Knowledge asks its host to run it. */
+/** A document version's indexing, as the Brain asks its host to run it. */
 export interface IndexJob {
   documentId: string;
   version: number;
@@ -204,7 +204,7 @@ export interface BrainPorts<C> {
   /** Payloads (payloads.ts), in a bucket whose jurisdiction the host set. */
   blobs: BlobStore;
   /**
-   * The audit log Knowledge's outbox drains into: Knowledge writes each
+   * The audit log the Brain's outbox drains into: the Brain writes each
    * event to its own outbox in the batch of its change (audit.ts).
    */
   audit: {

@@ -1,7 +1,7 @@
 import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
 
 // What the improvement signals (signals.ts) need of the audit log: model
-// calls' cost per workflow run, and Knowledge searches that found nothing,
+// calls' cost per workflow run, and Brain searches that found nothing,
 // per scope, key and asker. The AuditLog object tallies one stretch of the
 // log at a time with these (`AuditLog.tallyStretch`), so only small
 // partial totals cross to the Worker, which adds them up.
@@ -76,7 +76,7 @@ export const askerOf = (actor: AuditActor): string => {
 /**
  * Tallies events, one after another, oldest first: those the log received
  * from `from` (ISO 8601) on, as a stretch may start earlier for the
- * Knowledge usage signals it is read for too.
+ * Brain usage signals it is read for too.
  */
 export class SignalTallier {
   readonly #from: string;
@@ -106,7 +106,7 @@ export class SignalTallier {
       this.#costs.set(actor.runId, found);
       return;
     }
-    if (action === "knowledge.search.empty") {
+    if (action === "brain.search.empty") {
       this.#addQuestion(event, receivedAt);
     }
   }

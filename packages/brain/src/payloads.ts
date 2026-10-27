@@ -6,11 +6,11 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { Brain } from "./brain.ts";
 import { inList } from "./db/d1.ts";
 import { brainPayloadReleases, brainPayloads, versions } from "./db/schema.ts";
+import { collectionErrors } from "./documents-contract.ts";
 import { sha256HexOfBytes, toHex } from "./encoding.ts";
-import { knowledgeErrors } from "./knowledge.ts";
 import { errorFields, log } from "./log.ts";
 
-// The texts of Knowledge's versions: each an immutable object in the
+// The texts of the Brain's versions: each an immutable object in the
 // deployment's private `BRAIN_OBJECTS` bucket (EU jurisdiction, set when
 // the bucket is created), written once under a key of its own and never
 // replaced, with a row in `brain_payloads` (db/schema.ts). A
@@ -248,16 +248,16 @@ export const releasing = (
 /** Refuses a version whose text can't be read as stored. */
 const unavailable = (ref: PayloadRef, why: string) => {
   // The upload's ID only: the key's hash would say what text it is.
-  log.error("knowledge.payload_unavailable", {
+  log.error("brain.payload_unavailable", {
     upload: ref.key.split("/").at(-1),
     why,
   });
-  return knowledgeErrors.create("knowledge.unavailable");
+  return collectionErrors.create("brain.text_unavailable");
 };
 
 /**
  * The text of a version's payload, checked against its hash: refused with
- * `knowledge.unavailable` when its object is missing or isn't that text.
+ * `brain.text_unavailable` when its object is missing or isn't that text.
  */
 export const readPayload = async <C>(
   brain: Brain<C>,
@@ -318,7 +318,7 @@ export const collectPayloads = async <C>(
     } catch (error) {
       // Thrown, so a purge that called it fails rather than say the text
       // is gone; its rows stay `collecting`, for the next run or sweep.
-      log.error("knowledge.payload_collect_failed", errorFields(error));
+      log.error("brain.payload_collect_failed", errorFields(error));
       throw error;
     }
     // oxlint-disable-next-line no-await-in-loop -- a page at a time

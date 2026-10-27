@@ -118,7 +118,7 @@ describe("everything about one organization", () => {
   it("keeps the onboarding as it was: the same people, interviews and workflows", () => {
     const view = at(noordkade);
     expect(view.people).toHaveLength(170);
-    expect(view.knowledge.percent).toBe(80);
+    expect(view.brain.percent).toBe(80);
     expect(view.stage).toBe("interviews");
   });
 });

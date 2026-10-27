@@ -7,9 +7,9 @@ import { outboxed } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { collections, documents, transcripts } from "./db/schema.ts";
+import type { Provenance } from "./documents-contract.ts";
 import type { DetailValue } from "./events.ts";
 import type { Json } from "./json.ts";
-import type { Provenance } from "./knowledge.ts";
 
 // A document's transcript: what was said, turn by turn, and the chapters
 // it moved through. The Brain keeps it as any producer gives it (a speaker
@@ -164,7 +164,7 @@ export const hasTranscript = async (
  * `transcript`, in its save's batch: the one it had goes, and this one, if
  * any, takes its place. A save without one, of a document that `had` one
  * (`hasTranscript`, read before: the save's version check keeps any other
- * save from coming between), records `knowledge.transcript.removed`.
+ * save from coming between), records `brain.transcript.removed`.
  */
 export const transcriptWrites = <C>(
   brain: Brain<C>,
@@ -187,7 +187,7 @@ export const transcriptWrites = <C>(
           removed,
           outboxed(brain, {
             actor,
-            action: "knowledge.transcript.removed",
+            action: "brain.transcript.removed",
             target: { type: "document", id: documentId },
             detail: { version },
           }),
@@ -405,7 +405,7 @@ export const listTranscripts = async <C>(
   const provenance = await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       documentIds: rows.map(({ documentId }) => documentId),
       detail: { read: "transcripts", count: rows.length },
     },
@@ -464,7 +464,7 @@ export const readTranscript = async <C>(
   const provenance = await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       target: { type: "document", id: row.documentId },
       detail: { read: "transcript", version: row.version },
     },

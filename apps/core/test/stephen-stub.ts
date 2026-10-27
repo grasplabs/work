@@ -2,7 +2,7 @@
  * The model provider of Stephen's eval in CI (GRA-720): a stand-in behind
  * AI Gateway, the one outside system the run mocks, as the Brain baseline's
  * is (brain-stub-model.ts). For each case it does what a careful Stephen
- * would: one code step that makes the case's connector calls and Knowledge
+ * would: one code step that makes the case's connector calls and Brain
  * search through the agent's own `env`, then the case's answer, given only
  * once the evidence it rests on reached the model. So it measures whether
  * the platform got the right data to the model and held every change for
@@ -59,7 +59,7 @@ export const verdictLine =
 const isRead = (action: string) =>
   /\.(?:list|get|listRows|thread)$/u.test(action);
 
-/** Sections a Knowledge search reads. */
+/** Sections a Brain search reads. */
 const searched = 5;
 
 /** The code a turn's step runs: its calls in order, then its search. */
@@ -81,16 +81,16 @@ const stepCode = (
     }
     done.push({ action, result });
   }
-  const knowledge = [];
+  const brain = [];
   const search = ${JSON.stringify(search ?? null)};
   if (search !== null) {
-    const { hits } = await env.knowledge.search(search, { limit: ${searched} });
+    const { hits } = await env.brain.search(search, { limit: ${searched} });
     for (const hit of hits) {
-      const read = await env.knowledge.read(hit.documentId, { section: hit.section });
-      knowledge.push({ documentId: hit.documentId, path: read.path, text: read.text });
+      const read = await env.brain.read(hit.documentId, { section: hit.section });
+      brain.push({ documentId: hit.documentId, path: read.path, text: read.text });
     }
   }
-  return { done, knowledge };
+  return { done, brain };
 };`;
 
 const tokensOf = (text: string): number => Math.ceil(text.length / 4);
@@ -116,8 +116,8 @@ const says = (text: string, input: string): GatewayReply => ({
 
 const returned = "Returned:\n";
 
-/** The Knowledge sections a step's result handed the model. */
-const knowledgeOf = (
+/** The Brain sections a step's result handed the model. */
+const brainApiOf = (
   results: readonly string[]
 ): { documentId: string; path: string; text: string }[] =>
   results.flatMap((result) => {
@@ -128,9 +128,9 @@ const knowledgeOf = (
       const value: unknown = JSON.parse(result.slice(returned.length));
       return typeof value === "object" &&
         value !== null &&
-        "knowledge" in value &&
-        Array.isArray(value.knowledge)
-        ? value.knowledge.flatMap((unit: unknown) =>
+        "brain" in value &&
+        Array.isArray(value.brain)
+        ? value.brain.flatMap((unit: unknown) =>
             typeof unit === "object" &&
             unit !== null &&
             "documentId" in unit &&
@@ -172,7 +172,7 @@ const answerOf = (
     return couldNot[item.lang];
   }
   const [first] = evidence;
-  const source = knowledgeOf(results).find(
+  const source = brainApiOf(results).find(
     ({ text }) =>
       first !== undefined && normalized(text).includes(normalized(first))
   );

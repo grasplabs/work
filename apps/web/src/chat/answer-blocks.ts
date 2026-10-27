@@ -17,7 +17,7 @@ export const textOf = (node: Node | undefined): string => {
     return node.value;
   }
   if (node.type === "element") {
-    // An image shows its alt text (knowledge/markdown.tsx): that is its text.
+    // An image shows its alt text (brain/markdown.tsx): that is its text.
     if (node.tagName === "img") {
       const { alt } = node.properties;
       return typeof alt === "string" ? alt : "";

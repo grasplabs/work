@@ -261,7 +261,7 @@ const leftOf = async (person: string, words: string) => {
 /** What a member's brain shows of a team: its statements, its source, and each drawing of its tickets. */
 const brainOf = async (ids: Ids) => {
   const member = await signedInApi(idp, "user");
-  const brain: Workspace = await member.api.brain.read();
+  const brain: Workspace = await member.api.brain.readWorkspace();
   const teamId = `team-${ids.team}`;
   const tickets = brain.workflows.find(
     ({ teamId: of, name }) => of === teamId && name === "handling new tickets"

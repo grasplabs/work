@@ -8,7 +8,7 @@ import { appIdSchema, identifierSchema, permissionIdSchema } from "./ids.ts";
 // each resource an App of spec 8's layout declares for its actions. A
 // declaration in App code is a requirement and grants nothing; an admin's
 // binding, together with the live grant it names, is what lets an action
-// reach a model, a connection, knowledge collections or a template.
+// reach a model, a connection, brain collections or a template.
 //
 // A binding is the host's record, never part of a sealed manifest: it is
 // approved after a release is sealed and can be revoked at any time. It pins
@@ -33,7 +33,7 @@ const modelNameSchema = z
  *   gateway (its rules, budgets and accounting apply on every call);
  * - `connector`: one of the App's connection permissions, checked on every
  *   call, through connect;
- * - `knowledge`: one of the App's collection permissions for each
+ * - `brain`: one of the App's collection permissions for each
  *   collection the declaration names, read as a delegate on every call;
  * - `template`: one immutable version of a published template;
  * - `store`: one of the App's store permissions: another business store's
@@ -60,7 +60,7 @@ export const bindingTargetSchema = z.discriminatedUnion("kind", [
     permissionId: permissionIdSchema,
   }),
   z.strictObject({
-    kind: z.literal("knowledge"),
+    kind: z.literal("brain"),
     /** The permission for each collection name the declaration lists. */
     collections: z
       .record(
@@ -260,7 +260,7 @@ export interface AppChoice {
  * - `model`: the models the deployment allows;
  * - `connector`: the App's own active connection permissions that serve
  *   the declared contract and allow the tool of every declared action;
- * - `knowledge`: the App's own active permissions to read a collection,
+ * - `brain`: the App's own active permissions to read a collection,
  *   one for each declared collection;
  * - `template`: the published versions of the declared contract;
  * - `store`: the App's own active store permissions whose store serves
@@ -280,7 +280,7 @@ export interface AppChoice {
 export type BindingChoices = { truncated: boolean } & (
   | { kind: "model"; models: string[] }
   | { kind: "connector"; permissions: ConnectorChoice[] }
-  | { kind: "knowledge"; permissions: CollectionChoice[] }
+  | { kind: "brain"; permissions: CollectionChoice[] }
   | { kind: "template"; versions: PublishedTemplate[] }
   | { kind: "store"; permissions: StoreChoice[] }
   | { kind: "statistics"; platform: boolean; permissions: PlatformChoice[] }
@@ -299,7 +299,7 @@ export interface BindingLabel {
    */
   connection: { account: string | null; provider: string } | null;
   /**
-   * A knowledge binding's collections, by the names App code uses: each
+   * A brain binding's collections, by the names App code uses: each
    * bound collection's name, null once it is gone. Empty for other kinds.
    */
   collections: Record<string, string | null>;
@@ -314,13 +314,13 @@ export interface DeclaredResource {
   /** A connector's declared actions; empty for the other kinds. */
   actions: string[];
   /**
-   * Knowledge's declared operations, a store's or an App's functions, by
+   * The Brain's declared operations, a store's or an App's functions, by
    * path, or statistics'; empty for the other kinds.
    */
   operations: string[];
   /** The platform's measures a statistics resource reads; empty otherwise. */
   measures: string[];
-  /** Knowledge's declared collections, by the names App code uses. */
+  /** The Brain's declared collections, by the names App code uses. */
   collections: string[];
   /** A model's output token ceiling; null for the other kinds. */
   maxOutputTokens: number | null;

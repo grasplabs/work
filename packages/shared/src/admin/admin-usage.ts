@@ -208,7 +208,7 @@ export const asOf = (view: OrgView, today: string): string => {
 
 /** Whether Grasp is open for the company on the day the view is on. */
 export const isOpen = (view: OrgView): boolean =>
-  view.knowledge.opened !== null && view.knowledge.opened <= view.day;
+  view.brain.opened !== null && view.brain.opened <= view.day;
 
 /** How many of one piece of work a single person handles in a week. */
 const itemsAWeek = (work: Work): number =>
@@ -403,12 +403,8 @@ export const usageOf = (
 
   // Once Grasp is open: the chat of everyone who is in, and each workflow from the day it went live.
   // Worked out at a sample only: at a real organization, what the Worker counted is all there was.
-  if (
-    org.real === undefined &&
-    isOpen(view) &&
-    view.knowledge.opened !== null
-  ) {
-    const opened = dateOn(org, view.knowledge.opened);
+  if (org.real === undefined && isOpen(view) && view.brain.opened !== null) {
+    const opened = dateOn(org, view.brain.opened);
     const each = (
       from: string,
       purpose: Purpose,

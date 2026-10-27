@@ -168,7 +168,7 @@ export const buildRelease = async (
     )
   );
   // The databases core and connect also bind, as in the real release.
-  const [knowledge, connectDb] = await Promise.all([
+  const [brain, connectDb] = await Promise.all([
     file(
       "0000_knowledge.sql",
       "CREATE TABLE k (id TEXT);",
@@ -245,7 +245,7 @@ export const buildRelease = async (
           { type: "version_metadata", name: "CF_VERSION_METADATA" },
           { type: "assets", name: "ASSETS" },
           { type: "d1", name: "DB", id: "$D1_DB_ID" },
-          { type: "d1", name: "KNOWLEDGE", id: "$D1_KNOWLEDGE_ID" },
+          { type: "d1", name: "BRAIN_DB", id: "$D1_BRAIN_DB_ID" },
           {
             type: "r2_bucket",
             name: "FILES",
@@ -265,9 +265,9 @@ export const buildRelease = async (
         d1Databases: [
           { binding: "DB", databaseName: "grasp-os-core", migrations },
           {
-            binding: "KNOWLEDGE",
+            binding: "BRAIN_DB",
             databaseName: "grasp-os-knowledge",
-            migrations: [knowledge],
+            migrations: [brain],
           },
         ],
         assets: { config: {}, manifest: assetManifest },

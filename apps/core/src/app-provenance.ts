@@ -8,6 +8,8 @@ import { and, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { mayRead } from "./brain/access.ts";
+import type { CollectionAccess, PersonAccess } from "./brain/access.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import {
   appResourceBindings,
@@ -19,8 +21,6 @@ import {
   sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { mayRead } from "./knowledge/access.ts";
-import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 
 // Provenance on sharing. An App keeps what it reads (in its storage, its
 // workflows' state, what its screens show), so sharing it must not reach
@@ -56,13 +56,13 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 // it is shared with, while their role builds. Who may read
 // each: a personal connection (such as a mailbox) only its owner; a shared
 // connection everyone in the organization, who may all use it; a
-// collection whoever Knowledge lets read it now (`mayRead`, the rule of
-// knowledge/access.ts), so a collection whose access narrows reaches fewer
+// collection whoever the Brain lets read it now (`mayRead`, the rule of
+// brain/access.ts), so a collection whose access narrows reaches fewer
 // people from then on. A granted source that doesn't resolve (connect
-// doesn't know the connection, Knowledge has no such collection) fails
+// doesn't know the connection, the Brain has no such collection) fails
 // closed: nobody reads it but the App's owner and admins, who aren't
 // checked, since what the App read of it can't be placed. So does the
-// Apps collection: it is open to everyone, but Knowledge shows each entry
+// Apps collection: it is open to everyone, but the Brain shows each entry
 // only to whoever may open its App, so its access says nothing of what
 // the App read there. No App is given it now (permissions.ts
 // `requireCollection`); one granted it before counts it unresolved.
@@ -115,7 +115,7 @@ export interface BusinessStoreAccess {
 }
 
 /**
- * A person, as provenance decides what they read: Knowledge's access, and
+ * A person, as provenance decides what they read: the Brain's access, and
  * whether their role in the organization builds, which managing a store
  * needs.
  */
@@ -174,7 +174,7 @@ const accessOf = async (
   ids: string[]
 ): Promise<AppSources["collections"]> => {
   const [rows, shared] = await Promise.all([
-    drizzle(env.KNOWLEDGE)
+    drizzle(env.BRAIN_DB)
       .select({
         id: collections.id,
         access: collections.access,
@@ -649,7 +649,7 @@ const businessStoresOf = async (
  * those of the Apps whose data they may hold through calls between Apps
  * (`reachedThroughCalls`), in a few queries whatever their number: those
  * that follow the calls, one for all their permissions, one series of
- * pages to connect for all their connections, and one Knowledge batch for
+ * pages to connect for all their connections, and one Brain batch for
  * all their collections.
  */
 export const sourcesOfApps = async (

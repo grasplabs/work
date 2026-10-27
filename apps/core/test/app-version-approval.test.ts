@@ -184,7 +184,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
   // After the identity provider's mock is in place (`mockIdp`).
   beforeEach(async () => {
     const admin = await personApi("admin");
-    ({ id: collectionId } = await admin.api.knowledge.createCollection({
+    ({ id: collectionId } = await admin.api.brain.createCollection({
       name: `Notes ${unique()}`,
       access: "everyone",
     }));
@@ -606,7 +606,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
 describe("An App's collection stub", { timeout: 60_000 }, () => {
   beforeEach(async () => {
     const admin = await personApi("admin");
-    ({ id: collectionId } = await admin.api.knowledge.createCollection({
+    ({ id: collectionId } = await admin.api.brain.createCollection({
       name: `Notes ${unique()}`,
       access: "everyone",
     }));
@@ -643,7 +643,7 @@ describe("An App's collection stub", { timeout: 60_000 }, () => {
         note,
       ]);
     }
-    const written = await env.KNOWLEDGE.prepare(
+    const written = await env.BRAIN_DB.prepare(
       "SELECT count(*) AS written FROM documents WHERE collection_id = ?"
     )
       .bind(collectionId)

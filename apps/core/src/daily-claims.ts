@@ -4,12 +4,12 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import type {
   improvementSignalComputations,
-  knowledgeSignalComputations,
+  brainSignalComputations,
 } from "./db/core/schema.ts";
 
 // Claiming a UTC day's computation, for what is computed once a day from
 // the 15-minute cron trigger: the improvement signals (signals.ts) and
-// Knowledge's usage signals (knowledge/signals.ts). Each has a table of
+// The Brain's usage signals (brain/signals.ts). Each has a table of
 // computations with the same columns (id, day, started_at, finished_at),
 // one row per attempt.
 //
@@ -21,7 +21,7 @@ import type {
 //
 // Each attempt has an ID of its own. A computation finishes in one batch
 // that marks its row finished and deletes every computation started before
-// it (Knowledge keeps the finished one before it, for its readers): one
+// it (Brain keeps the finished one before it, for its readers): one
 // that outlived its lease and was finished past has lost its row, or finds
 // a later one of its day finished, so its finishing batch changes nothing
 // (every statement in it goes by `isFinished`). Both write their signals
@@ -40,7 +40,7 @@ export const claimsPerDay = 3;
 /** A table of daily computations. */
 type Computations =
   | typeof improvementSignalComputations
-  | typeof knowledgeSignalComputations;
+  | typeof brainSignalComputations;
 
 /** A claimed computation. */
 export interface Computation {

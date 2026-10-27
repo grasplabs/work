@@ -1,7 +1,7 @@
 import type { AppCaller } from "@grasp-os/shared/apps";
+import type { BrainDocumentsApi } from "@grasp-os/shared/brain-documents";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -15,14 +15,14 @@ import { sandbox } from "../src/sandbox.ts";
 import { buildServer } from "../src/screens.ts";
 import { outlook, release, requestGranted, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { reached } from "./contexts.ts";
-import { mockIdp } from "./idp.ts";
 import {
   collectionWithNote,
   newTeam,
   readCollection,
   storedGrant,
-} from "./knowledge.ts";
+} from "./brain-collections.ts";
+import { reached } from "./contexts.ts";
+import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
@@ -1105,22 +1105,22 @@ export default workflowTests(definition, [{ name: "runs", mocks: { one: 1 }, exp
   });
 });
 
-/** Someone's Knowledge, as they reach it in the product. */
-const knowledgeOf = (person: Builder): { knowledge: KnowledgeApi } => {
-  const knowledge: KnowledgeApi = person.api.knowledge;
-  return { knowledge };
+/** Someone's Brain, as they reach it in the product. */
+const brainApiOf = (person: Builder): { brain: BrainDocumentsApi } => {
+  const brain: BrainDocumentsApi = person.api.brain;
+  return { brain };
 };
 
 /** What each of the sample App's reads (`reads`) ended with. */
 const everyReadIs = (code: string) => Array.from({ length: 7 }, () => code);
 
-// The same App serves everyone, so what it reads from Knowledge must be
+// The same App serves everyone, so what it reads from the Brain must be
 // what the person whose call it runs in may read, and no more (R5): the
 // App's grant intersected with that person's access, never a personal
 // collection (those never enter a shared context), and never for someone
 // App code names itself (R3, SB4). A sensitive read restricts the App for
 // good, before the data reaches its code (Q12).
-describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
+describe("App server code reading Brain", { timeout: 60_000 }, () => {
   /**
    * An App granted a team's collection (`HANDBOOK`), a member of the team
    * and someone outside it, and a collection the App wasn't granted.
@@ -1131,12 +1131,12 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
     const outsider = await personApi("user");
     const teamId = await newTeam(admin, [member]);
     const [finance, other] = await Promise.all([
-      collectionWithNote(knowledgeOf(admin), {
+      collectionWithNote(brainApiOf(admin), {
         name: "Finance",
         access: "teams",
         teams: [teamId],
       }),
-      collectionWithNote(knowledgeOf(admin), {
+      collectionWithNote(brainApiOf(admin), {
         name: "Other",
         access: "everyone",
       }),
@@ -1166,15 +1166,15 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       envNames: ["HANDBOOK", "STATISTICS"],
       member: everyReadIs("ok"),
-      outsider: everyReadIs("knowledge.not_found"),
+      outsider: everyReadIs("brain.document_not_found"),
       other: [
         "ok",
-        "knowledge.not_found",
-        "knowledge.not_found",
-        "knowledge.not_found",
+        "brain.document_not_found",
+        "brain.document_not_found",
+        "brain.document_not_found",
         "ok",
-        "knowledge.not_found",
-        "knowledge.not_found",
+        "brain.document_not_found",
+        "brain.document_not_found",
       ],
     });
 
@@ -1238,8 +1238,8 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       member: [everyReadIs("ok"), everyReadIs("ok")],
       outsider: [
-        everyReadIs("knowledge.not_found"),
-        everyReadIs("knowledge.not_found"),
+        everyReadIs("brain.document_not_found"),
+        everyReadIs("brain.document_not_found"),
       ],
     });
   });
@@ -1312,7 +1312,7 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
     });
     expect(
       events
-        .filter(({ action }) => action === "knowledge.read")
+        .filter(({ action }) => action === "brain.read")
         .map(({ actor, target, provenance, detail }) => ({
           actor,
           target,
@@ -1331,7 +1331,7 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
 
   it("never reads a personal collection, not even for its owner", async () => {
     const owner = await personApi("user");
-    const diary = await collectionWithNote(knowledgeOf(owner), {
+    const diary = await collectionWithNote(brainApiOf(owner), {
       name: "Diary",
       access: "me",
     });
@@ -1345,7 +1345,7 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
     );
     await expect(
       callApp(env, app, as(owner.userId), "reads", ["DIARY", diary.noteId])
-    ).resolves.toStrictEqual(everyReadIs("knowledge.not_found"));
+    ).resolves.toStrictEqual(everyReadIs("brain.document_not_found"));
   });
 
   it("is restricted for good by a sensitive read, and then holds every action for the person it acts for", async () => {
@@ -1353,13 +1353,13 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
     const outsider = await personApi("user");
     const teamId = await newTeam(admin, []);
     const [payroll, handbook] = await Promise.all([
-      collectionWithNote(knowledgeOf(admin), {
+      collectionWithNote(brainApiOf(admin), {
         name: "Payroll",
         access: "teams",
         teams: [teamId],
         sensitive: true,
       }),
-      collectionWithNote(knowledgeOf(admin), {
+      collectionWithNote(brainApiOf(admin), {
         name: "Handbook",
         access: "everyone",
       }),
@@ -1402,7 +1402,7 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
       before,
       sensitive,
       after: [await send(admin.userId), await send(outsider.userId)],
-      // Knowledge stays inside the deployment, so it can still be read.
+      // Brain stays inside the deployment, so it can still be read.
       stillReads: await callApp(env, app, as(admin.userId), "reads", [
         "OTHER",
         handbook.noteId,
@@ -1414,7 +1414,7 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
         sensitive: false,
         restricted: false,
       },
-      refused: everyReadIs("knowledge.not_found"),
+      refused: everyReadIs("brain.document_not_found"),
       before: heldWrite,
       sensitive: {
         collectionIds: [payroll.collectionId],
@@ -1433,7 +1433,7 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
   it("is restricted by every read that reaches a sensitive collection, also one that finds nothing", async () => {
     const admin = await personApi("admin");
     const teamId = await newTeam(admin, []);
-    const payroll = await collectionWithNote(knowledgeOf(admin), {
+    const payroll = await collectionWithNote(brainApiOf(admin), {
       name: "Payroll",
       access: "teams",
       teams: [teamId],
@@ -1474,7 +1474,7 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
       ["ok", true],
       ["ok", true],
       ["ok", true],
-      ["knowledge.not_found", true],
+      ["brain.document_not_found", true],
     ]);
   });
 
@@ -1492,7 +1492,7 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
       ),
     }).toStrictEqual({
       member: everyReadIs("ok"),
-      outsider: everyReadIs("knowledge.not_found"),
+      outsider: everyReadIs("brain.document_not_found"),
     });
   });
 });

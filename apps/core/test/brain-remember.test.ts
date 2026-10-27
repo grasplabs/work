@@ -13,7 +13,7 @@ import { mockIdp } from "./idp.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The Brain's memory commands (GRA-297), as a signed-in person calls them
-// through Knowledge's RPC. How they can fail, and what holds each:
+// through the Brain's RPC. How they can fail, and what holds each:
 // 1. A retry after a lost reply makes a second record, or a reused key
 //    with another request overwrites the first: the key answers one
 //    recorded result, and a different request conflicts.
@@ -64,7 +64,7 @@ const plantReceipts = async (
   createdAt: number,
   retentionUntil: number
 ): Promise<void> => {
-  await env.KNOWLEDGE.prepare(
+  await env.BRAIN_DB.prepare(
     `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?1)
      INSERT INTO brain_receipts
        (id, key_hash, caller, operation, request_hash, status,
@@ -79,7 +79,7 @@ const plantReceipts = async (
 
 /** How many receipts `caller` has. */
 const receiptsOf = async (caller: string): Promise<number> => {
-  const row = await env.KNOWLEDGE.prepare(
+  const row = await env.BRAIN_DB.prepare(
     "SELECT COUNT(*) AS count FROM brain_receipts WHERE caller = ?"
   )
     .bind(caller)
@@ -98,7 +98,7 @@ const citing = (documentId: string, collectionId: string, version: number) => ({
 describe("the Brain's memory commands", setUpTime, () => {
   it("remember once per key: a retry answers the same receipt, another request conflicts", async () => {
     const person = await signedInApi(idp, "user");
-    const brain = person.api.knowledge;
+    const { brain } = person.api;
     const idempotencyKey = key();
     const input = {
       kind: "preference" as const,
@@ -156,7 +156,7 @@ describe("the Brain's memory commands", setUpTime, () => {
 
   it("keep one record when the same key races", async () => {
     const person = await signedInApi(idp, "user");
-    const brain = person.api.knowledge;
+    const { brain } = person.api;
     const idempotencyKey = key();
     const input = { kind: "fact" as const, text: "My desk is on floor 3." };
     const receipts = await Promise.all(
@@ -184,17 +184,17 @@ describe("the Brain's memory commands", setUpTime, () => {
     const one = await signedInApi(idp, "user");
     const other = await signedInApi(idp, "admin");
     const idempotencyKey = key();
-    const mine = await one.api.knowledge.remember(
+    const mine = await one.api.brain.remember(
       { kind: "fact", text: "I work in Utrecht." },
       { idempotencyKey }
     );
     // The same key is another command for someone else: no conflict.
-    const theirs = await other.api.knowledge.remember(
+    const theirs = await other.api.brain.remember(
       { kind: "fact", text: "I work in Delft." },
       { idempotencyKey }
     );
     // The same request by someone else hashes apart.
-    const same = await other.api.knowledge.remember(
+    const same = await other.api.brain.remember(
       { kind: "fact", text: "I work in Utrecht." },
       { idempotencyKey: key() }
     );
@@ -202,17 +202,17 @@ describe("the Brain's memory commands", setUpTime, () => {
     if (ref?.kind !== "memory") {
       throw new Error("No memory committed");
     }
-    const othersList = await other.api.knowledge.memoriesList();
+    const othersList = await other.api.brain.memoriesList();
     expect({
       theirs: theirs.status,
       distinct: theirs.id !== mine.id,
       hashedApart: same.requestHash !== mine.requestHash,
       // An admin is no exception: a person's records are theirs.
       receipt: await outcome(
-        other.api.knowledge.receiptsGet({ receiptId: mine.id })
+        other.api.brain.receiptsGet({ receiptId: mine.id })
       ),
       record: await outcome(
-        other.api.knowledge.memoriesGet({ memoryId: ref.memoryId })
+        other.api.brain.memoriesGet({ memoryId: ref.memoryId })
       ),
       listed: othersList.records.map(({ statement }) => statement),
     }).toStrictEqual({
@@ -227,17 +227,17 @@ describe("the Brain's memory commands", setUpTime, () => {
 
   it("keep a remember's receipt and record only with its audit event", async () => {
     const person = await signedInApi(idp, "user");
-    const brain = person.api.knowledge;
+    const { brain } = person.api;
     const idempotencyKey = key();
     const input = { kind: "fact" as const, text: "I keep my bike inside." };
     // The event's write fails, as if core stopped right after the receipt.
-    const database: D1Database = env.KNOWLEDGE;
+    const database: D1Database = env.BRAIN_DB;
     const prepare = database.prepare.bind(database);
     const failing = vi
       .spyOn(database, "prepare")
       .mockImplementation((query: string) => {
         if (query.includes("audit_outbox")) {
-          throw new Error("Knowledge's database is down for a moment");
+          throw new Error("Brain's database is down for a moment");
         }
         return prepare(query);
       });
@@ -269,41 +269,41 @@ describe("the Brain's memory commands", setUpTime, () => {
       left: 0,
       records: 0,
       retried: "committed",
-      events: ["knowledge.memory.remember"],
+      events: ["brain.memory.remember"],
     });
   });
 
   it("cite only document versions the person may read, and refuse forged fields", async () => {
     const author = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
-    const open = await author.api.knowledge.createCollection({
+    const open = await author.api.brain.createCollection({
       name: `Open ${unique()}`,
       access: "everyone",
     });
-    const closed = await author.api.knowledge.createCollection({
+    const closed = await author.api.brain.createCollection({
       name: `Closed ${unique()}`,
       access: "me",
     });
-    const openDocument = await author.api.knowledge.saveDocument({
+    const openDocument = await author.api.brain.saveDocument({
       collectionId: open.id,
       path: "desks.md",
       text: "# Desks\nFloor 3 is quiet.",
       ifVersion: 0,
     });
-    const closedDocument = await author.api.knowledge.saveDocument({
+    const closedDocument = await author.api.brain.saveDocument({
       collectionId: closed.id,
       path: "plans.md",
       text: "# Plans\nA reorganisation.",
       ifVersion: 0,
     });
     // Version 2 has three sections where version 1 had one.
-    await author.api.knowledge.saveDocument({
+    await author.api.brain.saveDocument({
       collectionId: open.id,
       path: "desks.md",
       text: "# Desks\nFloor 3 is quiet.\n\n# Lockers\nBy the lift.\n\n# Bikes\nIn the basement.",
       ifVersion: 1,
     });
-    const brain = person.api.knowledge;
+    const { brain } = person.api;
     const cited = await brain.remember(citing(openDocument.id, open.id, 1), {
       idempotencyKey: key(),
     });
@@ -380,14 +380,14 @@ describe("the Brain's memory commands", setUpTime, () => {
       description: "Leave requests, from request to approval.",
     });
     await release(owner, app, { "AGENTS.md": "# Leave\nAsk your lead.\n" });
-    const { documents } = await owner.api.knowledge.listDocuments("apps");
+    const { documents } = await owner.api.brain.listDocuments("apps");
     const entry = documents.find(({ path }) => path === `${app}/AGENTS.md`);
     if (entry === undefined) {
       throw new Error(`App ${app} has no entry`);
     }
     const cite = async (by: typeof owner) =>
       await outcome(
-        by.api.knowledge.remember(citing(entry.id, "apps", 1), {
+        by.api.brain.remember(citing(entry.id, "apps", 1), {
           idempotencyKey: key(),
         })
       );
@@ -404,13 +404,13 @@ describe("the Brain's memory commands", setUpTime, () => {
 
   it("forget a key once its receipt expires, at its retention to the millisecond, and say the receipt expired", async () => {
     const person = await signedInApi(idp, "user");
-    const brain = person.api.knowledge;
+    const { brain } = person.api;
     const idempotencyKey = key();
     const input = { kind: "fact" as const, text: "I start at nine." };
     const first = await brain.remember(input, { idempotencyKey });
     // Now is the receipt's retention exactly: expired already.
     const now = Date.now() + 1000;
-    await env.KNOWLEDGE.prepare(
+    await env.BRAIN_DB.prepare(
       "UPDATE brain_receipts SET retention_until = ? WHERE id = ?"
     )
       .bind(now, first.id)
@@ -445,7 +445,7 @@ describe("the Brain's memory commands", setUpTime, () => {
 
   it("sweep receipts past their retention on the clock, and answer a swept one as never made", async () => {
     const person = await signedInApi(idp, "user");
-    const brain = person.api.knowledge;
+    const { brain } = person.api;
     const swept = await brain.remember(
       { kind: "fact", text: "I park at the back." },
       { idempotencyKey: key() }
@@ -457,11 +457,11 @@ describe("the Brain's memory commands", setUpTime, () => {
     // The clock, a retention on: one receipt expires at that very moment,
     // the other a millisecond after.
     const at = new Date(Date.now() + receiptRetentionMs + 60_000);
-    await env.KNOWLEDGE.batch([
-      env.KNOWLEDGE.prepare(
+    await env.BRAIN_DB.batch([
+      env.BRAIN_DB.prepare(
         "UPDATE brain_receipts SET retention_until = ? WHERE id = ?"
       ).bind(at.getTime(), swept.id),
-      env.KNOWLEDGE.prepare(
+      env.BRAIN_DB.prepare(
         "UPDATE brain_receipts SET retention_until = ? WHERE id = ?"
       ).bind(at.getTime() + 1, kept.id),
     ]);
@@ -475,7 +475,7 @@ describe("the Brain's memory commands", setUpTime, () => {
     );
     await runQuarterHourCron({}, at);
     const runawayLeft = await receiptsOf(runaway);
-    const stored = await env.KNOWLEDGE.prepare(
+    const stored = await env.BRAIN_DB.prepare(
       "SELECT id FROM brain_receipts WHERE id IN (?, ?)"
     )
       .bind(swept.id, kept.id)
@@ -497,7 +497,7 @@ describe("the Brain's memory commands", setUpTime, () => {
   it("bound how much one person remembers in a day, still answering a retry", async () => {
     const person = await signedInApi(idp, "user");
     const other = await signedInApi(idp, "user");
-    const brain = person.api.knowledge;
+    const { brain } = person.api;
     const idempotencyKey = key();
     const input = { kind: "fact" as const, text: "I take the 8:12 train." };
     const first = await brain.remember(input, { idempotencyKey });
@@ -531,7 +531,7 @@ describe("the Brain's memory commands", setUpTime, () => {
     const records = await brain.memoriesList({ limit: 100 });
     const retry = await brain.remember(input, { idempotencyKey });
     // The bound is each person's own.
-    const others = await other.api.knowledge.remember(input, {
+    const others = await other.api.brain.remember(input, {
       idempotencyKey: key(),
     });
     expect({
@@ -561,7 +561,7 @@ describe("the Brain's memory commands", setUpTime, () => {
   it("list the person's records a bounded page at a time, of one kind if asked", async () => {
     const person = await signedInApi(idp, "user");
     const other = await signedInApi(idp, "user");
-    const brain = person.api.knowledge;
+    const { brain } = person.api;
     for (const [kind, text] of [
       ["fact", "One."],
       ["fact", "Two."],
@@ -586,7 +586,7 @@ describe("the Brain's memory commands", setUpTime, () => {
       forged: await outcome(brain.memoriesList({ cursor: "not-ours" })),
       // A cursor is the person's own: no one else walks on from it.
       foreign: await outcome(
-        other.api.knowledge.memoriesList({ cursor: first.cursor ?? "" })
+        other.api.brain.memoriesList({ cursor: first.cursor ?? "" })
       ),
       // Nor through another kind of record than it was written for.
       otherKind: await outcome(

@@ -1,10 +1,10 @@
 import type { AnyResource } from "@grasp-os/sdk";
 import type { AuditActor } from "@grasp-os/shared/audit";
+import type { Provenance } from "@grasp-os/shared/brain-documents";
 import type { HeldBinding } from "@grasp-os/shared/capability";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import type { AppId, ConnectionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { Provenance } from "@grasp-os/shared/knowledge";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
@@ -21,13 +21,13 @@ import type { CallingAgent } from "./workflow-start-intents.ts";
 // How a resource binding reaches its provider (resource-bindings.ts): one
 // adapter per kind of declaration. An adapter runs in core, never in App
 // code, and reaches its provider only through the platform's own way out:
-// the model gateway, connect, Knowledge's delegate reads, the template
+// the model gateway, connect, the Brain's delegate reads, the template
 // records. Whatever it answers is checked again by the operation host
 // against the declaration's contract before App code sees it.
 
 /**
  * Where what an invocation read through its resources comes from: the
- * Knowledge collections and their classification, and each connection it
+ * Brain collections and their classification, and each connection it
  * read from with the resources (messages, files) that connection's
  * connector named. It goes back to the caller with the answer.
  */

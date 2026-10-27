@@ -121,10 +121,10 @@ export const targetOf = (
       ? { kind: "statistics", permissionId: picked }
       : undefined;
   }
-  if (choices.kind === "knowledge") {
+  if (choices.kind === "brain") {
     return allChosen(resource.collections, chosen)
       ? {
-          kind: "knowledge",
+          kind: "brain",
           collections: collectionsOf(resource.collections, chosen),
         }
       : undefined;

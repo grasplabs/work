@@ -717,22 +717,20 @@ describe("an interview deleted because the person asked", () => {
 
 /** How much is known about Van Rijn, in percent, with `state` on top of where it starts. */
 const knownAtVanRijn = (state: Partial<OrgState>) =>
-  viewOf(vanrijn, { ...vanrijn.seed, ...state }).knowledge.percent;
+  viewOf(vanrijn, { ...vanrijn.seed, ...state }).brain.percent;
 
 describe("how much Grasp knows about an organization", () => {
   it("counts the same sources, with the same weights, as the company’s own onboarding", () => {
-    const { knowledge } = viewOf(noordkade, noordkade.seed);
+    const { brain } = viewOf(noordkade, noordkade.seed);
     expect(
-      knowledge.sources.map((each) => [each.source, each.weight])
+      brain.sources.map((each) => [each.source, each.weight])
     ).toStrictEqual(Object.entries(WEIGHTS));
-    expect(knowledge.sources.reduce((sum, each) => sum + each.weight, 0)).toBe(
-      100
-    );
+    expect(brain.sources.reduce((sum, each) => sum + each.weight, 0)).toBe(100);
     // Whole points only, so what the sources show always adds up to the percentage.
-    expect(knowledge.sources.reduce((sum, each) => sum + each.points, 0)).toBe(
-      knowledge.percent
+    expect(brain.sources.reduce((sum, each) => sum + each.points, 0)).toBe(
+      brain.percent
     );
-    for (const each of knowledge.sources) {
+    for (const each of brain.sources) {
       expect(each.known).toBeGreaterThanOrEqual(0);
       expect(each.known).toBeLessThanOrEqual(1);
       expect(each.points).toBe(Math.floor(each.weight * each.known + 1e-9));
@@ -770,11 +768,11 @@ describe("how much Grasp knows about an organization", () => {
   });
 
   it("leaves out what the company skipped", () => {
-    const pulse = viewOf(veldkamp, veldkamp.seed).knowledge.sources.find(
+    const pulse = viewOf(veldkamp, veldkamp.seed).brain.sources.find(
       (each) => each.source === "pulse"
     );
     expect(pulse?.known).toBe(0);
-    expect(viewOf(veldkamp, veldkamp.seed).knowledge.percent).toBe(
+    expect(viewOf(veldkamp, veldkamp.seed).brain.percent).toBe(
       100 -
         WEIGHTS.pulse -
         WEIGHTS.leadsHeard -
@@ -787,7 +785,7 @@ describe("how much Grasp knows about an organization", () => {
     for (const org of SAMPLE_ORGS) {
       let before = 0;
       for (const day of days) {
-        const { percent } = viewOf(org, told(org, day)).knowledge;
+        const { percent } = viewOf(org, told(org, day)).brain;
         expect(percent).toBeGreaterThanOrEqual(before);
         expect(percent).toBeLessThanOrEqual(100);
         before = percent;
@@ -799,15 +797,15 @@ describe("how much Grasp knows about an organization", () => {
 describe("Grasp opening for a company", () => {
   it("waits for Grasp’s go once enough is known, and says so first", () => {
     const view = viewOf(noordkade, noordkade.seed);
-    expect(view.knowledge).toMatchObject({
+    expect(view.brain).toMatchObject({
       threshold: DEFAULT_THRESHOLD,
       ready: true,
       opened: null,
     });
-    expect(view.knowledge.percent).toBeGreaterThanOrEqual(DEFAULT_THRESHOLD);
+    expect(view.brain.percent).toBeGreaterThanOrEqual(DEFAULT_THRESHOLD);
     expect(view.needs[0]).toStrictEqual({
       kind: "go",
-      percent: view.knowledge.percent,
+      percent: view.brain.percent,
       threshold: DEFAULT_THRESHOLD,
     });
     expect(view.stages.open).toBe("now");
@@ -815,21 +813,21 @@ describe("Grasp opening for a company", () => {
 
   it("is not ready below the share it opens at, wherever Grasp sets that", () => {
     const early = viewOf(noordkade, told(noordkade, 4));
-    expect(early.knowledge.ready).toBeFalsy();
+    expect(early.brain.ready).toBeFalsy();
     expect(early.stages.open).toBe("later");
     expect(early.needs.some((need) => need.kind === "go")).toBeFalsy();
     expect(
-      viewOf(noordkade, told(noordkade, 4, { threshold: 70 })).knowledge.ready
+      viewOf(noordkade, told(noordkade, 4, { threshold: 70 })).brain.ready
     ).toBeTruthy();
     expect(
-      viewOf(noordkade, { ...noordkade.seed, threshold: 90 }).knowledge.ready
+      viewOf(noordkade, { ...noordkade.seed, threshold: 90 }).brain.ready
     ).toBeFalsy();
   });
 
   it("is open from the day Grasp gave its go, and asks for nothing more", () => {
     const view = viewOf(noordkade, { ...noordkade.seed, opened: 8 });
     expect(view.stages.open).toBe("done");
-    expect(view.knowledge.opened).toBe(8);
+    expect(view.brain.opened).toBe(8);
     expect(
       view.needs.some((need) => need.kind === "go" || need.kind === "short")
     ).toBeFalsy();
@@ -845,11 +843,11 @@ describe("Grasp opening for a company", () => {
       noordkade,
       told(noordkade, LISTEN_DAYS, { threshold: 95 })
     );
-    expect(view.knowledge.ready).toBeFalsy();
+    expect(view.brain.ready).toBeFalsy();
     expect(view.stages.open).toBe("now");
     expect(view.needs[0]).toStrictEqual({
       kind: "short",
-      percent: view.knowledge.percent,
+      percent: view.brain.percent,
       threshold: 95,
     });
   });

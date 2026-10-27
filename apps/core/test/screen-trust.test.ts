@@ -1111,7 +1111,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     await admin.api.permissions.grant(reach, { version: 1 });
     await classifyAs(admin, near, "ordinary");
     const live = await following(builder, near);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Ledger ${crypto.randomUUID()}`,
       access: "everyone",
     });
@@ -1539,7 +1539,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Ledger ${crypto.randomUUID()}`,
       access: "everyone",
     });
@@ -1694,7 +1694,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
     const { generation: shown } = await admin.api.screenTrust.review(app);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Ledger ${crypto.randomUUID()}`,
       access: "everyone",
     });
@@ -1767,7 +1767,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
         await classifyAs(admin, app, "ordinary");
       })
     );
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Ledger ${crypto.randomUUID()}`,
       access: "everyone",
     });

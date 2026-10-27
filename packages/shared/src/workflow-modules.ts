@@ -16,7 +16,7 @@ export const actionUseKinds = [
   "connector",
   "operation",
   "model",
-  "knowledge",
+  "brain",
   "template",
   "files",
 ] as const;
@@ -69,22 +69,22 @@ export const operationUseSchema = z.strictObject({
 });
 
 /**
- * The operations of a Knowledge collection an action may use (GRA-700),
+ * The operations of a Brain collection an action may use (GRA-700),
  * the Brain's recall over it among them (GRA-1067).
  */
-export const knowledgeUseOperations = ["search", "read", "recall"] as const;
+export const brainUseOperations = ["search", "read", "recall"] as const;
 
 /**
- * A knowledge binding's use: the operations of its one collection the
+ * A brain binding's use: the operations of its one collection the
  * action calls, each once (GRA-700). The host refuses any other.
  */
-export const knowledgeUseSchema = z.strictObject({
+export const brainUseSchema = z.strictObject({
   alias: z.string().regex(actionUseAliasPattern),
-  kind: z.literal("knowledge"),
+  kind: z.literal("brain"),
   operations: z
-    .array(z.enum(knowledgeUseOperations))
+    .array(z.enum(brainUseOperations))
     .min(1)
-    .max(knowledgeUseOperations.length)
+    .max(brainUseOperations.length)
     .refine((operations) => new Set(operations).size === operations.length),
 });
 
@@ -118,7 +118,7 @@ export const templateUseSchema = z.strictObject({
  * A binding an action declares it uses, as its sealed contract holds it
  * (GRA-704): a connector's with the exact operations it calls, each once;
  * an operation binding's (an App export, one operation) with nothing more;
- * a model binding's with the shape its calls answer; a knowledge binding's
+ * a model binding's with the shape its calls answer; a brain binding's
  * with the operations of its collection it calls; a template binding's
  * with nothing more; a files binding's with the operations on the run's
  * own files it calls. The host refuses a call of any other operation.
@@ -126,7 +126,7 @@ export const templateUseSchema = z.strictObject({
 export const actionUseSchema = z.discriminatedUnion("kind", [
   connectorUseSchema,
   operationUseSchema,
-  knowledgeUseSchema,
+  brainUseSchema,
   templateUseSchema,
   filesUseSchema,
   // A model binding's: the descriptor of what each of its calls answers,
@@ -154,8 +154,8 @@ export type SealedUse =
   | { readonly alias: string; readonly kind: "model"; readonly output: string }
   | {
       readonly alias: string;
-      readonly kind: "knowledge";
-      readonly operations: readonly (typeof knowledgeUseOperations)[number][];
+      readonly kind: "brain";
+      readonly operations: readonly (typeof brainUseOperations)[number][];
     }
   | { readonly alias: string; readonly kind: "template" }
   | {

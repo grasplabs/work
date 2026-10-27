@@ -449,7 +449,7 @@ const probeFailures: ProbeFailure[] = [
   },
   {
     name: "a database that doesn't answer",
-    probe: { down: ["KNOWLEDGE"] },
+    probe: { down: ["BRAIN_DB"] },
     code: "probe_binding_unanswered",
   },
   {

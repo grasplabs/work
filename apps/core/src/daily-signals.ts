@@ -4,12 +4,12 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { auditLog } from "./audit-log.ts";
 import type { SearchRange, TallyWanted } from "./audit-log.ts";
 import {
-  addKnowledgeTally,
-  claimKnowledgeSignals,
-  knowledgeWindow,
-  storeKnowledgeSignals,
-} from "./knowledge/signals.ts";
-import type { KnowledgeTotals } from "./knowledge/signals.ts";
+  addBrainTally,
+  claimBrainSignals,
+  brainWindow,
+  storeBrainSignals,
+} from "./brain/signals.ts";
+import type { BrainTotals } from "./brain/signals.ts";
 import {
   addSignalTally,
   claimImprovementSignals,
@@ -20,7 +20,7 @@ import {
 import type { SignalTotals } from "./signals.ts";
 
 // What is computed once a UTC day from the audit log: the improvement
-// signals (signals.ts) and Knowledge's usage signals (knowledge/signals.ts).
+// signals (signals.ts) and the Brain's usage signals (brain/signals.ts).
 // The 15-minute cron trigger claims each one's day (daily-claims.ts), and
 // whatever it claimed is computed from one pass over the audit log, the
 // object tallying a stretch at a time for each of them
@@ -58,11 +58,11 @@ const auditPass = async (
   env: Env,
   now: Date,
   wanted: TallyWanted,
-  totals: { signals?: SignalTotals; knowledge?: KnowledgeTotals },
+  totals: { signals?: SignalTotals; brain?: BrainTotals },
   holdsFrom: string | undefined
 ): Promise<{ complete: boolean }> => {
   const audit = auditLog(env);
-  const [from] = [wanted.signals?.from, wanted.knowledge?.readsFrom]
+  const [from] = [wanted.signals?.from, wanted.brain?.readsFrom]
     .filter((at) => at !== undefined)
     .toSorted();
   const filter = { from: from ?? now.toISOString(), to: now.toISOString() };
@@ -88,8 +88,8 @@ const auditPass = async (
     if (stretch.signals !== undefined && totals.signals !== undefined) {
       addSignalTally(totals.signals, stretch.signals);
     }
-    if (stretch.knowledge !== undefined && totals.knowledge !== undefined) {
-      addKnowledgeTally(totals.knowledge, stretch.knowledge);
+    if (stretch.brain !== undefined && totals.brain !== undefined) {
+      addBrainTally(totals.brain, stretch.brain);
     }
     if (stretch.next === null) {
       return { complete };
@@ -104,7 +104,7 @@ const firstFailure = (
 ): unknown => results.find((result) => result.status === "rejected")?.reason;
 
 /**
- * Computes the day's improvement signals and Knowledge usage signals of
+ * Computes the day's improvement signals and Brain usage signals of
  * `now`'s UTC day, those that are due. Its cron trigger
  * calls it every 15 minutes. Throws the first failure once both are done.
  */
@@ -114,18 +114,17 @@ export const refreshDailySignals = async (
 ): Promise<void> => {
   const claims = await Promise.allSettled([
     claimImprovementSignals(env, now),
-    claimKnowledgeSignals(env, now),
+    claimBrainSignals(env, now),
   ]);
-  const [improvement, knowledge] = claims.map((claim) =>
+  const [improvement, brain] = claims.map((claim) =>
     claim.status === "fulfilled" ? claim.value : undefined
   );
   const failures = [firstFailure(claims)];
-  if (improvement !== undefined || knowledge !== undefined) {
-    const window =
-      knowledge === undefined ? undefined : knowledgeWindow(env, now);
+  if (improvement !== undefined || brain !== undefined) {
+    const window = brain === undefined ? undefined : brainWindow(env, now);
     const totals = {
       signals: improvement === undefined ? undefined : noSignalTotals(),
-      knowledge: window?.totals(),
+      brain: window?.totals(),
     };
     const { complete } = await auditPass(
       env,
@@ -135,7 +134,7 @@ export const refreshDailySignals = async (
           improvement === undefined
             ? undefined
             : { from: signalsFrom(now).toISOString() },
-        knowledge: window && {
+        brain: window && {
           readsFrom: window.readsFrom,
           questionsFrom: window.questionsFrom,
         },
@@ -147,10 +146,10 @@ export const refreshDailySignals = async (
       improvement !== undefined && totals.signals !== undefined
         ? storeImprovementSignals(env, improvement, totals.signals)
         : undefined,
-      knowledge !== undefined && totals.knowledge !== undefined
-        ? storeKnowledgeSignals(env, knowledge, {
-            ...totals.knowledge,
-            read: complete ? totals.knowledge.read : null,
+      brain !== undefined && totals.brain !== undefined
+        ? storeBrainSignals(env, brain, {
+            ...totals.brain,
+            read: complete ? totals.brain.read : null,
           })
         : undefined,
     ]);

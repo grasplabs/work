@@ -74,10 +74,10 @@ const line = ({ at: _at, ...event }: ChatToolEvent) => event;
 const stepCode = `export default async (self, env) => {
   const attachments = await env.chat.attachments();
   const workflows = await env.workflows.list();
-  const found = await env.knowledge.search("the secret parental leave policy");
+  const found = await env.brain.search("the secret parental leave policy");
   let refused = false;
   try {
-    await env.knowledge.read("doc-that-is-not-there");
+    await env.brain.read("doc-that-is-not-there");
   } catch {
     refused = true;
   }
@@ -133,7 +133,7 @@ describe("a chat's tool lines", () => {
         {
           id: tools[2]?.id,
           callId,
-          method: "knowledge.search",
+          method: "brain.search",
           target: null,
           summary: { hits: 0 },
           outcome: "ok",
@@ -142,7 +142,7 @@ describe("a chat's tool lines", () => {
         {
           id: tools[3]?.id,
           callId,
-          method: "knowledge.read",
+          method: "brain.read",
           target: null,
           summary: {},
           outcome: "refused",

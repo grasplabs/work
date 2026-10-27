@@ -172,7 +172,7 @@ export const secureDeleteReady = async (
     ]);
     return true;
   } catch (error) {
-    log.warn("knowledge.purge.secure_delete_unavailable", errorFields(error));
+    log.warn("brain.purge.secure_delete_unavailable", errorFields(error));
     return false;
   }
 };
@@ -389,7 +389,7 @@ const leftUnexplained = async (
   }
   if (held.size > liveLookupsCap) {
     // Counts only: never a term.
-    log.warn("knowledge.purge.index_check_capped", {
+    log.warn("brain.purge.index_check_capped", {
       keys: keys.length,
       liveLookups: held.size,
     });
@@ -457,7 +457,7 @@ export const eraseFromSearchIndex = async (
     } catch (error) {
       // Not readable here (a platform that refuses it): rebuilt instead.
       // The error's name only: its message repeats the lookup's terms.
-      log.warn("knowledge.purge.index_check_failed", {
+      log.warn("brain.purge.index_check_failed", {
         errorName: errorNameOf(error),
       });
     }
@@ -603,7 +603,7 @@ export type CollectionPlan =
 
 /** Logs that a personal purge's check reached a cap: counts only. */
 const loggedCapped = (counts: CheckCounts): CollectionPlan => {
-  log.warn("knowledge.purge.collection_check_capped", { ...counts });
+  log.warn("brain.purge.collection_check_capped", { ...counts });
   return { kind: "capped", counts };
 };
 
@@ -738,7 +738,7 @@ export const collectionPlan = async <C>(
     return await readCollection(brain, db, collectionId, valuesOf);
   } catch (error) {
     // Not readable here (a platform that refuses it): rebuilt instead.
-    log.warn("knowledge.purge.index_check_failed", {
+    log.warn("brain.purge.index_check_failed", {
       errorName: errorNameOf(error),
     });
     return { kind: "unknown" };
@@ -806,7 +806,7 @@ export const eraseCollectionFromSearchIndex = async (
       }
     } catch (error) {
       // The error's name only: its message repeats the lookup's tokens.
-      log.warn("knowledge.purge.index_check_failed", {
+      log.warn("brain.purge.index_check_failed", {
         errorName: errorNameOf(error),
       });
     }

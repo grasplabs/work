@@ -247,7 +247,7 @@ const aroundTrigger = async (
 /** A catalog contract of `kind` published by `admin`: its key. */
 const contract = async (
   admin: Identity,
-  kind: "connector" | "operation" | "model" | "knowledge" | "template" | "files"
+  kind: "connector" | "operation" | "model" | "brain" | "template" | "files"
 ): Promise<string> => {
   const key = `${kind}-${unique()}`;
   if (kind === "connector") {
@@ -319,7 +319,7 @@ const lookModule = `import { action, resource, v } from "@grasp-os/sdk/action";
 export const look = action({
   args: { doc: v.string() },
   returns: v.object({ status: v.string() }),
-  uses: [resource.knowledge("docs", { operations: ["read"] }), resource.template("letter")],
+  uses: [resource.brain("docs", { operations: ["read"] }), resource.template("letter")],
   handler: async (ctx, args) => {
     if (args.doc === "letter") {
       const letter = await ctx.resources.letter.read();
@@ -417,14 +417,11 @@ const listing = (
   ],
 });
 
-/** A definition calling action `look`, which reads Knowledge or a template. */
-const reading = (keys: {
-  knowledge: string;
-  template: string;
-}): Definition => ({
+/** A definition calling action `look`, which reads Brain or a template. */
+const reading = (keys: { brain: string; template: string }): Definition => ({
   bindings: {
     look: { kind: "operation", contract: "local:code/look.ts#look" },
-    docs: { kind: "knowledge", contract: keys.knowledge },
+    docs: { kind: "brain", contract: keys.brain },
     letter: { kind: "template", contract: keys.template },
   },
   tasks: [
@@ -448,7 +445,7 @@ describe("test runs of a workflow's draft", () => {
       connector: await contract(admin, "connector"),
       operation: await contract(admin, "operation"),
       model: await contract(admin, "model"),
-      knowledge: await contract(admin, "knowledge"),
+      brain: await contract(admin, "brain"),
       template: await contract(admin, "template"),
       files: await contract(admin, "files"),
     };
@@ -490,10 +487,10 @@ describe("test runs of a workflow's draft", () => {
         status: "Hello, Ada",
       },
     ];
-    const read = { knowledge: keys.knowledge, template: keys.template };
+    const read = { brain: keys.brain, template: keys.template };
     const throughAction = [
       {
-        kind: "knowledge",
+        kind: "brain",
         who: "doc-1",
         alias: "docs",
         answer: { id: "doc-1", title: "Leave policy", text: "…" },

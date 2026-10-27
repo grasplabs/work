@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { MessageResponse } from "./message.tsx";
 
-// An answer's links to notes, against core's Knowledge as the page reaches
+// An answer's links to notes, against core's Brain as the page reaches
 // it over RPC, faked: a note the answer cites opens on its collection's
 // page, looked up as the reader when followed; one it doesn't cite, or one
 // the reader can't read, opens nothing.
@@ -30,7 +30,7 @@ let root: Root | undefined;
 /** A refusal as core sends one: a code the page reads. */
 const notFound = (): Error =>
   Object.assign(new Error("There's no such document."), {
-    code: "knowledge.not_found",
+    code: "brain.document_not_found",
   });
 
 /**
@@ -44,7 +44,7 @@ const shown = async (
   sources: ChatCitedDocument[] = []
 ) => {
   const looked: string[] = [];
-  const knowledge = {
+  const brain = {
     getDocument: async (documentId: string) => {
       looked.push(documentId);
       await Promise.resolve();
@@ -57,8 +57,8 @@ const shown = async (
   };
   const core = {
     withSession: async <T,>(
-      action: (session: { knowledge: typeof knowledge }) => Promise<T>
-    ): Promise<T> => await action({ knowledge }),
+      action: (session: { brain: typeof brain }) => Promise<T>
+    ): Promise<T> => await action({ brain }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const answer = createRoute({
@@ -70,7 +70,7 @@ const shown = async (
   });
   const collection = createRoute({
     getParentRoute: () => rootRoute,
-    path: "/knowledge/$collection",
+    path: "/brain/collections/$collection",
     component: () => null,
   });
   const router = createRouter({
@@ -181,7 +181,7 @@ describe(MessageResponse, () => {
         kinds: { Leave: "button", Travel: "span", Docs: "button" },
         looked: [],
       },
-      at: "/knowledge/handbook",
+      at: "/brain/collections/handbook",
       search: { doc: "leave" },
       looked: ["leave"],
     });
@@ -265,7 +265,7 @@ describe(MessageResponse, () => {
       // No quote: the start of what the note says.
       unquoted: "Parental leaveleave.mdParental leave lasts sixteen weeks.",
       kinds: { planned: "button" },
-      at: "/knowledge/handbook",
+      at: "/brain/collections/handbook",
       search: { doc: "leave" },
     });
   });

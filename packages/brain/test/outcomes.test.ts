@@ -109,7 +109,7 @@ describe("task outcomes", () => {
         { eventId: first.eventId, execution: "completed", result: "unknown" },
       ],
       cursor: { source: first.source, seq: 9 },
-      audited: ["knowledge.episode.recorded"],
+      audited: ["brain.episode.recorded"],
     });
   });
 
@@ -163,7 +163,7 @@ describe("task outcomes", () => {
       erased: [],
       kept: [expect.objectContaining({ evidenceId: kept.evidenceId })],
       // Its recording, then its erasure, each once.
-      audited: ["knowledge.episode.recorded", "knowledge.episode.erased"],
+      audited: ["brain.episode.recorded", "brain.episode.erased"],
     });
   });
 

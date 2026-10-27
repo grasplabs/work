@@ -1,6 +1,6 @@
 // The built-in blueprints, generated into dist/ by build-blueprints.ts.
 
-import type { DeclaredCollection } from "@grasp-os/shared/knowledge";
+import type { DeclaredCollection } from "@grasp-os/shared/brain-documents";
 import type {
   BlueprintWorkflow,
   DeclaredPermission,

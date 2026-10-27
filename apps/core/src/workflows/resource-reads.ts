@@ -3,45 +3,45 @@ import { recall } from "@grasp-os/brain/recall";
 import { documents } from "@grasp-os/brain/schema";
 import { search } from "@grasp-os/brain/search";
 import { read } from "@grasp-os/brain/tools";
+import { collectionErrors } from "@grasp-os/shared/brain-documents";
 import { collectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
-import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
+import { brainSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { readAsDelegate } from "../brain/binding.ts";
+import { brainOf } from "../brain/ports.ts";
 import { permissions } from "../db/core/schema.ts";
-import { readAsDelegate } from "../knowledge/binding.ts";
-import { brainOf } from "../knowledge/ports.ts";
 import { pinnedTemplate } from "../resource-templates.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 
-// A run's reads of Knowledge and of published templates, for its
+// A run's reads of the Brain and of published templates, for its
 // workflow's own actions (GRA-700; the threat model is on the issue). Each
 // is one of the run's named calls (resource-calls.ts, `makeCall`): its
 // binding frozen at the start, its authority decided again first, its
 // receipts kept. What each closes:
 //
 // - A collection the workflow wasn't granted, or the person can't read.
-//   A knowledge binding is one collection, through one permission the
-//   workflow holds; every read goes through Knowledge's own access rules
+//   A brain binding is one collection, through one permission the
+//   workflow holds; every read goes through the Brain's own access rules
 //   as a delegate (`readAsDelegate`), as the run (the workflow, on behalf
 //   of the run's person), under that one permission: what both the grant
 //   and the person allow, nothing else. A document outside the collection,
 //   or one the person may not read, is refused alike, as one that isn't
 //   there (`resource.item_not_found`).
-// - Restricted data reaching an unrestricted run. Knowledge restricts the
+// - Restricted data reaching an unrestricted run. Brain restricts the
 //   reading context before it returns a sensitive collection's data
-//   (knowledge/access.ts), and an independent run never enters restricted
+//   (brain/access.ts), and an independent run never enters restricted
 //   mode after its start (restricted.ts): such a read is refused
 //   (`permission.restricted`) before anything is returned, a search that
 //   finds nothing too, as that says something of what the collection
-//   holds (knowledge/search.ts). A run started restricted reads it.
+//   holds (brain/search.ts). A run started restricted reads it.
 // - A template other than the one approved. A binding pins one version by
 //   its content's hash; content that no longer hashes to it serves
 //   nothing (`resource.unavailable`).
@@ -53,9 +53,9 @@ import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 //   another collection is refused as one that isn't there
 //   (`brain.not_found`). What it read is recorded with the run.
 
-/** What a search asks: text, as Knowledge takes it, and how many hits. */
+/** What a search asks: text, as the Brain takes it, and how many hits. */
 const searchSchema = z.strictObject({
-  text: z.string().min(1).max(knowledgeSearchMaxLength),
+  text: z.string().min(1).max(brainSearchMaxLength),
   limit: z.int().min(1).max(20).optional(),
 });
 
@@ -71,14 +71,14 @@ const defaultHits = 20;
 const callInvalid = (issue: string) =>
   workflowResourceErrors.create("workflow.call_invalid", { issues: [issue] });
 
-/** A knowledge call, as an action asks it: an operation and its request. */
-export interface KnowledgeCall {
+/** A brain call, as an action asks it: an operation and its request. */
+export interface BrainCall {
   readonly operation: "search" | "read" | "recall";
   readonly arguments: Json;
 }
 
 /**
- * The collection a knowledge binding reads through its permission, read
+ * The collection a brain binding reads through its permission, read
  * now: the workflow's own, active, allowing `read`, or the call is denied.
  */
 const boundCollection = async (
@@ -138,7 +138,7 @@ const searched = async (
   } catch (error) {
     // A collection the person may not read answers nothing, as one with
     // no match: a search says nothing of what they can't read.
-    if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
+    if (collectionErrors.codeOf(error) === "brain.document_not_found") {
       return [];
     }
     throw error;
@@ -152,7 +152,7 @@ const document = async (
   bound: { permissionId: PermissionId; collectionId: CollectionId },
   request: z.infer<typeof readSchema>
 ): Promise<Json> => {
-  const located = await drizzle(env.KNOWLEDGE)
+  const located = await drizzle(env.BRAIN_DB)
     .select({ collectionId: documents.collectionId })
     .from(documents)
     .where(eq(documents.id, request.id))
@@ -170,7 +170,7 @@ const document = async (
     );
     return { title: found.title, text: found.text };
   } catch (error) {
-    if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
+    if (collectionErrors.codeOf(error) === "brain.document_not_found") {
       throw operationErrors.create("resource.item_not_found");
     }
     throw error;
@@ -200,12 +200,12 @@ const recalled = async (
 };
 
 /**
- * What knowledge call `call` asks, checked: a search's text and limit, a
+ * What brain call `call` asks, checked: a search's text and limit, a
  * read's document ID, or a recall's input (`workflow.call_invalid`
  * otherwise).
  */
-export const requireKnowledgeRequest = (
-  call: KnowledgeCall
+export const requireBrainRequest = (
+  call: BrainCall
 ):
   | { operation: "search"; request: z.infer<typeof searchSchema> }
   | { operation: "read"; request: z.infer<typeof readSchema> }
@@ -214,7 +214,7 @@ export const requireKnowledgeRequest = (
     const request = searchSchema.safeParse(call.arguments);
     if (!request.success) {
       throw callInvalid(
-        `arguments: Give text of 1 to ${knowledgeSearchMaxLength} characters, and a limit of 1 to 20 if any.`
+        `arguments: Give text of 1 to ${brainSearchMaxLength} characters, and a limit of 1 to 20 if any.`
       );
     }
     return { operation: "search", request: request.data };
@@ -223,7 +223,7 @@ export const requireKnowledgeRequest = (
     const request = recallSchema.safeParse(call.arguments);
     if (!request.success) {
       throw callInvalid(
-        `arguments: Give a query of 1 to ${knowledgeSearchMaxLength} characters, and a budget if any.`
+        `arguments: Give a query of 1 to ${brainSearchMaxLength} characters, and a budget if any.`
       );
     }
     return { operation: "recall", request: request.data };
@@ -236,21 +236,21 @@ export const requireKnowledgeRequest = (
 };
 
 /**
- * Makes knowledge call `call` of `run` through `binding`, its authority
+ * Makes brain call `call` of `run` through `binding`, its authority
  * already decided again (`makeCall`): a search's hits, or a document.
  */
-export const callKnowledge = async (
+export const callBrainCollection = async (
   env: Env,
   run: CallingRun,
   binding: FrozenCatalogBinding,
-  call: KnowledgeCall
+  call: BrainCall
 ): Promise<Json> => {
   const { target } = binding;
-  if (target.kind !== "knowledge") {
+  if (target.kind !== "brain") {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
   const bound = await boundCollection(env, run, target.permissionId);
-  const request = requireKnowledgeRequest(call);
+  const request = requireBrainRequest(call);
   switch (request.operation) {
     case "search": {
       return await searched(env, run, bound, request.request);

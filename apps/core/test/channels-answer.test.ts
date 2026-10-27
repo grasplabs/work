@@ -7,8 +7,8 @@ import { workspace } from "../src/durable-objects.ts";
 import { codeStep, pausedReply, says } from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
+import { readCollection } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
@@ -62,11 +62,11 @@ const answersIn = async (conversation: string): Promise<string[]> => {
 describe("a member's question", setUpTime, () => {
   it("is answered in their own Teams chat, with the documents it cites", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
+    const { id: collectionId } = await admin.api.brain.createCollection({
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    const saved = await admin.api.knowledge.saveDocument({
+    const saved = await admin.api.brain.saveDocument({
       collectionId,
       path: "leave.md",
       text: "# Parental leave\n\nParental leave lasts sixteen weeks.",
@@ -84,7 +84,7 @@ describe("a member's question", setUpTime, () => {
     const { userId, teams } = await member(
       idp,
       codeStep(
-        `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(saved.id)})).text;`
+        `export default async (self, env) => (await env.brain.read(${JSON.stringify(saved.id)})).text;`
       ),
       says(
         `Leave lasts sixteen weeks [Parental leave](grasp:note/${saved.id}).`
@@ -103,7 +103,7 @@ describe("a member's question", setUpTime, () => {
       noteLinks: answer.includes("grasp:note"),
       source: answer.includes("1. Parental leave"),
       sourceLink: answer.includes(
-        `${clientOrigin}/knowledge/${collectionId}?doc=${saved.id}`
+        `${clientOrigin}/brain/${collectionId}?doc=${saved.id}`
       ),
       // Labelled as made by AI, as Teams shows it.
       aiLabel: answer.includes("AIGeneratedContent"),

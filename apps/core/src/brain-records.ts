@@ -64,7 +64,7 @@ import { inList } from "./db/d1.ts";
 //   earlier in the same call, so the brain never shows a fact without its
 //   source. The onboarding's sources count only once they exist.
 // - A flood: at most `brainRecordsMaxPerCall` records a call, and
-//   `brainRecordsMaxPerType` of each type in all, so `brain.read` stays
+//   `brainRecordsMaxPerType` of each type in all, so `brain.readWorkspace` stays
 //   bounded.
 // - A change without its record: the records and their audit event are one
 //   batch, kept together or not at all.
@@ -77,7 +77,7 @@ import { inList } from "./db/d1.ts";
 // - A purged document left in the brain: the onboarding alone takes its
 //   own drawings out (`purgeOnboardingDrawings`, as the system), whole.
 // - A purged name or passage left in a record, reaching agents through
-//   `brain.read`: a Knowledge content purge reaches every record through
+//   `brain.readWorkspace`: a Brain content purge reaches every record through
 //   core's `OnErase` (`brainRecordErasure`), rewriting the words in it as
 //   it rewrites a document's. Ids and the values the schema names are
 //   kept, so what a record names still holds. Once purged, a record sent
@@ -360,7 +360,7 @@ const freshOf = (
 /**
  * Refuses `fresh` when it would take a type past its cap. Counted before
  * the batch that adds them: calls racing past it overshoot by at most
- * their own records each, which keeps `brain.read` as bounded as the cap
+ * their own records each, which keeps `brain.readWorkspace` as bounded as the cap
  * means it to be.
  */
 const requireRoom = async (
@@ -655,7 +655,7 @@ export const onboardingDrawingsOf = async (
 /**
  * Takes out of the brain, for good, every drawing the onboarding gave it
  * from `since` on: what may have been drawn with a document's reading
- * that a Knowledge purge reached (onboarding/documents.ts). A drawing is
+ * that a Brain purge reached (onboarding/documents.ts). A drawing is
  * a version of its workflow; the workflow stays, and is drawn again.
  * Nothing else is taken out, and nothing written over. One batch with its
  * audit event, which names the records by id and counts them, never what
@@ -1125,7 +1125,7 @@ const countRecords = async (
 };
 
 /**
- * The Playbook's records as a Knowledge purge reaches them: their words
+ * The Playbook's records as a Brain purge reaches them: their words
  * are people's too, so a content purge rewrites them. No record names
  * who added it, so a personal purge has no one to forget here.
  */

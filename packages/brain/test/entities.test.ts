@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ensureCollection } from "../src/collections.ts";
 import { brainMentions } from "../src/db/schema.ts";
+import { purgedMarker } from "../src/documents-contract.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
   entitiesFor,
@@ -17,7 +18,6 @@ import {
   sweepLinking,
 } from "../src/entities.ts";
 import type { IndexStep } from "../src/indexing.ts";
-import { purgedMarker } from "../src/knowledge.ts";
 import {
   memoriesProposeChange,
   memoriesPublish,

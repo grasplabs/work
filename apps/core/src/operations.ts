@@ -22,19 +22,19 @@ import type { OperationChannel } from "@grasp-os/sdk/runner";
 import type { RunHandle } from "@grasp-os/sdk/server";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { appCallLimits } from "@grasp-os/shared/apps";
+import { resourceRecallInputSchema } from "@grasp-os/shared/brain-documents";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { resourceRecallInputSchema } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   appErrorDetailsMaxBytes,
   appErrorMessageMaxLength,
   invocationMaxReads,
   isAppErrorCode,
-  knowledgeSearchMaxLength,
+  brainSearchMaxLength,
   operationInputMaxBytes,
   operationResultMaxBytes,
   stagedReadMaxBytes,
@@ -1432,7 +1432,7 @@ export interface ResourceContext {
 /**
  * A resource as core bound it for an invocation: an approved resource of
  * the kind declared, the contract it serves, and its adapter, which
- * reaches the provider (connect, the model gateway, knowledge) and never
+ * reaches the provider (connect, the model gateway, brain) and never
  * hands App code a key, token or unrestricted fetch.
  */
 export interface BoundResource {
@@ -1455,14 +1455,14 @@ export type ResourceBindings = (
   declaration: AnyResource
 ) => Promise<BoundResource | undefined>;
 
-/** A knowledge search's request, as the declaration's client sends it. */
-const knowledgeSearchSchema = z.strictObject({
-  text: z.string().min(1).max(knowledgeSearchMaxLength),
+/** A brain search's request, as the declaration's client sends it. */
+const brainSearchSchema = z.strictObject({
+  text: z.string().min(1).max(brainSearchMaxLength),
   limit: z.number().int().min(1).max(20).optional(),
 });
 
-/** A knowledge read's request. */
-const knowledgeReadSchema = z.strictObject({ id: z.string().min(1).max(256) });
+/** A brain read's request. */
+const brainReadSchema = z.strictObject({ id: z.string().min(1).max(256) });
 
 /** A model request. */
 const modelRequestSchema = z.strictObject({
@@ -1470,20 +1470,20 @@ const modelRequestSchema = z.strictObject({
   instructions: z.string().max(20_000).optional(),
 });
 
-/** Each knowledge operation's request. */
-const knowledgeRequests = {
-  search: knowledgeSearchSchema,
-  read: knowledgeReadSchema,
+/** Each brain operation's request. */
+const brainRequests = {
+  search: brainSearchSchema,
+  read: brainReadSchema,
   recall: resourceRecallInputSchema,
   skillsSelect: skillsSelectInputSchema,
   skillsRead: skillsReadInputSchema,
 } as const;
 
-/** Whether `method` is an operation a knowledge resource serves. */
-const isKnowledgeOperation = (
+/** Whether `method` is an operation a brain resource serves. */
+const isBrainOperation = (
   method: unknown
-): method is keyof typeof knowledgeRequests =>
-  typeof method === "string" && Object.hasOwn(knowledgeRequests, method);
+): method is keyof typeof brainRequests =>
+  typeof method === "string" && Object.hasOwn(brainRequests, method);
 
 /** A request a resource's declaration doesn't allow. */
 const notAllowed = () => operationErrors.create("resource.not_allowed");
@@ -1492,21 +1492,21 @@ const notAllowed = () => operationErrors.create("resource.not_allowed");
 const invalidResult = () =>
   operationErrors.create("contract.invalid_resource_result");
 
-/** What a knowledge search answers: hits of exactly a title and an excerpt. */
-const knowledgeHitsSchema = z
+/** What a brain search answers: hits of exactly a title and an excerpt. */
+const brainHitsSchema = z
   .array(z.strictObject({ title: z.string(), excerpt: z.string() }))
   .max(20);
 
-/** What a knowledge read answers. */
-const knowledgeDocumentSchema = z.strictObject({
+/** What a brain read answers. */
+const brainDocumentSchema = z.strictObject({
   title: z.string(),
   text: z.string(),
 });
 
-/** What each knowledge operation answers: a recall, a Brain memory pack. */
-const knowledgeResults = {
-  search: knowledgeHitsSchema,
-  read: knowledgeDocumentSchema,
+/** What each brain operation answers: a recall, a Brain memory pack. */
+const brainResults = {
+  search: brainHitsSchema,
+  read: brainDocumentSchema,
   recall: memoryPackSchema,
   skillsSelect: skillSelectionSchema,
   skillsRead: skillReadSchema,
@@ -1641,21 +1641,19 @@ const isNamedCall = (
 };
 
 /**
- * Whether `declaration` allows knowledge operation `method` with `args`:
+ * Whether `declaration` allows brain operation `method` with `args`:
  * one it declares, with one request. A declared operation asked with a
- * request outside its contract (a search text past Knowledge's limit, or
+ * request outside its contract (a search text past the Brain's limit, or
  * a recall naming a collection the declaration doesn't, say) is refused
  * as arguments that don't fit.
  */
-const allowsKnowledge = (
-  declaration: Extract<AnyResource, { "~resource": "knowledge" }>,
+const allowsBrain = (
+  declaration: Extract<AnyResource, { "~resource": "brain" }>,
   method: unknown,
   args: readonly Json[]
 ): boolean => {
   const [first] = args;
-  const schema = isKnowledgeOperation(method)
-    ? knowledgeRequests[method]
-    : undefined;
+  const schema = isBrainOperation(method) ? brainRequests[method] : undefined;
   const allowed =
     schema !== undefined &&
     declaration.operations.some((operation) => operation === method) &&
@@ -1677,7 +1675,7 @@ const allowsKnowledge = (
 /**
  * The request `method` with `args` makes of `declaration`, if the
  * declaration allows it: a connector one of its declared actions with an
- * object of arguments, knowledge one of its declared operations, a model
+ * object of arguments, brain one of its declared operations, a model
  * a prompt, a template a read. `resource.not_allowed` otherwise.
  */
 const allowedRequest = (
@@ -1691,8 +1689,8 @@ const allowedRequest = (
   if (declaration["~resource"] === "connector") {
     const { actions } = declaration;
     allowed = isNamedCall(method, args, (name) => actions.includes(name));
-  } else if (declaration["~resource"] === "knowledge") {
-    allowed = allowsKnowledge(declaration, method, args);
+  } else if (declaration["~resource"] === "brain") {
+    allowed = allowsBrain(declaration, method, args);
   } else if (kind === "model") {
     allowed =
       method === "generate" &&
@@ -1751,7 +1749,7 @@ const returnsDeclared = (
 
 /**
  * What a resource answered, if its contract allows it: a model's structured
- * output (or text), knowledge's hits or document, a template's pinned
+ * output (or text), brain's hits or document, a template's pinned
  * version of the declared contract. A connector's answer is checked as JSON
  * here; its action's own descriptor comes with generated connector
  * contracts.
@@ -1771,11 +1769,9 @@ const checkedResourceResult = (
         : isNormalized(structuredOutput, result);
   } else if (declaration["~resource"] === "store") {
     valid = returnsDeclared(declaration.operations, args, result);
-  } else if (declaration["~resource"] === "knowledge") {
+  } else if (declaration["~resource"] === "brain") {
     valid = (
-      isKnowledgeOperation(method)
-        ? knowledgeResults[method]
-        : knowledgeDocumentSchema
+      isBrainOperation(method) ? brainResults[method] : brainDocumentSchema
     ).safeParse(result).success;
   } else if (declaration["~resource"] === "guests") {
     valid =

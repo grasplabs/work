@@ -114,7 +114,7 @@ describe("one of the client's people Grasp hasn't seen", setUpTime, () => {
     await post(messageFrom(person, { text: "Where's the handbook?" }));
     const { gateway } = await signsIn(
       person.aadObjectId,
-      "In Knowledge.",
+      "In Brain.",
       "Hello again.",
       "Bye."
     );

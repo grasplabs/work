@@ -4,7 +4,7 @@
  * so every page has something to show and shows what the prototype does:
  * the company's name, people in teams and roles, the onboarding's roster and plan, the
  * prototype's domains with the workflows core can run, 30 days of their
- * runs and apps over them (scripts/seed/screens.ts), Knowledge, and
+ * runs and apps over them (scripts/seed/screens.ts), Brain, and
  * chats. Run it while `vp run dev` runs.
  *
  * Everything goes through core's API as the person who would do it, signed
@@ -21,7 +21,7 @@
  * start it again.
  */
 import { appErrors } from "@grasp-os/shared/apps";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
+import { collectionErrors } from "@grasp-os/shared/brain-documents";
 import { onboardingErrors, planDays } from "@grasp-os/shared/onboarding";
 import { organizationErrors } from "@grasp-os/shared/organization";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
@@ -29,13 +29,13 @@ import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
+import { collections } from "./seed/brain-documents.ts";
+import type { CollectionSeed } from "./seed/brain-documents.ts";
 import { chats, writeTranscript } from "./seed/chats.ts";
 import { companyName, people, roster, teamNames } from "./seed/company.ts";
 import type { Person, PersonKey, TeamName } from "./seed/company.ts";
 import { engines } from "./seed/engines.ts";
 import type { EngineSeed, WorkflowSeed } from "./seed/engines.ts";
-import { collections } from "./seed/knowledge.ts";
-import type { CollectionSeed } from "./seed/knowledge.ts";
 import {
   authCall,
   localD1,
@@ -195,10 +195,10 @@ const seedCollection = async (
   sessions: ReadonlyMap<PersonKey, Session>,
   teams: ReadonlyMap<TeamName, string>
 ): Promise<string> => {
-  const creator = sessionFor(sessions, seed.createdBy).api.knowledge;
-  const { knowledge } = sessionFor(sessions, seed.writer).api;
+  const creator = sessionFor(sessions, seed.createdBy).api.brain;
+  const { brain } = sessionFor(sessions, seed.writer).api;
   // Its writer reads it, whoever created it.
-  const listed = await knowledge.listCollections();
+  const listed = await brain.listCollections();
   const collection =
     listed.find(({ name }) => name === seed.name) ??
     (await creator.createCollection({
@@ -215,7 +215,7 @@ const seedCollection = async (
   for (const document of seed.documents) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one save at a time
-      await knowledge.saveDocument({
+      await brain.saveDocument({
         collectionId: collection.id,
         path: document.path,
         text: document.text,
@@ -223,14 +223,14 @@ const seedCollection = async (
       });
     } catch (error) {
       // It's there already: seeded before.
-      if (knowledgeErrors.codeOf(error) === "knowledge.conflict") {
+      if (collectionErrors.codeOf(error) === "brain.conflict") {
         continue;
       }
       throw error;
     }
     if (document.update !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- one save at a time
-      await knowledge.saveDocument({
+      await brain.saveDocument({
         collectionId: collection.id,
         path: document.path,
         text: document.update.text,
@@ -438,7 +438,7 @@ const seedEngine = async (
 };
 
 /**
- * Engines' access to Knowledge: one an admin granted, and one still
+ * Engines' access to the Brain: one an admin granted, and one still
  * waiting for an admin, so the dashboard has a request to show.
  */
 const seedPermissions = async (
@@ -621,7 +621,7 @@ const main = async (): Promise<void> => {
       const id = await seedCollection(seed, sessions, teams);
       collectionIds.set(seed.name, id);
     }
-    console.info(`${collections.length} Knowledge collections`);
+    console.info(`${collections.length} Brain collections`);
 
     const engineIds = new Map<string, string>();
     for (const seed of engines) {
@@ -654,10 +654,10 @@ const main = async (): Promise<void> => {
 try {
   await main();
 } catch (error) {
-  // An App or Knowledge error says what core refused, in its own words.
+  // An App or Brain error says what core refused, in its own words.
   const coded =
     appErrors.codeOf(error) ??
-    knowledgeErrors.codeOf(error) ??
+    collectionErrors.codeOf(error) ??
     onboardingErrors.codeOf(error) ??
     organizationErrors.codeOf(error) ??
     workflowErrors.codeOf(error);

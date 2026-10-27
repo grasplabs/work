@@ -60,6 +60,7 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import type { Acting, Member } from "./auth/identity.ts";
+import { appMemoryPath, requireWithinLimit } from "./brain/memory-files.ts";
 import {
   appCandidateReports,
   appCandidates,
@@ -71,7 +72,6 @@ import {
   sdkResourceBindings,
 } from "./db/core/schema.ts";
 import { isTransientD1Error, isUniqueViolation } from "./db/d1.ts";
-import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { appBindingKinds, madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
 import { recordVersionBuilds } from "./screen-builds.ts";
@@ -449,8 +449,8 @@ const checkLimits = (
 };
 
 /**
- * `knowledge.memory_too_large` if the App's AGENTS.md, which agents
- * working on the App have in their context (knowledge/memory.ts), is over
+ * `brain.memory_too_large` if the App's AGENTS.md, which agents
+ * working on the App have in their context (brain/memory.ts), is over
  * its limit, and only if it also grew, as with `checkLimits`.
  */
 const checkMemory = (

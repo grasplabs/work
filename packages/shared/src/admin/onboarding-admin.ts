@@ -1933,7 +1933,7 @@ export type Need =
     };
 
 /** Where what Grasp knows about an organization comes from: the same sources, with the same weights, as the company's own onboarding counts. */
-export const KNOWLEDGE_SOURCES = [
+export const BRAIN_SOURCES = [
   "vision",
   "directory",
   "sources",
@@ -1944,17 +1944,17 @@ export const KNOWLEDGE_SOURCES = [
   "everyoneHeard",
   "review",
 ] as const;
-export type KnowledgeSource = (typeof KNOWLEDGE_SOURCES)[number];
+export type BrainSource = (typeof BRAIN_SOURCES)[number];
 
 /**
  * How much of what it needs Grasp knows about an organization, and whether that is enough to
  * open. The company sees the same percentage in its own onboarding, and its platform stays
  * closed until Grasp gives its go.
  */
-export interface OrgKnowledge {
+export interface OrgBrain {
   /** Each source: how much it can add, in percent, how much of that is in, 0 to 1, and the whole points that makes. */
   sources: {
-    source: KnowledgeSource;
+    source: BrainSource;
     weight: number;
     known: number;
     points: number;
@@ -1992,7 +1992,7 @@ export interface OrgView {
   asked: number;
   interviews: Interview[];
   works: WorkEvidence[];
-  knowledge: OrgKnowledge;
+  brain: OrgBrain;
   stages: Record<Stage, StageStatus>;
   /** The first step that is not done. */
   stage: Stage;
@@ -2341,7 +2341,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
   const counted = org.works.filter(
     (work) => !left.has(work.team) || works.some((each) => each.id === work.id)
   ).length;
-  const has: Record<KnowledgeSource, number> = {
+  const has: Record<BrainSource, number> = {
     // The first conversation, and the research into the company that follows it.
     vision: 0.75 * said + (state.research === "done" ? 0.25 : 0),
     directory: whether(known),
@@ -2359,7 +2359,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     review: share(knownWorks(works), counted),
   };
   // A point counts once it is wholly in, so the sources always add up to the percentage.
-  const sources = KNOWLEDGE_SOURCES.map((source) => ({
+  const sources = BRAIN_SOURCES.map((source) => ({
     source,
     weight: WEIGHTS[source],
     known: has[source],
@@ -2368,7 +2368,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
   // Where the organization counts it itself, its own number stands: the company sees that one.
   const percent =
     org.real?.known ?? sources.reduce((sum, each) => sum + each.points, 0);
-  const knowledge: OrgKnowledge = {
+  const brain: OrgBrain = {
     // Core's number comes without its parts: the admin's own would not add up to it, so none.
     sources: org.real?.known === undefined ? sources : [],
     percent,
@@ -2388,7 +2388,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     closed,
     talking: told && taking.some((team) => team.sent !== null),
     open,
-    ready: knowledge.ready,
+    ready: brain.ready,
   });
   // At a real organization the first conversation is Grasp's own to bring in: nothing waits for it,
   // but it is what Stephen starts from, so until he has read it Grasp is asked for it all the same.
@@ -2493,7 +2493,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
   if (unread > 0) {
     needs.push({ kind: "read", count: unread });
   }
-  if (!open && knowledge.ready) {
+  if (!open && brain.ready) {
     needs.unshift({ kind: "go", percent, threshold: state.threshold });
   } else if (!open && closed) {
     needs.unshift({ kind: "short", percent, threshold: state.threshold });
@@ -2513,7 +2513,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     asked: people.length - counts.away,
     interviews,
     works,
-    knowledge,
+    brain,
     stages,
     stage,
     needs,

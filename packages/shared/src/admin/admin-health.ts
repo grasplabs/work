@@ -1,10 +1,6 @@
 import type { AdminView } from "./admin-view.ts";
-import { KNOWLEDGE_SOURCES, listenDays } from "./onboarding-admin.ts";
-import type {
-  KnowledgeSource,
-  Need,
-  WorkEvidence,
-} from "./onboarding-admin.ts";
+import { BRAIN_SOURCES, listenDays } from "./onboarding-admin.ts";
+import type { BrainSource, Need, WorkEvidence } from "./onboarding-admin.ts";
 
 /**
  * How one organization is doing, in a few signals Grasp can act on before the company asks: its
@@ -28,7 +24,7 @@ export const phaseOf = (view: AdminView): AdminPhase => {
   if (view.open) {
     return "open";
   }
-  if (view.knowledge.ready) {
+  if (view.brain.ready) {
     return "ready";
   }
   if (view.stage === "conversation" || view.stage === "research") {
@@ -125,7 +121,7 @@ export interface BrainHealth {
   percent: number;
   threshold: number;
   /** Each source of what is known, 0 to 1, with how much it can add, the largest gap first. */
-  sources: { source: KnowledgeSource; weight: number; known: number }[];
+  sources: { source: BrainSource; weight: number; known: number }[];
   teams: BrainTeam[];
   /** Teams that take part and have at least one agreed interview. */
   covered: number;
@@ -161,19 +157,18 @@ export const brainOf = (view: AdminView): BrainHealth => {
       ),
     };
   });
-  const weighed = view.knowledge.sources.map(({ source, weight, known }) => ({
+  const weighed = view.brain.sources.map(({ source, weight, known }) => ({
     source,
     weight,
     known,
   }));
   return {
-    percent: view.knowledge.percent,
-    threshold: view.knowledge.threshold,
+    percent: view.brain.percent,
+    threshold: view.brain.threshold,
     sources: weighed.toSorted(
       (a, b) =>
         b.weight * (1 - b.known) - a.weight * (1 - a.known) ||
-        KNOWLEDGE_SOURCES.indexOf(a.source) -
-          KNOWLEDGE_SOURCES.indexOf(b.source)
+        BRAIN_SOURCES.indexOf(a.source) - BRAIN_SOURCES.indexOf(b.source)
     ),
     teams,
     covered: teams.filter((team) => !team.off && team.agreed > 0).length,

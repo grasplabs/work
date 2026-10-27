@@ -49,20 +49,20 @@ import {
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
 import {
   brainTranscript,
-  knowledgeTranscriptSources,
+  brainTranscriptSources,
 } from "./brain-transcripts.ts";
+import { brainOf } from "./brain/ports.ts";
+import { BrainDocumentsRpc } from "./brain/rpc.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
-import { brainOf } from "./knowledge/ports.ts";
 import { intakeIds } from "./onboarding/brain-intake.ts";
 import { mondayOf } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
-import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { visibleApps } from "./workflows/overview.ts";
 
-// The company brain's workspace (`brain.read`), assembled from what core
+// The company brain's workspace (`brain.readWorkspace`), assembled from what core
 // already holds, each part as the person may read it, so the brain shows
 // no one more than the reads it is built from would:
 //
@@ -77,7 +77,7 @@ import { visibleApps } from "./workflows/overview.ts";
 // |                    | interview and the documents shared in the onboarding     |
 // |                    | (admins); each team's interviews, once the brain holds   |
 // |                    | what they learned, for whoever reads records naming them |
-// |                    | (never with a transcript); Knowledge documents saved     |
+// |                    | (never with a transcript); Brain documents saved     |
 // |                    | with a transcript, for whoever may read them, by turn    |
 // |                    | count (brain-transcripts.ts)                             |
 // | tools              | the tools those documents name (admins)                  |
@@ -419,7 +419,7 @@ const toolsOf = (
  * The onboarding's sources, each with when it came in: the kickoff when
  * its transcript came in, the staff list when it was last saved, the team
  * leads' interviews and the documents shared. The one definition of which
- * sources there are and what they are called, for `brain.read` and
+ * sources there are and what they are called, for `brain.readWorkspace` and
  * `brain.changes` alike; none for anyone but an admin, who alone has
  * `facts`.
  */
@@ -507,7 +507,7 @@ const sourcesForRecords = async (
   );
 };
 
-/** The onboarding's sources as changes (brain-changes.ts), with the ids and titles `brain.read` gives them. */
+/** The onboarding's sources as changes (brain-changes.ts), with the ids and titles `brain.readWorkspace` gives them. */
 const sourceChanges = (facts: OnboardingFacts | null): SourceChange[] =>
   onboardingSources(facts).map(({ source: { id, title }, at }) => ({
     id,
@@ -734,14 +734,14 @@ const teamSources = ({ sourceId, counts, stakeholders }: Team): string[] => [
 
 /**
  * The brain's gaps, with what became of each, as every member reads
- * them: what `brain.read` serves, and what a chat's agent reads too.
+ * them: what `brain.readWorkspace` serves, and what a chat's agent reads too.
  */
 export const brainGaps = async (
   env: Env,
   // The one access point the brain page and an agent share: per-team gaps
   // would be filtered here for both. Today every member reads every gap.
   _person: Pick<Identity, "userId" | "role" | "teams">,
-  // The records `brain.read` loaded already, so it reads them once.
+  // The records `brain.readWorkspace` loaded already, so it reads them once.
   loaded?: HeldRecords
 ): Promise<Gap[]> => {
   const { gaps } = loaded ?? (await readBrainRecords(env));
@@ -812,7 +812,7 @@ export const readBrain = async (
     organizationName(env),
     connectionsOf(env, person),
     readBrainRecords(env),
-    knowledgeTranscriptSources(env, person),
+    brainTranscriptSources(env, person),
   ]);
 
   const company: Company = {
@@ -869,23 +869,23 @@ export const readBrain = async (
 
 /**
  * The company brain over `/rpc`: for anyone signed in. Of its workspace,
- * only the Knowledge documents it lists as transcript sources are audited,
- * as the Knowledge read that listing is; the rest reads nothing from
- * Knowledge. Opening a source's transcript is audited as that one read
- * (brain-transcripts.ts). Its changes are, as the Knowledge read they are
+ * only the Brain documents it lists as transcript sources are audited,
+ * as the Brain read that listing is; the rest reads nothing from
+ * Brain. Opening a source's transcript is audited as that one read
+ * (brain-transcripts.ts). Its changes are, as the Brain read they are
  * (brain-changes.ts). Adding records is, with the records it added.
  */
-export class BrainRpc extends CoreRpcTarget implements BrainApi {
+export class BrainRpc extends BrainDocumentsRpc implements BrainApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 
   constructor(env: Env, check: SessionCheck) {
-    super();
+    super(env, check);
     this.#env = env;
     this.#check = check;
   }
 
-  async read(): Promise<Workspace> {
+  async readWorkspace(): Promise<Workspace> {
     return await withPerson(
       this.#check,
       async (person) => await readBrain(this.#env, person)

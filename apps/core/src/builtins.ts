@@ -1,4 +1,4 @@
-import knowledgeMigrations from "@grasp-os/brain/migrations/journal" with { type: "json" };
+import brainMigrations from "@grasp-os/brain/migrations/journal" with { type: "json" };
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -8,16 +8,16 @@ import builtinBlueprints from "#blueprints";
 import type { BuiltinBlueprint } from "#blueprints";
 
 import { installBuiltinBlueprint } from "./app-blueprints.ts";
+import { graspSkills, syncGraspSkills } from "./brain/grasp-skills.ts";
+import type { GraspSkill } from "./brain/grasp-skills.ts";
 import coreMigrations from "./db/core/migrations/meta/_journal.json" with { type: "json" };
 import { inJurisdiction } from "./durable-objects.ts";
-import { graspSkills, syncGraspSkills } from "./knowledge/grasp-skills.ts";
-import type { GraspSkill } from "./knowledge/grasp-skills.ts";
 
 // What ships with the release, installed once per release on the first
 // request: the built-in blueprints
 // (apps/core/blueprints/, embedded by build-blueprints.ts, each installed
 // as a blueprint like any other, app-blueprints.ts), and the Grasp skills
-// (knowledge/grasp-skills.ts). Workers have no deploy hook, so the first
+// (brain/grasp-skills.ts). Workers have no deploy hook, so the first
 // request core serves after the router's check starts the install, in the
 // background (`installBuiltinsOnce`), once per isolate.
 //
@@ -88,21 +88,21 @@ const installBlueprints = async (
 };
 
 /**
- * The core and Knowledge databases' latest migrations: part of the
+ * The core and Brain databases' latest migrations: part of the
  * fingerprint, so a release that changes either schema installs again, as
  * what the install writes may have moved or been cleared, such as the
  * Grasp skills (a migration can't reach the fingerprint, which lives in
  * the singleton's storage).
  */
 const coreSchema = coreMigrations.entries.at(-1)?.tag ?? null;
-const knowledgeSchema = knowledgeMigrations.entries.at(-1)?.tag ?? null;
+const brainSchema = brainMigrations.entries.at(-1)?.tag ?? null;
 
 /** The fingerprint of what installing `of` writes. */
 export const fingerprintOf = async (of: Release): Promise<string> =>
   await sha256Hex(
     canonicalJson({
       schema: coreSchema,
-      knowledgeSchema,
+      brainSchema,
       blueprints: of.blueprints.map(
         ({
           id,

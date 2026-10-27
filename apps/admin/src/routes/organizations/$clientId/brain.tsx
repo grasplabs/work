@@ -13,7 +13,7 @@ import type { ReactNode } from "react";
 
 import { useOrganization } from "../../../admin/organization.tsx";
 import { BarList, Figure } from "../../../admin/parts.tsx";
-import { knowledgeSourceWords, plural } from "../../../admin/words.ts";
+import { brainSourceWords, plural } from "../../../admin/words.ts";
 
 /** A part of the section: its title, what it is for, and what it shows. */
 const BrainPart = ({
@@ -114,7 +114,7 @@ const BrainSection = () => {
                 const share = Math.round(known * 100);
                 return {
                   id: source,
-                  label: knowledgeSourceWords[source],
+                  label: brainSourceWords[source],
                   value: share,
                   shown: `${share}%`,
                 };

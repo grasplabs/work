@@ -167,7 +167,7 @@ describe(
       await answering([fiveToldReply(ids)], async () => await store.drawNext());
       const { gave } = await intake(ids);
       const member = await signedInApi(idp, "user");
-      const brain = await member.api.brain.read();
+      const brain = await member.api.brain.readWorkspace();
       const records = await kept(ids);
       const teamId = `team-${ids.team}`;
       expect({
@@ -261,7 +261,7 @@ describe(
       const again = [first.gave, second.gave];
       const after = await kept(ids);
       const member = await signedInApi(idp, "user");
-      const brain = await member.api.brain.read();
+      const brain = await member.api.brain.readWorkspace();
       const workflow = brain.workflows.find(
         ({ teamId }) => teamId === `team-${ids.team}`
       );
@@ -343,7 +343,7 @@ describe(
       );
       await intake(ids);
       const member = await signedInApi(idp, "user");
-      const brain = await member.api.brain.read();
+      const brain = await member.api.brain.readWorkspace();
       const workflow = brain.workflows.find(
         ({ teamId }) => teamId === `team-${ids.team}`
       );
@@ -445,7 +445,7 @@ describe(
         "skips the queue",
       ];
       const shownTo = async (api: SessionApi) => {
-        const brain = await api.brain.read();
+        const brain = await api.brain.readWorkspace();
         const source = brain.sources.find(
           ({ teamIds }) => teamIds?.includes(teamId) === true
         );
@@ -473,7 +473,7 @@ describe(
         admin: await shownTo(admin.api),
         member: await shownTo(member.api),
         nobody: {
-          read: await outcome(nobodyCore.authenticate().brain.read()),
+          read: await outcome(nobodyCore.authenticate().brain.readWorkspace()),
           opened: await outcome(
             nobodyCore
               .authenticate()
@@ -505,10 +505,10 @@ describe(
 
 /** The team's statements as `api` reads them in the brain: their words, sorted. */
 const statementsFor = async (
-  api: { brain: { read: () => Promise<Workspace> } },
+  api: { brain: { readWorkspace: () => Promise<Workspace> } },
   ids: Ids
 ): Promise<string[]> => {
-  const brain = await api.brain.read();
+  const brain = await api.brain.readWorkspace();
   return brain.statements
     .filter(({ teamIds }) => teamIds.includes(`team-${ids.team}`))
     .map(({ text }) => text)
@@ -1336,10 +1336,10 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
 
 /** The tickets' newest drawing as `api` reads it in the brain, and its baseline's steps. */
 const ticketsDrawingFor = async (
-  api: { brain: { read: () => Promise<Workspace> } },
+  api: { brain: { readWorkspace: () => Promise<Workspace> } },
   ids: Ids
 ) => {
-  const brain = await api.brain.read();
+  const brain = await api.brain.readWorkspace();
   // The team's one piece of work in the brain: the rota, its lead's own,
   // stays out. Found by its team, as staff read no name.
   const workflow = brain.workflows.find(
@@ -1546,7 +1546,7 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
       );
     });
     const member = await signedInApi(idp, "user");
-    const brain = await member.api.brain.read();
+    const brain = await member.api.brain.readWorkspace();
     const drawing = brain.workflows
       .find(({ teamId }) => teamId === `team-${ids.team}`)
       ?.drawings?.at(-1);
@@ -1649,7 +1649,7 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
       );
     });
     const member = await signedInApi(idp, "user");
-    const brain = await member.api.brain.read();
+    const brain = await member.api.brain.readWorkspace();
     const takes = brain.workflows
       .find(({ teamId }) => teamId === `team-${ids.team}`)
       ?.drawings?.at(-1)?.takes;
@@ -1720,7 +1720,7 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
       });
     });
     const member = await signedInApi(idp, "user");
-    const brain = await member.api.brain.read();
+    const brain = await member.api.brain.readWorkspace();
     const drawing = brain.workflows
       .find(({ teamId }) => teamId === `team-${ids.team}`)
       ?.drawings?.at(-1);
@@ -1946,8 +1946,8 @@ describe("the brain as Grasp's staff read it", { timeout: 120_000 }, () => {
     await givenWith(fiveToldReply);
     const admin = await signedInApi(idp, "admin");
     const staff = await asStaff();
-    await expect(staff.brain.read()).resolves.toStrictEqual(
-      await admin.api.brain.read()
+    await expect(staff.brain.readWorkspace()).resolves.toStrictEqual(
+      await admin.api.brain.readWorkspace()
     );
   });
 });

@@ -11,7 +11,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { runBindingsFor } from "../src/bindings.ts";
-import type { CollectionBinding } from "../src/knowledge/binding.ts";
+import type { CollectionBinding } from "../src/brain/binding.ts";
 import {
   AttemptHost,
   attemptCallLabels,
@@ -21,8 +21,8 @@ import { RunHost } from "../src/workflows/host.ts";
 import { keepMessage } from "../src/workflows/kept-email.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { collectionWithNote, readCollection } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, readCollection } from "./knowledge.ts";
 import { engineOfTest } from "./run-host.ts";
 import { signedInApi } from "./sign-in.ts";
 import { appWith } from "./workflow-apps.ts";

@@ -1,10 +1,10 @@
+import { purgedMarker } from "@grasp-os/shared/brain-documents";
+import type { PurgeInput } from "@grasp-os/shared/brain-documents";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import {
   brainRecordsMaxPerCall,
   brainRecordsMaxPerType,
 } from "@grasp-os/shared/brain-records";
-import { purgedMarker } from "@grasp-os/shared/knowledge";
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -19,7 +19,7 @@ import {
 } from "./sign-in.ts";
 
 // The brain's records (`brain.addRecords`, core's brain-records.ts), as
-// an admin adds them and every member reads them in `brain.read`. What
+// an admin adds them and every member reads them in `brain.readWorkspace`. What
 // can go wrong, tried here (the threat note is on GRA-527): someone who
 // isn't an admin writing the brain; a record written over, or a retry
 // failing; a statement whose source, tool, candidate or earlier statement
@@ -116,7 +116,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
     const events = await auditedDuring(async () => {
       added = await admin.api.brain.addRecords(records);
     });
-    const workspace = await member.api.brain.read();
+    const workspace = await member.api.brain.readWorkspace();
 
     expect({
       added,
@@ -216,7 +216,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
       await outcome(member.api.brain.addRecords(records)),
       await outcome(builder.api.brain.addRecords(records)),
     ];
-    const workspace = await member.api.brain.read();
+    const workspace = await member.api.brain.readWorkspace();
 
     expect({
       outcomes,
@@ -256,7 +256,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
         { type: "candidate", id: ids.blocker, name: "Typing invoices" },
       ])
     );
-    const workspace = await admin.api.brain.read();
+    const workspace = await admin.api.brain.readWorkspace();
 
     expect({
       retried,
@@ -414,7 +414,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
         )
       ),
     };
-    const workspace = await admin.api.brain.read();
+    const workspace = await admin.api.brain.readWorkspace();
 
     expect({
       outcomes,
@@ -441,7 +441,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
     await admin.api.onboarding.saveRoster(roster);
     const tag = unique();
     const cap = brainRecordsMaxPerType.candidate;
-    const before = await admin.api.brain.read();
+    const before = await admin.api.brain.readWorkspace();
     const held = before.candidates.length;
     for (let start = 0; start < cap - held; start += brainRecordsMaxPerCall) {
       const size = Math.min(brainRecordsMaxPerCall, cap - held - start);
@@ -459,7 +459,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
         { type: "candidate", id: `cand-${tag}-past`, name: "One too many" },
       ])
     );
-    const workspace = await admin.api.brain.read();
+    const workspace = await admin.api.brain.readWorkspace();
 
     expect({ past, held: workspace.candidates.length }).toStrictEqual({
       past: "brain.records_full",
@@ -473,7 +473,7 @@ type Signed = Awaited<ReturnType<typeof signedInApi>>;
 /** Saves `text` as a note in `person`'s Personal collection. */
 const noteOf = async (person: Signed, text: string) => {
   const { personal } = await person.api.memory.collections();
-  return await person.api.knowledge.saveDocument({
+  return await person.api.brain.saveDocument({
     collectionId: personal,
     path: `notes/${unique()}.md`,
     text,
@@ -525,7 +525,7 @@ const purgeOf = async (admin: Signed, terms: string[]) => {
     terms,
     reason: "erasure_request",
   };
-  return { input, plan: await admin.api.knowledge.preparePurge(input) };
+  return { input, plan: await admin.api.brain.preparePurge(input) };
 };
 
 describe(
@@ -543,11 +543,11 @@ describe(
       const { input, plan } = await purgeOf(admin, [name]);
       let stillFound: number | undefined;
       const events = await auditedDuring(async () => {
-        ({ stillFound } = await admin.api.knowledge.purge(input, plan.token));
+        ({ stillFound } = await admin.api.brain.purge(input, plan.token));
       });
       // The onboarding gives a team's intake again: the same records.
       const again = await admin.api.brain.addRecords(records);
-      const read = await member.api.brain.read();
+      const read = await member.api.brain.readWorkspace();
 
       expect({
         planned: plan.hostCopies,
@@ -634,13 +634,13 @@ describe(
       const racing = await core.authenticate();
 
       const first = await purgeOf(admin, [name]);
-      const raced = await racing.knowledge.purge(first.input, first.plan.token);
+      const raced = await racing.brain.purge(first.input, first.plan.token);
       const second = await purgeOf(admin, [name]);
-      const again = await admin.api.knowledge.purge(
+      const again = await admin.api.brain.purge(
         second.input,
         second.plan.token
       );
-      const read = await admin.api.brain.read();
+      const read = await admin.api.brain.readWorkspace();
 
       expect({
         raced: raced.stillFound,
@@ -662,8 +662,8 @@ describe(
       await admin.api.brain.addRecords(records);
 
       const { input, plan } = await purgeOf(admin, [`René${tag}`]);
-      const result = await admin.api.knowledge.purge(input, plan.token);
-      const read = await admin.api.brain.read();
+      const result = await admin.api.brain.purge(input, plan.token);
+      const read = await admin.api.brain.readWorkspace();
 
       expect({
         planned: plan.hostCopies,

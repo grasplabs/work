@@ -18,6 +18,24 @@ import {
   links,
   versions,
 } from "./db/schema.ts";
+import {
+  documentTypeOf,
+  historyOptionsSchema,
+  collectionErrors,
+  listDocumentsOptionsSchema,
+  versionInputSchema,
+} from "./documents-contract.ts";
+import type {
+  Backlink,
+  BacklinkPage,
+  DocumentPage,
+  DocumentRead,
+  DocumentSummary,
+  DocumentType,
+  HistoryPage,
+  Version,
+  VersionSummary,
+} from "./documents-contract.ts";
 import { documentLinkIntent } from "./entities.ts";
 import type { BrainEvent, DetailValue } from "./events.ts";
 import {
@@ -29,24 +47,6 @@ import type { ParsedDocument } from "./frontmatter.ts";
 import { collectionIdSchema, documentIdSchema } from "./ids.ts";
 import { publishInline } from "./indexing.ts";
 import type { Json } from "./json.ts";
-import {
-  documentTypeOf,
-  historyOptionsSchema,
-  knowledgeErrors,
-  listDocumentsOptionsSchema,
-  versionInputSchema,
-} from "./knowledge.ts";
-import type {
-  Backlink,
-  BacklinkPage,
-  DocumentPage,
-  DocumentRead,
-  DocumentSummary,
-  DocumentType,
-  HistoryPage,
-  Version,
-  VersionSummary,
-} from "./knowledge.ts";
 import { extractLinks, splitSections } from "./markdown.ts";
 import type { Link, Section } from "./markdown.ts";
 import {
@@ -81,7 +81,7 @@ import type { ReadAt, Transcript } from "./transcripts.ts";
  * Largest document text, in bytes of UTF-8: the sections, which hold it
  * all again, are rows in D1, which keeps a row to 2 MB.
  */
-const knowledgeTextMaxBytes = 1024 * 1024;
+const brainTextMaxBytes = 1024 * 1024;
 
 /** Most sections one document has. */
 const documentMaxSections = 1000;
@@ -107,7 +107,7 @@ interface Prepared {
 }
 
 const invalid = (issues: string[]) =>
-  knowledgeErrors.create("knowledge.invalid", { issues });
+  collectionErrors.create("brain.document_invalid", { issues });
 
 const fileTitle = (path: string): string => {
   const name = path.split("/").at(-1) ?? path;
@@ -186,10 +186,10 @@ export const sectionCountOf = (
  */
 const prepare = (path: string, text: string, purge: boolean): Prepared => {
   const bytes = new TextEncoder().encode(text).byteLength;
-  if (bytes > knowledgeTextMaxBytes) {
-    throw knowledgeErrors.create("knowledge.too_large", {
+  if (bytes > brainTextMaxBytes) {
+    throw collectionErrors.create("brain.too_large", {
       bytes,
-      maxBytes: knowledgeTextMaxBytes,
+      maxBytes: brainTextMaxBytes,
     });
   }
   let parsed: ParsedDocument;
@@ -204,14 +204,14 @@ const prepare = (path: string, text: string, purge: boolean): Prepared => {
   const { type, frontmatter, body } = parsed;
   const found = splitSections(body);
   if (found.length > documentMaxSections) {
-    throw knowledgeErrors.create("knowledge.too_many_sections", {
+    throw collectionErrors.create("brain.too_many_sections", {
       sections: found.length,
       maxSections: documentMaxSections,
     });
   }
   const linked = extractLinks(body);
   if (linked.length > documentMaxLinks) {
-    throw knowledgeErrors.create("knowledge.too_many_links", {
+    throw collectionErrors.create("brain.too_many_links", {
       links: linked.length,
       maxLinks: documentMaxLinks,
     });
@@ -325,7 +325,7 @@ export const versionText = async <C>(
 };
 
 const conflict = (existing: DocumentRow | undefined) =>
-  knowledgeErrors.create("knowledge.conflict", {
+  collectionErrors.create("brain.conflict", {
     documentId: existing?.id ?? null,
     latestVersion: existing?.currentVersion ?? 0,
   });
@@ -408,7 +408,7 @@ export interface Write {
   purgedTranscript?: Transcript;
   /**
    * With `purgedTranscript`: the transcript as the purge read it. The save
-   * fails with `knowledge.conflict` when it is no longer so, as another
+   * fails with `brain.conflict` when it is no longer so, as another
    * purge changed it meanwhile (`transcriptUnmoved`).
    */
   transcriptRead?: ReadAt;
@@ -468,7 +468,7 @@ const savedRow = (
 
 /**
  * Writes the next version, if the document is still at `ifVersion`
- * (0: it doesn't exist yet). Throws `knowledge.conflict`, with the version
+ * (0: it doesn't exist yet). Throws `brain.conflict`, with the version
  * it is at, and writes nothing otherwise.
  */
 export const writeVersion = async <C>(
@@ -491,8 +491,8 @@ export const writeVersion = async <C>(
   const transcript =
     write.transcript === undefined
       ? write.purgedTranscript
-      : knowledgeErrors.parse(
-          "knowledge.invalid",
+      : collectionErrors.parse(
+          "brain.document_invalid",
           transcriptSchema,
           write.transcript
         );
@@ -532,8 +532,8 @@ export const writeVersion = async <C>(
     actor: by.actor,
     action:
       restoredFrom === null
-        ? "knowledge.document.saved"
-        : "knowledge.document.restored",
+        ? "brain.document.saved"
+        : "brain.document.restored",
     target: { type: "document", id: documentId },
     detail: {
       ...by.detail,
@@ -648,7 +648,7 @@ export const readableDocument = async (
         .get()
     : undefined;
   if (!found) {
-    throw knowledgeErrors.create("knowledge.not_found");
+    throw collectionErrors.create("brain.document_not_found");
   }
   return found;
 };
@@ -663,7 +663,11 @@ export const getDocument = async <C>(
   const number =
     version === undefined
       ? undefined
-      : knowledgeErrors.parse("knowledge.invalid", versionInputSchema, version);
+      : collectionErrors.parse(
+          "brain.document_invalid",
+          versionInputSchema,
+          version
+        );
   const { db } = brain;
   const allowed = await allowedFor(brain.ports, reader);
   const id = documentIdSchema.safeParse(documentId);
@@ -692,7 +696,7 @@ export const getDocument = async <C>(
         .get()
     : undefined;
   if (!found) {
-    throw knowledgeErrors.create("knowledge.not_found");
+    throw collectionErrors.create("brain.document_not_found");
   }
   const { document, collection, version: row, payload } = found;
   // Recorded before a missing version is refused: that a version isn't
@@ -701,14 +705,14 @@ export const getDocument = async <C>(
   const provenance = await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       target: { type: "document", id: document.id },
       detail: { read: "document", version: number ?? document.currentVersion },
     },
     collection
   );
   if (row === null || payload === null) {
-    throw knowledgeErrors.create("knowledge.not_found");
+    throw collectionErrors.create("brain.document_not_found");
   }
   const text = await readPayload(brain, payload);
   const read: Version = {
@@ -725,8 +729,8 @@ export const listDocuments = async <C>(
   collectionId: unknown,
   options?: unknown
 ): Promise<DocumentPage> => {
-  const { after, limit } = knowledgeErrors.parse(
-    "knowledge.invalid",
+  const { after, limit } = collectionErrors.parse(
+    "brain.document_invalid",
     listDocumentsOptionsSchema,
     options
   );
@@ -753,7 +757,7 @@ export const listDocuments = async <C>(
   const provenance = await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       target: { type: "collection", id: collection.id },
       detail: { read: "documents", count: rows.length },
     },
@@ -772,8 +776,8 @@ export const history = async <C>(
   documentId: unknown,
   options?: unknown
 ): Promise<HistoryPage> => {
-  const { before, limit } = knowledgeErrors.parse(
-    "knowledge.invalid",
+  const { before, limit } = collectionErrors.parse(
+    "brain.document_invalid",
     historyOptionsSchema,
     options
   );
@@ -802,7 +806,7 @@ export const history = async <C>(
   const provenance = await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       target: { type: "document", id: document.id },
       detail: { read: "history", count: rows.length },
     },
@@ -864,8 +868,8 @@ export const backlinks = async <C>(
   documentId: unknown,
   options?: unknown
 ): Promise<BacklinkPage> => {
-  const page = knowledgeErrors.parse(
-    "knowledge.invalid",
+  const page = collectionErrors.parse(
+    "brain.document_invalid",
     listDocumentsOptionsSchema,
     options
   );
@@ -880,7 +884,7 @@ export const backlinks = async <C>(
   const provenance = await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       target: { type: "document", id: document.id },
       detail: { read: "backlinks", count: found.length },
     },

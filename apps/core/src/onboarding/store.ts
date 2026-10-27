@@ -241,7 +241,7 @@ import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 //   in only as the mail is sent. Each link goes by email on its day, and
 //   one reminder after `remindAfterWorkingDays`; the admin's update twice
 //   a week holds the admin's own numbers, never a name (mail-text.ts).
-// - A purged document living on in its reading (GRA-970): a Knowledge
+// - A purged document living on in its reading (GRA-970): a Brain
 //   purge that reaches a shared document forgets its reading here, every
 //   drawing that may have had it for context, and those drawings in the
 //   brain (`forgetDocuments`). A drawing under way when it goes is thrown
@@ -3422,7 +3422,7 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Forgets shared documents' readings for good, as a Knowledge purge
+   * Forgets shared documents' readings for good, as a Brain purge
    * reached them (documents.ts `documentReadingErasure`): each reading,
    * its question and the admin's answer, so neither Stephen's context nor
    * the brain's sources and tools (brain-rpc.ts) show them again; every

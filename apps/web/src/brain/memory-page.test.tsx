@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { MemoryPage } from "./memory-page.tsx";
 
-// The Brain's memory page, against core's knowledge API as the page
+// The Brain's memory page, against core's brain API as the page
 // reaches it over RPC, faked: a person corrects their own record against
 // the revision they read, and sees the correction in its place; another's
 // shared record offers no correction, and a retirement only to an admin;
@@ -56,7 +56,7 @@ const shown = async (admin: boolean, refusal?: string) => {
   const calls: string[] = [];
   const records = { mine: [own], shared: [shared] };
   const retired = new Set<string>();
-  const knowledge = {
+  const brain = {
     memoriesList: async ({ among }: { among: "mine" | "shared" }) => {
       await Promise.resolve();
       calls.push(`list ${among}`);
@@ -113,8 +113,8 @@ const shown = async (admin: boolean, refusal?: string) => {
   };
   const core = {
     withSession: async <T,>(
-      action: (session: { knowledge: typeof knowledge }) => Promise<T>
-    ): Promise<T> => await action({ knowledge }),
+      action: (session: { brain: typeof brain }) => Promise<T>
+    ): Promise<T> => await action({ brain }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({

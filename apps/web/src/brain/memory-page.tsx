@@ -29,9 +29,9 @@ import { LessonsView } from "./lessons-view.tsx";
 // offers a correction or a retirement only where core would take it.
 // Statements, names and titles are text, never markup.
 
-type Knowledge = Session["knowledge"];
-type Page = Awaited<ReturnType<Knowledge["memoriesList"]>>;
-type Lineage = Awaited<ReturnType<Knowledge["memoriesLineage"]>>;
+type Brain = Session["brain"];
+type Page = Awaited<ReturnType<Brain["memoriesList"]>>;
+type Lineage = Awaited<ReturnType<Brain["memoriesLineage"]>>;
 type Shown = Lineage["record"];
 type Among = "mine" | "shared";
 type Tab = Among | "lessons";
@@ -48,11 +48,11 @@ type Read<T> =
  */
 const readFrom = async <T,>(
   core: CoreConnection,
-  read: (knowledge: Knowledge) => Promise<T>
+  read: (brain: Brain) => Promise<T>
 ): Promise<Read<T>> => {
   try {
     const data = await core.withSession(
-      async (session) => await read(session.knowledge)
+      async (session) => await read(session.brain)
     );
     return { state: "ready", data };
   } catch (error) {
@@ -224,7 +224,7 @@ const CorrectForm = ({
         void (async () => {
           const receipt = await run(
             async (session) =>
-              await session.knowledge.memoriesProposeChange(
+              await session.brain.memoriesProposeChange(
                 { memoryId: record.id, statement: statement.trim() },
                 {
                   idempotencyKey: crypto.randomUUID(),
@@ -277,7 +277,7 @@ const RetireButton = ({
             void (async () => {
               const receipt = await run(
                 async (session) =>
-                  await session.knowledge.memoriesRetire(
+                  await session.brain.memoriesRetire(
                     { memoryId: record.id },
                     {
                       idempotencyKey: crypto.randomUUID(),
@@ -322,7 +322,7 @@ const LineagePanel = ({
     const read = async (): Promise<void> => {
       const answer = await readFrom(
         core,
-        async (knowledge) => await knowledge.memoriesLineage({ memoryId })
+        async (brain) => await brain.memoriesLineage({ memoryId })
       );
       if (!left) {
         setAnswered(answer);
@@ -409,7 +409,7 @@ const RecordList = ({
     const read = async (): Promise<void> => {
       const answer = await readFrom(
         core,
-        async (knowledge) => await knowledge.memoriesList({ among })
+        async (brain) => await brain.memoriesList({ among })
       );
       if (!left) {
         setListed(answer);

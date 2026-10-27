@@ -214,8 +214,8 @@
           "type": "d1"
         },
         {
-          "id": "$D1_KNOWLEDGE_ID",
-          "name": "KNOWLEDGE",
+          "id": "$D1_BRAIN_DB_ID",
+          "name": "BRAIN_DB",
           "type": "d1"
         },
         {
@@ -279,7 +279,7 @@
           ]
         },
         {
-          "binding": "KNOWLEDGE",
+          "binding": "BRAIN_DB",
           "databaseName": "grasp-os-knowledge",
           "migrations": [
             {

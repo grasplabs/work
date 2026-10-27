@@ -184,7 +184,7 @@ export const recordOutcome = async <C>(
       brain,
       {
         actor: system,
-        action: "knowledge.episode.recorded",
+        action: "brain.episode.recorded",
         target: { type: "episode", id: outcome.eventId },
         detail: {
           source: outcome.source,
@@ -374,7 +374,7 @@ const eraseWhere = async <C>(
   const results = await auditedBatch(brain.ports, db, [
     outboxedWhere(
       brain,
-      { actor: system, action: "knowledge.episode.erased", target },
+      { actor: system, action: "brain.episode.erased", target },
       holds
     ),
     ...retiringOrphans(db, eq(column, target.id), brain.ports.clock()),

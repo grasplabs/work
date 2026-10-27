@@ -207,7 +207,7 @@ describe("the built-in blueprints' build", () => {
       [onTasks("TASKS", ["read", "write"])],
     ],
     ["a binding name twice", [onTasks(), onTasks("TASKS", ["read"])]],
-    ["a platform binding name", [onTasks("KNOWLEDGE")]],
+    ["a platform binding name", [onTasks("BRAIN_DB")]],
     [
       "a connection, whose ID differs in each deployment",
       [

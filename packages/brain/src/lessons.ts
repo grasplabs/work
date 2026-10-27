@@ -471,8 +471,8 @@ const applyPatch = async <C>(
         actor: patch.actor ?? system,
         action:
           patch.state === "retired"
-            ? "knowledge.lesson.retired"
-            : "knowledge.lesson.proposed",
+            ? "brain.lesson.retired"
+            : "brain.lesson.proposed",
         target: { type: "lesson", id: patch.lessonId },
         detail: {
           revision,

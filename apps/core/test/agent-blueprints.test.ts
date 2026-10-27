@@ -7,8 +7,8 @@ import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { collectionWithNote, readCollection } from "./brain-collections.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, readCollection } from "./knowledge.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // `env.build.createFromBlueprint` in a chat's code: the chat's agent

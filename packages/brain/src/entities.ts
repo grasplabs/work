@@ -22,10 +22,10 @@ import {
   documents,
   versions,
 } from "./db/schema.ts";
+import { collectionErrors } from "./documents-contract.ts";
 import { collectionIdSchema, documentIdSchema, memoryIdSchema } from "./ids.ts";
 import type { IndexStep, StepConfig } from "./indexing.ts";
 import { keyed } from "./keyed.ts";
-import { knowledgeErrors } from "./knowledge.ts";
 import { log } from "./log.ts";
 import { citesReadable } from "./memory-cites.ts";
 import { readPayload } from "./payloads.ts";
@@ -1251,7 +1251,7 @@ const linkInputSchema = z.object({
 
 /** The code an error ends a step with: the Brain's own, or unexpected. */
 const codeOfError = (error: unknown): string =>
-  knowledgeErrors.codeOf(error) ??
+  collectionErrors.codeOf(error) ??
   brainErrors.codeOf(error) ??
   "internal.unexpected";
 
@@ -1260,7 +1260,7 @@ const codeOfMessage = (error: unknown): string => {
   const code =
     error instanceof Error ? error.message.split(": ").at(-1) : undefined;
   return code !== undefined &&
-    (knowledgeErrors.codeOf({ code }) !== undefined ||
+    (collectionErrors.codeOf({ code }) !== undefined ||
       brainErrors.codeOf({ code }) !== undefined)
     ? code
     : "internal.unexpected";
@@ -1340,7 +1340,7 @@ const failureFields = (error: unknown) => ({
 
 /**
  * Gives up on `source`, failed for good at run {@link maxLinkReruns}:
- * once, audited as `knowledge.links_exhausted`. Its next change queues it
+ * once, audited as `brain.links_exhausted`. Its next change queues it
  * again.
  */
 const exhaust = async <C>(
@@ -1364,7 +1364,7 @@ const exhaust = async <C>(
       ),
     outboxedIfChanged(brain, {
       actor: { type: "system" },
-      action: "knowledge.links_exhausted",
+      action: "brain.links_exhausted",
       target: { type: of.kind, id: of.id },
       detail: { version, runs: maxLinkReruns + 1 },
     }),
@@ -1425,7 +1425,7 @@ const rerunFailed = async <C>(brain: Brain<C>, now: Date): Promise<void> => {
         });
       }
     } catch (error) {
-      log.warn("knowledge.link_sweep_failed", failureFields(error));
+      log.warn("brain.link_sweep_failed", failureFields(error));
     }
   }
 };
@@ -1477,7 +1477,7 @@ export const sweepLinking = async <C>(
           );
       }
     } catch (error) {
-      log.warn("knowledge.link_sweep_failed", failureFields(error));
+      log.warn("brain.link_sweep_failed", failureFields(error));
     }
   }
   await rerunFailed(brain, now);
@@ -1592,7 +1592,7 @@ const noteRead = async <C>(
   await brain.ports.onRead(
     reader,
     {
-      action: "knowledge.read",
+      action: "brain.read",
       documentIds: [
         ...new Set(rows.flatMap(({ documentId }) => documentId ?? [])),
       ].slice(0, 20),

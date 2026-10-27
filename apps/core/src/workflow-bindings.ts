@@ -153,18 +153,18 @@ const actionsOf = (row: { actions: string }): string[] => {
 };
 
 /**
- * Refuses a knowledge target unless it names a permission workflow `id`
- * itself holds, active, on a Knowledge collection, allowing `read`
+ * Refuses a brain target unless it names a permission workflow `id`
+ * itself holds, active, on a Brain collection, allowing `read`
  * (GRA-700). Each call reads through it again, as the person its run acts
  * for may read too (workflows/resource-calls.ts). A collection no delegate
- * may ever read is refused too, as Knowledge's own `collectionsAllowed`
+ * may ever read is refused too, as the Brain's own `collectionsAllowed`
  * leaves it out: one deleted, one only its owner reads (`me`), or one
  * only admins read.
  */
-const requireKnowledgeServes = async (
+const requireBrainServes = async (
   env: Env,
   id: string,
-  target: Extract<WorkflowBindingTarget, { kind: "knowledge" }>
+  target: Extract<WorkflowBindingTarget, { kind: "brain" }>
 ): Promise<void> => {
   const row = await workflowPermission(env, id, target.permissionId);
   if (
@@ -176,7 +176,7 @@ const requireKnowledgeServes = async (
       "target.permissionId: The workflow holds no permission to read a collection."
     );
   }
-  const collection = await drizzle(env.KNOWLEDGE)
+  const collection = await drizzle(env.BRAIN_DB)
     .select({ access: collections.access })
     .from(collections)
     .where(eq(collections.id, row.objectId))
@@ -577,8 +577,8 @@ export const requireTargetServes = async (
       // outside the run serves its own files (GRA-724).
       break;
     }
-    case "knowledge": {
-      await requireKnowledgeServes(env, id, target);
+    case "brain": {
+      await requireBrainServes(env, id, target);
       return;
     }
     case "template": {
@@ -634,7 +634,7 @@ const targetDetail = (
     case "event": {
       return { targetKind: target.kind };
     }
-    case "knowledge": {
+    case "brain": {
       return { targetKind: target.kind, permissionId: target.permissionId };
     }
     case "files": {

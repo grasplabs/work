@@ -138,7 +138,7 @@ const SidebarDemo = () => (
               <SidebarMenuItem>
                 <SidebarMenuButton>
                   <BookOpenIcon />
-                  Knowledge
+                  Brain
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

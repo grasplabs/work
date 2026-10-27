@@ -511,7 +511,7 @@ const Frame = () => (
                     <SidebarMenuItem>
                       <SidebarMenuButton>
                         <BookOpenIcon />
-                        Knowledge
+                        Brain
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   </SidebarMenu>
@@ -523,7 +523,7 @@ const Frame = () => (
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink href="/kit">Knowledge</BreadcrumbLink>
+              <BreadcrumbLink href="/kit">Brain</BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>

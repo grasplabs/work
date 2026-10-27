@@ -3,10 +3,10 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
 import { appsApi } from "./agent-apps.ts";
+import { brainDocumentsApi } from "./agent-brain-documents.ts";
 import { brainAgentApi } from "./agent-brain.ts";
 import { buildApi } from "./agent-builds.ts";
 import { connectionsApi } from "./agent-connections.ts";
-import { knowledgeApi } from "./agent-knowledge.ts";
 import { memoryApi } from "./agent-memory.ts";
 import { auditToolCall, requireOpenRun } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
@@ -164,14 +164,24 @@ const apiNameSchema = z
 /** The APIs a chat's code gets. */
 export const agentApis: readonly AgentApi[] = [
   chatApi,
-  knowledgeApi,
+  brainAgentApi,
   connectionsApi,
   appsApi,
   buildApi,
   workflowsApi,
   memoryApi,
-  brainAgentApi,
 ].map((api) => ({
   ...api,
   name: apiNameSchema.parse(api.name),
 }));
+
+/**
+ * What a chat others share gets: its chat, and the Brain's documents,
+ * read for everyone in it. Not the Brain's recall, questions or skills,
+ * nor connections, Apps, builds, workflows or memory saves, which act as
+ * the one person who asked.
+ */
+export const sharedAgentApis: readonly AgentApi[] = [
+  chatApi,
+  brainDocumentsApi,
+].map((api) => ({ ...api, name: apiNameSchema.parse(api.name) }));

@@ -1,8 +1,8 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { collectionErrors } from "../src/documents-contract.ts";
 import { getDocument, writeVersion } from "../src/documents.ts";
-import { knowledgeErrors } from "../src/knowledge.ts";
 import { preparePurge, purge } from "../src/purge.ts";
 import { recall } from "../src/recall.ts";
 import { search } from "../src/search.ts";
@@ -27,7 +27,7 @@ const outcome = async (promise: Promise<unknown>): Promise<string> => {
     await promise;
     return "ok";
   } catch (error) {
-    return knowledgeErrors.codeOf(error) ?? String(error);
+    return collectionErrors.codeOf(error) ?? String(error);
   }
 };
 
@@ -76,7 +76,7 @@ describe("a standalone Brain", () => {
       ],
     }).toStrictEqual({
       shared: "ok",
-      hidden: "knowledge.not_found",
+      hidden: "brain.document_not_found",
       found: [shared.id],
       recalled: [shared.id],
     });
@@ -110,9 +110,9 @@ describe("a standalone Brain", () => {
       outboxed: outbox.results.length,
       reads: reads.map(({ caller, record }) => [caller, record.action]),
     }).toStrictEqual({
-      events: ["knowledge.collection.created", "knowledge.document.saved"],
+      events: ["brain.collection.created", "brain.document.saved"],
       outboxed: 2,
-      reads: [["reader", "knowledge.read"]],
+      reads: [["reader", "brain.read"]],
     });
   });
 
@@ -131,7 +131,7 @@ describe("a standalone Brain", () => {
     await write("# Leave\nFirst.");
 
     await expect(outcome(write("# Leave\nSecond."))).resolves.toBe(
-      "knowledge.conflict"
+      "brain.conflict"
     );
   });
 

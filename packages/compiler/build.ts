@@ -64,7 +64,7 @@ const sdk = realpathSync(path.join(modules, "@grasp-os/sdk"));
 const shared = realpathSync(path.join(sdk, "node_modules/@grasp-os/shared"));
 /**
  * The Brain's contract, which the SDK re-exports (`@grasp-os/sdk/brain`)
- * and Knowledge's types come from: kept for the same reason.
+ * and the Brain's types come from: kept for the same reason.
  */
 const brain = realpathSync(path.join(sdk, "node_modules/@grasp-os/brain"));
 const require = createRequire(path.join(root, "package.json"));

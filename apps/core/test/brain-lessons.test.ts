@@ -4,13 +4,13 @@ import { recordOutcome } from "@grasp-os/brain/outcomes";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { keepAudience } from "../src/knowledge/access.ts";
-import { brainOf } from "../src/knowledge/ports.ts";
+import { keepAudience } from "../src/brain/access.ts";
+import { brainOf } from "../src/brain/ports.ts";
 import { newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
-// Lessons through Knowledge's RPC, as the Brain's Memory page reads them
+// Lessons through the Brain's RPC, as the Brain's Memory page reads them
 // (GRA-301, slice 2; the threat model is on the issue): a shared chat's
 // lesson for the people who were in it for every turn it rests on and
 // still are, retired only by one of the company's admins among them.
@@ -34,11 +34,11 @@ const outcome = async (promise: Promise<unknown>): Promise<string> => {
 
 /** The lessons `person` lists. */
 const listed = async (person: Person): Promise<string[]> => {
-  const lessons = await person.api.knowledge.lessonsList();
+  const lessons = await person.api.brain.lessonsList();
   return lessons.map(({ id }) => id);
 };
 
-describe("lessons through Knowledge's RPC", setUpTime, () => {
+describe("lessons through Brain's RPC", setUpTime, () => {
   it("shows a shared chat's lesson to the people there for every turn it rests on, and lets an admin among them retire it", async () => {
     const admin = await signedInApi(idp, "admin");
     const ben = await signedInApi(idp, "user");
@@ -80,19 +80,19 @@ describe("lessons through Knowledge's RPC", setUpTime, () => {
     const [lessonId = ""] = await listed(ben);
     const retire = async (by: Person) =>
       await outcome(
-        by.api.knowledge.lessonsRetire({ lessonId, expectedRevision: 1 })
+        by.api.brain.lessonsRetire({ lessonId, expectedRevision: 1 })
       );
 
     const before = {
       admin: await listed(admin),
       ben: [lessonId],
       cas: await listed(cas),
-      casLineage: await outcome(cas.api.knowledge.lessonsLineage({ lessonId })),
+      casLineage: await outcome(cas.api.brain.lessonsLineage({ lessonId })),
     };
     const byBen = await retire(ben);
     const byCas = await retire(cas);
     const byAdmin = await retire(admin);
-    const lineage = await ben.api.knowledge.lessonsLineage({ lessonId });
+    const lineage = await ben.api.brain.lessonsLineage({ lessonId });
 
     expect({
       before,

@@ -360,7 +360,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       },
       audited: [
         // What the Brain captured of the run goes with its details.
-        "knowledge.episode.erased",
+        "brain.episode.erased",
         "workflow.run.completed",
         "workflow.run.started",
         "workflow.step.completed $params",

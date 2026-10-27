@@ -246,7 +246,7 @@ const coreDb: D1State = {
       `${core}channels/signals.ts`,
       "Hourly counts of how Stephen fared in the chat apps, kept a week for the admin's watch."
     ),
-    chat_audiences: exported(`${core}knowledge/access.ts`),
+    chat_audiences: exported(`${core}brain/access.ts`),
     invitations: exported(auth),
     teams: exported(auth),
     team_members: exported(auth),
@@ -385,24 +385,24 @@ const coreDb: D1State = {
     landscape_staged_people: transient(`${core}landscape.ts`),
     brain_records: exported(`${core}brain-records.ts`, brainPending),
     brain_gap_states: exported(`${core}brain-gaps.ts`),
-    // Knowledge's host tables (src/db/core/schema.ts).
-    collection_teams: exported(`${core}knowledge/collection-rules.ts`),
-    app_entries: cache(`${core}knowledge/apps-collection.ts`),
-    uploads: exported(`${core}knowledge/uploads.ts`, brainPending),
+    // The Brain's host tables (src/db/core/schema.ts).
+    collection_teams: exported(`${core}brain/collection-rules.ts`),
+    app_entries: cache(`${core}brain/apps-collection.ts`),
+    uploads: exported(`${core}brain/uploads.ts`, brainPending),
     upload_cleanups: exported(
-      `${core}knowledge/uploads.ts`,
+      `${core}brain/uploads.ts`,
       "Deletions still owed, purges' included."
     ),
-    knowledge_signal_computations: cache(`${core}knowledge/signals.ts`),
-    knowledge_signals: cache(`${core}knowledge/signals.ts`),
-    knowledge_signal_dismissals: exported(`${core}knowledge/signals.ts`),
+    knowledge_signal_computations: cache(`${core}brain/signals.ts`),
+    knowledge_signals: cache(`${core}brain/signals.ts`),
+    knowledge_signal_dismissals: exported(`${core}brain/signals.ts`),
   },
 };
 
-const knowledgeDb: D1State = {
-  role: "knowledge-db",
+const brainDb: D1State = {
+  role: "brain-db",
   worker: "core",
-  binding: "KNOWLEDGE",
+  binding: "BRAIN_DB",
   database: "grasp-os-knowledge",
   schema: `${brain}db`,
   tables: {
@@ -920,7 +920,7 @@ const files: R2State = {
     "run-files/": exported(`${core}workflows/run-files.ts`),
     "app-files/": exported(`${core}file-host.ts`, "Stores' files, by store."),
     "inbound-email/": exported(`${core}workflows/kept-email.ts`),
-    "knowledge/": exported(`${core}knowledge/uploads.ts`, brainPending),
+    "brain/": exported(`${core}brain/uploads.ts`, brainPending),
     "npm-tarballs/": cache(`${core}packages/tarballs.ts`),
     "package-builds/": cache(`${core}packages/build.ts`),
     "screen-builds/": cache(`${core}screens.ts`),
@@ -952,7 +952,7 @@ const brainObjects: R2State = {
   prefixes: {
     "payloads/": exported(
       `${brain}payloads.ts`,
-      `Knowledge version texts by SHA-256, each named by its row in brain_payloads. ${brainPending}`
+      `Brain version texts by SHA-256, each named by its row in brain_payloads. ${brainPending}`
     ),
   },
 };
@@ -982,7 +982,7 @@ export const clientStateRegistry: ClientStateRegistry = {
     "apps/router/wrangler.jsonc":
       "The router runs once, in grasp-os-ops, and holds only hostnames the admin writes.",
   },
-  d1: [coreDb, knowledgeDb, connectDb],
+  d1: [coreDb, brainDb, connectDb],
   durableObjects: [
     workspaces,
     apps,
@@ -1002,7 +1002,7 @@ export const clientStateRegistry: ClientStateRegistry = {
     {
       className: "D1Store",
       owner: `${core}on-prem/d1.ts`,
-      carries: ["core-db", "knowledge-db"],
+      carries: ["core-db", "brain-db"],
       runtimeTables: {
         d1_migrations: exported(`${core}on-prem/d1.ts`),
       },

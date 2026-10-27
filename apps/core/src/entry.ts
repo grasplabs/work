@@ -39,6 +39,7 @@ import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
+import { originalResponse } from "./brain/uploads.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
 import { carryOnAfterConnecting } from "./channels/answer.ts";
 import { channelResponse } from "./channels/door.ts";
@@ -51,7 +52,6 @@ import {
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
-import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
 import { hearResponse } from "./onboarding/hear.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
@@ -141,8 +141,8 @@ const frontendResponse = async (
   return await pageResponse(pathname, request, env);
 };
 
-/** `/api/knowledge/uploads/<id>/original`: an upload's original. */
-const originalPath = /^\/api\/knowledge\/uploads\/(?<id>[\w-]+)\/original$/u;
+/** `/api/brain/uploads/<id>/original`: an upload's original. */
+const originalPath = /^\/api\/brain\/uploads\/(?<id>[\w-]+)\/original$/u;
 
 /**
  * The pages a link opens, which have no session: the link's secret in the

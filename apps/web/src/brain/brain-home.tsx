@@ -471,7 +471,7 @@ export const BrainHome = ({ brain }: { brain: Brain }) => {
 /**
  * The brain's home as a page, as the prototype shows the company note: the company's name, how the
  * brain works in a few sentences, then a block for each part of it, to go on from. Under them, the
- * way to Knowledge, where the memory, skills and uploads are: the brain's own navigation has no
+ * way to the Brain, where the memory, skills and uploads are: the brain's own navigation has no
  * place for it.
  */
 export const HomePage = ({
@@ -505,8 +505,11 @@ export const HomePage = ({
           <footer className="text-muted-foreground border-t pt-4 text-sm">
             <Trans>
               The memory files, skills and uploads your agents read are in{" "}
-              <Link className="text-foreground hover:underline" to="/knowledge">
-                Knowledge
+              <Link
+                className="text-foreground hover:underline"
+                to="/brain/collections"
+              >
+                Brain
               </Link>
               .
             </Trans>

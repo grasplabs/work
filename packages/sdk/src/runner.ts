@@ -206,7 +206,7 @@ const startOf =
     );
 
 /**
- * The one method of each kind of resource's client but knowledge's,
+ * The one method of each kind of resource's client but brain's,
  * statistics' and guests', whose methods are the operations they declare.
  */
 const clientMethods = {
@@ -230,7 +230,7 @@ const resourcesOf = (
       async (...args: unknown[]): Promise<unknown> =>
         await channel.resource(resource.alias, method, args);
     const methods =
-      resource["~resource"] === "knowledge" ||
+      resource["~resource"] === "brain" ||
       resource["~resource"] === "statistics" ||
       resource["~resource"] === "guests"
         ? [...resource.operations]

@@ -29,10 +29,10 @@ import { mockIdp } from "./idp.ts";
 // (brain-scale-arm.ts says why): full text's here, with the distractors'
 // generator, the run's identity and build, and the control; the agent's in
 // brain-scale-agent.test.ts, full context's in
-// brain-scale-full-context.test.ts. Its gate reads Knowledge as the larger
+// brain-scale-full-context.test.ts. Its gate reads Brain as the larger
 // sizes do, by each table's row count (every row, twice a trial, would take
 // hours there), and a control shows that this still catches a change to
-// Knowledge; core, R2 and the Workspace object are read row by row at
+// Brain; core, R2 and the Workspace object are read row by row at
 // every size. The larger sizes run on request only
 // (brain-scale-sizes.test.ts, vite.brain-scale.config.ts): they take far
 // longer than a CI run should.
@@ -84,7 +84,7 @@ describe("the Brain baseline at scale", { timeout: scaleTimeout }, () => {
     expect({
       suite: [identity.suite.version, identity.suite.digest],
       distractors: identity.distractors,
-      knowledgeState: identity.knowledgeState,
+      brainState: identity.brainState,
     }).toStrictEqual({
       suite: [brainSuiteVersion, brainSuiteDigests[brainSuiteVersion]],
       distractors: {
@@ -96,7 +96,7 @@ describe("the Brain baseline at scale", { timeout: scaleTimeout }, () => {
             `${brainDistractorVersion}/${brainDistractorSeed}/${chunks}`
           ],
       },
-      knowledgeState: "counts",
+      brainState: "counts",
     });
   });
 
@@ -104,7 +104,7 @@ describe("the Brain baseline at scale", { timeout: scaleTimeout }, () => {
     scaleArmTests("fullText", run, 0);
   });
 
-  it("would see a change to Knowledge by its row counts alone", async () => {
+  it("would see a change to Brain by its row counts alone", async () => {
     const { baseline } = await run();
     expect(
       baseline.controlGate.violations.map(
@@ -134,7 +134,7 @@ describe("the Brain baseline at scale", { timeout: scaleTimeout }, () => {
     }).toStrictEqual({ ana: ["team02"], bram: ["team01"] });
   });
 
-  it("records the index build, each window's incremental update and what Knowledge stores", async () => {
+  it("records the index build, each window's incremental update and what Brain stores", async () => {
     const { build, updates, stored } = await run();
     expect({
       build: build.corpusMs > 0 && build.distractorsMs > 0,

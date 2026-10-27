@@ -3,6 +3,9 @@ import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
 import { BrainRpc } from "./brain-rpc.ts";
+import { MemoryRpc } from "./brain/memory-rpc.ts";
+import { BrainSignalsRpc } from "./brain/signals-rpc.ts";
+import { UploadsRpc } from "./brain/uploads-rpc.ts";
 import { ChannelAccountsRpc } from "./channels/accounts.ts";
 import { ChatsRpc } from "./chats-rpc.ts";
 import { ConnectionsRpc } from "./connections.ts";
@@ -10,10 +13,6 @@ import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DependenciesRpc } from "./dependencies/rpc.ts";
 import { EmailPreferencesRpc } from "./email-preferences-rpc.ts";
-import { MemoryRpc } from "./knowledge/memory-rpc.ts";
-import { KnowledgeRpc } from "./knowledge/rpc.ts";
-import { KnowledgeSignalsRpc } from "./knowledge/signals-rpc.ts";
-import { UploadsRpc } from "./knowledge/uploads-rpc.ts";
 import { LandscapeRpc } from "./landscape.ts";
 import { MembersRpc } from "./members.ts";
 import { ModelsRpc } from "./models-rpc.ts";
@@ -55,9 +54,8 @@ import { WorkflowsRpc } from "./workflows/rpc.ts";
 export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #check: SessionCheck;
   readonly #apps: AppsRpc;
-  readonly #knowledge: KnowledgeRpc;
   readonly #brain: BrainRpc;
-  readonly #knowledgeSignals: KnowledgeSignalsRpc;
+  readonly #brainSignals: BrainSignalsRpc;
   readonly #memory: MemoryRpc;
   readonly #uploads: UploadsRpc;
   readonly #permissions: PermissionsRpc;
@@ -101,9 +99,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     // Everything but the onboarding refuses staff who reach the onboarding alone.
     const full = fullAccess(check);
     this.#apps = new AppsRpc(env, full);
-    this.#knowledge = new KnowledgeRpc(env, full);
     this.#brain = new BrainRpc(env, full);
-    this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
+    this.#brainSignals = new BrainSignalsRpc(env, full);
     this.#memory = new MemoryRpc(env, full);
     this.#uploads = new UploadsRpc(env, full);
     this.#permissions = new PermissionsRpc(env, full);
@@ -194,16 +191,12 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#apps;
   }
 
-  get knowledge(): KnowledgeRpc {
-    return this.#knowledge;
-  }
-
   get brain(): BrainRpc {
     return this.#brain;
   }
 
-  get knowledgeSignals(): KnowledgeSignalsRpc {
-    return this.#knowledgeSignals;
+  get brainSignals(): BrainSignalsRpc {
+    return this.#brainSignals;
   }
 
   get memory(): MemoryRpc {

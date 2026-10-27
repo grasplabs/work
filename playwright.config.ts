@@ -215,7 +215,7 @@ export default defineConfig({
         // test sees it go on once they decided.
         devVar("WORKFLOW_OFF_WAIT_MS", "2000"),
         // `--local` has no Workers AI: a deployment kept in the EU extracts
-        // uploads' text in the Worker instead (knowledge/extract.ts). The
+        // uploads' text in the Worker instead (brain/extract.ts). The
         // Models page shows the rules and budgets.
         devVar(
           "MODEL_GATEWAY",

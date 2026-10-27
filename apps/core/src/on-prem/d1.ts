@@ -1,5 +1,5 @@
 /**
- * The on-prem profile's D1: core's D1 databases (`DB`, `KNOWLEDGE`) on plain
+ * The on-prem profile's D1: core's D1 databases (`DB`, `BRAIN_DB`) on plain
  * workerd, which has D1's client but no D1 service behind it.
  *
  * Core never sees this module. On Cloudflare its D1 bindings are real D1.

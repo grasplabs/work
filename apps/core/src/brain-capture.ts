@@ -16,8 +16,8 @@ import { z } from "zod";
 
 import { memberRole } from "./auth/identity.ts";
 import { scheduleConsolidation } from "./brain-consolidation.ts";
+import { brainOf } from "./brain/ports.ts";
 import { apps, brainCaptureIntents, workflowRuns } from "./db/core/schema.ts";
-import { brainOf } from "./knowledge/ports.ts";
 
 // Settled task outcomes, captured for the Brain without a learning step in
 // any task (GRA-300; the Brain design's "Automatic platform operation"):
@@ -52,7 +52,7 @@ import { brainOf } from "./knowledge/ports.ts";
 //   share is one experience for exactly its members as the chat kept them
 //   for the turn (Nick, GRA-300): the Brain reaches one of them only while
 //   the chat still counts them and they are still a member (the Brain's
-//   `audiences` port, knowledge/access.ts `audiencesOf`).
+//   `audiences` port, brain/access.ts `audiencesOf`).
 // - Minimal and erasable: an outcome holds identifiers and states, never
 //   inputs, outputs or messages, and names the record it rests on. When
 //   that record goes (a chat deleted, a run's details past retention), its

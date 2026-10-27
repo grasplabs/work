@@ -901,7 +901,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       "CONNECT",
       "DB",
       "AI",
-      "KNOWLEDGE",
+      "BRAIN_DB",
       "LOADER",
       "APPS",
       "DATA_STORES",

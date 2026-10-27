@@ -47,7 +47,7 @@ const filesSchema = z.record(z.string().min(1).max(512), z.string());
 export const appBindingKinds = [
   "model",
   "connector",
-  "knowledge",
+  "brain",
   "template",
   "store",
   "statistics",

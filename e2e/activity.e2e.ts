@@ -17,7 +17,7 @@ const collectionOf = async (
 ): Promise<string> => {
   const { core, api } = apiOf(admin);
   try {
-    const { id } = await api.knowledge.createCollection({
+    const { id } = await api.brain.createCollection({
       name: `Board pack ${crypto.randomUUID()}`,
       access: "everyone",
     });

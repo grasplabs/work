@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 // The purge's table of the search index's token characters
-// (src/knowledge/unicode61.ts) against the tokenizer itself, every code
+// (src/brain/unicode61.ts) against the tokenizer itself, every code
 // point: a purge decides where a term ends by that table, so a code point
 // the table gets wrong leaves a term the index still finds (GRA-698).
 // `fts5vocab` lists each probe's tokens: one probe per code point, "xq",
@@ -18,7 +18,7 @@ const probed = async (): Promise<{
   kept: [number, number][];
   dropped: [number, number][];
 }> => {
-  const db = env.KNOWLEDGE;
+  const db = env.BRAIN_DB;
   await db.batch([
     db.prepare("DROP TABLE IF EXISTS unicode61_probe_v"),
     db.prepare("DROP TABLE IF EXISTS unicode61_probe"),

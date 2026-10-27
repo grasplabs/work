@@ -19,11 +19,8 @@ import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import { uploadTypes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import {
-  ExtractorUnavailableError,
-  localExtractor,
-} from "../knowledge/extract.ts";
-import type { LocalExtractorEnv } from "../knowledge/extract.ts";
+import { ExtractorUnavailableError, localExtractor } from "../brain/extract.ts";
+import type { LocalExtractorEnv } from "../brain/extract.ts";
 import { gatewaySettings, modelForRole, models } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
 import { NAMED } from "./stephen.ts";
@@ -242,7 +239,7 @@ const kindOf = (name: string): TranscriptFileKind | undefined => {
 
 /**
  * The transcript's text, as it was pasted or read from its file. A Word
- * file is read in the extractor's sandbox (knowledge/extract.ts), never in
+ * file is read in the extractor's sandbox (brain/extract.ts), never in
  * core, whatever the deployment's extraction settings: a transcript stays
  * in the Worker.
  */

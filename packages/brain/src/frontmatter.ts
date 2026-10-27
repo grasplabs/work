@@ -2,13 +2,16 @@ import { parse } from "yaml";
 import { z } from "zod";
 
 import { skillManifestSchema } from "./contract.ts";
-import { issuesOf } from "./errors.ts";
 import {
   builtinDocumentTypeSchema,
   documentTypeSchema,
   splitFrontmatterBlock,
-} from "./knowledge.ts";
-import type { BuiltinDocumentType, DocumentType } from "./knowledge.ts";
+} from "./documents-contract.ts";
+import type {
+  BuiltinDocumentType,
+  DocumentType,
+} from "./documents-contract.ts";
+import { issuesOf } from "./errors.ts";
 
 // A document's frontmatter: the YAML block between `---` lines at its top.
 // Its `type` picks the schema the rest must match. The text keeps any other

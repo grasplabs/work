@@ -15,7 +15,7 @@ import {
   actionUseAliasPattern,
   connectorUseSchema,
   filesUseSchema,
-  knowledgeUseSchema,
+  brainUseSchema,
   operationUseSchema,
   templateUseSchema,
   workflowModuleLimits,
@@ -116,7 +116,7 @@ export const sealedUse = (use: ActionUse | SealedUse): SealedUse => {
         output: use.output,
       });
     }
-    case "knowledge": {
+    case "brain": {
       return Object.freeze({
         alias: use.alias,
         kind: use.kind,
@@ -343,7 +343,7 @@ export const versionActionsOf = (
             // what a reviewer approves the action's model calls for.
             return { alias: use.alias, kind: use.kind, output: use.output };
           }
-          case "knowledge": {
+          case "brain": {
             return {
               alias: use.alias,
               kind: use.kind,
@@ -382,7 +382,7 @@ const descriptorObject = z.record(z.string(), z.json());
 const manifestUseSchema = z.discriminatedUnion("kind", [
   connectorUseSchema,
   operationUseSchema,
-  knowledgeUseSchema,
+  brainUseSchema,
   templateUseSchema,
   filesUseSchema,
   z.strictObject({
@@ -655,7 +655,7 @@ export const moduleLookup =
             : {
                 // As validation checks them against the catalog: a
                 // connector's with its operations, which its contract must
-                // name; any other by its alias and kind. A knowledge use's
+                // name; any other by its alias and kind. A brain use's
                 // operations are the host's own to hold it to (GRA-700).
                 uses: contract.uses.map((use) =>
                   use.kind === "connector"

@@ -1,5 +1,5 @@
 // The part of webvtt-parser (W3C's webvtt.js) the extractor uses
-// (src/knowledge/extractor/vtt.ts): the package ships no types.
+// (src/brain/extractor/vtt.ts): the package ships no types.
 declare module "webvtt-parser" {
   /** A node of a cue's text: text, or a tag (`v` with its voice as `value`). */
   export type WebVTTNode =

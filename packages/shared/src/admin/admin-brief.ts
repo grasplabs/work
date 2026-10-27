@@ -3,7 +3,7 @@ import type { AdminPhase } from "./admin-health.ts";
 import { todoOf } from "./admin-todo.ts";
 import type { Todo } from "./admin-todo.ts";
 import type { AdminView } from "./admin-view.ts";
-import type { KnowledgeSource, Need, Stage } from "./onboarding-admin.ts";
+import type { BrainSource, Need, Stage } from "./onboarding-admin.ts";
 
 /**
  * What a person at Grasp takes into the next conversation with a company: where it stands, what
@@ -18,7 +18,7 @@ export interface Brief {
   /** What needs Grasp there that is worth saying to the company, the most pressing first. */
   bringUp: Need[];
   /** What the brain lacks most, by what it would add. */
-  missing: { source: KnowledgeSource; known: number }[];
+  missing: { source: BrainSource; known: number }[];
   /** What people could not say when asked, still to find out. */
   questions: number;
   /** What the step the company is at still asks, before the next one; none once Grasp is open. */
@@ -72,8 +72,8 @@ export const briefOf = (view: AdminView): Brief => {
   return {
     phase: phaseOf(view),
     stage: view.stage,
-    percent: view.knowledge.percent,
-    threshold: view.knowledge.threshold,
+    percent: view.brain.percent,
+    threshold: view.brain.threshold,
     bringUp: view.needs
       .filter((need) => WITH_COMPANY.includes(need.kind))
       .slice(0, BRIEF_ITEMS),

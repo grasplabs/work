@@ -12,11 +12,11 @@ import { Await } from "@tanstack/react-router";
 import { FileTextIcon, PrinterIcon } from "lucide-react";
 import { useState } from "react";
 
+import { PlainMarkdown } from "../brain-collections/markdown.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { exportAs } from "../export/export-file.tsx";
 import type { ExportFile, ExportFormat } from "../export/export-file.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
-import { PlainMarkdown } from "../knowledge/markdown.tsx";
 import type { NextReport } from "./programme.ts";
 import {
   reportBody,

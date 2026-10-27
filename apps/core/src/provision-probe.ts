@@ -89,10 +89,10 @@ const r2 = (bucket: R2Bucket) => async () => await bucket.head(absentKey);
  * core's own clock armed.
  */
 const probed = async (env: Env): Promise<ProvisionProbe> => {
-  const [db, knowledge, files, auditArchive, brainObjects, connect, core] =
+  const [db, brain, files, auditArchive, brainObjects, connect, core] =
     await Promise.all([
       answers("DB", d1(env.DB)),
-      answers("KNOWLEDGE", d1(env.KNOWLEDGE)),
+      answers("BRAIN_DB", d1(env.BRAIN_DB)),
       answers("FILES", r2(env.FILES)),
       answers("AUDIT_ARCHIVE", r2(env.AUDIT_ARCHIVE)),
       answers("BRAIN_OBJECTS", r2(env.BRAIN_OBJECTS)),
@@ -104,7 +104,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     clientId: env.CLIENT_ID ?? null,
     bindings: {
       DB: db,
-      KNOWLEDGE: knowledge,
+      BRAIN_DB: brain,
       FILES: files,
       AUDIT_ARCHIVE: auditArchive,
       BRAIN_OBJECTS: brainObjects,

@@ -74,7 +74,7 @@ const fact = (value: string, marker: string): BrainExpectation => ({
   evidence: [{ source: "s.md#S", marker }],
 });
 
-/** The contract's section, as a Knowledge read returns it. */
+/** The contract's section, as a Brain read returns it. */
 const leaseSection = ["## Lease\nOwner: Marta Ruiz."];
 
 /** A tool result, backed by what its step's reads returned. */

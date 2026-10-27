@@ -5,7 +5,7 @@
  * frozen one, with the same arms, tasks, gate and stubbed model provider.
  *
  * The distractors are loaded the way the corpus is: through the admin's
- * own Knowledge API, one document per save, so loading them is the index
+ * own Brain API, one document per save, so loading them is the index
  * build and its time is the build time. Each person reads only a few of
  * the 24 team collections they add, and each agent is granted them all:
  * restrictive permission sets, which every search and listing filters.
@@ -15,7 +15,7 @@
  * Per arm the report gives evidence recall, completion, p50, p95 and p99
  * latency, and the share of trials whose full context was truncated; for
  * the run, the index build time, each window's incremental update time,
- * the chunks indexed and Knowledge's stored size. Its identity is the
+ * the chunks indexed and the Brain's stored size. Its identity is the
  * baseline's, with the distractors' version, seed, size and digest next to
  * the suite's.
  *
@@ -26,6 +26,7 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 
+import { newTeam } from "./brain-collections.ts";
 import { runBrainBaseline } from "./brain-harness.ts";
 import type {
   BrainArm,
@@ -33,7 +34,7 @@ import type {
   BrainProvider,
   BrainReport,
   BrainRunOptions,
-  KnowledgeStateCheck,
+  BrainStateCheck,
   RunIdentity,
 } from "./brain-harness.ts";
 import { percentile } from "./brain-scoring.ts";
@@ -54,10 +55,9 @@ import {
   distractorReaders,
   distractorTeams,
 } from "./fixtures/brain-distractors.ts";
-import { newTeam } from "./knowledge.ts";
 import { openRpc } from "./sign-in.ts";
 
-/** Documents saved at once while loading: Knowledge orders their writes. */
+/** Documents saved at once while loading: Brain orders their writes. */
 const loadConcurrency = 8;
 
 /** What pins a generated corpus: its generator, seed, size and output. */
@@ -74,7 +74,7 @@ export interface DistractorIdentity {
 export interface LoadedDistractors {
   identity: DistractorIdentity;
   documents: number;
-  /** Saving every document through Knowledge's API: the index build. */
+  /** Saving every document through the Brain's API: the index build. */
   buildMs: number;
 }
 
@@ -118,7 +118,7 @@ export const loadDistractors = async (
       team.members.map((persona) => ({ userId: people[persona].userId }))
     );
     // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    const created = await admin.api.knowledge.createCollection({
+    const created = await admin.api.brain.createCollection({
       name: team.name,
       description: team.description,
       access: "teams",
@@ -153,7 +153,7 @@ export const loadDistractors = async (
     digest = await chained(digest, document);
     documents += 1;
     batch.push(
-      admin.api.knowledge.saveDocument({
+      admin.api.brain.saveDocument({
         collectionId: collectionOf(document.collection),
         path: document.path,
         text: document.text,
@@ -174,13 +174,13 @@ export const loadDistractors = async (
   };
 };
 
-/** Knowledge's database as stored: its bytes, and the chunks it indexes. */
-export const storedKnowledge = async (): Promise<{
+/** The Brain's database as stored: its bytes, and the chunks it indexes. */
+export const storedBrain = async (): Promise<{
   bytes: number;
   chunks: number;
 }> => {
-  const { meta } = await env.KNOWLEDGE.prepare("SELECT 1").run();
-  const indexed = await env.KNOWLEDGE.prepare(
+  const { meta } = await env.BRAIN_DB.prepare("SELECT 1").run();
+  const indexed = await env.BRAIN_DB.prepare(
     "SELECT count(*) AS chunks FROM search_rows"
   ).first<{ chunks: number }>();
   return { bytes: meta.size_after, chunks: indexed?.chunks ?? 0 };
@@ -270,7 +270,7 @@ export interface BrainScaleReport {
   /** The baseline's identity, and the distractors' next to its suite. */
   identity: RunIdentity & {
     distractors: DistractorIdentity;
-    knowledgeState: KnowledgeStateCheck;
+    brainState: BrainStateCheck;
   };
   arms: ScaleArm[];
   build: {
@@ -327,16 +327,16 @@ const scaleArm = (report: BrainReport, arm: BrainArm): ScaleArm => {
 
 export interface BrainScaleOptions extends Omit<
   BrainRunOptions,
-  "knowledgeState" | "respond" | "providerName"
+  "brainState" | "respond" | "providerName"
 > {
   /** Distractor chunks: one of `brainScaleSizes`, or any other size. */
   chunks: number;
   distractorSeed: number;
   /**
-   * How the gate reads Knowledge: every row by default, row counts for a
+   * How the gate reads Brain: every row by default, row counts for a
    * corpus too large to read twice a trial.
    */
-  knowledgeState?: KnowledgeStateCheck;
+  brainState?: BrainStateCheck;
 }
 
 /**
@@ -345,25 +345,20 @@ export interface BrainScaleOptions extends Omit<
  */
 export const runBrainScale = async (
   company: BrainCompany,
-  {
-    chunks,
-    distractorSeed,
-    knowledgeState = "rows",
-    ...options
-  }: BrainScaleOptions
+  { chunks, distractorSeed, brainState = "rows", ...options }: BrainScaleOptions
 ): Promise<BrainScaleReport> => {
   const loaded = await loadDistractors(company, {
     seed: distractorSeed,
     chunks,
   });
-  const stored = await storedKnowledge();
+  const stored = await storedBrain();
   const seen: DistractorsSeen = {
     leaks: [],
     reached: new Map(),
   };
   const baseline = await runBrainBaseline(company, {
     ...options,
-    knowledgeState,
+    brainState,
     respond: watchingStub(seen),
     providerName: brainStubModel,
   });
@@ -374,7 +369,7 @@ export const runBrainScale = async (
     identity: {
       ...baseline.identity,
       distractors: loaded.identity,
-      knowledgeState,
+      brainState,
     },
     arms,
     build: {

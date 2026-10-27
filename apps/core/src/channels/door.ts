@@ -52,7 +52,7 @@
  * in it, read from the platform's roster then (`audienceIn`). It is
  * answered in the person's own chat for the platform, or their one chat
  * for that group or channel thread, whose agent reads only what everyone
- * in it may (answer.ts, knowledge/access.ts).
+ * in it may (answer.ts, brain/access.ts).
  *
  * Slack (slack.ts) comes in the same way, by its own signature and ids:
  * its people are known only by the Slack account they linked to Grasp, and
@@ -88,11 +88,11 @@ import { z } from "zod";
 
 import { signInConfig } from "../auth/config.ts";
 import { memberFromDirectory } from "../auth/directory-members.ts";
+import { audienceMaxMembers } from "../brain/access.ts";
+import type { Audience } from "../brain/access.ts";
 import { channelConversations } from "../db/core/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import { errorResponse } from "../errors.ts";
-import { audienceMaxMembers } from "../knowledge/access.ts";
-import type { Audience } from "../knowledge/access.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { stephenFor } from "../stephen-reach.ts";
 import { offerChannelLink } from "./accounts.ts";
