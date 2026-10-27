@@ -1,3 +1,5 @@
+import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ensureCollection } from "../src/collections.ts";
@@ -545,6 +547,127 @@ describe("a recall's network route", () => {
       found: 1,
       routed: [],
     });
+  });
+
+  it("counts an entity two relations reach as one of a hop's twenty starts", async () => {
+    const query = word();
+    const hub = `Hub ${word()}`;
+    const linked = stated("Anna", "runs", hub);
+    // Eleven entities, each reached by two relations: 22 steps, 11 starts.
+    const tools = Array.from({ length: 11 }, () => `Tool ${word()}`);
+    const both = tools.flatMap((tool) => [
+      stated(hub, "owns", tool),
+      stated(hub, "uses", tool),
+    ]);
+    const hosted = tools.map((tool) =>
+      stated(tool, "runs_on", `Host ${word()}`)
+    );
+    const host = testHost(modelOf([linked, ...both, ...hosted]).model);
+    const notes = await newCollection(host.brain, "Stack");
+    await saved(host, notes, "team.md", `${query}: ${linked.evidence}`);
+    await saved(
+      host,
+      notes,
+      "tools.md",
+      both.map(({ evidence }) => evidence).join("\n")
+    );
+    await saved(
+      host,
+      notes,
+      "hosts.md",
+      hosted.map(({ evidence }) => evidence).join("\n")
+    );
+    const reader: Caller = { userId: "reader", reads: [notes.id] };
+
+    const pack = await recall(host.brain, reader, {
+      query,
+      network: {},
+      budget: { maxItems: 50 },
+    });
+
+    // Every tool gone on from, so every host reached; nothing cut.
+    expect({
+      cuts: cutsOf(pack),
+      hosts: routed(pack).filter((path) => path.includes("runs_on")).length,
+    }).toStrictEqual({ cuts: [], hosts: 11 });
+  });
+
+  it("gives up on a hop's read that would outlast the recall's deadline, and says the route was cut", async () => {
+    const { host, query, everyone } = await team();
+    // Relation reads that take longer than the recall may, once its
+    // full-text route has read.
+    const slow = { on: false };
+    const slowMs = 3000;
+    /** What `pending` settles to, once `slowMs` have passed too. */
+    const later = async (pending: Promise<unknown>): Promise<unknown> => {
+      await scheduler.wait(slowMs);
+      const settled: unknown = await pending;
+      return settled;
+    };
+    const delayed = <T extends object>(target: T, sql: string): T =>
+      new Proxy(target, {
+        get: (object, property) => {
+          const value: unknown = Reflect.get(object, property, object);
+          if (typeof value !== "function") {
+            return value;
+          }
+          return (...args: unknown[]) => {
+            const result: unknown = Reflect.apply(value, object, args);
+            if (
+              property === "bind" &&
+              typeof result === "object" &&
+              result !== null
+            ) {
+              return delayed(result, sql);
+            }
+            if (
+              result instanceof Promise &&
+              slow.on &&
+              sql.includes("brain_assertions")
+            ) {
+              return later(result);
+            }
+            return result;
+          };
+        },
+      });
+    const database = new Proxy(env.BRAIN, {
+      get: (object, property): unknown => {
+        if (property === "prepare") {
+          return (sql: string) => delayed(object.prepare(sql), sql);
+        }
+        const value: unknown = Reflect.get(object, property, object);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, object, args)
+          : value;
+      },
+    });
+    const brain = {
+      db: drizzle(database),
+      ports: {
+        ...host.brain.ports,
+        onRead: async (
+          ...read: Parameters<typeof host.brain.ports.onRead>
+        ): ReturnType<typeof host.brain.ports.onRead> => {
+          slow.on = true;
+          return await host.brain.ports.onRead(...read);
+        },
+      },
+    };
+    const startedAt = Date.now();
+
+    const pack = await recall(brain, everyone, {
+      query,
+      network: {},
+      budget: { deadlineMs: 1000 },
+    });
+    const tookMs = Date.now() - startedAt;
+
+    expect({
+      cuts: cutsOf(pack),
+      items: pack.items.length,
+      inTime: tookMs < slowMs,
+    }).toStrictEqual({ cuts: ["deadline"], items: 1, inTime: true });
   });
 
   it("no longer follows a relation once its source's new version doesn't state it", async () => {
