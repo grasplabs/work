@@ -4,12 +4,14 @@ import type {
   ChatMessage,
   ChatOutput,
   ChatPartial,
+  ChatReasoning,
 } from "@grasp-os/shared/chat";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
+  BrainIcon,
   CheckCircleIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -222,12 +224,12 @@ const Working = ({ doing }: { doing: WorkState }) => {
   );
 };
 
-/** Over a finished answer: how long Grasp worked on the question, said short. */
-const WorkedFor = ({ seconds }: { seconds: number }) => {
+/** A length of time in whole seconds, said short: "4m 21s", or "21s". */
+const useSaidShort = (): ((seconds: number) => string) => {
   const { t } = useLingui();
-  const { minutes, rest } = minutesAndSeconds(seconds);
-  const time =
-    minutes > 0
+  return (seconds) => {
+    const { minutes, rest } = minutesAndSeconds(seconds);
+    return minutes > 0
       ? t({
           message: `${minutes}m ${rest}s`,
           comment: "A length of time, said short: 4 minutes and 21 seconds.",
@@ -236,7 +238,59 @@ const WorkedFor = ({ seconds }: { seconds: number }) => {
           message: `${rest}s`,
           comment: "A length of time, said short: 21 seconds.",
         });
+  };
+};
+
+/** Over a finished answer: how long Grasp worked on the question, said short. */
+const WorkedFor = ({ seconds }: { seconds: number }) => {
+  const { t } = useLingui();
+  const time = useSaidShort()(seconds);
   return <AnswerTop>{t`Worked for ${time}`}</AnswerTop>;
+};
+
+/**
+ * What the model thought before a response, folded under a quiet line:
+ * "Thinking" while it still thinks, open so its words stream in, then
+ * closed. Once kept, the line says how long it thought, at least a
+ * second; a response kept before that was timed says only that it
+ * reasoned. A provider that showed none of its words leaves only the line.
+ */
+const Reasoning = ({
+  reasoning,
+  thinking,
+}: {
+  reasoning: ChatReasoning;
+  /** The model is thinking now: the response has no words or code yet. */
+  thinking: boolean;
+}) => {
+  const { t } = useLingui();
+  const saidShort = useSaidShort();
+  const { text, ms } = reasoning;
+  let label = t`Reasoning`;
+  if (thinking) {
+    label = t`Thinking`;
+  } else if (ms !== null) {
+    const time = saidShort(Math.max(1, Math.round(ms / 1000)));
+    label = t`Thought for ${time}`;
+  }
+  const line = (
+    <span className="flex items-center gap-2">
+      <BrainIcon className="size-3.5" />
+      {label}
+    </span>
+  );
+  if (text.trim() === "") {
+    return <p className="text-muted-foreground text-xs">{line}</p>;
+  }
+  return (
+    <details className="group/reasoning text-muted-foreground" open={thinking}>
+      <summary className="hover:text-foreground flex w-fit cursor-pointer list-none items-center gap-1 text-xs [&::-webkit-details-marker]:hidden">
+        {line}
+        <ChevronDownIcon className="size-3.5 transition-transform group-open/reasoning:rotate-180" />
+      </summary>
+      <p className="mt-2 border-l pl-3 text-xs whitespace-pre-wrap">{text}</p>
+    </details>
+  );
 };
 
 /** The quiet row of actions under an answer, with what it cites when it cites any. */
@@ -267,7 +321,9 @@ const Reply = ({
   onRetry,
   cited,
 }: {
-  reply: ChatPartial & {
+  reply: Omit<ChatPartial, "reasoning"> & {
+    /** What the model thought before it, when it thought. */
+    reasoning?: ChatReasoning;
     end?: Answer["end"];
     error?: string;
     /** A stored answer's citations; one being written has none. */
@@ -295,6 +351,12 @@ const Reply = ({
       {top}
       <Message from="assistant">
         <MessageContent>
+          {reply.reasoning === undefined ? null : (
+            <Reasoning
+              reasoning={reply.reasoning}
+              thinking={writing && answer === "" && reply.code.length === 0}
+            />
+          )}
           {answer === "" ? null : (
             <MessageResponse
               cited={reply.citations?.map(({ documentId }) => documentId)}
@@ -364,7 +426,7 @@ const Reading = () => (
 
 /**
  * Where Grasp stands on the chat's questions: the answer being written,
- * once it shows its first words or code; while it works, the replies to
+ * once it shows its first thoughts, words or code; while it works, the replies to
  * the last question so far and what it does on it; and how long it worked
  * on every other, by the ID of its first reply.
  */
@@ -380,7 +442,10 @@ const progressOf = (
   worked: ReadonlyMap<number, number>;
 } => {
   const shown =
-    partial !== null && (partial.text.trim() !== "" || partial.code.length > 0)
+    partial !== null &&
+    (partial.text.trim() !== "" ||
+      partial.code.length > 0 ||
+      partial.reasoning.trim() !== "")
       ? partial
       : null;
   const turns = turnsOf(messages);
@@ -506,7 +571,13 @@ export const ChatThread = ({
             <li aria-busy="true">
               <Reply
                 output={output}
-                reply={shown}
+                reply={{
+                  ...shown,
+                  reasoning:
+                    shown.reasoning === ""
+                      ? undefined
+                      : { text: shown.reasoning, ms: null },
+                }}
                 results={results}
                 running={running}
                 sign={doing}

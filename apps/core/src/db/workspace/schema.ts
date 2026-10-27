@@ -131,6 +131,12 @@ export const chatMessages = sqliteTable(
       .references(() => chats.id),
     message: text().notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    /**
+     * How long the model thought before an answer, in milliseconds
+     * (`ChatReasoning.ms`); null for any other message, and for an answer
+     * kept before it was timed.
+     */
+    thinkingMs: integer("thinking_ms"),
   },
   (table) => [index("chat_messages_chat").on(table.chatId, table.id)]
 );
