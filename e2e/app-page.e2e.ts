@@ -156,6 +156,13 @@ test("a builder renames an App and says what it is for in its settings, archives
     "Where the boards are kept."
   );
 
+  // Its integrations: none yet for a new App, which its builder adds to.
+  const integrations = page.getByRole("region", { name: "Integrations" });
+  await expect(integrations.getByText("No integrations yet.")).toBeVisible();
+  await expect(
+    integrations.getByRole("button", { name: "Add an integration" })
+  ).toBeVisible();
+
   // Archived only once asked, and restored as a draft.
   await page.getByRole("button", { name: "Archive and take offline" }).click();
   await page

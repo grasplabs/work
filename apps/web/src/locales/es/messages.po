@@ -2346,6 +2346,10 @@ msgstr "Añadir una palabra"
 msgid "Add an exception"
 msgstr "Añadir una excepción"
 
+#: src/engines/app-integrations.tsx
+msgid "Add an integration"
+msgstr "Añadir una integración"
+
 #: src/settings/package-approvers.tsx
 msgid "Add approver"
 msgstr "Añadir aprobador"
@@ -2401,6 +2405,11 @@ msgstr "Añadió un miembro a un dominio"
 #: src/brain/brain.ts
 msgid "Added as an open question"
 msgstr "Añadida como pregunta abierta"
+
+#: src/engines/app-integrations.tsx
+msgctxt "why an integration is one of a domain's"
+msgid "Added by hand"
+msgstr "Añadida a mano"
 
 #: src/chat/builds.tsx
 msgid "Added parameter {name}"
@@ -7188,6 +7197,7 @@ msgstr "Instrucciones para {name}"
 msgid "Integration"
 msgstr "Integración"
 
+#: src/engines/app-integrations.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -7520,6 +7530,11 @@ msgstr "Su presupuesto no se puede leer, así que no sirve nada en lugar de func
 #: src/routes/_shell.settings.models.tsx
 msgid "Its budget can't be read, so it serves nothing."
 msgstr "Su presupuesto no se puede leer, así que no atiende nada."
+
+#: src/engines/app-integrations.tsx
+msgctxt "why an integration is one of a domain's"
+msgid "Its code uses it"
+msgstr "Su código la usa"
 
 #: src/workflows/resource-params.tsx
 msgid "Its current version has no parameters."
@@ -8970,9 +8985,14 @@ msgstr "Todavía no se ha compartido contigo ningún flujo de trabajo independie
 msgid "No independent workflow of yours serves this process."
 msgstr "Ninguno de sus flujos de trabajo independientes sirve a este proceso."
 
+#: src/engines/app-integrations.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "No integrations match your search."
 msgstr "Ninguna integración coincide con tu búsqueda."
+
+#: src/engines/app-integrations.tsx
+msgid "No integrations yet."
+msgstr "Aún no hay integraciones."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "No interviews yet"
@@ -12339,6 +12359,7 @@ msgstr "Buscar en chats y proyectos"
 msgid "Search for another name, or look under another tab."
 msgstr "Busca otro nombre o mira en otra pestaña."
 
+#: src/engines/app-integrations.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search integrations"
 msgstr "Buscar integraciones"
@@ -13440,6 +13461,10 @@ msgctxt "kind of fact"
 msgid "System"
 msgstr "Sistema"
 
+#: src/engines/app-integrations.tsx
+msgid "Take {integrationName} off {appName}"
+msgstr "Quitar {integrationName} de {appName}"
+
 #: src/settings/team-members-dialog.tsx
 msgid "Take {who} off {name}"
 msgstr "Quitar a {who} de {name}"
@@ -13977,6 +14002,10 @@ msgstr "El proceso de negocio al que sirve {name}"
 #: src/routes/_shell.settings.billing.tsx
 msgid "The card Stripe charges for each invoice."
 msgstr "La tarjeta a la que Stripe cobra cada factura."
+
+#: src/engines/app-integrations.tsx
+msgid "The catalog can’t be read right now, so nothing can be added. Try again in a moment."
+msgstr "Ahora no se puede leer el catálogo, así que no se puede añadir nada. Vuelve a intentarlo en un momento."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "The catalog doesn't list {app}, so its tools can't be shown."
@@ -16596,6 +16625,10 @@ msgstr "Dónde lo deja la gente"
 msgctxt "what Grasp knows, by source"
 msgid "Where the documents live"
 msgstr "Dónde están los documentos"
+
+#: src/engines/app-integrations.tsx
+msgid "Where the domain’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing."
+msgstr "De dónde vienen los datos del dominio. Las que pide su código aparecen solas; añade cualquier otra que necesite. Añadir una no conecta nada."
 
 #: src/brain/thinking/shapes.ts
 msgid "Where the hours go"
