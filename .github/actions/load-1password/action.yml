@@ -1,0 +1,108 @@
+# Loads named values from a 1Password Environment into the job's env: the
+# one place that knows the secret manager, as grasplabs/grasp's
+# load-deployment-secrets is. Each GitHub environment holds only its
+# service account's token (OP_SERVICE_ACCOUNT_TOKEN), read-only and able to
+# read that one 1Password Environment; the Environments' ids are below,
+# ids, not credentials.
+#
+# Only the names a job lists are exported, so a job never gets the rest of
+# its Environment. Secrets are masked in the log; settings aren't, so a
+# budget of 3 doesn't hide every 3 in a job's output. A name the
+# Environment lacks is exported empty, unless it's required: then the job
+# stops before anything else runs, naming what's missing, never a value.
+# Exported values reach every later step of the job, so a job loads a
+# secret only right before the steps that use it.
+name: Load from 1Password
+description: Export allowlisted values of a 1Password Environment to the job
+
+inputs:
+  environment:
+    description: "The 1Password Environment: stephen-eval, staging, releases or ops"
+    required: true
+  service-account-token:
+    description: The GitHub environment's read-only 1Password service account token
+    required: true
+  secrets:
+    description: Names to export masked, space-separated
+    required: false
+    default: ""
+  settings:
+    description: Names to export unmasked, space-separated
+    required: false
+    default: ""
+  required:
+    description: Names that must not be empty, space-separated
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Check the 1Password token
+      shell: bash
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: ${{ inputs.service-account-token }}
+      run: |
+        if [ -z "$OP_SERVICE_ACCOUNT_TOKEN" ]; then
+          echo "::error::OP_SERVICE_ACCOUNT_TOKEN is not set on this GitHub environment."
+          exit 1
+        fi
+
+    # Reading an Environment with a service account needs the CLI's beta,
+    # pinned so it can't change under us (grasplabs/grasp pins the same).
+    - name: Install the 1Password CLI
+      uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
+      with:
+        version: 2.39.1-beta.01
+
+    - name: Export from 1Password
+      shell: bash
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: ${{ inputs.service-account-token }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        SECRET_NAMES: ${{ inputs.secrets }}
+        SETTING_NAMES: ${{ inputs.settings }}
+        REQUIRED_NAMES: ${{ inputs.required }}
+      run: |
+        set -euo pipefail
+        case "$ENVIRONMENT" in
+          stephen-eval) id=__OP_ENVIRONMENT_STEPHEN_EVAL__ ;;
+          staging) id=__OP_ENVIRONMENT_STAGING__ ;;
+          releases) id=__OP_ENVIRONMENT_RELEASES__ ;;
+          ops) id=__OP_ENVIRONMENT_OPS__ ;;
+          *) echo "::error::No 1Password Environment called $ENVIRONMENT"; exit 1 ;;
+        esac
+        # The values exist only inside this inner shell, op's child; it
+        # writes the listed ones to the job's env and nothing to the log.
+        op run --no-masking --environment="$id" -- bash -c '
+          set -euo pipefail
+          missing=()
+          for name in $REQUIRED_NAMES; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Empty in the $ENVIRONMENT 1Password Environment: ${missing[*]}"
+            exit 1
+          fi
+          export_value() {
+            # A value may span lines: written between a delimiter it cannot contain.
+            local delimiter
+            delimiter=$(openssl rand -hex 16)
+            printf "%s<<%s\n%s\n%s\n" "$1" "$delimiter" "$2" "$delimiter" >> "$GITHUB_ENV"
+          }
+          for name in $SECRET_NAMES; do
+            value="${!name:-}"
+            # Masked line by line, as the runner masks.
+            while IFS= read -r line; do
+              if [ -n "$line" ]; then
+                echo "::add-mask::$line"
+              fi
+            done <<< "$value"
+            export_value "$name" "$value"
+          done
+          for name in $SETTING_NAMES; do
+            export_value "$name" "${!name:-}"
+          done
+        '
