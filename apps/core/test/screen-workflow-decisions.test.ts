@@ -1,6 +1,10 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
-import { generatedPaths } from "@grasp-os/sdk/host";
+import {
+  declaredWorkflows,
+  generatedPaths,
+  workflowFingerprint,
+} from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -23,6 +27,7 @@ import { decisionOutcome } from "../src/decisions/decisions.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { withScreenReferences } from "../src/screen-references.ts";
+import { readWorkflowWatch } from "../src/screen-workflows.ts";
 import { buildScreens } from "../src/screens.ts";
 import {
   publishCatalogContract,
@@ -421,7 +426,7 @@ const decisionInbox = async () => {
     const decisionId = crypto.randomUUID();
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'app', ?, ?, ?, ?, ?, ?, 1, 'h', ?)"
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at, origin_app_version) VALUES (?, 'app', ?, ?, ?, ?, ?, ?, 1, 'h', ?, 1)"
       ).bind(
         runId,
         app,
@@ -484,6 +489,7 @@ const decisionInbox = async () => {
   };
   return {
     fixture,
+    release,
     binding,
     workflowId,
     manifestHash,
@@ -1094,6 +1100,143 @@ describe(
         answers: 1,
         gone: "decision.not_found",
         unboundStatus: "open",
+      });
+    });
+
+    it("let a reviewer watch the run a decision asks them about, its decisions to them alone and no control, until it no longer asks them", async () => {
+      const {
+        fixture,
+        release,
+        opened,
+        reviewer,
+        starter,
+        outsider,
+        runAsking,
+      } = await decisionInbox();
+      const { app } = fixture;
+      const declared = declaredWorkflows(release.app, release.workflows).find(
+        ({ alias }) => alias === "review"
+      );
+      if (declared === undefined) {
+        throw new Error("The release declares no review");
+      }
+      const workflow = {
+        resourceId: release.manifest.resourceId,
+        resourceVersion: release.manifest.resourceVersion,
+        contractId: "workflows.review",
+        fingerprint: await workflowFingerprint(declared),
+        kind: "workflow" as const,
+      };
+      /** `who`'s snapshot of run `runId`, or the code it was refused with. */
+      const watched = async (
+        who: Parameters<typeof readWorkflowWatch>[1],
+        runId: string
+      ): Promise<unknown> => {
+        try {
+          const read = await readWorkflowWatch(env, who, app, {
+            workflow,
+            watch: "run",
+            runId,
+          });
+          return read.value;
+        } catch (error) {
+          return error instanceof Error && "code" in error
+            ? error.code
+            : String(error);
+        }
+      };
+      const shownTo = async (who: typeof reviewer, runId: string) => {
+        const snapshot = await watched(who, runId);
+        const parsed = z
+          .looseObject({
+            waits: z.array(z.looseObject({ kind: z.string() })),
+            control: z.looseObject({}),
+          })
+          .safeParse(snapshot);
+        return parsed.success
+          ? {
+              waits: parsed.data.waits.map(({ kind, canRespond }) => ({
+                kind,
+                canRespond,
+              })),
+              control: parsed.data.control,
+              output: "output" in parsed.data,
+            }
+          : snapshot;
+      };
+      const asked = await runAsking(app, opened);
+      const staff = { ...(await person("admin")), staff: true };
+      // A control asked of it by the reviewer: refused, as for no run.
+      const cancelled = await callScreenFunction(
+        env,
+        reviewer,
+        app,
+        JSON.stringify({
+          workflow,
+          command: "cancel",
+          runId: asked.runId,
+          idempotencyKey: "0".repeat(32),
+        }),
+        Date.now() + 30_000,
+        async () => {
+          // Nothing here is charged.
+        }
+      );
+      const before = {
+        reviewer: await shownTo(reviewer, asked.runId),
+        outsider: await watched(outsider, asked.runId),
+        staff: await watched(staff, asked.runId),
+        cancel: answerOf(cancelled.result),
+      };
+      // Each way a decision stops asking the reviewer: answered, closed at
+      // its deadline, or asked of someone else.
+      const answeredRun = await runAsking(app, opened + 1000);
+      const closedRun = await runAsking(app, opened + 2000);
+      const reassignedRun = await runAsking(app, opened + 3000);
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE workflow_decisions SET status = 'approved', decided_by = ?, decided_at = ? WHERE id = ?"
+        ).bind(starter.userId, Date.now(), answeredRun.decisionId),
+        env.DB.prepare(
+          "UPDATE workflow_decisions SET status = 'timed_out' WHERE id = ?"
+        ).bind(closedRun.decisionId),
+        env.DB.prepare(
+          "UPDATE workflow_decisions SET deciders = ? WHERE id = ?"
+        ).bind(`person:${outsider.userId}`, reassignedRun.decisionId),
+      ]);
+      // The App in restricted mode: the run, unrestricted, isn't its
+      // screen's to answer, so not the reviewer's to watch.
+      const unrestrictedBefore = await watched(reviewer, asked.runId);
+      await appHost(env, appIdSchema.parse(app)).restrict();
+
+      expect({
+        ...before,
+        unrestrictedBefore: typeof unrestrictedBefore,
+        afterRestricting: await watched(reviewer, asked.runId),
+        answered: await watched(reviewer, answeredRun.runId),
+        closed: await watched(reviewer, closedRun.runId),
+        reassigned: await watched(reviewer, reassignedRun.runId),
+      }).toStrictEqual({
+        reviewer: {
+          // No engine runs these rows' run, so it waits on nothing the
+          // engine lists (run-waits.ts); a real run's are the journey's.
+          waits: [],
+          control: {
+            canPause: false,
+            canResume: false,
+            canCancel: false,
+            pendingControl: null,
+          },
+          output: false,
+        },
+        outsider: "workflow.run_unavailable",
+        staff: "workflow.run_unavailable",
+        cancel: "workflow.run_unavailable",
+        unrestrictedBefore: "object",
+        afterRestricting: "workflow.run_unavailable",
+        answered: "workflow.run_unavailable",
+        closed: "workflow.run_unavailable",
+        reassigned: "workflow.run_unavailable",
       });
     });
 
