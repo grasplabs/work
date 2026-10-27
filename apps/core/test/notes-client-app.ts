@@ -4,7 +4,7 @@ import type { Release } from "../src/app-releases.ts";
 
 // A Notes App on the accepted SDK, and its `api` as its screens import it
 // from `#grasp`: what the session client's tests call, through a screen's
-// page (screen-client.test.ts) or a portable host
+// page (screen-client*.test.ts) or a portable host
 // (portable-client.test.ts).
 
 export const notesFiles: Record<string, string> = {

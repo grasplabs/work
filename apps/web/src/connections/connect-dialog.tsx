@@ -1,4 +1,5 @@
 import {
+  canSignInAgain,
   composioConsentText,
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
@@ -74,21 +75,12 @@ export const canConnect = (
   return isAdmin(identity.role);
 };
 
-/**
- * Whether this person can sign in again to `connection`: whoever may
- * disconnect it (its owner, or an admin for a shared one), never Grasp
- * staff, only a native one, and only while its entry is offered.
- */
+/** Whether this person can sign in again to `connection`, as core decides it. */
 export const canReconnect = (
   connection: ListedConnection,
   offered: boolean,
   identity: Pick<Identity, "role" | "staff">
-): boolean =>
-  connection.source === "native" &&
-  oauthProviderSchema.safeParse(connection.provider).success &&
-  offered &&
-  (connection.scope === "personal" || isAdmin(identity.role)) &&
-  !identity.staff;
+): boolean => canSignInAgain(connection, offered, identity);
 
 /**
  * The connection an integration's page offers to sign in to again: the

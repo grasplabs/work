@@ -47,6 +47,7 @@ export default class DurationSequencer extends BaseSequencer {
     const split = splitIntoShards(
       files.map((spec): ShardFile => ({
         key: keyOf(spec),
+        project: spec.project.name,
         group: spec.project.config.sequence.groupOrder,
         // `fileParallelism: false` resolves to one worker.
         serial: spec.project.config.maxWorkers === 1,

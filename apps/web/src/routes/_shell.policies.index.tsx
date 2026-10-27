@@ -21,7 +21,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { loadLandscape } from "../landscape/landscape-data.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import { FindingsTable } from "../policies/findings-table.tsx";
-import { policyBook, policyToday } from "../policies/policies-data.ts";
+import { bookOf, policyToday } from "../policies/policies-data.ts";
 import { PoliciesTable } from "../policies/policies-table.tsx";
 import { findings, inForce, peopleAffected } from "../policies/policy.ts";
 import type { Finding } from "../policies/policy.ts";
@@ -30,11 +30,10 @@ import { RulesTable } from "../policies/rules-table.tsx";
 // The policy manager, as in the prototype (`routes/policies/index.tsx`):
 // the rules the company set for the apps its people use, the apps that
 // break them, and the policies the rules come from. The rules are tested
-// against the Landscape's apps (landscape/landscape-data.ts). Grasp keeps
-// no policies, rules or exceptions yet (policies/policies-data.ts), so the
-// figures are zero and each tab is the prototype's empty state; uploading
-// a policy and making a rule, which the prototype offers here, wait for
-// core to keep them.
+// against the Landscape's apps (landscape/landscape-data.ts). Core keeps
+// the policies, rules and exceptions (policies/policies-data.ts); uploading
+// a policy and making a rule, which the prototype offers here, come with
+// the policy pages' port.
 
 type Tab = "rules" | "apps" | "policies";
 
@@ -100,11 +99,11 @@ const Figure = ({
 
 const PoliciesPage = () => {
   const { t, i18n } = useLingui();
-  const { apps } = Route.useLoaderData();
+  const { apps, book } = Route.useLoaderData();
   const navigate = useNavigate();
   const tab = Route.useSearch().tab ?? "rules";
   const [show, setShow] = useState<Show>("inForce");
-  const { rules, policies, exceptions } = policyBook;
+  const { rules, policies, exceptions } = bookOf(book);
 
   const found = findings(
     rules,

@@ -117,7 +117,7 @@ export const AppSidebar = ({
                     {sections.slice(0, 1).map((section) => (
                       <SectionItem key={section.to} section={section} />
                     ))}
-                    <DashboardItem identity={identity} />
+                    <DashboardItem />
                     {sections.slice(1).map((section) => {
                       if (section.to === "/domains") {
                         return (

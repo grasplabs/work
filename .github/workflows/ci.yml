@@ -2,9 +2,10 @@
 # tests it on top of the latest main and squash-merges it. Checks run on pull
 # requests and in the merge queue; a push to main only deploys what those
 # checks already tested: it builds the release once, deploys those bytes
-# to grasp-os-staging, and once staging accepts them publishes the same
-# bytes as a release for the admin. grasp-os-ops is deployed by hand
-# with the Deploy grasp-os-ops workflow. Jobs with secrets never run for pull
+# as staging's core and connect, and once staging accepts them publishes
+# the same bytes as a release for the admin. Staging, the admin and the
+# router share Grasp's one Cloudflare account; the admin and router are
+# deployed by hand with the Deploy grasp-os-ops workflow. Jobs with secrets never run for pull
 # requests from forks. CI never deploys to a client account: the admin
 # rolls releases out.
 name: CI
@@ -24,14 +25,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  # Everything but `vp test`, once: format, lint and types, the repo checks,
-  # the build, and that generated files are committed. Part of the required
-  # `check` (below).
+  # Everything but `vp test` and the build (release, below), once: format,
+  # lint and types, the repo checks, and that generated files are
+  # committed. Part of the required `check` (below).
   static:
     name: static
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    # About 2 minutes with a warm cache (October 2026).
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,12 +53,7 @@ jobs:
       - run: vp run check:wrangler-configs
       - run: vp run check:state-registry
       - run: vp run check:playwright-image
-      - run: vp run -r build
-      # The admin isn't deployed from here (see deploy-staging): check that
-      # its build is a Worker wrangler would deploy. No credentials needed.
-      - run: vp exec wrangler deploy --dry-run
-        working-directory: apps/admin
-      # Generated files (Worker types, route trees, migrations, the
+      # Generated files (Worker types, migrations, the
       # frontend's translation catalogs) must be committed.
       - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
@@ -74,14 +69,40 @@ jobs:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    # The test step's 25 minutes, and room for the steps around it.
-    timeout-minutes: 31
+    # The test step's 15 minutes, and room for the steps around it.
+    timeout-minutes: 21
     strategy:
       # A failing shard doesn't cancel the other: each says what failed in
       # it.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard:
+          [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+          ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,26 +119,34 @@ jobs:
       # descendants, and workerd is gdb's sibling, so tracing is opened up:
       # the runner is a throwaway VM. A failed install leaves the dump to say
       # gdb didn't run, and the tests run regardless.
+      # In the background, beside the tests: the dump needs it only once a
+      # run has stalled, minutes in, and the install took 10 to 15 s.
       - name: Install gdb for stall stack dumps
         continue-on-error: true
-        timeout-minutes: 3
         run: |
-          command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends gdb)
           sudo sysctl -w kernel.yama.ptrace_scope=0
-      # Two shards split by a hash of each file's path took 10 to 14
-      # minutes each (October 2026), and a slow runner ran one into this
-      # step's timeout: core's heaviest files could land together, and a
-      # shard runs its project groups (core and the rest, then core's
-      # screens, then on-prem) one after another. Five shards split by
-      # duration took 4 to 7 minutes each at first, leaving room for a
-      # runner twice as slow; four left the heaviest at about 9. As tests
-      # grew, five reached the 16 minutes this step had, and 4 of 9 PR runs
-      # lost a shard to it (October 2026, GRA-981): six shards, durations
-      # refreshed from recent runs, and 25 minutes, so a slow runner still
-      # fits. Refresh the durations from the shards' test-progress
-      # artifacts when the split drifts (scripts/test-durations.ts).
+          command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends gdb > "$RUNNER_TEMP/gdb-install.log" 2>&1 &)
+      # Shards split by how long each file takes (scripts/test-sequencer.ts,
+      # with the times in scripts/test-durations.json), each shard running
+      # one project group only (scripts/test-shards.ts): a shard that ran
+      # its groups one after another started each group's pools after the
+      # one before had ended, up to two minutes a group. Six shards took
+      # 14 to 16 minutes (October 2026, GRA-1094). No shard's time can be
+      # shorter than its longest file's, so split a file that sets it
+      # rather than adding shards. Refresh the durations from the shards'
+      # test-progress artifacts when the split drifts
+      # (scripts/test-durations.ts).
+      # A failed test is tried once more: a third of pull request runs
+      # failed, most often on a few flaky files, each a whole re-run of CI
+      # (October 2026). The flaky
+      # reporter (scripts/flaky-reporter.ts) names every test that passed
+      # only when tried again, as a warning and in the step summary, so it
+      # is fixed, not retried for ever.
       # Vitest's default runs a worker per CPU but one, which left a third
       # of the runner's CPU idle; a worker per CPU measured about 6% faster.
+      # Even then the CPUs were idle a third of the time, tests waiting on
+      # their runs' timers (October 2026, GRA-1094): six workers on the
+      # runner's four CPUs. Eight left as much idle and ran slower.
       # Vitest times a test out from inside its worker, so a worker that is
       # blocked, or whose request workerd cancelled, never reports its test.
       # The stall reporter (scripts/stall-reporter.ts) names such a test or
@@ -133,12 +162,12 @@ jobs:
       # one), with the runner's memory.
       # Reporters given here replace Vitest's defaults, so github-actions is
       # listed for the inline failure annotations.
-      - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=100% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
-        timeout-minutes: 25
+      - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
+        timeout-minutes: 15
         env:
           # Below the step's timeout, so the reporter says what still runs
           # before the step is killed.
-          GRASP_STALL_REPORT_AFTER_MINUTES: 23
+          GRASP_STALL_REPORT_AFTER_MINUTES: 13
           # Seconds past a test's own timeout (counted for each attempt):
           # room for the hooks around it, which have timeouts of their own.
           # The longest is 120 s, set by workerflow's process tests
@@ -178,26 +207,27 @@ jobs:
             echo "The kernel log is unavailable, so an OOM kill can't be ruled out: $kernel_log"
           fi
 
-  # The one required check (.github/rulesets/main.json) for static and every
-  # test shard, so sharding leaves the ruleset as it is. It runs however
+  # The one required check (.github/rulesets/main.json) for static, release
+  # and every test shard, so sharding leaves the ruleset as it is. It runs however
   # they ended, and passes only if all of them passed: GitHub counts a
   # skipped required check as passing, so this job mustn't be skipped when
   # one of them failed, was cancelled or was skipped.
   check:
     name: check
-    needs: [static, test]
+    needs: [static, release, test]
     if: always() && github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: |
-          echo "static: $STATIC, test shards: $TEST"
-          if [ "$STATIC" != success ] || [ "$TEST" != success ]; then
-            echo "::error title=check::static ended as $STATIC and the test shards as $TEST; check passes only when both succeed."
+          echo "static: $STATIC, release: $RELEASE, test shards: $TEST"
+          if [ "$STATIC" != success ] || [ "$RELEASE" != success ] || [ "$TEST" != success ]; then
+            echo "::error title=check::static ended as $STATIC, release as $RELEASE and the test shards as $TEST; check passes only when all three succeed."
             exit 1
           fi
         env:
           STATIC: ${{ needs.static.result }}
+          RELEASE: ${{ needs.release.result }}
           # A matrix job's result: a failure if any shard failed.
           TEST: ${{ needs.test.result }}
 
@@ -207,9 +237,11 @@ jobs:
   # every shard, and the serial projects (Grasp's go, the interviews, the
   # journeys) depend on everything before them, so `--shard` alone splits
   # nothing: GRASP_E2E_PART picks the part. The parallel part runs in
-  # shards, which split its test files by count, and the serial part runs
-  # on a stack of its own, where nothing runs before it. Add a shard by
-  # adding a parallel entry and raising the count in every `--shard`.
+  # parts, each the files scripts/e2e-parts.ts gives it by their times
+  # (scripts/e2e-durations.json), and each serial project on a stack of its
+  # own, where nothing runs before it: on one stack the three took about 7
+  # minutes (October 2026, GRA-1094). Add a parallel part by adding an
+  # entry and raising the count in every entry's `part`.
   # Part of the required `e2e` (below).
   #
   # In Playwright's image, which has the browsers and their system packages
@@ -238,22 +270,39 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - part: 1/3
+          - part: 1/8
             project: parallel
-            artifact: 1-of-3
-            args: --shard=1/3
-          - part: 2/3
+            artifact: 1-of-8
+          - part: 2/8
             project: parallel
-            artifact: 2-of-3
-            args: --shard=2/3
-          - part: 3/3
+            artifact: 2-of-8
+          - part: 3/8
             project: parallel
-            artifact: 3-of-3
-            args: --shard=3/3
-          - part: serial
-            project: serial
-            artifact: serial
-            args: ""
+            artifact: 3-of-8
+          - part: 4/8
+            project: parallel
+            artifact: 4-of-8
+          - part: 5/8
+            project: parallel
+            artifact: 5-of-8
+          - part: 6/8
+            project: parallel
+            artifact: 6-of-8
+          - part: 7/8
+            project: parallel
+            artifact: 7-of-8
+          - part: 8/8
+            project: parallel
+            artifact: 8-of-8
+          - part: onboarding
+            project: onboarding
+            artifact: onboarding
+          - part: interview
+            project: interview
+            artifact: interview
+          - part: journeys
+            project: journeys
+            artifact: journeys
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -264,9 +313,26 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - run: vp run e2e ${{ matrix.args }}
+      - run: |
+          files=""
+          if [ "$GRASP_E2E_PART" = parallel ]; then
+            files=$(node scripts/e2e-parts.ts "$PART")
+          fi
+          # Unquoted: a filter per file.
+          vp run e2e $files --reporter=github,json
         env:
           GRASP_E2E_PART: ${{ matrix.project }}
+          PART: ${{ matrix.part }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/e2e-results.json
+      # Kept for passing runs too: the times the parts are split by come
+      # from it (scripts/e2e-durations.ts).
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-results-${{ matrix.artifact }}
+          path: ${{ runner.temp }}/e2e-results.json
+          if-no-files-found: ignore
+          retention-days: 14
       # A failing test is retried with a trace (playwright.config.ts): keep it.
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -350,8 +416,10 @@ jobs:
 
   # Builds a release bundle as main will publish it (core, connect, the
   # frontend's static files and D1 migrations, with its manifest) and checks
-  # every blob against the manifest. For a pull request or the merge queue,
-  # that's all. On a push to main it's the commit's only build: the bundle
+  # every blob against the manifest, and builds the admin, which isn't part
+  # of a release. For a pull request or the merge queue, that's all, and
+  # it's the run's only build: part of the required `check` (above). On a
+  # push to main it's the commit's only build too: the bundle
   # is the run's `release` artifact, which deploy-staging deploys and
   # publish-release publishes as it is, so the release the admin rolls
   # out is the one staging ran and accepted, byte for byte.
@@ -370,6 +438,15 @@ jobs:
           run-install: |
             - args: ["--frozen-lockfile"]
       - run: vp run release:build --out release-out
+      # The admin isn't deployed from here (see deploy-staging): check that
+      # its build is a Worker wrangler would deploy. No credentials needed.
+      - if: github.event_name != 'push'
+        run: vp run build && vp exec wrangler deploy --dry-run
+        working-directory: apps/admin
+      # The builds above regenerate the route trees, which must be committed
+      # (static checks the other generated files without building).
+      - if: github.event_name != 'push'
+        run: git diff --exit-code -- '*routeTree.gen.ts'
       # Every file but the build's `.grasp-release` marker, which only
       # release:build reads. The download checks the artifact's digest, and
       # each job that uses it checks every file against the manifest again.
@@ -403,124 +480,18 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
 
-  # Stephen's eval with a real model (GRA-739), for a change that touches
-  # Stephen: his instructions and tools, the card path, the connectors'
-  # tools whose classes decide what he may do alone, or the eval itself
-  # (scripts/stephen-eval.ts names the files). A broken hard rule blocks the
-  # merge, and the run's numbers go on the pull request. The required
-  # `stephen` (below) always ends, as GitHub counts a skipped required
-  # check as passing: a change that touches no Stephen file passes it
-  # without a model call.
-  stephen-changes:
-    name: stephen-changes
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      stephen: ${{ steps.changed.outputs.stephen }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          # The diff is against the base commit.
-          fetch-depth: 0
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
-      - id: changed
-        run: node scripts/stephen-eval.ts changed "$BASE"
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-
-  # The model is reached with the real AI binding, through an AI Gateway of
-  # CI's own (`STEPHEN_EVAL_GATEWAY`) whose spend limit caps what CI can
-  # spend, and each run's budget (`STEPHEN_EVAL_BUDGET_USD`) is the
-  # ledger's limit too. Its Cloudflare token comes from the stephen-eval
-  # environment's 1Password service account, as staging's does.
-  stephen-eval:
-    name: stephen-eval
-    needs: stephen-changes
-    if: needs.stephen-changes.outputs.stephen == 'true'
-    runs-on: ubuntu-latest
-    # The whole suite with a real model: about 70 turns and their judging.
-    timeout-minutes: 60
-    environment: stephen-eval
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      # Secrets never reach a pull request from a fork; we don't accept those.
-      - if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-        run: |
-          echo "::error title=stephen::A pull request from a fork can't run Stephen's eval."
-          exit 1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
-      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
-        with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-stephen-eval/cloudflare/account-id
-          CLOUDFLARE_API_TOKEN: op://grasp-os-stephen-eval/cloudflare/api-token
-      # Fails on a broken hard rule (test/stephen-real-model.test.ts).
-      - name: Run Stephen's eval with the real model
-        run: |
-          set -o pipefail
-          vp -C apps/core test -c vite.stephen-model.config.ts 2>&1 | tee stephen-eval.log
-        env:
-          STEPHEN_MODEL: ${{ vars.STEPHEN_EVAL_MODEL }}
-          STEPHEN_MODEL_BUDGET_USD: ${{ vars.STEPHEN_EVAL_BUDGET_USD || '3' }}
-          STEPHEN_MODEL_GATEWAY: ${{ vars.STEPHEN_EVAL_GATEWAY || 'stephen-ci' }}
-      - name: Report the numbers
-        if: always()
-        run: node scripts/stephen-eval.ts report stephen-eval.log > stephen-eval.md
-      - name: Post the numbers on the pull request
-        if: always() && github.event_name == 'pull_request'
-        run: |
-          if [ -s stephen-eval.md ]; then
-            gh pr comment "$PR" --repo "$REPO" --body-file stephen-eval.md --edit-last --create-if-none
-          fi
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-
+  # Stephen's eval against a real model runs by hand only (stephen-eval.yml),
+  # and weekly on main (stephen-weekly.yml); every change is checked against
+  # the scripted model in `vp test`. This job only keeps the required
+  # `stephen` check passing: delete it once branch protection no longer
+  # requires it.
   stephen:
     name: stephen
-    needs: [stephen-changes, stephen-eval]
-    if: always() && github.event_name != 'push'
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - run: |
-          echo "Stephen's files changed: $CHANGED; the eval ended as $EVAL"
-          if [ "$CHANGES" != success ]; then
-            echo "::error title=stephen::Finding what changed ended as $CHANGES."
-            exit 1
-          fi
-          if [ "$CHANGED" != true ]; then
-            echo "No Stephen file changed: the gate passes without a model call."
-            exit 0
-          fi
-          if [ "$EVAL" != success ]; then
-            echo "::error title=stephen::Stephen's eval ended as $EVAL: a broken hard rule, or a run that didn't finish, blocks the merge."
-            exit 1
-          fi
-        env:
-          CHANGES: ${{ needs.stephen-changes.result }}
-          CHANGED: ${{ needs.stephen-changes.outputs.stephen }}
-          EVAL: ${{ needs.stephen-eval.result }}
+      - run: echo "Stephen's eval with a real model runs by hand, from the Actions tab."
 
   # Deploys core and connect from the release job's bundle, never from
   # source: each Worker's modules, static files, bindings, compatibility
@@ -528,8 +499,11 @@ jobs:
   # against it first (scripts/release/deploy-release.ts). Then staging
   # accepts the release, or refuses it: core must answer its health check
   # as the version just deployed (scripts/release/accept-release.ts).
-  # Secrets come from 1Password: one service account per environment, each
-  # limited to its own vault, its token stored as a GitHub environment secret.
+  # Secrets and settings come from 1Password, never from GitHub: each
+  # GitHub environment's from the 1Password Environment of the same name,
+  # read with that environment's read-only service account, whose token,
+  # OP_SERVICE_ACCOUNT_TOKEN, is the only value kept in GitHub
+  # (.github/actions/load-1password).
   deploy-staging:
     name: deploy-staging
     needs: release
@@ -550,13 +524,13 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+      - uses: ./.github/actions/load-1password
         with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-staging/cloudflare/account-id
-          CLOUDFLARE_API_TOKEN: op://grasp-os-staging/cloudflare/api-token
+          environment: staging
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secrets: CLOUDFLARE_API_TOKEN
+          settings: CLOUDFLARE_ACCOUNT_ID
+          required: CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
@@ -593,56 +567,23 @@ jobs:
       - run: vp run release:deploy --release release-out --worker connect
       - id: core
         run: vp run release:deploy --release release-out --worker core --var RUNTIME_PROFILE:cloudflare
-      # Core's router secret, loaded only for the acceptance check, as
-      # publish-release loads its R2 key.
-      - id: router
-        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+      # Core's router secret, loaded only for the acceptance check, the last
+      # step, as publish-release loads its R2 key right before the upload.
+      - uses: ./.github/actions/load-1password
         with:
-          export-env: false
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          ROUTER_SECRET: op://grasp-os-staging/core/ROUTER_SECRET
+          environment: staging
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secrets: ROUTER_SECRET
+          required: ROUTER_SECRET
       - run: vp run release:accept --release release-out --version "$CORE_VERSION"
         env:
           CORE_VERSION: ${{ steps.core.outputs.version }}
-          ROUTER_SECRET: ${{ steps.router.outputs.ROUTER_SECRET }}
-      # The admin is deliberately not deployed to staging: it has no route
-      # there and refuses every request without an Access application
-      # (apps/admin/src/access.ts). It deploys only to grasp-os-ops, with
-      # deploy-ops. A real staging admin would need a route and its own
-      # Access application first. The static job still proves it builds.
-
-  # The router on its own: its deploy needs the account's Secrets Store
-  # (scripts/wrangler-deploy.ts), and an account not set up for it yet
-  # mustn't hold back core and connect, nor publishing, which waits only
-  # for deploy-staging. It isn't part of a release.
-  deploy-staging-router:
-    name: deploy-staging-router
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: grasp-os-staging
-    concurrency:
-      group: deploy-grasp-os-staging-router
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
-      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
-        with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-staging/cloudflare/account-id
-          CLOUDFLARE_API_TOKEN: op://grasp-os-staging/cloudflare/api-token
-      - run: vp run --filter @grasp-os/router deploy
+      # Nor are the admin and router: they deploy by hand, with deploy-ops,
+      # to the same account. Staging needs no router of its own (the
+      # acceptance check calls core on workers.dev), and one would share the
+      # name grasp-os-router with Grasp's. Staging core's ROUTER_SECRET is a
+      # random value set on it by hand, the same as in the staging 1Password
+      # Environment. The static job still proves the admin builds.
 
   # Every merge to main is a release: built once (the release job), verified
   # against its manifest and published to R2 in grasp-os-ops, where the
@@ -653,46 +594,61 @@ jobs:
   # the admin can't roll it out to a client. When deploy-staging fails,
   # is cancelled or is skipped, this job is skipped too, and the commit's
   # changes ship in the next release that passes staging. The R2 key is
-  # loaded after the download and passed only to the upload step; all
-  # steps share one runner, so that isn't a security boundary. Skipped until
-  # the repository variable PUBLISH_RELEASES is `true`, set once the bucket,
-  # key and environment exist, and staging deploys. Pushes to main share the
-  # workflow's concurrency group, which keeps only the newest pending run: in
-  # a burst of merges a middle commit may never be published, and its
-  # changes ship in the next release.
+  # passed only to the upload step; all steps share one runner, so that
+  # isn't a security boundary. Publishes nothing until PUBLISH_RELEASES, a
+  # setting in the releases 1Password Environment, is `true`, set once the
+  # bucket, key and environment exist, and staging deploys. A job's `if`
+  # can't read 1Password, so the job runs and its steps check: first
+  # whether the environment has its service account token at all (without
+  # one, nothing is set up yet and the job passes doing nothing), then the
+  # switch.
+  # Pushes to main share the workflow's concurrency group, which keeps only
+  # the newest pending run: in a burst of merges a middle commit may never
+  # be published, and its changes ship in the next release.
   publish-release:
     name: publish-release
     needs: [release, deploy-staging]
-    if: github.event_name == 'push' && vars.PUBLISH_RELEASES == 'true'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: grasp-os-releases
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: setup
+        run: echo "ready=$READY" >> "$GITHUB_OUTPUT"
+        env:
+          READY: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN != '' }}
+      - if: steps.setup.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      # The switch first: with publishing off, the R2 key needn't be in the
+      # Environment yet.
+      - if: steps.setup.outputs.ready == 'true'
+        uses: ./.github/actions/load-1password
+        with:
+          environment: releases
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          settings: PUBLISH_RELEASES
+      - if: env.PUBLISH_RELEASES == 'true'
+        uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
         with:
           node-version-file: .node-version
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - if: env.PUBLISH_RELEASES == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
           path: release-out
-      - id: r2
-        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+      - if: env.PUBLISH_RELEASES == 'true'
+        uses: ./.github/actions/load-1password
         with:
-          export-env: false
+          environment: releases
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secrets: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+          required: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+      - if: env.PUBLISH_RELEASES == 'true'
+        run: vp run release:upload --release release-out
         env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          R2_ENDPOINT: op://grasp-os-releases/r2/endpoint
-          R2_ACCESS_KEY_ID: op://grasp-os-releases/r2/access-key-id
-          R2_SECRET_ACCESS_KEY: op://grasp-os-releases/r2/secret-access-key
-      - run: vp run release:upload --release release-out
-        env:
-          R2_ENDPOINT: ${{ steps.r2.outputs.R2_ENDPOINT }}
           R2_BUCKET: grasp-os-releases
-          R2_ACCESS_KEY_ID: ${{ steps.r2.outputs.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ steps.r2.outputs.R2_SECRET_ACCESS_KEY }}

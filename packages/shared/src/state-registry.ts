@@ -230,6 +230,10 @@ const coreDb: D1State = {
       "App token signing keys, private keys encrypted with BETTER_AUTH_SECRET."
     ),
     organizations: exported(auth),
+    org_settings: exported(`${core}org-settings.ts`),
+    policy_documents: exported(`${core}policies.ts`),
+    policy_rules: exported(`${core}policies.ts`),
+    policy_exceptions: exported(`${core}policies.ts`),
     members: exported(auth),
     member_removals: exported(`${core}organization.ts`),
     channel_accounts: exported(`${core}channels/accounts.ts`),
@@ -448,6 +452,10 @@ const knowledgeDb: D1State = {
     brain_entity_keys: exported(
       `${brain}entities.ts`,
       `The exact evidence each entity is known by, as deployment-keyed HMACs. ${brainPending}`
+    ),
+    brain_assertions: exported(
+      `${brain}entities.ts`,
+      `Relations the Brain's sources state between their entities, with their passages: derived, but only by model calls again. ${brainPending}`
     ),
     brain_mentions: exported(
       `${brain}entities.ts`,
@@ -696,6 +704,10 @@ const onboarding: DurableObjectState = {
     asked_about: exported(`${core}onboarding/store.ts`),
     drawn_works: exported(`${core}onboarding/store.ts`),
     settled_works: exported(`${core}onboarding/store.ts`),
+    checked_differences: exported(
+      `${core}onboarding/store.ts`,
+      "The differences whose two ways the brain's intake checked five or more people behind, by the drawing it checked."
+    ),
     counted_works: exported(`${core}onboarding/store.ts`),
     brain_teams: exported(`${core}onboarding/store.ts`),
     brain_sent: exported(

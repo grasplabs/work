@@ -14,7 +14,7 @@ import type {
  * and are refused before anything is read. 150 in all.
  *
  * The probes are what is asked, not how a model takes it: the harness
- * (permission-probes.test.ts) has the model try every read it can, so a
+ * (permission-probing.ts) has the model try every read it can, so a
  * probe passes on the platform's permissions alone.
  */
 
