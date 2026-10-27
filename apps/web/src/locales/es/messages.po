@@ -407,6 +407,14 @@ msgstr "{count, plural, one {Añadir # documento} other {Añadir # documentos}}"
 msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 msgstr "{count, plural, one {Las respuestas se basan en # fuente} other {Las respuestas se basan en # fuentes}}"
 
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Asked you a question} other {Asked you # questions}}"
+msgstr "{count, plural, one {Te hizo una pregunta} other {Te hizo # preguntas}}"
+
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
+msgstr "{count, plural, one {Volver a la pregunta} other {Volver a las # preguntas}}"
+
 #: src/chat/builds-state.ts
 msgid "{count, plural, one {once} other {# times}}"
 msgstr "{count, plural, one {una vez} other {# veces}}"
@@ -3077,6 +3085,7 @@ msgstr "Ausente estas semanas. Nada espera a {first}."
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/chat/asked-questions.tsx
 #: src/tour/tour-layer.tsx
 msgid "Back"
 msgstr "Atrás"
@@ -5952,6 +5961,14 @@ msgstr "Concedió un permiso"
 msgid "Grasp access"
 msgstr "Acceso de Grasp"
 
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks"
+msgstr "Grasp pregunta"
+
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks, {number} of {total}"
+msgstr "Grasp pregunta, {number} de {total}"
+
 #: src/chat/chat-dock.tsx
 #: src/chat/cited-note.tsx
 #: src/core.ts
@@ -7984,6 +8001,7 @@ msgctxt "inbox sort"
 msgid "Newest first"
 msgstr "Más recientes primero"
 
+#: src/chat/asked-questions.tsx
 #: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Siguiente"
@@ -11243,6 +11261,7 @@ msgstr "Uso detectado: aún no, ni por el inicio de sesión ni por Pulse"
 msgid "Seen, never mentioned"
 msgstr "Vistas, nunca mencionadas"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Send"
 msgstr "Enviar"
@@ -11670,6 +11689,7 @@ msgstr "Alguien que ya no está en tu organización"
 msgid "Someone's own work"
 msgstr "El trabajo propio de alguien"
 
+#: src/chat/asked-questions.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Something else"
 msgstr "Otra cosa"
@@ -13884,6 +13904,7 @@ msgstr "Dos respuestas"
 msgid "Type"
 msgstr "Tipo"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Type instead"
 msgstr "Prefiero escribir"
@@ -15579,6 +15600,7 @@ msgstr "Sigues con la sesión iniciada. Vuelve a intentarlo en un momento."
 msgid "Your account"
 msgstr "Tu cuenta"
 
+#: src/chat/asked-questions.tsx
 #: src/chat/brain-questions.tsx
 #: src/interview/composer.tsx
 msgid "Your answer"
