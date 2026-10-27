@@ -576,6 +576,11 @@ export const screenModuleResponse = async (
 // - it reports only an event the browser made (`isTrusted`, each event's
 //   own property that no script can redefine), never one a script
 //   dispatched;
+// - one gesture is one act: a pointer's press (never its release, nor the
+//   mouse and touch events the same gesture fires too) and a key's first
+//   press (never its repeats while held, read with the getter taken at
+//   start), so a screen can't turn one click or one held key into many
+//   navigations;
 // - the report carries nothing: what counts is that it came over this
 //   port, which only this script holds. The screen's ports and the page's
 //   window are its own to post on, and the page reads no act from them.
@@ -584,17 +589,22 @@ const apply = Reflect.apply;
 const listen = EventTarget.prototype.addEventListener;
 const unlisten = EventTarget.prototype.removeEventListener;
 const post = MessagePort.prototype.postMessage;
+const repeatOf = Object.getOwnPropertyDescriptor(KeyboardEvent.prototype, "repeat").get;
 const load = new URLSearchParams(location.search).get("load");
 const screen = JSON.parse(document.getElementById("screen").textContent);
 const reportActs = (port) => {
-  const acted = (event) => {
+  const pressed = (event) => {
     if (event.isTrusted === true) {
       apply(post, port, [null]);
     }
   };
-  for (const type of ["pointerdown", "pointerup", "mousedown", "keydown", "touchend"]) {
-    apply(listen, window, [type, acted, true]);
-  }
+  const keyed = (event) => {
+    if (event.isTrusted === true && apply(repeatOf, event, []) !== true) {
+      apply(post, port, [null]);
+    }
+  };
+  apply(listen, window, ["pointerdown", pressed, true]);
+  apply(listen, window, ["keydown", keyed, true]);
 };
 const start = (event) => {
   const { data, ports } = event;

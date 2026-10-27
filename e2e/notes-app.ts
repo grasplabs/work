@@ -822,6 +822,8 @@ export default function Prefs({ input }: ScreenProps<typeof screens.prefs>) {
       <Button onClick={() => void navigate(screens.prefs, { section: "billing" }, { surface: "prefs" })}>Open billing preferences</Button>
       <Button onClick={() => { setTimeout(() => { void navigate(screens.note, { id: "n77" }); }, 1500); }}>Open note n77 later</Button>
       <Button onClick={() => { setTimeout(() => { void navigate(screens.notes); }, 1500); }}>Open the list later</Button>
+      <Button onPointerDown={() => void navigate(screens.note, { id: "down" })} onPointerUp={() => { setTimeout(() => { void navigate(screens.note, { id: "up" }); }, 1500); }}>Press and lift</Button>
+      <input aria-label="Keys" onKeyDown={(event) => { if (event.repeat) { setTimeout(() => { void navigate(screens.note, { id: "held" }); }, 1500); } else { void navigate(screens.note, { id: "pressed" }); } }} />
     </main>`
       ),
   };
