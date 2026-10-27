@@ -12,6 +12,7 @@
     "./generate": "./src/generate.ts",
     "./limits": "./src/limits.ts",
     "./provenance": "./src/provenance.ts",
+    "./stores": "./src/stores.ts",
     "./validate": "./src/validate.ts"
   },
   "dependencies": {
