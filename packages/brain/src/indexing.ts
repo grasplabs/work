@@ -7,6 +7,7 @@ import { z } from "zod";
 import { outboxedIfChanged } from "./audit.ts";
 import type { Brain } from "./brain.ts";
 import { brainErrors } from "./contract.ts";
+import { insertChunks } from "./db/d1.ts";
 import { brainPayloads, documents, sections, versions } from "./db/schema.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import type { Json } from "./json.ts";
@@ -46,9 +47,6 @@ import { readPayload } from "./payloads.ts";
 // its current version before the purge reports done
 // (`requireCurrentIndexed`), or the purge fails with
 // `knowledge.purge_index_pending` and its indexing run is started.
-
-/** D1 binds at most 100 parameters to one statement: a section binds 8. */
-const sectionsPerInsert = 10;
 
 /** How the host retries and times a step of an indexing job. */
 export interface StepConfig {
@@ -128,12 +126,10 @@ const publishStatements = (
     headings: JSON.stringify(section.headings),
     text: section.text,
   }));
-  const inserts: BatchItem<"sqlite">[] = [];
-  for (let start = 0; start < rows.length; start += sectionsPerInsert) {
-    inserts.push(
-      db.insert(sections).values(rows.slice(start, start + sectionsPerInsert))
-    );
-  }
+  const inserts = insertChunks(
+    rows,
+    (row) => db.insert(sections).values(row).toSQL().params.length
+  ).map((chunk) => db.insert(sections).values(chunk));
   return [
     db
       .delete(sections)
