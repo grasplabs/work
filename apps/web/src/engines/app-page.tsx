@@ -241,24 +241,26 @@ const AppTitle = ({ app }: { app: App }) => {
   }
   return (
     <>
-      <button
-        className="focus-visible:ring-ring/50 max-w-full cursor-text truncate rounded-sm text-left outline-none focus-visible:ring-3"
-        onDoubleClick={() => {
-          setRenaming(true);
-        }}
-        ref={button}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" && event.key !== "F2") {
-            return;
-          }
-          event.preventDefault();
-          setRenaming(true);
-        }}
-        title={t`Double-click to rename`}
-        type="button"
-      >
-        {name}
-      </button>
+      <h1 className="min-w-0 truncate text-base font-medium">
+        <button
+          className="focus-visible:ring-ring/50 max-w-full cursor-text truncate rounded-sm text-left outline-none focus-visible:ring-3"
+          onDoubleClick={() => {
+            setRenaming(true);
+          }}
+          ref={button}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== "F2") {
+              return;
+            }
+            event.preventDefault();
+            setRenaming(true);
+          }}
+          title={t`Double-click to rename`}
+          type="button"
+        >
+          {name}
+        </button>
+      </h1>
       <ErrorText>{failure}</ErrorText>
     </>
   );
@@ -297,9 +299,11 @@ export const AppPage = ({
           >
             <LayoutGridIcon className="size-4" />
           </span>
-          <h1 className="min-w-0 truncate text-base font-medium">
-            {editable ? <AppTitle app={app} /> : name}
-          </h1>
+          {editable ? (
+            <AppTitle app={app} />
+          ) : (
+            <h1 className="min-w-0 truncate text-base font-medium">{name}</h1>
+          )}
           <StatusBadge status={app.status} />
         </span>
         <ScreenTabs app={app.id} open={open} screens={contents.screens} />

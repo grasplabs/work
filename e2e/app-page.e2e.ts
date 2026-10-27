@@ -143,11 +143,7 @@ test("a builder finds the Apps beside an App's page by where they stand, renames
 
   const apps = page.getByRole("navigation", { name: "Apps" });
   const group = (title: string) =>
-    apps.getByRole("region", { name: title }).or(
-      apps.locator("section").filter({
-        has: page.getByRole("heading", { name: title, exact: true }),
-      })
-    );
+    apps.getByRole("region", { name: title, exact: true });
   await expect(
     group("Published").getByRole("link", { name: published })
   ).toHaveAttribute("aria-current", "page");
@@ -174,6 +170,45 @@ test("a builder finds the Apps beside an App's page by where they stand, renames
   await page.getByRole("menuitem", { name: "Restore" }).click();
   await expect(
     group("Draft").getByRole("link", { name: renamed })
+  ).toBeVisible();
+});
+
+test("someone an App is shared with as a user finds it beside its page, opens another by a double click, and changes none of them", async ({
+  pageOf,
+}) => {
+  const { builder, user } = peopleIn("appPage");
+  const first = `Shared ${crypto.randomUUID()}`;
+  const second = `Also shared ${crypto.randomUUID()}`;
+  const apps = [
+    await newApp(builder, first, twoScreens),
+    await newApp(builder, second, twoScreens),
+  ];
+  const { core, api } = apiOf(builder);
+  try {
+    for (const app of apps) {
+      // oxlint-disable-next-line no-await-in-loop -- one share after another
+      await api.apps.members.add(app, {
+        type: "person",
+        id: user.userId,
+        role: "user",
+      });
+    }
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const page = await pageOf(user);
+  await page.goto(`/apps/${apps[0]}`);
+
+  const list = page.getByRole("navigation", { name: "Apps" });
+  const row = list.getByRole("link", { name: second });
+  await expect(row).toBeVisible();
+  // Their rows have no menu, and a double click opens rather than renames.
+  await expect(list.getByRole("button", { name: /^More for/u })).toHaveCount(0);
+  await row.dblclick();
+  await expect(page).toHaveURL(new RegExp(`/apps/${apps[1]}$`, "u"));
+  await expect(list.getByRole("textbox")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { level: 1, name: second })
   ).toBeVisible();
 });
 
