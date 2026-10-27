@@ -1,11 +1,12 @@
-import { and, eq, inArray, lt, lte, ne, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit.ts";
+import { auditedBatch, outboxedIfChanged } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
+import type { Allowed } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import {
   brainErrors,
@@ -1908,9 +1909,30 @@ const pairKey = (a: string, b: string): string =>
 /** Most entities a read of decisions asks about at once: D1 binds 100 at most. */
 const decisionBatch = 40;
 
+/**
+ * Whether a decision's evidence is a document `allowed` reads now: a
+ * `same` is honoured only for such a reader, so an identification never
+ * reaches anyone who can't read what it rests on (initials in one
+ * collection matched to a named person by a note in another).
+ */
+const readableEvidence = <C>(brain: Brain<C>, allowed: Allowed): SQL =>
+  exists(
+    brain.db
+      .select({ one: sql`1` })
+      .from(documents)
+      .innerJoin(collections, eq(collections.id, documents.collectionId))
+      .where(
+        and(
+          eq(documents.id, brainEntityMatches.evidenceDocumentId),
+          allowed.documents()
+        )
+      )
+  );
+
 /** The pairs among `ids` that have a decision, either way, as `pairKey`s. */
 const decidedPairs = async <C>(
   brain: Brain<C>,
+  allowed: Allowed,
   ids: readonly string[]
 ): Promise<Set<string>> => {
   const keys = new Set<string>();
@@ -1920,7 +1942,16 @@ const decidedPairs = async <C>(
     const rows = await brain.db
       .select({ a: brainEntityMatches.entityA, b: brainEntityMatches.entityB })
       .from(brainEntityMatches)
-      .where(inArray(brainEntityMatches.entityA, chunk));
+      .where(
+        and(
+          inArray(brainEntityMatches.entityA, chunk),
+          // A `same` only for a reader of its evidence (`honoured`).
+          or(
+            eq(brainEntityMatches.decision, "different"),
+            readableEvidence(brain, allowed)
+          )
+        )
+      );
     for (const { a, b } of rows) {
       if (ids.includes(b)) {
         keys.add(pairKey(a, b));
@@ -2020,7 +2051,11 @@ export const entityMatchProposals = async <C>(
       byName.set(key, entry);
     }
   }
-  const decided = await decidedPairs(brain, [...byEntity.keys()]);
+  const decided = await decidedPairs(
+    brain,
+    await allowedFor(brain.ports, reader),
+    [...byEntity.keys()]
+  );
   const proposals = new Map<string, EntityMatchProposal>();
   for (const { kind, name, ids } of byName.values()) {
     const entities = [...ids].toSorted().map((id) => {
@@ -2128,6 +2163,95 @@ const acrossCollections = (
 ): boolean =>
   [...one.collections].some((a) => [...other.collections].some((b) => a !== b));
 
+/** Refuses evidence that isn't a document version `reader` reads now. */
+const requireEvidence = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  evidence: { documentId: string; version: number }
+): Promise<void> => {
+  const allowed = await allowedFor(brain.ports, reader);
+  const found = await brain.db
+    .select({ id: documents.id })
+    .from(documents)
+    .innerJoin(collections, eq(collections.id, documents.collectionId))
+    .innerJoin(
+      versions,
+      and(
+        eq(versions.documentId, documents.id),
+        eq(versions.number, evidence.version)
+      )
+    )
+    .where(and(eq(documents.id, evidence.documentId), allowed.documents()))
+    .get();
+  if (found === undefined) {
+    throw brainErrors.create("brain.not_found");
+  }
+};
+
+/**
+ * The readable mentions of a pair `reader` may decide on: both read now
+ * (`brain.not_found` otherwise, as for an ID that's no entity), of one
+ * kind, seen in different collections, and evidence exactly for `same`,
+ * a version they read (`brain.invalid` or `brain.not_found` otherwise).
+ */
+const decidable = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  [first, second]: readonly [string, string],
+  evidence: { documentId: string; version: number } | undefined,
+  decision: "same" | "different"
+): Promise<ReadableMention[]> => {
+  const { sides, rows } = await readableSides(brain, reader, [first, second]);
+  const one = sides.get(first);
+  const other = sides.get(second);
+  if (one === undefined || other === undefined) {
+    throw brainErrors.create("brain.not_found");
+  }
+  if (
+    one.kind !== other.kind ||
+    !acrossCollections(one, other) ||
+    (decision === "same") !== (evidence !== undefined)
+  ) {
+    throw brainErrors.create("brain.invalid");
+  }
+  if (evidence !== undefined) {
+    await requireEvidence(brain, reader, evidence);
+  }
+  return rows;
+};
+
+/**
+ * The decision on `pair` that `reader` (the person `decidedBy`) may
+ * replace, if there is one: their own, or another's the host's
+ * `mayReplaceMatch` lets them replace (refused otherwise).
+ */
+const replaceable = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  pair: SQL | undefined,
+  decidedBy: string
+): Promise<
+  | { decidedBy: string; decision: string; previousDecider: string | null }
+  | undefined
+> => {
+  const existing = await brain.db
+    .select({
+      decidedBy: brainEntityMatches.decidedBy,
+      decision: brainEntityMatches.decision,
+    })
+    .from(brainEntityMatches)
+    .where(pair)
+    .get();
+  if (existing === undefined) {
+    return undefined;
+  }
+  if (existing.decidedBy === decidedBy) {
+    return { ...existing, previousDecider: null };
+  }
+  await brain.ports.mayReplaceMatch(reader, { decidedBy: existing.decidedBy });
+  return { ...existing, previousDecider: existing.decidedBy };
+};
+
 /**
  * Records that two entities of different collections are one (`same`) or
  * not (`different`), GRA-1080: only by a person who reads both now (an
@@ -2150,57 +2274,38 @@ export const decideEntityMatch = async <C>(
   );
   await brain.ports.recall.require(reader);
   // A person's own call: an App, run or agent never decides who is who.
-  brain.ports.ownerOf(reader);
+  const decidedBy = brain.ports.ownerOf(reader);
   const [first, second] = entities;
-  const { sides, rows } = await readableSides(brain, reader, entities);
-  const one = sides.get(first);
-  const other = sides.get(second);
-  if (one === undefined || other === undefined) {
-    throw brainErrors.create("brain.not_found");
-  }
-  if (
-    one.kind !== other.kind ||
-    !acrossCollections(one, other) ||
-    (decision === "same") !== (evidence !== undefined)
-  ) {
-    throw brainErrors.create("brain.invalid");
-  }
-  if (evidence !== undefined) {
-    const allowed = await allowedFor(brain.ports, reader);
-    const found = await brain.db
-      .select({ id: documents.id })
-      .from(documents)
-      .innerJoin(collections, eq(collections.id, documents.collectionId))
-      .innerJoin(
-        versions,
-        and(
-          eq(versions.documentId, documents.id),
-          eq(versions.number, evidence.version)
-        )
-      )
-      .where(and(eq(documents.id, evidence.documentId), allowed.documents()))
-      .get();
-    if (found === undefined) {
-      throw brainErrors.create("brain.not_found");
-    }
-  }
+  const rows = await decidable(brain, reader, entities, evidence, decision);
   const [entityA, entityB] = first < second ? [first, second] : [second, first];
+  const pair = and(
+    eq(brainEntityMatches.entityA, entityA),
+    eq(brainEntityMatches.entityB, entityB)
+  );
+  const existing = await replaceable(brain, reader, pair, decidedBy);
   const decidedAt = brain.ports.clock();
   const values = {
     decision,
     evidenceDocumentId: evidence?.documentId ?? null,
     evidenceVersion: evidence?.version ?? null,
+    decidedBy,
     decidedAt,
   };
-  await auditedBatch(brain.ports, brain.db, [
+  const [written] = await auditedBatch(brain.ports, brain.db, [
     brain.db
       .insert(brainEntityMatches)
       .values({ entityA, entityB, ...values })
       .onConflictDoUpdate({
         target: [brainEntityMatches.entityA, brainEntityMatches.entityB],
         set: values,
+        // Exactly the decision the replacement was allowed against: one
+        // made or replaced meanwhile is left as it is (and refused below).
+        setWhere:
+          existing === undefined
+            ? sql`0`
+            : eq(brainEntityMatches.decidedBy, existing.decidedBy),
       }),
-    outboxed(brain, {
+    outboxedIfChanged(brain, {
       actor: brain.ports.actorOf(reader),
       action: "brain.entity_match.decided",
       target: { type: "entity_match", id: `${entityA}:${entityB}` },
@@ -2208,12 +2313,18 @@ export const decideEntityMatch = async <C>(
         decision,
         evidence: evidence?.documentId ?? null,
         version: evidence?.version ?? null,
+        // A replacement names what it replaced, and whose it was.
+        replaced: existing?.decision ?? null,
+        previousDecider: existing?.previousDecider ?? null,
       },
       provenance: [
         ...new Set(rows.flatMap(({ collectionId }) => collectionId ?? [])),
       ],
     }),
   ]);
+  if (written.meta.changes === 0) {
+    throw brainErrors.create("brain.revision_conflict");
+  }
   return { entities: [entityA, entityB], decision };
 };
 
@@ -2230,6 +2341,7 @@ export const sameAsFor = async <C>(
   // Every direct decision, a page at a time, so none is dropped before
   // the visibility check.
   const readable: string[] = [];
+  const allowed = await allowedFor(brain.ports, reader);
   let after: { a: string; b: string } | undefined;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time, keyset-ordered
@@ -2240,6 +2352,7 @@ export const sameAsFor = async <C>(
         and(
           eq(brainEntityMatches.decision, "same"),
           sql`(${brainEntityMatches.entityA} = ${entityId} OR ${brainEntityMatches.entityB} = ${entityId})`,
+          readableEvidence(brain, allowed),
           after === undefined
             ? undefined
             : sql`(${brainEntityMatches.entityA}, ${brainEntityMatches.entityB}) > (${after.a}, ${after.b})`

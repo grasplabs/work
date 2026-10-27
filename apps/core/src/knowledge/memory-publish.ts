@@ -282,6 +282,26 @@ export const mayPublish = async (
 };
 
 /**
+ * Core's `mayReplaceMatch` port: an entity match decision is replaced by
+ * whoever made it, or by an admin: Grasp staff too, who may act and are
+ * audited as staff (the decision's audit event names them); anyone else
+ * is refused.
+ */
+export const mayReplaceMatch = async (
+  reader: Reader,
+  decision: { decidedBy: string }
+): Promise<void> => {
+  const allowed =
+    reader.type === "person" &&
+    (decision.decidedBy === reader.person.userId ||
+      isAdmin(reader.person.role));
+  if (!allowed) {
+    throw brainErrors.create("brain.denied");
+  }
+  await Promise.resolve();
+};
+
+/**
  * Core's `mayRetire` port: a shared record is retired by whoever published
  * it, or by one of the organization's own admins; anyone else is refused
  * as one that isn't there.

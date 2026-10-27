@@ -936,6 +936,11 @@ export const brainEntityMatches = sqliteTable(
     /** The evidence for `same`: a document, at its version. */
     evidenceDocumentId: text("evidence_document_id"),
     evidenceVersion: integer("evidence_version"),
+    /**
+     * The person who decided it, as the host's `ownerOf` names them: only
+     * they, or whoever the host's `mayReplaceMatch` lets, replace it.
+     */
+    decidedBy: text("decided_by").notNull(),
     decidedAt: timestamp("decided_at").notNull(),
   },
   (table) => [
