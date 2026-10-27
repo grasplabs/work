@@ -1991,8 +1991,15 @@ describe(
             }),
             tampered: () => {},
             ...(fuel === undefined ? {} : { activationFuel: fuel }),
-            admitAttempt: async (asked) =>
-              await admitAttempt(env, owner, asked),
+            admitAttempt: async (asked) => {
+              const admitted = await admitAttempt(env, owner, asked);
+              // The engine's try past the step's last: a while passes
+              // between its admission and the host's refusal of it.
+              if (asked.number === 5) {
+                await scheduler.wait(50);
+              }
+              return admitted;
+            },
           }
         );
       await stoppedIn(activation(1));
@@ -2000,12 +2007,28 @@ describe(
       await stoppedIn(activation(2, 0));
       await stoppedIn(activation(3));
       await stoppedIn(activation(4));
+      // The engine tries once more, as its own count allows (the last
+      // that ran timed out, or its activation stopped): refused before it
+      // runs, it holds and charges nothing of the lineage's time.
+      await stoppedIn(activation(5));
       const receipts = await receiptsOf(runId);
+      const lineage = await env.DB.prepare(
+        "SELECT active_used_ms AS used, active_held_ms AS held FROM run_lineages WHERE root_run_id = ?"
+      )
+        .bind(runId)
+        .first<{ used: number; held: number }>();
 
       expect({
         ends,
         engineRetries: [...new Set(retries)],
         ran: receipts.map(({ attempt }) => attempt),
+        refused: receipts
+          .filter(({ attempt }) => attempt === 5)
+          .map(({ settled, used }) => ({ settled, used })),
+        lineage: {
+          used: lineage?.used,
+          held: lineage?.held,
+        },
       }).toStrictEqual({
         // Retried after each that ran, and after the one cut off; the third
         // that ran is the step's last, whatever the engine has left.
@@ -2014,10 +2037,19 @@ describe(
           "TimeoutError",
           "TimeoutError",
           "NonRetryableError",
+          "NonRetryableError",
         ],
         // The step's two retries, and room for four cut off besides.
         engineRetries: [6],
-        ran: [1, 3, 4],
+        ran: [1, 3, 4, 5],
+        refused: [{ settled: 1, used: 0 }],
+        // Only what the attempts that ran used: none of the refused one's.
+        lineage: {
+          used: receipts
+            .filter(({ attempt }) => attempt !== 5)
+            .reduce((sum, { used }) => sum + (used ?? 0), 0),
+          held: 0,
+        },
       });
     });
 

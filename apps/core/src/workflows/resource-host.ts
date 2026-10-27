@@ -2056,12 +2056,14 @@ export class ResourceRunHost
       }
       admission = admitted;
     }
+    // Past the step's attempts that may run: the last of them ended with
+    // no outcome core saw (the engine timed it out, or its activation
+    // stopped), and the engine tries again, as its own count allows. It
+    // never runs, so it charges none of the lineage's time.
+    const refused = overRetries(ranOf(admission, told));
     // Settled however it ends, from here on (the `finally` below).
     try {
-      // Past the step's attempts that may run: the last of them ended with
-      // no outcome core saw (the engine timed it out, or its activation
-      // stopped), and the engine tries again, as its own count allows.
-      if (overRetries(ranOf(admission, told))) {
+      if (refused) {
         throw workflowErrors.create("workflow.too_many_attempts", {
           max: stepRetries + 1,
         });
@@ -2116,8 +2118,8 @@ export class ResourceRunHost
     } finally {
       // Settled last, however it ended: what it held of its lineage's time
       // turns into what it used, its evaluations' and its record's checks'
-      // time included.
-      await admission?.settle();
+      // time included; one refused before it ran used none.
+      await admission?.settle(!refused);
     }
   }
 

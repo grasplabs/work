@@ -753,8 +753,12 @@ export interface AttemptAdmission {
    * (`hostCallsOf`), throwing the refusal.
    */
   hostCall: () => Promise<void>;
-  /** Settles it with the time it used and the calls it made; never throws. */
-  settle: () => Promise<void>;
+  /**
+   * Settles it with the time it used and the calls it made; never throws.
+   * One refused before it ran (`ran` false: past the step's attempts that
+   * may run) gives its hold back and charges none of the lineage's time.
+   */
+  settle: (ran?: boolean) => Promise<void>;
 }
 
 /** The least wait a refusal for a busy lineage names, in seconds. */
@@ -788,8 +792,9 @@ const busyFor = async (
 /**
  * Settles the attempt `identity` of the lineage of `root`, admitted at
  * `admittedAt`: its hold is given back, and the lineage counts what it
- * used, the wall time it ran up to its deadline, and gives back the
- * `unusedHostCalls` it reserved and didn't make. Once only, however often
+ * used, the wall time it ran up to its deadline (none for one that never
+ * ran, `ran` false), and gives back the `unusedHostCalls` it reserved and
+ * didn't make. Once only, however often
  * it is called, and not at all once its deadline has passed and an
  * admission settled it as used up. Logged, never thrown, when the
  * database can't: the hold stays, and is settled as used up once its
@@ -800,10 +805,11 @@ const settleAttempt = async (
   root: string,
   identity: ReturnType<typeof and>,
   admittedAt: Date,
-  unusedHostCalls: number
+  unusedHostCalls: number,
+  ranAtAll = true
 ): Promise<void> => {
   const held = runLineageAttempts;
-  const ran = Math.max(0, Date.now() - admittedAt.getTime());
+  const ran = ranAtAll ? Math.max(0, Date.now() - admittedAt.getTime()) : 0;
   const db = drizzle(env.DB);
   const open = and(identity, isNull(held.settledAt));
   const reservedOf = sql`(SELECT ${held.reservedMs} FROM ${held} WHERE ${open})`;
@@ -1338,13 +1344,14 @@ const admitAttemptOnce = async (
       attemptsAllowed: policy.limits.workflowAttemptsPerStep,
       ran: ran + 1,
       hostCall: hostCalls.take,
-      settle: async () => {
+      settle: async (itRan = true) => {
         await settleAttempt(
           env,
           root,
           identity,
           admitted.admittedAt,
-          await hostCalls.close()
+          await hostCalls.close(),
+          itRan
         );
       },
     };
