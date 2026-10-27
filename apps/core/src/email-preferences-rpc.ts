@@ -8,8 +8,8 @@ import type {
   EmailPreferencesApi,
 } from "@grasp-os/shared/email-preferences";
 
-import { personalWorkspaceId } from "./chats-rpc.ts";
 import { workspace } from "./durable-objects.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";

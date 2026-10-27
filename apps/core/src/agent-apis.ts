@@ -6,6 +6,7 @@ import { appsApi } from "./agent-apps.ts";
 import { brainAgentApi } from "./agent-brain.ts";
 import { buildApi } from "./agent-builds.ts";
 import { connectionsApi } from "./agent-connections.ts";
+import { dashboardApi } from "./agent-dashboard.ts";
 import { knowledgeApi } from "./agent-knowledge.ts";
 import { memoryApi } from "./agent-memory.ts";
 import { auditToolCall, requireOpenRun } from "./agent-scope.ts";
@@ -184,6 +185,7 @@ export const agentApis: readonly AgentApi[] = [
   workflowsApi,
   memoryApi,
   brainAgentApi,
+  dashboardApi,
 ].map((api) => ({
   ...api,
   name: apiNameSchema.parse(api.name),

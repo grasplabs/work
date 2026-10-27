@@ -1,8 +1,14 @@
 import type { App } from "@grasp-os/shared/apps";
-import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
+import { standardWidgetIdSchema } from "@grasp-os/shared/dashboard";
+import type {
+  DashboardWidgetId,
+  StandardWidgetId,
+} from "@grasp-os/shared/dashboard";
 import type { ModelMonthSpend } from "@grasp-os/shared/models";
+import type { CustomWidget } from "@grasp-os/shared/widgets";
 import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import {
   Popover,
   PopoverContent,
@@ -10,6 +16,8 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@grasp-os/ui/components/popover";
+import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Textarea } from "@grasp-os/ui/components/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -21,7 +29,7 @@ import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Await, Link } from "@tanstack/react-router";
 import { GripVerticalIcon, PlusIcon, XIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 
@@ -32,6 +40,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { byState, enginesOf, stateOf, workflowStates } from "./board.ts";
 import type { Engines, EngineWorkflows, WorkflowState } from "./board.ts";
+import { CustomWidgetBlock } from "./custom-widget.tsx";
 import {
   addWidget,
   differsFromDefault,
@@ -76,15 +85,16 @@ import {
 // under the board puts it back as it began. Each comes as it is read, so
 // a slow one holds back no other.
 //
-// What the prototype's board has besides: Grasp makes a widget from what
-// someone asks, or changes one, from the empty card and a block's
-// sparkle, drawing it in dots meanwhile, and the blocks glide out of each
-// other's way. Making widgets needs the model gateway behind it, and
-// comes with it; until then the empty card puts back a widget that was
-// taken off. The goals widget reads the board's goals from core, each
-// with the workflows linked to it, and the teams widget the teams that own
-// workflows; the return widget counts hours core doesn't keep yet: it
-// shows what the prototype shows with nothing to count (`returns.ts`).
+// Grasp makes a widget from what someone asks, from the empty card
+// (custom-widget.tsx draws it): core has the model write it, checks it
+// against what the person may see, and keeps it on their board. What the
+// prototype's board has besides: changing a widget from a block's sparkle
+// (core can: `changeWidget`), drawing it in dots meanwhile, and the
+// blocks gliding out of each other's way. The goals widget reads the
+// board's goals from core, each with the workflows linked to it, and the
+// teams widget the teams that own workflows; the return widget counts
+// hours core doesn't keep yet: it shows what the prototype shows with
+// nothing to count (`returns.ts`).
 
 /** The engines the person can open, with the workflows. */
 export interface EnginesRead {
@@ -95,9 +105,11 @@ export interface EnginesRead {
 /** What the board reads, each on its own, and the person's order of it. */
 export interface Board {
   /** The widgets on the person's board, in order. */
-  layout: readonly StandardWidgetId[];
+  layout: readonly DashboardWidgetId[];
   /** The widgets Grasp offers them, as their board begins (`offeredWidgets`). */
   offered: readonly StandardWidgetId[];
+  /** The widgets Grasp made for them from what they asked, as core read them. */
+  made: Loaded<CustomWidget[]>;
   /** What the return widget counts. */
   returns: WorkReturns;
   /** The teams that own workflows, and what their workflows handled. */
@@ -571,6 +583,34 @@ const widgetBlocks: Record<
 };
 
 /**
+ * A widget on the board in its block: one of Grasp's own, or one Grasp
+ * made for the person (`made`); one core couldn't read says so.
+ */
+const BoardWidget = ({
+  board,
+  id,
+  made,
+  title,
+}: {
+  board: Board;
+  id: DashboardWidgetId;
+  made: ReadonlyMap<string, CustomWidget>;
+  title: string;
+}) => {
+  const standard = standardWidgetIdSchema.safeParse(id);
+  if (standard.success) {
+    return <>{widgetBlocks[standard.data](board, title)}</>;
+  }
+  const widget = made.get(id);
+  if (widget !== undefined) {
+    return <CustomWidgetBlock widget={widget} />;
+  }
+  return board.made.state === "ready" ? null : (
+    <NotRead loaded={board.made} title={title} />
+  );
+};
+
+/**
  * A block's own buttons, until it is pointed at: there, but unseen. Seen
  * with the keys in the block, and always where there is no pointer to
  * point with.
@@ -624,14 +664,14 @@ const shapeOf = (grid: HTMLElement | null): GridShape | null => {
  * the order it has made so far.
  */
 interface Press {
-  id: StandardWidgetId;
+  id: DashboardWidgetId;
   /** The pointer that took hold of it: another one, a second finger, is ignored. */
   pointer: number;
   fromX: number;
   fromY: number;
   moved: boolean;
-  before: readonly StandardWidgetId[];
-  order: readonly StandardWidgetId[];
+  before: readonly DashboardWidgetId[];
+  order: readonly DashboardWidgetId[];
 }
 
 /**
@@ -645,7 +685,7 @@ const Grip = ({
   title,
   onKeyDown,
 }: {
-  id: StandardWidgetId;
+  id: DashboardWidgetId;
   title: string;
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
 }) => {
@@ -674,21 +714,56 @@ const Grip = ({
 /**
  * Where a widget is added, as the prototype's (`widget-add.tsx`): the last
  * place on the board, always there, an empty card as large as a block with
- * nothing in it but a plus. In the prototype a press asks Grasp, in the
- * chat box, what the widget should be, and Grasp sketches it in dots
- * meanwhile; that comes with making widgets. Until then a press lists the
- * widgets that were taken off the board, each going last, and the card
- * can't be pressed while every one is on it.
+ * nothing in it but a plus. A press asks what the widget should show, and
+ * Grasp makes it through core (`makeWidget`), which puts it last on the
+ * board; under that, the widgets taken off the board, Grasp's own and
+ * those Grasp made, each going back last.
  */
 const AddTile = ({
   missing,
+  takenOff,
+  titleOf,
   onAdd,
+  onMade,
 }: {
   missing: readonly StandardWidgetId[];
-  onAdd: (id: StandardWidgetId) => void;
+  takenOff: readonly CustomWidget[];
+  titleOf: (id: DashboardWidgetId) => string;
+  onAdd: (id: DashboardWidgetId) => void;
+  onMade: (widget: CustomWidget) => void;
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
+  const { busy, failure, run } = useCoreAction();
   const [open, setOpen] = useState(false);
+  const [request, setRequest] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const requestId = useId();
+  const back: readonly DashboardWidgetId[] = [
+    ...missing,
+    ...takenOff.map(({ id }) => id),
+  ];
+  const ask = async () => {
+    const asked = request.trim();
+    if (asked === "" || busy) {
+      return;
+    }
+    setNote(null);
+    const result = await run(
+      async (session) => await session.dashboard.makeWidget(asked)
+    );
+    if (result === undefined) {
+      return;
+    }
+    setRequest("");
+    onMade(result.widget);
+    // What Grasp says of the nearest thing it made stays to be read; else
+    // the card closes on the widget it made.
+    if (result.note === null) {
+      setOpen(false);
+    } else {
+      setNote(result.note);
+    }
+  };
   return (
     <div className="relative h-80 min-w-0">
       <div className="relative h-full">
@@ -697,34 +772,75 @@ const AddTile = ({
             render={
               <button
                 aria-label={t`Add a widget`}
-                className="peer border-input hover:border-ring focus-visible:ring-ring size-full rounded-xl border border-dashed transition-colors outline-none focus-visible:ring-2 disabled:pointer-events-none"
-                disabled={missing.length === 0}
+                className="peer border-input hover:border-ring focus-visible:ring-ring size-full rounded-xl border border-dashed transition-colors outline-none focus-visible:ring-2"
                 type="button"
               />
             }
           />
-          <PopoverContent className="w-64">
+          <PopoverContent className="w-80">
             <PopoverHeader>
               <PopoverTitle>
                 <Trans>Add a widget</Trans>
               </PopoverTitle>
             </PopoverHeader>
-            <ul className="flex flex-col">
-              {missing.map((id) => (
-                <li key={id}>
-                  <Button
-                    className="w-full justify-start"
-                    onClick={() => {
-                      setOpen(false);
-                      onAdd(id);
-                    }}
-                    variant="ghost"
-                  >
-                    {i18n._(widgetTitles[id])}
-                  </Button>
-                </li>
-              ))}
-            </ul>
+            <form
+              className="flex flex-col gap-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void ask();
+              }}
+            >
+              <Field>
+                <FieldLabel htmlFor={requestId}>
+                  <Trans>Ask Grasp for a widget</Trans>
+                </FieldLabel>
+                <Textarea
+                  disabled={busy}
+                  id={requestId}
+                  maxLength={500}
+                  onChange={(event) => {
+                    setRequest(event.target.value);
+                  }}
+                  placeholder={t`Which workflows failed most this month?`}
+                  value={request}
+                />
+              </Field>
+              <ErrorText>{failure}</ErrorText>
+              {note === null ? null : (
+                <output className="text-muted-foreground">{note}</output>
+              )}
+              <Button disabled={busy || request.trim() === ""} type="submit">
+                {busy ? <Spinner data-icon="inline-start" /> : null}
+                {busy ? (
+                  <Trans>Grasp is making it…</Trans>
+                ) : (
+                  <Trans>Ask Grasp</Trans>
+                )}
+              </Button>
+            </form>
+            {back.length === 0 ? null : (
+              <div className="flex flex-col gap-1 border-t pt-3">
+                <p className="text-muted-foreground text-xs">
+                  <Trans>Put one back</Trans>
+                </p>
+                <ul className="flex flex-col">
+                  {back.map((id) => (
+                    <li key={id}>
+                      <Button
+                        className="w-full justify-start"
+                        onClick={() => {
+                          setOpen(false);
+                          onAdd(id);
+                        }}
+                        variant="ghost"
+                      >
+                        {titleOf(id)}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </PopoverContent>
         </Popover>
         {/* The plus stands in the middle of the card, and is always seen. */}
@@ -800,18 +916,32 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
   const [widgets, setWidgets] = useState(board.layout);
   const [failure, setFailure] = useState<string>();
   const [announcement, setAnnouncement] = useState("");
-  const [dragged, setDragged] = useState<StandardWidgetId | null>(null);
+  const [dragged, setDragged] = useState<DashboardWidgetId | null>(null);
   const grid = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
   /** Ends the drag under way, if any, without saving it. */
   const stopDrag = useRef<(() => void) | null>(null);
   /** The layout core last took: what a refused save goes back to. */
   const confirmed = useRef(board.layout);
-  const titleOf = (id: StandardWidgetId) => i18n._(widgetTitles[id]);
+  /** The widgets Grasp made for them, as core last gave each. */
+  const [made, setMade] = useState<ReadonlyMap<string, CustomWidget>>(
+    () =>
+      new Map(
+        board.made.state === "ready"
+          ? board.made.data.map((widget) => [widget.id, widget])
+          : []
+      )
+  );
+  const titleOf = (id: DashboardWidgetId) => {
+    const standard = standardWidgetIdSchema.safeParse(id);
+    return standard.success
+      ? i18n._(widgetTitles[standard.data])
+      : (made.get(id)?.view.title ?? t`A widget Grasp made`);
+  };
 
   // A save that core refuses, with no later one to come, puts the board
   // back to what core last took: never to a layout only this page had.
-  const save = async (next: readonly StandardWidgetId[], said: string) => {
+  const save = async (next: readonly DashboardWidgetId[], said: string) => {
     setWidgets(next);
     setFailure(undefined);
     setAnnouncement(said);
@@ -847,8 +977,8 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
   );
 
   const placeSaid = (
-    id: StandardWidgetId,
-    order: readonly StandardWidgetId[]
+    id: DashboardWidgetId,
+    order: readonly DashboardWidgetId[]
   ) => {
     const title = titleOf(id);
     const place = order.indexOf(id) + 1;
@@ -857,7 +987,7 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
   };
 
   const moveByKey = (
-    id: StandardWidgetId,
+    id: DashboardWidgetId,
     event: KeyboardEvent<HTMLButtonElement>
   ) => {
     const by = keySteps(event.key, shapeOf(grid.current)?.columns ?? 1);
@@ -878,15 +1008,45 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
     grip.focus();
   };
 
-  const remove = (id: StandardWidgetId) => {
+  const remove = (id: DashboardWidgetId) => {
     const title = titleOf(id);
-    void save(
-      removeWidget(widgets, id),
-      t`${title} removed from the dashboard.`
-    );
+    const said = t`${title} removed from the dashboard.`;
+    if (standardWidgetIdSchema.safeParse(id).success || !made.has(id)) {
+      void save(removeWidget(widgets, id), said);
+      return;
+    }
+    // A widget Grasp made goes for good: core forgets it and takes it off
+    // the board it keeps, so the board here follows.
+    void (async () => {
+      const gone = await run(
+        async (session) => {
+          await session.dashboard.removeWidget(id);
+          return true;
+        },
+        (reason) => {
+          setFailure(reason);
+        }
+      );
+      if (gone !== true) {
+        return;
+      }
+      setMade(new Map([...made].filter(([each]) => each !== id)));
+      confirmed.current = removeWidget(confirmed.current, id);
+      setWidgets(removeWidget(widgets, id));
+      setAnnouncement(said);
+    })();
   };
 
-  const add = (id: StandardWidgetId) => {
+  /** A widget Grasp just made: core put it last on the board it keeps. */
+  const madeOne = (widget: CustomWidget) => {
+    setMade(new Map([...made, [widget.id, widget]]));
+    confirmed.current = addWidget(confirmed.current, widget.id);
+    setWidgets(addWidget(widgets, widget.id));
+    const { title } = widget.view;
+    setAnnouncement(t`${title} added to the dashboard.`);
+  };
+
+  const add = (id: DashboardWidgetId) => {
     const title = titleOf(id);
     void save(addWidget(widgets, id), t`${title} added to the dashboard.`);
   };
@@ -898,7 +1058,7 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
   // A drag follows the pointer over the whole page, so a block that moves
   // under it while it is dragged doesn't lose it.
   const startDrag = (
-    id: StandardWidgetId,
+    id: DashboardWidgetId,
     event: PointerEvent<HTMLElement>
   ) => {
     if (event.button !== 0 || !(event.target instanceof Element)) {
@@ -1039,14 +1199,27 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
                     ),
                   }}
                 >
-                  {widgetBlocks[id](board, title)}
+                  <BoardWidget
+                    board={board}
+                    id={id}
+                    made={made}
+                    title={title}
+                  />
                 </WidgetControls>
               </div>
             </div>
           );
         })}
         {/* Adding is on the board, always, in the place a new widget takes. */}
-        <AddTile missing={missing} onAdd={add} />
+        <AddTile
+          missing={missing}
+          onAdd={add}
+          onMade={madeOne}
+          takenOff={[...made.values()].filter(
+            (widget) => !widgets.includes(widget.id)
+          )}
+          titleOf={titleOf}
+        />
       </div>
       <p aria-live="polite" className="sr-only">
         {announcement}

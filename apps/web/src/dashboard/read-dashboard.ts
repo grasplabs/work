@@ -1,5 +1,13 @@
 import type { AuditRecord } from "@grasp-os/shared/audit-log";
-import type { BoardReport, StandardWidgetId } from "@grasp-os/shared/dashboard";
+import {
+  offeredWidgets,
+  standardWidgetIdSchema,
+} from "@grasp-os/shared/dashboard";
+import type {
+  BoardReport,
+  DashboardWidgetId,
+  StandardWidgetId,
+} from "@grasp-os/shared/dashboard";
 import { expectedMessageOf } from "@grasp-os/shared/errors";
 import type { KnowledgeSignals } from "@grasp-os/shared/knowledge-signals";
 import type { Programme } from "@grasp-os/shared/onboarding";
@@ -25,7 +33,6 @@ import { listWorkflows, openableApps } from "../workflows/reads.ts";
 import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
 import { markShownRead } from "./failed-workflows.tsx";
-import { offeredWidgets } from "./layout.ts";
 import { goalProgressOf, noReturns, teamProgressOf } from "./returns.ts";
 import type { GoalProgress, TeamsRead } from "./returns.ts";
 import { fullDays } from "./runs.ts";
@@ -327,19 +334,24 @@ const readTeams = async (
 /**
  * The widgets on the person's board, in order: as they last saved it, or
  * as it begins when they never did. A read that fails gives the board as
- * it begins too, rather than no board. A widget no longer `offered` (an
- * admin's, saved before they stopped being one) is left out.
+ * it begins too, rather than no board. One of Grasp's own no longer
+ * `offered` (an admin's, saved before they stopped being one) is left out;
+ * a widget Grasp made for them is there while they have it (core says).
  */
 const readLayout = async (
   core: CoreConnection,
   offered: readonly StandardWidgetId[]
-): Promise<readonly StandardWidgetId[]> => {
+): Promise<readonly DashboardWidgetId[]> => {
   const loaded = await loadFromCore(
     core,
     async (session) => await session.dashboard.layout()
   );
   return loaded.state === "ready" && loaded.data !== null
-    ? loaded.data.widgets.filter((widget) => offered.includes(widget))
+    ? loaded.data.widgets.filter(
+        (widget) =>
+          !standardWidgetIdSchema.safeParse(widget).success ||
+          offered.some((each) => each === widget)
+      )
     : offered;
 };
 
@@ -396,9 +408,10 @@ export const readDashboard = async (
   // The board's order and the page's heading are known before they show,
   // so nothing moves once it is there; read alongside what waits, which
   // the page waits for too.
-  const [waiting, layout, read] = await Promise.all([
+  const [waiting, layout, made, read] = await Promise.all([
     readWaiting(core, identity),
     readLayout(core, offered),
+    loadFromCore(core, async (session) => await session.dashboard.widgets()),
     programme,
   ]);
   return {
@@ -408,6 +421,7 @@ export const readDashboard = async (
     board: {
       layout,
       offered,
+      made,
       returns: noReturns,
       goals,
       teams,

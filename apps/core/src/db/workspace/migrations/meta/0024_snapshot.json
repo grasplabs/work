@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8671fde0-a0f5-4458-8872-149081ab00c8",
+  "id": "3d7b3989-6dc1-4f54-83eb-b14aa2e2aafb",
   "prevId": "fc0bff7e-350f-4d5e-b15f-dc649518b094",
   "tables": {
     "audit_outbox": {
@@ -1359,13 +1359,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "app_id": {
-          "name": "app_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -1383,18 +1376,70 @@
             "project_id"
           ],
           "isUnique": false
-        },
-        "chats_app": {
-          "name": "chats_app",
-          "columns": [
-            "person_id",
-            "app_id"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "custom_widgets": {
+      "name": "custom_widgets",
+      "columns": {
+        "person_id": {
+          "name": "person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "spec": {
+          "name": "spec",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "asked": {
+          "name": "asked",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "made_at": {
+          "name": "made_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "changed_at": {
+          "name": "changed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "custom_widgets_person_id_id_pk": {
+          "columns": [
+            "person_id",
+            "id"
+          ],
+          "name": "custom_widgets_person_id_id_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

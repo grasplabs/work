@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { App } from "@grasp-os/shared/apps";
+import type { ViewedApp } from "@grasp-os/shared/apps";
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { i18n } from "@lingui/core";
@@ -28,7 +28,7 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
 
-const app: App = {
+const app: ViewedApp = {
   id: appIdSchema.parse(crypto.randomUUID()),
   name: "Invoices",
   description: "",
@@ -40,6 +40,7 @@ const app: App = {
   pendingVersion: null,
   status: "draft",
   createdAt: "2026-10-20T08:00:00.000Z",
+  role: "builder",
 };
 
 const appChat: ChatSummary = {
@@ -75,8 +76,8 @@ const shown = async (screens: string[], answer: () => Promise<ChatSummary>) => {
         <>
           <AppPage
             app={app}
-            builds
             contents={{ version: 1, screens, workflows: [] }}
+            identity={{ staff: false }}
             open={screens[0]}
           >
             <p>The screen</p>
