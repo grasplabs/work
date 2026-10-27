@@ -1023,6 +1023,15 @@ const observedInvocation = (
 };
 
 /**
+ * Whom a call acts for, with the server-set staff mark of their session
+ * when core read one (`Identity.staff`, `actingPerson`'s `staff`): work a
+ * Grasp staff member does keeps it in every App it reaches (GRA-1088).
+ */
+export type StaffMarked = Pick<Identity, "userId" | "role" | "teams"> & {
+  readonly staff?: boolean;
+};
+
+/**
  * Tells `onAdmitted` of `call` once it resolved to `path`, one of the
  * release's public functions, before it runs: a screen's keyed submission
  * is noted for recovery (screen-submissions.ts). A paginated window's read
@@ -1041,7 +1050,7 @@ const toldAdmitted = async (
 
 const callFunction = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams">,
+  by: StaffMarked,
   app: unknown,
   request: unknown,
   options: FunctionCallOptions
@@ -1142,7 +1151,10 @@ const callFunction = async (
       by,
       requestId,
       deadline,
-      ...(byStaff === true ? { byStaff } : {}),
+      // The calling work's staff mark (GRA-1088): the one a call between
+      // Apps hands on, else the caller's own, as core read their session
+      // (a staff chat turn's person, a staff session's screen).
+      ...((byStaff ?? by.staff) === true ? { byStaff: true } : {}),
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
       ...(agent === undefined ? {} : { agent }),
       sources,
@@ -1213,7 +1225,7 @@ const callFunction = async (
  */
 export const callAppFunction = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams">,
+  by: StaffMarked,
   app: unknown,
   request: unknown,
   deadline = Date.now() + platformLimits.serverInvocationWallMs,
@@ -1447,7 +1459,7 @@ export const evaluateAppQuery = async (
  */
 export const invokeAppAction = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams">,
+  by: StaffMarked,
   app: string,
   call: FunctionRequest,
   {
@@ -1487,6 +1499,8 @@ export const invokeAppAction = async (
       requestId,
       deadline,
       cancelled,
+      // A staff session's run keeps their mark (GRA-1088).
+      ...(by.staff === true ? { byStaff: true } : {}),
       // Another App's function, as a screen's call of it runs.
       callApp: async (person, called, appRequest, appOptions) =>
         await callFunction(env, person, called, appRequest, appOptions),

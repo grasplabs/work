@@ -10,7 +10,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { actionInvocation, invocationName } from "../src/action-invocation.ts";
@@ -37,7 +37,8 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
-import { published, release } from "./apps.ts";
+import { codeResults, codeStep, chatOf, model, says } from "./agent-chat.ts";
+import { published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished, leave } from "./runs.ts";
@@ -1610,6 +1611,87 @@ export default workflowTests(definition, [{ name: "runs", mocks: { relay: null }
       unbound: { ok: true, value: "+error:resource.unavailable:undefined" },
       bound: { ok: true, value: "+++error:resource.unavailable:undefined" },
       first: [{ actor: "workflow", staff: staffId, onBehalfOf: staffId }],
+      second: [{ actor: "app", staff: staffId, onBehalfOf: staffId }],
+    });
+  });
+
+  it("calls as the Grasp staff member whose chat turn called the App, each App down the chain audited as theirs", async () => {
+    const admin = await person("admin");
+    const granting = await signedInApi(idp, "admin");
+    const [first, second] = await Promise.all(
+      ["First", "Second"].map(async (name) => await sealedApp(relayFiles, name))
+    );
+    if (first === undefined || second === undefined) {
+      throw new Error("Two relays");
+    }
+    await bind(admin, first, second.app, "next");
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const { userId: staffId } = await whoami(session);
+    const go = JSON.stringify({
+      reference: {
+        resourceId: first.release.manifest.resourceId,
+        resourceVersion: first.release.manifest.resourceVersion,
+        contractId: "relay.go",
+        fingerprint: first.release.fingerprints["relay.go"],
+        kind: "action",
+      },
+      input: {},
+    });
+    const chat = await chatOf(
+      staffId,
+      codeStep(
+        `export default async (self, env) => await env.apps.call(${JSON.stringify(first.app)}, new Blob([${JSON.stringify(go)}]).stream());`
+      ),
+      says("Done.")
+    );
+    await requestGranted(idp, granting, {
+      subject: chat.agent,
+      object: { type: "app", appId: appIdSchema.parse(first.app) },
+      actions: ["read", "write"],
+      binding: "FIRST",
+    });
+
+    // As core's chats send a staff member's question: marked.
+    await chat.stub.send(chat.chat.id, staffId, { text: "Relay", model }, true);
+    const result = await vi.waitFor(
+      async () => {
+        const [returned] = await codeResults(chat.stub, chat.chat.id);
+        expect(returned).toBeDefined();
+        return returned;
+      },
+      { timeout: 20_000 }
+    );
+    const events = await allEvents();
+    const staffOf = (callee: string) =>
+      callsTo(events, callee).map(({ actor, onBehalfOf }) => ({
+        actor: actor.type,
+        staff: "staff" in actor ? actor.staff : undefined,
+        onBehalfOf,
+      }));
+
+    // The chat's call of the first relay is the agent's (`agent.call`).
+    const chatCalls = events
+      .filter(
+        ({ action, actor, detail }) =>
+          action === "agent.call" &&
+          detail.method === "apps.call" &&
+          actor.type === "agent" &&
+          actor.agentId === chat.agent.agentId
+      )
+      .map(({ actor }) => ({
+        actor: actor.type,
+        staff: "staff" in actor ? actor.staff : undefined,
+        onBehalfOf: "onBehalfOf" in actor ? actor.onBehalfOf : undefined,
+      }));
+
+    expect({
+      // The first relay reached the second, which had nowhere further.
+      returned: result?.text.includes("++error:resource.unavailable"),
+      first: chatCalls,
+      second: staffOf(second.app),
+    }).toStrictEqual({
+      returned: true,
+      first: [{ actor: "agent", staff: staffId, onBehalfOf: staffId }],
       second: [{ actor: "app", staff: staffId, onBehalfOf: staffId }],
     });
   });
