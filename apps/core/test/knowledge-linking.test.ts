@@ -1,9 +1,14 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { brainErrors } from "@grasp-os/brain/contract";
-import { entitiesFor, settleMs } from "@grasp-os/brain/entities";
+import {
+  entitiesFor,
+  relationsPerSource,
+  settleMs,
+} from "@grasp-os/brain/entities";
 import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import type { Reader } from "../src/knowledge/access.ts";
 import { extractEntities } from "../src/knowledge/entities.ts";
@@ -89,6 +94,64 @@ describe("linking Brain sources in core", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it("reads a piece as dense with relations as the Brain keeps, its whole answer within what the model may give", async () => {
+    const rules = {
+      gateway: "grasp-os-test",
+      models: [workersAi],
+      sensitive: { models: [workersAi], connections: [] },
+    };
+    // As many relations as a source keeps, each its own sentence, in one
+    // piece of text: the answer copies every sentence.
+    const team = `Support ${unique()}`;
+    const people = Array.from(
+      { length: relationsPerSource },
+      (_, index) => `Person ${index} ${unique()}`
+    );
+    const lines = people.map(
+      (name, index) =>
+        `${name} leads the ${team} escalation rota for region ${index} from 2026-01-01 until further notice, as agreed at the quarterly review.`
+    );
+    const answer = {
+      entities: [
+        ...people.map((name) => ({ kind: "person", name, identifiers: [] })),
+        { kind: "team", name: team, identifiers: [] },
+      ],
+      relations: people.map((name, index) => ({
+        subject: name,
+        predicate: "leads",
+        object: team,
+        validFrom: "2026-01-01",
+        validTo: null,
+        evidence: lines[index] ?? "",
+      })),
+    };
+    const text = JSON.stringify(answer);
+    // About three characters a token, as JSON goes; cut at the request's
+    // own limit, as a provider cuts an answer.
+    const tokens = Math.ceil(text.length / 3);
+    const gateway = answeringGateway((requests) => {
+      const limit = z
+        .object({ max_completion_tokens: z.number() })
+        .parse(requests.at(-1)?.body).max_completion_tokens;
+      return {
+        text: tokens > limit ? text.slice(0, limit * 3) : text,
+        truncated: tokens > limit,
+        inputTokens: 3000,
+        outputTokens: Math.min(tokens, limit),
+      };
+    });
+
+    const read = await extractEntities(
+      { ...env, AI: gateway.binding, MODEL_GATEWAY: rules },
+      lines.join("\n")
+    );
+
+    expect({
+      dense: lines.join("\n").length <= 8000 && tokens > 4000,
+      read,
+    }).toStrictEqual({ dense: true, read: answer });
   });
 
   it("reads a source only through a model the sensitive-data rule lists, recorded as the Brain's upkeep", async () => {
