@@ -13,7 +13,7 @@ import {
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { AppId, PermissionId } from "@grasp-os/shared/ids";
+import type { AppId, PermissionId, StoreId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   bindingNameSchema,
@@ -34,6 +34,7 @@ import type {
   PermissionSubject,
   PermissionSubjectType,
   WorkContext,
+  StoreReach,
 } from "@grasp-os/shared/permissions";
 import {
   isMemberAdmin,
@@ -1630,6 +1631,26 @@ export const revokePermission = async (
   return permission;
 };
 
+/** What a store's operations reach, every one of them, or undefined. */
+type StoreReachReading = StoreReach[] | undefined;
+
+/**
+ * What every operation of store `storeId` reaches (`storeReachOf`), or an
+ * empty list when a workflow's store can't be read now: the review then
+ * says so rather than show it as any other store.
+ */
+const readStoreReach = async (
+  env: Env,
+  storeId: StoreId
+): Promise<StoreReachReading> => {
+  try {
+    return await storeReachOf(env, storeId);
+  } catch (error) {
+    log.warn("permissions.store_reach_unreadable", errorFields(error));
+    return [];
+  }
+};
+
 /**
  * Every permission, or those of one App or agent, oldest first; only those
  * in `status` when given. With `openApps` (a condition on `apps`: the Apps
@@ -1704,19 +1725,29 @@ export const listPermissions = async (
     // asked, are that person's alone: never listed to admins or builders.
     .where(and(ofOne, ofOpenApp, inStatus, eq(permissions.personal, false)))
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
+  // A workflow's store: what its operations reach, for the review. Read
+  // once per store; one that can't be read shows as such, and never fails
+  // the list.
+  const reaches = new Map<StoreId, Promise<StoreReachReading>>();
   return await Promise.all(
     rows.map(async (row) => {
       const permission = toPermission(row);
       if (permission.object.type !== "store") {
         return permission;
       }
-      // A workflow's store: what its operations reach, for the review.
-      const reach = await storeReachOf(
-        env,
-        permission.object.storeId,
-        permission.actions
-      );
-      return reach === undefined ? permission : { ...permission, reach };
+      const { storeId } = permission.object;
+      const reading = reaches.get(storeId) ?? readStoreReach(env, storeId);
+      reaches.set(storeId, reading);
+      const read = await reading;
+      if (read === undefined) {
+        return permission;
+      }
+      return {
+        ...permission,
+        reach: read.flatMap((entry) =>
+          permission.actions.includes(entry.operation) ? [entry] : []
+        ),
+      };
     })
   );
 };

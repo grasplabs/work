@@ -12172,6 +12172,10 @@ msgstr "Almacén {store} de un flujo de trabajo. Puede leer todos los registros 
 msgid "Store {store}, a workflow's. This can read every record of {reads}, whoever owns it"
 msgstr "Almacén {store} de un flujo de trabajo. Puede leer todos los registros de {reads}, sea quien sea su propietario"
 
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. What these operations reach can't be shown now"
+msgstr "Almacén {store} de un flujo de trabajo. Ahora no se puede mostrar a qué acceden estas operaciones"
+
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
 msgstr "ID del almacén: {store}"

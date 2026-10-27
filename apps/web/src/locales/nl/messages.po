@@ -12172,6 +12172,10 @@ msgstr "Opslag {store} van een workflow. Dit kan elk record van {reads} lezen, e
 msgid "Store {store}, a workflow's. This can read every record of {reads}, whoever owns it"
 msgstr "Opslag {store} van een workflow. Dit kan elk record van {reads} lezen, van wie het ook is"
 
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. What these operations reach can't be shown now"
+msgstr "Opslag {store} van een workflow. Wat deze bewerkingen bereiken, kan nu niet worden getoond"
+
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
 msgstr "Opslag-ID: {store}"

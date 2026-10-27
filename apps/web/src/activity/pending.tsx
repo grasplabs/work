@@ -166,6 +166,13 @@ export const objectOf = (
       msg`Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it`
     );
   }
+  if (object.type === "store" && reach?.length === 0) {
+    // A workflow's store whose operations can't be read now, or that
+    // serves none of these: consent can't be given in plain words yet.
+    return i18n._(
+      msg`Store ${ph({ store: object.storeId })}, a workflow's. What these operations reach can't be shown now`
+    );
+  }
   if (object.type === "store" && reach !== undefined) {
     // Consent in plain words: a workflow's store, whose operations reach
     // every record of their tables, whoever owns it.

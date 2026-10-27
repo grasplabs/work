@@ -12172,6 +12172,10 @@ msgstr "Magasin {store} d'un workflow. Il peut lire chaque enregistrement de {re
 msgid "Store {store}, a workflow's. This can read every record of {reads}, whoever owns it"
 msgstr "Magasin {store} d'un workflow. Il peut lire chaque enregistrement de {reads}, quel qu'en soit le propriétaire"
 
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. What these operations reach can't be shown now"
+msgstr "Magasin {store} d'un workflow. Ce que ces opérations atteignent ne peut pas être affiché pour l'instant"
+
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
 msgstr "ID du magasin : {store}"

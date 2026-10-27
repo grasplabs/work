@@ -325,30 +325,27 @@ export const hostedWorkflowStore = (server: WorkflowStoreServer): HostedApp => {
 };
 
 /**
- * What each of `actions` reaches on store `storeId`, if a workflow owns
- * it and its current version serves it (`StoreReach`): what an admin
+ * What each operation of store `storeId` reaches, if a workflow owns it
+ * and its current version serves it (`StoreReach`): what an admin
  * reviewing a permission on it consents to. Undefined for any other
- * store, or one nothing serves now.
+ * store; throws for a version whose store isn't the one it bound.
  */
 export const storeReachOf = async (
   env: Env,
-  storeId: StoreId,
-  actions: readonly string[]
+  storeId: StoreId
 ): Promise<StoreReach[] | undefined> => {
-  const server = await workflowStoreServer(env, storeId);
-  if (server === undefined) {
+  const owned = await drizzle(env.DB)
+    .select({ workflowId: sdkStoreOwners.workflowId })
+    .from(sdkStoreOwners)
+    .where(eq(sdkStoreOwners.storeId, storeId))
+    .get();
+  if (owned?.workflowId === null || owned === undefined) {
     return undefined;
   }
-  return actions.flatMap((path) => {
-    const operation = server.store.operations.get(path);
-    return operation === undefined
-      ? []
-      : [
-          {
-            operation: path,
-            table: operation.table,
-            changes: operation.kind === "insert" || operation.kind === "patch",
-          },
-        ];
-  });
+  const server = await workflowStoreServer(env, storeId);
+  return [...(server?.store.operations ?? [])].map(([path, operation]) => ({
+    operation: path,
+    table: operation.table,
+    changes: operation.kind === "insert" || operation.kind === "patch",
+  }));
 };
