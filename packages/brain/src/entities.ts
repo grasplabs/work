@@ -27,6 +27,7 @@ import type { IndexStep, StepConfig } from "./indexing.ts";
 import { keyed } from "./keyed.ts";
 import { knowledgeErrors } from "./knowledge.ts";
 import { log } from "./log.ts";
+import { citesReadable } from "./memory-cites.ts";
 import { readPayload } from "./payloads.ts";
 
 // Entity linking (GRA-305; the Brain design's "internal network of
@@ -1552,7 +1553,18 @@ const readableMentions = async <C>(
             brainMemories,
             eq(brainMemories.id, brainMentions.memoryId)
           )
-          .where(and(eq(brainMemories.ownerId, owner), current, where))
+          .where(
+            and(
+              eq(brainMemories.ownerId, owner),
+              // Only records resting on what the owner may read now: a
+              // record follows its sources' restrictions, theirs too.
+              citesReadable(
+                await brain.ports.memories.readableBy(reader, [owner])
+              ),
+              current,
+              where
+            )
+          )
           .orderBy(sql`${brainMentions}.rowid DESC`)
           .limit(readRowsMax),
   ]);
@@ -1914,7 +1926,14 @@ export const linkCoverage = async <C>(
             brainMemories,
             eq(brainMemories.id, brainLinkJobs.memoryId)
           )
-          .where(eq(brainMemories.ownerId, owner))
+          .where(
+            and(
+              eq(brainMemories.ownerId, owner),
+              citesReadable(
+                await brain.ports.memories.readableBy(reader, [owner])
+              )
+            )
+          )
           .groupBy(brainLinkJobs.state),
   ]);
   const coverage = { sources: 0, linked: 0, pending: 0, failed: 0, partial: 0 };
