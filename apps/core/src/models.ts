@@ -16,14 +16,11 @@ import {
   clampThinkingLevel,
   getSupportedThinkingLevels,
 } from "@earendil-works/pi-ai";
-import { streamSimple as anthropicMessages } from "@earendil-works/pi-ai/api/anthropic-messages";
 import {
   CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL,
   createAiBindingFetch,
 } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import { streamSimple as openaiCompletions } from "@earendil-works/pi-ai/api/openai-completions";
-import { streamSimple as openaiResponses } from "@earendil-works/pi-ai/api/openai-responses";
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
 import { CLOUDFLARE_WORKERS_AI_MODELS } from "@earendil-works/pi-ai/providers/cloudflare-workers-ai.models";
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models";
@@ -189,6 +186,33 @@ const bedrockEuModels: Readonly<Record<string, Model<"anthropic-messages">>> =
       ];
     })
   );
+
+/*
+ * pi's adapter for each API, loaded the first time a model is called: they
+ * bring the providers' SDKs, which would cost every isolate's startup
+ * (Cloudflare caps the CPU a Worker's startup may use).
+ */
+const anthropicMessages = async (): Promise<
+  StreamFunction<"anthropic-messages", SimpleStreamOptions>
+> => {
+  const { streamSimple } =
+    await import("@earendil-works/pi-ai/api/anthropic-messages");
+  return streamSimple;
+};
+const openaiResponses = async (): Promise<
+  StreamFunction<"openai-responses", SimpleStreamOptions>
+> => {
+  const { streamSimple } =
+    await import("@earendil-works/pi-ai/api/openai-responses");
+  return streamSimple;
+};
+const openaiCompletions = async (): Promise<
+  StreamFunction<"openai-completions", SimpleStreamOptions>
+> => {
+  const { streamSimple } =
+    await import("@earendil-works/pi-ai/api/openai-completions");
+  return streamSimple;
+};
 
 /**
  * The providers the gateway offers, by their AI Gateway path: the pi adapter
@@ -1798,7 +1822,7 @@ const withRequestId = (
  * in, and the gateway's response once it came. pi reports a failed request
  * as a final error event instead of throwing.
  */
-const open = (
+const open = async (
   route: Route,
   context: TranscriptContext,
   { signal, endsAt }: { signal: AbortSignal; endsAt: number }
@@ -1883,7 +1907,7 @@ const open = (
   // SAFETY: the provider picks both the adapter and the catalog the model
   // comes from, so the model always speaks the adapter's API.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const adapter = providers[ref.provider].stream as StreamFunction<
+  const adapter = (await providers[ref.provider].stream()) as StreamFunction<
     Api,
     SimpleStreamOptions
   >;
@@ -1907,7 +1931,7 @@ const open = (
 /** Sends one request through the gateway and waits for the whole answer. */
 const send = async (request: Request): Promise<Sent> => {
   const { system, messages, signal, endsAt } = request;
-  const { events, response } = open(
+  const { events, response } = await open(
     request,
     normalizeContext({ systemPrompt: system, messages }),
     { signal, endsAt }
@@ -2914,7 +2938,7 @@ export const contextWindowOf = (model: string): number | undefined => {
 const relayEvents = async (
   env: ModelsEnv,
   route: Route,
-  { events, response }: ReturnType<typeof open>,
+  { events, response }: Awaited<ReturnType<typeof open>>,
   out: AssistantMessageEventStream,
   limit: Deadline
 ): Promise<void> => {
@@ -3034,7 +3058,13 @@ const relay = async (
   }
   const limit = deadline(session.timeoutMs ?? defaultTimeoutMs, caller);
   try {
-    await relayEvents(env, route, open(route, context, limit), out, limit);
+    await relayEvents(
+      env,
+      route,
+      await open(route, context, limit),
+      out,
+      limit
+    );
   } finally {
     limit.clear();
   }
