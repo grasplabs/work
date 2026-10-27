@@ -1,7 +1,11 @@
+import { and, eq } from "drizzle-orm";
+
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { readableCollection } from "./collections.ts";
-import { collections } from "./db/schema.ts";
+import { brainErrors } from "./contract.ts";
+import { inList } from "./db/d1.ts";
+import { collections, documents } from "./db/schema.ts";
 import type { CollectionId } from "./ids.ts";
 import type { Provenance } from "./knowledge.ts";
 import { searchSections } from "./search.ts";
@@ -42,6 +46,15 @@ export interface BrainStore<C> {
     reader: C,
     collectionIds: readonly CollectionId[]
   ) => Promise<void>;
+  /**
+   * Refuses, as `brain.not_found`, any of `refs` that `reader` may not read
+   * now, or that is gone (a document deleted or purged, or moved to another
+   * collection): one query, whatever their number.
+   */
+  requireDocumentsReadable: (
+    reader: C,
+    refs: readonly { documentId: string; collectionId: string }[]
+  ) => Promise<void>;
   /** Sections that match `query`, best first, of those `reader` may read. */
   findEvidence: (
     reader: C,
@@ -69,6 +82,40 @@ export const d1BrainStore = <C>(brain: Brain<C>): BrainStore<C> => ({
           await readableCollection(db, allowed.collections, collectionId)
       )
     );
+  },
+  requireDocumentsReadable: async (reader, refs) => {
+    if (refs.length === 0) {
+      return;
+    }
+    const allowed = await allowedFor(brain.ports, reader);
+    const rows = await brain.db
+      .select({
+        documentId: documents.id,
+        collectionId: documents.collectionId,
+      })
+      .from(documents)
+      .innerJoin(collections, eq(collections.id, documents.collectionId))
+      .where(
+        and(
+          inList(documents.id, [
+            ...new Set(refs.map(({ documentId }) => documentId)),
+          ]),
+          allowed.documents()
+        )
+      );
+    const readable = new Set(
+      rows.map(
+        ({ documentId, collectionId }) => `${collectionId}/${documentId}`
+      )
+    );
+    if (
+      refs.some(
+        ({ documentId, collectionId }) =>
+          !readable.has(`${collectionId}/${documentId}`)
+      )
+    ) {
+      throw brainErrors.create("brain.not_found");
+    }
   },
   findEvidence: async (reader, { query, collectionIds, limit }) =>
     await searchSections(

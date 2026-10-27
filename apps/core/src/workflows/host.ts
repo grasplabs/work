@@ -93,6 +93,10 @@ import { attachmentOf, keptMessage } from "./kept-email.ts";
 import { modelWaitRecorded } from "./model-waits.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
+import {
+  recordRunEvidence,
+  requireRunEvidenceReadable,
+} from "./run-evidence.ts";
 import { shareWakeType } from "./share-wakes.ts";
 import { heldWakeType } from "./wakes.ts";
 
@@ -2256,6 +2260,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "model");
       requireUnrefused(attempt);
+      await this.#requireEvidenceReadable();
       await this.#requireKindIn(attempt, "model", "model");
       await this.#requirePerson();
       const { binding, instructions, input, outputSchema } = checked(
@@ -2799,15 +2804,37 @@ export class RunHost extends RpcTarget {
         }
         throw error;
       }
-      return await readAsDelegate(
+      if (call !== "recall") {
+        return await readAsDelegate(
+          this.#env,
+          authority,
+          context,
+          undefined,
+          async (reader) =>
+            await brainCalls[call](brainOf(this.#env), reader, request)
+        );
+      }
+      const pack = await readAsDelegate(
         this.#env,
         authority,
         context,
         undefined,
-        async (reader) =>
-          await brainCalls[call](brainOf(this.#env), reader, request)
+        async (reader) => await recall(brainOf(this.#env), reader, request)
       );
+      // What it cites, added to the run's evidence (run-evidence.ts):
+      // checked before anything leaves the run from now on. A step replayed
+      // returns its recorded pack and records nothing.
+      await recordRunEvidence(this.#env, this.#run, permissionId, pack);
+      return pack;
     });
+  }
+
+  /**
+   * Refuses, as `brain.revoked`, anything leaving this run once it may no
+   * longer read what it recalled (run-evidence.ts).
+   */
+  async #requireEvidenceReadable(): Promise<void> {
+    await requireRunEvidenceReadable(this.#env, this.#run);
   }
 
   /**
@@ -2824,6 +2851,7 @@ export class RunHost extends RpcTarget {
     return await settle(async () => {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "connection");
+      await this.#requireEvidenceReadable();
       const stepKey = this.#stepKeyOf(attempt);
       const { connections, authority } = this.#run;
       const name = checked(z.string(), binding);
@@ -2895,6 +2923,7 @@ export class RunHost extends RpcTarget {
     return await settle(async () => {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "APP");
+      await this.#requireEvidenceReadable();
       await this.#requireReviewed(attempt, "APP");
       await this.#requirePerson();
       const stepKey = this.#stepKeyOf(attempt);
@@ -2952,6 +2981,8 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "decision");
       requireUnrefused(attempt);
+      // Its text goes to people other than the run's person.
+      await this.#requireEvidenceReadable();
       await this.#requireKindIn(attempt, "decision", "decision");
       const { step, from, description, timeout } = checked(
         decisionSchema,

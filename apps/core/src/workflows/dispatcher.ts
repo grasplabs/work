@@ -1,3 +1,4 @@
+import { brainErrors } from "@grasp-os/brain/contract";
 import { runLinking } from "@grasp-os/brain/entities";
 import { runIndexing } from "@grasp-os/brain/indexing";
 import { runConsolidation } from "@grasp-os/brain/lessons";
@@ -47,6 +48,8 @@ import { accountOf, admitAttempt } from "./quotas.ts";
 import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
 import { childRunsOf } from "./run-children.ts";
+import { requireRunEvidenceReadable } from "./run-evidence.ts";
+import type { EvidenceRun } from "./run-evidence.ts";
 import { appRecord, findRun, recordFailure, recordWaiting } from "./runs.ts";
 import type { RunRow, Stopped } from "./runs.ts";
 import { wakingOnSettle } from "./share-wakes.ts";
@@ -149,6 +152,28 @@ const runError = ({ name, message }: StepError): Error => {
   const error = new Error(message);
   error.name = name;
   return error;
+};
+
+/**
+ * The refusal of a run's output once it may no longer read what it
+ * recalled, if so (run-evidence.ts); undefined when it may.
+ */
+const evidenceRefusal = async (
+  env: Env,
+  run: EvidenceRun
+): Promise<StepError | undefined> => {
+  try {
+    await requireRunEvidenceReadable(env, run);
+    return undefined;
+  } catch (error) {
+    if (
+      brainErrors.codeOf(error) !== "brain.revoked" ||
+      !(error instanceof Error)
+    ) {
+      throw error;
+    }
+    return { name: error.name, message: error.message, code: "brain.revoked" };
+  }
 };
 
 /**
@@ -284,6 +309,8 @@ const runWorkflow = async (
   // after that, by a settle that came too late.
   const wakes: Promise<void>[] = [];
   const waking = { open: true };
+  // Whose recalls the run's output is checked against (run-evidence.ts).
+  let hosted: EvidenceRun | undefined;
   const result = await settledRun(async () => {
     const authority = await authorityOf(env, row);
     const { bindings, connections, brains } = await runBindingsFor(
@@ -328,6 +355,7 @@ const runWorkflow = async (
         ...(memory.current === undefined ? {} : { current: memory.current }),
       }
     );
+    hosted = run;
     const calls: AttemptCall[] = [];
     const host = new RunHost(env, step, run, {
       stepFailed,
@@ -386,13 +414,28 @@ const runWorkflow = async (
     // ended it, or the newer activation, records what comes of it.
     throw new Error(`Run ${runId} is no longer this activation's`);
   }
-  const failed = tampered ?? (result.ok ? undefined : result.error);
+  // Its output leaves the run too (its screens and details show it), and
+  // so does its error, which its code may have made of recalled text
+  // (catching a refusal and throwing what it recalled, say): neither once
+  // it may no longer read what it recalled (run-evidence.ts). A run caught
+  // tampering fails with that refusal, checked or not.
+  const evidenceRefused =
+    tampered === undefined && hosted !== undefined
+      ? await evidenceRefusal(env, hosted)
+      : undefined;
+  const failed =
+    tampered ?? evidenceRefused ?? (result.ok ? undefined : result.error);
   if (failed) {
     // A failed run stops here, whatever failed: the step's retries (only
     // for failures trying again may fix, host.ts) are behind it. Its
     // report is kept in a step, once, before the run ends; its end, and
     // that it failed, are the engine's to say (runs.ts, `projectStatus`).
-    const stopped = stoppedWith(failed, lastFailed);
+    // Refused for its evidence, it reports no step: the step it stopped at
+    // and that step's input may hold what it recalled.
+    const stopped = stoppedWith(
+      failed,
+      evidenceRefused === undefined ? lastFailed : undefined
+    );
     await step.do(`${coreStepPrefix}end`, {}, async () => {
       await recordFailure(env, row, stopped);
       return null;
