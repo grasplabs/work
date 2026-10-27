@@ -10,7 +10,7 @@ import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { MessageCircleQuestionIcon } from "lucide-react";
 import { useId, useState } from "react";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { Composer } from "./composer.tsx";
@@ -51,6 +51,24 @@ interface Answer {
 
 const unanswered: Answer = { choice: undefined, own: "" };
 
+/**
+ * How far the person got with the questions of call `callId`: the one
+ * they are on, and what they answered so far. Kept by the box's place
+ * (`AskOrCompose`), so typing instead and coming back loses none of it.
+ */
+export interface AskProgress {
+  callId: string;
+  step: number;
+  answers: Answer[];
+}
+
+/** Where the person starts on `asked`: its first question, none answered. */
+const startOf = (asked: ChatAsked): AskProgress => ({
+  callId: asked.callId,
+  step: 0,
+  answers: asked.questions.map(() => unanswered),
+});
+
 /** One answer as it is sent: the choice, or their own words. */
 const answerOf = ({ choice, own }: Answer): string =>
   choice === other ? own.trim() : (choice ?? "");
@@ -82,31 +100,43 @@ export const answersText = (
 export const AskedQuestions = ({
   asked,
   busy,
+  children,
   failure,
+  onProgress,
   onSend,
   onType,
+  progress = startOf(asked),
 }: {
   asked: ChatAsked;
   busy: boolean;
+  /** More of the place's own controls, beside Type instead. */
+  children?: ReactNode;
   failure: string | undefined;
+  /** Keeps how far the person got; their own state without it. */
+  onProgress?: (next: AskProgress) => void;
   onSend: (text: string) => void;
   onType: () => void;
+  progress?: AskProgress;
 }) => {
   const { t } = useLingui();
   const ids = useId();
-  const [step, setStep] = useState(0);
-  const [answers, setAnswers] = useState<Answer[]>(() =>
-    asked.questions.map(() => unanswered)
-  );
+  const [own, setOwn] = useState(progress);
+  const current = onProgress === undefined ? own : progress;
+  const keep = onProgress ?? setOwn;
+  const { step, answers } = current;
+  const setStep = (next: number): void => {
+    keep({ ...current, step: next });
+  };
   const total = asked.questions.length;
   const question = asked.questions[step];
   const answer = answers[step] ?? unanswered;
   const answered = answerOf(answer) !== "";
   const last = step === total - 1;
   const setAnswer = (next: Answer): void => {
-    setAnswers((all) =>
-      all.map((each, index) => (index === step ? next : each))
-    );
+    keep({
+      ...current,
+      answers: answers.map((each, index) => (index === step ? next : each)),
+    });
   };
   if (question === undefined) {
     return null;
@@ -167,6 +197,7 @@ export const AskedQuestions = ({
         <Button onClick={onType} size="sm" variant="ghost">
           <Trans>Type instead</Trans>
         </Button>
+        {children}
         <span className="ml-auto flex gap-2">
           {step === 0 ? null : (
             <Button
@@ -253,6 +284,8 @@ export const AskOrCompose = ({
   const asking = pendingAsk(messages, composer.running);
   // The questions the person chose to type instead of answering, by call.
   const [typing, setTyping] = useState<string>();
+  // How far they got with them, kept while they type instead.
+  const [progress, setProgress] = useState<AskProgress>();
   if (asking !== undefined && typing !== asking.callId) {
     return (
       <AskedQuestions
@@ -260,11 +293,17 @@ export const AskOrCompose = ({
         busy={composer.busy}
         failure={composer.failure}
         key={asking.callId}
+        onProgress={setProgress}
         onSend={onAnswer}
         onType={() => {
           setTyping(asking.callId);
         }}
-      />
+        progress={
+          progress?.callId === asking.callId ? progress : startOf(asking)
+        }
+      >
+        {composer.children}
+      </AskedQuestions>
     );
   }
   return (

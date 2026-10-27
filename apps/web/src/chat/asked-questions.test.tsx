@@ -7,7 +7,12 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AskedQuestions, answersText, pendingAsk } from "./asked-questions.tsx";
+import {
+  AskOrCompose,
+  AskedQuestions,
+  answersText,
+  pendingAsk,
+} from "./asked-questions.tsx";
 
 // The questions the chat's agent asked with choices, in place of the box
 // (GRA-1001): one at a time, a choice or the person's own words for each,
@@ -134,6 +139,93 @@ describe("questions with choices in place of the box", () => {
       typed: true,
       sent: [],
     });
+  });
+});
+
+/** The latest reply, asking `asked`: what the place waits on. */
+const asking: ChatMessage = {
+  id: 1,
+  role: "assistant",
+  text: "",
+  citations: [],
+  code: [],
+  asked,
+  end: "done",
+  at: "2026-10-27T10:00:00.000Z",
+};
+
+/** The box's place, waiting on `asked`, with a control of its own. */
+const placed = (): void => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  act(() => {
+    root = createRoot(host);
+    root.render(
+      <I18nProvider i18n={i18n}>
+        <AskOrCompose
+          busy={false}
+          compact
+          messages={[asking]}
+          onAnswer={() => {
+            // Sent elsewhere.
+          }}
+          onSend={() => {
+            // Sent elsewhere.
+          }}
+          onText={() => {
+            // Typed elsewhere.
+          }}
+          running={false}
+          text=""
+        >
+          <button type="button">Open the chat</button>
+        </AskOrCompose>
+      </I18nProvider>
+    );
+  });
+};
+
+/** Whether the choice labelled `label` is the one picked. */
+const picked = (label: string): boolean => {
+  const found = [...document.querySelectorAll("label")].find(
+    (each) => each.textContent === label
+  );
+  // The label names the choice's input, which says whether it is checked.
+  return (
+    found !== undefined &&
+    document.querySelector<HTMLInputElement>(
+      `input#${CSS.escape(found.htmlFor)}`
+    )?.checked === true
+  );
+};
+
+describe("the box's place while questions wait", () => {
+  afterEach(unmount);
+
+  it("keeps the person's answers and question when they type instead and come back", () => {
+    placed();
+    pick("Weekly");
+    click(button("Next"));
+    click(button("Type instead"));
+    const boxShown = document.querySelector("textarea") !== null;
+    click(button("Back to the 2 questions"));
+    const onSecond = document.body.textContent?.includes("To whom?") ?? false;
+    click(button("Back"));
+
+    expect({ boxShown, onSecond, kept: picked("Weekly") }).toStrictEqual({
+      boxShown: true,
+      onSecond: true,
+      kept: true,
+    });
+  });
+
+  it("keeps the place's own controls beside the questions, such as the way to open the dock", () => {
+    placed();
+
+    expect({
+      asking: document.body.textContent?.includes("How often?") ?? false,
+      open: button("Open the chat").type,
+    }).toStrictEqual({ asking: true, open: "button" });
   });
 });
 
