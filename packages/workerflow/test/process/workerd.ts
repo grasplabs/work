@@ -45,9 +45,6 @@ export const bundleFixture = (directory: string): string => {
   execFileSync(
     process.execPath,
     [
-      // Node 24's Sparkplug bug segfaults long runs (see the root
-      // vite.config.ts); off here too, as Wrangler runs in a Node of its own.
-      "--no-sparkplug",
       wranglerCli,
       "deploy",
       // Before the flags: `--compatibility-flags` takes a list, and would
