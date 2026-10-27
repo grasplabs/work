@@ -815,14 +815,6 @@ msgstr "{name} {range}, met by {resolved}"
 msgid "{name} {range}, not met"
 msgstr "{name} {range}, not met"
 
-#: src/chat/builds-state.ts
-msgid "{name} changed"
-msgstr "{name} changed"
-
-#: src/chat/builds-state.ts
-msgid "{name} changed: it {does}"
-msgstr "{name} changed: it {does}"
-
 #: src/onboarding/hr-leads.tsx
 msgid "{name} didn’t take this service user. Check its ID and token, and that it may read people’s work details."
 msgstr "{name} didn’t take this service user. Check its ID and token, and that it may read people’s work details."
@@ -879,14 +871,6 @@ msgstr "{name} logo"
 #: src/connections/connect-dialog.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} may write. Change to Read"
-
-#: src/chat/builds-state.ts
-msgid "{name} no longer changes the domain's data (write → read)"
-msgstr "{name} no longer changes the domain's data (write → read)"
-
-#: src/chat/builds-state.ts
-msgid "{name} now changes the domain's data (read → write)"
-msgstr "{name} now changes the domain's data (read → write)"
 
 #: src/connections/connect-dialog.tsx
 msgid "{name} reads only. Change to Write"
@@ -3683,14 +3667,6 @@ msgstr "Changes Grasp sent for someone whose answer was lost, so nobody can tell
 msgid "Changes something"
 msgstr "Changes something"
 
-#: src/chat/builds-state.ts
-msgid "changes the domain's data"
-msgstr "changes the domain's data"
-
-#: src/chat/builds.tsx
-msgid "Changes the domain's data"
-msgstr "Changes the domain's data"
-
 #: src/engines/store-changes.tsx
 msgid "Changes to the domain's stores"
 msgstr "Changes to the domain's stores"
@@ -4368,10 +4344,6 @@ msgstr "Could not copy the address"
 #: src/landscape/audit-trail.tsx
 msgid "Could not copy the fingerprint"
 msgstr "Could not copy the fingerprint"
-
-#: src/activity/pending.tsx
-msgid "couldn't be read"
-msgstr "couldn't be read"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "Couldn't load this domain's workflows."
@@ -5473,14 +5445,6 @@ msgstr "Export this chat"
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
 msgstr "Exported the audit trail"
-
-#: src/chat/builds.tsx
-msgid "Exports"
-msgstr "Exports"
-
-#: src/activity/pending.tsx
-msgid "Exports of {domain}: {covered}"
-msgstr "Exports of {domain}: {covered}"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -7787,6 +7751,10 @@ msgstr "Move to project"
 msgid "Moved old entries out of the audit trail"
 msgstr "Moved old entries out of the audit trail"
 
+#: src/activity/pending.tsx
+msgid "Mutations and actions of {domain}"
+msgstr "Mutations and actions of {domain}"
+
 #: src/interview/voice-bar.tsx
 msgctxt "turn your microphone off for a moment"
 msgid "Mute"
@@ -8615,10 +8583,6 @@ msgstr "None drawn yet. They show up here as the interviews come in."
 #: src/landscape/data-tab.tsx
 msgid "None found."
 msgstr "None found."
-
-#: src/activity/pending.tsx
-msgid "none now"
-msgstr "none now"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "None of its rules are in use any more."
@@ -9541,18 +9505,6 @@ msgctxt "the team for people a staff list gives no team"
 msgid "Other"
 msgstr "Other"
 
-#: src/chat/builds-state.ts
-msgid "Other domains may no longer call {name}"
-msgstr "Other domains may no longer call {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}"
-msgstr "Other domains may now call {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}, which {does}"
-msgstr "Other domains may now call {name}, which {does}"
-
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
 msgstr "Otherwise:"
@@ -10186,6 +10138,14 @@ msgstr "Purpose and model"
 msgid "Put back"
 msgstr "Put back"
 
+#: src/activity/pending.tsx
+msgid "Queries of {domain}"
+msgstr "Queries of {domain}"
+
+#: src/activity/pending.tsx
+msgid "Queries, mutations and actions of {domain}"
+msgstr "Queries, mutations and actions of {domain}"
+
 #: src/workflows/runs.tsx
 msgid "Queued"
 msgstr "Queued"
@@ -10390,10 +10350,6 @@ msgstr "Reading…"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reads"
 msgstr "Reads"
-
-#: src/chat/builds-state.ts
-msgid "reads the domain's data"
-msgstr "reads the domain's data"
 
 #: src/knowledge/uploads.tsx
 #: src/onboarding/setup-frame.tsx
@@ -14702,10 +14658,6 @@ msgstr "What needs Grasp"
 #: src/onboarding/setup-steps.tsx
 msgid "What needs you"
 msgstr "What needs you"
-
-#: src/chat/builds.tsx
-msgid "What other domains may call"
-msgstr "What other domains may call"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "What people thought of {name}"
