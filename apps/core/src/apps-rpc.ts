@@ -5,6 +5,7 @@ import type {
   AppsApi,
   CurrentExports,
   NewApp,
+  ViewedApp,
 } from "@grasp-os/shared/apps";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 
@@ -81,14 +82,14 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     );
   }
 
-  async list(): Promise<App[]> {
+  async list(): Promise<ViewedApp[]> {
     return await withPerson(
       this.#check,
       async (by) => await listApps(this.#env, by)
     );
   }
 
-  async get(app: string): Promise<App> {
+  async get(app: string): Promise<ViewedApp> {
     return await withPerson(
       this.#check,
       async (by) => await getApp(this.#env, by, app)

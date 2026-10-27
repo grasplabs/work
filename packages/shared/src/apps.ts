@@ -663,11 +663,22 @@ export interface AppBlueprintsApi {
  * (`members`): its users call what its screens use, its builders the
  * rest.
  */
+/**
+ * An App as the person asking lists or opens it, with their own role in
+ * it, as core decides it for every call they make: a `builder` changes
+ * it, a `user` works in it. A page offers changes only to its builders;
+ * core refuses anyone else all the same. Grasp staff are builders of every
+ * App here, as admins are, yet their sessions change none.
+ */
+export interface ViewedApp extends App {
+  role: AppRole;
+}
+
 export interface AppsApi {
   create: (app: NewApp) => Promise<App>;
-  /** The Apps the person has a role in, oldest first. */
-  list: () => Promise<App[]>;
-  get: (app: string) => Promise<App>;
+  /** The Apps the person has a role in, oldest first, each with that role. */
+  list: () => Promise<ViewedApp[]>;
+  get: (app: string) => Promise<ViewedApp>;
   /** The screens and workflows of the App's current version. */
   contents: (app: string) => Promise<AppContents>;
   /**

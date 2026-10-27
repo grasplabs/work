@@ -1,4 +1,4 @@
-import type { App, AppContents } from "@grasp-os/shared/apps";
+import type { AppContents, ViewedApp } from "@grasp-os/shared/apps";
 import type { DependencyApprovals } from "@grasp-os/shared/dependencies";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -6,9 +6,9 @@ import type { Session } from "../core.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 
-/** An engine as its members read it: the App and what it holds. */
+/** An engine as its members read it: the App, with their role in it, and what it holds. */
 export interface EnginePage {
-  app: App;
+  app: ViewedApp;
   contents: AppContents;
 }
 
