@@ -247,6 +247,38 @@ describe("removing an App", slow, () => {
     });
   });
 
+  it("has its entry forgotten by the cron's indexing when forgetting it failed at removal", async () => {
+    const owner = await personApi("builder");
+    const word = `v${crypto.randomUUID().replaceAll("-", "")}`;
+    const { id: app } = await owner.api.apps.create({
+      name: `Leave ${word}`,
+    });
+    await release(owner, app, { "AGENTS.md": `# Leave\n\n${word}\n` });
+    await indexApps(env);
+    // Removed, as if its entry's forgetting had failed: its note is left.
+    await env.DB.prepare(
+      "UPDATE apps SET status = 'archived', removed_at = ?, removed_by = ?, current_version = NULL WHERE id = ?"
+    )
+      .bind(Date.now(), owner.userId, app)
+      .run();
+    await indexApps(env);
+    const note = await rowCount(
+      "SELECT count(*) AS n FROM app_entries WHERE app_id = ?",
+      app
+    );
+    const text = await env.KNOWLEDGE.prepare(
+      "SELECT count(*) AS n FROM documents WHERE collection_id = 'apps' AND path = ? AND current_version > 1"
+    )
+      .bind(`${app}/AGENTS.md`)
+      .first<{ n: number }>();
+
+    // Its note gone only once its entry is the tombstone, a version later.
+    expect({ note, tombstoned: text?.n }).toStrictEqual({
+      note: 0,
+      tombstoned: 1,
+    });
+  });
+
   it("changes nothing when a restore lands first", async () => {
     const owner = await personApi("builder");
     const app = await archivedApp(owner);

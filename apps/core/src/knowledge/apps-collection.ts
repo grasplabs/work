@@ -310,8 +310,10 @@ const removedEntryText =
  * text, its name, description and AGENTS.md, is replaced by one that
  * says only that an App was removed, and its note goes, so the indexer
  * never writes it again (the App has no current version). Nobody reads
- * the entry any more either (app-entries.ts). A failure is logged: the
- * entry is unreadable all the same, and removing again forgets it.
+ * the entry any more either (app-entries.ts), its earlier versions
+ * included: they are kept history, reached only through the same
+ * per-path rule. A failure is logged: the entry is unreadable all the
+ * same, and `indexApps` forgets it on its next run (its note still there).
  */
 export const forgetAppEntry = async (
   env: Env,
@@ -373,6 +375,17 @@ export const indexAppNow = async (env: Env, appId: string): Promise<void> => {
  * minutes.
  */
 export const indexApps = async (env: Env): Promise<void> => {
+  // Removed Apps whose entry wasn't forgotten yet: their note goes only
+  // once their entry is the tombstone.
+  const unforgotten = await drizzle(env.DB)
+    .select({ id: apps.id })
+    .from(apps)
+    .innerJoin(appEntries, eq(appEntries.appId, apps.id))
+    .where(isNotNull(apps.removedAt));
+  for (const { id } of unforgotten) {
+    // oxlint-disable-next-line no-await-in-loop -- one App at a time
+    await forgetAppEntry(env, id);
+  }
   const [noted, inUse] = await Promise.all([
     drizzle(env.DB)
       .select({
