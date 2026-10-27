@@ -12,7 +12,7 @@ import {
   collections,
   documents,
 } from "./db/schema.ts";
-import { requireBrainRead } from "./entities.ts";
+import { kindOf, requireBrainRead } from "./entities.ts";
 import { collectionIdSchema, documentIdSchema, memoryIdSchema } from "./ids.ts";
 import { citesReadable } from "./memory-cites.ts";
 
@@ -91,6 +91,12 @@ export const relationsFor = async <C>(
     relationsGetInputSchema,
     input
   );
+  // Folded as the Brain keeps relations (`kindOf`): `Reports to` asks for
+  // `reports_to`.
+  const relation = predicate === undefined ? undefined : kindOf(predicate);
+  if (relation === "") {
+    throw brainErrors.create("brain.invalid");
+  }
   await requireBrainRead(brain, reader);
   const { db } = brain;
   const allowed = await allowedFor(brain.ports, reader);
@@ -108,9 +114,9 @@ export const relationsFor = async <C>(
       eq(brainAssertions.subjectEntityId, entityId),
       eq(brainAssertions.objectEntityId, entityId)
     ),
-    predicate === undefined
+    relation === undefined
       ? undefined
-      : eq(brainAssertions.predicate, predicate),
+      : eq(brainAssertions.predicate, relation),
     at === undefined
       ? undefined
       : sql`(${brainAssertions.validFrom} IS NULL OR ${brainAssertions.validFrom} <= ${at}) AND (${brainAssertions.validTo} IS NULL OR ${brainAssertions.validTo} >= ${at})`,
