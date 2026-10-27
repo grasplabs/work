@@ -1760,6 +1760,10 @@ msgstr "a month"
 msgid "A new template"
 msgstr "A new template"
 
+#: src/inbox/items.ts
+msgid "A new version of {name} is up for review, and you answer for it. It runs once it is made current, on the domain's page."
+msgstr "A new version of {name} is up for review, and you answer for it. It runs once it is made current, on the domain's page."
+
 #: src/screens/screen-frame.tsx
 msgid "A new version of this app is ready"
 msgstr "A new version of this app is ready"
@@ -7510,6 +7514,10 @@ msgstr "Make version {version} current"
 #: src/chat/builds.tsx
 msgid "Make version {version} current and publish"
 msgstr "Make version {version} current and publish"
+
+#: src/inbox/items.ts
+msgid "Make version {version} of {name} live?"
+msgstr "Make version {version} of {name} live?"
 
 #: src/connections/integration-row.tsx
 msgid "Manage"
