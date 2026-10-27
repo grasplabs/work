@@ -759,6 +759,14 @@ const controlCharacters = /[\u0000-\u001F\u007F-\u009F\p{Cf}]+/gu;
 const wordingOf = (answer: string): string =>
   answer.replaceAll(controlCharacters, " ").trim().slice(0, wordingMaxLength);
 
+/** How many episodes a stored version was written from; -1 if unreadable. */
+const episodesOf = (stored: string): number => {
+  const parsed = z
+    .object({ episodes: z.int().min(0) })
+    .safeParse(JSON.parse(stored));
+  return parsed.success ? parsed.data.episodes : -1;
+};
+
 /**
  * How long a wording pass holds the revisions it claimed: longer than its
  * step may run, so only a pass that died lets another word them.
@@ -790,6 +798,7 @@ const wordingPass = async <C>(
       applicability: brainLessons.applicability,
       instruction: brainLessons.instruction,
       evidenceStatus: brainLessons.evidenceStatus,
+      content: brainLessonVersions.content,
     })
     .from(brainLessons)
     .innerJoin(
@@ -812,6 +821,24 @@ const wordingPass = async <C>(
   let worded = 0;
   let refused = false;
   for (const lesson of unworded) {
+    // oxlint-disable-next-line no-await-in-loop -- one bounded call at a time
+    const counts = await db
+      .select({ role: brainLessonEvidence.role, count: count() })
+      .from(brainLessonEvidence)
+      .where(
+        and(
+          eq(brainLessonEvidence.lessonId, lesson.lessonId),
+          eq(brainLessonEvidence.revision, lesson.revision)
+        )
+      )
+      .groupBy(brainLessonEvidence.role);
+    // Worded only from evidence whole as its text was written from: an
+    // erasure since leaves its counts short of what its text says, and
+    // the revision that erasure brings is worded instead.
+    const held = counts.reduce((sum, { count: each }) => sum + each, 0);
+    if (held !== episodesOf(lesson.content)) {
+      continue;
+    }
     // Claimed first, in one statement, or left to the pass that has it:
     // only one job asks, and pays, for a revision's wording.
     // oxlint-disable-next-line no-await-in-loop -- one bounded call at a time
@@ -829,17 +856,6 @@ const wordingPass = async <C>(
     if (claimed.length === 0) {
       continue;
     }
-    // oxlint-disable-next-line no-await-in-loop -- one bounded call at a time
-    const counts = await db
-      .select({ role: brainLessonEvidence.role, count: count() })
-      .from(brainLessonEvidence)
-      .where(
-        and(
-          eq(brainLessonEvidence.lessonId, lesson.lessonId),
-          eq(brainLessonEvidence.revision, lesson.revision)
-        )
-      )
-      .groupBy(brainLessonEvidence.role);
     const { taskType, versions } = z
       .object({ taskType: z.string(), versions: z.array(z.string()) })
       .parse(JSON.parse(lesson.applicability));

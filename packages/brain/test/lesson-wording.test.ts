@@ -287,6 +287,31 @@ describe("wording lessons", () => {
     });
   });
 
+  it("asks nothing for a revision whose evidence an erasure cut short of what its text says", async () => {
+    const { brain, worded } = testHost();
+    const ann = named("ann");
+    await lessonFor(brain, ann);
+    const [lesson] = await lessonsOf(brain, { scope: "person", scopeId: ann });
+    // One of its episodes erased, its revision not yet patched again.
+    await env.BRAIN.prepare(
+      "DELETE FROM brain_lesson_evidence WHERE rowid = (SELECT rowid FROM brain_lesson_evidence WHERE lesson_id = ? LIMIT 1)"
+    )
+      .bind(lesson?.id ?? "")
+      .run();
+
+    const count = await wordLessons(brain, { scope: "person", scopeId: ann });
+
+    expect({
+      count,
+      asked: worded.length,
+      kept: await stored(lesson?.id ?? ""),
+    }).toStrictEqual({
+      count: 0,
+      asked: 0,
+      kept: { wording: null, state: null },
+    });
+  });
+
   it("hides a version's wording wherever its text is hidden", async () => {
     const { brain } = testHost(undefined, { answer: "Turns kept failing." });
     const chat = named("chat");
