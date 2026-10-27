@@ -47,11 +47,23 @@ export const idpOrigin = `http://localhost:${idpPort}`;
 export const stateDir = path.join(root, "apps/core/.wrangler/e2e-state");
 
 /**
+ * Core's wrangler config in the stack, from core's directory: its own,
+ * with the scripted model as its AI binding, written as the stack starts
+ * (e2e/core-config.ts), and the model's own config, which the stack's
+ * wrangler dev starts beside core and connect.
+ */
+export const e2eCoreConfig = "wrangler.e2e.jsonc";
+export const e2eModelConfig = "test/model.wrangler.jsonc";
+
+/**
  * The models the stack's gateway allows (playwright.config.ts): one that
  * doesn't think, first, and one that does, so the composer offers how hard
  * it thinks. Named here, not taken from a new deployment's defaults, so
- * the tests don't follow them. `--local` reaches no AI Gateway, so a call
- * to either fails: the chat test (e2e/chat.e2e.ts) shows that failure.
+ * the tests don't follow them. `--local` reaches no AI Gateway: a call to
+ * either reaches the scripted model (apps/core/test/model-scripts.ts),
+ * which answers an agent's turn in a chat a script opens, and refuses the
+ * rest, as a stack without a model would: the chat test (e2e/chat.e2e.ts)
+ * shows both.
  */
 export const e2eModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 export const e2eThinkingModel = "workers-ai/@cf/zai-org/glm-5.3-flash";

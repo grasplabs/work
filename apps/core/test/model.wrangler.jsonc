@@ -1,0 +1,16 @@
+// The scripted model (model-worker.ts), for the e2e tests only: never
+// deployed. Started in the e2e stack's wrangler dev beside core and
+// connect, as the AI binding of core's e2e config (e2e/core-config.ts).
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "grasp-os-e2e-model",
+  "main": "model-worker.ts",
+  "compatibility_date": "2026-09-15",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": false,
+    "redact_query_string": true,
+    "logs": { "invocation_logs": false },
+  },
+}

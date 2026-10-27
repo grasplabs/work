@@ -5,7 +5,9 @@ import { localSignIn } from "./apps/core/test/sign-in-config.ts";
 import { testAuthSecret, testCapabilityKey } from "./e2e/people.ts";
 import {
   corePort,
+  e2eCoreConfig,
   e2eModel,
+  e2eModelConfig,
   e2eThinkingModel,
   idpOrigin,
   idpPort,
@@ -202,6 +204,8 @@ export default defineConfig({
       command: [
         // The dir comes from `env` below, so no path is ever shell syntax.
         'rm -rf "$DEV_PERSIST_TO" &&',
+        // Core's config with the scripted model as its AI binding.
+        "node e2e/core-config.ts &&",
         `vp run --filter @grasp-os/core dev --local --port ${corePort}`,
         devVar("BETTER_AUTH_SECRET", testAuthSecret),
         ...Object.entries(localSignIn(origin, idpOrigin)).map(([name, value]) =>
@@ -229,6 +233,10 @@ export default defineConfig({
       ].join(" "),
       env: {
         DEV_PERSIST_TO: stateDir,
+        // `--local` reaches no AI Gateway: core's AI binding is the
+        // scripted model instead (e2e/core-config.ts), started beside it.
+        CORE_WRANGLER_CONFIG: e2eCoreConfig,
+        E2E_MODEL_CONFIG: e2eModelConfig,
         // Core signs each connector call's capability and connect checks
         // it: from the environment, which wrangler gives both Workers, as
         // a `--var` reaches core alone.
