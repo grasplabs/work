@@ -560,9 +560,42 @@ export const screenModuleResponse = async (
   });
 };
 
+// The bootstrap also tells the page each time the person acts in this
+// frame (a click, a tap, a key), over a port of its own: the page counts a
+// screen's navigation as the person's only on such an act
+// (screen-host.ts), never on activation the frame may have focused itself
+// into. The screen's code shares this realm, so what reports runs before
+// any of it, and keeps what it needs where that code never reaches:
+// - the port, and the intrinsics it reports and listens with, are taken
+//   as this script starts, before any module loads, and held in its
+//   closure only, never on a global or a prototype; patching
+//   `MessagePort.prototype` or `EventTarget.prototype` later changes
+//   nothing here;
+// - its listeners are the window's first, in the capture phase, so no
+//   listener of the screen's runs before them or stops them;
+// - it reports only an event the browser made (`isTrusted`, each event's
+//   own property that no script can redefine), never one a script
+//   dispatched;
+// - the report carries nothing: what counts is that it came over this
+//   port, which only this script holds. The screen's ports and the page's
+//   window are its own to post on, and the page reads no act from them.
 const bootstrap = `"use strict";
+const apply = Reflect.apply;
+const listen = EventTarget.prototype.addEventListener;
+const unlisten = EventTarget.prototype.removeEventListener;
+const post = MessagePort.prototype.postMessage;
 const load = new URLSearchParams(location.search).get("load");
 const screen = JSON.parse(document.getElementById("screen").textContent);
+const reportActs = (port) => {
+  const acted = (event) => {
+    if (event.isTrusted === true) {
+      apply(post, port, [null]);
+    }
+  };
+  for (const type of ["pointerdown", "pointerup", "mousedown", "keydown", "touchend"]) {
+    apply(listen, window, [type, acted, true]);
+  }
+};
 const start = (event) => {
   const { data, ports } = event;
   if (
@@ -570,11 +603,12 @@ const start = (event) => {
     data?.type !== "${screenFrameMessage}" ||
     data.load !== load ||
     data.artifact !== screen.artifact ||
-    ports.length !== 3
+    ports.length !== 4
   ) {
     return;
   }
-  removeEventListener("message", start);
+  apply(unlisten, window, ["message", start]);
+  reportActs(ports[3]);
   const style = document.createElement("style");
   style.textContent = screen.css;
   document.head.append(style);
@@ -588,7 +622,7 @@ const start = (event) => {
     )
   );
 };
-addEventListener("message", start);
+apply(listen, window, ["message", start]);
 parent.postMessage({ type: "${screenFrameReady}", load }, "*");`;
 
 /**

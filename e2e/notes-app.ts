@@ -847,6 +847,8 @@ export const hoppingFiles = (): Record<string, string> => ({
     { name: "start", path: "/start", source: "screens/takeoff.tsx" },
     { name: "launch", path: "/launch", source: "screens/launch.tsx" },
     { name: "hop", path: "/hops/:n", source: "screens/hop.tsx", input: v.object({ n: v.string() }) },
+    { name: "focusHop", path: "/focus-hops/:n", source: "screens/focus-hop.tsx", input: v.object({ n: v.string() }) },
+    { name: "forge", path: "/forges/:n", source: "screens/forge.tsx", input: v.object({ n: v.string() }) },
   ],`
     ),
   "screens/takeoff.tsx": `import { useEffect } from "react";
@@ -871,6 +873,8 @@ export default function Launch() {
     <main className="p-6">
       <h1>Launch</h1>
       <Button onClick={() => void navigate(screens.hop, { n: "1" })}>Start hopping</Button>
+      <Button onClick={() => void navigate(screens.focusHop, { n: "1" })}>Start focused hopping</Button>
+      <Button onClick={() => void navigate(screens.forge, { n: "1" })}>Start forging</Button>
     </main>
   );
 }
@@ -886,6 +890,76 @@ export default function Hop({ input }: ScreenProps<typeof screens.hop>) {
     void navigate(screens.hop, { n: String(Number(input.n) + 1) }).catch(() => undefined);
   }, [navigate, input.n]);
   return <main className="p-6"><h1>Hop {input.n}</h1></main>;
+}
+`,
+  // A hop that focuses its own field as it mounts, while the click that
+  // opened the first is still active, so the page sees the person acting
+  // in its frame, then navigates.
+  "screens/focus-hop.tsx": `import { useEffect, useRef } from "react";
+import { useNavigate } from "@grasp-os/sdk/react";
+import type { ScreenProps } from "@grasp-os/sdk/react";
+import { screens } from "#grasp";
+
+export default function FocusHop({ input }: ScreenProps<typeof screens.focusHop>) {
+  const navigate = useNavigate();
+  const field = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    field.current?.focus();
+    void navigate(screens.focusHop, { n: String(Number(input.n) + 1) }).catch(() => undefined);
+  }, [navigate, input.n]);
+  return (
+    <main className="p-6">
+      <h1>Focus hop {input.n}</h1>
+      <input aria-label="Where" ref={field} />
+    </main>
+  );
+}
+`,
+  // A hop that tries every way its code has to pass for the person
+  // acting: it patches the prototypes the frame's document reports acts
+  // with (dropping what an act report looks like), listens first to stop
+  // input reaching anyone else, dispatches input of its own, posts
+  // act-shaped messages to the page, and focuses itself, then navigates.
+  // Its "Go back" button is the person's own act, which must still count.
+  "screens/forge.tsx": `import { useEffect, useRef } from "react";
+import { useNavigate } from "@grasp-os/sdk/react";
+import type { ScreenProps } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/ui/components/button";
+import { screens } from "#grasp";
+
+const forge = () => {
+  const post = MessagePort.prototype.postMessage;
+  MessagePort.prototype.postMessage = function (message, ...rest) {
+    if (message === null) {
+      return;
+    }
+    return Reflect.apply(post, this, [message, ...rest]);
+  };
+  for (const type of ["pointerdown", "pointerup", "mousedown", "keydown", "touchend"]) {
+    window.addEventListener(type, (event) => event.stopImmediatePropagation(), true);
+  }
+  window.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+  parent.postMessage(null, "*");
+  parent.postMessage({ type: "act" }, "*");
+};
+
+export default function Forge({ input }: ScreenProps<typeof screens.forge>) {
+  const navigate = useNavigate();
+  const field = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    forge();
+    field.current?.focus();
+    void navigate(screens.forge, { n: String(Number(input.n) + 1) }).catch(() => undefined);
+  }, [navigate, input.n]);
+  return (
+    <main className="p-6">
+      <h1>Forge {input.n}</h1>
+      <input aria-label="Where" ref={field} />
+      <Button onClick={() => void navigate(screens.launch, {})}>Go back</Button>
+    </main>
+  );
 }
 `,
 });
