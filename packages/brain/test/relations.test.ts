@@ -642,6 +642,135 @@ describe("explained relations", () => {
     });
   });
 
+  it("never follows a relation the reader can't read, even to one they can", async () => {
+    const payroll = `Payroll ${word()}`;
+    const mentors = "Anna mentors Bob.";
+    const owns = `Bob owns ${payroll}.`;
+    const host = testHost(
+      modelOf({
+        [mentors]: {
+          entities: [
+            { kind: "person", name: "Anna" },
+            { kind: "person", name: "Bob" },
+          ],
+          relations: [
+            {
+              subject: "Anna",
+              predicate: "mentors",
+              object: "Bob",
+              evidence: mentors,
+            },
+          ],
+        },
+        [owns]: {
+          entities: [
+            { kind: "person", name: "Bob" },
+            { kind: "process", name: payroll },
+          ],
+          relations: [
+            {
+              subject: "Bob",
+              predicate: "owns",
+              object: payroll,
+              evidence: owns,
+            },
+          ],
+        },
+      })
+    );
+    const team = await newCollection(host.brain, "People");
+    await savedAndLinked(host, team, "memo.md", mentors);
+    await savedAndLinked(host, team, "handbook.md", owns);
+    const everyone: Caller = { userId: "reader", reads: [team.id] };
+    const some: Caller = {
+      userId: "other",
+      reads: [team.id],
+      only: { [team.id]: ["handbook.md"] },
+    };
+    const anna = await entityOf(host, everyone, "Anna");
+
+    const [all, narrowed] = await Promise.all([
+      relationsExplain(host.brain, everyone, { entityId: anna }),
+      relationsExplain(host.brain, some, { entityId: anna }),
+    ]);
+
+    expect({ all: named(all), narrowed }).toStrictEqual({
+      all: [
+        ["Anna mentors Bob", "→ Bob"],
+        ["Anna mentors Bob", `Bob owns ${payroll}`, `→ ${payroll}`],
+      ],
+      // The memo is theirs not to read: neither Bob nor payroll is reached.
+      narrowed: { paths: [], truncated: false },
+    });
+  });
+
+  it("goes on from twenty entities at most, and says so when there were more", async () => {
+    const hub = `Hub ${word()}`;
+    const people = Array.from({ length: 21 }, (_, index) => `Member ${index}`);
+    const joins = people.map((name) => `${name} joins ${hub}.`);
+    const uses = people.map((name) => `${name} uses Slack.`);
+    const host = testHost(
+      modelOf({
+        [hub]: {
+          entities: [
+            { kind: "team", name: hub },
+            { kind: "tool", name: "Slack" },
+            ...people.map((name) => ({ kind: "person", name })),
+          ],
+          relations: people.flatMap((name, index) => [
+            {
+              subject: name,
+              predicate: "joins",
+              object: hub,
+              evidence: joins[index] ?? "",
+            },
+            {
+              subject: name,
+              predicate: "uses",
+              object: "Slack",
+              evidence: uses[index] ?? "",
+            },
+          ]),
+        },
+      })
+    );
+    const team = await newCollection(host.brain, "Teams");
+    await savedAndLinked(
+      host,
+      team,
+      "members.md",
+      [...joins, ...uses].join("\n")
+    );
+    const reader: Caller = { userId: "reader", reads: [team.id] };
+
+    const explained = await relationsExplain(host.brain, reader, {
+      entityId: await entityOf(host, reader, hub),
+      budget: { maxPaths: 50 },
+    });
+
+    expect({
+      first: explained.paths.filter(({ relations }) => relations.length === 1)
+        .length,
+      second: explained.paths.filter(({ relations }) => relations.length === 2)
+        .length,
+      truncated: explained.truncated,
+    }).toStrictEqual({ first: 21, second: 20, truncated: true });
+  });
+
+  it("stops at its budget of paths in the second hop too, and says it was cut", async () => {
+    const { host, everyone, anna } = await handbook();
+
+    const explained = await relationsExplain(host.brain, everyone, {
+      entityId: anna,
+      budget: { maxPaths: 2 },
+    });
+
+    expect({
+      paths: explained.paths.map(({ relations }) => relations.length),
+      truncated: explained.truncated,
+    }).toStrictEqual({ paths: [1, 2], truncated: true });
+  });
+
   it("stops at its budget of paths or its deadline, and says it was cut", async () => {
     const { host, everyone, anna } = await handbook();
     // A clock that has run past any deadline by the second hop.

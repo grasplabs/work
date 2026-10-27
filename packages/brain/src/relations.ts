@@ -139,14 +139,16 @@ const reportRead = async <C>(
   const collectionIds = [
     ...new Set(read.flatMap(({ collectionId }) => collectionId ?? [])),
   ];
+  const documentIds = [
+    ...new Set(read.flatMap(({ documentId }) => documentId ?? [])),
+  ];
   await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",
-      documentIds: [
-        ...new Set(read.flatMap(({ documentId }) => documentId ?? [])),
-      ].slice(0, 20),
-      detail,
+      documentIds: documentIds.slice(0, 20),
+      // The count of every document read, past the 20 named.
+      detail: { ...detail, documents: documentIds.length },
     },
     ...collectionIds.map((id) => ({ id, sensitive: false }))
   );
@@ -154,14 +156,14 @@ const reportRead = async <C>(
 
 /**
  * The relations of `entityId` readable through `scope`, newest first, at
- * most `readRowsMax`, conflicts among them marked: what every read of
- * relations answers from.
+ * most `readRowsMax`, conflicts among them marked, and whether that cap
+ * left any out (`cut`): what every read of relations answers from.
  */
 const readable = async <C>(
   brain: Brain<C>,
   { allowed, owner, ownerReads }: ReadScope,
   { entityId, predicate, at, knownAt }: RelationsQuery
-): Promise<ReadRelation[]> => {
+): Promise<{ relations: ReadRelation[]; cut: boolean }> => {
   const { db } = brain;
   const known = knownAt === undefined ? undefined : new Date(knownAt);
   const where: SQL | undefined = and(
@@ -189,7 +191,7 @@ const readable = async <C>(
       .innerJoin(collections, eq(collections.id, documents.collectionId))
       .where(and(allowed.documents(), eq(collections.sensitive, false), where))
       .orderBy(desc(brainAssertions.recordedAt))
-      .limit(readRowsMax),
+      .limit(readRowsMax + 1),
     owner === undefined
       ? []
       : db
@@ -209,7 +211,7 @@ const readable = async <C>(
             )
           )
           .orderBy(desc(brainAssertions.recordedAt))
-          .limit(readRowsMax),
+          .limit(readRowsMax + 1),
   ]);
   // Both kinds of source together, newest first: conflicts are found among
   // all of them, then the answer is the newest `readRowsMax`.
@@ -265,12 +267,16 @@ const readable = async <C>(
         overlaps(one.view, other.view)
     );
   }
-  return views.slice(0, readRowsMax).map((view, index) => ({
-    view,
-    source: rows[index]?.source ?? "",
-    documentId: rows[index]?.documentId ?? null,
-    collectionId: rows[index]?.collectionId ?? null,
-  }));
+  return {
+    relations: views.slice(0, readRowsMax).map((view, index) => ({
+      view,
+      source: rows[index]?.source ?? "",
+      documentId: rows[index]?.documentId ?? null,
+      collectionId: rows[index]?.collectionId ?? null,
+    })),
+    // One more than the cap was read of each kind, to tell.
+    cut: rows.length > readRowsMax,
+  };
 };
 
 /**
@@ -290,7 +296,11 @@ export const relationsFor = async <C>(
     relationsGetInputSchema,
     input
   );
-  const read = await readable(brain, await scopeOf(brain, reader), query);
+  const { relations: read } = await readable(
+    brain,
+    await scopeOf(brain, reader),
+    query
+  );
   await reportRead(brain, reader, read, {
     read: "relations",
     relations: read.length,
@@ -301,6 +311,20 @@ export const relationsFor = async <C>(
 /** The entity at a relation's other end from `entityId`. */
 const otherEnd = (view: RelationView, entityId: string) =>
   view.subject.entityId === entityId ? view.object : view.subject;
+
+/**
+ * Each of `relations` read from `from`, with the entity at its other end:
+ * never back to `start`, where the path began.
+ */
+const stepsFrom = (
+  relations: readonly ReadRelation[],
+  from: string,
+  start: string
+): { view: RelationView; to: RelationView["subject"] }[] =>
+  relations.flatMap(({ view }) => {
+    const to = otherEnd(view, from);
+    return to.entityId === start || to.entityId === from ? [] : [{ view, to }];
+  });
 
 /**
  * The paths out from `entityId` that `reader` may read (the Brain design's
@@ -333,60 +357,46 @@ export const relationsExplain = async <C>(
   const scope = await scopeOf(brain, reader);
   const read: ReadRelation[] = [];
   const paths: RelationsExplanation["paths"] = [];
-  let truncated = false;
   const first = await readable(brain, scope, { entityId, ...filters });
-  read.push(...first);
+  read.push(...first.relations);
+  // Cut by a cap on what was read, on entities gone on from, or the
+  // deadline; or by the paths' budget, which ends it.
+  let truncated = first.cut;
+  /** Adds `found` as far as the budget goes: whether it took them all. */
+  const add = (found: RelationsExplanation["paths"]): boolean => {
+    const space = maxPaths - paths.length;
+    paths.push(...found.slice(0, space));
+    return found.length <= space;
+  };
   // One path per relation, to the entity at its other end; the entities
   // reached, in the order first reached, are the next hop's starts.
+  const firstPaths = stepsFrom(first.relations, entityId, entityId);
+  let room = add(firstPaths.map(({ view, to }) => ({ relations: [view], to })));
   const reached = new Map<string, RelationView>();
-  for (const { view } of first) {
-    const to = otherEnd(view, entityId);
-    if (to.entityId === entityId) {
-      continue;
-    }
-    if (paths.length >= maxPaths) {
-      truncated = true;
-      break;
-    }
-    paths.push({ relations: [view], to });
+  for (const { view, to } of firstPaths.slice(0, paths.length)) {
     if (!reached.has(to.entityId)) {
       reached.set(to.entityId, view);
     }
   }
-  if (hops === 2 && !truncated) {
-    const starts = [...reached.keys()];
-    if (starts.length > explainFanOut) {
-      truncated = true;
+  const starts = hops === 2 && room ? [...reached.entries()] : [];
+  truncated ||= starts.length > explainFanOut;
+  for (const [via, step] of starts.slice(0, explainFanOut)) {
+    if (!room || brain.ports.clock().getTime() >= deadline) {
+      truncated ||= room;
+      break;
     }
-    for (const via of starts.slice(0, explainFanOut)) {
-      if (brain.ports.clock().getTime() >= deadline) {
-        truncated = true;
-        break;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- one hop at a time, within the deadline
-      const next = await readable(brain, scope, { entityId: via, ...filters });
-      read.push(...next);
-      const step = reached.get(via);
-      for (const { view } of next) {
-        const to = otherEnd(view, via);
-        if (
-          step === undefined ||
-          to.entityId === entityId ||
-          to.entityId === via
-        ) {
-          continue;
-        }
-        if (paths.length >= maxPaths) {
-          truncated = true;
-          break;
-        }
-        paths.push({ relations: [step, view], to });
-      }
-      if (truncated) {
-        break;
-      }
-    }
+    // oxlint-disable-next-line no-await-in-loop -- one hop at a time, within the deadline
+    const next = await readable(brain, scope, { entityId: via, ...filters });
+    read.push(...next.relations);
+    truncated ||= next.cut;
+    room = add(
+      stepsFrom(next.relations, via, entityId).map(({ view, to }) => ({
+        relations: [step, view],
+        to,
+      }))
+    );
   }
+  truncated ||= !room;
   await reportRead(brain, reader, read, {
     read: "relations.explain",
     relations: read.length,
