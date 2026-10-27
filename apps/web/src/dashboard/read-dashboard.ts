@@ -1,11 +1,8 @@
 import type { AuditRecord } from "@grasp-os/shared/audit-log";
-import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
+import type { BoardReport, StandardWidgetId } from "@grasp-os/shared/dashboard";
 import { expectedMessageOf } from "@grasp-os/shared/errors";
 import type { KnowledgeSignals } from "@grasp-os/shared/knowledge-signals";
-import type {
-  OnboardingProgress,
-  Programme,
-} from "@grasp-os/shared/onboarding";
+import type { Programme } from "@grasp-os/shared/onboarding";
 import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ImprovementSignals } from "@grasp-os/shared/signals";
@@ -16,7 +13,7 @@ import type {
   WaitingPart,
 } from "@grasp-os/shared/waiting";
 import { handledRunDays } from "@grasp-os/shared/workflows";
-import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 
 import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
@@ -29,8 +26,6 @@ import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
 import { markShownRead } from "./failed-workflows.tsx";
 import { offeredWidgets } from "./layout.ts";
-import { reportWindow, todayUtc } from "./programme.ts";
-import type { ReportReads } from "./report.ts";
 import { goalProgressOf, noReturns, teamProgressOf } from "./returns.ts";
 import type { GoalProgress, TeamsRead } from "./returns.ts";
 import { fullDays } from "./runs.ts";
@@ -42,8 +37,8 @@ import type { Board, EnginesRead } from "./widget-board.tsx";
 // What the dashboard reads, each part on its own so one that fails or
 // hangs leaves the rest: what waits on the person, the person's layout of
 // the widget board and what it shows (the workflows, the engines, the
-// runs over time, the signals), the programme with Grasp and what its
-// weekly report is made from, and, for admins, the latest of the audit
+// runs over time, the signals), the programme with Grasp and its weekly
+// report, both as core counts and reads them, and, for admins, the latest of the audit
 // trail.
 
 /** The items of the feed of one kind. */
@@ -330,45 +325,6 @@ const readTeams = async (
 };
 
 /**
- * The runs the weekly report counts: those of its own week
- * (`reportWindow`), read once the programme is known, not the board's
- * days. Without a programme no report is offered: the board's runs.
- */
-const readReportRuns = async (
-  core: CoreConnection,
-  programme: Promise<Loaded<Programme | null>>,
-  board: Promise<Loaded<RunActivity>>,
-  today: string
-): Promise<Loaded<RunActivity>> => {
-  const loaded = await programme;
-  if (loaded.state !== "ready" || loaded.data === null) {
-    return await board;
-  }
-  const window = reportWindow(loaded.data.start, today);
-  return await loadFromCore(
-    core,
-    async (session) => await session.workflows.activity(window)
-  );
-};
-
-/**
- * What the weekly report is made from, once all of it came: the board's
- * reads, and, for admins, how many the interviews heard.
- */
-const readReport = async (
-  board: Pick<Board, "workflows" | "runs" | "signals">,
-  people: Promise<Loaded<OnboardingProgress | null>> | undefined
-): Promise<ReportReads> => {
-  const [runs, workflows, signals, heard] = await Promise.all([
-    board.runs,
-    board.workflows,
-    board.signals,
-    people,
-  ]);
-  return { runs, workflows, signals, people: heard };
-};
-
-/**
  * The widgets on the person's board, in order: as they last saved it, or
  * as it begins when they never did. A read that fails gives the board as
  * it begins too, rather than no board. A widget no longer `offered` (an
@@ -397,10 +353,8 @@ export interface Dashboard {
   board: Board;
   /** The programme with Grasp; null without a plan. */
   programme: Loaded<Programme | null>;
-  /** The day it was read on, UTC, as the programme counts days. */
-  today: string;
-  /** What the weekly report is made from. */
-  report: Promise<ReportReads>;
+  /** The weekly report, as core reads it in one call: shown only with a programme. */
+  report: Promise<Loaded<BoardReport>>;
   /** Admins only. */
   activity: Promise<Loaded<LatestActivity>> | undefined;
 }
@@ -434,16 +388,10 @@ export const readDashboard = async (
     core,
     async (session) => await session.onboarding.programme()
   );
-  const people = isAdmin(identity.role)
-    ? loadFromCore(core, async (session) => {
-        const { progress } = await session.onboarding.view();
-        return progress;
-      })
-    : undefined;
-  const today = todayUtc();
-  const report = readReport(
-    { workflows, runs: readReportRuns(core, programme, runs, today), signals },
-    people
+  // Not awaited: the report's dialog waits for it.
+  const report = loadFromCore(
+    core,
+    async (session) => await session.dashboard.report()
   );
   // The board's order and the page's heading are known before they show,
   // so nothing moves once it is there; read alongside what waits, which
@@ -470,7 +418,6 @@ export const readDashboard = async (
       spend,
     },
     programme: read,
-    today,
     report,
     activity,
   };
