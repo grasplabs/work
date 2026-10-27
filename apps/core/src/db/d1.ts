@@ -13,7 +13,7 @@ export const isUniqueViolation = (error: unknown): boolean =>
 
 /**
  * Whether D1 refused a write for touching a removed App: the triggers of
- * migration 0153 (app-removal.ts) abort any write that gives a removed
+ * migration 0155 (app-removal.ts) abort any write that gives a removed
  * App something new, or changes it.
  */
 export const isRemovedAppRefusal = (error: unknown): boolean =>

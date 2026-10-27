@@ -589,7 +589,7 @@ describe("removing an App", slow, () => {
     }).toStrictEqual({ name: 0, integrations: 0, recorded: [] });
   });
 
-  it("takes no permission request that read the App before it was removed, and the database refuses any other write that would", async () => {
+  it("takes no permission request that read the App before it was removed, and the database refuses any other write that would, but to what it is", async () => {
     const owner = await personApi("builder");
     const [app, other] = await Promise.all([
       archivedApp(owner),
@@ -643,7 +643,15 @@ describe("removing an App", slow, () => {
         .run()
     );
 
+    // What it is stays open, for erasure, retention and migrations.
+    const renamed = await outcome(
+      env.DB.prepare("UPDATE apps SET name = 'Erased' WHERE id = ?")
+        .bind(app)
+        .run()
+    );
+
     expect({
+      renamed,
       requested,
       requests: await rowCount(
         "SELECT count(*) AS n FROM permissions WHERE subject_type = 'app' AND subject_id = ?",
@@ -655,6 +663,7 @@ describe("removing an App", slow, () => {
         .bind(app)
         .first("status"),
     }).toStrictEqual({
+      renamed: "ok",
       requested: "app.not_found",
       requests: 0,
       direct: false,
