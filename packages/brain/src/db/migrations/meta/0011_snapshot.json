@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "43ce2a41-176a-4985-a4a0-0ab8863fa2ef",
+  "id": "b9a5e01e-3eca-4078-8cb0-8eec60c5f93c",
   "prevId": "204d6d86-e9e7-4e0b-b440-2460536976f4",
   "tables": {
     "audit_outbox": {
@@ -515,6 +515,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        },
+        "decided_by": {
+          "name": "decided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "decided_at": {
