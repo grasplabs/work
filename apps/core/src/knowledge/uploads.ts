@@ -118,7 +118,7 @@ const vttSignature = bytesOf("WEBVTT");
  * Office files, and WebVTT's signature (after a byte order mark, if any)
  * as the WebVTT spec defines it.
  */
-const signatures: Readonly<
+export const signatures: Readonly<
   Record<UploadExtension, (bytes: Uint8Array) => boolean>
 > = {
   pdf: (bytes) => startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]),
@@ -392,7 +392,7 @@ const pageHeading = /^#{1,6} Page \d+$/gmu;
  * Whether Markdown holds any text: a heading's counts, table rules and
  * the page headings a PDF's sections get don't.
  */
-const hasText = (markdown: string): boolean =>
+export const hasText = (markdown: string): boolean =>
   markdown
     .replaceAll(pageHeading, "")
     .replaceAll(headingMarks, "")

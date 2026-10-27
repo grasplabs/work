@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   ChatOutput,
   ChatPartial,
+  ChatToolEvent,
 } from "@grasp-os/shared/chat";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -24,6 +25,7 @@ import {
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+import { FileCards } from "./chat-files.tsx";
 import {
   Conversation,
   ConversationContent,
@@ -37,7 +39,7 @@ import {
   MessageContent,
   MessageResponse,
 } from "./message.tsx";
-import { signOf } from "./sign.ts";
+import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { AnswerSources } from "./sources.tsx";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
@@ -205,15 +207,25 @@ const AnswerTop = ({ children }: { children: ReactNode }) => (
   </div>
 );
 
-/** Over an answer Grasp works on: what it does now, as a light runs through the words. */
-const Working = ({ doing }: { doing: WorkState }) => {
+/**
+ * Over an answer Grasp works on: what it does now, as a light runs through
+ * the words; the file it reads, while its code reads one of the chat's.
+ */
+const Working = ({ doing, file }: { doing: WorkState; file?: string }) => {
   const { t } = useLingui();
-  const label = {
-    reading: t`Reading the workspace`,
-    thinking: t`Thinking`,
-    writing: t`Writing`,
-    working: t`Working on it`,
-  }[doing];
+  const label =
+    file === undefined
+      ? {
+          reading: t`Reading the workspace`,
+          thinking: t`Thinking`,
+          writing: t`Writing`,
+          working: t`Working on it`,
+        }[doing]
+      : t({
+          message: `Reading ${file}`,
+          comment:
+            "Grasp reads a file the person attached; {file} is its name.",
+        });
   return (
     <AnswerTop>
       {/* A live status, so a screen reader hears that Grasp is working. */}
@@ -377,6 +389,8 @@ const progressOf = (
   shown: ChatPartial | null;
   replies: readonly Answer[];
   doing: WorkState | undefined;
+  /** The code step being written or run: the newest answer's last. */
+  step: ChatCode | undefined;
   worked: ReadonlyMap<number, number>;
 } => {
   const shown =
@@ -392,9 +406,13 @@ const progressOf = (
     doing: running
       ? signOf({ partial: shown, replies, ran: (id) => results.has(id) })
       : undefined,
+    step: (shown ?? replies.at(-1))?.code.at(-1),
     worked: workedFor(turns, current),
   };
 };
+
+/** Where the page passes no calls of the chat's code. */
+const noTools: readonly ChatToolEvent[] = [];
 
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
@@ -404,6 +422,7 @@ export const ChatThread = ({
   output,
   partial,
   running,
+  tools = noTools,
   onRetry,
   children,
 }: {
@@ -417,6 +436,8 @@ export const ChatThread = ({
   partial: ChatPartial | null;
   /** Whether the agent is working on the chat now. */
   running: boolean;
+  /** The calls the chat's code made: what it reads, while it reads it. */
+  tools?: readonly ChatToolEvent[];
   /** Asks the last question again. */
   onRetry: () => void;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
@@ -436,15 +457,16 @@ export const ChatThread = ({
     lastAnswer !== undefined &&
     messages.findLastIndex(({ role }) => role === "user") <
       messages.indexOf(lastAnswer);
-  const { shown, replies, doing, worked } = progressOf(
+  const { shown, replies, doing, step, worked } = progressOf(
     messages,
     partial,
     running,
     results
   );
+  const file = readingFileOf({ doing, step, tools, messages });
   const topOf = (id: number): ReactNode => {
     if (doing !== undefined && replies[0]?.id === id) {
-      return <Working doing={doing} />;
+      return <Working doing={doing} file={file} />;
     }
     const seconds = worked.get(id);
     return seconds === undefined ? undefined : <WorkedFor seconds={seconds} />;
@@ -466,6 +488,10 @@ export const ChatThread = ({
               return (
                 <li key={message.id}>
                   <Message from="user">
+                    {message.files === undefined ||
+                    message.files.length === 0 ? null : (
+                      <FileCards files={message.files} />
+                    )}
                     <MessageContent>{message.text}</MessageContent>
                   </Message>
                 </li>
@@ -512,7 +538,7 @@ export const ChatThread = ({
                 sign={doing}
                 top={
                   doing !== undefined && replies.length === 0 ? (
-                    <Working doing={doing} />
+                    <Working doing={doing} file={file} />
                   ) : undefined
                 }
                 writing

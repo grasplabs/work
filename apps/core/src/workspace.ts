@@ -16,6 +16,8 @@ import type {
 } from "@grasp-os/shared/audit";
 import {
   chatChannelSchema,
+  chatFilesMax,
+  chatFilesPerQuestionMax,
   chatPlatformSchema,
   chatToolEventsKept,
   projectDocumentMaxBytes,
@@ -27,6 +29,8 @@ import type {
   ChatCitedDocument,
   ChatDraft,
   ChatDraftVersion,
+  ChatFile,
+  ChatFileType,
   ChatMessage,
   ChatProject,
   ChatOutput,
@@ -73,7 +77,18 @@ import { redact } from "@grasp-os/shared/redact";
 import type { ScreenProblem, ServerLog } from "@grasp-os/shared/screens";
 import type { RunFailure } from "@grasp-os/shared/workflows";
 import { DurableObject } from "cloudflare:workers";
-import { and, asc, count, desc, eq, gt, isNull, max, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  max,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
@@ -148,6 +163,7 @@ import {
   maxToolCallIdChars,
   chatDocuments,
   chatDrafts,
+  chatFiles,
   chatMessages,
   chatProjectDocuments,
   chatProjects,
@@ -415,6 +431,12 @@ export const questionSchema = z.strictObject({
   /** `<provider>/<model>`, one the deployment allows. */
   model: z.string().min(1),
   effort: z.enum(modelEfforts).optional(),
+  /** The chat's files it carries (`attachFile`), each once. */
+  files: z
+    .array(z.uuid())
+    .max(chatFilesPerQuestionMax)
+    .refine((files) => new Set(files).size === files.length)
+    .optional(),
 });
 export type Question = z.input<typeof questionSchema>;
 
@@ -454,6 +476,36 @@ export type Answer = TurnResult & {
 const storedMessageSchema = z.custom<Message>(
   (value) => typeof value === "object" && value !== null && isMessage(value)
 );
+
+/**
+ * `shown` with the files its question carried, by its ID in `carried`;
+ * as it is for any other message, or a question that carried none.
+ */
+const withFiles = (
+  shown: ChatMessage | undefined,
+  carried: ReadonlyMap<number, ChatFile[]> | undefined
+): ChatMessage | undefined => {
+  if (shown?.role !== "user") {
+    return shown;
+  }
+  const files = carried?.get(shown.id);
+  return files === undefined ? shown : { ...shown, files };
+};
+
+/** A chat file, as its person sees it, from its row. */
+const chatFileOf = ({
+  id,
+  name,
+  type,
+  bytes,
+  createdAt,
+}: typeof chatFiles.$inferSelect): ChatFile => ({
+  id,
+  name,
+  type,
+  bytes,
+  createdAt: createdAt.toISOString(),
+});
 
 /**
  * A failure report attached to a chat (`attachments`), as this object
@@ -920,13 +972,39 @@ export class Workspace extends DurableObject<Env> {
    * Stores `message` as the chat's next, and shows it to its watchers;
    * its ID.
    */
-  #keep(chatId: ChatId, message: Message): number {
-    const { id, createdAt } = this.#store(chatId, message);
-    const shown = chatMessageOf(
-      id,
-      message,
-      createdAt,
-      message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined
+  #keep(
+    chatId: ChatId,
+    message: Message,
+    files: readonly string[] = []
+  ): number {
+    // A question and the files it carries are kept together: each file is
+    // its, and no other's.
+    const { id, createdAt } =
+      files.length === 0
+        ? this.#store(chatId, message)
+        : this.ctx.storage.transactionSync(() => {
+            const stored = this.#store(chatId, message);
+            this.#db
+              .update(chatFiles)
+              .set({ messageId: stored.id })
+              .where(
+                and(
+                  eq(chatFiles.chatId, chatId),
+                  inArray(chatFiles.id, [...files]),
+                  isNull(chatFiles.messageId)
+                )
+              )
+              .run();
+            return stored;
+          });
+    const shown = withFiles(
+      chatMessageOf(
+        id,
+        message,
+        createdAt,
+        message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined
+      ),
+      files.length === 0 ? undefined : this.#filesAfter(chatId, id - 1)
     );
     // A step's result shows all it logged: its output goes in the same update.
     if (message.role === "toolResult") {
@@ -1100,6 +1178,144 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Attaches a file to `personId`'s own chat, as the text core read from
+   * it (chats-rpc.ts), for its next question to carry: refused past
+   * {@link chatFilesMax}. Audited with its ID, type and size, never its
+   * name or text.
+   */
+  attachFile(
+    chatId: unknown,
+    personId: string,
+    file: { name: string; type: ChatFileType; bytes: number; text: string },
+    by: AuditActor
+  ): ChatFile {
+    const { id } = this.#ownChat(chatId, personId);
+    if (this.#deleting.has(id)) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    const attached = this.ctx.storage.transactionSync(() => {
+      const [kept] = this.#db
+        .select({ files: count() })
+        .from(chatFiles)
+        .where(eq(chatFiles.chatId, id))
+        .all();
+      if ((kept?.files ?? 0) >= chatFilesMax) {
+        throw agentErrors.create("agent.too_many_files");
+      }
+      const row = this.#db
+        .insert(chatFiles)
+        .values({
+          id: crypto.randomUUID(),
+          chatId: id,
+          messageId: null,
+          ...file,
+          createdAt: new Date(),
+        })
+        .returning()
+        .get();
+      this.#outboxed(by, "chat.file_attached", id, {
+        file: row.id,
+        type: file.type,
+        bytes: file.bytes,
+      });
+      return row;
+    });
+    this.#deliverAudit();
+    return chatFileOf(attached);
+  }
+
+  /**
+   * The chat's files, in the order they were attached, with the question
+   * that carried each (`null` while none has), for its agent
+   * (`env.chat.files()` in agent-apis.ts): never their text.
+   */
+  chatFiles(chatId: ChatId): (ChatFile & { question: number | null })[] {
+    return this.#db
+      .select()
+      .from(chatFiles)
+      .where(eq(chatFiles.chatId, chatId))
+      .orderBy(asc(chatFiles.createdAt), asc(chatFiles.id))
+      .all()
+      .map((row) => ({ ...chatFileOf(row), question: row.messageId }));
+  }
+
+  /**
+   * One of the chat's files with its text, for its agent
+   * (`env.chat.readFile`); `undefined` for none the chat has.
+   */
+  chatFile(
+    chatId: ChatId,
+    fileId: string
+  ): (ChatFile & { text: string }) | undefined {
+    const row = this.#db
+      .select()
+      .from(chatFiles)
+      .where(and(eq(chatFiles.chatId, chatId), eq(chatFiles.id, fileId)))
+      .get();
+    return row === undefined
+      ? undefined
+      : { ...chatFileOf(row), text: row.text };
+  }
+
+  /**
+   * The files `fileIds` names, in that order, each attached to the chat
+   * and carried by no question yet: what a question may carry. Refused
+   * with `agent.file_not_found` for any other.
+   */
+  #unsentFiles(
+    chatId: ChatId,
+    fileIds: readonly string[]
+  ): { id: string; name: string; type: ChatFileType }[] {
+    if (fileIds.length === 0) {
+      return [];
+    }
+    const rows = this.#db
+      .select({
+        id: chatFiles.id,
+        name: chatFiles.name,
+        type: chatFiles.type,
+      })
+      .from(chatFiles)
+      .where(
+        and(
+          eq(chatFiles.chatId, chatId),
+          inArray(chatFiles.id, [...fileIds]),
+          isNull(chatFiles.messageId)
+        )
+      )
+      .all();
+    return fileIds.map((fileId) => {
+      const row = rows.find(({ id }) => id === fileId);
+      if (row === undefined) {
+        throw agentErrors.create("agent.file_not_found");
+      }
+      return row;
+    });
+  }
+
+  /**
+   * The files each of the chat's questions after message `after` carried,
+   * by the question's ID, in the order they were attached.
+   */
+  #filesAfter(chatId: ChatId, after: number): Map<number, ChatFile[]> {
+    const carried = new Map<number, ChatFile[]>();
+    const rows = this.#db
+      .select()
+      .from(chatFiles)
+      .where(and(eq(chatFiles.chatId, chatId), gt(chatFiles.messageId, after)))
+      .orderBy(asc(chatFiles.createdAt), asc(chatFiles.id))
+      .all();
+    for (const row of rows) {
+      if (row.messageId !== null) {
+        const files = carried.get(row.messageId) ?? [];
+        files.push(chatFileOf(row));
+        carried.set(row.messageId, files);
+      }
+    }
+    return carried;
+  }
+
+  /**
    * Stores the audit event of a change to chat `chatId` in this object's
    * outbox: call it in the change's transaction, so both are kept or
    * neither, then `#deliverAudit`. Names the chat and this object, never
@@ -1112,7 +1328,8 @@ export class Workspace extends DurableObject<Env> {
       | "chat.renamed"
       | "chat.deleted"
       | "chat.moved"
-      | "chat.draft_restored",
+      | "chat.draft_restored"
+      | "chat.file_attached",
     chatId: ChatId,
     detail: Record<string, AuditDetailValue> = {}
   ): void {
@@ -1433,6 +1650,9 @@ export class Workspace extends DurableObject<Env> {
       if (this.#storedChars(chat.id) > maxChatChars) {
         throw agentErrors.create("agent.chat_full");
       }
+      // Before anything is kept: a file it names that the chat hasn't, or
+      // that another question carried, refuses the question.
+      const files = this.#unsentFiles(chat.id, parsed.data.files ?? []);
       // Where the chat is (this object, by the name core gave it:
       // `workspace` in durable-objects.ts), and whose agent acts in it, as
       // the chat stored it.
@@ -1478,6 +1698,7 @@ export class Workspace extends DurableObject<Env> {
       const result = await runTurn({
         history: this.#transcript(chat.id),
         question: parsed.data.text,
+        files,
         model,
         apis: shared ? sharedApis : agentApis,
         context,
@@ -1515,7 +1736,12 @@ export class Workspace extends DurableObject<Env> {
           if (message.role === "assistant") {
             this.#partials.delete(chat.id);
           }
-          const id = this.#keep(chat.id, message);
+          // The turn's one question carries its files.
+          const id = this.#keep(
+            chat.id,
+            message,
+            message.role === "user" ? files.map(({ id: file }) => file) : []
+          );
           if (message.role === "assistant") {
             answer = id;
           }
@@ -3270,6 +3496,8 @@ export class Workspace extends DurableObject<Env> {
           .delete(brainCaptureIntents)
           .where(eq(brainCaptureIntents.evidenceId, id))
           .run();
+        // Before its messages: a file names the question that carried it.
+        this.#db.delete(chatFiles).where(eq(chatFiles.chatId, id)).run();
         this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
         this.#db.delete(chatSources).where(eq(chatSources.chatId, id)).run();
         this.#db
@@ -4295,6 +4523,7 @@ export class Workspace extends DurableObject<Env> {
   /** The chat's messages stored after the one with ID `after`, as shown. */
   #shownAfter(chatId: ChatId, after: number): ChatMessage[] {
     const givenBy = this.#givenBy(chatId);
+    const carried = this.#filesAfter(chatId, after);
     return this.#db
       .select()
       .from(chatMessages)
@@ -4302,11 +4531,14 @@ export class Workspace extends DurableObject<Env> {
       .orderBy(asc(chatMessages.id))
       .all()
       .flatMap(({ id, message, createdAt }) => {
-        const shown = chatMessageOf(
-          id,
-          storedMessageSchema.parse(JSON.parse(message)),
-          createdAt,
-          givenBy(id)
+        const shown = withFiles(
+          chatMessageOf(
+            id,
+            storedMessageSchema.parse(JSON.parse(message)),
+            createdAt,
+            givenBy(id)
+          ),
+          carried
         );
         return shown === undefined ? [] : [shown];
       });
