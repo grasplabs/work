@@ -1,7 +1,9 @@
 import { env } from "cloudflare:workers";
+import { asc, eq } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ensureCollection } from "../src/collections.ts";
+import { brainMentions } from "../src/db/schema.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
   entitiesFor,
@@ -9,6 +11,7 @@ import {
   entitySources,
   linkCoverage,
   linkProposals,
+  mentionsPerSource,
   runLinking,
   settleMs,
   sweepLinking,
@@ -221,7 +224,7 @@ describe("entity linking", () => {
     const host = testHost(gazetteer(people));
     const collection = await newCollection(host.brain, "Directory");
     const reader: Caller = { userId: "reader", reads: [collection.id] };
-    await save(
+    const saved = await save(
       host,
       collection,
       "directory.md",
@@ -231,13 +234,30 @@ describe("entity linking", () => {
     );
     await settle(host, new Set());
     const found = await entitiesFor(host.brain, reader, { limit: 50 });
+    // What was kept, row by row: an insert chunk dropped or cut short
+    // would leave its people out.
+    const kept = await host.brain.db
+      .select({
+        name: brainMentions.name,
+        state: brainMentions.state,
+        entityId: brainMentions.entityId,
+      })
+      .from(brainMentions)
+      .where(eq(brainMentions.documentId, saved.id))
+      .orderBy(asc(brainMentions.position));
 
     expect({
       coverage: await linkCoverage(host.brain, reader),
       found: found.length,
+      mentions: kept.map(({ name }) => name),
+      linked: kept.filter(({ state }) => state === "linked").length,
+      entities: new Set(kept.map(({ entityId }) => entityId)).size,
     }).toStrictEqual({
       coverage: { sources: 1, linked: 1, pending: 0, failed: 0, partial: 0 },
       found: 50,
+      mentions: people.slice(0, mentionsPerSource).map(({ name }) => name),
+      linked: mentionsPerSource,
+      entities: mentionsPerSource,
     });
   });
 
