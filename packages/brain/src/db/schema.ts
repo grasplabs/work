@@ -673,6 +673,27 @@ export const brainLessonVersions = sqliteTable(
     content: text().notNull(),
     patchKey: text("patch_key").notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * A model's wording of it for a person (../lessons.ts): beside its text
+     * of record, never instead of it; shown under the same rule.
+     */
+    wording: text(),
+    /**
+     * Whether its wording was written, or refused (budget) or failed; or
+     * claimed by a wording pass now asking for it (`wording_claimed_at`),
+     * so two jobs never pay for the same wording.
+     */
+    wordingState: text("wording_state", {
+      enum: ["claimed", "written", "refused", "failed"],
+    }),
+    /**
+     * The claim of the consolidation job wording it: a token the job keeps
+     * in its durable steps, so a retry of the job takes its own claims
+     * back, and another job never takes them while they last.
+     */
+    wordingClaim: text("wording_claim"),
+    /** When a job claimed it: past its lease, another job may. */
+    wordingClaimedAt: timestamp("wording_claimed_at"),
   },
   (table) => [
     primaryKey({ columns: [table.lessonId, table.revision] }),

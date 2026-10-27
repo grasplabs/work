@@ -472,8 +472,9 @@ export const recallWithSources = async <C>(
     // company because its name is "Brain"), each named collection, and
     // the access revision the pack carries. Their time counts against the
     // deadline: the read gets what is left of it, and none once it is
-    // spent.
-    const startedAt = Date.now();
+    // spent, on the host's clock (`ports.clock`), as everything the Brain
+    // times.
+    const startedAt = brain.ports.clock().getTime();
     await store.requireBrainGrant(reader);
     const limits = clampBudget(budget);
     const collectionIds = scopeOf(filters?.collectionIds, within);
@@ -488,7 +489,8 @@ export const recallWithSources = async <C>(
       brain,
       JSON.stringify([await store.accessKey(reader), readers ?? null])
     );
-    const remaining = limits.deadlineMs - (Date.now() - startedAt);
+    const remaining =
+      limits.deadlineMs - (brain.ports.clock().getTime() - startedAt);
     // One more than asked, to tell a full pack from a cut one.
     const limit = Math.min(limits.maxItems + 1, searchMaxLimit);
     const read =

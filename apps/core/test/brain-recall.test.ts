@@ -477,12 +477,20 @@ describe("the Brain's recall", setUpTime, () => {
     const word = rareWord();
     await collectionSaying(admin, "everyone", `# Onboarding\n${word}`);
     const person = await admin.api.whoami();
-    const store = d1BrainStore(brainOf(env));
+    // The host's clock, moved on by hand: the access reads take 400ms of
+    // it, past the 200ms the recall may take, whatever the machine does.
+    let now = Date.parse("2026-10-27T09:00:00.000Z");
+    const brain = brainOf(env);
+    const timed = {
+      ...brain,
+      ports: { ...brain.ports, clock: () => new Date(now) },
+    };
+    const store = d1BrainStore(timed);
     let searched = false;
     const slowAccess = {
       ...store,
       accessKey: async (reader: Parameters<typeof store.accessKey>[0]) => {
-        await scheduler.wait(400);
+        now += 400;
         return await store.accessKey(reader);
       },
       findEvidence: async (
@@ -492,27 +500,23 @@ describe("the Brain's recall", setUpTime, () => {
         return await store.findEvidence(...args);
       },
     };
-    const started = Date.now();
     const pack = await recall(
-      brainOf(env),
+      timed,
       { type: "person", person },
       { query: word, budget: { deadlineMs: 200 } },
       undefined,
       slowAccess
     );
-    const took = Date.now() - started;
     expect({
       coverage: pack.coverage.state,
       items: pack.items.length,
       gaps: pack.gaps.length,
       searched,
-      withinAccessTimeAndAMargin: took < 400 + 150,
     }).toStrictEqual({
       coverage: "degraded",
       items: 0,
       gaps: 0,
       searched: false,
-      withinAccessTimeAndAMargin: true,
     });
   });
 });

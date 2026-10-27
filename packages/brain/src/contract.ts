@@ -696,6 +696,11 @@ export interface LessonVersionView {
   supersedes: number | null;
   /** Its text, unless it rests on episodes the reader wasn't part of. */
   instruction: string | null;
+  /**
+   * A model's wording of it for a person, beside its text: shown, or not,
+   * exactly as its text is.
+   */
+  wording: string | null;
   evidenceStatus: "supported" | "contested" | null;
   episodes: LessonEpisode[];
   createdAt: string;

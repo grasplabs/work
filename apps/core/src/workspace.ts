@@ -947,16 +947,22 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Stores `message` as the chat's next, and marks the chat active then:
-   * every message moves it up its person's list.
+   * Stores `message` as the chat's next, with how long it thought when it
+   * is an answer that did, and marks the chat active then: every message
+   * moves it up its person's list.
    */
-  #store(chatId: ChatId, message: Message): { id: number; createdAt: Date } {
+  #store(
+    chatId: ChatId,
+    message: Message,
+    thinkingMs: number | null = null
+  ): { id: number; createdAt: Date } {
     const stored = this.#db
       .insert(chatMessages)
       .values({
         chatId,
         message: JSON.stringify(message),
         createdAt: new Date(),
+        thinkingMs,
       })
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
       .get();
@@ -969,21 +975,24 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Stores `message` as the chat's next, and shows it to its watchers;
-   * its ID.
+   * Stores `message` as the chat's next (`#store`), and shows it to its
+   * watchers; its ID.
    */
   #keep(
     chatId: ChatId,
     message: Message,
-    files: readonly string[] = []
+    {
+      thinkingMs,
+      files = [],
+    }: { thinkingMs?: number; files?: readonly string[] } = {}
   ): number {
     // A question and the files it carries are kept together: each file is
     // its, and no other's.
     const { id, createdAt } =
       files.length === 0
-        ? this.#store(chatId, message)
+        ? this.#store(chatId, message, thinkingMs ?? null)
         : this.ctx.storage.transactionSync(() => {
-            const stored = this.#store(chatId, message);
+            const stored = this.#store(chatId, message, thinkingMs ?? null);
             this.#db
               .update(chatFiles)
               .set({ messageId: stored.id })
@@ -1002,7 +1011,8 @@ export class Workspace extends DurableObject<Env> {
         id,
         message,
         createdAt,
-        message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined
+        message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined,
+        thinkingMs ?? null
       ),
       files.length === 0 ? undefined : this.#filesAfter(chatId, id - 1)
     );
@@ -1724,7 +1734,7 @@ export class Workspace extends DurableObject<Env> {
         signal: cancel.signal,
         events: () => live.events.splice(0),
         withheld: async () => await this.#withheldRuns(scope),
-        keep: (message) => {
+        keep: (message, thinkingMs) => {
           // A job's notice is this turn's only (`LiveTurn`).
           if (
             message.role === "system" &&
@@ -1737,11 +1747,11 @@ export class Workspace extends DurableObject<Env> {
             this.#partials.delete(chat.id);
           }
           // The turn's one question carries its files.
-          const id = this.#keep(
-            chat.id,
-            message,
-            message.role === "user" ? files.map(({ id: file }) => file) : []
-          );
+          const id = this.#keep(chat.id, message, {
+            thinkingMs,
+            files:
+              message.role === "user" ? files.map(({ id: file }) => file) : [],
+          });
           if (message.role === "assistant") {
             answer = id;
           }
@@ -4530,13 +4540,14 @@ export class Workspace extends DurableObject<Env> {
       .where(and(eq(chatMessages.chatId, chatId), gt(chatMessages.id, after)))
       .orderBy(asc(chatMessages.id))
       .all()
-      .flatMap(({ id, message, createdAt }) => {
+      .flatMap(({ id, message, createdAt, thinkingMs }) => {
         const shown = withFiles(
           chatMessageOf(
             id,
             storedMessageSchema.parse(JSON.parse(message)),
             createdAt,
-            givenBy(id)
+            givenBy(id),
+            thinkingMs
           ),
           carried
         );
