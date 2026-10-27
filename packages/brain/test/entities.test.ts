@@ -3,9 +3,11 @@ import { asc, eq } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ensureCollection } from "../src/collections.ts";
+import { brainErrors } from "../src/contract.ts";
 import { brainMentions } from "../src/db/schema.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
+  decideEntityMatch,
   entitiesFor,
   entityMatchProposals,
   entitySources,
@@ -13,6 +15,7 @@ import {
   linkProposals,
   mentionsPerSource,
   runLinking,
+  sameAsFor,
   settleMs,
   sweepLinking,
 } from "../src/entities.ts";
@@ -46,7 +49,9 @@ import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 // 6. A match across collections (GRA-1080) is made, shown or counted for
 //    a reader who can't read both sides, so a member learns whether a
 //    collection hidden from them holds a name (the probe #1203 closed); or
-//    two of a name are merged on the name alone.
+//    two of a name are merged on the name alone; or a decision on one is
+//    made without reading both sides or evidence, shows to a reader of one
+//    side, rewrites an ID, or outlives an erased entity.
 
 /** An entity as the fake model knows it. */
 interface Known {
@@ -161,6 +166,16 @@ const link = async (
   version: number
 ): Promise<void> => {
   await runLinking(host.brain, { source: `doc:${documentId}`, version }, once);
+};
+
+/** The code `promise` was refused with, or "ok". */
+const outcome = async (promise: Promise<unknown>): Promise<string> => {
+  try {
+    await promise;
+    return "ok";
+  } catch (error) {
+    return brainErrors.codeOf(error) ?? String(error);
+  }
 };
 
 /** Text in its order, as `toSorted` takes a comparison. */
@@ -1083,6 +1098,144 @@ describe("entity linking", () => {
       same: before,
       before: [],
       admin: [{ name, sides: 2 }],
+    });
+  });
+
+  it("decides a match only for a person who reads both sides, `same` only with evidence they read, audited, and shows it only to readers of both", async () => {
+    const person = `Ada ${word()}`;
+    const concept = `Payroll ${word()}`;
+    const host = testHost(
+      gazetteer([
+        { kind: "person", name: person },
+        { kind: "concept", name: concept },
+      ])
+    );
+    const sales = await newCollection(host.brain, "Sales");
+    const support = await newCollection(host.brain, "Support");
+    const saved = [
+      await save(host, sales, "a.md", `${person} runs ${concept}.`),
+      await save(host, support, "b.md", `${person} asks about ${concept}.`),
+      await save(
+        host,
+        sales,
+        "hr.md",
+        "HR confirms both notes are about one person."
+      ),
+    ];
+    for (const { id } of saved) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, on purpose
+      await link(host, id, 1);
+    }
+    const admin: Caller = { userId: "admin", reads: [sales.id, support.id] };
+    const member: Caller = { userId: "member", reads: [sales.id] };
+    const proposals = await entityMatchProposals(host.brain, admin);
+    const pairOf = (kind: string): [string, string] => {
+      const ids = proposals
+        .find((proposal) => proposal.kind === kind)
+        ?.entities.map(({ id }) => id);
+      return [ids?.[0] ?? "", ids?.[1] ?? ""];
+    };
+    const people = pairOf("person");
+    const concepts = pairOf("concept");
+    const evidence = { documentId: saved[2]?.id ?? "", version: 1 };
+    const decide = async (caller: Caller, input: unknown) =>
+      await outcome(decideEntityMatch(host.brain, caller, input));
+    const refused = {
+      // They read one side: the other isn't there, as for an ID that's no entity.
+      byMember: await decide(member, {
+        entities: people,
+        decision: "same",
+        evidence,
+      }),
+      noSuchEntity: await decide(admin, {
+        entities: [people[0], "nobody"],
+        decision: "different",
+      }),
+      // A name alone never makes two people one.
+      noEvidence: await decide(admin, { entities: people, decision: "same" }),
+    };
+    const accepted = await decideEntityMatch(host.brain, admin, {
+      entities: people,
+      decision: "same",
+      evidence,
+    });
+    await decideEntityMatch(host.brain, admin, {
+      entities: concepts,
+      decision: "different",
+    });
+    const named = await entitiesFor(host.brain, admin, { query: person });
+    const audited = host.events.filter(
+      ({ action }) => action === "brain.entity_match.decided"
+    );
+
+    expect({
+      refused,
+      accepted: accepted.decision,
+      left: await entityMatchProposals(host.brain, admin),
+      sameForAdmin: await sameAsFor(host.brain, admin, people[0]),
+      sameForMember: await sameAsFor(host.brain, member, people[0]),
+      differentIsNotSame: await sameAsFor(host.brain, admin, concepts[0]),
+      // Never rewritten: still two of her, by their own IDs.
+      ids: named.map(({ id }) => id).toSorted(byText),
+      audited: audited.map(({ detail }) => detail?.decision),
+    }).toStrictEqual({
+      refused: {
+        byMember: "brain.not_found",
+        noSuchEntity: "brain.not_found",
+        noEvidence: "brain.invalid",
+      },
+      accepted: "same",
+      left: [],
+      sameForAdmin: [people[1]],
+      sameForMember: [],
+      differentIsNotSame: [],
+      ids: [...people].toSorted(byText),
+      audited: ["same", "different"],
+    });
+  });
+
+  it("drops a decision with an entity an erasure removes, so none outlives it", async () => {
+    const person = `Bo ${word()}`;
+    const host = testHost(gazetteer([{ kind: "person", name: person }]));
+    const sales = await newCollection(host.brain, "Sales");
+    const support = await newCollection(host.brain, "Support");
+    const first = await save(host, sales, "a.md", `${person} called.`);
+    const second = await save(host, support, "b.md", `${person} called back.`);
+    const proof = await save(host, sales, "proof.md", "The same caller.");
+    for (const { id } of [first, second, proof]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, on purpose
+      await link(host, id, 1);
+    }
+    const admin: Caller = { userId: "admin", reads: [sales.id, support.id] };
+    const [proposal] = await entityMatchProposals(host.brain, admin);
+    const [a = "", b = ""] = proposal?.entities.map(({ id }) => id) ?? [];
+    await decideEntityMatch(host.brain, admin, {
+      entities: [a, b],
+      decision: "same",
+      evidence: { documentId: proof.id, version: 1 },
+    });
+    const count = async () => {
+      const row = await env.BRAIN.prepare(
+        "SELECT count(*) AS n FROM brain_entity_matches WHERE entity_a IN (?, ?) OR entity_b IN (?, ?)"
+      )
+        .bind(a, b, a, b)
+        .first<{ n: number }>();
+      return row?.n ?? -1;
+    };
+    const before = await count();
+    const writer = writerOf("admin");
+    const content = {
+      type: "content",
+      documentIds: [first.id],
+      terms: [person],
+      reason: "erasure_request",
+    };
+    const prepared = await preparePurge(host.brain, writer, content, noCopies);
+    await purge(host.brain, writer, content, prepared.token, noCopies);
+
+    expect({ before, after: await count() }).toStrictEqual({
+      before: 1,
+      after: 0,
     });
   });
 });

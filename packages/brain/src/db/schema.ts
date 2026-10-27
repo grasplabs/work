@@ -857,6 +857,36 @@ export const brainEntityKeys = sqliteTable(
 );
 
 /**
+ * A decision on whether two entities of different collections are one
+ * (GRA-1080): `same`, with the source a reviewer who reads both cites as
+ * evidence, or `different`; who decided is the audit log's to say.
+ * Entity IDs only, never a name or a person, the pair in
+ * order (`entityA` < `entityB`), each end gone with its entity, so an
+ * erased entity leaves no decision behind. It never rewrites an entity's
+ * ID: a reader sees it only where they read both sides.
+ */
+export const brainEntityMatches = sqliteTable(
+  "brain_entity_matches",
+  {
+    entityA: text("entity_a")
+      .notNull()
+      .references(() => brainEntities.id, { onDelete: "cascade" }),
+    entityB: text("entity_b")
+      .notNull()
+      .references(() => brainEntities.id, { onDelete: "cascade" }),
+    decision: text({ enum: ["same", "different"] }).notNull(),
+    /** The evidence for `same`: a document, at its version. */
+    evidenceDocumentId: text("evidence_document_id"),
+    evidenceVersion: integer("evidence_version"),
+    decidedAt: timestamp("decided_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.entityA, table.entityB] }),
+    index("brain_entity_matches_b_idx").on(table.entityB),
+  ]
+);
+
+/**
  * The entity mentions of each source's linked version, replaced whole by
  * each generation: `linked` to one entity, or `ambiguous` with the
  * entities it may be (`candidates`, a JSON array), never linked until
