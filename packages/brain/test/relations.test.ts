@@ -13,7 +13,7 @@ import {
 import type { IndexStep } from "../src/indexing.ts";
 import { remember } from "../src/memories.ts";
 import { preparePurge, purge } from "../src/purge.ts";
-import { relationsFor } from "../src/relations.ts";
+import { relationsExplain, relationsFor } from "../src/relations.ts";
 import type { Caller, StartedJob } from "./host.ts";
 import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 
@@ -523,6 +523,184 @@ describe("typed relations", () => {
       byStart: "ok",
       person: "ok",
     });
+  });
+});
+
+/** A path as names: each relation's subject, predicate and object, then where it ends. */
+const named = (explanation: Awaited<ReturnType<typeof relationsExplain>>) =>
+  explanation.paths.map(({ relations, to }) => [
+    ...relations.map(
+      ({ subject, predicate, object }) =>
+        `${subject.name} ${predicate} ${object.name}`
+    ),
+    `→ ${to.name}`,
+  ]);
+
+/** The Brain's error code a read was refused with, or `read`. */
+const refusal = async (promise: Promise<unknown>) => {
+  try {
+    await promise;
+    return "read";
+  } catch (error) {
+    return brainErrors.codeOf(error);
+  }
+};
+
+/** Paths in one order, whatever order they were found in. */
+const inOrder = (paths: string[][]): string[][] =>
+  paths.toSorted((a, b) => a.join("\n").localeCompare(b.join("\n")));
+
+describe("explained relations", () => {
+  /**
+   * A team's handbook where Anna owns onboarding, onboarding uses Personio,
+   * and, in a memo only some may read, onboarding uses a secret tool.
+   */
+  const handbook = async () => {
+    const thing = `Onboarding ${word()}`;
+    const tool = `Personio ${word()}`;
+    const secret = `Vault ${word()}`;
+    const owns = `Anna owns ${thing}.`;
+    const uses = `${thing} uses ${tool}.`;
+    const hidden = `${thing} uses ${secret}.`;
+    const host = testHost(
+      modelOf({
+        [owns]: {
+          entities: [
+            { kind: "person", name: "Anna" },
+            { kind: "process", name: thing },
+            { kind: "tool", name: tool },
+          ],
+          relations: [
+            {
+              subject: "Anna",
+              predicate: "owns",
+              object: thing,
+              evidence: owns,
+            },
+            { subject: thing, predicate: "uses", object: tool, evidence: uses },
+          ],
+        },
+        [hidden]: {
+          entities: [
+            { kind: "process", name: thing },
+            { kind: "tool", name: secret },
+          ],
+          relations: [
+            {
+              subject: thing,
+              predicate: "uses",
+              object: secret,
+              evidence: hidden,
+            },
+          ],
+        },
+      })
+    );
+    const team = await newCollection(host.brain, "Operations");
+    await savedAndLinked(host, team, "handbook.md", `${owns}\n${uses}`);
+    await savedAndLinked(host, team, "memo.md", hidden);
+    const everyone: Caller = { userId: "reader", reads: [team.id] };
+    const some: Caller = {
+      userId: "other",
+      reads: [team.id],
+      only: { [team.id]: ["handbook.md"] },
+    };
+    const anna = await entityOf(host, everyone, "Anna");
+    return { host, everyone, some, anna, thing, tool, secret };
+  };
+
+  it("follows an entity's relations two hops out, each path with its passages, only through what the reader may read", async () => {
+    const { host, everyone, some, anna, thing, tool, secret } =
+      await handbook();
+
+    const [all, narrowed, oneHop] = await Promise.all([
+      relationsExplain(host.brain, everyone, { entityId: anna }),
+      relationsExplain(host.brain, some, { entityId: anna }),
+      relationsExplain(host.brain, everyone, { entityId: anna, hops: 1 }),
+    ]);
+
+    expect({
+      all: inOrder(named(all)),
+      narrowed: named(narrowed),
+      oneHop: named(oneHop),
+      evidence: all.paths[0]?.relations[0]?.evidence,
+      truncated: [all.truncated, narrowed.truncated],
+    }).toStrictEqual({
+      all: inOrder([
+        [`Anna owns ${thing}`, `→ ${thing}`],
+        [`Anna owns ${thing}`, `${thing} uses ${secret}`, `→ ${secret}`],
+        [`Anna owns ${thing}`, `${thing} uses ${tool}`, `→ ${tool}`],
+      ]),
+      // The memo is none of theirs: its relation neither shows nor counts.
+      narrowed: [
+        [`Anna owns ${thing}`, `→ ${thing}`],
+        [`Anna owns ${thing}`, `${thing} uses ${tool}`, `→ ${tool}`],
+      ],
+      oneHop: [[`Anna owns ${thing}`, `→ ${thing}`]],
+      evidence: `Anna owns ${thing}.`,
+      truncated: [false, false],
+    });
+  });
+
+  it("stops at its budget of paths or its deadline, and says it was cut", async () => {
+    const { host, everyone, anna } = await handbook();
+    // A clock that has run past any deadline by the second hop.
+    let calls = 0;
+    const late = {
+      ...host.brain,
+      ports: {
+        ...host.brain.ports,
+        clock: () => {
+          calls += 1;
+          return new Date(Date.now() + (calls === 1 ? 0 : 10_000));
+        },
+      },
+    };
+
+    const [few, slow] = await Promise.all([
+      relationsExplain(host.brain, everyone, {
+        entityId: anna,
+        budget: { maxPaths: 1 },
+      }),
+      relationsExplain(late, everyone, { entityId: anna }),
+    ]);
+
+    expect({
+      few: { paths: few.paths.length, truncated: few.truncated },
+      slow: { paths: slow.paths.length, truncated: slow.truncated },
+    }).toStrictEqual({
+      few: { paths: 1, truncated: true },
+      slow: { paths: 1, truncated: true },
+    });
+  });
+
+  it("takes no graph expression, and nothing without the Brain's gate", async () => {
+    const { host, anna } = await handbook();
+
+    await expect(
+      Promise.all([
+        refusal(
+          relationsExplain(
+            host.brain,
+            { userId: "reader", reads: [] },
+            {
+              entityId: anna,
+              hops: 3,
+            }
+          )
+        ),
+        refusal(
+          relationsExplain(
+            host.brain,
+            { userId: "reader", reads: [] },
+            {
+              entityId: anna,
+              where: "1 = 1",
+            }
+          )
+        ),
+      ])
+    ).resolves.toStrictEqual(["brain.invalid", "brain.invalid"]);
   });
 });
 
