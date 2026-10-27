@@ -71,6 +71,7 @@ import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflo
 import { Route as ShellWorkflowsWorkflowRouteImport } from './routes/_shell.workflows.$workflow'
 import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
 import { Route as KitExamplesNameRouteImport } from './routes/kit_.examples.$name'
+import { Route as ShellAppsAppSettingsRouteImport } from './routes/_shell.apps.$app_.settings'
 import { Route as ShellBrainSectionsSectionIdRouteImport } from './routes/_shell.brain.sections.$sectionId'
 import { Route as ShellDomainsEngineIndexRouteImport } from './routes/_shell.domains.$engine.index'
 import { Route as ShellEnginesEngineIndexRouteImport } from './routes/_shell.engines.$engine.index'
@@ -414,6 +415,11 @@ const KitExamplesNameRoute = KitExamplesNameRouteImport.update({
   path: '/kit/examples/$name',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ShellAppsAppSettingsRoute = ShellAppsAppSettingsRouteImport.update({
+  id: '/apps/$app_/settings',
+  path: '/apps/$app/settings',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellBrainSectionsSectionIdRoute =
   ShellBrainSectionsSectionIdRouteImport.update({
     id: '/sections/$sectionId',
@@ -640,6 +646,7 @@ export interface FileRoutesByFullPath {
   '/policies/': typeof ShellPoliciesIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
+  '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/landscape/$appId/audit': typeof ShellLandscapeAppIdAuditRoute
   '/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
@@ -727,6 +734,7 @@ export interface FileRoutesByTo {
   '/policies': typeof ShellPoliciesIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
+  '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/landscape/$appId/audit': typeof ShellLandscapeAppIdAuditRoute
   '/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
@@ -820,6 +828,7 @@ export interface FileRoutesById {
   '/_shell/policies/': typeof ShellPoliciesIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
+  '/_shell/apps/$app_/settings': typeof ShellAppsAppSettingsRoute
   '/_shell/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/_shell/landscape/$appId/audit': typeof ShellLandscapeAppIdAuditRoute
   '/_shell/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
@@ -913,6 +922,7 @@ export interface FileRouteTypes {
     | '/policies/'
     | '/settings/'
     | '/workflows/'
+    | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
     | '/landscape/$appId/audit'
     | '/landscape/$appId/connections'
@@ -1000,6 +1010,7 @@ export interface FileRouteTypes {
     | '/policies'
     | '/settings'
     | '/workflows'
+    | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
     | '/landscape/$appId/audit'
     | '/landscape/$appId/connections'
@@ -1092,6 +1103,7 @@ export interface FileRouteTypes {
     | '/_shell/policies/'
     | '/_shell/settings/'
     | '/_shell/workflows/'
+    | '/_shell/apps/$app_/settings'
     | '/_shell/brain/sections/$sectionId'
     | '/_shell/landscape/$appId/audit'
     | '/_shell/landscape/$appId/connections'
@@ -1574,6 +1586,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KitExamplesNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_shell/apps/$app_/settings': {
+      id: '/_shell/apps/$app_/settings'
+      path: '/apps/$app/settings'
+      fullPath: '/apps/$app/settings'
+      preLoaderRoute: typeof ShellAppsAppSettingsRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/brain/sections/$sectionId': {
       id: '/_shell/brain/sections/$sectionId'
       path: '/sections/$sectionId'
@@ -1924,6 +1943,7 @@ interface ShellRouteChildren {
   ShellLandscapeIndexRoute: typeof ShellLandscapeIndexRoute
   ShellPoliciesIndexRoute: typeof ShellPoliciesIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
+  ShellAppsAppSettingsRoute: typeof ShellAppsAppSettingsRoute
   ShellLinksAppSurfaceRoute: typeof ShellLinksAppSurfaceRoute
   ShellPoliciesDocumentsPolicyIdRoute: typeof ShellPoliciesDocumentsPolicyIdRoute
   ShellPoliciesRulesRuleIdRoute: typeof ShellPoliciesRulesRuleIdRoute
@@ -1962,6 +1982,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellLandscapeIndexRoute: ShellLandscapeIndexRoute,
   ShellPoliciesIndexRoute: ShellPoliciesIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
+  ShellAppsAppSettingsRoute: ShellAppsAppSettingsRoute,
   ShellLinksAppSurfaceRoute: ShellLinksAppSurfaceRoute,
   ShellPoliciesDocumentsPolicyIdRoute: ShellPoliciesDocumentsPolicyIdRoute,
   ShellPoliciesRulesRuleIdRoute: ShellPoliciesRulesRuleIdRoute,
