@@ -17,8 +17,11 @@ import type { Person } from "./people.ts";
 // submitting `workflow.respond`). Grasp's own dialog, outside the frame,
 // shows what would be recorded: cancelled, nothing is, and the draft
 // stays; confirmed, the answer is recorded, the inbox empties without a
-// refresh and the run goes on. What the host refuses, and every race of
-// answers, are core's own tests (apps/core/test/screen-workflow-decisions.test.ts).
+// refresh and the run goes on. The reviewer watches a run only while a
+// decision of it asks them: one asking someone else, or one whose answer
+// they gave, reads as no run at all, on a real engine. What else the host
+// refuses, and every race of answers, are core's own tests
+// (apps/core/test/screen-workflow-decisions.test.ts).
 
 // A trace of every failing page, kept as the run's artifact.
 test.use({ trace: "retain-on-failure" });
@@ -42,10 +45,10 @@ const stringsDescriptor = (names: readonly string[]) =>
     .descriptor;
 
 /**
- * A workflow asking `reviewer` for decision `contract`, as `approval`, in
- * its task `ask`, then greeting.
+ * A workflow asking the person its input names (`reviewer`, a user ID) for
+ * decision `contract`, as `approval`, in its task `ask`, then greeting.
  */
-const definitionOf = (name: string, contract: string, reviewer: string) =>
+const definitionOf = (name: string, contract: string) =>
   JSON.stringify({
     document: {
       dsl: "1.0.3",
@@ -61,7 +64,12 @@ const definitionOf = (name: string, contract: string, reviewer: string) =>
         },
       },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
+    input: {
+      schema: objectSchema({
+        who: { type: "string" },
+        reviewer: { type: "string" },
+      }),
+    },
     output: { schema: objectSchema({ status: { type: "string" } }) },
     do: [
       {
@@ -69,7 +77,7 @@ const definitionOf = (name: string, contract: string, reviewer: string) =>
           call: "grasp.decision",
           with: {
             binding: "approval",
-            recipients: [`person:${reviewer}`],
+            recipients: '${ ["person:" + $workflow.input.reviewer] }',
             prompt: "Greet them?",
             input: { who: "${ $workflow.input.who }" },
           },
@@ -80,11 +88,15 @@ const definitionOf = (name: string, contract: string, reviewer: string) =>
   });
 
 /**
- * The App: it declares the `followUp` workflow; its screen starts runs
- * of it, shows the latest one's status, and lists the decisions waiting
+ * The App: it declares the `followUp` workflow; its screen starts runs of
+ * it asking `admin` or `colleague` (user IDs), shows the latest one's ID
+ * and status, watches any run by its ID, and lists the decisions waiting
  * for the person, each answered through its own decision form.
  */
-const appFiles = (): Record<string, string> => ({
+const appFiles = (
+  admin: string,
+  colleague: string
+): Record<string, string> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({ requests: defineTable({ who: v.string() }) });
@@ -92,7 +104,7 @@ export default defineSchema({ requests: defineTable({ who: v.string() }) });
   "operations/requests.ts": `import { resource, v } from "@grasp-os/sdk";
 
 export const followUp = resource.workflow("followUp", {
-  input: v.object({ who: v.string().trim().min(1) }),
+  input: v.object({ who: v.string().trim().min(1), reviewer: v.string() }),
   output: v.object({ status: v.string() }),
 });
 `,
@@ -167,23 +179,54 @@ export function Review({
   );
 }
 `,
+  "screens/watched.tsx": `import { useWorkflow } from "@grasp-os/sdk/react";
+import { workflows } from "#grasp";
+
+/** Run \`runId\`'s status, as the person may see it: thrown otherwise. */
+export function Watched({ runId }: { runId: string }) {
+  const run = useWorkflow(workflows.followUp, { runId });
+  return <output aria-label="Watched status">{run.status}</output>;
+}
+`,
   "screens/desk.tsx": `import { useQuery, useWorkflow } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
+import { useState } from "react";
 import { workflows } from "#grasp";
 import { Review } from "./review.tsx";
+import { Watched } from "./watched.tsx";
 
 export default function Desk() {
   const followUp = useWorkflow(workflows.followUp);
   const inbox = useQuery(workflows.followUp.queries.decisions, {
     pagination: {},
   });
+  const [runId, setRunId] = useState("");
+  const [watching, setWatching] = useState<string | null>(null);
   return (
     <main>
       <h1>Follow-ups</h1>
       <output aria-label="Status">{followUp.status}</output>
-      <Button onClick={() => void followUp.run({ who: "Ada" })}>
+      <output aria-label="Run">
+        {followUp.status === "idle" ? "" : followUp.runId}
+      </output>
+      <Button
+        onClick={() => void followUp.run({ who: "Ada", reviewer: "${admin}" })}
+      >
         Start follow-up
       </Button>
+      <Button
+        onClick={() =>
+          void followUp.run({ who: "Grace", reviewer: "${colleague}" })
+        }
+      >
+        Start colleague's follow-up
+      </Button>
+      <label>
+        Run to watch
+        <input onChange={(event) => setRunId(event.target.value)} value={runId} />
+      </label>
+      <Button onClick={() => setWatching(runId)}>Watch</Button>
+      {watching === null ? null : <Watched runId={watching} />}
       <h2>Waiting for you</h2>
       <ul aria-label="Decisions">
         {(inbox?.items ?? []).map((item) => (
@@ -200,12 +243,17 @@ export default function Desk() {
 
 /**
  * A new App of `appFiles` whose `followUp` binds version 1 of a new
- * workflow of `builder`'s asking `admin` alone, its decision binding
- * approved for them, released, published and current, its screens'
- * code approved and its `start` grant given by `admin`. Bound before the
- * release, so the screens' `workflows.followUp` names the decision.
+ * workflow of `builder`'s asking `admin` or `colleague`, its decision
+ * binding approved for them, released, published and current, its
+ * screens' code approved and its `start` grant given by `admin`. Bound
+ * before the release, so the screens' `workflows.followUp` names the
+ * decision.
  */
-const boundApp = async (builder: Person, admin: Person): Promise<string> => {
+const boundApp = async (
+  builder: Person,
+  admin: Person,
+  colleague: Person
+): Promise<string> => {
   const builds = apiOf(builder);
   const decides = apiOf(admin);
   try {
@@ -219,16 +267,24 @@ const boundApp = async (builder: Person, admin: Person): Promise<string> => {
     const { id: app } = await builds.api.apps.create({
       name: `Requests ${crypto.randomUUID().slice(0, 8)}`,
     });
+    await builds.api.apps.members.add(app, {
+      type: "person",
+      id: colleague.userId,
+      role: "user",
+    });
     const workflow = await builds.api.workflowResources.create(
       `greet-${crypto.randomUUID().slice(0, 8)}`
     );
     await builds.api.workflowResources.publish(workflow.id, {
-      definition: definitionOf(workflow.name, key, admin.userId),
+      definition: definitionOf(workflow.name, key),
       basedOn: null,
     });
     await decides.api.workflowResources.approveBinding(workflow.id, {
       alias: "approval",
-      target: { kind: "decision", deciders: [`person:${admin.userId}`] },
+      target: {
+        kind: "decision",
+        deciders: [`person:${admin.userId}`, `person:${colleague.userId}`],
+      },
       reviewed: { version: 1 },
     });
     await builds.api.workflowResources.bindToApp(workflow.id, {
@@ -238,7 +294,7 @@ const boundApp = async (builder: Person, admin: Person): Promise<string> => {
     });
     const { version } = await builds.api.apps.files.commit(
       app,
-      appFiles(),
+      appFiles(admin.userId, colleague.userId),
       "Requests"
     );
     await builds.api.apps.versions.setCurrent(app, version);
@@ -280,32 +336,69 @@ const openDesk = async (page: Page, app: string): Promise<FrameLocator> => {
 const decisionsOn = (screen: FrameLocator) =>
   screen.getByRole("list", { name: "Decisions" }).getByRole("listitem");
 
-test("a reviewer answers a run's decision through a decision form on a screen, confirmed in Grasp's own dialog, and a cancelled one records nothing", async ({
-  pageOf,
-}) => {
-  const { builder, admin } = peopleIn("screenDecisionForm");
-  const app = await boundApp(builder, admin);
-  const [first, second] = await Promise.all([pageOf(builder), pageOf(admin)]);
-  const [starter, reviewer] = await Promise.all([
-    openDesk(first, app),
-    openDesk(second, app),
-  ]);
-
-  // The starter starts a run; it waits for its decision, which only the
-  // reviewer's inbox lists, without a refresh.
-  await starter.getByRole("button", { name: "Start follow-up" }).click();
-  await expect(starter.getByRole("status", { name: "Status" })).toHaveText(
+/** The ID of the run `screen` started last, once it shows it running. */
+const startedRun = async (
+  screen: FrameLocator,
+  button: string
+): Promise<string> => {
+  const run = screen.getByRole("status", { name: "Run" });
+  const before = (await run.textContent()) ?? "";
+  await screen.getByRole("button", { name: button }).click();
+  await expect(run).not.toHaveText(before, live);
+  await expect(screen.getByRole("status", { name: "Status" })).toHaveText(
     "running",
     live
   );
+  return (await run.textContent()) ?? "";
+};
+
+/** Watches run `runId` on `screen`, through `useWorkflow({ runId })`. */
+const watch = async (screen: FrameLocator, runId: string): Promise<void> => {
+  await screen.getByRole("textbox", { name: "Run to watch" }).fill(runId);
+  await screen.getByRole("button", { name: "Watch" }).click();
+};
+
+/** What a screen shows of a run the person may not see (the SDK's message). */
+const noSuchRun = "This workflow has no such run.";
+
+test("a reviewer answers a run's decision through a decision form on a screen, confirmed in Grasp's own dialog, and watches only a run whose decision asks them now", async ({
+  pageOf,
+}) => {
+  const { builder, admin, colleague } = peopleIn("screenDecisionForm");
+  const app = await boundApp(builder, admin, colleague);
+  const [first, second, third] = await Promise.all([
+    pageOf(builder),
+    pageOf(admin),
+    pageOf(colleague),
+  ]);
+  const [starter, reviewer, other] = await Promise.all([
+    openDesk(first, app),
+    openDesk(second, app),
+    openDesk(third, app),
+  ]);
+
+  // The starter starts a run asking the reviewer, and one asking their
+  // colleague: each waits for its decision, which only the person it asks
+  // has in their inbox, without a refresh.
+  const asked = await startedRun(starter, "Start follow-up");
+  const notAsked = await startedRun(starter, "Start colleague's follow-up");
   await expect(decisionsOn(reviewer)).toHaveCount(1, live);
+  await expect(decisionsOn(other)).toHaveCount(1, live);
   await expect(decisionsOn(starter)).toHaveCount(0);
+  await expect(decisionsOn(reviewer)).toHaveCount(1);
+
+  // A run whose decision asks someone else is none of the reviewer's to
+  // watch: it reads as no run at all.
+  await watch(reviewer, notAsked);
+  await expect(reviewer.getByRole("alert")).toContainText(noSuchRun, live);
+  const desk = await openDesk(second, app);
 
   // The reviewer chooses to approve and writes a comment: nothing is sent
   // until they submit, and then Grasp's own dialog, outside the frame,
   // shows what would be recorded. Cancelled, nothing is: the decision
   // still waits, and the draft is still there to send.
-  const form = decisionsOn(reviewer).first();
+  await expect(decisionsOn(desk)).toHaveCount(1, live);
+  const form = decisionsOn(desk).first();
   await form.getByRole("radio", { name: "Approve" }).check();
   await form.getByRole("textbox", { name: "Comment" }).fill("Looks right");
   await form.getByRole("button", { name: "Send answer" }).click();
@@ -317,7 +410,7 @@ test("a reviewer answers a run's decision through a decision form on a screen, c
   await expect(confirmation).toContainText("Looks right");
   await confirmation.getByRole("button", { name: "Cancel" }).click();
   await expect(confirmation).toBeHidden();
-  await expect(decisionsOn(reviewer)).toHaveCount(1);
+  await expect(decisionsOn(desk)).toHaveCount(1);
   await expect(form.getByRole("textbox", { name: "Comment" })).toHaveValue(
     "Looks right"
   );
@@ -335,9 +428,19 @@ test("a reviewer answers a run's decision through a decision form on a screen, c
   }).toPass({ timeout: 20_000 });
   await confirmation.getByRole("button", { name: "Confirm" }).click();
   await expect(confirmation).toBeHidden();
-  await expect(decisionsOn(reviewer)).toHaveCount(0, live);
-  await expect(starter.getByRole("status", { name: "Status" })).toHaveText(
-    "completed",
-    live
-  );
+  await expect(decisionsOn(desk)).toHaveCount(0, live);
+  await watch(starter, asked);
+  await expect(
+    starter.getByRole("status", { name: "Watched status" })
+  ).toHaveText("completed", live);
+  // Its answer given, the reviewer's screen goes on: their form of it
+  // leaves with the decision, never failing the screen.
+  await expect(desk.getByRole("alert")).toHaveCount(0);
+  await expect(desk.getByRole("heading", { name: "Follow-ups" })).toBeVisible();
+
+  // Nothing asks the reviewer of the ended run any more: watched again,
+  // it reads as no run, never showing what it returned.
+  await watch(desk, asked);
+  await expect(desk.getByRole("alert")).toContainText(noSuchRun, live);
+  await expect(decisionsOn(other)).toHaveCount(1);
 });
