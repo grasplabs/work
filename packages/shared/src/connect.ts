@@ -308,6 +308,15 @@ export const disconnectPersonalSchema = z.strictObject({
 });
 export type DisconnectPersonal = z.input<typeof disconnectPersonalSchema>;
 
+/**
+ * Erases everything of `ownerUserId`'s in connect (GRA-903): for core
+ * only, once an admin erased someone they removed.
+ */
+export const erasePersonalSchema = z.strictObject({
+  ownerUserId: identifierSchema,
+});
+export type ErasePersonal = z.input<typeof erasePersonalSchema>;
+
 /** One connection, as people see it: never its tokens. */
 export interface ConnectionSummary {
   id: string;
@@ -1724,6 +1733,15 @@ export interface ConnectApi extends PackageRegistryApi, ChannelApi {
   disconnectPersonal: (
     request: DisconnectPersonal
   ) => Promise<{ disconnected: number }>;
+  /**
+   * Erases everything of a person's in connect, for core only, once an
+   * admin erased someone they removed (GRA-903): their personal
+   * connections disconnected again first, then emptied of who their
+   * accounts were, with what calls through them returned and changed, and
+   * their flows and held actions. Safe to ask again. Answers how many of
+   * their connections it emptied.
+   */
+  erasePersonal: (request: ErasePersonal) => Promise<{ connections: number }>;
   /**
    * Spends a flow that came back but can't finish (no session, say), so its
    * code can't be brought back to finish it later.

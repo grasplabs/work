@@ -253,10 +253,25 @@ const channels: ErasureStep = {
 };
 
 /**
+ * Their personal connections, in connect, the only place tokens live
+ * (GRA-1183): disconnected again, each grant revoked at its provider, then
+ * emptied of who their accounts were and of what calls through them
+ * returned (connect's person-erasure.ts). Connect erases once, however
+ * often it is asked; the area is complete once it answered.
+ */
+const connect: ErasureStep = {
+  area: "connect",
+  erase: async (env, userId) => {
+    await env.CONNECT.erasePersonal({ ownerUserId: userId });
+    await completed(drizzle(env.DB), userId, "connect");
+  },
+};
+
+/**
  * The erasure's areas, in the order they run. Each area's own leaf of
  * GRA-903 adds its step here.
  */
-const steps: readonly ErasureStep[] = [identity, channels];
+const steps: readonly ErasureStep[] = [identity, channels, connect];
 
 /** Refuses anyone but one of the client's admins, as members.ts does. */
 const requireMemberAdmin = (by: Identity): void => {
