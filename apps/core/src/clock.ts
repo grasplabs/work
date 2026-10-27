@@ -15,6 +15,7 @@ import type {
 } from "@grasp-os/workerflow/clock";
 
 import { retryAccessRevocations } from "./access-revocations.ts";
+import { reapAbandonedApps } from "./app-removal.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
 import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
@@ -186,6 +187,12 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: async (env) => {
       await indexApps(env);
     },
+  },
+  // Apps a chat created that nobody accepted or works on (app-removal.ts).
+  {
+    name: "apps.reap_abandoned",
+    period: "quarterHour",
+    run: reapAbandonedApps,
   },
   { name: "statistics.sweep", period: "quarterHour", run: sweepStatistics },
   // Brain command receipts past their retention (src/knowledge/memories.ts).
