@@ -230,6 +230,9 @@ const coreDb: D1State = {
       "App token signing keys, private keys encrypted with BETTER_AUTH_SECRET."
     ),
     organizations: exported(auth),
+    policy_documents: exported(`${core}policies.ts`),
+    policy_rules: exported(`${core}policies.ts`),
+    policy_exceptions: exported(`${core}policies.ts`),
     members: exported(auth),
     member_removals: exported(`${core}organization.ts`),
     channel_accounts: exported(`${core}channels/accounts.ts`),
