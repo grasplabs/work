@@ -1106,6 +1106,36 @@ export const stepLimitOf = async (env: Env): Promise<number> => {
   }
 };
 
+/** The model call limit this isolate last read from the quota policy. */
+let lastModelCallLimit: number | undefined;
+
+/**
+ * The model calls a run's lineage may make, as the deployment's quota
+ * policy has it now (`lineageModelRequests`): the ceiling a run's host
+ * holds its model calls to (`maxModelCalls`).
+ *
+ * Read as a run loads, before any of its steps, where a throw would end
+ * the run for good (GRA-1091), so a policy that can't be read for a moment
+ * is logged, and the limit this isolate last read applies, else the
+ * platform's own: never no limit at all. It admits nothing more: every
+ * model request of a run's lineage reads the policy again as it is sent
+ * (models.ts, `scopesNowOf`), and one that can't is held back, so a
+ * lowered limit holds through the moment.
+ */
+export const modelCallLimitOf = async (env: Env): Promise<number> => {
+  try {
+    const { limits } = await quotaPolicy(env);
+    lastModelCallLimit = limits.lineageModelRequests;
+    return lastModelCallLimit;
+  } catch (error) {
+    log.warn("workflow.quota_policy_unread", {
+      ...errorFields(error),
+      limit: "lineageModelRequests",
+    });
+    return lastModelCallLimit ?? platformLimits.lineageModelRequests;
+  }
+};
+
 /**
  * `step`, counting the run's own steps (`stepLimit` is the operator's
  * allowance of them) and refusing one past it, as a failure of that step.
