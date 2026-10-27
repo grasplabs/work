@@ -1,5 +1,6 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -29,19 +30,33 @@ type Admin = Awaited<ReturnType<typeof signedInApi>>;
 const rareWord = (): string =>
   `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
 
-/** A collection everyone reads, holding `word` in one document. */
-const collectionSaying = async (admin: Admin, name: string, word: string) => {
+/**
+ * A collection everyone reads, holding `word` in its one document, and
+ * who says so, `by`.
+ */
+const documentSaying = async (
+  admin: Admin,
+  name: string,
+  word: string,
+  by = "Ops"
+) => {
   const { id } = await admin.api.knowledge.createCollection({
     name: `${name} ${crypto.randomUUID()}`,
     access: "everyone",
   });
-  await admin.api.knowledge.saveDocument({
+  const document = await admin.api.knowledge.saveDocument({
     collectionId: id,
     path: "plan.md",
-    text: `# Plan\n${word} is the plan.`,
+    text: `# Plan\n${word} is the plan, says ${by}.`,
     ifVersion: 0,
   });
-  return id;
+  return { collectionId: id, documentId: document.id };
+};
+
+/** A collection everyone reads, holding `word` in one document. */
+const collectionSaying = async (admin: Admin, name: string, word: string) => {
+  const { collectionId } = await documentSaying(admin, name, word);
+  return collectionId;
 };
 
 /** `files`, their workflow importing the SDK's `brain` too. */
@@ -367,10 +382,16 @@ describe("a workflow's recall through the Brain binding", () => {
     }
   });
 
-  it("fails as revoked, never with its own message, a run that throws what it recalled once it may no longer read it", async () => {
+  it("fails as revoked, never with its own message, a run that throws what it recalled once it may no longer read it, or once it was purged", async () => {
     const admin = await signedInApi(idp, "admin");
     const word = rareWord();
-    const handbook = await collectionSaying(admin, "Handbook", word);
+    const by = rareWord();
+    const { collectionId: handbook, documentId } = await documentSaying(
+      admin,
+      "Handbook",
+      word,
+      by
+    );
     const { id: app } = await admin.api.apps.create({ name: "Recall" });
     const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
     const collectionGrant = await requestGranted(
@@ -412,23 +433,49 @@ describe("a workflow's recall through the Brain binding", () => {
         status,
         code: failure?.error.code ?? null,
         recalledText: stored.includes(word),
+        purgedText: stored.includes(by),
       };
     };
 
     const kept = await thrown();
+    // The document still readable, its ID and collection the same, but who
+    // said it purged from it while the run slept.
+    const purged = await thrown(async () => {
+      const input: PurgeInput = {
+        type: "content",
+        documentIds: [documentId],
+        terms: [by],
+        reason: "erasure_request",
+      };
+      const plan = await admin.api.knowledge.preparePurge(input);
+      await admin.api.knowledge.purge(input, plan.token);
+    });
     const revoked = await thrown(async () => {
       await admin.api.permissions.revoke(collectionGrant);
     });
 
-    expect({ kept, revoked }).toStrictEqual({
+    expect({ kept, purged, revoked }).toStrictEqual({
       // Still readable: its own error, as it threw it.
       kept: {
         status: "failed",
         code: "workflow.run_failed",
         recalledText: true,
+        purgedText: true,
+      },
+      // Purged since: the refusal, nothing it recalled in it.
+      purged: {
+        status: "failed",
+        code: "brain.revoked",
+        recalledText: false,
+        purgedText: false,
       },
       // Not any more: its error is the refusal, its text nowhere in it.
-      revoked: { status: "failed", code: "brain.revoked", recalledText: false },
+      revoked: {
+        status: "failed",
+        code: "brain.revoked",
+        recalledText: false,
+        purgedText: false,
+      },
     });
   });
 });

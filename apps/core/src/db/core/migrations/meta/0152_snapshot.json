@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5b1e7615-f052-4f97-ae16-647b252aeac6",
+  "id": "35452193-6fdb-4a58-845b-a6eef9448660",
   "prevId": "8fac9586-8c51-4f4b-a56e-dff1095ab65e",
   "tables": {
     "access_revocations": {
@@ -6315,6 +6315,20 @@
           "notNull": true,
           "autoincrement": false
         },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pinned": {
+          "name": "pinned",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "permission_id": {
           "name": "permission_id",
           "type": "text",
@@ -6333,13 +6347,14 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "run_brain_evidence_run_id_document_id_permission_id_pk": {
+        "run_brain_evidence_run_id_document_id_version_permission_id_pk": {
           "columns": [
             "run_id",
             "document_id",
+            "version",
             "permission_id"
           ],
-          "name": "run_brain_evidence_run_id_document_id_permission_id_pk"
+          "name": "run_brain_evidence_run_id_document_id_version_permission_id_pk"
         }
       },
       "uniqueConstraints": {},

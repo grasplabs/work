@@ -1,6 +1,7 @@
 import type { Brain } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
 import { recall } from "@grasp-os/brain/recall";
+import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import { readSkill, selectSkill } from "@grasp-os/brain/skills";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
@@ -94,6 +95,7 @@ import { modelWaitRecorded } from "./model-waits.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import {
+  citedVersions,
   recordRunEvidence,
   requireRunEvidenceReadable,
 } from "./run-evidence.ts";
@@ -2814,17 +2816,27 @@ export class RunHost extends RpcTarget {
             await brainCalls[call](brainOf(this.#env), reader, request)
         );
       }
-      const pack = await readAsDelegate(
+      const { pack, pins } = await readAsDelegate(
         this.#env,
         authority,
         context,
         undefined,
-        async (reader) => await recall(brainOf(this.#env), reader, request)
+        async (reader) => {
+          const brain = brainOf(this.#env);
+          const recalled = await recall(brain, reader, request);
+          return {
+            pack: recalled,
+            pins: await d1BrainStore(brain).pinsOf(
+              reader,
+              citedVersions(recalled)
+            ),
+          };
+        }
       );
-      // What it cites, added to the run's evidence (run-evidence.ts):
-      // checked before anything leaves the run from now on. A step replayed
-      // returns its recorded pack and records nothing.
-      await recordRunEvidence(this.#env, this.#run, permissionId, pack);
+      // What it cites, pinned as it was, added to the run's evidence
+      // (run-evidence.ts): checked before anything leaves the run from now
+      // on. A step replayed returns its recorded pack and records nothing.
+      await recordRunEvidence(this.#env, this.#run, permissionId, pins);
       return pack;
     });
   }
