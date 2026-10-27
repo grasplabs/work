@@ -42,9 +42,11 @@ export const partialUpdate = (
     return null;
   }
   const text = gained(shown?.text ?? "", now.text);
+  const reasoning = gained(shown?.reasoning ?? "", now.reasoning);
   return {
     from: text.from,
     text: text.added,
+    reasoning: { from: reasoning.from, text: reasoning.added },
     code: now.code.map(({ callId, code }) => {
       const step = gained(
         shown?.code.find((before) => before.callId === callId)?.code ?? "",

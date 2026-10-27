@@ -895,16 +895,22 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Stores `message` as the chat's next, and marks the chat active then:
-   * every message moves it up its person's list.
+   * Stores `message` as the chat's next, with how long it thought when it
+   * is an answer that did, and marks the chat active then: every message
+   * moves it up its person's list.
    */
-  #store(chatId: ChatId, message: Message): { id: number; createdAt: Date } {
+  #store(
+    chatId: ChatId,
+    message: Message,
+    thinkingMs: number | null = null
+  ): { id: number; createdAt: Date } {
     const stored = this.#db
       .insert(chatMessages)
       .values({
         chatId,
         message: JSON.stringify(message),
         createdAt: new Date(),
+        thinkingMs,
       })
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
       .get();
@@ -917,16 +923,17 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Stores `message` as the chat's next, and shows it to its watchers;
-   * its ID.
+   * Stores `message` as the chat's next (`#store`), and shows it to its
+   * watchers; its ID.
    */
-  #keep(chatId: ChatId, message: Message): number {
-    const { id, createdAt } = this.#store(chatId, message);
+  #keep(chatId: ChatId, message: Message, thinkingMs?: number): number {
+    const { id, createdAt } = this.#store(chatId, message, thinkingMs ?? null);
     const shown = chatMessageOf(
       id,
       message,
       createdAt,
-      message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined
+      message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined,
+      thinkingMs ?? null
     );
     // A step's result shows all it logged: its output goes in the same update.
     if (message.role === "toolResult") {
@@ -1503,7 +1510,7 @@ export class Workspace extends DurableObject<Env> {
         signal: cancel.signal,
         events: () => live.events.splice(0),
         withheld: async () => await this.#withheldRuns(scope),
-        keep: (message) => {
+        keep: (message, thinkingMs) => {
           // A job's notice is this turn's only (`LiveTurn`).
           if (
             message.role === "system" &&
@@ -1515,7 +1522,7 @@ export class Workspace extends DurableObject<Env> {
           if (message.role === "assistant") {
             this.#partials.delete(chat.id);
           }
-          const id = this.#keep(chat.id, message);
+          const id = this.#keep(chat.id, message, thinkingMs);
           if (message.role === "assistant") {
             answer = id;
           }
@@ -4301,12 +4308,13 @@ export class Workspace extends DurableObject<Env> {
       .where(and(eq(chatMessages.chatId, chatId), gt(chatMessages.id, after)))
       .orderBy(asc(chatMessages.id))
       .all()
-      .flatMap(({ id, message, createdAt }) => {
+      .flatMap(({ id, message, createdAt, thinkingMs }) => {
         const shown = chatMessageOf(
           id,
           storedMessageSchema.parse(JSON.parse(message)),
           createdAt,
-          givenBy(id)
+          givenBy(id),
+          thinkingMs
         );
         return shown === undefined ? [] : [shown];
       });
