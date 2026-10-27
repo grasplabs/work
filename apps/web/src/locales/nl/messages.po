@@ -815,14 +815,6 @@ msgstr "{name} {range}, vervuld door {resolved}"
 msgid "{name} {range}, not met"
 msgstr "{name} {range}, niet vervuld"
 
-#: src/chat/builds-state.ts
-msgid "{name} changed"
-msgstr "{name} gewijzigd"
-
-#: src/chat/builds-state.ts
-msgid "{name} changed: it {does}"
-msgstr "{name} gewijzigd: {does}"
-
 #: src/onboarding/hr-leads.tsx
 msgid "{name} didn’t take this service user. Check its ID and token, and that it may read people’s work details."
 msgstr "{name} accepteerde deze service user niet. Controleer de ID en het token, en of hij de werkgegevens van mensen mag lezen."
@@ -879,14 +871,6 @@ msgstr "Logo van {name}"
 #: src/connections/connect-dialog.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} mag schrijven. Wijzigen naar Lezen"
-
-#: src/chat/builds-state.ts
-msgid "{name} no longer changes the domain's data (write → read)"
-msgstr "{name} wijzigt de gegevens van het domein niet meer (schrijven → lezen)"
-
-#: src/chat/builds-state.ts
-msgid "{name} now changes the domain's data (read → write)"
-msgstr "{name} wijzigt nu de gegevens van het domein (lezen → schrijven)"
 
 #: src/connections/connect-dialog.tsx
 msgid "{name} reads only. Change to Write"
@@ -3683,14 +3667,6 @@ msgstr "Wijzigingen die Grasp voor iemand verstuurde waarvan het antwoord verlor
 msgid "Changes something"
 msgstr "Wijzigt iets"
 
-#: src/chat/builds-state.ts
-msgid "changes the domain's data"
-msgstr "wijzigt de gegevens van het domein"
-
-#: src/chat/builds.tsx
-msgid "Changes the domain's data"
-msgstr "Wijzigt de gegevens van het domein"
-
 #: src/engines/store-changes.tsx
 msgid "Changes to the domain's stores"
 msgstr "Wijzigingen in de opslag van het domein"
@@ -4368,10 +4344,6 @@ msgstr "Het adres kon niet worden gekopieerd"
 #: src/landscape/audit-trail.tsx
 msgid "Could not copy the fingerprint"
 msgstr "Kopiëren van de vingerafdruk is mislukt"
-
-#: src/activity/pending.tsx
-msgid "couldn't be read"
-msgstr "kon niet worden gelezen"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "Couldn't load this domain's workflows."
@@ -5473,14 +5445,6 @@ msgstr "Deze chat exporteren"
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
 msgstr "Het auditlogboek geëxporteerd"
-
-#: src/chat/builds.tsx
-msgid "Exports"
-msgstr "Exports"
-
-#: src/activity/pending.tsx
-msgid "Exports of {domain}: {covered}"
-msgstr "Exports van {domain}: {covered}"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -7787,6 +7751,10 @@ msgstr "Naar project verplaatsen"
 msgid "Moved old entries out of the audit trail"
 msgstr "Oude vermeldingen uit het auditlogboek verplaatst"
 
+#: src/activity/pending.tsx
+msgid "Mutations and actions of {domain}"
+msgstr "Mutaties en acties van {domain}"
+
 #: src/interview/voice-bar.tsx
 msgctxt "turn your microphone off for a moment"
 msgid "Mute"
@@ -8615,10 +8583,6 @@ msgstr "Nog geen getekend. Ze verschijnen hier naarmate de interviews binnenkome
 #: src/landscape/data-tab.tsx
 msgid "None found."
 msgstr "Niets gevonden."
-
-#: src/activity/pending.tsx
-msgid "none now"
-msgstr "nu geen"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "None of its rules are in use any more."
@@ -9541,18 +9505,6 @@ msgctxt "the team for people a staff list gives no team"
 msgid "Other"
 msgstr "Overig"
 
-#: src/chat/builds-state.ts
-msgid "Other domains may no longer call {name}"
-msgstr "Andere domeinen mogen {name} niet meer aanroepen"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}"
-msgstr "Andere domeinen mogen nu {name} aanroepen"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}, which {does}"
-msgstr "Andere domeinen mogen nu {name} aanroepen, dat {does}"
-
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
 msgstr "Anders:"
@@ -10186,6 +10138,14 @@ msgstr "Doel en model"
 msgid "Put back"
 msgstr "Terugzetten"
 
+#: src/activity/pending.tsx
+msgid "Queries of {domain}"
+msgstr "Queries van {domain}"
+
+#: src/activity/pending.tsx
+msgid "Queries, mutations and actions of {domain}"
+msgstr "Queries, mutaties en acties van {domain}"
+
 #: src/workflows/runs.tsx
 msgid "Queued"
 msgstr "In de wachtrij"
@@ -10390,10 +10350,6 @@ msgstr "Wordt gelezen…"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reads"
 msgstr "Leest"
-
-#: src/chat/builds-state.ts
-msgid "reads the domain's data"
-msgstr "leest de gegevens van het domein"
 
 #: src/knowledge/uploads.tsx
 #: src/onboarding/setup-frame.tsx
@@ -14702,10 +14658,6 @@ msgstr "Wat Grasp nodig heeft"
 #: src/onboarding/setup-steps.tsx
 msgid "What needs you"
 msgstr "Wat op jou wacht"
-
-#: src/chat/builds.tsx
-msgid "What other domains may call"
-msgstr "Wat andere domeinen mogen aanroepen"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "What people thought of {name}"
