@@ -3442,6 +3442,11 @@ export class Onboarding extends DurableObject<Env> {
           .delete(drawnWorks)
           .where(inList(drawnWorks.work, forgotten))
           .run();
+        // And the ways of a difference checked in them: words of theirs.
+        this.#db
+          .delete(checkedDifferences)
+          .where(inList(checkedDifferences.work, forgotten))
+          .run();
         this.#db
           .delete(drawFailures)
           .where(
@@ -6078,6 +6083,11 @@ export class Onboarding extends DurableObject<Env> {
         led.has(teamOf.get(row.work) ?? "");
       if (rests) {
         this.#db.delete(drawnWorks).where(eq(drawnWorks.work, row.work)).run();
+        // The ways of a difference checked in it hold their words too.
+        this.#db
+          .delete(checkedDifferences)
+          .where(eq(checkedDifferences.work, row.work))
+          .run();
         this.#db
           .delete(drawFailures)
           .where(eq(drawFailures.item, `work:${row.work}`))

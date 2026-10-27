@@ -6,6 +6,7 @@ import type {
 } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -255,6 +256,24 @@ const asStaff = async () => {
   return await core.authenticate();
 };
 
+/** What the store keeps of the difference checked in work `work`'s drawing. */
+const checkedOf = async (work: string) =>
+  await runInDurableObject(onboardingStore(env), (_instance, state) =>
+    state.storage.sql
+      .exec("SELECT way, other FROM checked_differences WHERE work = ?", work)
+      .toArray()
+  );
+
+/** Someone's `action` on their own link (`withdraw`, `delete`). */
+const onLinkOf = async (person: string, action: string) => {
+  const { secret, key } = await deviceOf(person);
+  await routed(interviewApiPath, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action, secret, key }),
+  });
+};
+
 describe("what needs the admin", { timeout: 120_000 }, () => {
   beforeEach(holdAlarm);
 
@@ -326,6 +345,45 @@ describe("what needs the admin", { timeout: 120_000 }, () => {
     expect(differences.map(({ other }) => other)).toStrictEqual([
       "Look up the customer in Salesforce, as someone does.",
     ]);
+  });
+
+  it("keeps no checked difference's words once someone it rests on withdraws, deletes their interview, or a document it had goes", async () => {
+    // Withdrawing.
+    const withdrawn = await team();
+    const { tickets: first } = await drawn(withdrawn);
+    const before = await checkedOf(first);
+    await onLinkOf(withdrawn.doers[0] ?? "", "withdraw");
+    const afterWithdrawal = await checkedOf(first);
+    // Deleting the interview.
+    const deleted = await team();
+    const { tickets: second } = await drawn(deleted);
+    await onLinkOf(deleted.doers[0] ?? "", "delete");
+    const afterDeletion = await checkedOf(second);
+    // A document shared before it was drawn (as its time says), purged.
+    const documented = await team();
+    const store = onboardingStore(env);
+    const { tickets: third } = await drawn(documented);
+    const document = `doc-${crypto.randomUUID()}`;
+    await runInDurableObject(store, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO documents (id, name, at, by, reading) VALUES (?, 'Handbook', ?, 'admin', 'A handbook.')",
+        document,
+        new Date(Date.now() - 600_000).toISOString()
+      );
+    });
+    const beforePurge = await checkedOf(third);
+    await store.forgetDocuments([document], { type: "system" });
+    expect({
+      before: [before.length, beforePurge.length],
+      afterWithdrawal,
+      afterDeletion,
+      afterPurge: await checkedOf(third),
+    }).toStrictEqual({
+      before: [1, 1],
+      afterWithdrawal: [],
+      afterDeletion: [],
+      afterPurge: [],
+    });
   });
 
   it("shows no difference whose other way fewer than five are checked to tell, the drawing's word for five notwithstanding", async () => {
