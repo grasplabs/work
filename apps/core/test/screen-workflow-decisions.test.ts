@@ -1212,12 +1212,12 @@ describe(
           .safeParse(snapshot);
         return parsed.success
           ? {
+              fields: Object.keys(parsed.data).toSorted(),
               waits: parsed.data.waits.map(({ kind, canRespond }) => ({
                 kind,
                 canRespond,
               })),
               control: parsed.data.control,
-              output: "output" in parsed.data,
             }
           : snapshot;
       };
@@ -1301,6 +1301,21 @@ describe(
         ending,
       }).toStrictEqual({
         reviewer: {
+          // Who the run is, its status, its waits and no control: nothing
+          // of its outcome (what it returned, why it failed, what it rolls
+          // back after), however the snapshot grows.
+          fields: [
+            "control",
+            "fingerprint",
+            "finishedAt",
+            "manifestHash",
+            "runId",
+            "startedAt",
+            "status",
+            "waits",
+            "workflowId",
+            "workflowVersion",
+          ],
           // No engine runs these rows' run, so it waits on nothing the
           // engine lists (run-waits.ts); a real run's are the journey's.
           waits: [],
@@ -1310,7 +1325,6 @@ describe(
             canCancel: false,
             pendingControl: null,
           },
-          output: false,
         },
         outsider: "workflow.run_unavailable",
         staff: "workflow.run_unavailable",
