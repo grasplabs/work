@@ -773,19 +773,11 @@ jobs:
         run: echo "ready=$READY" >> "$GITHUB_OUTPUT"
         env:
           READY: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN != '' }}
-      # Loading the R2 key also installs the 1Password CLI the switch is
-      # read with: a setting, so not loaded as a secret, which would mask
-      # every "true" in the log.
-      - id: r2
-        if: steps.setup.outputs.ready == 'true'
-        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
-        with:
-          export-env: false
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          R2_ENDPOINT: op://grasp-os-releases/env/R2_ENDPOINT
-          R2_ACCESS_KEY_ID: op://grasp-os-releases/env/R2_ACCESS_KEY_ID
-          R2_SECRET_ACCESS_KEY: op://grasp-os-releases/env/R2_SECRET_ACCESS_KEY
+      # The switch is read first, with the 1Password CLI, so that with
+      # publishing off the R2 fields needn't exist yet: a setting, not
+      # loaded as a secret, which would mask every "true" in the log.
+      - if: steps.setup.outputs.ready == 'true'
+        uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
       - id: switch
         if: steps.setup.outputs.ready == 'true'
         run: |
@@ -811,6 +803,16 @@ jobs:
         with:
           name: release
           path: release-out
+      - id: r2
+        if: steps.switch.outputs.publish == 'true'
+        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: false
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          R2_ENDPOINT: op://grasp-os-releases/env/R2_ENDPOINT
+          R2_ACCESS_KEY_ID: op://grasp-os-releases/env/R2_ACCESS_KEY_ID
+          R2_SECRET_ACCESS_KEY: op://grasp-os-releases/env/R2_SECRET_ACCESS_KEY
       - if: steps.switch.outputs.publish == 'true'
         run: vp run release:upload --release release-out
         env:
