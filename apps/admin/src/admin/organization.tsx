@@ -423,13 +423,7 @@ const SourceNote = ({ origins }: { origins: readonly Origin[] }) => {
   ];
   return (
     <p className="text-muted-foreground text-xs" data-slot="source-note">
-      {lines.join(" ")}{" "}
-      <Link
-        className="hover:text-foreground underline underline-offset-4"
-        to="/sources"
-      >
-        Sources
-      </Link>
+      {lines.join(" ")}
     </p>
   );
 };

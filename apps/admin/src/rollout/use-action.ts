@@ -8,7 +8,7 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
   release_not_imported: "That release isn't imported.",
   no_targets: "No active client is in that scope.",
   ring_zero_only:
-    "No active client past ring 0 is in that scope, so it would reach only our own deployments: pick a ring or client that has one.",
+    "No active client past Alpha is in that scope, so it would reach only our own deployments: pick a ring or client that has one.",
   too_large:
     "That's more clients than one rollout takes: roll out one ring or client at a time.",
   rollout_running:

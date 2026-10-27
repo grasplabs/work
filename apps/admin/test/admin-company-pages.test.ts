@@ -173,7 +173,7 @@ describe("the company pages, in the admin", () => {
   });
 
   it("offers the imported releases, with their notes, on adding an organization, and every sign-in field", async () => {
-    const releaseId = await importedRelease("feat(core): newest of all");
+    await importedRelease("feat(core): newest of all");
 
     const { status, html } = await page("/new-organization");
 
@@ -187,7 +187,8 @@ describe("the company pages, in the admin", () => {
         'name="domains"',
         'name="admins"',
       ].every((field) => html.includes(field)),
-      newest: html.includes(`${releaseId} · feat(core): newest of all`),
+      // By its version and what it holds, not its id alone.
+      newest: /v\d+\.\d+ · Newest of all/u.test(html),
     }).toStrictEqual({ status: 200, form: true, signIn: true, newest: true });
   });
 

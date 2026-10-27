@@ -18,6 +18,12 @@ import {
   adminAskRequestSchema,
 } from "@grasp-os/shared/admin-ask";
 import {
+  adminKickoffPath,
+  adminKickoffPurpose,
+  adminKickoffRequestSchema,
+} from "@grasp-os/shared/admin-kickoff";
+import type { AdminKickoffView } from "@grasp-os/shared/admin-kickoff";
+import {
   adminSnapshotPath,
   adminSnapshotPurpose,
   adminSnapshotRequestSchema,
@@ -480,6 +486,72 @@ const answerAsk = async (
   return Response.json(account.ask ?? { text: "An answer.", truncated: false });
 };
 
+/** A kickoff with nothing brought in yet, as core answers it. */
+export const emptyKickoff = (): AdminKickoffView => ({
+  transcript: null,
+  read: false,
+  fields: [],
+  teams: 0,
+});
+
+/**
+ * What a client's core answers the admin's kickoff request with, as core
+ * does (core's src/admin-kickoff.ts): the account's kickoff once the
+ * signature checks out, with the key its live version's auth secret gives
+ * for the kickoff's purpose, and the request parses, keeping it; 401 for
+ * a request signed otherwise, 403 for one that doesn't parse or a company
+ * that keeps Grasp's staff out.
+ */
+const answerKickoff = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    adminKickoffPurpose,
+    ["verify"]
+  );
+  const signature = request.headers.get(platformUpdateSignatureHeader) ?? "";
+  const signed = await crypto.subtle.verify(
+    "HMAC",
+    key,
+    Uint8Array.from(signature.match(hexPair) ?? [], (pair) =>
+      Number.parseInt(pair, 16)
+    ),
+    new TextEncoder().encode(body)
+  );
+  if (!signed) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const asked = adminKickoffRequestSchema.safeParse(JSON.parse(body));
+  if (!asked.success) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  account.kickoffAsks.push(asked.data);
+  if (account.kickoff === "shut_out") {
+    return Response.json({ code: "onboarding.staff_only" }, { status: 403 });
+  }
+  return Response.json(account.kickoff ?? emptyKickoff());
+};
+
+/** The admin's signed requests core answers alike: by path, a `POST` each. */
+const signedPosts: ReadonlyMap<
+  string,
+  (
+    account: AccountState,
+    live: VersionState,
+    request: Request
+  ) => Promise<Response>
+> = new Map([
+  [platformUpdatePath, takeNotice],
+  [onboardingSummaryPath, answerSummary],
+  [provisionProbePath, answerProbe],
+  [adminAskPath, answerAsk],
+  [adminKickoffPath, answerKickoff],
+]);
+
 /**
  * The workers.dev subdomains taken across Cloudflare: a subdomain is one
  * account's only.
@@ -854,6 +926,7 @@ export const fakeCloudflareApi = (
       notices: [],
       adminReaders: [],
       asked: [],
+      kickoffAsks: [],
     };
     accounts.set(account.id, account);
     return account;
@@ -1185,17 +1258,10 @@ export const fakeCloudflareApi = (
     ) {
       return new Response("Forbidden", { status: 403 });
     }
-    if (url.pathname === platformUpdatePath && request.method === "POST") {
-      return await takeNotice(account, live, request);
-    }
-    if (url.pathname === onboardingSummaryPath && request.method === "POST") {
-      return await answerSummary(account, live, request);
-    }
-    if (url.pathname === provisionProbePath && request.method === "POST") {
-      return await answerProbe(account, live, request);
-    }
-    if (url.pathname === adminAskPath && request.method === "POST") {
-      return await answerAsk(account, live, request);
+    const signed =
+      request.method === "POST" ? signedPosts.get(url.pathname) : undefined;
+    if (signed !== undefined) {
+      return await signed(account, live, request);
     }
     if (url.pathname === quotaPolicyReportPath && request.method === "POST") {
       return await answerQuotaPolicy(account, script, live, request);
