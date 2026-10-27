@@ -57,7 +57,10 @@ const answerOf = ({ choice, own }: Answer): string =>
 
 /**
  * The answers as the person's message: the one answer alone to a single
- * question; otherwise each question, then its answer, a pair a line.
+ * question; otherwise each answer numbered as its question, one a line.
+ * Only what the person picked or wrote: a question is the model's text,
+ * so sending it would put words they never saw composed in their mouth,
+ * into the transcript, their memory and the brain.
  */
 export const answersText = (
   asked: ChatAsked,
@@ -67,8 +70,8 @@ export const answersText = (
     ? answerOf(answers[0] ?? unanswered)
     : asked.questions
         .map(
-          ({ question }, index) =>
-            `${question} ${answerOf(answers[index] ?? unanswered)}`
+          (_question, index) =>
+            `${index + 1}. ${answerOf(answers[index] ?? unanswered)}`
         )
         .join("\n");
 

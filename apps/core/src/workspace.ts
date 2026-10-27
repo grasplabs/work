@@ -926,7 +926,8 @@ export class Workspace extends DurableObject<Env> {
       id,
       message,
       createdAt,
-      message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined
+      message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined,
+      message.role === "assistant" && this.#asksIn(chatId)
     );
     // A step's result shows all it logged: its output goes in the same update.
     if (message.role === "toolResult") {
@@ -2476,6 +2477,19 @@ export class Workspace extends DurableObject<Env> {
    * to the chat's code before it was stored (after an earlier message),
    * that the chat still keeps.
    */
+  /**
+   * Whether the chat's agent is offered `askQuestions`: in Grasp's own
+   * app, never in a chat app's chat (agent.ts), which can't show them.
+   */
+  #asksIn(chatId: ChatId): boolean {
+    const chat = this.#db
+      .select({ via: chats.via })
+      .from(chats)
+      .where(eq(chats.id, chatId))
+      .get();
+    return chat?.via === "web";
+  }
+
   #givenBy(
     chatId: ChatId
   ): (messageId: number) => (documentId: string) => boolean {
@@ -4295,6 +4309,7 @@ export class Workspace extends DurableObject<Env> {
   /** The chat's messages stored after the one with ID `after`, as shown. */
   #shownAfter(chatId: ChatId, after: number): ChatMessage[] {
     const givenBy = this.#givenBy(chatId);
+    const asking = this.#asksIn(chatId);
     return this.#db
       .select()
       .from(chatMessages)
@@ -4306,7 +4321,8 @@ export class Workspace extends DurableObject<Env> {
           id,
           storedMessageSchema.parse(JSON.parse(message)),
           createdAt,
-          givenBy(id)
+          givenBy(id),
+          asking
         );
         return shown === undefined ? [] : [shown];
       });

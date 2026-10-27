@@ -309,14 +309,30 @@ export const chatAskLimits = {
   choiceLength: 120,
 } as const;
 
-/** One line of text, starting and ending with something other than space. */
-const oneLine = /^\S(?:[^\r\n]*\S)?$/u;
+/** Text starting and ending with something other than space. */
+const unpadded = /^\S(?:.*\S)?$/su;
+
+/**
+ * What a question or a choice never holds: controls (line breaks among
+ * them), invisible formatting (bidi overrides, zero-width characters) and
+ * the line and paragraph separators, so it shows as the one line it reads
+ * as, and can't pass for something the page itself shows.
+ */
+const notInAskLine = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 /**
  * One line of plain text, as a question or a choice is: taken as written
  * or refused, never trimmed.
  */
-const askLine = (max: number) => z.string().max(max).regex(oneLine);
+const askLine = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .regex(unpadded)
+    .refine((line) => !notInAskLine.test(line) && line.isWellFormed(), {
+      message:
+        "A question or choice is one line of well-formed text, with no control or invisible formatting characters",
+    });
 
 /** What the agent asks the person at once, as it calls `askQuestions`. */
 export const chatAskSchema = z.strictObject({
@@ -327,7 +343,10 @@ export const chatAskSchema = z.strictObject({
         choices: z
           .array(askLine(chatAskLimits.choiceLength))
           .min(chatAskLimits.choicesMin)
-          .max(chatAskLimits.choices),
+          .max(chatAskLimits.choices)
+          .refine((choices) => new Set(choices).size === choices.length, {
+            message: "A question's choices are all different",
+          }),
       })
     )
     .min(1)

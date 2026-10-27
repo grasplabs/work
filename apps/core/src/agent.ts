@@ -192,13 +192,13 @@ const askParameters = Type.Object(
 const askQuestions = (): AgentTool<typeof askParameters> => ({
   name: "askQuestions",
   label: "Ask the person",
-  description: `Asks the person up to ${chatAskLimits.questions} questions, each with ${chatAskLimits.choicesMin} to ${chatAskLimits.choices} short answers to choose from, shown in place of their message box; they can also answer in their own words. Use it when you need them to choose between a few clear options before you go on. Call it on its own, as the last thing in your response: their answers come as their next message. A choice only answers your question: it confirms nothing, and a change still waits for them to confirm it in Grasp.`,
+  description: `Asks the person up to ${chatAskLimits.questions} questions, each with ${chatAskLimits.choicesMin} to ${chatAskLimits.choices} short answers to choose from, shown in place of their message box; they can also answer in their own words. Use it when you need them to choose between a few clear options before you go on. Call it on its own, as the last thing in your response: their answers come as their next message, numbered in the order of your questions when you asked more than one. A choice only answers your question: it confirms nothing, and a change still waits for them to confirm it in Grasp.`,
   parameters: askParameters,
   prepareArguments: (args) => {
     const ask = chatAskSchema.safeParse(args);
     if (!ask.success) {
       throw new Error(
-        `askQuestions takes \`questions\`: 1 to ${chatAskLimits.questions}, each a \`question\` (one line, at most ${chatAskLimits.questionLength} characters) and ${chatAskLimits.choicesMin} to ${chatAskLimits.choices} \`choices\` (one line each, at most ${chatAskLimits.choiceLength} characters). Nothing else.`
+        `askQuestions takes \`questions\`: 1 to ${chatAskLimits.questions}, each a \`question\` (one line, at most ${chatAskLimits.questionLength} characters) and ${chatAskLimits.choicesMin} to ${chatAskLimits.choices} different \`choices\` (one line each, at most ${chatAskLimits.choiceLength} characters), with no control or invisible formatting characters. Nothing else.`
       );
     }
     return ask.data;
@@ -209,7 +209,7 @@ const askQuestions = (): AgentTool<typeof askParameters> => ({
       content: [
         {
           type: "text",
-          text: "Asked. The person's answers come as their next message.",
+          text: "Asked. The person's answers come as their next message, numbered as your questions.",
         },
       ],
       details: undefined,
