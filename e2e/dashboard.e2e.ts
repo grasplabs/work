@@ -235,10 +235,16 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   ];
   await expect(titles).toHaveText(begun);
   await expect(reset).toHaveCount(0);
-  // The empty card is always there, last; with every widget on the board
-  // there is nothing to add from it.
+  // The empty card is always there, last, to ask Grasp for a widget; with
+  // every one of Grasp's own on the board there is none to put back.
   const add = page.getByRole("button", { name: "Add a widget" });
-  await expect(add).toBeDisabled();
+  await add.click();
+  const card = page.getByRole("dialog", { name: "Add a widget" });
+  await expect(
+    card.getByRole("textbox", { name: "Ask Grasp for a widget" })
+  ).toBeVisible();
+  await expect(card.getByText("Put one back")).toHaveCount(0);
+  await page.keyboard.press("Escape");
 
   // Taken off, it stays off.
   await page
@@ -267,7 +273,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     .getByRole("button", { name: "Domains" })
     .click();
   await expect(titles).toHaveText([...without, "Domains"]);
-  await expect(add).toBeDisabled();
   await expect
     .poll(saved)
     .toStrictEqual([

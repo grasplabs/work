@@ -1,9 +1,12 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
+import { customWidgetIdSchema, customWidgetsMax } from "./widgets.ts";
+import type { CustomWidget, WidgetMade } from "./widgets.ts";
 
 // Each person's own dashboard: which of the widget board's widgets are on
-// it, and in what order. Core keeps it in the person's Workspace object
+// it, and in what order, Grasp's own and those Grasp made from what they
+// asked (widgets.ts). Core keeps it in the person's Workspace object
 // (core's dashboard-rpc.ts); only they read or change it. A person who
 // never changed theirs has none saved, and sees the board as it begins.
 
@@ -11,6 +14,19 @@ import { defineErrorFamily } from "./errors.ts";
 export const dashboardErrors = defineErrorFamily({
   "dashboard.invalid_layout":
     "That isn't a dashboard layout: each of the dashboard's widgets at most once, and no others.",
+  "dashboard.invalid_request":
+    "Say in a few words what the widget should show: at most 500 characters.",
+  "dashboard.widget_not_found":
+    "That widget is not on your dashboard any more.",
+  "dashboard.too_many_widgets":
+    "Your dashboard holds at most 12 widgets Grasp made. Take one off first.",
+  "dashboard.widget_busy":
+    "Grasp is still changing this widget. Try again in a moment.",
+  "dashboard.widget_unreadable":
+    "Grasp could not make that into a widget. Try asking another way.",
+  "dashboard.widget_unchanged":
+    "That is how the widget is already. Say what should be different.",
+  "dashboard.no_model": "No model may make widgets here.",
 });
 
 /**
@@ -36,14 +52,35 @@ export const standardWidgetIds = [
 export const standardWidgetIdSchema = z.enum(standardWidgetIds);
 export type StandardWidgetId = z.infer<typeof standardWidgetIdSchema>;
 
+/** The widgets only admins are offered: what the models cost, which core reads only to them. */
+const adminWidgets: ReadonlySet<StandardWidgetId> = new Set(["spend"]);
+
+/**
+ * The widgets Grasp offers a person, in the order the board begins with:
+ * every one to admins. It is their board as it begins, and as it is if
+ * they never changed it.
+ */
+export const offeredWidgets = (admin: boolean): readonly StandardWidgetId[] =>
+  admin
+    ? standardWidgetIds
+    : standardWidgetIds.filter((widget) => !adminWidgets.has(widget));
+
+/** A widget on a person's board: one of Grasp's own, or one Grasp made for them. */
+export const dashboardWidgetIdSchema = z.union([
+  standardWidgetIdSchema,
+  customWidgetIdSchema,
+]);
+export type DashboardWidgetId = z.infer<typeof dashboardWidgetIdSchema>;
+
 /**
  * The widgets on a person's board, in order: each at most once, so no
  * more than there are. None at all is a board they took everything off.
+ * A widget Grasp made is on it only while they have it (core checks).
  */
 export const dashboardLayoutSchema = z.strictObject({
   widgets: z
-    .array(standardWidgetIdSchema)
-    .max(standardWidgetIds.length)
+    .array(dashboardWidgetIdSchema)
+    .max(standardWidgetIds.length + customWidgetsMax)
     .refine((widgets) => new Set(widgets).size === widgets.length, {
       message: "Each widget may be on the board once.",
     }),
@@ -56,4 +93,20 @@ export interface DashboardApi {
   layout: () => Promise<DashboardLayout | null>;
   /** Saves their whole board, in place of what they saved before. */
   saveLayout: (layout: DashboardLayout) => Promise<void>;
+  /**
+   * The widgets Grasp made for them, each as it looks now, its numbers
+   * worked out from what they may see today.
+   */
+  widgets: () => Promise<CustomWidget[]>;
+  /**
+   * Has Grasp make a widget from what they ask (`request`), through the
+   * model gateway, on their own model budget, and puts it last on their
+   * board. Refused as `dashboard.widget_unreadable` when no answer would
+   * read as one after being sent back to be put right twice.
+   */
+  makeWidget: (request: string) => Promise<WidgetMade>;
+  /** Has Grasp change widget `id` as they ask; it keeps its place. */
+  changeWidget: (id: string, request: string) => Promise<WidgetMade>;
+  /** Takes widget `id` off their board, for good. */
+  removeWidget: (id: string) => Promise<void>;
 }
