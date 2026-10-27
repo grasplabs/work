@@ -1,15 +1,13 @@
-import { employeeDomainsMax } from "@grasp-os/shared/org-settings";
-import type { PulseSettings } from "@grasp-os/shared/org-settings";
+import { employeeDomainsMax, quietPulse } from "@grasp-os/shared/org-settings";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
 import { useState } from "react";
 
-import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -20,6 +18,7 @@ import {
 } from "../settings/pulse-people.tsx";
 import type { PeopleFilters } from "../settings/pulse-people.tsx";
 import type { PulsePerson } from "../settings/pulse.ts";
+import { useQueuedSave } from "../settings/queued-save.ts";
 import {
   SettingsError,
   SettingsLoading,
@@ -27,7 +26,6 @@ import {
   SettingsSection,
 } from "../settings/settings-parts.tsx";
 import { WeekHours } from "../settings/week-hours.tsx";
-import { useCoreAction } from "../use-core-action.ts";
 
 // Settings → Pulse, for admins, as in the prototype
 // (`routes/settings/pulse.tsx`): who has it, when it may report, who counts
@@ -125,10 +123,12 @@ const Domains = ({
  */
 const PulsePage = () => {
   const { t } = useLingui();
-  const router = useRouter();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { busy, failure, run } = useCoreAction();
+  const { failure, save } = useQueuedSave(
+    page.state === "ready" ? page.data : quietPulse,
+    async (session, next) => await session.orgSettings.updatePulse(next)
+  );
   const [filters, setFilters] = useState<PeopleFilters>(noPeopleFilters);
   const people = directory.length;
   if (page.state !== "ready") {
@@ -140,17 +140,7 @@ const PulsePage = () => {
   }
   const settings = page.data;
   // Only the organization's own admins change them; Grasp staff read them.
-  const canChange = !identity.staff && !busy;
-  const save = (next: PulseSettings): void => {
-    void run(async (session) => {
-      await changeThenRefresh(
-        async () => await session.orgSettings.updatePulse(next),
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
-    });
-  };
+  const canChange = !identity.staff;
 
   return (
     <>
@@ -175,7 +165,7 @@ const PulsePage = () => {
           onChange={
             canChange
               ? (schedule) => {
-                  save({ ...settings, schedule });
+                  save({ schedule });
                 }
               : undefined
           }
@@ -195,7 +185,7 @@ const PulsePage = () => {
             disabled={!canChange}
             domains={settings.employeeDomains}
             onChange={(employeeDomains) => {
-              save({ ...settings, employeeDomains });
+              save({ employeeDomains });
             }}
           />
         </SettingsRow>

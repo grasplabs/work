@@ -1,4 +1,4 @@
-import type { BillingSettings } from "@grasp-os/shared/org-settings";
+import { noBilling } from "@grasp-os/shared/org-settings";
 import {
   Alert,
   AlertDescription,
@@ -7,13 +7,13 @@ import {
 import { Button } from "@grasp-os/ui/components/button";
 import { Switch } from "@grasp-os/ui/components/switch";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { ExternalLinkIcon, InfoIcon } from "lucide-react";
 
-import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { useQueuedSave } from "../settings/queued-save.ts";
 import { SavedField } from "../settings/saved-field.tsx";
 import {
   SettingsError,
@@ -21,7 +21,6 @@ import {
   SettingsRow,
   SettingsSection,
 } from "../settings/settings-parts.tsx";
-import { useCoreAction } from "../use-core-action.ts";
 
 // Settings → Billing, for admins, as in the prototype
 // (`routes/settings/billing.tsx`): the plan, the card, the billing details
@@ -48,10 +47,13 @@ const Nothing = () => (
 
 const BillingPage = () => {
   const { t } = useLingui();
-  const router = useRouter();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { busy, failure, run } = useCoreAction();
+  const billing = page.state === "ready" ? page.data : noBilling;
+  const { failure, save } = useQueuedSave(
+    billing,
+    async (session, next) => await session.orgSettings.updateBilling(next)
+  );
   if (page.state !== "ready") {
     return (
       <SettingsSection title={t`Billing`}>
@@ -59,20 +61,8 @@ const BillingPage = () => {
       </SettingsSection>
     );
   }
-  const billing = page.data;
   // Only the organization's own admins change them; Grasp staff read them.
-  const disabled = identity.staff || busy;
-  const save = (change: Partial<BillingSettings>): void => {
-    void run(async (session) => {
-      await changeThenRefresh(
-        async () =>
-          await session.orgSettings.updateBilling({ ...billing, ...change }),
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
-    });
-  };
+  const disabled = identity.staff;
   return (
     <>
       <Alert>

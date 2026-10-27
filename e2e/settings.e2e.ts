@@ -44,8 +44,8 @@ test("an admin opens Settings on the workspace, and each section from the list b
     "Nobody matches."
   );
   // The admin's schedule and domains are kept, over a reload.
-  const schedule = sectionOf(page, "When Pulse may report");
-  const monday = schedule.getByRole("switch", { name: "Monday" });
+  const hours = sectionOf(page, "When Pulse may report");
+  const monday = hours.getByRole("switch", { name: "Monday" });
   if (!(await monday.isChecked())) {
     await monday.click();
   }
@@ -56,6 +56,24 @@ test("an admin opens Settings on the workspace, and each section from the list b
     await who.getByRole("button", { name: "Add" }).click();
   }
   await expect(who.getByText("acme-old.test")).toBeVisible();
+  // Each is saved as it changes, one after the other: once core keeps
+  // both, the page reads them again as saved.
+  {
+    const { core, api } = apiOf(admin);
+    try {
+      await expect
+        .poll(async () => {
+          const { schedule, employeeDomains } = await api.orgSettings.pulse();
+          return {
+            monday: schedule[0]?.includes(true),
+            domains: employeeDomains,
+          };
+        })
+        .toStrictEqual({ monday: true, domains: ["acme-old.test"] });
+    } finally {
+      core[Symbol.dispose]();
+    }
+  }
   await page.reload();
   await expect(
     sectionOf(page, "When Pulse may report").getByRole("switch", {
@@ -81,13 +99,30 @@ test("an admin opens Settings on the workspace, and each section from the list b
   await details.getByLabel("VAT number").fill("nl123456789b01");
   await details.getByLabel("Billing email").fill("finance@acme.test");
   await details.getByLabel("VAT number").focus();
+  // Each field is saved as it is left, one after the other: once core
+  // keeps both, the page reads them again as saved.
+  {
+    const { core, api } = apiOf(admin);
+    try {
+      await expect
+        .poll(async () => {
+          const { email, vatNumber } = await api.orgSettings.billing();
+          return { email, vatNumber };
+        })
+        .toStrictEqual({
+          email: "finance@acme.test",
+          vatNumber: "NL123456789B01",
+        });
+    } finally {
+      core[Symbol.dispose]();
+    }
+  }
   await page.reload();
-  await expect(
-    sectionOf(page, "Billing details").getByLabel("VAT number")
-  ).toHaveValue("NL123456789B01");
-  await expect(
-    sectionOf(page, "Billing details").getByLabel("Billing email")
-  ).toHaveValue("finance@acme.test");
+  const saved = sectionOf(page, "Billing details");
+  await expect(saved.getByLabel("VAT number")).toHaveValue("NL123456789B01");
+  await expect(saved.getByLabel("Billing email")).toHaveValue(
+    "finance@acme.test"
+  );
 
   await nav.getByRole("link", { name: "Notifications" }).click();
   await expect(page).toHaveURL(/\/settings\/notifications$/u);
