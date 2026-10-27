@@ -24,6 +24,7 @@ import type { OnboardingApi, OnboardingStaffApi } from "./onboarding.ts";
 import type { OrgSettingsApi } from "./org-settings.ts";
 import type { OrganizationApi } from "./organization.ts";
 import type { PermissionsApi } from "./permissions.ts";
+import type { PoliciesApi } from "./policies.ts";
 import type { ResourceBindingsApi, TemplatesApi } from "./resource-bindings.ts";
 import type { Role } from "./roles.ts";
 import type { ScreenTrustApi } from "./screen-trust.ts";
@@ -133,6 +134,12 @@ export interface SessionApi {
    * access, read from its identity provider.
    */
   readonly landscape: LandscapeApi;
+  /**
+   * The company's policies for the apps its people use: its policy
+   * documents, rules and exceptions. Everyone reads them; the
+   * organization's own admins change them.
+   */
+  readonly policies: PoliciesApi;
   /** Runs of Apps' workflows, for those with a role in the App. */
   readonly workflows: WorkflowsApi;
   /**
