@@ -1,4 +1,4 @@
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
 import { allowedFor } from "./authorize.ts";
@@ -190,14 +190,24 @@ const reportRead = async <C>(
 };
 
 /**
+ * Relations of each source's current version only, not replaced: a change
+ * hides what it replaced at once, before its own relations are read.
+ */
+export const currentRelations = (): SQL =>
+  sql`${brainAssertions.supersededAt} IS NULL AND EXISTS (SELECT 1 FROM ${brainLinkJobs} WHERE ${brainLinkJobs.source} = ${brainAssertions.source} AND ${brainLinkJobs.version} = ${brainAssertions.version})`;
+
+/**
  * The relations of `entityId` readable through `scope`, newest first, at
  * most `readRowsMax`, conflicts among them marked, and whether that cap
- * left any out (`cut`): what every read of relations answers from.
+ * left any out (`cut`): what every read of relations answers from. A read
+ * bound `within` some collections (a recall's, GRA-307) reads documents
+ * of those alone, before the cap, as the scope is.
  */
 export const readable = async <C>(
   brain: Brain<C>,
   { allowed, owner, ownerReads }: ReadScope,
-  { entityId, predicate, at, knownAt }: RelationsQuery
+  { entityId, predicate, at, knownAt }: RelationsQuery,
+  within?: readonly string[]
 ): Promise<{
   relations: ReadRelation[];
   cut: boolean;
@@ -229,7 +239,7 @@ export const readable = async <C>(
     // Now: those of each source's current version only, so a change hides
     // what it replaced at once, before its own relations are read.
     known === undefined
-      ? sql`${brainAssertions.supersededAt} IS NULL AND EXISTS (SELECT 1 FROM ${brainLinkJobs} WHERE ${brainLinkJobs.source} = ${brainAssertions.source} AND ${brainLinkJobs.version} = ${brainAssertions.version})`
+      ? currentRelations()
       : sql`${brainAssertions.recordedAt} <= ${known.getTime()} AND (${brainAssertions.supersededAt} IS NULL OR ${brainAssertions.supersededAt} > ${known.getTime()})`
   );
   // What each kind of source may give: documents in collections that
@@ -239,6 +249,8 @@ export const readable = async <C>(
   const fromReadable = and(
     allowed.documents(),
     eq(collections.sensitive, false),
+    // A read bound to collections (a recall's network, GRA-307): those alone.
+    within === undefined ? undefined : inArray(collections.id, [...within]),
     where
   );
   const fromOwn =

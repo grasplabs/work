@@ -71,6 +71,12 @@ export type BrainSourceRef = z.infer<typeof brainSourceRefSchema>;
 /** Most source references one item or command names. */
 export const brainSourceRefsMax = 20;
 
+/** One end of a relation: its entity, and the name its source gives it. */
+const relationEndSchema = z.strictObject({
+  entityId: idSchema,
+  name: z.string(),
+});
+
 // --- recall -----------------------------------------------------------------
 
 /** The most a recall may ask for; core clamps every budget to these. */
@@ -122,11 +128,25 @@ export const recallFiltersSchema = z.strictObject({
 });
 export type RecallFilters = z.infer<typeof recallFiltersSchema>;
 
+/** The most relations a recall's network route follows from what it found. */
+export const recallNetworkHopsMax = 2;
+
+/**
+ * A recall's network route (GRA-307), asked for: from the entities its
+ * full-text evidence names, along stored relations the caller may read,
+ * one hop or two. Without it, a recall reads full text alone.
+ */
+export const recallNetworkSchema = z.strictObject({
+  hops: z.int().min(1).max(recallNetworkHopsMax).optional(),
+});
+export type RecallNetwork = z.infer<typeof recallNetworkSchema>;
+
 /** A recall: a question, in the caller's words, and how much to spend. */
 export const recallInputSchema = z.strictObject({
   query: z.string().trim().min(1).max(searchQueryMaxLength),
   filters: recallFiltersSchema.optional(),
   budget: recallBudgetSchema.optional(),
+  network: recallNetworkSchema.optional(),
 });
 export type RecallInput = z.input<typeof recallInputSchema>;
 
@@ -201,6 +221,32 @@ export const coverageSchema = z.strictObject({
 export type Coverage = z.infer<typeof coverageSchema>;
 
 /**
+ * One step of a network path: a relation as a source states it. Only
+ * `typed_assertion` for now, a relation stored from a source's passage;
+ * other kinds of link (shared entities, observed dependencies, inferred
+ * associations) will be steps of their own kind, never passed off as one.
+ */
+export const networkStepSchema = z.strictObject({
+  kind: z.literal("typed_assertion"),
+  subject: relationEndSchema,
+  predicate: z.string(),
+  object: relationEndSchema,
+  sourceRef: brainSourceRefSchema,
+});
+export type NetworkStep = z.infer<typeof networkStepSchema>;
+
+/**
+ * How the network route reached item `itemId`: from `seed`, an entity a
+ * source the recall found names, along `steps`, the last being the item's.
+ */
+export const networkPathSchema = z.strictObject({
+  itemId: idSchema,
+  seed: relationEndSchema,
+  steps: z.array(networkStepSchema).min(1).max(recallNetworkHopsMax),
+});
+export type NetworkPath = z.infer<typeof networkPathSchema>;
+
+/**
  * A recall's answer: the evidence that applies, bounded, with what it
  * conflicts on and lacks, how far the read got, and the versions it
  * came from. Evidence, never generated analysis: a later `reflect`
@@ -217,6 +263,17 @@ export const memoryPackSchema = z.strictObject({
   conflicts: z.array(memoryConflictSchema),
   gaps: z.array(memoryGapSchema),
   coverage: coverageSchema,
+  /**
+   * The network route's paths, one per item it added, when the recall asked
+   * for it (`network`): which policy followed them, and each path's
+   * relations, exactly, as their sources state them.
+   */
+  network: z
+    .strictObject({
+      policyVersion: z.string().min(1),
+      paths: z.array(networkPathSchema).max(recallLimits.maxItems),
+    })
+    .optional(),
   /** Whether a budget left out evidence that applied. */
   truncated: z.boolean(),
   warnings: z.array(z.string()),
@@ -760,12 +817,6 @@ export const relationsGetInputSchema = z.strictObject({
   knownAt: instantSchema.optional(),
 });
 export type RelationsGetInput = z.input<typeof relationsGetInputSchema>;
-
-/** One end of a relation: its entity, and the name its source gives it. */
-const relationEndSchema = z.strictObject({
-  entityId: idSchema,
-  name: z.string(),
-});
 
 /**
  * A relation as a reader sees it: what a source says (`observed`), never

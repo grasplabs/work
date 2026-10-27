@@ -10,7 +10,9 @@ import type {
   Coverage,
   MemoryItem,
   MemoryPack,
+  NetworkPath,
   RecallBudget,
+  RecallNetwork,
 } from "./contract.ts";
 import { toHex } from "./encoding.ts";
 import type { CollectionId } from "./ids.ts";
@@ -18,6 +20,8 @@ import { knowledgeErrors, searchMaxLimit } from "./knowledge.ts";
 import type { Provenance } from "./knowledge.ts";
 import { searchMemories } from "./memories.ts";
 import type { MemoryAudience } from "./memories.ts";
+import { networkOf, networkPolicyVersion } from "./network.ts";
+import type { NetworkCut, NetworkFound } from "./network.ts";
 import { d1BrainStore } from "./recall-store.ts";
 import type { BrainStore, EvidenceQuery } from "./recall-store.ts";
 import type { FoundSection } from "./search.ts";
@@ -232,25 +236,184 @@ const sourcesOf = (items: readonly MemoryItem[]): BrainSourceRef[] => {
 /**
  * How far the read got: the full-text route timed out (`degraded`, which
  * proves nothing missing), a budget cut it (`bounded`), or it finished its
- * bounded read (`complete`, never exhaustive).
+ * bounded read (`complete`, never exhaustive). A network route asked for
+ * is queried, or omitted for the full-text route's deadline; each of its
+ * cuts is an omission with its reason, which bounds the read.
  */
-const coverageOf = (timedOut: boolean, truncated: boolean): Coverage => {
+const coverageOf = (
+  timedOut: boolean,
+  truncated: boolean,
+  network?: { cuts: readonly NetworkCut[] }
+): Coverage => {
   if (timedOut) {
     return {
       state: "degraded",
       queriedRoutes: [],
       omittedRoutes: [
         { route: "fulltext", reason: "deadline" },
+        ...(network === undefined
+          ? []
+          : [{ route: "network", reason: "deadline" }]),
         ...omittedRoutes,
       ],
     };
   }
+  const cuts = (network?.cuts ?? []).map((reason) => ({
+    route: "network",
+    reason,
+  }));
   return {
-    state: truncated ? "bounded" : "complete",
-    queriedRoutes: ["fulltext"],
-    omittedRoutes,
+    state: truncated || cuts.length > 0 ? "bounded" : "complete",
+    queriedRoutes:
+      network === undefined ? ["fulltext"] : ["fulltext", "network"],
+    omittedRoutes: [...cuts, ...omittedRoutes],
   };
 };
+
+/**
+ * As many of the network route's items as the budget left after `items`
+ * holds, in the order it reached them: with their paths, the tokens
+ * they take, and whether the budget left any out.
+ */
+const networkPacked = (
+  network: NetworkFound,
+  { maxItems, maxTokens }: ClampedBudget,
+  items: readonly MemoryItem[],
+  tokenCount: number
+): {
+  added: MemoryItem[];
+  paths: NetworkPath[];
+  tokens: number;
+  cut: boolean;
+} => {
+  const added: MemoryItem[] = [];
+  const paths: NetworkPath[] = [];
+  let tokens = 0;
+  for (const { item, path } of network.items) {
+    const cost = tokensOf(item.statement);
+    if (
+      items.length + added.length === maxItems ||
+      tokenCount + tokens + cost > maxTokens
+    ) {
+      return { added, paths, tokens, cut: true };
+    }
+    added.push(item);
+    paths.push(path);
+    tokens += cost;
+  }
+  return { added, paths, tokens, cut: false };
+};
+
+/** The documents `items` cite, each at its version, once. */
+const foundDocuments = (
+  items: readonly MemoryItem[]
+): { documentId: string; version: number }[] => {
+  const found = new Map<string, { documentId: string; version: number }>();
+  for (const { sourceRefs } of items) {
+    for (const ref of sourceRefs) {
+      if (ref.kind === "document") {
+        found.set(`${ref.documentId}@${ref.version}`, {
+          documentId: ref.documentId,
+          version: ref.version,
+        });
+      }
+    }
+  }
+  return [...found.values()];
+};
+
+/**
+ * The network route of a recall whose full-text route `packed` its pack
+ * (network.ts), as far as the budget left after that: the items it adds,
+ * their paths and tokens, what it read, and every cut.
+ */
+interface NetworkRouted {
+  /** Whether the recall asked for the route. */
+  asked: boolean;
+  added: MemoryItem[];
+  paths: NetworkPath[];
+  tokens: number;
+  cuts: NetworkCut[];
+  provenance: Provenance;
+}
+
+const networkRouted = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  {
+    network,
+    read,
+    within,
+    deadline,
+    limits,
+    packed: { items, tokenCount },
+  }: {
+    network: RecallNetwork | undefined;
+    /** Whether the full-text route read before its deadline. */
+    read: boolean;
+    within: readonly CollectionId[] | undefined;
+    deadline: number;
+    limits: ClampedBudget;
+    packed: { items: readonly MemoryItem[]; tokenCount: number };
+  }
+): Promise<NetworkRouted> => {
+  if (network === undefined || !read) {
+    return {
+      asked: network !== undefined,
+      added: [],
+      paths: [],
+      tokens: 0,
+      cuts: [],
+      provenance: noProvenance,
+    };
+  }
+  const hops = network.hops === 1 ? 1 : 2;
+  const found = await networkOf(brain, reader, {
+    hops,
+    found: foundDocuments(items),
+    within,
+    deadline,
+    maxItems: limits.maxItems - items.length,
+  });
+  const { added, paths, tokens, cut } = networkPacked(
+    found,
+    limits,
+    items,
+    tokenCount
+  );
+  const cuts = new Set<NetworkCut>(found.cuts);
+  if (cut) {
+    cuts.add("items");
+  }
+  return {
+    asked: true,
+    added,
+    paths,
+    tokens,
+    cuts: [...cuts],
+    provenance: found.provenance,
+  };
+};
+
+/**
+ * What a pack says of the routes it read: the retrieval policy, how far
+ * the read got, and the network route's paths when it was asked for.
+ */
+const routesOf = (
+  timedOut: boolean,
+  truncated: boolean,
+  routed: NetworkRouted
+): Pick<MemoryPack, "retrievalPolicyVersion" | "coverage" | "network"> =>
+  routed.asked
+    ? {
+        retrievalPolicyVersion: `${recallPolicyVersion}+${networkPolicyVersion}`,
+        coverage: coverageOf(timedOut, truncated, { cuts: routed.cuts }),
+        network: { policyVersion: networkPolicyVersion, paths: routed.paths },
+      }
+    : {
+        retrievalPolicyVersion: recallPolicyVersion,
+        coverage: coverageOf(timedOut, truncated),
+      };
 
 /**
  * A pack's access revision: `text` (what the reader may read now) signed
@@ -460,7 +623,7 @@ export const recallWithSources = async <C>(
   provenance: Provenance;
 }> => {
   try {
-    const { query, filters, budget } = brainErrors.parse(
+    const { query, filters, budget, network } = brainErrors.parse(
       "brain.invalid",
       recallInputSchema,
       input
@@ -503,17 +666,37 @@ export const recallWithSources = async <C>(
             ...(collectionIds === undefined ? {} : { collectionIds }),
           });
     const found = alternated(read?.sections ?? [], read?.memories ?? []);
-    const { items, memories, tokenCount } = packed(found, limits);
-    const truncated = items.length < found.length || readFull(read, limit);
+    const packedFound = packed(found, limits);
+    const { memories } = packedFound;
+    // The network route, asked for, from the documents the pack holds:
+    // after the full-text route, within what its deadline and budget left.
+    const routed = await networkRouted(brain, reader, {
+      network,
+      read: read !== undefined,
+      within: collectionIds,
+      deadline: startedAt + limits.deadlineMs,
+      limits,
+      packed: packedFound,
+    });
+    const items = [...packedFound.items, ...routed.added];
+    const tokenCount = packedFound.tokenCount + routed.tokens;
+    const truncated =
+      packedFound.items.length < found.length ||
+      readFull(read, limit) ||
+      routed.cuts.length > 0;
     const provenance = joined(
-      read?.provenance ?? noProvenance,
-      await memoriesRead(brain, reader, memories),
-      collectionIds ?? []
+      joined(
+        read?.provenance ?? noProvenance,
+        await memoriesRead(brain, reader, memories),
+        collectionIds ?? []
+      ),
+      routed.provenance,
+      []
     );
     const pack: MemoryPack = {
       id: crypto.randomUUID(),
       contractVersion: brainContractVersion,
-      retrievalPolicyVersion: recallPolicyVersion,
+      ...routesOf(read === undefined, truncated, routed),
       items,
       sourceVersions: sourcesOf(items),
       conflicts: [],
@@ -523,7 +706,6 @@ export const recallWithSources = async <C>(
         found.length === 0 && read !== undefined
           ? [{ about: "No evidence the caller may read matched the question." }]
           : [],
-      coverage: coverageOf(read === undefined, truncated),
       truncated,
       warnings: [],
       tokenCount,
