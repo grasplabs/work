@@ -1,6 +1,7 @@
-# Deploys the admin and router to grasp-os-ops: the account that holds a token
-# for every client, so it never changes on a merge. Run it by hand from main
-# once the change works in grasp-os-staging. Require a reviewer on the grasp-os-ops
+# Deploys the admin and router to Grasp's Cloudflare account, the one
+# staging's core and connect run in too: the admin holds a token for every
+# client, so it never changes on a merge. Run it by hand from main once
+# the change works in staging. Require a reviewer on the grasp-os-ops
 # environment in GitHub so a second person approves every run.
 #
 # Every run also copies the shared secrets (Grasp's OAuth app secrets and
