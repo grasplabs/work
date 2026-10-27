@@ -892,8 +892,10 @@ describe("AuditLog purges", () => {
     ]);
   });
 
-  it("works out archive retention from deployment config only, and purges nothing without it", () => {
-    expect(archiveRetentionDays({})).toBeUndefined();
+  it("works out archive retention from deployment config, seven years unless set, and purges nothing on one that is invalid", () => {
+    // Unset: seven years, or the log's own retention when that is longer.
+    expect(archiveRetentionDays({})).toBe(2555);
+    expect(archiveRetentionDays({ AUDIT_RETENTION_DAYS: "3000" })).toBe(3000);
     // Below the floor, above the ceiling, or not whole days: none.
     for (const days of ["30", "364", "3651", "400.5", "a year"]) {
       expect(

@@ -368,6 +368,13 @@ export const auditRetentionSchema = z.int().min(30).max(3650);
  */
 export const auditArchiveRetentionSchema = z.int().min(365).max(3650);
 
+/**
+ * Days an event is kept in all, archive included, unless set: seven years
+ * (Nick's decision on GRA-903), or the log's own retention if that is
+ * longer, so an unset archive retention is never shorter than it.
+ */
+export const auditArchiveRetentionDefaultDays = 7 * 365;
+
 // RUN_RETENTION_DAYS (core's src/workflows/retention.ts)
 
 /** Days an ended workflow run keeps its details, unless set. */
