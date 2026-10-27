@@ -1,9 +1,22 @@
-import { brainContractVersion, brainErrors } from "@grasp-os/brain/contract";
-import type { MemoryPack } from "@grasp-os/brain/contract";
+import {
+  brainContractVersion,
+  brainErrors,
+  skillsReadInputSchema,
+  skillsSelectInputSchema,
+} from "@grasp-os/brain/contract";
+import type {
+  MemoryPack,
+  SkillRead,
+  SkillSelection,
+} from "@grasp-os/brain/contract";
 import { recallWithSources } from "@grasp-os/brain/recall";
 import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import { documents } from "@grasp-os/brain/schema";
 import { search } from "@grasp-os/brain/search";
+import {
+  readSkillWithSources,
+  selectSkillWithSources,
+} from "@grasp-os/brain/skills";
 import { read } from "@grasp-os/brain/tools";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { collectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
@@ -44,7 +57,10 @@ import type {
 // answer and feed its later model requests. A remote search is a snapshot,
 // answered once, never a live query.
 
-/** What every knowledge binding serves. */
+/**
+ * What a knowledge binding serves: search, read and recall for every one,
+ * and the skill operations (GRA-310) for one that declares them.
+ */
 const knowledgeContract = {
   contractId: "grasp.knowledge@1",
   search: {
@@ -67,10 +83,43 @@ const knowledgeContract = {
     answer: `a Brain memory pack (${brainContractVersion})`,
     needs: "the App's brain permission",
   },
+  skillsSelect: {
+    request: { task: "a type, and traits, each a token" },
+    answer: `the applicable skill of the declared collections, pinned, or none (${brainContractVersion})`,
+    needs: "the App's brain permission",
+  },
+  skillsRead: {
+    request: {
+      documentId: "a skill a selection pinned",
+      version: "its version",
+    },
+    answer: `that skill at exactly that version (${brainContractVersion})`,
+    needs: "the App's brain permission",
+  },
 } as const;
 
-/** The knowledge contract's fingerprint, computed once. */
-const knowledgeFingerprint = sha256Hex(canonicalJson(knowledgeContract));
+/** The operations every knowledge binding's fingerprint covers, declared or not. */
+const baseOperations = ["search", "read", "recall"] as const;
+
+/**
+ * The fingerprint of the knowledge contract a declaration of `operations`
+ * is bound to: search, read and recall, as every binding's has been, and
+ * a skill operation only once it is declared. So adding an operation to
+ * the contract changes no fingerprint but those of the Apps that use it,
+ * and every other App's approval still matches.
+ */
+export const knowledgeFingerprintOf = async (
+  operations: readonly string[]
+): Promise<string> => {
+  const { contractId } = knowledgeContract;
+  const covered = Object.entries(knowledgeContract).filter(
+    ([name]) =>
+      baseOperations.some((base) => base === name) || operations.includes(name)
+  );
+  return await sha256Hex(
+    canonicalJson({ contractId, ...Object.fromEntries(covered) })
+  );
+};
 
 /** What the operation host lets through, per operation (operations.ts). */
 const searchSchema = z.strictObject({
@@ -292,6 +341,23 @@ const readableNow = async (
   }
 };
 
+/** Those of `bound` the person the call acts for may read now, each under its own permission. */
+const readableOf = async (
+  env: Env,
+  caller: BindingCaller,
+  bound: readonly BoundCollection[]
+): Promise<CollectionId[]> => {
+  const readable: CollectionId[] = [];
+  // One collection after another, each under its own permission.
+  for (const binding of bound) {
+    // oxlint-disable-next-line no-await-in-loop -- one collection at a time
+    if (await readableNow(env, caller, binding)) {
+      readable.push(binding.collectionId);
+    }
+  }
+  return readable;
+};
+
 /** A Brain refusal, as the operation host answers an App. */
 const asOperationError = (error: unknown): unknown => {
   const code = brainErrors.codeOf(error);
@@ -326,14 +392,7 @@ const recallBound = async (
       : bound.filter(({ names }) =>
           names.some((name) => collections.includes(name))
         );
-  const readable: CollectionId[] = [];
-  // One collection after another, each under its own permission.
-  for (const binding of asked) {
-    // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    if (await readableNow(env, caller, binding)) {
-      readable.push(binding.collectionId);
-    }
-  }
+  const readable = await readableOf(env, caller, asked);
   try {
     // Under every collection permission the App holds, and only within
     // those this binding names that the person may read now.
@@ -357,10 +416,71 @@ const recallBound = async (
   }
 };
 
+/**
+ * The skill of the bound collections the person may read now that applies
+ * to `request`'s task, pinned, or none (GRA-310): the Brain's selection,
+ * as every caller's, weighing only those collections, as the App's recall
+ * reads only them, under its `brain` permission and with what it weighed
+ * noted, as a recall's sources are.
+ */
+const selectBound = async (
+  env: Env,
+  caller: BindingCaller,
+  bound: readonly BoundCollection[],
+  request: z.output<typeof skillsSelectInputSchema>
+): Promise<SkillSelection> => {
+  const readable = await readableOf(env, caller, bound);
+  try {
+    const { selection, provenance } = await readAsDelegate(
+      env,
+      caller.authority,
+      caller.context,
+      undefined,
+      async (reader) =>
+        await selectSkillWithSources(brainOf(env), reader, request, readable)
+    );
+    caller.sources.note(provenance);
+    return selection;
+  } catch (error) {
+    throw asOperationError(error);
+  }
+};
+
+/**
+ * A pinned skill at exactly its version, from the bound collections the
+ * person may read now: one anywhere else isn't found, as one they can't
+ * see. Under the App's `brain` permission, its read noted.
+ */
+const readSkillBound = async (
+  env: Env,
+  caller: BindingCaller,
+  bound: readonly BoundCollection[],
+  request: z.output<typeof skillsReadInputSchema>
+): Promise<SkillRead> => {
+  const readable = await readableOf(env, caller, bound);
+  try {
+    const { read: skill, provenance } = await readAsDelegate(
+      env,
+      caller.authority,
+      caller.context,
+      undefined,
+      async (reader) =>
+        await readSkillWithSources(brainOf(env), reader, request, readable)
+    );
+    caller.sources.note(provenance);
+    return skill;
+  } catch (error) {
+    if (brainErrors.codeOf(error) === "brain.not_found") {
+      throw operationErrors.create("resource.item_not_found");
+    }
+    throw asOperationError(error);
+  }
+};
+
 export const knowledgeAdapter: ResourceAdapter<"knowledge"> = {
   bind: async (env, app, declaration, target) => {
     const bound = await boundCollections(env, app, declaration, target);
-    const fingerprint = await knowledgeFingerprint;
+    const fingerprint = await knowledgeFingerprintOf(declaration.operations);
     return bound === undefined
       ? undefined
       : {
@@ -381,6 +501,22 @@ export const knowledgeAdapter: ResourceAdapter<"knowledge"> = {
                 caller,
                 bound,
                 resourceRecallInputSchema.parse(args[0])
+              );
+            }
+            if (method === "skillsSelect") {
+              return await selectBound(
+                env,
+                caller,
+                bound,
+                skillsSelectInputSchema.parse(args[0])
+              );
+            }
+            if (method === "skillsRead") {
+              return await readSkillBound(
+                env,
+                caller,
+                bound,
+                skillsReadInputSchema.parse(args[0])
               );
             }
             return await readBound(

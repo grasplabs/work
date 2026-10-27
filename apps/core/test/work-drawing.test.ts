@@ -323,7 +323,11 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       drew: drew[1],
       models: requests.map(modelOf),
       sent: {
-        max: sent.includes(`## ${ids.max} (Agent)`),
+        // Each teller by a neutral label, never their id or title (GRA-1084).
+        max:
+          sent.includes("## P1") &&
+          !sent.includes(ids.max) &&
+          !sent.includes("(Agent)"),
         // A file named in the conversation was never read back or
         // approved: it doesn't leave the store (GRA-329).
         example: sent.includes("ticket-4411.pdf"),
@@ -421,9 +425,10 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
     const works = await store.teamWorks(ids.team);
     expect({
       result,
-      teller: sent.includes(
-        `## ${ids.lea} (Team lead), asked about the work of the whole team`
-      ),
+      teller:
+        sent.includes("## P1, asked about the work of the whole team") &&
+        !sent.includes(ids.lea) &&
+        !sent.includes("(Team lead)"),
       context: sent.includes("for context only"),
       drawn: works.map(
         ({ drawn }) => drawn?.steps.map(({ text }) => text) ?? null
@@ -596,10 +601,46 @@ describe("the work as drawn", () => {
       // The case's text holds no number of anyone's.
       when: drawn.differently.map(({ when }) => when),
     }).toStrictEqual({
-      lisa: [{ step: 0, minutes: [2, 4, 9] }],
+      lisa: [{ step: 0, minutes: [2, 4, 9], normal: 4 }],
       tim: [{ case: 0, outOfTen: 2 }],
       bram: [[], []],
       when: ["the client number is missing"],
+    });
+  });
+
+  it("keeps each person's numbers as they gave them, no part filled in from another", () => {
+    const drawn = drawnOf(
+      {
+        steps: [
+          step("Look it up.", {
+            minutes_by: [{ person: "lisa", minutes: [-1, 12, -1] }],
+          }),
+        ],
+        numbers: [
+          {
+            person: "lisa",
+            quiet: -1,
+            busy: 50,
+            of: "me",
+            per: "week",
+            minutes: [-1, 12, -1],
+          },
+          { person: "tim", quiet: 30, of: "team", per: "month", minutes: [5] },
+        ],
+      },
+      tellers,
+      "2026-10-22T00:00:00.000Z"
+    );
+    expect({
+      lisa: [drawn.told.lisa?.gave, drawn.told.lisa?.stepMinutes?.[0]?.normal],
+      tim: drawn.told.tim?.gave,
+    }).toStrictEqual({
+      lisa: [
+        { quiet: null, busy: 50, per: "week", takes: [null, 12, null] },
+        12,
+      ],
+      // A single time is a normal one.
+      tim: { quiet: 30, busy: null, per: "month", takes: [null, 5, null] },
     });
   });
 

@@ -1,5 +1,5 @@
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
@@ -39,8 +39,9 @@ import { z } from "zod";
 import {
   auditedBatch,
   outboxed,
+  outboxedEventWhere,
   outboxedIfChanged,
-  outboxedWhere,
+  storedEvent,
 } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import { tellOfferedRunEnd } from "../channels/offered-runs.ts";
@@ -311,7 +312,9 @@ export type ResourceControlRow =
  * Settles `control` of run `run` as `state`, if it is still admitted,
  * audited as it settles (by the system, naming the person who asked):
  * while the run hasn't ended, its snapshot moves on with it, in the same
- * batch, and the run's screens read it again.
+ * batch, and the run's screens read it again. The screen's apply and the
+ * engine's notification can settle the same control at once: only the one
+ * whose update changed the row audits it and moves the snapshot on.
  */
 export const settleControl = async (
   env: Env,
@@ -320,36 +323,31 @@ export const settleControl = async (
   state: "applied" | "superseded"
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const at = new Date();
-  const settled = sql`EXISTS (SELECT 1 FROM ${workflowResourceRunControls} WHERE ${and(
-    eq(workflowResourceRunControls.id, control.id),
-    eq(workflowResourceRunControls.state, state),
-    eq(workflowResourceRunControls.settledAt, at)
-  )})`;
   const entry = runEntry(run, `workflow.run.control_${state}`);
+  const event = createAuditEvent(
+    {
+      ...entry,
+      detail: {
+        ...entry.detail,
+        control: control.id,
+        kind: control.kind,
+        onBehalfOf: control.principalId,
+      },
+    },
+    "core"
+  );
   await auditedBatch(env, db, [
     db
       .update(workflowResourceRunControls)
-      .set({ state, settledAt: at })
+      .set({ state, settledAt: new Date() })
       .where(
         and(
           eq(workflowResourceRunControls.id, control.id),
           eq(workflowResourceRunControls.state, "admitted")
         )
       ),
-    outboxedWhere(
-      db,
-      {
-        ...entry,
-        detail: {
-          ...entry.detail,
-          control: control.id,
-          kind: control.kind,
-          onBehalfOf: control.principalId,
-        },
-      },
-      settled
-    ),
+    // Stored only if the update just before it changed the row.
+    outboxedEventWhere(db, event, sql`changes() > 0`),
     db
       .update(workflowResourceRuns)
       .set({
@@ -359,7 +357,7 @@ export const settleControl = async (
         and(
           eq(workflowResourceRuns.id, run.id),
           inArray(workflowResourceRuns.status, unended),
-          settled
+          storedEvent(event.id)
         )
       ),
   ]);
@@ -1282,9 +1280,9 @@ export const projectResourceRun = async (
       .update(workflowResourceRuns)
       .set({
         status,
-        // A screen's snapshot shows the status: another is a revision of
-        // its own (screen-workflows.ts).
-        summaryRevision: sql`CASE WHEN ${workflowResourceRuns.status} = ${status} THEN ${workflowResourceRuns.summaryRevision} ELSE ${workflowResourceRuns.summaryRevision} + 1 END`,
+        // Every status the engine takes: a wait opened or closed is one,
+        // and a screen's snapshot shows its waits (run-waits.ts).
+        summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
         ...(engine.sequence === undefined
           ? {}
           : { engineSequence: engine.sequence }),
@@ -1328,9 +1326,8 @@ export const projectResourceRun = async (
   if (now !== undefined) {
     await settleCancels(env, now);
   }
-  if (status !== row.status) {
-    await tellQueryFollowers(env, id);
-  }
+  // Every status the engine takes is a revision of the run's snapshot.
+  await tellQueryFollowers(env, id);
   // Last: a failure here has the engine tell the end again, which repeats
   // only this (above), never skipping what came before it.
   if (now !== undefined) {

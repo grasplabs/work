@@ -1,6 +1,8 @@
 ---
 name: draw-a-workflow
 description: Draws a workflow in the workflow map, step by step, with who does each step, in which tool, how often and how long it takes. Use to record how work runs today (drawn) or how it should run (designed).
+tasks: [workflow.draw]
+status: accepted
 ---
 
 # Draw a workflow

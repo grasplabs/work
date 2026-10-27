@@ -547,7 +547,9 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       badCursor: await codeOf(admin.api.unknownOutcomes.list("not-a-cursor")),
       othersList: await other.api.unknownOutcomes.list(),
       stillListed: await listedFor(admin),
-      live: await liveStatus(run.id),
+      // Between its checks (every `WORKFLOW_OFF_WAIT_MS`), as it went on
+      // waiting: a check itself shows it running for a moment.
+      live: await asleep(run.id),
       sent: await sentFrom(mailbox),
       resolutions: await resolutions(connectionId),
     }).toStrictEqual({
@@ -603,7 +605,8 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
         unknown.claim
       )
     );
-    const live = await liveStatus(run.id);
+    // Still waiting, between its checks (`asleep`).
+    const live = await asleep(run.id);
     await admin.api.unknownOutcomes.resolve(
       unknown.key,
       "happened",

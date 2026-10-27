@@ -1,4 +1,5 @@
 import { brainErrors } from "@grasp-os/brain/contract";
+import type { ConsolidationScope } from "@grasp-os/brain/lessons";
 import {
   audienceMembersMax,
   eraseOutcome,
@@ -14,6 +15,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { memberRole } from "./auth/identity.ts";
+import { scheduleConsolidation } from "./brain-consolidation.ts";
 import { apps, brainCaptureIntents, workflowRuns } from "./db/core/schema.ts";
 import { brainOf } from "./knowledge/ports.ts";
 
@@ -102,6 +104,12 @@ export interface CaptureStore {
   outcomeOf: (intent: PendingCapture) => Promise<CapturedOutcome | undefined>;
 }
 
+/** The scope an outcome's lessons are consolidated in: its own, exactly. */
+const scopeOfOutcome = (outcome: CapturedOutcome): ConsolidationScope =>
+  outcome.audience === undefined
+    ? { scope: "person", scopeId: outcome.ownerId }
+    : { scope: "session", scopeId: outcome.audience.id };
+
 /**
  * Delivers one intent: built from its records now, recorded in the Brain
  * (once, whatever came before), checked again, then removed. A failure is
@@ -135,7 +143,7 @@ const deliver = async (
     return;
   }
   try {
-    await recordOutcome(brain, {
+    const { recorded } = await recordOutcome(brain, {
       ...outcome,
       source: store.source,
       sourceSeq: intent.seq,
@@ -144,6 +152,9 @@ const deliver = async (
     // find this yet: it goes now, and nothing else of its record.
     if ((await store.outcomeOf(intent)) === undefined) {
       await eraseOutcome(brain, outcome.eventId);
+    } else if (recorded) {
+      // Learning from it, once its scope has enough new: in the background.
+      await scheduleConsolidation(env, scopeOfOutcome(outcome));
     }
   } catch (error) {
     const code = brainErrors.codeOf(error) ?? "unavailable";

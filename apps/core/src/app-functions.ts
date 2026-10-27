@@ -1384,11 +1384,16 @@ export const callsWorkflowQuery = (request: unknown): boolean => {
 };
 
 /**
- * Whether `request` calls a workflow reference's decision queries: read
- * again when a decision of one of the App's runs changes, for whomever it
- * asks (run-changes.ts, `tellDecisionFollowers`).
+ * Whether `request` calls a workflow reference's decision queries, or
+ * watches a run (screen-workflows.ts), which a reviewer may watch only
+ * while one of its decisions asks them: read again when a decision of one
+ * of the App's runs changes, for whomever it asks (run-changes.ts,
+ * `tellDecisionFollowers`).
  */
 export const callsDecisionQuery = (request: unknown): boolean => {
+  if (watchesWorkflow(request)) {
+    return true;
+  }
   try {
     return isDecisionQueryPath(
       readFunctionRequest(request).reference.contractId
