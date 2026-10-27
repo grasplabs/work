@@ -2,7 +2,11 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { published } from "./apps.ts";
+import type { Acting } from "../src/auth/identity.ts";
+import { deleteStore } from "../src/data-stores.ts";
+import { authorize } from "../src/knowledge/app-entries.ts";
+import { indexApps } from "../src/knowledge/apps-collection.ts";
+import { published, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -50,7 +54,22 @@ const archivedApp = async (
   return id;
 };
 
-/** A store the App owns, with one record's worth of inventory. */
+/** `person` as core's functions take a caller. */
+const acting = (
+  person: Person,
+  role: Role,
+  staff = false
+): Acting & { email: string; name: string; expiresAt: string } => ({
+  userId: person.userId,
+  email: `${person.userId}@acme.test`,
+  name: "Person",
+  role,
+  teams: [],
+  staff,
+  expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+});
+
+/** A store the App owns, its default store, with its inventory row. */
 const ownedStore = async (app: string): Promise<string> => {
   const store = crypto.randomUUID();
   await env.DB.batch([
@@ -60,6 +79,9 @@ const ownedStore = async (app: string): Promise<string> => {
     env.DB.prepare(
       "INSERT INTO sdk_store_owners (store_id, app_id, claimed_at) VALUES (?, ?, ?)"
     ).bind(store, app, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO app_default_stores (app_id, store_id, created_at) VALUES (?, ?, ?)"
+    ).bind(app, store, Date.now()),
   ]);
   return store;
 };
@@ -154,6 +176,74 @@ describe("removing an App", slow, () => {
       activeGrants: 0,
       store: 1,
       claim: 1,
+    });
+  });
+
+  it("leaves its default store to the organization's admins, never staff or its owner, so its records are never stuck", async () => {
+    const [owner, admin] = await Promise.all([
+      personApi("builder"),
+      personApi("admin"),
+    ]);
+    const app = await archivedApp(owner);
+    const store = await ownedStore(app);
+    await owner.api.apps.remove(app);
+
+    expect({
+      byOwner: await outcome(deleteStore(env, acting(owner, "builder"), store)),
+      byStaff: await outcome(
+        deleteStore(env, acting(admin, "admin", true), store)
+      ),
+      byAdmin: await outcome(deleteStore(env, acting(admin, "admin"), store)),
+    }).toStrictEqual({
+      byOwner: "data.store_unavailable",
+      byStaff: "role.forbidden",
+      byAdmin: "ok",
+    });
+  });
+
+  it("forgets its entry in the Apps collection: nobody, an admin included, finds its name or AGENTS.md", async () => {
+    const [owner, admin] = await Promise.all([
+      personApi("builder"),
+      personApi("admin"),
+    ]);
+    const word = `v${crypto.randomUUID().replaceAll("-", "")}`;
+    const { id: app } = await owner.api.apps.create({
+      name: `Leave ${word}`,
+    });
+    await release(owner, app, {
+      "AGENTS.md": `# How we approve leave\n\nEvery ${word} request goes to the team lead.\n`,
+    });
+    await indexApps(env);
+    const found = async () => {
+      const { hits } = await admin.api.knowledge.search(word);
+      return hits.filter(({ collectionId }) => collectionId === "apps").length;
+    };
+    const before = await found();
+    await owner.api.apps.archive(app);
+    await owner.api.apps.remove(app);
+    // The cron's indexing never writes it back.
+    await indexApps(env);
+    const entry = await env.KNOWLEDGE.prepare(
+      "SELECT count(*) AS n FROM documents WHERE collection_id = 'apps' AND path = ?"
+    )
+      .bind(`${app}/AGENTS.md`)
+      .first<{ n: number }>();
+    const readable = await authorize(env, {
+      type: "person",
+      person: acting(admin, "admin"),
+    });
+
+    expect({
+      before,
+      after: await found(),
+      kept: entry?.n,
+      listedToAdmin: readable.only?.apps?.includes(`${app}/AGENTS.md`) ?? true,
+    }).toStrictEqual({
+      before: 1,
+      after: 0,
+      // A tombstone stays, read by nobody.
+      kept: 1,
+      listedToAdmin: false,
     });
   });
 

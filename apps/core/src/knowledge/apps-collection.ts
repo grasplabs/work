@@ -301,6 +301,55 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
   await noteVersion(env, appId, version, described, null);
 };
 
+/** What a removed App's entry holds instead of its name and AGENTS.md. */
+const removedEntryText =
+  "---\ntitle: A removed App\n---\nThis App was removed.\n";
+
+/**
+ * Forgets the entry of the removed App `appId` (app-removal.ts): its
+ * text, its name, description and AGENTS.md, is replaced by one that
+ * says only that an App was removed, and its note goes, so the indexer
+ * never writes it again (the App has no current version). Nobody reads
+ * the entry any more either (app-entries.ts). A failure is logged: the
+ * entry is unreadable all the same, and removing again forgets it.
+ */
+export const forgetAppEntry = async (
+  env: Env,
+  appId: string
+): Promise<void> => {
+  try {
+    const knowledge = drizzle(env.KNOWLEDGE);
+    const stored = await knowledge
+      .select({ version: documents.currentVersion })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.collectionId, appsCollectionId),
+          eq(documents.path, appEntryPath(appId))
+        )
+      )
+      .get();
+    if (stored !== undefined) {
+      const collection = await ensureCollection(
+        brainOf(env),
+        appsCollectionRow(),
+        appsActor
+      );
+      await writeVersion(brainOf(env), appsWriter, {
+        collection,
+        path: appEntryPath(appId),
+        text: removedEntryText,
+        ifVersion: stored.version,
+        message: "The App was removed",
+        restoredFrom: null,
+      });
+    }
+    await drizzle(env.DB).delete(appEntries).where(eq(appEntries.appId, appId));
+  } catch (error) {
+    log.error("apps.forget_failed", { appId, ...errorFields(error) });
+  }
+};
+
 /**
  * `indexApp`, whose failure is logged and left to the clock (see
  * `indexApps`): a conflict, another indexing that wrote first, is left to
