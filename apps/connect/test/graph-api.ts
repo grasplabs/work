@@ -10,7 +10,8 @@
  * workbooks in the finance drive hold their named tables in memory, typed
  * as Excel types what it is sent, afresh for each test. Each person's To
  * Do is theirs alone: Graph answers a token for its own user's lists only,
- * as it answers a delegated `Tasks.ReadWrite` token.
+ * as it answers a delegated `Tasks.ReadWrite` token. Teams chats and
+ * meetings are graph-teams-fake.ts's.
  */
 import { egressHeader } from "@grasp-os/connector-kit/manifest";
 import {
@@ -74,6 +75,13 @@ import {
   appRoutes,
   resetApps,
 } from "./graph-apps-fake.ts";
+import {
+  holdMeetings,
+  meetingsAnswer,
+  resetTeams,
+  teamsParts,
+  teamsRoutes,
+} from "./graph-teams-fake.ts";
 import { fakeProvider, json, route as routeOn } from "./internet.ts";
 import type { ProviderRoute } from "./internet.ts";
 import type { fakeProviders } from "./oauth-provider.ts";
@@ -96,6 +104,7 @@ const parts = [
   "task",
   "version",
   ...appParts,
+  ...teamsParts,
 ] as const;
 
 export type Part = (typeof parts)[number];
@@ -730,12 +739,20 @@ const graphRoutes: ProviderRoute<Part>[] = [
     return json(made, 201);
   }),
   route("GET", `${users}/calendarView`, ({ mailbox, query }) => {
+    const meetings = meetingsAnswer(mailbox, query);
+    if (meetings !== undefined) {
+      return meetings;
+    }
     const held = heldEvents.get(mailbox);
     return held === undefined
       ? json(eventPage(mailbox, query.get("$skiptoken")))
       : json(viewOf(mailbox, held, query));
   }),
-  route("GET", `${users}/events/(?<id>[^/]+)`, ({ mailbox, id }) => {
+  route("GET", `${users}/events/(?<id>[^/]+)`, ({ mailbox, id, query }) => {
+    const meeting = meetingsAnswer(mailbox, query, id);
+    if (meeting !== undefined) {
+      return meeting;
+    }
     const event = eventOf(mailbox, id);
     if (inviteDuringRead) {
       // Someone invites a guest right after this read.
@@ -1140,6 +1157,7 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     attendeesLeftOut = undefined;
     resetWorkbooks();
     resetApps();
+    resetTeams();
   });
   /** The subject of the token's account, if `mailbox` is that account. */
   const ownerOf = (mailbox: string, request: Request): string | undefined => {
@@ -1163,6 +1181,7 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     // list's routes are more particular than the other lists'.
     routes: [
       ...appRoutes(route, ownerOf),
+      ...teamsRoutes(route, ownerOf),
       ...graphRoutes,
       ...todoRoutes(ownerOf),
     ],
@@ -1227,6 +1246,8 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     holdEvents: (mailbox: string, held: HeldEvent[]) => {
       heldEvents.set(mailbox, held);
     },
+    /** Makes `mailbox`'s calendar hold Teams meetings (graph-teams-fake.ts). */
+    holdMeetings,
     /** Has someone invite a guest to the next event read, right after it. */
     inviteDuringRead: () => {
       inviteDuringRead = true;

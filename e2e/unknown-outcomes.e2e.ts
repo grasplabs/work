@@ -21,7 +21,7 @@ import { toCard } from "./pile.ts";
 // the step's call as for any lost answer, and the run waits on its person.
 // What connect and core do with it (who may resolve it, what each choice
 // does) is their tests' (apps/connect/test/unknown-outcomes.test.ts,
-// apps/core/test/unknown-outcome-runs.test.ts).
+// apps/core/test/unknown-outcome-*.test.ts).
 
 const mail = {
   mailbox: "invoices@acme.test",

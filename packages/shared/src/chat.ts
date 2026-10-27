@@ -278,11 +278,32 @@ export interface ChatCitation {
 export const chatCitationsMax = 50;
 
 /**
+ * A span of an answer that cites a document: one of its links to the
+ * note, `[text](grasp:note/<documentId> "quote")`, as stored. `at` is where
+ * the link starts in the answer's text (the offset of its `[`), so a page
+ * finds it as it renders the Markdown; `text` is the words it links, as
+ * Markdown. `quote` is the words of the document it rests on, which the
+ * answer wrote as the link's title, only when the document says them now
+ * (whitespace aside), and never longer than {@link citedQuoteMax}; else
+ * null, and the span cites the document alone.
+ */
+export interface ChatCitedSpan {
+  at: number;
+  text: string;
+  quote: string | null;
+}
+
+/** Longest quote a cited span keeps (`ChatCitedSpan`). */
+export const citedQuoteMax = 300;
+
+/**
  * A document an answer cites (`ChatCitation`), as the chat's agent may
  * read it for the chat's person now: where it is, what it is called, and
  * the start of what it says (its description, or else its first section),
- * cut to {@link citedSnippetMax} characters. A document either of them can
- * no longer read, or that is gone, is never one.
+ * cut to {@link citedSnippetMax} characters; and the spans of the answer
+ * that cite it, in order, each with its quote. A document either of them
+ * can no longer read, or that is gone, is never one, so neither are its
+ * spans nor their quotes.
  */
 export interface ChatCitedDocument {
   documentId: string;
@@ -290,10 +311,27 @@ export interface ChatCitedDocument {
   title: string;
   path: string;
   snippet: string;
+  spans: ChatCitedSpan[];
 }
 
 /** Longest snippet of a cited document (`ChatCitedDocument`). */
 export const citedSnippetMax = 200;
+
+/**
+ * What the model thought before it answered, as its provider let it be
+ * shown: its own words, or a summary of them (OpenAI's). A redacted part
+ * (Anthropic's safety filters) shows nothing, but its time counts.
+ */
+export interface ChatReasoning {
+  /** Its parts, joined; empty when the provider showed none of it. */
+  text: string;
+  /**
+   * How long it thought, in milliseconds, from its first word to its last
+   * (core's clock, as the answer streamed in); null for a reply core kept
+   * before it timed it.
+   */
+  ms: number | null;
+}
 
 /**
  * One stored message of a chat, oldest first by `id`. The agent's
@@ -314,6 +352,8 @@ export type ChatMessage =
       citations: ChatCitation[];
       /** The code it asked to run, each run in a code step. */
       code: ChatCode[];
+      /** What the model thought before it, when it thought. */
+      reasoning?: ChatReasoning;
       end: ChatReplyEnd;
       /** Why it failed, in the model gateway's words. */
       error?: string;
@@ -344,6 +384,8 @@ export type ChatMessage =
 export interface ChatPartial {
   text: string;
   code: ChatCode[];
+  /** What the model thought so far (`ChatReasoning.text`); empty for nothing. */
+  reasoning: string;
 }
 
 /**
@@ -367,6 +409,8 @@ export interface ChatPartialUpdate {
   text: string;
   /** Every code step of the response, each as its own text is. */
   code: { callId: string; from: number; code: string }[];
+  /** What the model thought, as `from` and `text` are for its answer. */
+  reasoning: { from: number; text: string };
 }
 
 /** A text the watcher has, with what an update adds from `from` on. */
@@ -394,6 +438,11 @@ export const applyPartial = (
         code
       ),
     })),
+    reasoning: extended(
+      shown?.reasoning ?? "",
+      update.reasoning.from,
+      update.reasoning.text
+    ),
   };
 };
 

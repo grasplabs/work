@@ -8,6 +8,7 @@ import type {
   BlueprintWorkflow,
   DeclaredPermission,
 } from "@grasp-os/shared/permissions";
+import type { RuleCondition } from "@grasp-os/shared/policies";
 import { artifactDecisions } from "@grasp-os/shared/screen-trust";
 import { signalKinds } from "@grasp-os/shared/signals";
 import type {
@@ -169,6 +170,17 @@ export const organizations = sqliteTable("organizations", {
   createdAt: timestamp("created_at").notNull(),
   /** The IANA time zone an admin set (organization.ts); `UTC` until then. */
   timeZone: text("time_zone"),
+});
+
+/**
+ * The organization's settings an admin keeps beside its name and time zone
+ * (org-settings.ts): one row per kind (`billing`, `pulse`), its value as
+ * JSON, checked again as it is read. None until an admin saves one.
+ */
+export const orgSettings = sqliteTable("org_settings", {
+  kind: text().primaryKey(),
+  value: text().notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
 });
 
 /** A person's place in the organization, with their role. */
@@ -4472,6 +4484,9 @@ export const brainRecords = sqliteTable(
         "gap",
         "workflow",
         "workflowVersion",
+        "goal",
+        "goalVersion",
+        "goalLink",
       ],
     }).notNull(),
     id: text().notNull(),
@@ -4700,4 +4715,56 @@ export const knowledgeSignalDismissals = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.kind, table.collectionId, table.subject] }),
   ]
+);
+
+/**
+ * The company's policy documents (policies.ts): its own text, as uploaded,
+ * so its rules can be drawn from it.
+ */
+export const policyDocuments = sqliteTable("policy_documents", {
+  id: text().primaryKey(),
+  title: text().notNull(),
+  fileName: text("file_name").notNull(),
+  text: text().notNull(),
+  status: text({
+    enum: ["reading", "review", "published", "failed"],
+  }).notNull(),
+  uploadedBy: text("uploaded_by").notNull(),
+  uploadedAt: timestamp("uploaded_at").notNull(),
+  publishedAt: timestamp("published_at"),
+});
+
+/** The rules the company set for the apps its people use (policies.ts). */
+export const policyRules = sqliteTable(
+  "policy_rules",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    description: text().notNull(),
+    conditions: text({ mode: "json" }).$type<RuleCondition[]>().notNull(),
+    effect: text({ enum: ["flag", "block"] }).notNull(),
+    status: text({ enum: ["watching", "active", "paused"] }).notNull(),
+    /** The policy it comes from; null for a rule made by hand, or once its policy is removed. */
+    policyId: text("policy_id"),
+    excerpt: text(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [index("policy_rules_policy_idx").on(table.policyId)]
+);
+
+/** An app allowed to break one rule until a day (policies.ts): one per rule and app. */
+export const policyExceptions = sqliteTable(
+  "policy_exceptions",
+  {
+    ruleId: text("rule_id").notNull(),
+    appId: text("app_id").notNull(),
+    reason: text().notNull(),
+    /** Its last day, `YYYY-MM-DD`. */
+    until: text().notNull(),
+    grantedBy: text("granted_by").notNull(),
+    grantedAt: timestamp("granted_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ruleId, table.appId] })]
 );

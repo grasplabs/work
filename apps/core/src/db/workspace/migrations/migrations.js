@@ -22,6 +22,7 @@ import m0019 from './0019_chat_thread.sql';
 import m0020 from './0020_chat_draft_versions.sql';
 import m0021 from './0021_brain_capture_intents.sql';
 import m0022 from './0022_chat_last_at.sql';
+import m0023 from './0023_chat_thinking_ms.sql';
 
   export default {
     journal,
@@ -48,7 +49,8 @@ m0018,
 m0019,
 m0020,
 m0021,
-m0022
+m0022,
+m0023
     }
   }
   

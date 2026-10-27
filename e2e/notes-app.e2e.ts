@@ -25,7 +25,7 @@ import {
 // client the platform mounts, with the generated `#grasp` references, an
 // operation-bound create form and a record editor with explicit Save.
 // What a lost answer, a cancelled save or a reused key does is core's
-// own test, through the same client (apps/core/test/screen-client.test.ts).
+// own test, through the same client (apps/core/test/screen-client*.test.ts).
 // A screen whose page connects again as someone else, or calls core once
 // someone else signed in, is stopped before anything it holds is sent as
 // them; one whose person signed out is emptied too.

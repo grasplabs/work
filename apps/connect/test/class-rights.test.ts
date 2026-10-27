@@ -228,6 +228,57 @@ describe("a shared mailbox pointed at", () => {
   });
 });
 
+describe("Read others' words", () => {
+  const teamsRights = [
+    "Chat.Read",
+    "OnlineMeetings.Read",
+    "OnlineMeetingTranscript.Read.All",
+  ];
+
+  it("is asked of Microsoft only once the company turns it on", async () => {
+    const off = await Promise.all(
+      (
+        [
+          undefined,
+          ["read-own", "change-own"],
+          [
+            "read-own",
+            "read-company",
+            "change-own",
+            "change-company",
+            "reach-others",
+          ],
+        ] as const
+      ).map(async (classes) => await askedFor(classes && [...classes]))
+    );
+    expect(
+      off.flat().filter((right) => teamsRights.includes(right ?? ""))
+    ).toStrictEqual([]);
+    // On its own it reads the calendar too, to find the meetings.
+    await expect(askedFor(["read-others"])).resolves.toStrictEqual(
+      rights(...signIn, "Calendars.Read", ...teamsRights)
+    );
+  });
+
+  it("asks the connections granted without it to connect again once turned on", async () => {
+    const anna = someone();
+    const annas = await connectAccount(providers, anna, {
+      ...ownAccount(anna),
+      granted: defaultGrant,
+    });
+    // Made before grants were kept: the old wide set never read chats.
+    const ben = someone();
+    const bens = await connectAccount(providers, ben, ownAccount(ben));
+
+    await exports.default.requireClassRights({ classes: ["read-others"] });
+
+    expect({
+      annas: await stored(annas),
+      bens: await stored(bens),
+    }).toStrictEqual({ annas: askedAgain, bens: askedAgain });
+  });
+});
+
 describe("a class turned on", () => {
   it("asks the connections whose grant lacks its rights to connect again, and only those", async () => {
     const anna = someone();

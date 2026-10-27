@@ -32,6 +32,7 @@ import {
   sectionIds,
   suppliersList,
 } from "./fixtures/graph-apps.ts";
+import { chatIds, eventIds } from "./fixtures/graph-teams.ts";
 import {
   archiveFolderId,
   attachmentsSkipToken,
@@ -215,6 +216,13 @@ const mailboxInputs: Record<string, Input> = {
     title: "Notes",
     text: "Call Northwind back",
   },
+  "chats.list": {},
+  "chats.messages": { chat: chatIds.own },
+  "meetings.list": {
+    from: "2026-10-19T00:00:00Z",
+    to: "2026-10-26T00:00:00Z",
+  },
+  "meetings.transcript": { event: eventIds.review },
 };
 
 /** Input for each file tool, but its drive. */
@@ -335,8 +343,8 @@ describe("the Microsoft 365 connector's scoping", () => {
     );
     expect(unbound).toStrictEqual([]);
     // Only the tools that work in the person's own mailbox or OneDrive go
-    // to /me: the mail tools and calendar.freeTime to ask whose the token
-    // is, files.createDraft to write its draft.
+    // to /me: the mail tools, calendar.freeTime and the chat and meeting
+    // tools to ask whose the token is, files.createDraft to write its draft.
     const askWho = Object.entries(manifest.actions)
       .filter(([, { routes }]) =>
         routes.some(({ path }) => path.startsWith("/v1.0/me"))
@@ -344,10 +352,14 @@ describe("the Microsoft 365 connector's scoping", () => {
       .map(([name, { reach }]) => `${name} ${reach}`);
     expect(askWho.toSorted()).toStrictEqual([
       "calendar.freeTime own",
+      "chats.list conversations",
+      "chats.messages conversations",
       "files.createDraft own",
       "mail.categorise own",
       "mail.flag own",
       "mail.move own",
+      "meetings.list conversations",
+      "meetings.transcript conversations",
     ]);
     expect(
       Object.keys(manifest.actions).toSorted(),
