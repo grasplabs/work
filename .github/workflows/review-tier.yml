@@ -86,3 +86,67 @@ jobs:
             echo
             jq -r '.reasons[] | "- \(.)"' "$RUNNER_TEMP/tier.json"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # A model's reading of the diff (scripts/review-tier-model.ts), which may
+  # only raise the labels above. In shadow mode for now: it writes what it
+  # would set to the run's summary and an artifact, and changes no label,
+  # until its verdicts have been compared with how the reviews went.
+  #
+  # Its own job, so the key never sits beside a write token: this one may
+  # only read. Only the PR's files and patches reach the model, never its
+  # title or body, and nothing of the PR runs. Not for drafts, which are
+  # pushed often and reviewed once ready, nor for forks, which get no
+  # secrets. The key comes from the review-tier environment's 1Password
+  # service account, as the other jobs' secrets do; the API key there
+  # has its own spend limit.
+  model:
+    name: review tier (model, shadow)
+    # `edited` asks again only when the base branch changed, not the title.
+    if: >-
+      !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action != 'edited' || github.event.changes.base)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Shadow mode: a failure here never blocks a pull request.
+    continue-on-error: true
+    environment: review-tier
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          ANTHROPIC_API_KEY: op://grasp-os-review-tier/anthropic/api-key
+      - name: Ask the model
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api "repos/$REPO/pulls/$PR/files" --paginate \
+            --jq '.[] | {filename, previous_filename, additions, deletions, patch}' \
+            | node scripts/review-tier-model.ts > "$RUNNER_TEMP/review-tier-model.json"
+          {
+            jq -r '"### Model (shadow): would label Complexity: \(.labels.complexity)\(if .labels.security then ", Security" else "" end)"' "$RUNNER_TEMP/review-tier-model.json"
+            echo
+            jq -r '"Floor: \(.floor.complexity)\(if .floor.security then ", Security" else "" end). Model: \(.model.complexity)\(if .model.security then ", Security" else "" end), $\(.model.cost * 1000 | round / 1000)."' "$RUNNER_TEMP/review-tier-model.json"
+            echo
+            jq -r '.model.votes | to_entries[] | "- Vote \(.key + 1): \(.value.complexity), \(if .value.security then "Security" else "not Security" end). \(.value.complexity_reason) \(.value.security_reason)"' "$RUNNER_TEMP/review-tier-model.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: review-tier-model
+          path: ${{ runner.temp }}/review-tier-model.json
+          retention-days: 90
