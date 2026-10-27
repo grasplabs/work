@@ -47,6 +47,14 @@ import type { WorkflowStoreServer } from "./workflow-store-host.ts";
 //   version that resolved and that version still binding the store.
 // - The owner workflow calling its own store as a consumer: refused as an
 //   operation that isn't served; a workflow's store is its consumers'.
+// - An App opening a workflow's store: never. The store's tables admit
+//   members (`appMembers`), and this gate is the only path that counts a
+//   caller as one for a workflow-owned store: an App's release can't
+//   claim or bind it (`version.store_bound_elsewhere`, app-releases.ts),
+//   store-operations.ts serves App-owned stores only, an App's permission
+//   on it is refused at request (permissions.ts), and it is never shared.
+//   Pinned by app-releases.test.ts and store-operations.test.ts ("a store
+//   a workflow owns") and by this module's tests.
 // - Who the store's records reach: every generated operation reaches
 //   every record of its table, whoever owns it; the call runs as the
 //   consumer's principal, counted a member (the only members a workflow's
