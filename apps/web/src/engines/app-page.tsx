@@ -235,9 +235,9 @@ export const AppPage = ({
           <Link
             aria-label={t`Settings of ${name}`}
             className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
-            params={{ engine: app.id }}
+            params={{ app: app.id }}
             title={t`Settings`}
-            to="/domains/$engine"
+            to="/apps/$app/settings"
           >
             <SettingsIcon />
           </Link>

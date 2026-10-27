@@ -1837,6 +1837,10 @@ msgstr "Eine Mitarbeiterliste ist der schnellste Weg: Namen, E-Mail-Adressen, Te
 msgid "A step"
 msgstr "Ein Schritt"
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "A team it is no longer shared with"
+msgstr "Ein Team, mit dem sie nicht mehr geteilt ist"
+
 #: src/settings/person-limits.tsx
 msgid "A team no longer in your organization"
 msgstr "Ein Team, das nicht mehr zu deiner Organisation gehört"
@@ -2458,6 +2462,10 @@ msgstr "Eine App läuft erst, wenn ein Admin ihren Code genehmigt hat. Das gesch
 msgid "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
 msgstr "Eine archivierte Domäne bleibt, wie sie ist, und geht offline: Niemand öffnet ihre Apps, ihre Auslöser stoppen und ihre unfertigen Läufe werden abgebrochen. Ein Builder kann sie später als Entwurf wiederherstellen."
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "An archived domain is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft."
+msgstr "Eine archivierte Domäne bleibt, wie sie war, und geht offline: Niemand öffnet sie, ihre Auslöser stoppen und ihre unvollendeten Läufe werden abgebrochen. Ein Builder kann sie als Entwurf wiederherstellen."
+
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "Ein altes Format: als PDF oder neuere Datei speichern"
@@ -2801,12 +2809,17 @@ msgid "Apps to approve"
 msgstr "Zu genehmigende Apps"
 
 #: src/engines/app-status.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Archive"
 msgstr "Archivieren"
 
 #: src/engines/app-status.tsx
 msgid "Archive {name}?"
 msgstr "{name} archivieren?"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Archive and take offline"
+msgstr "Archivieren und offline nehmen"
 
 #: src/engines/app-status.tsx
 msgctxt "a domain put away"
@@ -3081,6 +3094,10 @@ msgstr "Zurück"
 #: src/onboarding/setup-frame.tsx
 msgid "Back and forward"
 msgstr "Zurück und weiter"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Back to {appName}"
+msgstr "Zurück zu {appName}"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Back to {destination}"
@@ -4869,6 +4886,7 @@ msgstr "Nimmt nicht teil: Niemand darin bekommt einen Link."
 #: src/inbox/items.ts
 #: src/landscape/app-cells.tsx
 #: src/landscape/landscape-overview.ts
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.models.tsx
@@ -4899,6 +4917,7 @@ msgstr "Domänen-App"
 msgid "Domain budgets"
 msgstr "Domänen-Budgets"
 
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Domain not found"
@@ -4912,6 +4931,7 @@ msgstr "Domänen-Verknüpfungen"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
@@ -5878,6 +5898,10 @@ msgstr "Lücken"
 #: src/activity/audit-words.ts
 msgid "Gave consent for a connection"
 msgstr "Einer Verbindung zugestimmt"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "General"
+msgstr "Allgemein"
 
 #: src/onboarding/interview-words.ts
 msgid "Gets its links once the team is told"
@@ -7477,6 +7501,10 @@ msgstr "Niedrig"
 msgid "Low confidence"
 msgstr "Geringe Belastbarkeit"
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Made by {person} on {date}."
+msgstr "Erstellt von {person} am {date}."
+
 #: src/policies/policy.ts
 msgid "Made by {vendors}"
 msgstr "Entwickelt von {vendors}"
@@ -7488,6 +7516,14 @@ msgstr "Manuell erstellt"
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "Made by hand by {createdBy} on {madeOn}."
 msgstr "Manuell erstellt von {createdBy} am {madeOn}."
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Made for"
+msgstr "Gemacht für"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Made on {date}."
+msgstr "Erstellt am {date}."
 
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
@@ -7806,6 +7842,7 @@ msgstr "Stumm"
 
 #: src/chat/project-dialog.tsx
 #: src/onboarding/interviews-progress.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
@@ -8509,6 +8546,10 @@ msgstr "Noch hat ihn niemand bearbeitet: Er beginnt mit einer Definition, die di
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Nobody has said yet. At the end of their interview, people can say how it was: from 1 to 5."
 msgstr "Noch hat niemand etwas dazu gesagt. Am Ende ihres Interviews können die Personen sagen, wie es war: von 1 bis 5."
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Nobody in particular"
+msgstr "Niemand Bestimmtes"
 
 #: src/onboarding/organization-words.ts
 msgid "Nobody is asked about “{work}”"
@@ -9273,6 +9314,10 @@ msgstr "Nur markierte Wortbeiträge"
 msgid "Only if its condition holds"
 msgstr "Nur wenn die Bedingung zutrifft"
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Only its builders change these settings."
+msgstr "Nur ihre Builder ändern diese Einstellungen."
+
 #: src/dashboard/standard-widgets.tsx
 msgid "Only mapped"
 msgstr "Nur erfasst"
@@ -9632,6 +9677,11 @@ msgstr "Verantwortlich"
 msgctxt "note property: the team that owns an application"
 msgid "Owner"
 msgstr "Verantwortlich"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgctxt "who answers for an app"
+msgid "Owner"
+msgstr "Verantwortliche Person"
 
 #: src/people/person-picker.tsx
 msgid "Owner: {owner}. Change owner"
@@ -10190,6 +10240,10 @@ msgstr "Zweck und Modell"
 msgid "Put back"
 msgstr "Zurücklegen"
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Putting it away"
+msgstr "Ablegen"
+
 #: src/workflows/runs.tsx
 msgid "Queued"
 msgstr "In der Warteschlange"
@@ -10629,6 +10683,7 @@ msgstr "Ressourcen"
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Restore"
 msgstr "Wiederherstellen"
 
@@ -11354,10 +11409,15 @@ msgstr "Festgelegt. Geben Sie einen neuen Wert ein, um ihn zu ersetzen."
 
 #: src/engines/app-page.tsx
 #: src/frame/person-menu.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
 msgstr "Einstellungen"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Settings of {appName}"
+msgstr "Einstellungen von {appName}"
 
 #: src/engines/app-page.tsx
 msgid "Settings of {name}"
@@ -11488,6 +11548,10 @@ msgstr "Die ersten {pageMaxLimit} Dateien werden angezeigt."
 #: src/workflows/runs.tsx
 msgid "Showing the first {runsPageSize} runs of more."
 msgstr "Die ersten {runsPageSize} von mehr Läufen werden angezeigt."
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Shown with the domain. It opens the domain to nobody: who may use it is who it is shared with."
+msgstr "Wird mit der Domäne angezeigt. Es öffnet die Domäne für niemanden: Nutzen darf sie, mit wem sie geteilt ist."
 
 #: src/policies/policy.ts
 msgid "Shows which apps it would flag or block, without doing it."
@@ -11680,6 +11744,10 @@ msgstr "Jemand anderes"
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Jemand anderes hat sich in diesem Browser angemeldet, deshalb wurde diese App gestoppt. Versuchen Sie es erneut, um sie als die jetzt angemeldete Person zu öffnen."
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Someone it is no longer shared with"
+msgstr "Jemand, mit dem sie nicht mehr geteilt ist"
+
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
 msgstr "Jemand, der nicht mehr da ist"
@@ -11852,6 +11920,7 @@ msgstr "Statistiken"
 #: src/connections/connection-list.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
+#: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -14681,6 +14750,11 @@ msgstr "Woran sie gebunden ist, kann sie nicht mehr bedienen: Die Berechtigung w
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "Woran sie gebunden ist, hat sich seit der Genehmigung der Bindung geändert. Binde sie erneut, sobald du geprüft hast, dass es noch passt."
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgctxt "what an app is for, in a sentence"
+msgid "What it is for"
+msgstr "Wofür sie da ist"
+
 #: src/brain/memory-page.tsx
 msgid "What it rests on"
 msgstr "Worauf es sich stützt"
@@ -14769,6 +14843,10 @@ msgstr "Was der Kunde teilt, und unsere eigene Desk-Recherche. Ergänzt Richtlin
 #: src/chat/builds.tsx
 msgid "What the domain holds"
 msgstr "Was die Domäne hat"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "What the domain is called and what it is for."
+msgstr "Wie die Domäne heißt und wofür sie da ist."
 
 #: src/engines/resource-bindings.tsx
 msgid "What the domain's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
@@ -15045,6 +15123,10 @@ msgstr "Wer"
 #: src/workflows/chosen-at-run-time.tsx
 msgid "who answers"
 msgstr "wer antwortet"
+
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Who answers for the domain: who is asked about it and decides what changes."
+msgstr "Wer für die Domäne verantwortlich ist: wer zu ihr gefragt wird und entscheidet, was sich ändert."
 
 #: src/brain/brain.ts
 msgid "Who approves a new tool"
