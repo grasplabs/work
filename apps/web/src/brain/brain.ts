@@ -21,6 +21,7 @@ import type {
   WorkflowStatus,
   Workspace,
 } from "@grasp-os/shared/brain";
+import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural, select, t } from "@lingui/core/macro";
@@ -1058,6 +1059,30 @@ export const quoted = (text: string): string =>
   t({
     message: `“${text}”`,
     comment: "A statement, quoted. Use the quotation marks of your language.",
+  });
+
+/**
+ * Whether a statement is one of the onboarding's claims (GRA-1084): what
+ * five or more of a team's people said, put together (core's
+ * onboarding/team-claims.ts), never one person's words.
+ */
+export const isTeamClaim = (statementId: string): boolean =>
+  statementId.startsWith(onboardingIdPrefix);
+
+/**
+ * Statement `statementId`'s words as the brain shows them: in quotation
+ * marks, as someone said them, except a team's claim, which no one person
+ * said and is never quoted (GRA-1199). Where it stands on its own, the
+ * claim says what it rests on (`ClaimBasis`, `teamClaimBasis`).
+ */
+export const statementWords = (statementId: string, text: string): string =>
+  isTeamClaim(statementId) ? text : quoted(text);
+
+/** What a team's claim rests on, in words: for where `ClaimBasis` can't go, such as the Markdown export. */
+export const teamClaimBasis = (): string =>
+  t({
+    message: "Said by five or more people",
+    comment: "Under a statement put together from the interviews",
   });
 
 type Draft = Omit<
@@ -2115,7 +2140,7 @@ const gapPoints = (cx: Context, gap: Gap): NotePoint[] =>
         );
         return statement
           ? {
-              label: quoted(statement.text),
+              label: statementWords(statement.id, statement.text),
               to: statement.sourceId,
               statement: id,
             }

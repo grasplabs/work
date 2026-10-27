@@ -41,7 +41,7 @@ import {
   given,
   kindLabel,
   mentionParts,
-  quoted,
+  statementWords,
   sourceContents,
   splitTimeline,
 } from "../brain/brain.ts";
@@ -453,8 +453,8 @@ const DetailRows = ({
             [
               ref.to ?? "",
               more > 0
-                ? `${quoted(first.text)} ${t`and ${more} more`}`
-                : quoted(first.text),
+                ? `${statementWords(first.id, first.text)} ${t`and ${more} more`}`
+                : statementWords(first.id, first.text),
             ],
           ];
         }
@@ -648,7 +648,7 @@ const Mentions = ({ note }: { note: Note }) => {
             params={{ noteId: mention.sourceId }}
             to="/brain/$noteId"
           >
-            {quoted(mention.text)}
+            {statementWords(mention.statementId, mention.text)}
           </Link>
         ))}
       </div>
