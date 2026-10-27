@@ -88,8 +88,9 @@ export interface PinnedRun {
  * build a chat's code handed to a durable job (build-jobs.ts), or filling
  * in a store's defaulted fields before its contract takes them
  * (store-backfill.ts), publishing a document version's sections to
- * search (knowledge/indexing.ts), or linking a Brain source's entities
- * (packages/brain's entities.ts).
+ * search (knowledge/indexing.ts), linking a Brain source's entities
+ * (packages/brain's entities.ts), or consolidating a scope's episodes into
+ * lesson candidates (brain-consolidation.ts).
  */
 export const internalWorkflows = [
   "extraction",
@@ -97,6 +98,7 @@ export const internalWorkflows = [
   "backfill",
   "indexing",
   "linking",
+  "consolidation",
 ] as const;
 
 export type InternalWorkflow = (typeof internalWorkflows)[number];
