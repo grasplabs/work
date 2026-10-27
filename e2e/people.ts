@@ -253,7 +253,7 @@ export const endSession = async (
  */
 const cast = {
   apps: { builder: "builder", user: "user", admin: "admin" },
-  appPage: { builder: "builder", user: "user" },
+  appPage: { builder: "builder", user: "user", colleague: "builder" },
   screens: { one: "builder", two: "builder" },
   screenAttacks: { builder: "builder", admin: "admin" },
   screenWorkflows: { builder: "builder", admin: "admin" },
