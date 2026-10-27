@@ -13,6 +13,7 @@ import {
   collections,
   documents,
 } from "./db/schema.ts";
+import { kindOf } from "./entities.ts";
 import { collectionIdSchema, documentIdSchema, memoryIdSchema } from "./ids.ts";
 import { citesReadable } from "./memory-cites.ts";
 
@@ -50,8 +51,17 @@ const isoDate = /^\d{4}-\d{2}-\d{2}$/u;
 const relationsInputSchema = z.strictObject({
   /** The entity whose relations, as subject or object. */
   entityId: z.string().min(1).max(256),
-  /** Only this relation (`owns`), folded as relations are. */
-  predicate: z.string().min(1).max(40).optional(),
+  /**
+   * Only this relation (`owns`), folded as the Brain keeps relations
+   * (`kindOf`): `Reports to` asks for `reports_to`.
+   */
+  predicate: z
+    .string()
+    .min(1)
+    .max(40)
+    .transform(kindOf)
+    .pipe(z.string().min(1))
+    .optional(),
   /** Those that hold on this date (ISO); every one without it. */
   at: z.string().regex(isoDate).optional(),
   /** What the Brain had read by this moment (ISO); now without it. */

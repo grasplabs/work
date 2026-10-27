@@ -268,7 +268,12 @@ const spansIn = (text: string): ((quote: string) => string | undefined) => {
 const fold = (text: string): string =>
   text.normalize("NFKC").toLowerCase().replaceAll(whitespace, " ").trim();
 
-const kindOf = (kind: string): string =>
+/**
+ * A kind or a relation's predicate as the Brain keeps it: folded, words
+ * joined by `_` (`Reports to` is `reports_to`), so a query finds it
+ * however it is written.
+ */
+export const kindOf = (kind: string): string =>
   fold(kind)
     .replaceAll(notWord, "_")
     .replaceAll(edgeUnderscores, "")
