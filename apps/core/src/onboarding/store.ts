@@ -504,12 +504,12 @@ const agreedOf = (stored: string): Record<string, string> =>
 /** A drawing as the store keeps it; null when there is none. */
 /**
  * Someone's admission as SQL, as `#interviewsOf` reads it: their
- * interview's start and when anything they approved last stopped counting,
+ * interview's start and how often anything they approved stopped counting,
  * or NULL while nothing they agreed to counts. For a statement that writes
  * only while it is what an intake read.
  */
 const admissionSql = (person: string): SQL =>
-  sql`(SELECT CASE WHEN agreed_at IS NULL THEN NULL ELSE coalesce(started_at, '') || '|' || coalesce(revoked_at, '') END FROM interview_states WHERE person = ${person})`;
+  sql`(SELECT CASE WHEN agreed_at IS NULL THEN NULL ELSE coalesce(started_at, '') || '|' || revocations END FROM interview_states WHERE person = ${person})`;
 
 const drawingOf = (stored: string | null): DrawnWork | null =>
   stored === null
