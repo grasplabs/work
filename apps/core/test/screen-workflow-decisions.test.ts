@@ -931,6 +931,12 @@ describe(
           "UPDATE workflow_decisions SET deciders = ? WHERE id = ?"
         ).bind(`person:${outsider.userId}`, reassignedRun.decisionId),
       ]);
+      // Read before restricting the App, which refuses these on its own.
+      const stopped = {
+        answered: await watched(reviewer, answeredRun.runId),
+        closed: await watched(reviewer, closedRun.runId),
+        reassigned: await watched(reviewer, reassignedRun.runId),
+      };
       // The App in restricted mode: the run, unrestricted, isn't its
       // screen's to answer, so not the reviewer's to watch.
       const unrestrictedBefore = await watched(reviewer, asked.runId);
@@ -940,9 +946,7 @@ describe(
         ...before,
         unrestrictedBefore: typeof unrestrictedBefore,
         afterRestricting: await watched(reviewer, asked.runId),
-        answered: await watched(reviewer, answeredRun.runId),
-        closed: await watched(reviewer, closedRun.runId),
-        reassigned: await watched(reviewer, reassignedRun.runId),
+        ...stopped,
       }).toStrictEqual({
         reviewer: {
           // No engine runs these rows' run, so it waits on nothing the
