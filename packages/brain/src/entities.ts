@@ -133,7 +133,7 @@ const chunkChars = 8000;
 const maxChunks = 4;
 
 /** The most mentions one source keeps, and identifiers one mention. */
-const mentionsPerSource = 100;
+export const mentionsPerSource = 100;
 const identifiersPerMention = 5;
 
 /** The longest kind, name and identifier kept. */
