@@ -244,6 +244,54 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await expect(waiting).toHaveCount(0);
 });
 
+test("a person attaches files to a question, takes one off, and sees the question carry the other", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const tag = crypto.randomUUID().slice(0, 8);
+  const plan = `plan-${tag}.md`;
+  const notes = `notes-${tag}.txt`;
+  const question = `What does the plan say ${tag}?`;
+  await page.goto("/");
+
+  // Picked with the button's file input: each shows as a card in the box.
+  const picker = page.locator('input[type="file"]');
+  await picker.setInputFiles([
+    {
+      name: plan,
+      mimeType: "text/markdown",
+      buffer: Buffer.from("# Plan\n\nShip it."),
+    },
+    { name: notes, mimeType: "text/plain", buffer: Buffer.from("Notes") },
+  ]);
+  await page.getByRole("button", { name: `Remove ${notes}` }).click();
+  await expect(page.getByText(notes)).toHaveCount(0);
+  await expect(page.getByText(plan)).toBeVisible();
+  // A type core doesn't take stays out, and the box says why.
+  await picker.setInputFiles({
+    name: "setup.exe",
+    mimeType: "application/octet-stream",
+    buffer: Buffer.from("MZ"),
+  });
+  await expect(page.getByText(/Only PDF, Word/u)).toBeVisible();
+  await expect(page.getByText("setup.exe")).toHaveCount(0);
+
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page).toHaveURL(/[?&]chat=/u);
+  // The question shows the file it carried; the box is empty again.
+  const asked = page
+    .getByRole("list", { name: "Messages" })
+    .getByRole("listitem")
+    .first();
+  await expect(asked).toContainText(question);
+  await expect(asked).toContainText(plan);
+  await expect(
+    page.getByRole("button", { name: `Remove ${plan}` })
+  ).toHaveCount(0);
+});
+
 test("a person groups chats in a project with a goal and a document, moves them in and out, and deletes it", async ({
   pageOf,
 }) => {

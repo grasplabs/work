@@ -74,3 +74,29 @@ export const formatEuro = (value: number): string =>
     currency: "EUR",
     maximumFractionDigits: 0,
   }).format(value);
+
+/** Bytes in a kilobyte and a megabyte, as file sizes are shown. */
+const kilobyte = 1024;
+const megabyte = kilobyte * kilobyte;
+
+/**
+ * A file's size as the page's language writes it: "512 byte", "48 kB",
+ * "2.4 MB", one decimal under 10 and none past it.
+ */
+export const formatBytes = (bytes: number): string => {
+  let value = bytes;
+  let unit = "byte";
+  if (bytes >= megabyte) {
+    value = bytes / megabyte;
+    unit = "megabyte";
+  } else if (bytes >= kilobyte) {
+    value = bytes / kilobyte;
+    unit = "kilobyte";
+  }
+  return new Intl.NumberFormat(i18n.locale, {
+    style: "unit",
+    unit,
+    unitDisplay: "short",
+    maximumFractionDigits: value < 10 ? 1 : 0,
+  }).format(value);
+};

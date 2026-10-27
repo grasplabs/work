@@ -14,6 +14,8 @@ import type {
   ChatCitedDocument,
   ChatDraft,
   ChatDraftVersion,
+  ChatFile,
+  ChatFileInput,
   ChatProject,
   ChatQuestion,
   ChatsApi,
@@ -52,6 +54,7 @@ import type { FunctionAnswer } from "./app-functions.ts";
 import { appFor, draftFiles, editableApp, screensIn } from "./apps.ts";
 import { organizationId } from "./auth/auth.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
+import { readChatFile } from "./chat-files.ts";
 import { personOf } from "./connections.ts";
 import { withReferencesText } from "./draft-references.ts";
 import { appHost, workspace } from "./durable-objects.ts";
@@ -486,6 +489,23 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         chatIdOf(chatId),
         person.userId,
         await personOf(this.#env, person),
+        actorOf(person)
+      );
+    });
+  }
+
+  /**
+   * Reads the file's text (chat-files.ts), outside the person's Workspace
+   * object, then attaches it to their chat there, audited.
+   */
+  async attachFile(chatId: string, file: ChatFileInput): Promise<ChatFile> {
+    return await withPerson(this.#check, async (person) => {
+      const id = chatIdOf(chatId);
+      const read = await readChatFile(this.#env, file);
+      return await this.#chatsOf(person.userId).attachFile(
+        id,
+        person.userId,
+        read,
         actorOf(person)
       );
     });
