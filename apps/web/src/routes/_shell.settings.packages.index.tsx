@@ -80,7 +80,7 @@ const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
   if (shown.subjects.length === 0) {
     return (
       <p className="text-muted-foreground border-t px-5 py-4">
-        <Trans>No App or workflow has approved packages.</Trans>
+        <Trans>No domain or workflow has approved packages.</Trans>
       </p>
     );
   }
@@ -172,8 +172,8 @@ const Packages = () => {
     <SettingsSection
       description={
         <Trans>
-          The Apps and workflows that may use approved npm packages. Open one to
-          retire or revoke what was approved for it.
+          The domains and workflows that may use approved npm packages. Open one
+          to retire or revoke what was approved for it.
         </Trans>
       }
       title={t`Packages`}

@@ -2619,9 +2619,7 @@ msgid "Anywhere"
 msgstr "Partout"
 
 #: src/connections/request-app-dialog.tsx
-#: src/dashboard/dependency-requests.tsx
 #: src/engines/screen-approval.tsx
-#: src/inbox/items.ts
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "App"
@@ -2636,11 +2634,6 @@ msgstr "Application"
 msgctxt "column: the app"
 msgid "App"
 msgstr "Application"
-
-#: src/chat/studio.tsx
-msgctxt "the App being built, beside its chat"
-msgid "App"
-msgstr "App"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -2782,10 +2775,6 @@ msgstr "Applications"
 msgctxt "inbox filter"
 msgid "Apps and connections"
 msgstr "Applications et connexions"
-
-#: src/chat/studio.tsx
-msgid "Apps being built in this chat"
-msgstr "Apps en cours de création dans ce chat"
 
 #: src/routes/_shell.policies.index.tsx
 msgid "Apps blocked"
@@ -4896,6 +4885,7 @@ msgstr "Ne participe pas"
 msgid "Doesn't take part: nobody in it gets a link."
 msgstr "Ne participe pas : personne n’y reçoit de lien."
 
+#: src/dashboard/dependency-requests.tsx
 #: src/dashboard/runs-widget.tsx
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
@@ -4916,6 +4906,11 @@ msgstr "Domaine"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
+msgid "Domain"
+msgstr "Domaine"
+
+#: src/chat/studio.tsx
+msgctxt "the domain being built, beside its chat"
 msgid "Domain"
 msgstr "Domaine"
 
@@ -4959,6 +4954,10 @@ msgstr "Domaines"
 #: src/connections/connection-list.tsx
 msgid "Domains and agents with a permission"
 msgstr "Domaines et agents avec une autorisation"
+
+#: src/chat/studio.tsx
+msgid "Domains being built in this chat"
+msgstr "Domaines en cours de création dans ce chat"
 
 #: src/knowledge/uploads.tsx
 msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
@@ -7038,8 +7037,8 @@ msgid "Its steps can't be read from its code, so any step may do anything its co
 msgstr "Ses étapes ne peuvent pas être lues dans son code : chaque étape peut donc faire tout ce que fait son code, en appelant {tools}."
 
 #: src/chat/builds.tsx
-msgid "Its steps can't be read from its code, so any step may do anything its code does, calling none of the App's bindings."
-msgstr "Ses étapes ne peuvent pas être lues dans son code : chaque étape peut donc faire tout ce que fait son code, sans appeler aucune liaison de l'App."
+msgid "Its steps can't be read from its code, so any step may do anything its code does, calling none of the domain's bindings."
+msgstr "Ses étapes ne peuvent pas être lues dans son code : chaque étape peut donc faire tout ce que fait son code, sans appeler aucune liaison du domaine."
 
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every domain and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
@@ -8114,10 +8113,6 @@ msgstr "Aucune application du paysage applicatif ne l’enfreint aujourd’hui."
 msgid "No app in the landscape breaks this rule."
 msgstr "Aucune application du paysage applicatif n’enfreint cette règle."
 
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "No App or workflow has approved packages."
-msgstr "Aucune app ni aucun workflow n’a de paquets approuvés."
-
 #: src/policies/policy.ts
 msgid "No apps"
 msgstr "Aucune application"
@@ -8191,6 +8186,10 @@ msgstr "Aucun domaine n'a de modèle lié."
 #: src/routes/_shell.domains.index.tsx
 msgid "No domain is published yet: publish one from its page, and the people it is shared with can open it."
 msgstr "Aucun domaine n’est encore publié : publiez-en un depuis sa page, et les personnes avec qui il est partagé pourront l’ouvrir."
+
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "No domain or workflow has approved packages."
+msgstr "Aucun domaine ni aucun workflow n’a de paquets approuvés."
 
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -12659,10 +12658,6 @@ msgstr "L’application est marquée dans le paysage applicatif, pour que son re
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 msgstr "L’approbation du code de cette application a été retirée, et l’application a été arrêtée. Un admin peut l’approuver de nouveau sur la page du domaine."
 
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "The Apps and workflows that may use approved npm packages. Open one to retire or revoke what was approved for it."
-msgstr "Les apps et workflows qui peuvent utiliser des paquets npm approuvés. Ouvrez-en un pour mettre hors service ou révoquer ce qui lui a été approuvé."
-
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."
 msgstr "Les apps citées par les équipes, et celles utilisées que personne n’a mentionnées."
@@ -12836,6 +12831,10 @@ msgstr "Les statistiques propres au domaine"
 #: src/engines/resource-bindings.tsx
 msgid "The domain's own statistics, and the platform's under permission {permission}"
 msgstr "Les statistiques propres au domaine, et celles de la plateforme sous l'autorisation {permission}"
+
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "The domains and workflows that may use approved npm packages. Open one to retire or revoke what was approved for it."
+msgstr "Les domaines et workflows qui peuvent utiliser des paquets npm approuvés. Ouvrez-en un pour mettre hors service ou révoquer ce qui lui a été approuvé."
 
 #: src/chat/builds.tsx
 msgid "The domains this chat builds didn't load."
@@ -14469,8 +14468,8 @@ msgid "Waiting for a share of the organization's runs; tries again by {time}"
 msgstr "En attente d’une part des exécutions de l’organisation ; réessaie au plus tard le {time}"
 
 #: src/workflows/runs.tsx
-msgid "Waiting for a share of this App's runs; tries again by {time}"
-msgstr "En attente d’une part des exécutions de cette App ; réessaie au plus tard le {time}"
+msgid "Waiting for a share of this domain's runs; tries again by {time}"
+msgstr "En attente d’une part des exécutions de ce domaine ; réessaie au plus tard le {time}"
 
 #: src/workflows/runs.tsx
 msgid "Waiting for a share of this person's runs; tries again by {time}"
