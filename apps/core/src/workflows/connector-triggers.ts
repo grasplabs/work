@@ -76,12 +76,18 @@ import { triggeredRunsPerHour } from "./runs.ts";
 //   refused for good). An App run's mail can't join an independent
 //   lineage (their runs are kept apart), so a stamped event of an App run
 //   is refused for good, audited (`lineage.unjoinable`), never started as a
-//   new root. Besides, a
+//   new root. Deliberately so, until the two lineages can be joined: an
+//   App's own mail never starts an independent workflow, a legitimate App
+//   mailing an operations mailbox a trigger watches included. Besides, a
 //   trigger starts at most `triggeredRunsPerHour` runs an hour, counted as
 //   each is admitted; past that the event waits in connect's outbox and is
 //   delivered again later, and one held back longer than `maxHeldMs` is
 //   dropped for the trigger, audited (`workflow.event.dropped`), so the
-//   backlog can't grow without end.
+//   backlog can't grow without end. The residual case, as for App email
+//   triggers: mail through a connector that puts no stamp on it (one not
+//   native, such as Composio's) is anyone's mail, a root, so a workflow
+//   mailing its own watched mailbox that way goes on at up to the hourly
+//   limit; the drop bounds only the backlog.
 // - An event dropped silently. A trigger that refuses it for good (its
 //   grant to start revoked, its person gone, an input its workflow doesn't
 //   take, its lineage full, an App run's mail) is audited
