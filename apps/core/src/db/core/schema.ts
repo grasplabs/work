@@ -3227,7 +3227,9 @@ export const notifications = sqliteTable(
   {
     id: text().primaryKey(),
     personId: text("person_id").notNull(),
-    type: text({ enum: ["run_failed", "gap_asked"] }).notNull(),
+    type: text({
+      enum: ["run_failed", "gap_asked", "trigger_stopped"],
+    }).notNull(),
     appId: text("app_id"),
     workflowId: text("workflow_id"),
     runId: text("run_id"),
@@ -3238,6 +3240,12 @@ export const notifications = sqliteTable(
     /** When it last changed: the latest failure it counts. */
     updatedAt: timestamp("updated_at").notNull(),
     readAt: timestamp("read_at"),
+    /**
+     * The schedule trigger a `trigger_stopped` row says stopped
+     * (workflows/schedule-triggers.ts); its `workflow_id` is the workflow
+     * resource the trigger starts.
+     */
+    triggerId: text("trigger_id"),
   },
   (table) => [
     // A person's list, latest first.
@@ -3681,9 +3689,11 @@ export const triggerResourceVersions = sqliteTable(
  * worked out for (`version`), none once it stopped. Only a live, enabled
  * trigger whose current version is `version` starts anything; the rest
  * wait here untouched until enabling or moving the trigger works out its
- * next occurrence again, from then. `failed_starts` counts its starts that
- * failed in a row, each try of a due one waiting twice as long as the one
- * before.
+ * next occurrence again, from then. `failed_starts` counts the starts in a
+ * row that were refused or failed in the workflow's own terms, toward
+ * stopping it; `attempts` counts every failed try of the occurrence due,
+ * core's own failures too, each try waiting twice as long as the one
+ * before, up to an hour.
  */
 export const triggerSchedules = sqliteTable(
   "trigger_schedules",
@@ -3694,6 +3704,7 @@ export const triggerSchedules = sqliteTable(
     version: integer().notNull(),
     nextAt: timestamp("next_at"),
     failedStarts: integer("failed_starts").notNull().default(0),
+    attempts: integer().notNull().default(0),
   },
   (table) => [
     // The schedules due by a time.

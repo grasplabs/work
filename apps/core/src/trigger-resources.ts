@@ -12,7 +12,12 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedIfChanged,
+  outboxedWhere,
+} from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
   triggerResources,
@@ -543,7 +548,7 @@ export const updateTriggerVersion = async (
             })
             .onConflictDoUpdate({
               target: triggerSchedules.triggerId,
-              set: { version: next, nextAt, failedStarts: 0 },
+              set: { version: next, nextAt, failedStarts: 0, attempts: 0 },
             }),
         ]),
     db
@@ -565,7 +570,10 @@ export const updateTriggerVersion = async (
  * Disables trigger `id` for `by`, who manages it, or enables it again for
  * its owner: disabled, it starts nothing more; runs it started go on. A
  * schedule trigger enabled again goes on from its next occurrence after
- * now: the ones it missed while disabled start nothing.
+ * now: the ones it missed while disabled start nothing. Enabling one that
+ * is enabled but whose schedule stopped (workflows/schedule-triggers.ts)
+ * starts its schedule again, the same way, audited
+ * (`trigger.schedule.restarted`).
  */
 export const setTriggerEnabled = async (
   env: Env,
@@ -605,22 +613,35 @@ export const setTriggerEnabled = async (
   }
   await auditedBatch(env, db, [
     // Before the trigger's own change, while it is still disabled, so
-    // enabling one already enabled moves no occurrence on.
+    // enabling one already enabled moves no occurrence on, unless its
+    // schedule stopped.
     db
       .update(triggerSchedules)
       .set({
         nextAt:
           nextOccurrence(schedule.cron, schedule.timeZone, new Date()) ?? null,
         failedStarts: 0,
+        attempts: 0,
       })
       .where(
         and(
           eq(triggerSchedules.triggerId, trigger.id),
           eq(triggerSchedules.version, trigger.version),
-          sql`EXISTS (SELECT 1 FROM trigger_resources
-            WHERE id = ${trigger.id} AND enabled = 0 AND deleted_at IS NULL)`
+          sql`(${triggerSchedules.nextAt} IS NULL OR EXISTS (
+            SELECT 1 FROM trigger_resources
+            WHERE id = ${trigger.id} AND enabled = 0 AND deleted_at IS NULL))`
         )
       ),
+    // Only for one already enabled: enabling a disabled one is audited
+    // as that.
+    outboxedWhere(
+      db,
+      entry(by, "trigger.schedule.restarted", trigger.id, {
+        version: trigger.version,
+      }),
+      sql`changes() > 0 AND EXISTS (SELECT 1 FROM trigger_resources
+        WHERE id = ${trigger.id} AND enabled = 1 AND deleted_at IS NULL)`
+    ),
     ...toggled,
   ]);
 };
