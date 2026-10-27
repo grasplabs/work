@@ -42,7 +42,7 @@ import type { GoalWording } from "./goal-records.ts";
 // takes from admins alone and audits; the brain is read again after it.
 // Members see the goals as notes, and nothing here.
 
-/** Today, as the brain's records date a change: an ISO date, UTC. */
+/** Today in UTC, as the brain's records date a change: `YYYY-MM-DD`. */
 const todayUtc = (): string => new Date().toISOString().slice(0, 10);
 
 /** Longest a goal's title is, as the brain keeps it. */
