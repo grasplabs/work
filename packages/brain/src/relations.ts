@@ -253,18 +253,23 @@ export const relationsFor = async <C>(
     );
   }
   const answered = views.slice(0, readRowsMax);
-  const read = rows.slice(0, readRowsMax);
+  // Every row read is reported, not only those answered: one past the
+  // answer's end still decided whether another is `conflicting`.
   const collectionIds = [
-    ...new Set(read.flatMap(({ collectionId }) => collectionId ?? [])),
+    ...new Set(rows.flatMap(({ collectionId }) => collectionId ?? [])),
   ];
   await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",
       documentIds: [
-        ...new Set(read.flatMap(({ documentId }) => documentId ?? [])),
+        ...new Set(rows.flatMap(({ documentId }) => documentId ?? [])),
       ].slice(0, 20),
-      detail: { read: "relations", relations: read.length },
+      detail: {
+        read: "relations",
+        relations: answered.length,
+        considered: rows.length,
+      },
     },
     ...collectionIds.map((id) => ({ id, sensitive: false }))
   );
