@@ -317,6 +317,7 @@ const coreDb: D1State = {
     business_store_versions: exported(`${core}data-stores.ts`),
     sdk_store_owners: exported(`${core}app-releases.ts`),
     app_default_stores: exported(`${core}app-activation.ts`),
+    workflow_stores: exported(`${core}workflow-stores.ts`),
     app_test_fixtures: transient(`${core}app-tests.ts`),
     app_test_runs: transient(`${core}workflows/fixture-runs.ts`),
     app_test_decisions: transient(`${core}workflows/fixture-decisions.ts`),

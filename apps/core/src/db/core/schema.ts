@@ -1354,6 +1354,26 @@ export const sdkStoreOwners = sqliteTable(
 );
 
 /**
+ * The stores a standalone workflow declares (GRA-682,
+ * workflow-stores.ts), by the name its definition gives each: created
+ * when a version declaring it is published, in one batch with its
+ * `business_stores` row and its `sdk_store_owners` claim, so a
+ * publication run again finds the store it made, never a second one.
+ * Kept for good, as the claim is: deleting the workflow never deletes its
+ * stores (spec 40.8).
+ */
+export const workflowStores = sqliteTable(
+  "workflow_stores",
+  {
+    workflowId: text("workflow_id").notNull(),
+    name: text().notNull(),
+    storeId: text("store_id").notNull().unique(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.workflowId, table.name] })]
+);
+
+/**
  * The store an App of spec 8's layout runs on, one per App: created by the
  * host when it first seals a version of the App whose schema has tables
  * (app-activation.ts), and bound to every later version, so the App's data

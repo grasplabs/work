@@ -43,6 +43,7 @@ import {
   apps,
   businessStoreMembers,
   businessStores,
+  sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import type { FileReader } from "./file-host.ts";
@@ -126,6 +127,10 @@ import type { ReadResult } from "./store-host.ts";
 //   the mark alone, and only the batch that marks the row stores it, so it
 //   is stored once whichever runs first; a store marked in its object is
 //   refused even while its inventory row lags.
+// - A workflow's store managed around its workflow (GRA-682): only the
+//   organization's admins manage it as a store, and it is never shared or
+//   unshared as one (`data.store_managed_by_workflow`); its schema is its
+//   workflow's versions', applied only as one is published.
 // - A deleted store comes back: its ID is never minted again (random), its
 //   object keeps its deletion mark after purging its records, and its
 //   inventory row keeps `deleted_at`.
@@ -244,6 +249,16 @@ export const createStore = async (env: Env, by: Acting): Promise<StoreId> => {
   return id;
 };
 
+/** Whether a workflow owns store `id` (`sdk_store_owners`, GRA-682). */
+const workflowOwned = async (env: Env, id: StoreId): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ workflowId: sdkStoreOwners.workflowId })
+    .from(sdkStoreOwners)
+    .where(eq(sdkStoreOwners.storeId, id))
+    .get();
+  return row?.workflowId !== null && row?.workflowId !== undefined;
+};
+
 /** The App a default store serves: whose roles decide who manages it. */
 type DefaultStoreApp = Pick<App, "id" | "owner" | "status"> & {
   createdAt: Date;
@@ -312,12 +327,39 @@ const managedBy = async (
   id: string,
   /** Whether to change it: an archived App's default store is read-only. */
   change = true
-): Promise<{ id: StoreId; owner: string; defaultOf?: DefaultStoreApp }> => {
+): Promise<{
+  id: StoreId;
+  owner: string;
+  defaultOf?: DefaultStoreApp;
+  workflowOwned?: true;
+}> => {
   const parsed = storeIdSchema.safeParse(id);
   if (!parsed.success || !canBuild(by.role)) {
     throw dataErrors.create("data.store_unavailable");
   }
   const db = drizzle(env.DB);
+  // A workflow's store (GRA-682, workflow-stores.ts): its versions decide
+  // its schema, and only the organization's admins manage it as a store,
+  // never its creator as such, nor anyone it might be shared with.
+  if (await workflowOwned(env, parsed.data)) {
+    if (!isAdmin(by.role)) {
+      throw dataErrors.create("data.store_unavailable");
+    }
+    const live = await db
+      .select({ owner: businessStores.ownerId })
+      .from(businessStores)
+      .where(
+        and(
+          eq(businessStores.id, parsed.data),
+          isNull(businessStores.deletedAt)
+        )
+      )
+      .get();
+    if (live === undefined) {
+      throw dataErrors.create("data.store_unavailable");
+    }
+    return { id: parsed.data, owner: live.owner, workflowOwned: true };
+  }
   const app = await defaultStoreApp(env, parsed.data);
   // A removed App's default store has no builders left: the
   // organization's own admins, never Grasp staff, read, export, change
@@ -379,9 +421,15 @@ const managedBy = async (
  * Refuses (`data.store_managed_by_app`) to share or unshare an App's
  * default store as a store: whom it serves follows the App's membership.
  */
-const requireSharableStore = (store: { defaultOf?: DefaultStoreApp }): void => {
+const requireSharableStore = (store: {
+  defaultOf?: DefaultStoreApp;
+  workflowOwned?: true;
+}): void => {
   if (store.defaultOf !== undefined) {
     throw dataErrors.create("data.store_managed_by_app");
+  }
+  if (store.workflowOwned === true) {
+    throw dataErrors.create("data.store_managed_by_workflow");
   }
 };
 

@@ -124,6 +124,11 @@ import type {
   ModuleContracts,
   ModulePackages,
 } from "./workflow-modules.ts";
+import {
+  provideWorkflowStores,
+  workflowStoreStatements,
+} from "./workflow-stores.ts";
+import type { WorkflowStoreBinding } from "./workflow-stores.ts";
 import { forValidation } from "./workflows/connector-schemas.ts";
 import {
   packagesHoldSql,
@@ -1909,6 +1914,8 @@ interface Publication {
   packages: SealedPackageManifest | undefined;
   /** Admits the write, right before it commits: throws to write nothing. */
   admit: (() => Promise<void>) | undefined;
+  /** The stores it declares, created and defined for it (workflow-stores.ts). */
+  stores: readonly WorkflowStoreBinding[];
 }
 
 /**
@@ -1933,6 +1940,7 @@ const writeVersion = async (
     actions,
     packages,
     admit,
+    stores,
   } = publication;
   // Bounded when the definition was checked (`inspectDefinition`).
   const contractText = canonicalJson(contractOf(checked));
@@ -1969,6 +1977,20 @@ const writeVersion = async (
     // admits again (workflows/sealed-packages.ts); the entries' code is
     // among the build's artifacts.
     ...(packages === undefined ? {} : { packages }),
+    // The stores it declares, each with its schema and its operations'
+    // fingerprints, as the version binds them (GRA-682).
+    ...(stores.length === 0
+      ? {}
+      : {
+          stores: stores.map(
+            ({ name, storeId, schemaHash, operationManifestHash }) => ({
+              name,
+              storeId,
+              schemaHash,
+              operationManifestHash,
+            })
+          ),
+        }),
     artifactTrust: "unreviewed",
   });
   if (bytesOf(manifest) > manifestMaxBytes) {
@@ -2042,6 +2064,13 @@ const writeVersion = async (
         .update(workflowResources)
         .set({ currentVersion: version })
         .where(eq(workflowResources.id, workflow.id)),
+      ...workflowStoreStatements(
+        db,
+        workflow.id,
+        version,
+        manifestHash,
+        stores
+      ),
       ...bindings.map((binding) =>
         binding.kind === "workflow"
           ? db.insert(sdkResourceBindings).values({
@@ -2080,6 +2109,8 @@ const writeVersion = async (
           definitionHash,
           contractHash,
           manifestHash,
+          // Its stores, by ID, as its manifest binds them.
+          stores: stores.map(({ storeId }) => storeId).join(","),
         })
       ),
     ]);
@@ -2301,6 +2332,15 @@ const publish = async (
     workflow.id,
     modules
   );
+  // Its stores, created and handed its schema before the version is
+  // written: only on this path, never by a run (workflow-stores.ts).
+  const stores = await provideWorkflowStores(
+    env,
+    by,
+    workflow.id,
+    (workflow.currentVersion ?? 0) + 1,
+    checked.stores
+  );
   try {
     return await writeVersion(env, by, {
       workflow,
@@ -2313,6 +2353,7 @@ const publish = async (
       actions: versionActionsOf(checked.bindings, modules),
       packages: sealed?.manifest,
       admit,
+      stores,
     });
   } catch (error) {
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
