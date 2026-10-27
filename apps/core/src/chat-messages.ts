@@ -1,6 +1,7 @@
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
-import { chatCitationsMax } from "@grasp-os/shared/chat";
+import { chatAskSchema, chatCitationsMax } from "@grasp-os/shared/chat";
 import type {
+  ChatAsked,
   ChatCitation,
   ChatCode,
   ChatMessage,
@@ -43,6 +44,21 @@ const codeOf = (message: AssistantMessage): ChatCode[] =>
     const { code } = part.arguments;
     return [{ callId: part.id, code: typeof code === "string" ? code : "" }];
   });
+
+/**
+ * The questions a response asked the person (`askQuestions`), as the tool
+ * took them; none when it asked none, or asked in a shape the tool
+ * refused (the model was told why, and the turn went on).
+ */
+const askedOf = (message: AssistantMessage): ChatAsked | undefined => {
+  for (const part of message.content) {
+    if (part.type === "toolCall" && part.name === "askQuestions") {
+      const ask = chatAskSchema.safeParse(part.arguments);
+      return ask.success ? { callId: part.id, ...ask.data } : undefined;
+    }
+  }
+  return undefined;
+};
 
 const ends: Record<AssistantMessage["stopReason"], ChatReplyEnd> = {
   stop: "done",
@@ -313,11 +329,13 @@ export const chatMessageOf = (
   }
   if (message.role === "assistant") {
     const usage = usageOf(message);
+    const asked = askedOf(message);
     return {
       id,
       role: "assistant",
       ...citedIn(textOf(message.content), given),
       code: codeOf(message),
+      ...(asked === undefined ? {} : { asked }),
       end: ends[message.stopReason],
       ...(message.stopReason === "error" && message.errorMessage !== undefined
         ? { error: message.errorMessage }
