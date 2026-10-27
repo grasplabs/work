@@ -678,10 +678,16 @@ export const brainLessonVersions = sqliteTable(
      * of record, never instead of it; shown under the same rule.
      */
     wording: text(),
-    /** Whether its wording was written, or refused (budget) or failed. */
+    /**
+     * Whether its wording was written, or refused (budget) or failed; or
+     * claimed by a wording pass now asking for it (`wording_claimed_at`),
+     * so two jobs never pay for the same wording.
+     */
     wordingState: text("wording_state", {
-      enum: ["written", "refused", "failed"],
+      enum: ["claimed", "written", "refused", "failed"],
     }),
+    /** When a wording pass claimed it: past its lease, another may. */
+    wordingClaimedAt: timestamp("wording_claimed_at"),
   },
   (table) => [
     primaryKey({ columns: [table.lessonId, table.revision] }),

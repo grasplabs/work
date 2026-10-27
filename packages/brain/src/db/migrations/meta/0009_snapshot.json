@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8d624726-452e-4cfd-b03d-72a1e38621a4",
+  "id": "475cb514-f1dd-4c69-9d95-534a929c58a3",
   "prevId": "a1f4c2c4-b219-4380-b959-c99984bb0723",
   "tables": {
     "audit_outbox": {
@@ -684,6 +684,13 @@
         "wording_state": {
           "name": "wording_state",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "wording_claimed_at": {
+          "name": "wording_claimed_at",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

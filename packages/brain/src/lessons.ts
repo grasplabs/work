@@ -456,7 +456,7 @@ const applyPatch = async <C>(
     db
       .insert(brainLessonVersions)
       .select(
-        sql`SELECT ${patch.lessonId}, ${revision}, ${patch.base === 0 ? null : patch.base}, ${content}, ${patchKey}, ${now.getTime()}, NULL, NULL WHERE ${atBase}`
+        sql`SELECT ${patch.lessonId}, ${revision}, ${patch.base === 0 ? null : patch.base}, ${content}, ${patchKey}, ${now.getTime()}, NULL, NULL, NULL WHERE ${atBase}`
       )
       .onConflictDoNothing(),
     db
@@ -760,6 +760,19 @@ const wordingOf = (answer: string): string =>
   answer.replaceAll(controlCharacters, " ").trim().slice(0, wordingMaxLength);
 
 /**
+ * How long a wording pass holds the revisions it claimed: longer than its
+ * step may run, so only a pass that died lets another word them.
+ */
+export const wordingClaimMs = 10 * 60_000;
+
+/**
+ * That a revision has no wording and no pass holds it, as of `now`: never
+ * claimed, or claimed past its lease.
+ */
+const unclaimed = (now: Date) =>
+  sql`(${brainLessonVersions.wordingState} IS NULL OR (${brainLessonVersions.wordingState} = 'claimed' AND ${brainLessonVersions.wordingClaimedAt} < ${now.getTime() - wordingClaimMs}))`;
+
+/**
  * One pass of `wordLessons`: how many lessons it asked to word, whether
  * written, failed or refused; how many it worded; and whether the budget
  * refused one, which the next pass would be refused too.
@@ -769,6 +782,7 @@ const wordingPass = async <C>(
   scope: ConsolidationScope
 ): Promise<{ asked: number; worded: number; refused: boolean }> => {
   const { db } = brain;
+  const now = brain.ports.clock();
   const unworded = await db
     .select({
       lessonId: brainLessons.id,
@@ -790,7 +804,7 @@ const wordingPass = async <C>(
         eq(brainLessons.scope, scope.scope),
         eq(brainLessons.scopeId, scope.scopeId),
         eq(brainLessons.state, "candidate"),
-        sql`${brainLessonVersions.wordingState} IS NULL`
+        unclaimed(now)
       )
     )
     .orderBy(asc(brainLessons.updatedAt), asc(brainLessons.id))
@@ -798,6 +812,23 @@ const wordingPass = async <C>(
   let worded = 0;
   let refused = false;
   for (const lesson of unworded) {
+    // Claimed first, in one statement, or left to the pass that has it:
+    // only one job asks, and pays, for a revision's wording.
+    // oxlint-disable-next-line no-await-in-loop -- one bounded call at a time
+    const claimed = await db
+      .update(brainLessonVersions)
+      .set({ wordingState: "claimed", wordingClaimedAt: now })
+      .where(
+        and(
+          eq(brainLessonVersions.lessonId, lesson.lessonId),
+          eq(brainLessonVersions.revision, lesson.revision),
+          unclaimed(now)
+        )
+      )
+      .returning({ lessonId: brainLessonVersions.lessonId });
+    if (claimed.length === 0) {
+      continue;
+    }
     // oxlint-disable-next-line no-await-in-loop -- one bounded call at a time
     const counts = await db
       .select({ role: brainLessonEvidence.role, count: count() })
@@ -844,12 +875,19 @@ const wordingPass = async <C>(
     // oxlint-disable-next-line no-await-in-loop -- as above
     await db
       .update(brainLessonVersions)
-      .set({ wording: written.wording, wordingState: written.state })
+      .set({
+        wording: written.wording,
+        wordingState: written.state,
+        wordingClaimedAt: null,
+      })
       .where(
         and(
           eq(brainLessonVersions.lessonId, lesson.lessonId),
           eq(brainLessonVersions.revision, lesson.revision),
-          sql`${brainLessonVersions.wordingState} IS NULL`
+          // Still this pass's claim: one past its lease another took saves
+          // nothing more of this one.
+          eq(brainLessonVersions.wordingState, "claimed"),
+          eq(brainLessonVersions.wordingClaimedAt, now)
         )
       );
     if (written.state === "written") {

@@ -6,6 +6,7 @@ import {
   consolidate,
   lessonsOf,
   runConsolidation,
+  wordingClaimMs,
   wordingMaxLength,
   wordingsPerJob,
   wordLessons,
@@ -247,6 +248,42 @@ describe("wording lessons", () => {
       written: wordingsPerJob + 1,
       failed: 1,
       unworded: 0,
+    });
+  });
+
+  it("asks for a revision's wording once, though two jobs word its scope at once, and again only once a claim's lease is over", async () => {
+    const { brain, worded } = testHost();
+    const ann = named("ann");
+    for (let n = 0; n < 3; n += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one task at a time
+      await lessonFor(brain, ann, `workflow:app/twice-${n}`);
+    }
+    const scope = { scope: "person" as const, scopeId: ann };
+
+    const [one, other] = await Promise.all([
+      wordLessons(brain, scope),
+      wordLessons(brain, scope),
+    ]);
+    const askedAtOnce = worded.length;
+    // A pass that died holding a claim: past its lease, the next words it.
+    const [lesson] = await lessonsOf(brain, scope);
+    await env.BRAIN.prepare(
+      "UPDATE brain_lesson_versions SET wording = NULL, wording_state = 'claimed', wording_claimed_at = ? WHERE lesson_id = ?"
+    )
+      .bind(Date.now() - wordingClaimMs - 1000, lesson?.id ?? "")
+      .run();
+    const reclaimed = await wordLessons(brain, scope);
+
+    expect({
+      worded: one + other,
+      askedAtOnce,
+      reclaimed,
+      asked: worded.length,
+    }).toStrictEqual({
+      worded: 3,
+      askedAtOnce: 3,
+      reclaimed: 1,
+      asked: 4,
     });
   });
 
