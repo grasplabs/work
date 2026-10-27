@@ -3777,6 +3777,17 @@ export const triggerResourceVersions = sqliteTable(
     scheduleCron: text("schedule_cron"),
     scheduleTimeZone: text("schedule_time_zone"),
     scheduleInput: text("schedule_input"),
+    /**
+     * For a connector trigger: the connection whose events start it, the
+     * part of it (a mailbox, a drive) or null for the account's own, and
+     * how each event becomes its run's input (canonical JSON: input fields
+     * to JSON Pointers into the event, and literal defaults), checked as
+     * the version was written (trigger-resources.ts). Its event type is
+     * `event_type`, with no `event_contract`. Null for any other kind.
+     */
+    connectionId: text("connection_id"),
+    connectionResource: text("connection_resource"),
+    inputMapping: text("input_mapping"),
   },
   (table) => [
     primaryKey({ columns: [table.triggerId, table.version] }),
@@ -3784,6 +3795,10 @@ export const triggerResourceVersions = sqliteTable(
     index("trigger_resource_versions_event")
       .on(table.eventContract, table.eventType)
       .where(sql`${table.eventContract} IS NOT NULL`),
+    // The connector triggers' versions that take a connection's events.
+    index("trigger_resource_versions_connection")
+      .on(table.connectionId, table.eventType)
+      .where(sql`${table.connectionId} IS NOT NULL`),
   ]
 );
 

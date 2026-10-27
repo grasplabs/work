@@ -36,6 +36,10 @@ import {
   allowingPermissionSql,
   listeningPermissionSql,
 } from "../permissions.ts";
+import {
+  startConnectorTriggers,
+  triggerListeners,
+} from "./connector-triggers.ts";
 import { lineageRefusals, stampedEventRun } from "./mail-stamps.ts";
 import { deliveryRoom, startRun } from "./runs.ts";
 
@@ -77,6 +81,10 @@ import { deliveryRoom, startRun } from "./runs.ts";
 // (`stampedEventRun`). The run never gets the stamp. A run its lineage
 // refuses is audited (`workflow.event.refused`) and the event settled,
 // since delivering it again would be refused again.
+//
+// The same event starts independent workflows' connector triggers too
+// (connector-triggers.ts), by their own grants; connect listens where
+// they do as well.
 
 /**
  * The event triggers of Apps' current versions for `event`'s type, in
@@ -239,6 +247,15 @@ export const deliverConnectorEvent = async (
         })
     )
   );
+  // Independent workflows' connector triggers, each by its own grant: one
+  // that may go another time fails the delivery, after the rest are tried.
+  let triggerRuns = 0;
+  let triggersFailed: unknown;
+  try {
+    ({ runs: triggerRuns } = await startConnectorTriggers(env, event, same));
+  } catch (error) {
+    triggersFailed = error;
+  }
   const refused = lineageRefusals(started, toStart);
   const failures = started.flatMap((result): unknown[] =>
     result.status === "rejected" &&
@@ -253,7 +270,7 @@ export const deliverConnectorEvent = async (
       ...errorFields(failure),
     });
   }
-  if (failures.length > 0) {
+  if (failures.length > 0 || triggersFailed !== undefined) {
     throw new Error(`Event ${event.type} didn't start every run it should`);
   }
   if (withRoom.length < receivers.length) {
@@ -310,7 +327,9 @@ export const deliverConnectorEvent = async (
       })
     );
   }
-  return { runs: receivers.length - refused.length - refusedBefore.size };
+  return {
+    runs: receivers.length - refused.length - refusedBefore.size + triggerRuns,
+  };
 };
 
 /**
@@ -356,6 +375,9 @@ export const listenersOf = async (env: Env): Promise<EventListener[]> => {
         listeners.set(JSON.stringify(listener.data), listener.data);
       }
     }
+  }
+  for (const listener of await triggerListeners(env, eventListenersMax + 1)) {
+    listeners.set(JSON.stringify(listener), listener);
   }
   const all = [...listeners.values()];
   if (all.length > eventListenersMax) {
