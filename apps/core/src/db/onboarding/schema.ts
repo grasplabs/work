@@ -75,8 +75,9 @@ export const teams = sqliteTable("teams", {
   mappedAt: text("mapped_at"),
   /**
    * The lead's agreement its map, as it stands, was last drawn from
-   * (GRA-329): its generation, their `agreedAt` and `revocations` as
-   * `agreedAt|revocations` (GRA-1089). Its pieces of work reach the brain only
+   * (GRA-329): their admission's generation then, when that interview
+   * began and how often something they approved stopped counting, as
+   * `startedAt|revocations` (GRA-1089). Its pieces of work reach the brain only
    * while that lead's facts still count, as they were when it was drawn:
    * an edit or a withdrawal since keeps them out until it is drawn again.
    */

@@ -452,10 +452,18 @@ export interface DrawInput {
   /**
    * Their agreement's generation as it was drawn from (`agreedAt` and how
    * often something they approved stopped counting, `#drawGeneration`):
-   * what `drawn` is told once it is drawn and a map keeps as `mappedFrom`,
-   * so two take-backs in one millisecond still differ.
+   * what `drawn` is told once it is drawn, so two take-backs in one
+   * millisecond still differ.
    */
   generation: string;
+  /**
+   * Their admission's generation as it was drawn from (`#interviewsOf`:
+   * when this interview began, and how often something they approved
+   * stopped counting): what a map keeps as `mappedFrom`. It changes with
+   * every take-back and with every interview begun anew, never with more
+   * approved, so it never repeats for another interview's content.
+   */
+  admission: string;
   facts: { tag: FactTag; record: string }[];
 }
 
@@ -1911,6 +1919,7 @@ export class Onboarding extends DurableObject<Env> {
       kind: state.kind,
       agreedAt: state.agreedAt,
       generation: `${state.agreedAt}|${state.revocations}`,
+      admission: `${state.startedAt ?? ""}|${state.revocations}`,
       facts: facts.map(({ tag, record }) => ({ tag, record })),
     };
   }
@@ -5018,23 +5027,13 @@ export class Onboarding extends DurableObject<Env> {
       .from(teams)
       .where(eq(teams.id, teamId))
       .all();
-    const [state] = this.#db
-      .select({
-        agreedAt: interviewStates.agreedAt,
-        revocations: interviewStates.revocations,
-      })
-      .from(interviewStates)
-      .where(eq(interviewStates.person, team.lead))
-      .all();
     const from = row?.mappedFrom ?? null;
-    // Drawn from the generation whose take-backs are all there are: their
-    // count, not a time, so two in one millisecond still tell apart.
-    return (
-      from !== null &&
-      state !== undefined &&
-      state.agreedAt !== null &&
-      from.slice(from.lastIndexOf("|") + 1) === String(state.revocations)
-    );
+    // Drawn from the lead's admission as it is now: this interview, and
+    // every take-back of it there is. A take-back, however close in time,
+    // or an interview begun anew, which counts its take-backs from nothing
+    // again, leaves the map unbacked until it is drawn again.
+    const now = this.#interviewsOf([team.lead]).get(team.lead) ?? null;
+    return from !== null && now !== null && from === now;
   }
 
   /**
@@ -5641,15 +5640,16 @@ export class Onboarding extends DurableObject<Env> {
         }
       }
       const generation = this.#drawGeneration(input.person);
+      const admission = this.#interviewsOf([input.person]).get(input.person);
       this.drawn(input.person, input.generation);
       this.#db
         .update(teams)
         .set({
           does: map.does === "" ? still.does : map.does,
-          ...(generation === input.generation
+          ...(generation === input.generation && admission === input.admission
             ? {
                 mappedAt: sql`coalesce(${teams.mappedAt}, ${at})`,
-                mappedFrom: input.generation,
+                mappedFrom: input.admission,
               }
             : {}),
         })

@@ -9,6 +9,7 @@ import type {
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -23,6 +24,7 @@ import {
   gatewayConfig,
   holdAlarm,
   onLink,
+  participate,
 } from "./interview-link.ts";
 import {
   agree,
@@ -542,6 +544,48 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       },
       restsOn: [],
     });
+  });
+
+  it("of a team's lead, begun anew, keeps the map of their old interview out of the brain until it is drawn again", async () => {
+    const store = onboardingStore(env);
+    const ids = await team();
+    const said = sentinels();
+    await inTheBrain(ids, said);
+    await deleteOnLink(ids.lea);
+    // Lea begins anew and agrees again: her new interview has taken
+    // nothing back yet, as her old one hadn't when its map was drawn.
+    const anew = await openLink(ids.lea);
+    const facts = [fact("l1", "work", "Max, Mia and Mo handle new tickets.")];
+    // A new start saves at the version the link's session gives now.
+    const begun = await onLink({ action: "session", ...anew });
+    const { version } = z
+      .object({ version: z.number() })
+      .parse(await begun.json());
+    await participate(anew);
+    await onLink({
+      action: "save",
+      ...anew,
+      version,
+      progress: leaSaves(facts),
+    });
+    await approve(anew, facts);
+    // Her map can't be drawn again, until it is given up.
+    const failing: GatewayReply = {
+      status: 400,
+      errorType: "invalid_request_error",
+    };
+    for (const later of [0, 2, 10, 40]) {
+      // oxlint-disable-next-line no-await-in-loop -- one try at a time, each later, as the alarm tries
+      await answering(
+        [failing],
+        async () => await store.drawNext(Date.now() + later * 60_000)
+      );
+    }
+    await drawAll(ids);
+    await givenToBrain(ids);
+    await store.purgeBrain();
+    const after = await brainOf(ids);
+    expect(after.drawings).toBeNull();
   });
 
   it("that leaves a team under five people takes all of the team's interviews out of the brain until five agree again (W5)", async () => {
