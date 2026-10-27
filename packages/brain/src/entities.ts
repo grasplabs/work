@@ -1640,15 +1640,18 @@ const isPerson = <C>(brain: Brain<C>, reader: C): boolean => {
 };
 
 /**
- * The entities `reader`'s readable sources mention, most mentioned first,
- * or those with a name starting with `query`: their counts, labels and
- * names from those sources only.
+ * `entitiesFor`, with the collections and documents whose mentions it
+ * listed: so a caller that labels what it was handed (a chat) labels the
+ * names, and can withhold them once that source goes.
  */
-export const entitiesFor = async <C>(
+export const entitiesWithSources = async <C>(
   brain: Brain<C>,
   reader: C,
   input: unknown = {}
-): Promise<EntitySummary[]> => {
+): Promise<{
+  entities: EntitySummary[];
+  sources: { collections: string[]; documents: string[] };
+}> => {
   const { query, limit = 20 } = brainErrors.parse(
     "brain.invalid",
     entitiesListInputSchema,
@@ -1704,13 +1707,35 @@ export const entitiesFor = async <C>(
   const page = found
     .toSorted((a, b) => b.sources - a.sources || a.label.localeCompare(b.label))
     .slice(0, limit);
-  await noteRead(
-    brain,
-    reader,
-    "entities",
-    rows.filter(({ entityId }) => page.some(({ id }) => id === entityId))
+  const listed = rows.filter(({ entityId }) =>
+    page.some(({ id }) => id === entityId)
   );
-  return page;
+  await noteRead(brain, reader, "entities", listed);
+  return {
+    entities: page,
+    sources: {
+      collections: [
+        ...new Set(listed.flatMap(({ collectionId }) => collectionId ?? [])),
+      ],
+      documents: [
+        ...new Set(listed.flatMap(({ documentId }) => documentId ?? [])),
+      ],
+    },
+  };
+};
+
+/**
+ * The entities `reader`'s readable sources mention, most mentioned first,
+ * or those with a name starting with `query`: their counts, labels and
+ * names from those sources only.
+ */
+export const entitiesFor = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown = {}
+): Promise<EntitySummary[]> => {
+  const { entities } = await entitiesWithSources(brain, reader, input);
+  return entities;
 };
 
 /** A row as the source reference the contract has. */

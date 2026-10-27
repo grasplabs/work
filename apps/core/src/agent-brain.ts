@@ -6,7 +6,7 @@ import type {
   SkillRead,
   SkillSelection,
 } from "@grasp-os/brain/contract";
-import { entitiesFor, entitySources } from "@grasp-os/brain/entities";
+import { entitiesWithSources, entitySources } from "@grasp-os/brain/entities";
 import { recallWithSources } from "@grasp-os/brain/recall";
 import { relationsFor } from "@grasp-os/brain/relations";
 import {
@@ -224,11 +224,16 @@ export class BrainAgentApi
    */
   async entities(input: unknown): Promise<EntitySummary[]> {
     return await this.#delegated("brain.entities", async (reader) => {
-      const found = await entitiesFor(brainOf(this.env), reader, input);
+      const { entities, sources } = await entitiesWithSources(
+        brainOf(this.env),
+        reader,
+        input
+      );
+      // The sources whose mentions named them, as recall records its own.
       return {
-        value: found,
-        sources: { collections: [], documents: [] },
-        detail: { entities: found.length },
+        value: entities,
+        sources,
+        detail: { entities: entities.length },
       };
     });
   }
