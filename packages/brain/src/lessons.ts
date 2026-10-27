@@ -3,7 +3,7 @@ import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { auditedBatch, outboxedWhere } from "./audit.ts";
-import type { Brain } from "./brain.ts";
+import type { Brain, LessonFacts } from "./brain.ts";
 import { brainErrors } from "./contract.ts";
 import { inList } from "./db/d1.ts";
 import {
@@ -456,7 +456,7 @@ const applyPatch = async <C>(
     db
       .insert(brainLessonVersions)
       .select(
-        sql`SELECT ${patch.lessonId}, ${revision}, ${patch.base === 0 ? null : patch.base}, ${content}, ${patchKey}, ${now.getTime()} WHERE ${atBase}`
+        sql`SELECT ${patch.lessonId}, ${revision}, ${patch.base === 0 ? null : patch.base}, ${content}, ${patchKey}, ${now.getTime()}, NULL, NULL, NULL, NULL WHERE ${atBase}`
       )
       .onConflictDoNothing(),
     db
@@ -731,6 +731,223 @@ export const consolidate = async <C>(
     );
   }
   return { read: fresh.length, patched };
+};
+
+/** Lessons one wording pass asks a model to word, at most. */
+export const wordingsPerJob = 5;
+
+/**
+ * Wording passes one consolidation job makes, at most: as many as it can
+ * patch lessons (`patchesPerJob`), so a job words what it patched.
+ */
+export const wordingPassesPerJob = Math.ceil(
+  consolidationLimits.patchesPerJob / wordingsPerJob
+);
+
+/** The longest wording kept, in characters. */
+export const wordingMaxLength = 500;
+
+/**
+ * Control characters (C0, DEL and C1) and Unicode format characters (such
+ * as bidirectional overrides and zero-width joiners), which a wording never
+ * keeps: it shows as the plain text it reads as.
+ */
+// oxlint-disable-next-line no-control-regex -- control characters on purpose
+const controlCharacters = /[\u0000-\u001F\u007F-\u009F\p{Cf}]+/gu;
+
+/** A model's answer as a lesson keeps it: one line of text, capped. */
+const wordingOf = (answer: string): string =>
+  answer.replaceAll(controlCharacters, " ").trim().slice(0, wordingMaxLength);
+
+/** How many episodes a stored version was written from; -1 if unreadable. */
+const episodesOf = (stored: string): number => {
+  const parsed = z
+    .object({ episodes: z.int().min(0) })
+    .safeParse(JSON.parse(stored));
+  return parsed.success ? parsed.data.episodes : -1;
+};
+
+/**
+ * How long a job's claim on a revision lasts against other jobs: longer
+ * than a job's steps may run, so only a job that died lets another word
+ * what it claimed. Its own retries take their claims back at once.
+ */
+export const wordingClaimMs = 10 * 60_000;
+
+/**
+ * That a revision has no wording yet and the job holding `token` may word
+ * it, as of `now`: never claimed, claimed by that job (a retry of one of
+ * its steps), or claimed by another job past its lease.
+ */
+const claimable = (now: Date, token: string) =>
+  sql`(${brainLessonVersions.wordingState} IS NULL OR (${brainLessonVersions.wordingState} = 'claimed' AND (${brainLessonVersions.wordingClaim} = ${token} OR ${brainLessonVersions.wordingClaimedAt} < ${now.getTime() - wordingClaimMs})))`;
+
+/**
+ * One pass of `wordLessons`: how many lessons it asked to word, whether
+ * written, failed or refused; how many it worded; and whether the budget
+ * refused one, which the next pass would be refused too.
+ */
+const wordingPass = async <C>(
+  brain: Brain<C>,
+  scope: ConsolidationScope,
+  /** The job's claim token, the same in every retry of its steps. */
+  token: string
+): Promise<{ asked: number; worded: number; refused: boolean }> => {
+  const { db } = brain;
+  const now = brain.ports.clock();
+  const unworded = await db
+    .select({
+      lessonId: brainLessons.id,
+      revision: brainLessons.revision,
+      applicability: brainLessons.applicability,
+      instruction: brainLessons.instruction,
+      evidenceStatus: brainLessons.evidenceStatus,
+      content: brainLessonVersions.content,
+    })
+    .from(brainLessons)
+    .innerJoin(
+      brainLessonVersions,
+      and(
+        eq(brainLessonVersions.lessonId, brainLessons.id),
+        eq(brainLessonVersions.revision, brainLessons.revision)
+      )
+    )
+    .where(
+      and(
+        eq(brainLessons.scope, scope.scope),
+        eq(brainLessons.scopeId, scope.scopeId),
+        eq(brainLessons.state, "candidate"),
+        claimable(now, token)
+      )
+    )
+    .orderBy(asc(brainLessons.updatedAt), asc(brainLessons.id))
+    .limit(wordingsPerJob);
+  let worded = 0;
+  let refused = false;
+  for (const lesson of unworded) {
+    // oxlint-disable-next-line no-await-in-loop -- one bounded call at a time
+    const counts = await db
+      .select({ role: brainLessonEvidence.role, count: count() })
+      .from(brainLessonEvidence)
+      .where(
+        and(
+          eq(brainLessonEvidence.lessonId, lesson.lessonId),
+          eq(brainLessonEvidence.revision, lesson.revision)
+        )
+      )
+      .groupBy(brainLessonEvidence.role);
+    // Worded only from evidence whole as its text was written from: an
+    // erasure since leaves its counts short of what its text says, and
+    // the revision that erasure brings is worded instead.
+    const held = counts.reduce((sum, { count: each }) => sum + each, 0);
+    if (held !== episodesOf(lesson.content)) {
+      continue;
+    }
+    // Claimed first, in one statement, or left to the pass that has it:
+    // only one job asks, and pays, for a revision's wording.
+    // oxlint-disable-next-line no-await-in-loop -- one bounded call at a time
+    const claimed = await db
+      .update(brainLessonVersions)
+      .set({
+        wordingState: "claimed",
+        wordingClaim: token,
+        wordingClaimedAt: now,
+      })
+      .where(
+        and(
+          eq(brainLessonVersions.lessonId, lesson.lessonId),
+          eq(brainLessonVersions.revision, lesson.revision),
+          claimable(now, token)
+        )
+      )
+      .returning({ lessonId: brainLessonVersions.lessonId });
+    if (claimed.length === 0) {
+      continue;
+    }
+    const { taskType, versions } = z
+      .object({ taskType: z.string(), versions: z.array(z.string()) })
+      .parse(JSON.parse(lesson.applicability));
+    const facts: LessonFacts = {
+      taskType,
+      versions,
+      failures: counts.find(({ role }) => role === "supporting")?.count ?? 0,
+      completions:
+        counts.find(({ role }) => role === "contradicting")?.count ?? 0,
+      evidenceStatus: lesson.evidenceStatus,
+      instruction: lesson.instruction,
+    };
+    let written: {
+      wording: string | null;
+      state: "written" | "refused" | "failed";
+    };
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const wording = wordingOf(await brain.ports.wordLesson(facts));
+      written =
+        wording === ""
+          ? { wording: null, state: "failed" }
+          : { wording, state: "written" };
+    } catch (error) {
+      written = {
+        wording: null,
+        state:
+          brainErrors.codeOf(error) === "brain.budget_exceeded"
+            ? "refused"
+            : "failed",
+      };
+    }
+    const mine = and(
+      eq(brainLessonVersions.lessonId, lesson.lessonId),
+      eq(brainLessonVersions.revision, lesson.revision),
+      eq(brainLessonVersions.wordingState, "claimed"),
+      eq(brainLessonVersions.wordingClaim, token)
+    );
+    try {
+      // Still this job's claim: one another job took past its lease saves
+      // nothing more of this one.
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await db
+        .update(brainLessonVersions)
+        .set({
+          wording: written.wording,
+          wordingState: written.state,
+          wordingClaim: null,
+          wordingClaimedAt: null,
+        })
+        .where(mine);
+    } catch (error) {
+      // A save that failed gives its claim back before the step retries.
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await db
+        .update(brainLessonVersions)
+        .set({ wordingState: null, wordingClaim: null, wordingClaimedAt: null })
+        .where(mine);
+      throw error;
+    }
+    if (written.state === "written") {
+      worded += 1;
+    }
+    refused ||= written.state === "refused";
+  }
+  return { asked: unworded.length, worded, refused };
+};
+
+/**
+ * Asks the host to word `scope`'s open lessons whose current revision has
+ * no wording yet, at most {@link wordingsPerJob}: each from what the lesson
+ * holds alone, never a task's content or anyone's identity. The wording is
+ * kept beside the lesson's text, never instead of it; a revision is worded
+ * once (a job made again finds it worded and asks nothing), and a refusal
+ * or failure is kept too, leaving the text as it is. Returns how many it
+ * worded.
+ */
+export const wordLessons = async <C>(
+  brain: Brain<C>,
+  scope: ConsolidationScope,
+  token: string = crypto.randomUUID()
+): Promise<number> => {
+  const { worded } = await wordingPass(brain, scope, token);
+  return worded;
 };
 
 /** A lesson as its host inspects it: every version, with its evidence. */
@@ -1008,4 +1225,38 @@ export const runConsolidation = async <C>(
     const result = await consolidate(brain, scope);
     return { ...result };
   });
+  // Its own steps: a wording that fails or is refused never undoes a
+  // patch. A bounded pass at a time, until one finds fewer to word than it
+  // may (none left) or the budget refuses one, at most as many as it
+  // patched. A wording that failed counts as asked, so it never ends the
+  // passes before the lessons after it are worded.
+  // The job's claim token, kept by its own step: the same in every retry
+  // and replay, so a retried pass takes back what it claimed before.
+  const token = z
+    .string()
+    .parse(
+      await step.do(
+        "word-claim",
+        consolidationConfig,
+        async () => await Promise.resolve(crypto.randomUUID())
+      )
+    );
+  for (let pass = 0; pass < wordingPassesPerJob; pass += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one bounded pass after another
+    const passed = await step.do(
+      `word-${pass}`,
+      consolidationConfig,
+      async () => await wordingPass(brain, scope, token)
+    );
+    const done = z
+      .object({ asked: z.int(), refused: z.boolean() })
+      .safeParse(passed);
+    if (
+      !done.success ||
+      done.data.refused ||
+      done.data.asked < wordingsPerJob
+    ) {
+      break;
+    }
+  }
 };

@@ -60,6 +60,7 @@ const shown = async (admin: boolean, refuse = false) => {
             revision: 2,
             supersedes: 1,
             instruction: "chat.turn failed 4 of its last 4 finished runs.",
+            wording: "Chat answers kept failing lately.",
             evidenceStatus: "supported" as const,
             episodes: [
               {
@@ -77,6 +78,7 @@ const shown = async (admin: boolean, refuse = false) => {
             revision: 1,
             supersedes: null,
             instruction: null,
+            wording: null,
             evidenceStatus: null,
             episodes: [],
             createdAt: at,
@@ -170,10 +172,14 @@ describe(LessonsView, () => {
 
     expect({
       hiddenSaid: text.includes("It rests on turns you were not part of."),
+      wordingLabelled: text.includes(
+        "Written by a model: Chat answers kept failing lately."
+      ),
       calls,
       retireStillOffered: buttons.includes("Retire this lesson"),
     }).toStrictEqual({
       hiddenSaid: true,
+      wordingLabelled: true,
       calls: [
         "list",
         "lineage lesson-1",
