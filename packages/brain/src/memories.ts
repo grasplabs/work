@@ -1092,12 +1092,19 @@ export const turnMemoryLimits = { records: 20, chars: 4000 } as const;
 export const memoriesFor = async <C>(
   { db }: Brain<C>,
   audience: MemoryAudience,
+  /**
+   * The collections everyone reading may read (`citesReadable`): a record
+   * resting on any other is never fetched, so it takes no place under
+   * `limits` (GRA-1123).
+   */
+  readable: readonly string[],
   limits: { records: number; chars: number } = turnMemoryLimits
 ): Promise<(MemoryRecord & { ownerId: string })[]> => {
-  const scope = audienceScope(audience);
-  if (scope === undefined) {
+  const audienceWhere = audienceScope(audience);
+  if (audienceWhere === undefined) {
     return [];
   }
+  const scope = and(audienceWhere, citesReadable(readable));
   const rows = await db
     .select()
     .from(brainMemories)
