@@ -66,10 +66,10 @@ runs:
       run: |
         set -euo pipefail
         case "$ENVIRONMENT" in
-          stephen-eval) id=__OP_ENVIRONMENT_STEPHEN_EVAL__ ;;
-          staging) id=__OP_ENVIRONMENT_STAGING__ ;;
-          releases) id=__OP_ENVIRONMENT_RELEASES__ ;;
-          ops) id=__OP_ENVIRONMENT_OPS__ ;;
+          stephen-eval) id=gwkizmisgitdjte6uoldfhps2a ;;
+          staging) id=ihkarcfaogzo7joffe6yuifkha ;;
+          releases) id=uyh2pedp7mdecljjxwvlo64d5y ;;
+          ops) id=4uwnjx2wvetaznfn4hpdb2zdkm ;;
           *) echo "::error::No 1Password Environment called $ENVIRONMENT"; exit 1 ;;
         esac
         if [[ ! "$id" =~ ^[a-z0-9]{26}$ ]]; then
