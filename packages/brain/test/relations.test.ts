@@ -162,6 +162,40 @@ describe("typed relations", () => {
     });
   });
 
+  it("keep every relation of a source that states as many as it may hold", async () => {
+    const thing = `Directory ${word()}`;
+    const people = Array.from({ length: 50 }, (_, index) => `Person ${index}`);
+    const lines = people.map((name) => `${name} owns ${thing}.`);
+    const host = testHost(
+      modelOf({
+        [thing]: {
+          entities: [
+            ...people.map((name) => ({ kind: "person", name })),
+            { kind: "thing", name: thing },
+          ],
+          relations: people.map((name, index) => ({
+            subject: name,
+            predicate: "owns",
+            object: thing,
+            evidence: lines[index] ?? "",
+          })),
+        },
+      })
+    );
+    const collection = await newCollection(host.brain, "Directory");
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    await savedAndLinked(host, collection, "owners.md", lines.join("\n"));
+    const owned = await owners(
+      host,
+      reader,
+      await entityOf(host, reader, thing)
+    );
+
+    expect(owned.map(({ owner }) => owner).toSorted()).toStrictEqual(
+      people.toSorted()
+    );
+  });
+
   it("keep what was known before a correction, which supersedes it without rewriting it", async () => {
     const thing = `Payroll ${word()}`;
     const wrong = `Ben owns ${thing}.`;
