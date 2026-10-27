@@ -19,6 +19,7 @@ import {
 } from "../src/app-workflow-bindings.ts";
 import { setCurrentVersion, versionFiles } from "../src/apps.ts";
 import { boundWorkflowsOf } from "../src/bound-workflows.ts";
+import { decisionOutcome } from "../src/decisions/decisions.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { withScreenReferences } from "../src/screen-references.ts";
@@ -300,6 +301,71 @@ const codeOf = async (call: () => Promise<unknown>): Promise<unknown> => {
       ? error.code
       : String(error);
   }
+};
+
+/**
+ * The person `who`'s whole answer `answer` to decision `of` on `screen`, as
+ * the page makes it: reviewed, confirmed in its dialog, then sent with
+ * that confirmation. Answers the decision's status as it answered, or the
+ * code it was refused with.
+ */
+const answered = async (
+  who: Parameters<typeof reviewScreenDecision>[1],
+  screen: Parameters<typeof reviewScreenDecision>[2],
+  of: { runId: string; decisionId: string },
+  answer: { approved: boolean; payload?: unknown },
+  /** Between the confirmation and the answer. */
+  between: () => Promise<void> = async () => {
+    await Promise.resolve();
+  }
+): Promise<unknown> => {
+  try {
+    const reviewed = await reviewScreenDecision(
+      env,
+      who,
+      screen,
+      of.runId,
+      of.decisionId,
+      answer
+    );
+    if (reviewed.state !== "review") {
+      return reviewed.decision.status;
+    }
+    const { confirmation } = await confirmScreenDecision(
+      env,
+      who,
+      screen,
+      of.runId,
+      of.decisionId,
+      reviewed.decision.revision,
+      reviewed.response
+    );
+    await between();
+    const view = await decideScreenRun(
+      env,
+      who,
+      screen,
+      of.runId,
+      of.decisionId,
+      reviewed.response,
+      confirmation
+    );
+    return view.status;
+  } catch (error) {
+    return error instanceof Error && "code" in error
+      ? error.code
+      : String(error);
+  }
+};
+
+/** Decision `decision`'s status, as its row has it. */
+const statusOf = async (decision: string): Promise<string> => {
+  const row = await env.DB.prepare(
+    "SELECT status FROM workflow_decisions WHERE id = ?"
+  )
+    .bind(decision)
+    .first();
+  return z.object({ status: z.string() }).parse(row).status;
 };
 
 /** What a call answered, or its refusal's code. */
@@ -858,6 +924,119 @@ describe(
         },
         beforeUnbinding: "answered",
         unbound: "decision.not_found",
+      });
+    });
+
+    it("keep one answer of a decision answered from screens at once, or against its deadline, and take none against a changed context or a binding gone", async () => {
+      const { fixture, binding, workflowId, opened, reviewer, runAsking } =
+        await decisionInbox();
+      const { app } = fixture;
+      const screen = { app, version: 1 };
+      const second = await person("admin");
+      await env.DB.prepare(
+        "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+      )
+        .bind(app, second.userId, fixture.owner.userId, Date.now())
+        .run();
+      const approve = { approved: true, payload: { comment: "Yes" } };
+      const reject = { approved: false, payload: { comment: "No" } };
+
+      // Two reviewers answer at once, differently: one answer stands.
+      const raced = await runAsking(app, opened);
+      const both = await Promise.all([
+        answered(reviewer, screen, raced, approve),
+        answered(second, screen, raced, reject),
+      ]);
+      const racedStatus = await statusOf(raced.decisionId);
+
+      // An answer against its run closing it at the deadline: one of them.
+      const timed = await runAsking(app, opened + 1000);
+      const run = {
+        kind: "resource" as const,
+        runId: timed.runId,
+        workflow: workflowId,
+        version: 1,
+      };
+      const [late, closed] = await Promise.all([
+        answered(reviewer, screen, timed, approve),
+        decisionOutcome(env, run, timed.decisionId, true),
+      ]);
+      const timedStatus = await statusOf(timed.decisionId);
+
+      // The context changes between the confirmation and the answer.
+      const changed = await runAsking(app, opened + 2000);
+      const conflict = await answered(
+        reviewer,
+        screen,
+        changed,
+        approve,
+        async () => {
+          await env.DB.prepare(
+            "UPDATE workflow_decisions SET description = 'Approve this larger invoice?' WHERE id = ?"
+          )
+            .bind(changed.decisionId)
+            .run();
+        }
+      );
+      const changedStatus = await statusOf(changed.decisionId);
+      // Asked again, against the context as it is: it takes the answer.
+      const reviewedAgain = await answered(reviewer, screen, changed, approve);
+      // Its acknowledgement lost, the page asks once more: the recorded
+      // answer, never a second one.
+      const askedTwice = await answered(reviewer, screen, changed, approve);
+      const events = await allEvents();
+      const answers = events.filter(
+        ({ action, target }) =>
+          action.startsWith("workflow.decision.") &&
+          ["approved", "rejected"].some((end) => action.endsWith(end)) &&
+          target?.id === changed.decisionId
+      ).length;
+
+      // The App unbinds the workflow between the confirmation and the answer.
+      const unbound = await runAsking(app, opened + 3000);
+      const gone = await answered(
+        reviewer,
+        screen,
+        unbound,
+        approve,
+        async () => {
+          await unbindWorkflowFromApp(env, fixture.owner, binding);
+        }
+      );
+
+      const winners = both.filter(
+        (outcome) => outcome === "approved" || outcome === "rejected"
+      );
+      expect({
+        // Exactly one answered; the other found it closed.
+        oneStands: winners.length === 1 && both.includes("decision.closed"),
+        racedMatches: racedStatus === winners[0],
+        // The answer and the close agree on how it ended.
+        timed:
+          (late === "approved" &&
+            timedStatus === "approved" &&
+            closed.answered) ||
+          (late === "decision.closed" &&
+            timedStatus === "timed_out" &&
+            !closed.answered),
+        conflict,
+        changedStatus,
+        reviewedAgain,
+        askedTwice,
+        answers,
+        gone,
+        unboundStatus: await statusOf(unbound.decisionId),
+      }).toStrictEqual({
+        oneStands: true,
+        racedMatches: true,
+        timed: true,
+        conflict: "decision.conflict",
+        changedStatus: "open",
+        reviewedAgain: "approved",
+        askedTwice: "approved",
+        answers: 1,
+        gone: "decision.not_found",
+        unboundStatus: "open",
       });
     });
 
