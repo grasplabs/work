@@ -407,6 +407,14 @@ msgstr "{count, plural, one {# document toevoegen} other {# documenten toevoegen
 msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 msgstr "{count, plural, one {Antwoorden steunen op # bron} other {Antwoorden steunen op # bronnen}}"
 
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Asked you a question} other {Asked you # questions}}"
+msgstr "{count, plural, one {Stelde je een vraag} other {Stelde je # vragen}}"
+
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
+msgstr "{count, plural, one {Terug naar de vraag} other {Terug naar de # vragen}}"
+
 #: src/chat/builds-state.ts
 msgid "{count, plural, one {once} other {# times}}"
 msgstr "{count, plural, one {één keer} other {# keer}}"
@@ -3077,6 +3085,7 @@ msgstr "Deze weken afwezig. Niets wacht op {first}."
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/chat/asked-questions.tsx
 #: src/tour/tour-layer.tsx
 msgid "Back"
 msgstr "Terug"
@@ -5952,6 +5961,14 @@ msgstr "Een toestemming verleend"
 msgid "Grasp access"
 msgstr "Toegang van Grasp"
 
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks"
+msgstr "Grasp vraagt"
+
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks, {number} of {total}"
+msgstr "Grasp vraagt, {number} van {total}"
+
 #: src/chat/chat-dock.tsx
 #: src/chat/cited-note.tsx
 #: src/core.ts
@@ -7984,6 +8001,7 @@ msgctxt "inbox sort"
 msgid "Newest first"
 msgstr "Nieuwste eerst"
 
+#: src/chat/asked-questions.tsx
 #: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Volgende"
@@ -11044,6 +11062,11 @@ msgstr "Runs deze week"
 msgid "Runs: {total}"
 msgstr "Runs: {total}"
 
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+msgid "Said by five or more people"
+msgstr "Gezegd door vijf of meer mensen"
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "Said it didn't happen: {who}."
@@ -11247,6 +11270,7 @@ msgstr "In gebruik gezien: nog niet waargenomen via inloggen of Pulse"
 msgid "Seen, never mentioned"
 msgstr "Gezien, nooit genoemd"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Send"
 msgstr "Versturen"
@@ -11674,6 +11698,7 @@ msgstr "Iemand die niet meer bij je organisatie hoort"
 msgid "Someone's own work"
 msgstr "Iemands eigen werk"
 
+#: src/chat/asked-questions.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Something else"
 msgstr "Iets anders"
@@ -13892,6 +13917,7 @@ msgstr "Twee antwoorden"
 msgid "Type"
 msgstr "Type"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Type instead"
 msgstr "Liever typen"
@@ -15587,6 +15613,7 @@ msgstr "Je bent nog ingelogd. Probeer het zo opnieuw."
 msgid "Your account"
 msgstr "Je account"
 
+#: src/chat/asked-questions.tsx
 #: src/chat/brain-questions.tsx
 #: src/interview/composer.tsx
 msgid "Your answer"

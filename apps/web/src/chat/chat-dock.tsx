@@ -26,9 +26,9 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { setActiveChat, useActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
+import { AskOrCompose } from "./asked-questions.tsx";
 import { BrainQuestions } from "./brain-questions.tsx";
 import { useFollowedChat } from "./chat-watch.ts";
-import { Composer } from "./composer.tsx";
 import { setDockMode, useDockMode } from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
 import { HeldWrites } from "./held-writes.tsx";
@@ -321,9 +321,13 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
   const open = mode !== "bar";
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const box = (
-    <Composer
+    <AskOrCompose
       {...composer}
       compact
+      messages={view.messages}
+      onAnswer={(answers) => {
+        void ask(answers);
+      }}
       label={words.title}
       onSend={() => {
         if (mode === "bar") {
@@ -348,7 +352,7 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
           <ChevronUpIcon />
         </Button>
       ) : null}
-    </Composer>
+    </AskOrCompose>
   );
   const drawer = mode === "drawer";
   // One tree in every mode, so the box, and the draft in it, stays as the

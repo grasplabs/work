@@ -26,6 +26,7 @@ import {
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+import { AskedLine } from "./asked-questions.tsx";
 import {
   Conversation,
   ConversationContent,
@@ -562,6 +563,9 @@ export const ChatThread = ({
                     top={topOf(message.id)}
                     writing={false}
                   />
+                  {message.asked === undefined ? null : (
+                    <AskedLine asked={message.asked} />
+                  )}
                 </li>
               );
             }
