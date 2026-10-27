@@ -1199,7 +1199,15 @@ describe("what a start freezes", () => {
     const frozen: unknown = JSON.parse(stored?.bindings ?? "[]");
     // The start admitted before the revocation, sent again, is that start.
     const sentAgain = await startWorkflow(env, asAda, workflow.id, request);
+    const events = await allEvents();
     expect({
+      // Recorded once, by the revocation that changed it.
+      audited: events
+        .filter(
+          ({ action, target }) =>
+            action === "workflow.binding.revoked" && target?.id === workflow.id
+        )
+        .map(({ detail }) => detail.approval),
       revokedAgain: (await generation()) === revoked,
       unapproved,
       frozen,
@@ -1207,6 +1215,7 @@ describe("what a start freezes", () => {
       after: await outcome(start(ada, workflow.id)),
       sentAgain: sentAgain.id,
     }).toStrictEqual({
+      audited: [approval.id],
       unapproved: "workflow.binding_unapproved",
       frozen: [
         {
