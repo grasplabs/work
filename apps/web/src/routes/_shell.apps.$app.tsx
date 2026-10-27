@@ -3,7 +3,6 @@ import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { LayoutGridIcon } from "lucide-react";
 
 import { AppPage } from "../engines/app-page.tsx";
-import { buildsApp } from "../engines/app-role.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -57,12 +56,7 @@ const AppPageView = () => {
       <SiteHeader
         crumbs={[{ label: t`Domains`, to: "/domains" }, { label: app.name }]}
       />
-      <AppPage
-        app={app}
-        builds={buildsApp(app, identity)}
-        contents={contents}
-        open={open}
-      >
+      <AppPage app={app} identity={identity} contents={contents} open={open}>
         {open === undefined ? null : (
           <ScreenFrame
             app={id}
