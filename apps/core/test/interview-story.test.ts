@@ -293,7 +293,7 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
     await approve(link, [weigh, changed]);
     const agreed = await drawingOf(person);
     const first = await store.drawInput(person);
-    await store.drawn(person, first?.agreedAt ?? "");
+    await store.drawn(person, first?.generation ?? "");
     const drawn = await drawingOf(person);
 
     // Back to add something: until they agree to it, it doesn't count.
@@ -464,7 +464,7 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
     const first = await approve(link, [weigh]);
     const firstBody: InterviewApproval = await first.json();
     const input = await store.drawInput(person);
-    await store.drawn(person, input?.agreedAt ?? "");
+    await store.drawn(person, input?.generation ?? "");
     // The answer was lost: the page asks again, the same.
     const again = await approve(link, [weigh]);
     const againBody: InterviewApproval = await again.json();
