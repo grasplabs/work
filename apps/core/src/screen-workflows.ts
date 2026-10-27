@@ -23,7 +23,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -34,6 +34,7 @@ import { bindingPinnedSql, startAppBinding } from "./app-workflow-bindings.ts";
 import { usableApp } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import {
+  workflowDecisions,
   workflowResourceRunControlKeys,
   workflowResourceRunControls,
   workflowResources,
@@ -41,6 +42,10 @@ import {
   workflowStartReceipts,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
+import {
+  answerableByNow,
+  resourceDecisionPending,
+} from "./decisions/decisions.ts";
 import { appHost } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { screenStartFiles } from "./screen-start-files.ts";
@@ -455,17 +460,56 @@ interface SeenRun {
 }
 
 /**
+ * That a decision of the run in the statement asks `asking`'s person now,
+ * as SQL: one still pending they may answer (`answerableByNow`), never for
+ * staff, and only where the run's restricted mode is the App's
+ * (`appRestricted`), as answering it requires (screen-runs.ts,
+ * `appDecision`). What lets a reviewer watch the run they decide on.
+ */
+const askedNowSql = (env: Env, asking: Asking, appRestricted: boolean): SQL => {
+  if (asking.by.staff === true) {
+    return sql`0`;
+  }
+  const db = drizzle(env.DB);
+  return (
+    and(
+      eq(workflowResourceRuns.restricted, appRestricted),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(workflowDecisions)
+          .where(
+            and(
+              eq(workflowDecisions.resourceRunId, workflowResourceRuns.id),
+              resourceDecisionPending(new Date()),
+              answerableByNow(db, asking.by.userId)
+            )
+          )
+      )
+    ) ?? sql`0`
+  );
+};
+
+/**
  * Run `runId`, if the asking App started it for the asking person and it
  * acts for them, of exactly `pin`, while the App's binding names `pin`:
  * `workflow.run_unavailable` for any other, one that doesn't exist alike.
+ * With `watching`, for a snapshot alone, also a run of the App's that one
+ * of its decisions asks the person to answer now (`askedNowSql`): never
+ * to control it or send it events, which stay its own person's.
  */
 const seenRun = async (
   env: Env,
   asking: Asking,
   alias: string,
   pin: WorkflowPin,
-  runId: string
+  runId: string,
+  watching?: { readonly appRestricted: boolean }
 ): Promise<SeenRun> => {
+  const own = and(
+    eq(workflowStartReceipts.principalId, asking.by.userId),
+    eq(workflowResourceRuns.principalId, asking.by.userId)
+  );
   const found = await drizzle(env.DB)
     .select({
       id: workflowResourceRuns.id,
@@ -481,8 +525,9 @@ const seenRun = async (
         eq(workflowResourceRuns.id, runId),
         eq(workflowStartReceipts.invokerType, "app"),
         eq(workflowStartReceipts.invokerId, asking.app),
-        eq(workflowStartReceipts.principalId, asking.by.userId),
-        eq(workflowResourceRuns.principalId, asking.by.userId),
+        watching === undefined
+          ? own
+          : or(own, askedNowSql(env, asking, watching.appRestricted)),
         eq(workflowResourceRuns.workflowResourceId, pin.workflowId),
         eq(workflowResourceRuns.version, pin.version),
         bindingPinnedSql(asking.app, alias, pin)
@@ -755,6 +800,16 @@ const waitsOf = async (
       )
     : [];
 
+/** A decision wait the viewer may answer, as `withRespond` marks one. */
+const answerableDecision = z.looseObject({
+  kind: z.literal("decision"),
+  canRespond: z.literal(true),
+});
+
+/** Whether `wait` is a decision the viewer may answer (`withRespond`). */
+const isAnswerableDecision = (wait: Json): boolean =>
+  answerableDecision.safeParse(wait).success;
+
 /**
  * A run's status as its snapshot shows it: a running run held for its AI
  * provider (ai-waits.ts) shows queued, as its summary does, since it goes
@@ -787,11 +842,13 @@ const snapshotWaits = async (
   row: RunRow,
   appRestricted: boolean
 ): Promise<Json[]> => {
+  const own = row.principalId === asking.by.userId;
   const canSend =
+    own &&
     !isEnded(row.status) &&
     !(appRestricted && !row.restricted) &&
     (await holds(env, maySendSql(asking, resolved.alias, pinOf(resolved))));
-  return await withRespond(
+  const waits = await withRespond(
     env,
     row.id,
     await waitsOf(env, row, resolved, canSend),
@@ -801,6 +858,9 @@ const snapshotWaits = async (
       sameRestriction: row.restricted === appRestricted,
     }
   );
+  // A reviewer watching a run they decide on (`seenRun`'s `watching`)
+  // sees only the decisions asking them: nothing else it waits on.
+  return own ? waits : waits.filter(isAnswerableDecision);
 };
 
 /** Run `runId`'s snapshot for the asking person, and its revision. */
@@ -816,15 +876,20 @@ const runSnapshot = async (
   // under the one before it is never numbered as one of the newer's, and
   // the read again it causes is a revision of its own.
   const generation = await generationOf(env, pin.workflowId);
-  const seen = await seenRun(env, asking, resolved.alias, pin, runId);
+  const appRestricted = await appHost(env, asking.app).isRestricted();
+  const seen = await seenRun(env, asking, resolved.alias, pin, runId, {
+    appRestricted,
+  });
   const { originAppVersion } = seen;
   // The run and the control it has applying, read together: one moment of
   // it, under the revision its row says (`summary_revision`, which every
   // write that changes either moves on in that write).
   const [row, pending] = await runAndPending(env, seen.row);
   const ended = isEnded(row.status);
-  const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
-  const appRestricted = await appHost(env, asking.app).isRestricted();
+  // Controls are the run's own person's: a reviewer watching it has none.
+  const mayStart =
+    row.principalId === asking.by.userId &&
+    (await holds(env, mayStartSql(asking, resolved.alias, pin)));
   // Read after the row: a wait opened or closed since moves its revision on.
   const waits = await snapshotWaits(env, asking, resolved, row, appRestricted);
   const status = await shownStatus(env, row, waits.length);
