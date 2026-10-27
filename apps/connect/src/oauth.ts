@@ -963,7 +963,7 @@ export const organizationConnections = async (
  * that is down doesn't keep a person from disconnecting, and the tokens are
  * deleted either way (threat model CN14).
  */
-const revoke = async (
+export const revoke = async (
   env: Env,
   connection: ConnectionRow
 ): Promise<boolean> => {

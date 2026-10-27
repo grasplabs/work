@@ -2,34 +2,52 @@ import {
   connectionErrors,
   erasePersonalSchema,
 } from "@grasp-os/shared/connect";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { recordEventIf } from "./audit.ts";
+import { recordEvents } from "./audit.ts";
 import {
   callChanges,
+  composioCleanups,
   composioFlows,
+  connectionTokens,
   connections,
   idempotentCalls,
   oauthFlows,
   pendingActions,
 } from "./db/schema.ts";
-import { disconnectPersonal } from "./oauth.ts";
+import { disconnectPersonal, revoke } from "./oauth.ts";
+import { providerFor } from "./providers.ts";
 
 // Erasing a person (GRA-903, GRA-1183), connect's part, for core only, for
 // someone an admin removed and then erased (core's person-erasure.ts).
-// Removing them disconnected their personal connections already: each
-// grant revoked at its provider, its tokens gone, their flows spent and
-// what waited for them dropped (`disconnectPersonal`). This does that
-// again first, in case anything came back, and refuses to go on while any
-// of their connections is still live, so a provider's grant is never left
-// behind what is erased. Then, in one batch, everything of theirs left in
-// connect: who their accounts were at each provider (the account, its
-// name, address and aliases), what the calls made through their own
-// connections returned and changed, and any flow or held action of
-// theirs. Their connections' rows stay, empty of them, as the IDs the
-// audit log and the company's records name. Calls made for them through
-// the company's shared connections are the company's (Nick's D3).
+// Nothing of theirs is emptied while a grant of theirs may still be live
+// at its provider: core's clock asks again until it isn't.
+//
+// - A connection of theirs still live (a flow that finished after they
+//   were removed, say) is revoked at its provider first, strictly: where
+//   the provider has a revocation endpoint and the revoke fails, it is
+//   left as it is, tokens and all, and this refuses
+//   (`connection.erase_pending`). Then it is stopped as any removal stops
+//   it (`disconnectPersonal`).
+// - A Composio connection is deleted at Composio after it is stopped, by
+//   a cleanup the cron trigger retries (composio-connections.ts): while
+//   one for theirs is outstanding, this refuses.
+// - A revoke that failed when they were removed can't be recovered: a
+//   disconnect deletes the tokens however its revoke went (threat model
+//   CN14), so there is nothing to revoke with any more, and nothing knows
+//   it failed. Until GRA-1191 keeps a token until its revoke succeeds,
+//   such a grant stays live at its provider until it lapses.
+//
+// Then, in one batch, everything of theirs left in connect: who their
+// accounts were at each provider, on their disconnected connections only,
+// what the calls made through those connections returned and changed,
+// and any flow or held action of theirs, recorded every time. Should one
+// of their connections be live again after it (a flow finishing as this
+// ran), this refuses, and the next try stops it. Their connections' rows
+// stay, empty of them, as the IDs the audit log and the company's records
+// name. Calls made for them through the company's shared connections are
+// the company's (Nick's D3), and stay.
 
 /** Their personal connections, as SQL: every one, live or disconnected. */
 const theirConnections = (ownerUserId: string) =>
@@ -38,11 +56,73 @@ const theirConnections = (ownerUserId: string) =>
     eq(connections.ownerUserId, ownerUserId)
   );
 
+/** Refuses: something of theirs may still be live at a provider. */
+const pending = (): Error =>
+  connectionErrors.create("connection.erase_pending");
+
+/**
+ * Revokes the grant of each live connection of `ownerUserId`'s whose
+ * provider can revoke one, refusing on the first that fails.
+ */
+const revokeLive = async (env: Env, ownerUserId: string): Promise<void> => {
+  const live = await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(
+      and(theirConnections(ownerUserId), ne(connections.status, "disconnected"))
+    );
+  for (const connection of live) {
+    const provider = providerFor(connection.provider);
+    // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+    const [token] = await drizzle(env.DB)
+      .select({ id: connectionTokens.connectionId })
+      .from(connectionTokens)
+      .where(eq(connectionTokens.connectionId, connection.id))
+      .limit(1);
+    // Without a token there is no grant here to revoke.
+    const revocable =
+      token !== undefined &&
+      provider?.kind === "oauth" &&
+      provider.revocationEndpoint !== undefined;
+    // oxlint-disable-next-line no-await-in-loop -- one grant at a time
+    if (revocable && !(await revoke(env, connection))) {
+      throw pending();
+    }
+  }
+};
+
+/** Whether a Composio cleanup of `ownerUserId`'s connections is outstanding. */
+const cleaningUp = async (env: Env, ownerUserId: string): Promise<boolean> => {
+  const [left] = await drizzle(env.DB)
+    .select({ id: composioCleanups.id })
+    .from(composioCleanups)
+    .where(
+      sql`${composioCleanups.serverId} IN (
+        SELECT ${connections.composioServerId} FROM ${connections}
+        WHERE ${theirConnections(ownerUserId)}
+          AND ${connections.composioServerId} IS NOT NULL
+      )`
+    )
+    .limit(1);
+  return left !== undefined;
+};
+
+/** Whether a connection of `ownerUserId`'s is live. */
+const anyLive = async (env: Env, ownerUserId: string): Promise<boolean> => {
+  const [live] = await drizzle(env.DB)
+    .select({ id: connections.id })
+    .from(connections)
+    .where(
+      and(theirConnections(ownerUserId), ne(connections.status, "disconnected"))
+    )
+    .limit(1);
+  return live !== undefined;
+};
+
 /**
  * Erases everything of `ownerUserId`'s in connect, as core asks once an
- * admin erased them. Safe to ask again: what is gone stays gone, and the
- * erasure is recorded once, by the change that found something of theirs.
- * Answers how many of their connections it emptied.
+ * admin erased them. Safe to ask again: what is gone stays gone. Answers
+ * how many of their connections it emptied.
  */
 export const erasePersonal = async (
   env: Env,
@@ -53,37 +133,34 @@ export const erasePersonal = async (
     erasePersonalSchema,
     request
   );
-  // Revoked at each provider and its tokens gone, as for anyone removed.
+  await revokeLive(env, ownerUserId);
+  // Stopped, its tokens gone, their flows spent and what waited for them
+  // dropped, as for anyone removed.
   await disconnectPersonal(env, { person: null, ownerUserIds: [ownerUserId] });
+  if (
+    (await anyLive(env, ownerUserId)) ||
+    (await cleaningUp(env, ownerUserId))
+  ) {
+    throw pending();
+  }
   const db = drizzle(env.DB);
   const owned = await db
-    .select({ id: connections.id, status: connections.status })
+    .select({ id: connections.id })
     .from(connections)
-    .where(theirConnections(ownerUserId));
-  if (owned.some(({ status }) => status !== "disconnected")) {
-    // A grant still live at its provider: erased only once it isn't.
-    throw connectionErrors.create("connection.invalid");
-  }
+    .where(
+      and(theirConnections(ownerUserId), eq(connections.status, "disconnected"))
+    );
   const ids = owned.map(({ id }) => id);
-  const stillNamed = and(
-    theirConnections(ownerUserId),
-    or(
-      sql`${connections.accountId} IS NOT NULL`,
-      sql`${connections.accountName} IS NOT NULL`,
-      sql`${connections.accountEmail} IS NOT NULL`,
-      sql`${connections.accountAddresses} IS NOT NULL`,
-      sql`${connections.accountSenders} IS NOT NULL`
-    )
-  );
-  await recordEventIf(
+  await recordEvents(
     env,
-    {
-      actor: { type: "system" },
-      action: "connection.person_erased",
-      target: { type: "person", id: ownerUserId },
-      detail: { ownerUserId, connections: ids.length },
-    },
-    { from: connections, where: stillNamed ?? sql`0` },
+    [
+      {
+        actor: { type: "system" },
+        action: "connection.person_erased",
+        target: { type: "person", id: ownerUserId },
+        detail: { ownerUserId, connections: ids.length },
+      },
+    ],
     [
       db
         .update(connections)
@@ -95,7 +172,12 @@ export const erasePersonal = async (
           accountSenders: null,
           updatedAt: new Date(),
         })
-        .where(theirConnections(ownerUserId)),
+        .where(
+          and(
+            inArray(connections.id, ids),
+            eq(connections.status, "disconnected")
+          )
+        ),
       db
         .delete(idempotentCalls)
         .where(inArray(idempotentCalls.connectionId, ids)),
@@ -107,5 +189,9 @@ export const erasePersonal = async (
       db.delete(composioFlows).where(eq(composioFlows.userId, ownerUserId)),
     ]
   );
+  // A flow that finished as this ran: refused, and stopped on the next try.
+  if (await anyLive(env, ownerUserId)) {
+    throw pending();
+  }
   return { connections: ids.length };
 };

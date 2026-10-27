@@ -1975,6 +1975,8 @@ export const connectionErrors = defineErrorFamily({
     "The provider granted more or less access than this connection asks for, so it wasn't kept. Connect it again, granting exactly what it asks.",
   "connection.own_auth_required":
     "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
+  "connection.erase_pending":
+    "Their connections aren't all revoked at their providers yet. Erasing them goes on once they are.",
 });
 
 /** Which App's held actions of which binding to drop. */
