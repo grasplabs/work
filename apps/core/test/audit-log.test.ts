@@ -896,6 +896,8 @@ describe("AuditLog purges", () => {
     // Unset: seven years, or the log's own retention when that is longer.
     expect(archiveRetentionDays({})).toBe(2555);
     expect(archiveRetentionDays({ AUDIT_RETENTION_DAYS: "3000" })).toBe(3000);
+    // Nor any while unset, if the log's own retention is invalid.
+    expect(archiveRetentionDays({ AUDIT_RETENTION_DAYS: "7" })).toBeUndefined();
     // Below the floor, above the ceiling, or not whole days: none.
     for (const days of ["30", "364", "3651", "400.5", "a year"]) {
       expect(
