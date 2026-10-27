@@ -6,6 +6,7 @@ import { writeVersion } from "../src/documents.ts";
 import {
   entitiesFor,
   entitySources,
+  relationsPerSource,
   runLinking,
   settleMs,
   sweepLinking,
@@ -13,7 +14,11 @@ import {
 import type { IndexStep } from "../src/indexing.ts";
 import { remember } from "../src/memories.ts";
 import { preparePurge, purge } from "../src/purge.ts";
-import { relationsExplain, relationsFor } from "../src/relations.ts";
+import {
+  readRowsMax,
+  relationsExplain,
+  relationsFor,
+} from "../src/relations.ts";
 import type { Caller, StartedJob } from "./host.ts";
 import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 
@@ -268,6 +273,78 @@ describe("typed relations", () => {
     expect(owned.map(({ owner }) => owner).toSorted()).toStrictEqual(
       people.toSorted()
     );
+  });
+
+  it("report every source a read weighed, one past the answer's cap too", async () => {
+    const thing = `Rota ${word()}`;
+    // The oldest source first: its relation is read past the cap, and
+    // still decides whether others conflict with it.
+    const batches = Math.ceil(readRowsMax / relationsPerSource) + 1;
+    const files = Array.from({ length: batches }, (_file, batch) =>
+      Array.from(
+        { length: batch === 0 ? 1 : relationsPerSource },
+        (_, index) => `Person ${batch}-${index} owns ${thing}.`
+      )
+    );
+    const host = testHost(
+      modelOf(
+        Object.fromEntries(
+          files.map((lines) => [
+            lines.join("\n"),
+            {
+              entities: [
+                ...lines.map((line) => ({
+                  kind: "person",
+                  name: line.split(" owns ")[0] ?? "",
+                })),
+                { kind: "thing", name: thing },
+              ],
+              relations: lines.map((line) => ({
+                subject: line.split(" owns ")[0] ?? "",
+                predicate: "owns",
+                object: thing,
+                evidence: line,
+              })),
+            },
+          ])
+        )
+      )
+    );
+    const collection = await newCollection(host.brain, "Rotas");
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    const saved: string[] = [];
+    for (const [index, lines] of files.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- oldest first, in order
+      const doc = await savedAndLinked(
+        host,
+        collection,
+        `rota-${index}.md`,
+        lines.join("\n")
+      );
+      saved.push(doc.id);
+      // oxlint-disable-next-line no-await-in-loop -- apart in time
+      await scheduler.wait(2);
+    }
+    const found = await relationsFor(host.brain, reader, {
+      entityId: await entityOf(host, reader, thing),
+      predicate: "owns",
+    });
+    const record = host.reads.at(-1)?.record;
+
+    expect({
+      answered: found.length,
+      considered: record?.detail.considered,
+      documents: record?.detail.documents,
+      oldestAnswered: found.some(
+        ({ sourceRef }) =>
+          sourceRef.kind === "document" && sourceRef.documentId === saved[0]
+      ),
+    }).toStrictEqual({
+      answered: readRowsMax,
+      considered: readRowsMax + 1,
+      documents: batches,
+      oldestAnswered: false,
+    });
   });
 
   it("keep what was known before a correction, which supersedes it without rewriting it", async () => {

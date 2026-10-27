@@ -596,10 +596,10 @@ export const mentionsOf = (
 };
 
 /** The most relations one source keeps. */
-const relationsPerSource = 50;
+export const relationsPerSource = 50;
 
 /** The longest passage a relation keeps as its evidence. */
-const evidenceMaxLength = 500;
+export const evidenceMaxLength = 500;
 
 const isoDate = /^\d{4}-\d{2}-\d{2}$/u;
 
