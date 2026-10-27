@@ -17,3 +17,4 @@ test-results/
 release-out/
 wrangler.deploy.jsonc
 scripts/lab/out/
+wrangler.e2e.jsonc

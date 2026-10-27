@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import type { WebSocketRoute } from "@playwright/test";
 
+import { modelScripts } from "../apps/core/test/model-scripts.ts";
 import { execute } from "./connections-seed.ts";
 import { test } from "./csp.ts";
 import { peopleIn } from "./people.ts";
@@ -10,9 +11,13 @@ import type { Person } from "./people.ts";
 // comes in, renames the chat, reads the writes its agent holds for them
 // (one as its tool describes it, one by its raw input), confirms and
 // rejects them, and sees nothing of held writes while they are switched
-// off. The local stack reaches no model, so the answer is the
-// gateway's failure; streaming, resuming and the person check themselves
-// are core's tests (apps/core/test/chats.test.ts).
+// off. The stack's model is scripted (apps/core/test/model-scripts.ts): it
+// answers a chat its script opens, and refuses any other, so the answer is
+// the gateway's failure; streaming, resuming and the person check
+// themselves are core's tests (apps/core/test/chats.test.ts).
+
+/** What a reply says when the scripted model refuses its chat's turn. */
+const unscriptedFailure = "The model call failed (400 invalid_request_error).";
 
 const quoted = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 
@@ -106,11 +111,11 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await expect(page).toHaveURL(/[?&]chat=/u);
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
-  // No model answers here: the answer says so once the turn ends.
-  await expect(messages.getByRole("alert")).toHaveText(
-    "The model call failed.",
-    { timeout: 30_000 }
-  );
+  // No script opens this chat, so the model refuses it: the answer says
+  // so once the turn ends.
+  await expect(messages.getByRole("alert")).toHaveText(unscriptedFailure, {
+    timeout: 30_000,
+  });
   const chats = page.getByRole("navigation", { name: "Recent chats" });
   await expect(chats.getByRole("link", { name: question })).toBeVisible();
 
@@ -124,8 +129,9 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
     messages.getByRole("listitem").filter({ hasText: question })
   ).toHaveCount(2);
   await expect(box).toHaveValue(draft);
+  // Each try's answer says it failed.
   await expect(messages.getByRole("alert")).toHaveText(
-    "The model call failed.",
+    [unscriptedFailure, unscriptedFailure],
     { timeout: 30_000 }
   );
   await box.fill("");
@@ -242,6 +248,28 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await expect(waiting).not.toContainText("dan@acme.test");
   await waiting.getByRole("button", { name: /^Reject mail\.send/u }).click();
   await expect(waiting).toHaveCount(0);
+});
+
+test("a person asks, and reads the agent's answer once its turn ends", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener, replies } = modelScripts.answers;
+  const [answer] = replies;
+  // Unique to the attempt; the scripted model answers what it opens with.
+  const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
+  await page.goto("/");
+
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+
+  const messages = page.getByRole("list", { name: "Messages" });
+  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  await expect(messages.getByText(answer.text)).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(messages.getByRole("alert")).toHaveCount(0);
 });
 
 test("a person groups chats in a project with a goal and a document, moves them in and out, and deletes it", async ({
@@ -381,10 +409,9 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   await expect(messages.getByRole("listitem").first()).toHaveText(
     `Out of reach ${tag}.`
   );
-  await expect(messages.getByRole("alert")).toHaveText(
-    "The model call failed.",
-    { timeout: 30_000 }
-  );
+  await expect(messages.getByRole("alert")).toHaveText(unscriptedFailure, {
+    timeout: 30_000,
+  });
   await expect(
     page
       .getByRole("navigation", { name: "Recent chats" })
@@ -539,10 +566,9 @@ test("the chat dock on every other page carries on the open chat, which is the s
   const dock = page.getByRole("region", { name: "Ask Grasp" });
   const messages = dock.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
-  await expect(messages.getByRole("alert")).toHaveText(
-    "The model call failed.",
-    { timeout: 30_000 }
-  );
+  await expect(messages.getByRole("alert")).toHaveText(unscriptedFailure, {
+    timeout: 30_000,
+  });
   // The page stayed where it was.
   expect(new URL(page.url()).pathname).toBe("/domains");
 
