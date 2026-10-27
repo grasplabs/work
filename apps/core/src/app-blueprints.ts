@@ -695,6 +695,12 @@ export const createFromBlueprint = async (
       createdAt: sql<Date>`${appRow.createdAt.getTime()}`.as("created_at"),
       removedAt: sql<Date | null>`NULL`.as("removed_at"),
       removedBy: sql<string | null>`NULL`.as("removed_by"),
+      provisionalWorkspaceId: sql<
+        string | null
+      >`${appRow.provisionalWorkspaceId}`.as("provisional_workspace_id"),
+      provisionalChatId: sql<string | null>`${appRow.provisionalChatId}`.as(
+        "provisional_chat_id"
+      ),
     })
     .from(blueprints)
     .where(
