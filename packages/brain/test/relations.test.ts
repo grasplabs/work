@@ -2,11 +2,17 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { writeVersion } from "../src/documents.ts";
-import { entitiesFor, runLinking } from "../src/entities.ts";
+import {
+  entitiesFor,
+  runLinking,
+  settleMs,
+  sweepLinking,
+} from "../src/entities.ts";
 import type { IndexStep } from "../src/indexing.ts";
+import { remember } from "../src/memories.ts";
 import { preparePurge, purge } from "../src/purge.ts";
 import { relationsFor } from "../src/relations.ts";
-import type { Caller } from "./host.ts";
+import type { Caller, StartedJob } from "./host.ts";
 import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 
 // Typed, source-backed relations (GRA-306, its threat model), through the
@@ -446,5 +452,82 @@ describe("typed relations", () => {
     });
 
     expect(found?.evidence).toBe(said);
+  });
+});
+
+describe("relations in a person's own memory", () => {
+  it("follow what the record rests on: once the owner can't read its source, neither its entities nor its relations are theirs to read", async () => {
+    const thing = `Payroll ${word()}`;
+    const remembered = `Mia owns ${thing}.`;
+    const host = testHost(
+      modelOf({
+        [remembered]: {
+          entities: [
+            { kind: "person", name: "Mia" },
+            { kind: "process", name: thing },
+          ],
+          relations: [
+            {
+              subject: "Mia",
+              predicate: "owns",
+              object: thing,
+              evidence: remembered,
+            },
+          ],
+        },
+      })
+    );
+    const collection = await newCollection(host.brain, "HR");
+    const source = await writeVersion(host.brain, writerOf("writer"), {
+      collection,
+      path: "owners.md",
+      text: "Payroll changes hands this month.",
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
+    const userId = `person-${word()}`;
+    const reads: Caller = { userId, reads: [collection.id] };
+    await remember(
+      host.brain,
+      reads,
+      {
+        kind: "preference",
+        text: remembered,
+        sourceRefs: [
+          {
+            kind: "document",
+            documentId: source.id,
+            collectionId: collection.id,
+            version: source.currentVersion,
+          },
+        ],
+      },
+      { idempotencyKey: word() }
+    );
+    await sweepLinking(host.brain, new Date(Date.now() + settleMs + 60_000));
+    for (const { job } of host.started.filter(
+      (started: StartedJob) => "source" in started.job
+    )) {
+      // oxlint-disable-next-line no-await-in-loop -- one job after another
+      await runLinking(host.brain, job, once);
+    }
+    // The same person, once they no longer read the collection it rests on.
+    const lost: Caller = { userId, reads: [] };
+    const read = async (caller: Caller) => {
+      const [found] = await entitiesFor(host.brain, caller, { query: thing });
+      const related = await owners(host, caller, found?.id ?? "-");
+      return {
+        entity: found?.label,
+        owners: related.map(({ owner }) => owner),
+      };
+    };
+
+    await expect(Promise.all([read(reads), read(lost)])).resolves.toStrictEqual(
+      [
+        { entity: thing, owners: ["Mia"] },
+        { entity: undefined, owners: [] },
+      ]
+    );
   });
 });

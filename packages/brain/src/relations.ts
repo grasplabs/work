@@ -14,6 +14,7 @@ import {
   documents,
 } from "./db/schema.ts";
 import { collectionIdSchema, documentIdSchema, memoryIdSchema } from "./ids.ts";
+import { citesReadable } from "./memory-cites.ts";
 
 // Typed, source-backed relations (GRA-306; the Brain design's "History and
 // authority" and "Graph tables and query behavior"): what the Brain's
@@ -173,7 +174,17 @@ export const relationsFor = async <C>(
             brainMemories,
             eq(brainMemories.id, brainAssertions.memoryId)
           )
-          .where(and(eq(brainMemories.ownerId, owner), where))
+          .where(
+            and(
+              eq(brainMemories.ownerId, owner),
+              // A record follows its sources' restrictions, the owner's
+              // own too: only those resting on what they may read now.
+              citesReadable(
+                await brain.ports.memories.readableBy(reader, [owner])
+              ),
+              where
+            )
+          )
           .orderBy(desc(brainAssertions.recordedAt))
           .limit(readRowsMax),
   ]);
