@@ -654,7 +654,9 @@ describe(
       await builder.api.screens.frame(app, "").control(run, "pause");
       await until(async () => (await liveStatus(run)) === "paused");
       await builder.api.screens.frame(app, "").control(run, "resume");
-      await until(async () => (await liveStatus(run)) !== "paused");
+      // Resumed, and asleep in `go` again: not merely past paused, which a
+      // resumed run is while it runs back to its sleep.
+      await until(async () => (await liveStatus(run)) === "waiting");
       const generations = await receiptsGenerations(run);
       const pause =
         generations.find(({ kind }) => kind === "pause")?.generation ?? 0;
@@ -686,7 +688,8 @@ describe(
       // Read while it is paused, and handed on late.
       const read = await runEngine(env).controlState(run);
       await builder.api.screens.frame(app, "").control(run, "resume");
-      await until(async () => (await liveStatus(run)) !== "paused");
+      // Asleep in `go` again (see above).
+      await until(async () => (await liveStatus(run)) === "waiting");
       // A newer pause admitted, its call to the engine failing.
       await aroundEngine(
         async (method, call) => {
