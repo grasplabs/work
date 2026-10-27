@@ -875,6 +875,41 @@ const requireWatchable = (row: RunRow, asking: Asking): void => {
   }
 };
 
+/**
+ * What a reviewer watching run `row` sees (`seenRun`'s widened access,
+ * while a decision of it asks them): who the run is, its status as its row
+ * says, when it started, the waits they may see and no control. Named
+ * field by field, so nothing a snapshot says of the run's outcome (what
+ * it returned, why it failed, what it rolls back after and why) reaches
+ * them, now or as the snapshot grows: that is its own person's alone.
+ */
+const watchedSnapshot = (
+  row: RunRow,
+  fingerprint: string,
+  waits: Json[],
+  pending: ResourceControlRow["kind"] | undefined
+): Json => {
+  const status = statusOf[row.status];
+  return {
+    runId: row.id,
+    workflowId: row.workflowResourceId,
+    workflowVersion: row.version,
+    manifestHash: row.manifestHash,
+    fingerprint,
+    status,
+    startedAt: status === "queued" ? null : row.createdAt.getTime(),
+    finishedAt: null,
+    waits,
+    control: {
+      canPause: false,
+      canResume: false,
+      canCancel: false,
+      pendingControl:
+        pending === undefined ? null : { kind: pending, stage: "applying" },
+    },
+  };
+};
+
 /** Run `runId`'s snapshot for the asking person, and its revision. */
 const runSnapshot = async (
   env: Env,
@@ -899,10 +934,6 @@ const runSnapshot = async (
   const [row, pending] = await runAndPending(env, seen.row);
   const ended = isEnded(row.status);
   requireWatchable(row, asking);
-  // Controls are the run's own person's: a reviewer watching it has none.
-  const mayStart =
-    row.principalId === asking.by.userId &&
-    (await holds(env, mayStartSql(asking, resolved.alias, pin)));
   // Read after the row: a wait opened or closed since moves its revision on.
   const waits = await snapshotWaits(env, asking, resolved, row, appRestricted);
   const status = await shownStatus(env, row, waits.length);
@@ -912,6 +943,13 @@ const runSnapshot = async (
     resolved,
     originAppVersion
   );
+  if (row.principalId !== asking.by.userId) {
+    return {
+      value: watchedSnapshot(row, contract.fingerprint, waits, pending),
+      revision: revisionOf(generation, row),
+    };
+  }
+  const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
   const returned = row.status === "completed" || row.status === "failed";
   if (returned && row.restricted && !appRestricted) {
     // What a restricted run returned, or why it failed, only to an App in
