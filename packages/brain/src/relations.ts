@@ -87,7 +87,7 @@ const columns = {
 };
 
 /** What one read of relations asks: an entity and its filters. */
-interface RelationsQuery {
+export interface RelationsQuery {
   entityId: string;
   predicate?: string | undefined;
   at?: string | undefined;
@@ -95,7 +95,7 @@ interface RelationsQuery {
 }
 
 /** What a reader may read through: their documents, and whose memories. */
-interface ReadScope {
+export interface ReadScope {
   allowed: Awaited<ReturnType<typeof allowedFor>>;
   owner: string | undefined;
   /** What the owner may read now: their own records rest on only that. */
@@ -103,7 +103,7 @@ interface ReadScope {
 }
 
 /** A relation as read, with the source and collection it came from. */
-interface ReadRelation {
+export interface ReadRelation {
   view: RelationView;
   source: string;
   documentId: string | null;
@@ -111,7 +111,10 @@ interface ReadRelation {
 }
 
 /** What `reader` reads relations through, past the Brain's gate. */
-const scopeOf = async <C>(brain: Brain<C>, reader: C): Promise<ReadScope> => {
+export const scopeOf = async <C>(
+  brain: Brain<C>,
+  reader: C
+): Promise<ReadScope> => {
   await requireBrainRead(brain, reader);
   const allowed = await allowedFor(brain.ports, reader);
   let owner: string | undefined;
@@ -159,7 +162,7 @@ const reportRead = async <C>(
  * most `readRowsMax`, conflicts among them marked, and whether that cap
  * left any out (`cut`): what every read of relations answers from.
  */
-const readable = async <C>(
+export const readable = async <C>(
   brain: Brain<C>,
   { allowed, owner, ownerReads }: ReadScope,
   { entityId, predicate, at, knownAt }: RelationsQuery
