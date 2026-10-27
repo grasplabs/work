@@ -128,6 +128,7 @@ const mainBetween = (
     number: number;
     reviews: unknown[];
     codeowners?: string;
+    truncated?: boolean;
   }[]
 ): ReviewSource => ({
   commitsBetween: async () =>
@@ -137,6 +138,7 @@ const mainBetween = (
     return await Promise.resolve({
       files: merge?.files ?? [],
       parent: `parent-of-${sha}`,
+      truncated: merge?.truncated ?? false,
     });
   },
   pullsOf: async (sha) => {
@@ -240,6 +242,31 @@ describe("the security review of every change between two releases", () => {
         watched
       )
     ).rejects.toThrow(/no CODEOWNER's approval/u);
+  });
+
+  it("counts a commit whose files GitHub cut short as touching the limits", async () => {
+    await expect(
+      securityReviewsSince(
+        mainBetween([
+          {
+            sha: "1".repeat(40),
+            files: ["apps/web/src/x.tsx"],
+            number: 10,
+            reviews: [],
+            truncated: true,
+          },
+          {
+            sha: commit,
+            files: ["packages/shared/src/platform-limits.ts"],
+            number: 12,
+            reviews: approved,
+          },
+        ]),
+        "0".repeat(40),
+        commit,
+        watched
+      )
+    ).rejects.toThrow(/#10 has no CODEOWNER's approval/u);
   });
 
   it("refuses a raise no reviewed change between the releases made", async () => {

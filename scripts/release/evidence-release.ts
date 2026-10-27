@@ -98,6 +98,9 @@ const pages = async (route: string): Promise<unknown[]> => {
   }
 };
 
+/** The most files GitHub lists of one commit. */
+const githubCommitFilesMax = 300;
+
 /** The security review, as GitHub's API answers it for this repository. */
 const fromGitHub: ReviewSource = {
   commitsBetween: async (base, head) => {
@@ -129,7 +132,12 @@ const fromGitHub: ReviewSource = {
     if (first === undefined) {
       throw new Error(`Commit ${sha} has no parent`);
     }
-    return { files: files.map(({ filename }) => filename), parent: first.sha };
+    return {
+      files: files.map(({ filename }) => filename),
+      parent: first.sha,
+      // GitHub lists a commit's first 300 files: more might hide one.
+      truncated: files.length >= githubCommitFilesMax,
+    };
   },
   pullsOf: async (sha) => await pages(`commits/${sha}/pulls`),
   reviewsOf: async (pullRequest) => await pages(`pulls/${pullRequest}/reviews`),

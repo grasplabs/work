@@ -33,6 +33,8 @@ export const capacityWorkloads: Readonly<Record<string, CapacityWorkload>> = {};
  */
 export const capacityWatched: readonly string[] = [
   "packages/shared/src/platform-limits.ts",
+  // Where `@grasp-os/shared/platform-limits` resolves to.
+  "packages/shared/package.json",
   "packages/shared/src/release.ts",
   "scripts/capacity/",
   "scripts/release/",

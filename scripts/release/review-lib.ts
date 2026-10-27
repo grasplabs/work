@@ -156,8 +156,14 @@ export const ownerApproval = (
 export interface ReviewSource {
   /** The commits after `base` up to `head` on main, oldest first. */
   commitsBetween: (base: string, head: string) => Promise<string[]>;
-  /** A commit's files and first parent. */
-  commit: (sha: string) => Promise<{ files: string[]; parent: string }>;
+  /**
+   * A commit's files and first parent, and whether the files were cut
+   * short (GitHub lists at most 300 a commit): one cut short counts as
+   * touching what's watched.
+   */
+  commit: (
+    sha: string
+  ) => Promise<{ files: string[]; parent: string; truncated: boolean }>;
   /** The pull requests GitHub associates with a commit. */
   pullsOf: (sha: string) => Promise<unknown>;
   /** A pull request's reviews. */
@@ -188,8 +194,8 @@ export const securityReviewsSince = async (
   const reviews: SecurityReview[] = [];
   for (const sha of await source.commitsBetween(base, head)) {
     // oxlint-disable-next-line no-await-in-loop -- one commit at a time, a few a release
-    const { files, parent } = await source.commit(sha);
-    if (!files.some((file) => isWatched(file, watched))) {
+    const { files, parent, truncated } = await source.commit(sha);
+    if (!truncated && !files.some((file) => isWatched(file, watched))) {
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- as above
