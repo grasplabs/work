@@ -1998,6 +1998,7 @@ msgid "Actor ID"
 msgstr "Actor-ID"
 
 #: src/onboarding/connect-steps.tsx
+#: src/routes/_shell.settings.pulse.tsx
 msgid "Add"
 msgstr "Toevoegen"
 
@@ -3192,6 +3193,7 @@ msgctxt "where a workflow stands"
 msgid "Better split in two"
 msgstr "Beter in tweeën splitsen"
 
+#: src/routes/_shell.settings.billing.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Billing"
 msgstr "Facturatie"
@@ -5133,10 +5135,6 @@ msgstr "Eerdere versies"
 msgid "Edit"
 msgstr "Bewerken"
 
-#: src/routes/_shell.settings.billing.tsx
-msgid "Edit details"
-msgstr "Gegevens wijzigen"
-
 #: src/chat/project-dialog.tsx
 msgid "Edit project"
 msgstr "Project bewerken"
@@ -5163,6 +5161,10 @@ msgstr "Ingebouwde AI"
 #: src/brain/brain-article/kern.tsx
 msgid "Employee"
 msgstr "Medewerker"
+
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Employee email domain"
+msgstr "E-maildomein van medewerkers"
 
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Employee email domains"
@@ -10558,6 +10560,10 @@ msgstr "Verwijderen"
 msgid "Remove {documentName}"
 msgstr "{documentName} verwijderen"
 
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Remove {domain}"
+msgstr "{domain} verwijderen"
+
 #: src/onboarding/document-drop.tsx
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
@@ -14107,8 +14113,8 @@ msgid "Until {until}"
 msgstr "Tot {until}"
 
 #: src/routes/_shell.settings.billing.tsx
-msgid "Until it is, billing can be seen here but not changed."
-msgstr "Tot die tijd kun je de facturatie hier zien, maar niet wijzigen."
+msgid "Until it is, there is no plan, card or invoice. The billing details and emails below are kept for when it is."
+msgstr "Tot die tijd is er geen abonnement, kaart of factuur. De factuurgegevens en e-mails hieronder worden daarvoor bewaard."
 
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. Mend the record through the domain and the change is tried again, or abandon it."

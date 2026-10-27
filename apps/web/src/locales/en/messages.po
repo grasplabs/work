@@ -1998,6 +1998,7 @@ msgid "Actor ID"
 msgstr "Actor ID"
 
 #: src/onboarding/connect-steps.tsx
+#: src/routes/_shell.settings.pulse.tsx
 msgid "Add"
 msgstr "Add"
 
@@ -3192,6 +3193,7 @@ msgctxt "where a workflow stands"
 msgid "Better split in two"
 msgstr "Better split in two"
 
+#: src/routes/_shell.settings.billing.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Billing"
 msgstr "Billing"
@@ -5133,10 +5135,6 @@ msgstr "Earlier versions"
 msgid "Edit"
 msgstr "Edit"
 
-#: src/routes/_shell.settings.billing.tsx
-msgid "Edit details"
-msgstr "Edit details"
-
 #: src/chat/project-dialog.tsx
 msgid "Edit project"
 msgstr "Edit project"
@@ -5163,6 +5161,10 @@ msgstr "Embedded AI"
 #: src/brain/brain-article/kern.tsx
 msgid "Employee"
 msgstr "Employee"
+
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Employee email domain"
+msgstr "Employee email domain"
 
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Employee email domains"
@@ -10558,6 +10560,10 @@ msgstr "Remove"
 msgid "Remove {documentName}"
 msgstr "Remove {documentName}"
 
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Remove {domain}"
+msgstr "Remove {domain}"
+
 #: src/onboarding/document-drop.tsx
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
@@ -14107,8 +14113,8 @@ msgid "Until {until}"
 msgstr "Until {until}"
 
 #: src/routes/_shell.settings.billing.tsx
-msgid "Until it is, billing can be seen here but not changed."
-msgstr "Until it is, billing can be seen here but not changed."
+msgid "Until it is, there is no plan, card or invoice. The billing details and emails below are kept for when it is."
+msgstr "Until it is, there is no plan, card or invoice. The billing details and emails below are kept for when it is."
 
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. Mend the record through the domain and the change is tried again, or abandon it."
