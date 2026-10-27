@@ -1,0 +1,23 @@
+diff --git a/dist/src/workers/workflows/binding.worker.js b/dist/src/workers/workflows/binding.worker.js
+index e72f3e06cd0e59351b6a838c30788a8dd7e43e7e..16b0a7db3d1114ba838cd2bcb617465481bcea46 100644
+--- a/dist/src/workers/workflows/binding.worker.js
++++ b/dist/src/workers/workflows/binding.worker.js
+@@ -2480,7 +2480,18 @@ var defaultConfig = {
+             timeoutTask
+           ]);
+         try {
++          // Grasp OS patch: the callback's answer is an RPC result, which
++          // holds the call into the Worker open until it is disposed, and
++          // this engine never disposed it: the Worker's request was left
++          // with nothing to wait on, and workerd reported it as hung
++          // (GRA-896). A copy of the plain value goes on; the result is
++          // let go once it is stored.
++          let answered = result2;
+           result2 = await persistStepResult(result2, timeoutTask);
++          if (answered !== null && typeof answered === "object" && typeof answered[Symbol.dispose] === "function" && !isReadableStreamLike(answered)) {
++            result2 = structuredClone(result2);
++            answered[Symbol.dispose]();
++          }
+         } catch (e) {
+           if (abortController.abort("step errored"), this.#engine.priorityQueue.remove({
+             hash: priorityQueueHash,
