@@ -1,3 +1,4 @@
+import type { ChatCitedDocument } from "@grasp-os/shared/chat";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Tooltip,
@@ -93,13 +94,16 @@ export const MessageAction = ({
 
 /**
  * An answer's words, as Markdown, its links to the notes it cites
- * (`cited`, a stored answer's citations) opening them; one still being
- * written cites none.
+ * (`cited`, a stored answer's citations) opening them, each an inline
+ * citation once core has said what the span cites (`sources`); one still
+ * being written cites none.
  */
 export const MessageResponse = ({
   text,
   cited,
+  sources,
 }: {
   text: string;
   cited?: readonly string[];
-}) => <AnswerMarkdown cited={cited} text={text} />;
+  sources?: readonly ChatCitedDocument[];
+}) => <AnswerMarkdown cited={cited} sources={sources} text={text} />;

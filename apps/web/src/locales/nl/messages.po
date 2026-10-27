@@ -11705,6 +11705,10 @@ msgctxt "column: how Grasp knows an app is used"
 msgid "Source"
 msgstr "Bron"
 
+#: src/chat/cited-note.tsx
+msgid "Source {number}: {title}"
+msgstr "Bron {number}: {title}"
+
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
