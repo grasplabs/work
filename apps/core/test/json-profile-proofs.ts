@@ -28,7 +28,11 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { admitRunEvent } from "../src/workflows/run-events.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
-import { consentCode, graphAttachmentUrl } from "./connect-providers.ts";
+import {
+  consentCode,
+  graphAttachmentReadsUrl,
+  graphAttachmentUrl,
+} from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { liveStatus, resumed, runObject, stopped } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
@@ -853,15 +857,24 @@ export const profileProofs = (where: string): void => {
           ({ action, detail }) =>
             action === "connection.call" && detail?.run === runId
         );
+        // What left the platform: Graph handed out the content once.
+        const graph = await providers().fetch(
+          `${graphAttachmentReadsUrl}?${new URLSearchParams({ mailbox, message: "m1", id: "a1" }).toString()}`
+        );
+        const { reads } = z
+          .object({ reads: z.number() })
+          .parse(await graph.json());
         expect({
           end: endOf(run),
           receipts: await receiptsOf(runId, "grasp.connector"),
           // Connect's own record of the call: once.
           calls: calls.length,
+          reads,
         }).toStrictEqual({
           end: { status: "completed", output: { status: "due 2026-11-01" } },
           receipts: ["started", "done"],
           calls: 1,
+          reads: 1,
         });
       });
 

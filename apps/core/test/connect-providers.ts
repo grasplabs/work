@@ -146,6 +146,14 @@ export const graphDraftsUrl = "https://graph-control.test/drafts";
 export const graphAttachmentUrl = "https://graph-control.test/attachment";
 
 /**
+ * Where tests read how often Graph handed out an attachment's content
+ * (not its fields alone): GET `?mailbox=…&message=…&id=…`, answered
+ * `{ reads }`.
+ */
+export const graphAttachmentReadsUrl =
+  "https://graph-control.test/attachment-reads";
+
+/**
  * Where tests publish a package on the fake npm registry: POST one
  * version as connect's test/npm-registry-fake.ts takes it, as JSON.
  */
@@ -381,6 +389,7 @@ const graphSent = [];
 const graphLosing = new Map();
 const graphDrafts = new Map();
 const graphAttachments = new Map();
+const graphAttachmentReads = new Map();
 /** Whether Graph loses this write's answer (\`graphLoseUrl\`). */
 const losesAnswer = (mailbox) => {
   const losing = graphLosing.get(mailbox) ?? 0;
@@ -659,9 +668,18 @@ export default {
         }
         const size = atob(found.contentBytes).length;
         const fields = { "@odata.type": "#microsoft.graph.fileAttachment", id: found.id, name: found.name, contentType: found.contentType, size, isInline: false };
-        return Response.json(url.searchParams.has("$select") ? fields : { ...fields, contentBytes: found.contentBytes });
+        if (url.searchParams.has("$select")) {
+          return Response.json(fields);
+        }
+        const read = [mailbox, rest[1], rest[3]].join("/");
+        graphAttachmentReads.set(read, (graphAttachmentReads.get(read) ?? 0) + 1);
+        return Response.json({ ...fields, contentBytes: found.contentBytes });
       }
       return graphEvents.answer(request, url);
+    }
+    if (request.method === "GET" && url.origin + url.pathname === ${JSON.stringify(graphAttachmentReadsUrl)}) {
+      const read = [url.searchParams.get("mailbox"), url.searchParams.get("message"), url.searchParams.get("id")].join("/");
+      return Response.json({ reads: graphAttachmentReads.get(read) ?? 0 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(graphAttachmentUrl)}) {
       const attachment = await request.json();
