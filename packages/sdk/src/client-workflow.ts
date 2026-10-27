@@ -4,6 +4,7 @@ import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { appErrorDetailsOf } from "./app-error.ts";
 import { clientInternals } from "./client-core.ts";
 import type {
+  DecisionTransport,
   GraspClient,
   SubmissionTarget,
   WorkflowLink,
@@ -15,6 +16,7 @@ import {
   issueDetails,
   readAnswer,
   readRejection,
+  withReceiptLink,
 } from "./client-error.ts";
 import { workflowReferenceLimits } from "./references.ts";
 import type {
@@ -1127,17 +1129,37 @@ export class WorkflowChannel {
     if (decisions === undefined) {
       throw clientError("decision.unavailable");
     }
+    await this.#answer(decisions, runId, wait.id, {
+      approved: response.approved,
+      payload: accepted.value,
+    });
+  }
+
+  /**
+   * Sends `answer` to decision `decision` of run `runId` through the
+   * trusted host: an outcome lost on the way is `decision.outcome_unknown`,
+   * carrying a link that sends this very answer again (`withReceiptLink`),
+   * so a form asked again never makes a fresh one.
+   */
+  async #answer(
+    decisions: DecisionTransport,
+    runId: string,
+    decision: string,
+    answer: { readonly approved: boolean; readonly payload: unknown }
+  ): Promise<void> {
     // A refusal fences only if no fence came since this answer was sent.
     const startedUnder = this.#link.generation();
     try {
-      await decisions.respond(runId, wait.id, {
-        approved: response.approved,
-        payload: accepted.value,
-      });
+      await decisions.respond(runId, decision, answer);
     } catch (error) {
       const settled = readRejection(error);
       if (settled.kind !== "failed") {
-        throw clientError("decision.outcome_unknown");
+        throw withReceiptLink(
+          clientError("decision.outcome_unknown"),
+          async () => {
+            await this.#answer(decisions, runId, decision, answer);
+          }
+        );
       }
       if (fences(settled.error.code)) {
         this.#link.fence(settled.error, startedUnder);
