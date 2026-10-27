@@ -127,7 +127,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#screenSubmissions = new ScreenSubmissionsRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
-    this.#dashboard = new DashboardRpc(env, full);
     this.#emailPreferences = new EmailPreferencesRpc(env, full);
     this.#sessions = new SessionsRpc(env, full, sessionId);
     this.#channelAccounts = new ChannelAccountsRpc(env, full);
@@ -148,6 +147,14 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#onboarding = new OnboardingRpc(env, check);
     this.#onboardingStaff = new OnboardingStaffRpc(env, check);
     this.#onboardingGate = new OnboardingGateRpc(env, check);
+    // Its report read through the namespaces above, with their checks.
+    this.#dashboard = new DashboardRpc(env, full, {
+      onboarding: this.#onboarding,
+      workflows: this.#workflows,
+      signals: this.#signals,
+      knowledgeSignals: this.#knowledgeSignals,
+      apps: this.#apps,
+    });
   }
 
   get sessions(): SessionsRpc {
