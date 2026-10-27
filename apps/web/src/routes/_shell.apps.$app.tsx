@@ -1,9 +1,9 @@
-import { canBuild } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { LayoutGridIcon } from "lucide-react";
 
 import { AppPage } from "../engines/app-page.tsx";
+import { buildsApp } from "../engines/app-role.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -59,7 +59,7 @@ const AppPageView = () => {
       />
       <AppPage
         app={app}
-        builds={canBuild(identity.role)}
+        builds={buildsApp(app, identity)}
         contents={contents}
         open={open}
       >
