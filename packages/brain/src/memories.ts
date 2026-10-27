@@ -49,6 +49,7 @@ import { canonicalJson } from "./json.ts";
 import type { Json } from "./json.ts";
 import { keyed } from "./keyed.ts";
 import { forgetPersonLessons } from "./lessons.ts";
+import { citesReadable } from "./memory-cites.ts";
 import { forgetPersonOutcomes } from "./outcomes.ts";
 import { asWord, termsOf } from "./search.ts";
 
@@ -175,16 +176,6 @@ const citesWrite = (
       sql`SELECT ${memoryId}, cited.value FROM json_each(${JSON.stringify(cited)}) AS cited WHERE EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${brainMemories.id} = ${memoryId})`
     )
     .onConflictDoNothing();
-
-/**
- * That a record rests on nothing but `readable` (`brain_memory_cites`), as
- * a condition of a query of `brain_memories`: the collections everyone
- * reading may read now, which the host names (`memories.readableBy`). A
- * record resting on any other is never fetched, so it shapes no page,
- * cursor or rank (GRA-1085).
- */
-export const citesReadable = (readable: readonly string[]): SQL =>
-  sql`NOT EXISTS (SELECT 1 FROM ${brainMemoryCites} WHERE ${brainMemoryCites.memoryId} = ${brainMemories.id} AND ${brainMemoryCites.collectionId} NOT IN (SELECT value FROM json_each(${JSON.stringify(readable)})))`;
 
 /**
  * The statements that delete `userId`'s records and receipts, and the

@@ -67,11 +67,22 @@ export interface GoalVersion extends Dated {
   howWeNotice: string;
 }
 
+/** One of the company's workflows: its App, and its id there. */
+export interface GoalWorkflow {
+  app: string;
+  workflow: string;
+}
+
 /** A board goal from the vision. Adjusting it adds a version; the newest counts. */
 export interface Goal {
   id: string;
   /** Oldest first; the first is where it was set. Never empty. */
   versions: GoalVersion[];
+  /**
+   * The company's workflows that serve it, in the order they were linked:
+   * only those the reader may see, while their App still has them.
+   */
+  workflows: GoalWorkflow[];
 }
 
 /** A role in a team, from the directory: how many people hold it, never who. */
@@ -367,6 +378,12 @@ export interface Workspace {
  */
 export interface BrainApi {
   read: () => Promise<Workspace>;
+  /**
+   * The board's goals (`Workspace.goals`) alone, for the dashboard, as
+   * `read` gives them: every member reads them, each with the workflows
+   * that serve it they may see.
+   */
+  goals: () => Promise<Goal[]>;
   /**
    * One source's transcript (`brain.transcript`), as the person may read it
    * now, or null: alike when it has none and when they may not read it.
