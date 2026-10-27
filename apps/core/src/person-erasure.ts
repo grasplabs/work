@@ -16,9 +16,16 @@ import { directoryProviderId } from "./auth/config.ts";
 import {
   accounts,
   erasedSubjects,
+  channelAccounts,
+  channelConversations,
+  channelLinks,
+  chatWorkflowOffers,
+  invitations,
+  notifications,
   personErasureAreas,
   personErasures,
   sessions,
+  teamMembers,
   users,
 } from "./db/core/schema.ts";
 import {
@@ -167,10 +174,59 @@ const identity: ErasureStep = {
 };
 
 /**
+ * How they were reached, and what reached them (GRA-1182): their chat
+ * accounts on every platform, the sign-in links they used to link one
+ * (which carry their name there), their conversations with the agent,
+ * the workflow offers it made them, the invitations made to the address
+ * that was theirs, found by its keyed hash (`person_erasures`), so
+ * whichever area runs first, their notifications, and their teams.
+ * Removing them took out their chat accounts, notifications and teams
+ * already; this takes them out again, in case any came back since.
+ * Guest chats they opened for an App are the company's, naming them.
+ */
+const channels: ErasureStep = {
+  area: "channels",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [erasure] = await db
+      .select({ emailHash: personErasures.emailHash })
+      .from(personErasures)
+      .where(eq(personErasures.userId, userId));
+    if (erasure === undefined) {
+      return;
+    }
+    const invited = await db
+      .select({ id: invitations.id, email: invitations.email })
+      .from(invitations);
+    const theirs: string[] = [];
+    for (const { id, email } of invited) {
+      // oxlint-disable-next-line no-await-in-loop -- one address at a time
+      if ((await emailHashOf(env, email)) === erasure.emailHash) {
+        theirs.push(id);
+      }
+    }
+    await db.batch([
+      db.delete(channelAccounts).where(eq(channelAccounts.userId, userId)),
+      db.delete(channelLinks).where(eq(channelLinks.usedBy, userId)),
+      db
+        .delete(channelConversations)
+        .where(eq(channelConversations.userId, userId)),
+      db
+        .delete(chatWorkflowOffers)
+        .where(eq(chatWorkflowOffers.userId, userId)),
+      db.delete(invitations).where(inArray(invitations.id, theirs)),
+      db.delete(notifications).where(eq(notifications.personId, userId)),
+      db.delete(teamMembers).where(eq(teamMembers.userId, userId)),
+      completed(db, userId, "channels"),
+    ]);
+  },
+};
+
+/**
  * The erasure's areas, in the order they run. Each area's own leaf of
  * GRA-903 adds its step here.
  */
-const steps: readonly ErasureStep[] = [identity];
+const steps: readonly ErasureStep[] = [identity, channels];
 
 /** Refuses anyone but one of the client's admins, as members.ts does. */
 const requireMemberAdmin = (by: Identity): void => {

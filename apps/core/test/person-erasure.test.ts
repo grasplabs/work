@@ -83,6 +83,16 @@ const storedOf = async (claims: Record<string, unknown>) => {
   return { users: users?.count ?? 0, accounts: held?.count ?? 0 };
 };
 
+/** How many invitations went to `address`, in any case. */
+const invitedOf = async (address: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS count FROM invitations WHERE lower(email) = lower(?)"
+  )
+    .bind(address)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+};
+
 /** An admin, and someone else they removed. */
 const removedPerson = async (): Promise<{ admin: Person; person: Person }> => {
   const admin = await signedInApi(idp, "admin");
@@ -127,7 +137,10 @@ describe("erasing a person", () => {
       erased: {
         requestedAt: "string",
         completedAt: "string",
-        areas: [{ area: "identity", state: "complete" }],
+        areas: [
+          { area: "identity", state: "complete" },
+          { area: "channels", state: "complete" },
+        ],
       },
       name,
       emailKept: false,
@@ -334,14 +347,20 @@ describe("erasing a person", () => {
     }).toMatchObject({
       pending: {
         completedAt: null,
-        areas: [{ area: "identity", state: "pending" }],
+        areas: [
+          { area: "identity", state: "pending" },
+          { area: "channels", state: "complete" },
+        ],
       },
       // Nothing of the area went: one statement, or none of it.
       meanwhile: { email: String(person.person.email), accounts: 1 },
       done: {
         email: null,
         completed: "string",
-        areas: [{ area: "identity", state: "complete" }],
+        areas: [
+          { area: "identity", state: "complete" },
+          { area: "channels", state: "complete" },
+        ],
       },
       accounts: 0,
     });
@@ -431,6 +450,76 @@ describe("erasing a person", () => {
         },
       ],
       text: false,
+    });
+  });
+
+  it("takes out how they were reached: their chat accounts and links, conversations, offers, invitations to their old address, notifications and teams", async () => {
+    const { admin, person } = await removedPerson();
+    const { userId } = person;
+    const email = String(person.person.email);
+    const now = Date.now();
+    // What came back, or was left, since they were removed.
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO channel_accounts (id, platform, platform_user_id, user_id, name, linked_at, linked_how) VALUES (?, 'teams', ?, ?, 'Them on Teams', ?, 'sign_in_link')"
+      ).bind(crypto.randomUUID(), `teams-${userId}`, userId, now),
+      env.DB.prepare(
+        "INSERT INTO channel_links (secret_hash, platform, platform_user_id, name, created_at, expires_at, used_at, used_by) VALUES (?, 'teams', ?, 'Them on Teams', ?, ?, ?, ?)"
+      ).bind(
+        `hash-${userId}`,
+        `teams-${userId}`,
+        now,
+        now + 60_000,
+        now,
+        userId
+      ),
+      env.DB.prepare(
+        "INSERT INTO channel_conversations (platform, thread_id, user_id, created_at, last_message_at) VALUES ('teams', ?, ?, ?, ?)"
+      ).bind(`thread-${userId}`, userId, now, now),
+      env.DB.prepare(
+        "INSERT INTO chat_workflow_offers (id, user_id, workspace_id, chat_id, workflow_id, workflow_name, version, input, created_at, expires_at) VALUES (?, ?, 'workspace', 'chat', 'workflow', 'Follow-up', 1, '{}', ?, ?)"
+      ).bind(crypto.randomUUID(), userId, now, now + 60_000),
+      env.DB.prepare(
+        "INSERT INTO invitations (id, organization_id, email, role, status, expires_at, created_at, inviter_id) VALUES (?, 'organization', ?, 'user', 'accepted', ?, ?, ?)"
+      ).bind(
+        crypto.randomUUID(),
+        email.toUpperCase(),
+        now + 60_000,
+        now,
+        admin.userId
+      ),
+      env.DB.prepare(
+        "INSERT INTO notifications (id, person_id, type, created_at, updated_at) VALUES (?, ?, 'run_failed', ?, ?)"
+      ).bind(crypto.randomUUID(), userId, now, now),
+    ]);
+    // Someone else's, which stays.
+    const other = `other-${crypto.randomUUID().slice(0, 8)}@acme.test`;
+    await env.DB.prepare(
+      "INSERT INTO invitations (id, organization_id, email, role, status, expires_at, created_at, inviter_id) VALUES (?, 'organization', ?, 'user', 'pending', ?, ?, ?)"
+    )
+      .bind(crypto.randomUUID(), other, now + 60_000, now, admin.userId)
+      .run();
+
+    await admin.api.members.erase(userId, String(person.person.name));
+
+    expect({
+      accounts: await rowsOf("channel_accounts", "user_id", userId),
+      links: await rowsOf("channel_links", "used_by", userId),
+      conversations: await rowsOf("channel_conversations", "user_id", userId),
+      offers: await rowsOf("chat_workflow_offers", "user_id", userId),
+      notifications: await rowsOf("notifications", "person_id", userId),
+      teams: await rowsOf("team_members", "user_id", userId),
+      invitedThem: await invitedOf(email),
+      invitedOther: await invitedOf(other),
+    }).toStrictEqual({
+      accounts: 0,
+      links: 0,
+      conversations: 0,
+      offers: 0,
+      notifications: 0,
+      teams: 0,
+      invitedThem: 0,
+      invitedOther: 1,
     });
   });
 });
