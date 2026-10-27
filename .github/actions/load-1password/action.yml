@@ -98,9 +98,14 @@ runs:
           }
           for name in $SECRET_NAMES; do
             value="${!name:-}"
-            # Masked line by line, as the runner masks.
+            # Masked line by line, as the runner masks. The runner decodes a
+            # command'"'"'s data, so % and a stray carriage return are encoded
+            # first, as the toolkit'"'"'s setSecret does: otherwise a value with
+            # %41 in it would register some other mask, and stay in the log.
             while IFS= read -r line; do
               if [ -n "$line" ]; then
+                line=${line//%/%25}
+                line=${line//$'"'"'\r'"'"'/%0D}
                 echo "::add-mask::$line"
               fi
             done <<< "$value"
