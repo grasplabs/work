@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
 import { allowedFor } from "./authorize.ts";
@@ -14,6 +14,7 @@ import type {
   RelationsExplanation,
   RelationView,
 } from "./contract.ts";
+import { inList } from "./db/d1.ts";
 import {
   brainAssertions,
   brainLinkJobs,
@@ -250,7 +251,7 @@ export const readable = async <C>(
     allowed.documents(),
     eq(collections.sensitive, false),
     // A read bound to collections (a recall's network, GRA-307): those alone.
-    within === undefined ? undefined : inArray(collections.id, [...within]),
+    within === undefined ? undefined : inList(collections.id, within),
     where
   );
   const fromOwn =
