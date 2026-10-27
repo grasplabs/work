@@ -251,22 +251,22 @@ const foldedWithPlaces = (
 };
 
 /**
- * The span of `text` that `quote` matches, folded alike and whole: the
- * text's own characters, never the quote's, or `undefined` when the text
- * doesn't hold it.
+ * Finds the span of `text` that a quote matches, folded alike and whole:
+ * the text's own characters, never the quote's, or `undefined` when the
+ * text doesn't hold it. The text is folded once, however many quotes are
+ * looked for in it.
  */
-export const spanOf = (text: string, quote: string): string | undefined => {
-  const term = foldedWithPlaces(quote).folded;
-  if (term === "") {
-    return undefined;
-  }
+const spansIn = (text: string): ((quote: string) => string | undefined) => {
   const { folded, starts, ends } = foldedWithPlaces(text);
-  const at = wholeAt(folded, term);
-  const start = starts[at];
-  const end = ends[at + term.length - 1];
-  return at === -1 || start === undefined || end === undefined
-    ? undefined
-    : text.slice(start, end);
+  return (quote) => {
+    const term = foldedWithPlaces(quote).folded;
+    const at = term === "" ? -1 : wholeAt(folded, term);
+    const start = starts[at];
+    const end = ends[at + term.length - 1];
+    return at === -1 || start === undefined || end === undefined
+      ? undefined
+      : text.slice(start, end);
+  };
 };
 
 /** Text as names are matched: NFKC, lower case, single spaces. */
@@ -633,13 +633,17 @@ export const relationsOf = (
     named.set(alias, (named.get(alias) ?? 0) + 1);
   }
   const found = new Map<string, Relation>();
+  const spanOf = spansIn(text);
   for (const relation of answers.flatMap(({ relations = [] }) => relations)) {
+    if (found.size >= relationsPerSource) {
+      break;
+    }
     const subject = fold(relation.subject);
     const object = fold(relation.object);
     const predicate = kindOf(relation.predicate);
     // The passage as the text itself has it, byte for byte: never the
     // extractor's copy, whose case or spacing may differ.
-    const evidence = spanOf(text, relation.evidence) ?? "";
+    const evidence = spanOf(relation.evidence) ?? "";
     const validFrom = dateOf(relation.validFrom);
     const validTo = dateOf(relation.validTo);
     if (
@@ -656,7 +660,7 @@ export const relationsOf = (
       continue;
     }
     const key = [subject, predicate, object, validFrom, validTo].join("\u0000");
-    if (!found.has(key) && found.size < relationsPerSource) {
+    if (!found.has(key)) {
       found.set(key, {
         subject,
         object,
