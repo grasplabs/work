@@ -84,7 +84,3 @@ export const Failure = ({ failure }: { failure: string | null }) =>
       {failure}
     </p>
   );
-
-/** A ring as the admin says it: the first one by name. */
-export const ringWords = (ring: number): string =>
-  ring === 0 ? "Ring 0, first" : `Ring ${ring}`;

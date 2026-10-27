@@ -26,6 +26,12 @@ export const releases = sqliteTable("releases", {
   manifestSha256: text("manifest_sha256").notNull(),
   builtAt: timestamp("built_at").notNull(),
   importedAt: timestamp("imported_at").notNull(),
+  /**
+   * Whether its note is a feature, which starts the next major version
+   * (src/releases/version.ts): kept on import, so versions are counted
+   * without reading every manifest. Null only for one imported before it.
+   */
+  feature: integer({ mode: "boolean" }),
 });
 
 /**

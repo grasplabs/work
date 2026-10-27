@@ -78,7 +78,7 @@ const rolloutBadgeWords = (
   }
   return next === null
     ? rolloutStatusWords[rollout.status]
-    : `Waits for ring ${next}`;
+    : `Waits for ${ringWords(next)}`;
 };
 
 /**
@@ -116,7 +116,7 @@ const ApproveRing = ({
         }}
         size="sm"
       >
-        {`Approve ring ${next}`}
+        {`Approve ${ringWords(next)}`}
       </Button>
       {failure === null ? null : (
         <p className="text-destructive text-sm" role="alert">

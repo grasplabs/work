@@ -23,14 +23,15 @@ import {
 // the people and the leads are the company admin's.
 
 type Section =
-  | "/onboarding/kickoff"
   | "/onboarding/agreements"
   | "/onboarding/interviews"
   | "/onboarding/open";
 
-/** Where the area deals with each stage, when it does. */
+/**
+ * Where the area deals with each stage, when it does. The kickoff is
+ * brought in from Grasp's admin, on the organization's Steps (GRA-1099).
+ */
 const stageSections: Partial<Record<StaffStage, Section>> = {
-  kickoff: "/onboarding/kickoff",
   agreements: "/onboarding/agreements",
   interviews: "/onboarding/interviews",
   open: "/onboarding/open",
