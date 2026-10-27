@@ -279,6 +279,96 @@ describe("removing an App", slow, () => {
     });
   });
 
+  it("has its entry forgotten by the cron's indexing when neither its note nor its forgetting was written", async () => {
+    const owner = await personApi("builder");
+    const word = `v${crypto.randomUUID().replaceAll("-", "")}`;
+    const { id: app } = await owner.api.apps.create({
+      name: `Leave ${word}`,
+    });
+    await release(owner, app, { "AGENTS.md": `# Leave\n\n${word}\n` });
+    await indexApps(env);
+    const versionOf = async () => {
+      const row = await env.KNOWLEDGE.prepare(
+        "SELECT current_version AS v FROM documents WHERE collection_id = 'apps' AND path = ?"
+      )
+        .bind(`${app}/AGENTS.md`)
+        .first<{ v: number }>();
+      return row?.v ?? 0;
+    };
+    const indexed = await versionOf();
+    // Its entry saved but never noted, then removed with its forgetting
+    // failed: nothing in core names the entry.
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM app_entries WHERE app_id = ?").bind(app),
+      env.DB.prepare(
+        "UPDATE apps SET status = 'archived', removed_at = ?, removed_by = ?, current_version = NULL WHERE id = ?"
+      ).bind(Date.now(), owner.userId, app),
+    ]);
+    await indexApps(env);
+    const tombstoned = await versionOf();
+    // Forgotten once: later runs write no further version of it.
+    await indexApps(env);
+
+    expect({
+      indexed,
+      tombstoned: tombstoned - indexed,
+      again: (await versionOf()) - indexed,
+    }).toStrictEqual({ indexed: 1, tombstoned: 1, again: 1 });
+  });
+
+  it("is never undone by a restore racing it: one of the two wins, and a removed App stays removed", async () => {
+    const owner = await personApi("builder");
+    const apps = await Promise.all(
+      [1, 2, 3].map(async () => await archivedApp(owner))
+    );
+    const outcomes: { app: string; restored: unknown; removed: unknown }[] = [];
+    const events = await auditedDuring(async () => {
+      await Promise.all(
+        apps.map(async (app) => {
+          // Both read it archived; whichever writes second is refused.
+          const [restored, removed] = await Promise.all([
+            outcome(owner.api.apps.restore(app)),
+            outcome(owner.api.apps.remove(app)),
+          ]);
+          outcomes.push({ app, restored, removed });
+        })
+      );
+    });
+    const raced = await Promise.all(
+      outcomes.map(async ({ app, restored, removed }) => {
+        const row = await env.DB.prepare(
+          "SELECT status, removed_at IS NOT NULL AS removed FROM apps WHERE id = ?"
+        )
+          .bind(app)
+          .first<{ status: string; removed: number }>();
+        const recorded = events
+          .filter(({ target }) => target?.id === app)
+          .map(({ action }) => action)
+          .filter(
+            (action) => action === "app.restored" || action === "app.removed"
+          );
+        return {
+          oneWon: (restored === "ok") !== (removed === "ok"),
+          stored:
+            removed === "ok"
+              ? row?.status === "archived" && row.removed === 1
+              : row?.status === "draft" && row.removed === 0,
+          recorded:
+            recorded.length === 1 &&
+            recorded[0] === (removed === "ok" ? "app.removed" : "app.restored"),
+        };
+      })
+    );
+
+    expect(raced).toStrictEqual(
+      Array.from({ length: 3 }, () => ({
+        oneWon: true,
+        stored: true,
+        recorded: true,
+      }))
+    );
+  });
+
   it("changes nothing when a restore lands first", async () => {
     const owner = await personApi("builder");
     const app = await archivedApp(owner);

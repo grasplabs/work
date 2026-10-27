@@ -322,8 +322,8 @@ const managedBy = async (
   const app = await defaultStoreApp(env, parsed.data);
   // A removed App's default store has no builders left: the
   // organization's own admins, never Grasp staff, read, export, change
-  // (`requireStoreChangeable` lets them: the App is no longer archived as
-  // one that can be restored) and delete it, so its records are never
+  // (`requireStoreChangeable` lets them too: nobody can restore the App)
+  // and delete it, so its records are never
   // stuck (erasure, GRA-335).
   if (app?.removed === true) {
     if (!isMemberAdmin(by)) {
@@ -625,14 +625,16 @@ const sharingRules = (owner: string) => ({
  * Refuses a change to store `id` while it is the default store of an
  * archived App (`app.archived`): read-only, as the App is, until a builder
  * restores it (app-status.ts). For changes made by admins without a role
- * check of their own on the App (backfills, migration samples).
+ * check of their own on the App (backfills, migration samples). A removed
+ * App's default store isn't refused: nobody can restore the App, and its
+ * admins manage the store from then on (`managedBy`).
  */
 export const requireStoreChangeable = async (
   env: Env,
   id: StoreId
 ): Promise<void> => {
   const app = await defaultStoreApp(env, id);
-  if (app !== undefined) {
+  if (app !== undefined && !app.removed) {
     requireNotArchived(app);
   }
 };

@@ -9,7 +9,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { stringify } from "yaml";
 
@@ -313,7 +313,7 @@ const removedEntryText =
  * the entry any more either (app-entries.ts), its earlier versions
  * included: they are kept history, reached only through the same
  * per-path rule. A failure is logged: the entry is unreadable all the
- * same, and `indexApps` forgets it on its next run (its note still there).
+ * same, and `indexApps` forgets it on one of its next runs.
  */
 export const forgetAppEntry = async (
   env: Env,
@@ -322,8 +322,19 @@ export const forgetAppEntry = async (
   try {
     const knowledge = drizzle(env.KNOWLEDGE);
     const stored = await knowledge
-      .select({ version: documents.currentVersion })
+      .select({
+        version: documents.currentVersion,
+        sha256: brainPayloads.sha256,
+      })
       .from(documents)
+      .innerJoin(
+        versions,
+        and(
+          eq(versions.documentId, documents.id),
+          eq(versions.number, documents.currentVersion)
+        )
+      )
+      .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
       .where(
         and(
           eq(documents.collectionId, appsCollectionId),
@@ -331,7 +342,12 @@ export const forgetAppEntry = async (
         )
       )
       .get();
-    if (stored !== undefined) {
+    // Already the tombstone (its note's deletion was what failed): no
+    // second version of it.
+    if (
+      stored !== undefined &&
+      stored.sha256 !== (await sha256Hex(removedEntryText))
+    ) {
       const collection = await ensureCollection(
         brainOf(env),
         appsCollectionRow(),
@@ -350,6 +366,67 @@ export const forgetAppEntry = async (
   } catch (error) {
     log.error("apps.forget_failed", { appId, ...errorFields(error) });
   }
+};
+
+/** Most entry paths one query of `unforgottenApps` names. */
+const pathsPerQuery = 50;
+
+/**
+ * The removed Apps whose entry wasn't forgotten yet: whose note is still
+ * there, or whose entry isn't the tombstone, read from the entry itself.
+ * An entry saved without its note (`noteVersion` failed after the save)
+ * whose forgetting failed too has no note to find it by, and isn't
+ * indexed again (the App has no current version).
+ */
+const unforgottenApps = async (env: Env): Promise<string[]> => {
+  const [removed, noted] = await Promise.all([
+    drizzle(env.DB)
+      .select({ id: apps.id })
+      .from(apps)
+      .where(isNotNull(apps.removedAt)),
+    drizzle(env.DB)
+      .select({ id: apps.id })
+      .from(apps)
+      .innerJoin(appEntries, eq(appEntries.appId, apps.id))
+      .where(isNotNull(apps.removedAt)),
+  ]);
+  const tombstone = await sha256Hex(removedEntryText);
+  const pages = Array.from(
+    { length: Math.ceil(removed.length / pathsPerQuery) },
+    (_, page) =>
+      removed
+        .slice(page * pathsPerQuery, (page + 1) * pathsPerQuery)
+        .map(({ id }) => appEntryPath(id))
+  );
+  const unforgotten = new Set(noted.map(({ id }) => id));
+  for (const paths of pages) {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    const held = await drizzle(env.KNOWLEDGE)
+      .select({ path: documents.path })
+      .from(documents)
+      .innerJoin(
+        versions,
+        and(
+          eq(versions.documentId, documents.id),
+          eq(versions.number, documents.currentVersion)
+        )
+      )
+      .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
+      .where(
+        and(
+          eq(documents.collectionId, appsCollectionId),
+          inArray(documents.path, paths),
+          ne(brainPayloads.sha256, tombstone)
+        )
+      );
+    for (const { path } of held) {
+      const appId = appOfEntry(path);
+      if (appId !== undefined) {
+        unforgotten.add(appId);
+      }
+    }
+  }
+  return [...unforgotten];
 };
 
 /**
@@ -375,14 +452,7 @@ export const indexAppNow = async (env: Env, appId: string): Promise<void> => {
  * minutes.
  */
 export const indexApps = async (env: Env): Promise<void> => {
-  // Removed Apps whose entry wasn't forgotten yet: their note goes only
-  // once their entry is the tombstone.
-  const unforgotten = await drizzle(env.DB)
-    .select({ id: apps.id })
-    .from(apps)
-    .innerJoin(appEntries, eq(appEntries.appId, apps.id))
-    .where(isNotNull(apps.removedAt));
-  for (const { id } of unforgotten) {
+  for (const id of await unforgottenApps(env)) {
     // oxlint-disable-next-line no-await-in-loop -- one App at a time
     await forgetAppEntry(env, id);
   }

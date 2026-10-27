@@ -61,7 +61,9 @@ import { stopsUnsettled } from "./workflows/resource-runs.ts";
 //   over the App still archived, as read (its status's last change), and
 //   not removed; the rest of its batch only once that write made it
 //   removed. Otherwise nothing is written or recorded, and it is refused
-//   (`app.conflict`).
+//   (`app.conflict`). A restore that read it archived before the removal
+//   writes only over an App not removed (app-status.ts), so it is refused
+//   in turn, never undoing the removal.
 // - What it was, kept where people search: its Apps-collection entry
 //   (its name, description and AGENTS.md) is replaced by a tombstone and
 //   read by nobody, admins included (app-entries.ts).
