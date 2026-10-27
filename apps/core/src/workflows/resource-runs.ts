@@ -400,6 +400,9 @@ const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
   for (const control of admitted) {
     // Applied only when it was cancelled and this receipt's stop was
     // asked: one a builder's terminate, say, ended first is superseded.
+    // A stop core asks never rolls back (engine.ts terminates with
+    // `rollback: false`), so one it took ends the run cancelled; a run
+    // that failed in a compensation was rolled back by something else.
     const applied =
       control.kind === "cancel" &&
       row.status === "cancelled" &&
