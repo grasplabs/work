@@ -2809,7 +2809,7 @@ msgstr "¿Archivar {name}?"
 
 #: src/engines/apps-sidebar.tsx
 msgid "Archive and take offline"
-msgstr "Archivar y desconectar"
+msgstr "Archivar y dejar fuera de línea"
 
 #: src/engines/app-status.tsx
 msgctxt "a domain put away"
