@@ -25,6 +25,7 @@ import { isUniqueViolation } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { defineSchemaOnStore } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
+import { storeAlias } from "./workflow-store-host.ts";
 
 // The stores a standalone workflow declares (GRA-682): created and handed
 // their schema when a version declaring them is published, the workflow's
@@ -69,9 +70,6 @@ export interface WorkflowStoreBinding {
   /** The hash of its operations' fingerprints, by path. */
   readonly operationManifestHash: string;
 }
-
-/** A store's alias among its version's bindings. */
-export const storeAlias = (name: string): string => `store:${name}`;
 
 /** The store workflow `workflowId` declared as `name`, if it has one. */
 const storeNamed = async (

@@ -12160,6 +12160,18 @@ msgstr "Speicher"
 msgid "Store {store}"
 msgstr "Speicher {store}"
 
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can read and change every record of {changes}, whoever owns it"
+msgstr "Speicher {store} eines Workflows. Dies kann jeden Datensatz von {changes} lesen und ändern, egal wem er gehört"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can read every record of {reads}, and read and change every record of {changes}, whoever owns it"
+msgstr "Speicher {store} eines Workflows. Dies kann jeden Datensatz von {reads} lesen und jeden Datensatz von {changes} lesen und ändern, egal wem er gehört"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can read every record of {reads}, whoever owns it"
+msgstr "Speicher {store} eines Workflows. Dies kann jeden Datensatz von {reads} lesen, egal wem er gehört"
+
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
 msgstr "Speicher-ID: {store}"

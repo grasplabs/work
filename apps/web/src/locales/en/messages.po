@@ -12160,6 +12160,18 @@ msgstr "Store"
 msgid "Store {store}"
 msgstr "Store {store}"
 
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can read and change every record of {changes}, whoever owns it"
+msgstr "Store {store}, a workflow's. This can read and change every record of {changes}, whoever owns it"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can read every record of {reads}, and read and change every record of {changes}, whoever owns it"
+msgstr "Store {store}, a workflow's. This can read every record of {reads}, and read and change every record of {changes}, whoever owns it"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can read every record of {reads}, whoever owns it"
+msgstr "Store {store}, a workflow's. This can read every record of {reads}, whoever owns it"
+
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
 msgstr "Store ID: {store}"
