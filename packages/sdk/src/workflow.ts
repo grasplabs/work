@@ -495,7 +495,7 @@ export type CollectionBinding = Readonly<Omit<CollectionReader, "recall">>;
  * binding name: `await brain(env.BRAIN).recall({ query })`, a skill's
  * selection and pinned read (`.skills.select`, `.skills.read`), and its
  * entities and relations (`.entities.list`, `.entities.sources`,
- * `.relations.get`), the same contract every caller of the Brain uses
+ * `.relations.get`, `.relations.explain`), the same contract every caller of the Brain uses
  * (`@grasp-os/sdk/brain`). Keep a selection's pin in the step's result: a
  * replay reads the same version.
  */
@@ -508,6 +508,7 @@ export type WorkflowBrainBinding = Required<
     | "entitiesList"
     | "entitySources"
     | "relationsGet"
+    | "relationsExplain"
   >
 >;
 

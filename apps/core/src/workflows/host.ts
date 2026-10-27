@@ -2,7 +2,7 @@ import type { Brain } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
 import { entitiesFor, entitySources } from "@grasp-os/brain/entities";
 import { recall } from "@grasp-os/brain/recall";
-import { relationsFor } from "@grasp-os/brain/relations";
+import { relationsExplain, relationsFor } from "@grasp-os/brain/relations";
 import { readSkill, selectSkill } from "@grasp-os/brain/skills";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
@@ -724,6 +724,7 @@ const brainCallSchema = z.enum([
   "entitiesList",
   "entitySources",
   "relationsGet",
+  "relationsExplain",
 ]);
 
 /**
@@ -746,6 +747,8 @@ const brainCalls: Record<
     await entitySources(brain, reader, request),
   relationsGet: async (brain, reader, request) =>
     await relationsFor(brain, reader, request),
+  relationsExplain: async (brain, reader, request) =>
+    await relationsExplain(brain, reader, request),
 };
 
 /**
