@@ -80,10 +80,19 @@ const outputSchema = {
 const totalBudget = 150_000;
 const fileBudget = 14_000;
 
+/**
+ * The author's text, unable to pose as the prompt's own structure: a line
+ * break in a file name can't start a line of its own, and a patch can't
+ * close or open the tags that hold it.
+ */
+const quote = (text: string): string => text.replaceAll("<", "&lt;");
+const nameOf = (path: string): string =>
+  quote(JSON.stringify(path).slice(1, -1));
+
 const pathOf = ({ filename, previous_filename }: PatchedFile): string =>
   previous_filename === undefined
-    ? filename
-    : `${filename} (renamed from ${previous_filename})`;
+    ? nameOf(filename)
+    : `${nameOf(filename)} (renamed from ${nameOf(previous_filename)})`;
 
 /**
  * What the model reads: every file with its line counts, then the patches,
@@ -109,7 +118,10 @@ export const promptFor = (files: readonly PatchedFile[]): string => {
       omitted += 1;
       continue;
     }
-    const patch = file.patch ?? "(no patch: binary or too large)";
+    // GitHub sends no patch for binary or very large files, nor for a
+    // rename, mode change or empty file: the line counts above still show.
+    const patch =
+      file.patch === undefined ? "(no patch from GitHub)" : quote(file.patch);
     const cap = Math.min(fileBudget, budget);
     const cut =
       patch.length > cap
@@ -183,7 +195,18 @@ const responseSchema = z.object({
 interface Options {
   readonly apiKey: string;
   readonly fetch?: typeof fetch;
+  /** How a retry waits; tests pass one that doesn't. */
+  readonly wait?: (ms: number) => Promise<unknown>;
 }
+
+const refusalReason =
+  "The model declined to judge this diff; a refusal counts as Security and High.";
+const refused: Verdict = {
+  security: true,
+  security_reason: refusalReason,
+  complexity: "High",
+  complexity_reason: refusalReason,
+};
 
 const attempts = 4;
 const backoff = (attempt: number): number => 2000 * attempt * attempt;
@@ -214,9 +237,9 @@ const vote = async (
   options: Options,
   attempt = 1
 ): Promise<{ verdict: Verdict; cost: number }> => {
-  const { apiKey, fetch: send = fetch } = options;
+  const { apiKey, fetch: send = fetch, wait = sleep } = options;
   const retry = async (): Promise<{ verdict: Verdict; cost: number }> => {
-    await sleep(backoff(attempt));
+    await wait(backoff(attempt));
     return await vote(user, options, attempt + 1);
   };
   let response: Response;
@@ -247,12 +270,6 @@ const vote = async (
     );
   }
   const body = responseSchema.parse(await response.json());
-  const text = body.content.find((block) => block.type === "text")?.text;
-  if (body.stop_reason !== "end_turn" || text === undefined) {
-    throw new Error(
-      `The model gave no verdict (stop reason ${body.stop_reason})`
-    );
-  }
   const { usage } = body;
   const cost =
     (usage.input_tokens * price.input +
@@ -260,6 +277,18 @@ const vote = async (
       (usage.cache_read_input_tokens ?? 0) * price.input * 0.1 +
       usage.output_tokens * price.output) /
     1e6;
+  // Sonnet's safeguards can decline a diff about auth, secrets or CI: the
+  // diffs this job exists for. A refusal is doubt, and doubt gets more
+  // review, so it counts as a vote for Security and High.
+  if (body.stop_reason === "refusal") {
+    return { verdict: refused, cost };
+  }
+  const text = body.content.find((block) => block.type === "text")?.text;
+  if (body.stop_reason !== "end_turn" || text === undefined) {
+    throw new Error(
+      `The model gave no verdict (stop reason ${body.stop_reason})`
+    );
+  }
   return { verdict: verdictSchema.parse(JSON.parse(text)), cost };
 };
 
