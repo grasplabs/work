@@ -15,6 +15,8 @@ import type {
   ReceiptsGetInput,
   RecallInput,
   RememberInput,
+  LessonLineage,
+  LessonSummary,
 } from "@grasp-os/brain/contract";
 import {
   recallBudgetSchema,
@@ -336,6 +338,18 @@ export interface KnowledgeApi {
    * follow it now, and the correction that superseded it (GRA-298).
    */
   memoriesLineage: (input: MemoriesLineageInput) => Promise<MemoryLineage>;
+  /**
+   * The lessons consolidation kept that the person may see (GRA-301): their
+   * own, and a shared chat's they were part of for every turn it rests on.
+   */
+  lessonsList: () => Promise<LessonSummary[]>;
+  /** A lesson they may see, with its versions, as far as they were part of them. */
+  lessonsLineage: (input: { lessonId: string }) => Promise<LessonLineage>;
+  /** Retires a lesson they may correct, at its revision: never recreated. */
+  lessonsRetire: (input: {
+    lessonId: string;
+    expectedRevision: number;
+  }) => Promise<void>;
   /**
    * Publishes a record into a team's, the company's or a chat's memory,
    * where the person may (GRA-298): retry-safe, as `remember`.

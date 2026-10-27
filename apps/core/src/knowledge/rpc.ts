@@ -15,6 +15,8 @@ import type {
   ReceiptsGetInput,
   RecallInput,
   RememberInput,
+  LessonLineage,
+  LessonSummary,
 } from "@grasp-os/brain/contract";
 import {
   backlinks,
@@ -23,6 +25,11 @@ import {
   listDocuments,
 } from "@grasp-os/brain/documents";
 import type { Writer } from "@grasp-os/brain/documents";
+import {
+  lessonLineage,
+  lessonsFor,
+  lessonsRetire,
+} from "@grasp-os/brain/lesson-reads";
 import {
   memoriesGet,
   memoriesList,
@@ -231,6 +238,27 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await this.#asReader(
       async (reader) => await memoriesList(brainOf(this.#env), reader, input)
     );
+  }
+
+  async lessonsList(): Promise<LessonSummary[]> {
+    return await this.#asReader(
+      async (reader) => await lessonsFor(brainOf(this.#env), reader)
+    );
+  }
+
+  async lessonsLineage(input: { lessonId: string }): Promise<LessonLineage> {
+    return await this.#asReader(
+      async (reader) => await lessonLineage(brainOf(this.#env), reader, input)
+    );
+  }
+
+  async lessonsRetire(input: {
+    lessonId: string;
+    expectedRevision: number;
+  }): Promise<void> {
+    await this.#asReader(async (reader) => {
+      await lessonsRetire(brainOf(this.#env), reader, input);
+    });
   }
 
   async memoriesLineage(input: MemoriesLineageInput): Promise<MemoryLineage> {
