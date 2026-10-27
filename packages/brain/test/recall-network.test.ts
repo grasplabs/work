@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { ensureCollection } from "../src/collections.ts";
 import type { MemoryPack } from "../src/contract.ts";
 import { writeVersion } from "../src/documents.ts";
-import { runLinking } from "../src/entities.ts";
+import { runLinking, settleMs, sweepLinking } from "../src/entities.ts";
 import { collectionIdSchema } from "../src/ids.ts";
 import type { IndexStep } from "../src/indexing.ts";
+import { remember } from "../src/memories.ts";
 import { recall } from "../src/recall.ts";
 import type { Caller } from "./host.ts";
 import { newCollection, testHost, writerOf } from "./host.ts";
@@ -230,6 +232,26 @@ describe("a recall's network route", () => {
     });
   });
 
+  it("reports to the host every row its hops considered, not only the relations it kept", async () => {
+    const { host, query, everyone } = await team();
+
+    await recall(host.brain, everyone, { query, network: {} });
+
+    const network = host.reads
+      .map(({ record }) => record)
+      .filter(({ detail }) => detail.read === "recall.network");
+    // Anna's one relation and onboarding's three on the first hop; the
+    // tool's two and the secret's one on the second: seven rows, the
+    // three kept among them, in four documents.
+    expect(
+      network.map(({ detail, documentIds }) => ({
+        relations: detail.relations,
+        considered: detail.considered,
+        documents: documentIds?.length,
+      }))
+    ).toStrictEqual([{ relations: 3, considered: 7, documents: 4 }]);
+  });
+
   it("never reaches a relation the reader may read through one they may not", async () => {
     const query = word();
     const payroll = `Payroll ${word()}`;
@@ -382,7 +404,9 @@ describe("a recall's network route", () => {
 
   it("starts from as many found documents as a recall holds, past what one statement may bind one by one", async () => {
     const query = word();
-    const owned = Array.from({ length: 50 }, (_, index) =>
+    // 49 notes, so the pack has room for one more: their pairs alone would
+    // bind 98 parameters, past what D1 takes with the rest of the query.
+    const owned = Array.from({ length: 49 }, (_, index) =>
       stated(`Owner ${index} ${word()}`, "owns", `Process ${index} ${word()}`)
     );
     const used = owned.map(({ object }) =>
@@ -414,12 +438,112 @@ describe("a recall's network route", () => {
       [collectionIdSchema.parse(notes.id)]
     );
 
-    // Fifty notes fill the pack: the route read their hundred seeds, went
-    // on from twenty, and had no room left, and says so, rather than
-    // failing.
-    expect({ items: pack.items.length, cuts: cutsOf(pack) }).toStrictEqual({
-      items: 50,
-      cuts: ["fan_out", "items"],
+    // The route read the notes' 98 seeds, went on from twenty, and took
+    // the one item there was room for, saying so, rather than failing.
+    expect({
+      items: pack.items.length,
+      routed: routed(pack).length,
+      cuts: cutsOf(pack),
+    }).toStrictEqual({ items: 50, routed: 1, cuts: ["fan_out", "items"] });
+  });
+
+  it("stops at the recall's deadline before its hops, and says the route was cut", async () => {
+    const { host, query, everyone } = await team();
+    // A clock that has run past any deadline once the full-text route has
+    // read: the network route meets it before its first hop.
+    let late = false;
+    const brain = {
+      ...host.brain,
+      ports: {
+        ...host.brain.ports,
+        clock: () => new Date(Date.now() + (late ? 60_000 : 0)),
+        onRead: async (
+          ...read: Parameters<typeof host.brain.ports.onRead>
+        ): ReturnType<typeof host.brain.ports.onRead> => {
+          late = true;
+          return await host.brain.ports.onRead(...read);
+        },
+      },
+    };
+
+    const pack = await recall(brain, everyone, { query, network: {} });
+
+    expect({
+      items: pack.items.length,
+      cuts: cutsOf(pack),
+      state: pack.coverage.state,
+      truncated: pack.truncated,
+    }).toStrictEqual({
+      items: 1,
+      cuts: ["deadline"],
+      state: "bounded",
+      truncated: true,
+    });
+  });
+
+  it("neither starts from nor follows a memory record's relations", async () => {
+    const query = word();
+    const thing = `Payroll ${word()}`;
+    const owns = stated("Mia", "owns", thing);
+    const uses = stated(thing, "uses", `Loket ${word()}`);
+    const host = testHost(modelOf([owns, uses]).model);
+    const notes = await newCollection(host.brain, "HR");
+    const reader: Caller = { userId: `person-${word()}`, reads: [notes.id] };
+    for (const text of [`${query}: ${owns.evidence}`, uses.evidence]) {
+      // oxlint-disable-next-line no-await-in-loop -- one record at a time
+      await remember(
+        host.brain,
+        reader,
+        { kind: "fact", text },
+        { idempotencyKey: word() }
+      );
+    }
+    await sweepLinking(host.brain, new Date(Date.now() + settleMs + 60_000));
+    for (const { job } of host.started.filter(
+      (started) => "source" in started.job
+    )) {
+      // oxlint-disable-next-line no-await-in-loop -- one job after another
+      await runLinking(host.brain, job, once);
+    }
+
+    const pack = await recall(host.brain, reader, { query, network: {} });
+
+    // The record is found by its words, and its relations stay its own.
+    expect({
+      found: pack.items.map(({ sourceRefs }) => sourceRefs[0]?.kind),
+      routed: routed(pack),
+    }).toStrictEqual({ found: ["memory"], routed: [] });
+  });
+
+  it("follows nothing in a sensitive collection, though its notes are found", async () => {
+    const query = word();
+    const thing = `Grievance ${word()}`;
+    const handles = stated("Anna", "handles", thing);
+    const involves = stated(thing, "involves", `Bob ${word()}`);
+    const host = testHost(modelOf([handles, involves]).model);
+    const restricted = await ensureCollection(
+      host.brain,
+      {
+        id: crypto.randomUUID(),
+        name: "Cases",
+        description: "",
+        owner: "owner",
+        access: "everyone",
+        sensitive: true,
+        source: "here",
+        createdAt: new Date(),
+      },
+      { type: "person", userId: "owner" }
+    );
+    await saved(host, restricted, "case.md", `${query}: ${handles.evidence}`);
+    await saved(host, restricted, "notes.md", involves.evidence);
+    const reader: Caller = { userId: "reader", reads: [restricted.id] };
+
+    const pack = await recall(host.brain, reader, { query, network: {} });
+
+    expect({ found: pack.items.length, routed: routed(pack) }).toStrictEqual({
+      found: 1,
+      routed: [],
     });
   });
 
