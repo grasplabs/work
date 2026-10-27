@@ -143,6 +143,7 @@ import {
   readbacks,
   teamCounts,
   teams,
+  checkedDifferences,
   settledWorks,
   usage,
   voiceUse,
@@ -446,8 +447,23 @@ const heardKey = (who: string): string => `${who}:heard`;
 export interface DrawInput {
   person: string;
   kind: "own" | "lead";
-  /** When they last agreed to something new: what `drawn` is told once it is drawn. */
+  /** When they last agreed to something new. */
   agreedAt: string;
+  /**
+   * Their agreement's generation as it was drawn from (`agreedAt` and how
+   * often something they approved stopped counting, `#drawGeneration`):
+   * what `drawn` is told once it is drawn, so two take-backs in one
+   * millisecond still differ.
+   */
+  generation: string;
+  /**
+   * Their admission's generation as it was drawn from (`#interviewsOf`:
+   * when this interview began, and how often something they approved
+   * stopped counting): what a map keeps as `mappedFrom`. It changes with
+   * every take-back and with every interview begun anew, never with more
+   * approved, so it never repeats for another interview's content.
+   */
+  admission: string;
   facts: { tag: FactTag; record: string }[];
 }
 
@@ -486,6 +502,15 @@ const agreedOf = (stored: string): Record<string, string> =>
   agreedSchema.safeParse(JSON.parse(stored)).data ?? {};
 
 /** A drawing as the store keeps it; null when there is none. */
+/**
+ * Someone's admission as SQL, as `#interviewsOf` reads it: their
+ * interview's start and how often anything they approved stopped counting,
+ * or NULL while nothing they agreed to counts. For a statement that writes
+ * only while it is what an intake read.
+ */
+const admissionSql = (person: string): SQL =>
+  sql`(SELECT CASE WHEN agreed_at IS NULL THEN NULL ELSE coalesce(started_at, '') || '|' || revocations END FROM interview_states WHERE person = ${person})`;
+
 const drawingOf = (stored: string | null): DrawnWork | null =>
   stored === null
     ? null
@@ -1861,9 +1886,11 @@ export class Onboarding extends DurableObject<Env> {
       .where(
         and(
           isNotNull(interviewStates.agreedAt),
+          // Drawn from another generation than theirs now: a later
+          // agreement, or a take-back, however close in time.
           or(
             isNull(interviewStates.drawnAt),
-            lt(interviewStates.drawnAt, interviewStates.agreedAt)
+            sql`${interviewStates.drawnAt} IS NOT ${interviewStates.agreedAt} || '|' || ${interviewStates.revocations}`
           )
         )
       )
@@ -1891,18 +1918,21 @@ export class Onboarding extends DurableObject<Env> {
       person,
       kind: state.kind,
       agreedAt: state.agreedAt,
+      generation: `${state.agreedAt}|${state.revocations}`,
+      admission: `${state.startedAt ?? ""}|${state.revocations}`,
       facts: facts.map(({ tag, record }) => ({ tag, record })),
     };
   }
 
   /**
-   * Notes that what someone agreed to by `agreedAt` was drawn: what they
-   * agree to after that is due again.
+   * Notes that what someone agreed to, as of their agreement's generation
+   * `generation` (`DrawInput.generation`), was drawn: what they agree to
+   * or take back after that is due again.
    */
-  drawn(person: string, agreedAt: string): void {
+  drawn(person: string, generation: string): void {
     this.#db
       .update(interviewStates)
-      .set({ drawnAt: agreedAt })
+      .set({ drawnAt: generation })
       .where(eq(interviewStates.person, person))
       .run();
   }
@@ -2214,6 +2244,13 @@ export class Onboarding extends DurableObject<Env> {
     known: number;
   } {
     const settled = this.#settled();
+    const checked = new Map(
+      this.#db
+        .select()
+        .from(checkedDifferences)
+        .all()
+        .map((row) => [row.work, row])
+    );
     const differences: Difference[] = [];
     let mapped = 0;
     let all = 0;
@@ -2222,6 +2259,9 @@ export class Onboarding extends DurableObject<Env> {
       if (team.off) {
         continue;
       }
+      // A team whose interviews the brain doesn't hold shows no
+      // difference: too few told their own work (GRA-1084).
+      const heard = this.#tellers(team.id).length >= minTeamShown;
       for (const work of this.teamWorks(team.id)) {
         all += 1;
         if (
@@ -2236,13 +2276,21 @@ export class Onboarding extends DurableObject<Env> {
         }
         mapped += 1;
         const { differs } = drawn;
-        if (differs?.why === "conflict") {
+        // Shown only when the brain's intake checked five or more people
+        // behind each way, in this drawing, and without a name in either
+        // (GRA-1084): never one person's way of doing it.
+        const check = checked.get(work.id);
+        if (
+          differs?.why === "conflict" &&
+          heard &&
+          check?.drawnAt === drawn.at
+        ) {
           differences.push({
             work: work.id,
             name: work.local === "" ? work.name : work.local,
             team: team.name,
-            way: drawn.steps[differs.step]?.text ?? "",
-            other: differs.other,
+            way: check.way,
+            other: check.other,
             holds: settled.get(work.id) ?? null,
           });
         }
@@ -3422,6 +3470,11 @@ export class Onboarding extends DurableObject<Env> {
         this.#db
           .delete(drawnWorks)
           .where(inList(drawnWorks.work, forgotten))
+          .run();
+        // And the ways of a difference checked in them: words of theirs.
+        this.#db
+          .delete(checkedDifferences)
+          .where(inList(checkedDifferences.work, forgotten))
           .run();
         this.#db
           .delete(drawFailures)
@@ -4749,13 +4802,14 @@ export class Onboarding extends DurableObject<Env> {
         person: interviewStates.person,
         startedAt: interviewStates.startedAt,
         agreedAt: interviewStates.agreedAt,
-        revokedAt: interviewStates.revokedAt,
+        revocations: interviewStates.revocations,
       })
       .from(interviewStates)
       .where(inList(interviewStates.person, whose))
       .all();
-    // Something they approved stopping counting (`revokedAt`) makes what
-    // was read before it as gone as a delete does.
+    // Something they approved stopping counting (`revocations`, a count,
+    // so two in one millisecond still differ) makes what was read before
+    // it as gone as a delete does.
     return new Map(
       whose.map((person) => {
         const row = rows.find((each) => each.person === person);
@@ -4763,7 +4817,7 @@ export class Onboarding extends DurableObject<Env> {
           person,
           row === undefined || row.agreedAt === null
             ? null
-            : `${row.startedAt ?? ""}|${row.revokedAt ?? ""}`,
+            : `${row.startedAt ?? ""}|${row.revocations}`,
         ];
       })
     );
@@ -4818,7 +4872,9 @@ export class Onboarding extends DurableObject<Env> {
         !waiting.some((work) => person in work.agreed) &&
         this.#agreedAt(person) === agreedAt
       ) {
-        this.drawn(person, agreedAt);
+        // As of their generation now: a take-back since the drawing began
+        // kept it from being kept (`#goneSince`).
+        this.drawn(person, this.#drawGeneration(person) ?? agreedAt);
       }
     }
     if (drawn !== null) {
@@ -4958,7 +5014,7 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Whether a team's map stands on what its lead's facts are now: drawn
    * from their agreement, and nothing they approved stopped counting since
-   * (an edit or a withdrawal, `revokedAt`). A team without a lead has no
+   * (an edit or a withdrawal, `revocations`). A team without a lead has no
    * map of anyone's.
    */
   #mapBacked(teamId: string): boolean {
@@ -4971,22 +5027,13 @@ export class Onboarding extends DurableObject<Env> {
       .from(teams)
       .where(eq(teams.id, teamId))
       .all();
-    const [state] = this.#db
-      .select({
-        agreedAt: interviewStates.agreedAt,
-        revokedAt: interviewStates.revokedAt,
-      })
-      .from(interviewStates)
-      .where(eq(interviewStates.person, team.lead))
-      .all();
     const from = row?.mappedFrom ?? null;
-    const agreedAt = state?.agreedAt ?? null;
-    const revokedAt = state?.revokedAt ?? null;
-    return (
-      from !== null &&
-      agreedAt !== null &&
-      (revokedAt === null || from >= revokedAt)
-    );
+    // Drawn from the lead's admission as it is now: this interview, and
+    // every take-back of it there is. A take-back, however close in time,
+    // or an interview begun anew, which counts its take-backs from nothing
+    // again, leaves the map unbacked until it is drawn again.
+    const now = this.#interviewsOf([team.lead]).get(team.lead) ?? null;
+    return from !== null && now !== null && from === now;
   }
 
   /**
@@ -5173,6 +5220,59 @@ export class Onboarding extends DurableObject<Env> {
         .set({ sentAt: sql`coalesce(${brainTeams.sentAt}, ${at})` })
         .where(eq(brainTeams.team, teamId))
         .run();
+      // Which differences the review may show: those whose two ways five
+      // or more were checked to tell, each, in the drawing as it stands.
+      for (const work of intake.works) {
+        const support = supports.get(work.id);
+        const { differs } = work.drawn;
+        const checked =
+          support !== undefined &&
+          differs !== null &&
+          (support.steps[differs.step] ?? []).length >= minTeamShown &&
+          support.other.length >= minTeamShown;
+        if (checked) {
+          // As checked: each way with the roster's names taken out now,
+          // never again with whatever names it has later.
+          const shown = {
+            drawnAt: work.drawn.at,
+            way: clean(work.drawn.steps[differs.step]?.text ?? ""),
+            other: clean(differs.other),
+            at,
+          };
+          // In one statement, only while what it was checked from still
+          // stands as the intake read it: the drawing it checked, and the
+          // interview of everyone it rests on, at the same admission
+          // (`admissionSql`). One forgotten, withdrawn, deleted or taken
+          // back meanwhile leaves no copy of its words.
+          const restsOn = [
+            ...new Set([
+              ...(support.steps[differs.step] ?? []),
+              ...support.other,
+            ]),
+          ];
+          const standing = and(
+            sql`EXISTS (SELECT 1 FROM ${drawnWorks}
+              WHERE ${drawnWorks.work} = ${work.id}
+                AND json_extract(${drawnWorks.drawn}, '$.at') = ${work.drawn.at})`,
+            ...restsOn.map(
+              (person) =>
+                sql`${admissionSql(person)} IS ${began.get(person) ?? null}`
+            )
+          );
+          this.#db
+            .insert(checkedDifferences)
+            .select(
+              sql`SELECT ${work.id}, ${shown.drawnAt}, ${shown.way}, ${shown.other}, ${shown.at} WHERE ${standing}`
+            )
+            .onConflictDoUpdate({ target: checkedDifferences.work, set: shown })
+            .run();
+        } else {
+          this.#db
+            .delete(checkedDifferences)
+            .where(eq(checkedDifferences.work, work.id))
+            .run();
+        }
+      }
       this.#brainSettled(teamId, dueAt);
       return changed || since.length > 0 || stale.length > 0;
     });
@@ -5365,6 +5465,12 @@ export class Onboarding extends DurableObject<Env> {
         sql`${countedWorks.work} not in (select ${works.id} from ${works})`
       )
       .run();
+    this.#db
+      .delete(checkedDifferences)
+      .where(
+        sql`${checkedDifferences.work} not in (select ${works.id} from ${works})`
+      )
+      .run();
   }
 
   /** Sets the alarm for the next thing to draw, when there is one. */
@@ -5419,9 +5525,10 @@ export class Onboarding extends DurableObject<Env> {
     if (input === null) {
       // Due with nothing agreed to draw from (agreed before facts were
       // marked agreed): drawn as it is, so it isn't due again and again.
-      const agreedAt = team.lead === null ? null : this.#agreedAt(team.lead);
-      if (team.lead !== null && agreedAt !== null) {
-        this.drawn(team.lead, agreedAt);
+      const generation =
+        team.lead === null ? null : this.#drawGeneration(team.lead);
+      if (team.lead !== null && generation !== null) {
+        this.drawn(team.lead, generation);
       }
       return;
     }
@@ -5532,16 +5639,17 @@ export class Onboarding extends DurableObject<Env> {
             .run();
         }
       }
-      const agreedAt = this.#agreedAt(input.person);
-      this.drawn(input.person, input.agreedAt);
+      const generation = this.#drawGeneration(input.person);
+      const admission = this.#interviewsOf([input.person]).get(input.person);
+      this.drawn(input.person, input.generation);
       this.#db
         .update(teams)
         .set({
           does: map.does === "" ? still.does : map.does,
-          ...(agreedAt === input.agreedAt
+          ...(generation === input.generation && admission === input.admission
             ? {
                 mappedAt: sql`coalesce(${teams.mappedAt}, ${at})`,
-                mappedFrom: input.agreedAt,
+                mappedFrom: input.admission,
               }
             : {}),
         })
@@ -5563,9 +5671,9 @@ export class Onboarding extends DurableObject<Env> {
         .delete(drawFailures)
         .where(eq(drawFailures.item, `team:${teamId}`))
         .run();
-      const agreedAt = this.#agreedAt(lead);
-      if (agreedAt !== null) {
-        this.drawn(lead, agreedAt);
+      const generation = this.#drawGeneration(lead);
+      if (generation !== null) {
+        this.drawn(lead, generation);
       }
       this.#db
         .update(teams)
@@ -5574,6 +5682,25 @@ export class Onboarding extends DurableObject<Env> {
         .run();
       this.#noted(lead, "map.gave_up", at, "grasp");
     });
+  }
+
+  /**
+   * Someone's agreement's generation (`DrawInput.generation`): when they
+   * last agreed, and how often something they approved stopped counting.
+   * Null while nothing they agreed to counts.
+   */
+  #drawGeneration(person: string): string | null {
+    const [state] = this.#db
+      .select({
+        agreedAt: interviewStates.agreedAt,
+        revocations: interviewStates.revocations,
+      })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, person))
+      .all();
+    return state?.agreedAt === null || state === undefined
+      ? null
+      : `${state.agreedAt}|${state.revocations}`;
   }
 
   #agreedAt(person: string): string | null {
@@ -5835,7 +5962,10 @@ export class Onboarding extends DurableObject<Env> {
       this.#forgetDrawings(person.id);
       this.#db
         .update(interviewStates)
-        .set({ revokedAt: now })
+        .set({
+          revokedAt: now,
+          revocations: sql`${interviewStates.revocations} + 1`,
+        })
         .where(eq(interviewStates.person, person.id))
         .run();
       const sent = this.#db
@@ -6022,6 +6152,11 @@ export class Onboarding extends DurableObject<Env> {
         led.has(teamOf.get(row.work) ?? "");
       if (rests) {
         this.#db.delete(drawnWorks).where(eq(drawnWorks.work, row.work)).run();
+        // The ways of a difference checked in it hold their words too.
+        this.#db
+          .delete(checkedDifferences)
+          .where(eq(checkedDifferences.work, row.work))
+          .run();
         this.#db
           .delete(drawFailures)
           .where(eq(drawFailures.item, `work:${row.work}`))

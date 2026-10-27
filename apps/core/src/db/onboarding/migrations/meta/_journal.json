@@ -176,6 +176,20 @@
       "when": 1792969527885,
       "tag": "0024_checked_drawings",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1793031772318,
+      "tag": "0025_checked_differences",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1793032057037,
+      "tag": "0026_admission_revocations",
+      "breakpoints": true
     }
   ]
 }
