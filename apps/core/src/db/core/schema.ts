@@ -2867,6 +2867,31 @@ export const workflowOwners = sqliteTable(
 );
 
 /**
+ * The team that owns a workflow (workflows/teams.ts): one of the
+ * organization's teams, set by an admin or a builder of its App, by App
+ * and workflow ID, so it holds across versions. A workflow without a row
+ * has no team; a team that goes takes its rows with it.
+ */
+export const workflowTeams = sqliteTable(
+  "workflow_teams",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    workflowId: text("workflow_id").notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.workflowId] }),
+    index("workflow_teams_team").on(table.teamId),
+  ]
+);
+
+/**
  * The catalog entries an admin stopped offering (connections.ts): one row
  * each, by its source (`native` or `composio`) and its ID there. Nobody
  * starts connecting a hidden entry, admins included, until an admin offers

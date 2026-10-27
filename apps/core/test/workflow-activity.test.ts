@@ -189,6 +189,8 @@ describe("runs over time", () => {
           started: 5,
           completed: 2,
           failed: 1,
+          // One of today's two completed runs asked a person.
+          completedAlone: 1,
         },
         {
           app,
@@ -198,6 +200,7 @@ describe("runs over time", () => {
           started: 2,
           completed: 0,
           failed: 1,
+          completedAlone: 0,
         },
       ],
     };
@@ -235,6 +238,8 @@ describe("runs over time", () => {
         started: 3,
         completed: 1,
         failed: 1,
+        // Eight days ago, asking no one.
+        completedAlone: 1,
       },
     });
   });
