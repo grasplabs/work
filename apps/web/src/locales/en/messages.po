@@ -2315,6 +2315,10 @@ msgctxt "tab listing every workflow"
 msgid "All"
 msgstr "All"
 
+#: src/engines/apps-sidebar.tsx
+msgid "All apps"
+msgstr "All apps"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "All calls"
 msgstr "All calls"
@@ -2632,6 +2636,7 @@ msgctxt "kind of thing that waits"
 msgid "App approval"
 msgstr "App approval"
 
+#: src/engines/apps-sidebar.tsx
 #: src/landscape/landscape.ts
 msgid "App name"
 msgstr "App name"
@@ -2748,6 +2753,7 @@ msgstr "Approved: {who}."
 msgid "Approver for new tools named"
 msgstr "Approver for new tools named"
 
+#: src/engines/apps-sidebar.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Apps"
@@ -2793,6 +2799,7 @@ msgid "Apps to approve"
 msgstr "Apps to approve"
 
 #: src/engines/app-status.tsx
+#: src/engines/apps-sidebar.tsx
 msgid "Archive"
 msgstr "Archive"
 
@@ -2800,10 +2807,19 @@ msgstr "Archive"
 msgid "Archive {name}?"
 msgstr "Archive {name}?"
 
+#: src/engines/apps-sidebar.tsx
+msgid "Archive and take offline"
+msgstr "Archive and take offline"
+
 #: src/engines/app-status.tsx
 msgctxt "a domain put away"
 msgid "Archived"
 msgstr "Archived"
+
+#: src/engines/apps-sidebar.tsx
+msgctxt "apps put away"
+msgid "Archived ({count})"
+msgstr "Archived ({count})"
 
 #: src/engines/app-status.tsx
 msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
@@ -3861,6 +3877,7 @@ msgstr "Click to open Usage"
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/apps-sidebar.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
@@ -4968,6 +4985,10 @@ msgctxt "part of an interview"
 msgid "Done right"
 msgstr "Done right"
 
+#: src/engines/app-page.tsx
+msgid "Double-click to rename"
+msgstr "Double-click to rename"
+
 #: src/knowledge/uploads.tsx
 msgid "Download {name}"
 msgstr "Download {name}"
@@ -4998,6 +5019,11 @@ msgstr "Draft"
 
 #: src/engines/app-status.tsx
 msgctxt "a domain still being made"
+msgid "Draft"
+msgstr "Draft"
+
+#: src/engines/apps-sidebar.tsx
+msgctxt "apps still being made"
 msgid "Draft"
 msgstr "Draft"
 
@@ -5417,6 +5443,10 @@ msgctxt "filter: apps allowed to break a rule"
 msgid "Exceptions"
 msgstr "Exceptions"
 
+#: src/engines/apps-sidebar.tsx
+msgid "Expand the apps"
+msgstr "Expand the apps"
+
 #: src/chat/chat-list.tsx
 msgid "Expand the chats"
 msgstr "Expand the chats"
@@ -5693,6 +5723,10 @@ msgstr "Flagged or blocked"
 #: src/policies/policy.ts
 msgid "Flags or blocks the apps that break it."
 msgstr "Flags or blocks the apps that break it."
+
+#: src/engines/apps-sidebar.tsx
+msgid "Fold the apps"
+msgstr "Fold the apps"
 
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
@@ -7711,6 +7745,10 @@ msgstr "More about these connections"
 msgid "More about this connection"
 msgstr "More about this connection"
 
+#: src/engines/apps-sidebar.tsx
+msgid "More for {name}"
+msgstr "More for {name}"
+
 #: src/chat/chat-list.tsx
 msgid "More for {title}"
 msgstr "More for {title}"
@@ -7819,6 +7857,10 @@ msgstr "Name"
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
 msgstr "Name of a new workflow"
+
+#: src/engines/app-page.tsx
+msgid "Name of the app"
+msgstr "Name of the app"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Name of your HR platform"
@@ -10150,6 +10192,11 @@ msgctxt "a domain open to the people it is shared with"
 msgid "Published"
 msgstr "Published"
 
+#: src/engines/apps-sidebar.tsx
+msgctxt "apps open to the people they are shared with"
+msgid "Published"
+msgstr "Published"
+
 #. placeholder {0}: outcome.version
 #: src/workflows/definition-editor.tsx
 msgid "Published as version {0}."
@@ -10561,6 +10608,7 @@ msgid "Removed: it acts for whoever uses the domain, with everything the domain 
 msgstr "Removed: it acts for whoever uses the domain, with everything the domain holds"
 
 #: src/chat/chat-list.tsx
+#: src/engines/apps-sidebar.tsx
 msgid "Rename"
 msgstr "Rename"
 
@@ -10624,6 +10672,7 @@ msgstr "Resources"
 
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
+#: src/engines/apps-sidebar.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Restore"
@@ -11331,6 +11380,7 @@ msgid "Set. Type a new value to replace it."
 msgstr "Set. Type a new value to replace it."
 
 #: src/engines/app-page.tsx
+#: src/engines/apps-sidebar.tsx
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
