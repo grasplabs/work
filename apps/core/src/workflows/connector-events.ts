@@ -211,9 +211,11 @@ export const deliverConnectorEvent = async (
   const withRoom = receivers.filter((_, index) => rooms[index] !== "capped");
   // A run's own mail, to a mailbox it watches through a connection,
   // starts its runs under the run (mail-stamps.ts), admitted against its
-  // lineage; anything else is a root. Asked only when a workflow listens.
-  const parent =
-    receivers.length === 0 ? undefined : await stampedEventRun(env, delivered);
+  // lineage; anything else is a root. An App's workflows join an App run's
+  // lineage only; connector triggers decide for themselves
+  // (connector-triggers.ts). Asked once, for both.
+  const stamped = await stampedEventRun(env, delivered);
+  const parent = stamped?.kind === "app" ? stamped.runId : undefined;
   // A refusal recorded is final for its delivery: one delivered again
   // (its acknowledgement lost) starts nothing, even once an operator
   // raised the limits that refused it.
@@ -252,7 +254,12 @@ export const deliverConnectorEvent = async (
   let triggerRuns = 0;
   let triggersFailed: unknown;
   try {
-    ({ runs: triggerRuns } = await startConnectorTriggers(env, event, same));
+    ({ runs: triggerRuns } = await startConnectorTriggers(
+      env,
+      event,
+      same,
+      stamped
+    ));
   } catch (error) {
     triggersFailed = error;
   }

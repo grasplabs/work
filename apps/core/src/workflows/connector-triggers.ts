@@ -1,5 +1,8 @@
 import type { EventListener } from "@grasp-os/shared/connect";
-import { eventListenerSchema } from "@grasp-os/shared/connect";
+import {
+  connectorEventActions,
+  eventListenerSchema,
+} from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { triggerIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -14,6 +17,7 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import {
+  connectorTriggerHolds,
   permissions,
   triggerResources,
   triggerResourceVersions,
@@ -23,6 +27,10 @@ import { allowingPermissionSql } from "../permissions.ts";
 import { inputMappingSchema } from "../trigger-resources.ts";
 import type { InputMapping } from "../trigger-resources.ts";
 import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
+import type { TriggerCause } from "../workflow-starts.ts";
+import type { StampedRun } from "./mail-stamps.ts";
+import { admitChild } from "./quotas.ts";
+import { runOf } from "./resource-runs.ts";
 import { triggeredRunsPerHour } from "./runs.ts";
 
 // Starting independent workflows from the events connections report
@@ -58,15 +66,28 @@ import { triggeredRunsPerHour } from "./runs.ts";
 //   evaluated, and a pointer that finds nothing leaves its default. The
 //   input is then checked against the workflow version's schema as any
 //   start's is; one it doesn't take is refused for good.
-// - A workflow starting itself without end (its own mail reaching a
-//   mailbox its trigger watches). A trigger starts at most
-//   `triggeredRunsPerHour` runs an hour, counted as each is admitted;
-//   past that the event waits in connect's outbox and is delivered again
-//   later.
+// - A workflow starting itself without end: its own mail reaching a
+//   mailbox its trigger watches, or a trigger and an App mailing each
+//   other. An independent workflow's mail is stamped as an App run's is
+//   (mail-stamps.ts, `resource_run_mail_calls`), and a stamped event's
+//   run joins the stamping run's lineage, one level deeper, admitted
+//   against its nesting and descendant limits (quotas.ts, `admitChild`),
+//   so the lineage's limits end the loop (`workflow.lineage_limit`,
+//   refused for good). An App run's mail can't join an independent
+//   lineage (their runs are kept apart), so a stamped event of an App run
+//   is refused for good, audited (`lineage.unjoinable`), never started as a
+//   new root. Besides, a
+//   trigger starts at most `triggeredRunsPerHour` runs an hour, counted as
+//   each is admitted; past that the event waits in connect's outbox and is
+//   delivered again later, and one held back longer than `maxHeldMs` is
+//   dropped for the trigger, audited (`workflow.event.dropped`), so the
+//   backlog can't grow without end.
 // - An event dropped silently. A trigger that refuses it for good (its
 //   grant to start revoked, its person gone, an input its workflow doesn't
-//   take) is audited (`workflow.event.refused`) and the event settled for
-//   it; anything else fails the delivery, so connect delivers it again.
+//   take, its lineage full, an App run's mail) is audited
+//   (`workflow.event.refused`) and the event settled for it; anything
+//   else fails the delivery, so connect delivers it again, until held
+//   back too long, audited as dropped.
 
 /** A connector trigger that takes an event, as its current version pins it. */
 interface Taker {
@@ -82,7 +103,11 @@ const refusedForGood: ReadonlySet<string> = new Set([
   "workflow.start_denied",
   "workflow.start_invalid",
   "workflow.packages_revoked",
+  "workflow.lineage_limit",
 ]);
+
+/** How long an event a trigger holds back at its hourly limit waits before it is dropped. */
+export const maxHeldMs = 24 * 60 * 60 * 1000;
 
 /** That trigger `id` may hear `event`, as SQL on `permissions`. */
 const hearsSql = (id: string, event: ConnectorEvent): SQL =>
@@ -175,16 +200,84 @@ export const inputOf = (mapping: InputMapping, event: ConnectorEvent): Json => {
   return input;
 };
 
+/** Audits that `taker` won't start `event`'s run, as `action`, with `detail`. */
+const audited = async (
+  env: Env,
+  taker: Taker,
+  event: ConnectorEvent,
+  action: "workflow.event.refused" | "workflow.event.dropped",
+  detail: Record<string, string | number>
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      actor: { type: "system" },
+      action,
+      target: { type: "trigger", id: taker.id },
+      detail: { event: event.type, version: taker.version, ...detail },
+    }),
+  ]);
+};
+
 /**
- * What became of `taker`'s start of `event` that threw `error`: gone (the
- * trigger disabled, deleted or moved meanwhile, or its grant to hear
- * revoked, settled), refused for good (audited, settled), or to try
- * again.
+ * `taker` at its hourly limit for the event of key `same`: held back, to
+ * be delivered again (`retry`), or, held since longer than
+ * {@link maxHeldMs}, dropped for it, audited (`gone`).
+ */
+const heldBack = async (
+  env: Env,
+  taker: Taker,
+  event: ConnectorEvent,
+  same: string
+): Promise<"gone" | "retry"> => {
+  const db = drizzle(env.DB);
+  await db
+    .insert(connectorTriggerHolds)
+    .values({ triggerId: taker.id, eventKey: same, heldSince: new Date() })
+    .onConflictDoNothing();
+  const held = await db
+    .select({ since: connectorTriggerHolds.heldSince })
+    .from(connectorTriggerHolds)
+    .where(
+      and(
+        eq(connectorTriggerHolds.triggerId, taker.id),
+        eq(connectorTriggerHolds.eventKey, same)
+      )
+    )
+    .get();
+  if (held === undefined || Date.now() - held.since.getTime() < maxHeldMs) {
+    log.warn("workflow.trigger_rate_limited", {
+      type: "connector",
+      trigger: taker.id,
+    });
+    return "retry";
+  }
+  await audited(env, taker, event, "workflow.event.dropped", {
+    reason: "hourly_limit",
+    heldSince: held.since.toISOString(),
+  });
+  await db
+    .delete(connectorTriggerHolds)
+    .where(
+      and(
+        eq(connectorTriggerHolds.triggerId, taker.id),
+        eq(connectorTriggerHolds.eventKey, same)
+      )
+    );
+  return "gone";
+};
+
+/**
+ * What became of `taker`'s start of `event` (key `same`) that threw
+ * `error`: gone (the trigger disabled, deleted or moved meanwhile, or
+ * refused for good, audited, or held back too long, dropped, audited:
+ * settled), or to try again.
  */
 const refusalOf = async (
   env: Env,
   taker: Taker,
   event: ConnectorEvent,
+  same: string,
   error: unknown
 ): Promise<"gone" | "retry"> => {
   if (!isExpectedError(error)) {
@@ -206,11 +299,7 @@ const refusalOf = async (
       sql`SELECT ${hearsSql(taker.id, event)} AS hears, ${roomSql(taker.id)} AS room`
     );
     if (now.hears === 1 && now.room === 0) {
-      log.warn("workflow.trigger_rate_limited", {
-        type: "connector",
-        trigger: taker.id,
-      });
-      return "retry";
+      return await heldBack(env, taker, event, same);
     }
     if (now.hears === 1) {
       return "retry";
@@ -219,16 +308,38 @@ const refusalOf = async (
   } else if (!refusedForGood.has(code)) {
     return "retry";
   }
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      actor: { type: "system" },
-      action: "workflow.event.refused",
-      target: { type: "trigger", id: taker.id },
-      detail: { event: event.type, version: taker.version, code },
-    }),
-  ]);
+  await audited(env, taker, event, "workflow.event.refused", { code });
   return "gone";
+};
+
+/**
+ * The lineage a stamped event's run joins, for `taker`: the stamping
+ * independent run's, one level deeper, admitted once per event and
+ * trigger (quotas.ts, `admitChild`, which throws `workflow.lineage_limit`
+ * past its limits); none for an event no run stamped; `unjoinable` for an
+ * App run's mail, which can't join an independent lineage (their runs are
+ * kept apart), or a run no longer kept.
+ */
+const causeOf = async (
+  env: Env,
+  taker: Taker,
+  same: string,
+  stamped: StampedRun | undefined
+): Promise<TriggerCause | "unjoinable" | undefined> => {
+  if (stamped === undefined) {
+    return undefined;
+  }
+  const run =
+    stamped.kind === "resource" ? await runOf(env, stamped.runId) : undefined;
+  if (run === undefined) {
+    return "unjoinable";
+  }
+  const place = await admitChild(
+    env,
+    { id: run.id, rootRunId: run.rootRunId, depth: run.depth },
+    `connector:${same}:${taker.id}`
+  );
+  return { runId: run.id, restricted: run.restricted, place };
 };
 
 /** What delivering an event to connector triggers came to. */
@@ -239,7 +350,8 @@ export interface TriggerDelivery {
 
 /**
  * Starts the run of each connector trigger that takes `event`, keyed by
- * `same` (a hash of its connection and source ID). Refusals for good are
+ * `same` (a hash of its connection and source ID), in the lineage of the
+ * run whose mail it is (`stamped`), if any. Refusals for good are
  * audited; throws, after trying every trigger, when any start may go
  * another time (a trigger at its hourly limit, a failure of core's), so
  * the event is delivered again and starts only what didn't start.
@@ -247,19 +359,32 @@ export interface TriggerDelivery {
 export const startConnectorTriggers = async (
   env: Env,
   event: ConnectorEvent,
-  same: string
+  same: string,
+  stamped?: StampedRun
 ): Promise<TriggerDelivery> => {
   const takers = await takersOf(env, event);
   const outcomes = await Promise.all(
     takers.map(async (taker): Promise<"started" | "gone" | "retry"> => {
       const key = `${coreStartKeyPrefix}connector:${taker.id}:${same}`;
       try {
+        const cause = await causeOf(env, taker, same, stamped);
+        if (cause === "unjoinable") {
+          // Never a new root: that is how a loop would go on.
+          await audited(env, taker, event, "workflow.event.refused", {
+            code: "lineage.unjoinable",
+          });
+          return "gone";
+        }
         const mapping = inputMappingSchema.parse(
           JSON.parse(taker.inputMapping ?? "{}")
         );
         await startWorkflow(
           env,
-          { type: "trigger", triggerId: taker.id },
+          {
+            type: "trigger",
+            triggerId: taker.id,
+            ...(cause === undefined ? {} : { cause }),
+          },
           taker.workflowId,
           {
             version: taker.workflowVersion,
@@ -272,11 +397,23 @@ export const startConnectorTriggers = async (
               WHERE ${workflowStartReceipts.invokerType} = 'trigger'
                 AND ${workflowStartReceipts.invokerId} = ${taker.id}
                 AND ${workflowStartReceipts.idempotencyKey} = ${key})))`,
-          { event: same, connection: event.connection }
+          {
+            event: same,
+            connection: event.connection,
+            ...(cause === undefined ? {} : { emittingRun: cause.runId }),
+          }
         );
+        await drizzle(env.DB)
+          .delete(connectorTriggerHolds)
+          .where(
+            and(
+              eq(connectorTriggerHolds.triggerId, taker.id),
+              eq(connectorTriggerHolds.eventKey, same)
+            )
+          );
         return "started";
       } catch (error) {
-        return await refusalOf(env, taker, event, error);
+        return await refusalOf(env, taker, event, same, error);
       }
     })
   );
@@ -289,48 +426,58 @@ export const startConnectorTriggers = async (
 /**
  * Where connect listens for connector triggers: each active grant of a
  * live, enabled connector trigger to hear its connection, for its current
- * version's event type and part, acting for the person it binds.
+ * version's event type and part and that type's read action, acting for
+ * the person it binds. A grant the trigger can't use (another part, or an
+ * action its event type doesn't read) listens nowhere.
  */
 export const triggerListeners = async (
   env: Env,
   limit: number
 ): Promise<EventListener[]> => {
-  const rows = await drizzle(env.DB)
-    .select({
-      type: triggerResourceVersions.eventType,
-      connection: triggerResourceVersions.connectionId,
-      resource: triggerResourceVersions.connectionResource,
-      owner: triggerResourceVersions.principalBinding,
-    })
-    .from(permissions)
-    .innerJoin(
-      triggerResources,
-      and(
-        eq(permissions.subjectType, "trigger"),
-        eq(permissions.subjectId, triggerResources.id)
+  const listeners: EventListener[] = [];
+  for (const [type, action] of Object.entries(connectorEventActions)) {
+    // oxlint-disable-next-line no-await-in-loop -- one query per event type, few
+    const rows = await drizzle(env.DB)
+      .select({
+        connection: triggerResourceVersions.connectionId,
+        resource: triggerResourceVersions.connectionResource,
+        owner: triggerResourceVersions.principalBinding,
+      })
+      .from(permissions)
+      .innerJoin(
+        triggerResources,
+        and(
+          eq(permissions.subjectType, "trigger"),
+          eq(permissions.subjectId, triggerResources.id)
+        )
       )
-    )
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
+      .innerJoin(
+        triggerResourceVersions,
+        and(
+          eq(triggerResourceVersions.triggerId, triggerResources.id),
+          eq(triggerResourceVersions.version, triggerResources.currentVersion)
+        )
       )
-    )
-    .where(
-      and(
-        eq(triggerResources.kind, "connector"),
-        eq(triggerResources.enabled, true),
-        isNull(triggerResources.deletedAt),
-        eq(permissions.status, "active"),
-        eq(permissions.objectType, "connection"),
-        eq(permissions.objectId, triggerResourceVersions.connectionId),
-        sql`${permissions.resource} IS ${triggerResourceVersions.connectionResource}`
+      .where(
+        and(
+          eq(triggerResources.kind, "connector"),
+          eq(triggerResources.enabled, true),
+          isNull(triggerResources.deletedAt),
+          eq(triggerResourceVersions.eventType, type),
+          eq(permissions.status, "active"),
+          eq(permissions.objectType, "connection"),
+          eq(permissions.objectId, triggerResourceVersions.connectionId),
+          sql`${permissions.resource} IS ${triggerResourceVersions.connectionResource}`,
+          sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = ${action})`
+        )
       )
-    )
-    .limit(limit);
-  return rows.flatMap((row) => {
-    const listener = eventListenerSchema.safeParse(row);
-    return listener.success ? [listener.data] : [];
-  });
+      .limit(limit);
+    for (const row of rows) {
+      const listener = eventListenerSchema.safeParse({ type, ...row });
+      if (listener.success) {
+        listeners.push(listener.data);
+      }
+    }
+  }
+  return listeners.slice(0, limit);
 };

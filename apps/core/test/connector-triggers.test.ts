@@ -5,6 +5,7 @@ import {
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -27,6 +28,8 @@ import {
   deliverConnectorEvent,
   listenersOf,
 } from "../src/workflows/connector-events.ts";
+import { maxHeldMs } from "../src/workflows/connector-triggers.ts";
+import { stampedMail } from "../src/workflows/mail-stamps.ts";
 import {
   resourceRunFor,
   terminateResourceRun,
@@ -121,26 +124,65 @@ const filing = async (admin: Identity) => {
 const connection = async ({
   owner,
   status = "active",
+  account = `watched-${unique()}@acme.test`,
 }: {
   owner?: string;
   status?: string;
+  account?: string;
 } = {}): Promise<string> => {
   const id = `connection-${unique()}`;
   const now = Date.now();
   await connectDb()
     .prepare(
-      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'microsoft', ?, ?, ?, 'native', 'microsoft-365', '[]', ?, ?)"
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, account_name, account_email, created_at, updated_at) VALUES (?, 'microsoft', ?, ?, ?, 'native', 'microsoft-365', '[]', ?, ?, ?, ?)"
     )
     .bind(
       id,
       owner === undefined ? "shared" : "personal",
       owner ?? null,
       status,
+      account,
+      account,
       now,
       now
     )
     .run();
   return id;
+};
+
+/** The account a connection `connection()` made is of. */
+const accountOf = async (connectionId: string): Promise<string> => {
+  const row = await connectDb()
+    .prepare("SELECT account_email AS email FROM connections WHERE id = ?")
+    .bind(connectionId)
+    .first<{ email: string }>();
+  return row?.email ?? "";
+};
+
+/**
+ * The stamp of mail run `run` (an independent workflow's, or an App's)
+ * sends from `mailbox` to it, through `connectionId`, as its step's call
+ * records it (mail-stamps.ts).
+ */
+const mailFrom = async (
+  run: string,
+  kind: "app" | "resource",
+  connectionId: string,
+  mailbox: string
+): Promise<string> => {
+  const { stamp } = await stampedMail(
+    env,
+    { run, stepKey: `step-${unique()}`, kind },
+    {
+      connectionId,
+      action: "mail.send",
+      input: { mailbox, to: [mailbox], subject: "Again", body: "Again." },
+    }
+  );
+  if (stamp === undefined) {
+    throw new Error("Expected the mail stamped");
+  }
+  return stamp;
 };
 
 /** `request`, asked for and granted by `admin`: the permission's ID. */
@@ -236,12 +278,14 @@ const mailEvent = (
     resource?: string;
     owner?: string;
     payload?: unknown;
+    stamp?: string;
   } = {}
 ) => ({
   id: changes.id ?? crypto.randomUUID(),
   connection: connectionId,
   owner: changes.owner ?? null,
   ...(changes.resource === undefined ? {} : { resource: changes.resource }),
+  ...(changes.stamp === undefined ? {} : { stamp: changes.stamp }),
   action: "mail.list",
   type: changes.type ?? "m365.mail.received",
   payload: changes.payload ?? { subject: "Invoice INV-7", folder: "archive" },
@@ -256,6 +300,33 @@ const runsOf = async (trigger: string) => {
     .all<{ id: string; key: string; input: string | null }>();
   return rows.results;
 };
+
+/** Fills the hour of the trigger whose receipt `receipt` is: copies of it, each under a key of its own. */
+const fillHour = async (receipt: string): Promise<void> => {
+  const columns = await env.DB.prepare(
+    "SELECT name FROM pragma_table_info('workflow_start_receipts')"
+  ).all<{ name: string }>();
+  const names = columns.results.map(({ name }) => name);
+  const copied = names.map((name) => {
+    if (name === "id") {
+      return "?1";
+    }
+    return name === "idempotency_key" ? "?2" : name;
+  });
+  await env.DB.batch(
+    Array.from({ length: triggeredRunsPerHour }, () =>
+      env.DB.prepare(
+        `INSERT INTO workflow_start_receipts (${names.join(", ")}) SELECT ${copied.join(", ")} FROM workflow_start_receipts WHERE id = ?3`
+      ).bind(crypto.randomUUID(), `filler-${unique()}`, receipt)
+    )
+  );
+};
+
+/** Each policy a test sets, under a generation higher than any before. */
+let generations = 3000;
+
+/** The limits the tests' deployment sets (vite.config.ts). */
+const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
 
 describe("connector triggers", { timeout: 120_000 }, () => {
   it("start one run per event with the mapped input, however often it is delivered, and never again once cancelled", async () => {
@@ -487,24 +558,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     const trigger = await connectorTrigger(admin, workflow.id, shared);
     await deliverConnectorEvent(env, mailEvent(shared));
     const [started] = await runsOf(trigger.id);
-    // Its hour full: copies of its receipt, each under a key of its own.
-    const columns = await env.DB.prepare(
-      "SELECT name FROM pragma_table_info('workflow_start_receipts')"
-    ).all<{ name: string }>();
-    const names = columns.results.map(({ name }) => name);
-    const copied = names.map((name) => {
-      if (name === "id") {
-        return "?1";
-      }
-      return name === "idempotency_key" ? "?2" : name;
-    });
-    await env.DB.batch(
-      Array.from({ length: triggeredRunsPerHour }, () =>
-        env.DB.prepare(
-          `INSERT INTO workflow_start_receipts (${names.join(", ")}) SELECT ${copied.join(", ")} FROM workflow_start_receipts WHERE id = ?3`
-        ).bind(crypto.randomUUID(), `filler-${unique()}`, started?.id)
-      )
-    );
+    await fillHour(started?.id ?? "");
     const logged = vi.spyOn(console, "warn").mockReturnValue();
 
     const over = await outcome(deliverConnectorEvent(env, mailEvent(shared)));
@@ -514,6 +568,168 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     expect({ over: over === "ok", runs: runs.length }).toStrictEqual({
       over: false,
       runs: 1,
+    });
+  });
+
+  it("end a workflow mailing its own watched mailbox at its lineage's limit, each run under the last", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const mailbox = await accountOf(shared);
+    const trigger = await connectorTrigger(admin, workflow.id, shared);
+    generations += 1;
+    env.QUOTA_LIMITS = {
+      generation: generations,
+      limits: { workflowNestingLevels: 3 },
+    };
+    try {
+      // Mail from outside: a root.
+      await deliverConnectorEvent(env, mailEvent(shared));
+      // Each new run mails the mailbox again; its copy arrives stamped.
+      let mailed = 0;
+      for (let hop = 0; hop < 5; hop += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one hop after another
+        const runs = await runsOf(trigger.id);
+        const last = runs.at(-1);
+        if (last === undefined || runs.length === mailed) {
+          break;
+        }
+        mailed = runs.length;
+        // oxlint-disable-next-line no-await-in-loop -- one hop after another
+        const stamp = await mailFrom(last.id, "resource", shared, mailbox);
+        // oxlint-disable-next-line no-await-in-loop -- one hop after another
+        await deliverConnectorEvent(
+          env,
+          mailEvent(shared, {
+            stamp,
+            payload: {
+              subject: "Again",
+              folder: "inbox",
+              from: { address: mailbox },
+            },
+          })
+        );
+      }
+    } finally {
+      generations += 1;
+      env.QUOTA_LIMITS = { generation: generations, limits: configuredLimits };
+    }
+    const lineage = await env.DB.prepare(
+      "SELECT run.depth, run.root_run_id AS root FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_id = ? ORDER BY run.depth"
+    )
+      .bind(trigger.id)
+      .all<{ depth: number; root: string | null }>();
+    const [first] = lineage.results;
+    const logged = await allEvents();
+    const refused = logged.filter(
+      ({ action, target }) =>
+        action === "workflow.event.refused" && target?.id === trigger.id
+    );
+
+    expect({
+      depths: lineage.results.map(({ depth }) => depth),
+      oneLineage: lineage.results
+        .slice(1)
+        .every(
+          ({ root }) => root !== null && root === lineage.results[1]?.root
+        ),
+      rootFirst: first?.depth,
+      refused: refused.map(({ detail }) => detail.code),
+    }).toStrictEqual({
+      // The root, then two levels under it: the third is past the limit.
+      depths: [0, 1, 2],
+      oneLineage: true,
+      rootFirst: 0,
+      refused: ["workflow.lineage_limit"],
+    });
+  });
+
+  it("refuse an App run's own mail, audited, rather than start it as a new root", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const mailbox = await accountOf(shared);
+    const trigger = await connectorTrigger(admin, workflow.id, shared);
+    // An App's run that mails the trigger's mailbox (the App, in turn,
+    // watching the mailbox the trigger's workflow mails).
+    const app = `app-${unique()}`;
+    const appRun = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Echo', '', ?, ?)"
+      ).bind(app, admin.userId, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'echo', 1, NULL, 'running', ?, NULL)"
+      ).bind(appRun, app, Date.now()),
+    ]);
+    const stamp = await mailFrom(appRun, "app", shared, mailbox);
+
+    const delivered = await deliverConnectorEvent(
+      env,
+      mailEvent(shared, {
+        stamp,
+        payload: {
+          subject: "Again",
+          folder: "inbox",
+          from: { address: mailbox },
+        },
+      })
+    );
+    const runs = await runsOf(trigger.id);
+    const logged = await allEvents();
+    const refused = logged.filter(
+      ({ action, target }) =>
+        action === "workflow.event.refused" && target?.id === trigger.id
+    );
+
+    expect({
+      delivered,
+      runs: runs.length,
+      refused: refused.map(({ detail }) => detail.code),
+    }).toStrictEqual({
+      delivered: { runs: 0 },
+      runs: 0,
+      refused: ["lineage.unjoinable"],
+    });
+  });
+
+  it("drop an event held back at the hourly limit for over a day, audited", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const trigger = await connectorTrigger(admin, workflow.id, shared);
+    await deliverConnectorEvent(env, mailEvent(shared));
+    const [started] = await runsOf(trigger.id);
+    await fillHour(started?.id ?? "");
+    const held = mailEvent(shared);
+    const logged = vi.spyOn(console, "warn").mockReturnValue();
+
+    const firstTry = await outcome(deliverConnectorEvent(env, held));
+    // A day and more on.
+    await env.DB.prepare(
+      "UPDATE connector_trigger_holds SET held_since = ? WHERE trigger_id = ?"
+    )
+      .bind(Date.now() - maxHeldMs - 1000, trigger.id)
+      .run();
+    const dayOn = await outcome(deliverConnectorEvent(env, held));
+    logged.mockRestore();
+    const runsAfter = await runsOf(trigger.id);
+    const events = await allEvents();
+    const dropped = events.filter(
+      ({ action, target }) =>
+        action === "workflow.event.dropped" && target?.id === trigger.id
+    );
+
+    expect({
+      firstTry: firstTry === "ok",
+      dayOn,
+      runs: runsAfter.length,
+      dropped: dropped.map(({ detail }) => detail.reason),
+    }).toStrictEqual({
+      firstTry: false,
+      dayOn: "ok",
+      runs: 1,
+      dropped: ["hourly_limit"],
     });
   });
 
@@ -548,6 +764,14 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     };
     const own = await ask(shared, ["mail.list"]);
     const after = await listenersOf(env);
+    // A grant it can no longer use (another action than its event reads):
+    // connect listens there no more.
+    await env.DB.prepare(
+      "UPDATE permissions SET actions = '[\"mail.send\"]' WHERE subject_type = 'trigger' AND subject_id = ?"
+    )
+      .bind(trigger.id)
+      .run();
+    const unusable = await listenersOf(env);
     const listening = (listeners: typeof after) =>
       listeners.some(
         (listener) =>
@@ -562,6 +786,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
       own,
       before: listening(before),
       after: listening(after),
+      unusable: listening(unusable),
     }).toStrictEqual({
       refused: {
         otherConnection: "permission.invalid",
@@ -571,6 +796,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
       own: "ok",
       before: false,
       after: true,
+      unusable: false,
     });
   });
 });

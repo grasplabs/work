@@ -3839,6 +3839,25 @@ export const triggerSchedules = sqliteTable(
 );
 
 /**
+ * The events a connector trigger held back because it was at its hourly
+ * limit (src/workflows/connector-triggers.ts): since when, by the
+ * trigger and the event's key. One held past a day is dropped, audited,
+ * so connect's backlog can't grow without end; one that starts its run
+ * goes.
+ */
+export const connectorTriggerHolds = sqliteTable(
+  "connector_trigger_holds",
+  {
+    triggerId: text("trigger_id")
+      .notNull()
+      .references(() => triggerResources.id),
+    eventKey: text("event_key").notNull(),
+    heldSince: timestamp("held_since").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.triggerId, table.eventKey] })]
+);
+
+/**
  * Each start of an independent workflow the host admitted
  * (src/workflow-starts.ts): its durable receipt, written in one statement
  * with the authorization it was admitted on, read again as the statement
@@ -4048,6 +4067,34 @@ export const workflowResourceRuns = sqliteTable(
       table.createdAt,
       table.id
     ),
+  ]
+);
+
+/**
+ * What each mail call of an independent workflow's run sent, for a native
+ * mail connector's send or draft (src/workflows/mail-stamps.ts): the
+ * call's stamp, which its message carries as a header, with every
+ * recipient the call named and who sent it, as `run_mail_calls` keeps an
+ * App run's. A copy that reaches a mailbox a connector trigger watches
+ * starts the trigger's run under the run, in its lineage
+ * (src/workflows/connector-triggers.ts). Keyed as `run_mail_calls` is.
+ * Removed with its run's details (src/workflows/retention.ts).
+ */
+export const resourceRunMailCalls = sqliteTable(
+  "resource_run_mail_calls",
+  {
+    origin: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    createdAt: timestamp("created_at").notNull(),
+    stamp: text().notNull(),
+    recipients: text({ mode: "json" }).$type<string[]>().notNull(),
+    senders: text({ mode: "json" }).$type<string[]>().notNull(),
+  },
+  (table) => [
+    index("resource_run_mail_calls_run_idx").on(table.runId),
+    uniqueIndex("resource_run_mail_calls_stamp_idx").on(table.stamp),
   ]
 );
 
