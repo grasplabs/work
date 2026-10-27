@@ -453,6 +453,10 @@ const knowledgeDb: D1State = {
       `${brain}entities.ts`,
       `Relations the Brain's sources state between their entities, with their passages: derived, but only by model calls again. ${brainPending}`
     ),
+    brain_entity_matches: exported(
+      `${brain}entities.ts`,
+      `Decisions that two entities of different collections are, or aren't, one: entity IDs and evidence only. ${brainPending}`
+    ),
     brain_mentions: exported(
       `${brain}entities.ts`,
       `Entity mentions of each source's linked version: derived, but only by model calls again. ${brainPending}`
