@@ -35,6 +35,11 @@ export type GatewayReply =
         tokens: number;
         /** Anthropic's signature of the thinking, `signed` if not given. */
         signature?: string;
+        /**
+         * Streams the thinking, then waits for `until` before it ends
+         * (Anthropic): a model caught thinking.
+         */
+        pause?: { until: Promise<unknown> };
       };
       /** The model hit its output limit (Anthropic and chat completions). */
       truncated?: boolean;
@@ -198,7 +203,12 @@ const textDeltas = (
 
 /** A content block of Anthropic's, as its stream opens it. */
 type AnthropicBlock =
-  | { type: "thinking"; text: string; signature: string }
+  | {
+      type: "thinking";
+      text: string;
+      signature: string;
+      pause?: StreamPause;
+    }
   | { type: "text"; text: string }
   | ({ type: "tool_use" } & ScriptedToolCall);
 
@@ -221,6 +231,7 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
             type: "thinking" as const,
             text: thinking.text,
             signature: thinking.signature ?? "signed",
+            pause: thinking.pause,
           },
         ]),
     ...(text === "" ? [] : [{ type: "text" as const, text }]),
@@ -286,6 +297,7 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
                 delta: { type: "thinking_delta", thinking: block.text },
               },
             },
+            ...(block.pause === undefined ? [] : [block.pause]),
             {
               event: "content_block_delta",
               data: {
