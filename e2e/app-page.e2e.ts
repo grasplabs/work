@@ -141,7 +141,7 @@ test("a builder finds the Apps beside an App's page by where they stand, renames
   const page = await pageOf(builder);
   await page.goto(`/apps/${app}`);
 
-  const apps = page.getByRole("navigation", { name: "Apps" });
+  const apps = page.getByRole("navigation", { name: "Domains" });
   const group = (title: string) =>
     apps.getByRole("region", { name: title, exact: true });
   await expect(
@@ -151,7 +151,7 @@ test("a builder finds the Apps beside an App's page by where they stand, renames
 
   // A double click renames it in place, through core's audited update.
   await apps.getByRole("link", { name: draft }).dblclick();
-  const field = apps.getByRole("textbox", { name: "App name" });
+  const field = apps.getByRole("textbox", { name: "Domain name" });
   await field.fill(renamed);
   await field.press("Enter");
   await expect(apps.getByRole("link", { name: renamed })).toBeVisible();
@@ -199,7 +199,7 @@ test("someone an App is shared with as a user finds it beside its page, opens an
   const page = await pageOf(user);
   await page.goto(`/apps/${apps[0]}`);
 
-  const list = page.getByRole("navigation", { name: "Apps" });
+  const list = page.getByRole("navigation", { name: "Domains" });
   const row = list.getByRole("link", { name: second });
   await expect(row).toBeVisible();
   // Their rows have no menu, and a double click opens rather than renames.
@@ -234,7 +234,7 @@ test("an App with no screen yet is only described, and its builder designs it in
   const other = await pageOf(user);
   await other.goto(`/apps/${app}`);
   await expect(
-    other.getByRole("heading", { name: "App not found" })
+    other.getByRole("heading", { name: "Domain not found" })
   ).toBeVisible();
 });
 

@@ -2315,10 +2315,6 @@ msgctxt "tab listing every workflow"
 msgid "All"
 msgstr "Todos"
 
-#: src/engines/apps-sidebar.tsx
-msgid "All apps"
-msgstr "Todas las aplicaciones"
-
 #: src/routes/_shell.settings.spend.tsx
 msgid "All calls"
 msgstr "Todas las llamadas"
@@ -2326,6 +2322,10 @@ msgstr "Todas las llamadas"
 #: src/routes/_shell.settings.models.tsx
 msgid "All calls together"
 msgstr "Todas las llamadas juntas"
+
+#: src/engines/apps-sidebar.tsx
+msgid "All domains"
+msgstr "Todos los dominios"
 
 #: src/brain/brain-atlas.ts
 msgid "All interviewed"
@@ -2606,7 +2606,6 @@ msgstr "En cualquier punto"
 #: src/dashboard/dependency-requests.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "App"
 msgstr "Aplicación"
@@ -2636,12 +2635,10 @@ msgctxt "kind of thing that waits"
 msgid "App approval"
 msgstr "Aprobación de aplicaciones"
 
-#: src/engines/apps-sidebar.tsx
 #: src/landscape/landscape.ts
 msgid "App name"
 msgstr "Nombre de la aplicación"
 
-#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.landscape.$appId.tsx
 msgid "App not found"
@@ -2753,7 +2750,6 @@ msgstr "Aprobado: {who}."
 msgid "Approver for new tools named"
 msgstr "Responsable de aprobar herramientas nombrado"
 
-#: src/engines/apps-sidebar.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Apps"
@@ -4883,6 +4879,7 @@ msgstr "No participa: nadie en él recibe un enlace."
 #: src/inbox/items.ts
 #: src/landscape/app-cells.tsx
 #: src/landscape/landscape-overview.ts
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.models.tsx
@@ -4913,6 +4910,11 @@ msgstr "Aplicación del dominio"
 msgid "Domain budgets"
 msgstr "Presupuestos de dominios"
 
+#: src/engines/apps-sidebar.tsx
+msgid "Domain name"
+msgstr "Nombre del dominio"
+
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Domain not found"
@@ -4924,6 +4926,7 @@ msgstr "Accesos directos de dominios"
 
 #: src/chat/side-panel.tsx
 #: src/dashboard/widget-board.tsx
+#: src/engines/apps-sidebar.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
 #: src/routes/_shell.apps.$app.tsx
@@ -5443,13 +5446,13 @@ msgctxt "filter: apps allowed to break a rule"
 msgid "Exceptions"
 msgstr "Excepciones"
 
-#: src/engines/apps-sidebar.tsx
-msgid "Expand the apps"
-msgstr "Desplegar las aplicaciones"
-
 #: src/chat/chat-list.tsx
 msgid "Expand the chats"
 msgstr "Desplegar los chats"
+
+#: src/engines/apps-sidebar.tsx
+msgid "Expand the domains"
+msgstr "Desplegar los dominios"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Expand the filters"
@@ -5724,10 +5727,6 @@ msgstr "Marcadas o bloqueadas"
 msgid "Flags or blocks the apps that break it."
 msgstr "Marca o bloquea las aplicaciones que la incumplen."
 
-#: src/engines/apps-sidebar.tsx
-msgid "Fold the apps"
-msgstr "Plegar las aplicaciones"
-
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
 msgstr "Plegar el chat"
@@ -5735,6 +5734,10 @@ msgstr "Plegar el chat"
 #: src/chat/chat-list.tsx
 msgid "Fold the chats"
 msgstr "Plegar los chats"
+
+#: src/engines/apps-sidebar.tsx
+msgid "Fold the domains"
+msgstr "Plegar los dominios"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Fold the filters"
@@ -7859,8 +7862,8 @@ msgid "Name of a new workflow"
 msgstr "Nombre de un nuevo flujo de trabajo"
 
 #: src/engines/app-page.tsx
-msgid "Name of the app"
-msgstr "Nombre de la aplicación"
+msgid "Name of the domain"
+msgstr "Nombre del dominio"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Name of your HR platform"

@@ -493,7 +493,7 @@ test("says an address no page has, and an App that isn't there, are not found, i
   // An App that isn't there, on its own page.
   await page.goto("/apps/no-such-app");
   await expect(
-    page.getByRole("heading", { name: "App not found" })
+    page.getByRole("heading", { name: "Domain not found" })
   ).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" })

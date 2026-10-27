@@ -220,7 +220,7 @@ const AppTitle = ({ app }: { app: App }) => {
     return (
       <span className="block w-64 max-w-full">
         <RenameField
-          label={t`Name of the app`}
+          label={t`Name of the domain`}
           maxLength={appLimits.nameLength}
           onDone={(next, byKey) => {
             refocus.current = byKey;

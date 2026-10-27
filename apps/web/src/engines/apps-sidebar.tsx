@@ -226,7 +226,7 @@ const AppRow = ({
       {renaming ? (
         <div className="flex items-center px-2 py-0.5">
           <RenameField
-            label={t`App name`}
+            label={t`Domain name`}
             maxLength={appLimits.nameLength}
             onDone={(next, byKey) => {
               refocus.current = byKey;
@@ -349,11 +349,11 @@ export const AppsList = ({
           variant="outline"
         >
           <LayoutGridIcon data-icon="inline-start" />
-          <Trans>All apps</Trans>
+          <Trans>All domains</Trans>
         </Button>
       </PageSidebarTop>
       <PageSidebarBody>
-        <nav aria-label={t`Apps`} className="flex flex-col gap-3">
+        <nav aria-label={t`Domains`} className="flex flex-col gap-3">
           {published.length === 0 ? null : (
             <Group
               apps={published}
@@ -451,9 +451,9 @@ export const AppsSidebar = ({
   if (folded) {
     const { published, draft } = appsByStatus(apps);
     return (
-      <PageSidebar folded label={t`Apps`}>
+      <PageSidebar folded label={t`Domains`}>
         <RailExpand
-          label={t`Expand the apps`}
+          label={t`Expand the domains`}
           onExpand={() => {
             setFolded(false);
           }}
@@ -484,12 +484,12 @@ export const AppsSidebar = ({
     );
   }
   return (
-    <PageSidebar folded={false} label={t`Apps`}>
+    <PageSidebar folded={false} label={t`Domains`}>
       <AppsList
         apps={apps}
         current={current}
         fold={{
-          label: t`Fold the apps`,
+          label: t`Fold the domains`,
           onFold: () => {
             setFolded(true);
           },
@@ -523,12 +523,12 @@ export const AppsSheetButton = ({
         variant="outline"
       >
         <PanelLeftIcon data-icon="inline-start" />
-        <Trans>Apps</Trans>
+        <Trans>Domains</Trans>
       </Button>
       <Sheet onOpenChange={setOpen} open={open}>
         <SheetContent closeLabel={t`Close`} side="left">
           <SheetTitle className="sr-only">
-            <Trans>Apps</Trans>
+            <Trans>Domains</Trans>
           </SheetTitle>
           <AppsList
             apps={apps}

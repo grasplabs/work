@@ -45,9 +45,9 @@ const AppPageView = () => {
   if (page.state !== "ready") {
     return (
       <PageNotLoaded
-        crumbs={[{ label: t`Domains`, to: "/domains" }, { label: t`App` }]}
+        crumbs={[{ label: t`Domains`, to: "/domains" }, { label: t`Domain` }]}
         icon={LayoutGridIcon}
-        notFound={t`App not found`}
+        notFound={t`Domain not found`}
         page={page}
       />
     );
