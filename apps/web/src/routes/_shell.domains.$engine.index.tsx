@@ -36,9 +36,8 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/to-do.tsx";
-import { buildsApp } from "../engines/app-role.ts";
 import {
-  StatusActions,
+  AppStatusControls,
   StatusBadge,
   StatusNote,
 } from "../engines/app-status.tsx";
@@ -538,7 +537,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           <StatusNote status={app.status} />
         </div>
         {/* On its bar, as the prototype's Publish: for who builds. */}
-        {buildsApp(app, identity) ? <StatusActions app={app} /> : null}
+        <AppStatusControls app={app} identity={identity} />
       </div>
       <StoreChanges changes={storeChanges} engine={app} />
       <Tabs

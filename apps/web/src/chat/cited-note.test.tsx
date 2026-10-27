@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { ChatCitedDocument } from "@grasp-os/shared/chat";
 import { Toaster } from "@grasp-os/ui/components/toast";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -32,11 +33,15 @@ const notFound = (): Error =>
     code: "knowledge.not_found",
   });
 
-/** The answer `text`, citing `cited`, on a page whose reader may read `readable`. */
+/**
+ * The answer `text`, citing `cited`, on a page whose reader may read
+ * `readable`, once core has said what it cites (`sources`).
+ */
 const shown = async (
   text: string,
   cited: string[],
-  readable: Record<string, string>
+  readable: Record<string, string>,
+  sources: ChatCitedDocument[] = []
 ) => {
   const looked: string[] = [];
   const knowledge = {
@@ -59,7 +64,9 @@ const shown = async (
   const answer = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <MessageResponse cited={cited} text={text} />,
+    component: () => (
+      <MessageResponse cited={cited} sources={sources} text={text} />
+    ),
   });
   const collection = createRoute({
     getParentRoute: () => rootRoute,
@@ -112,6 +119,22 @@ const follow = async (label: string): Promise<void> => {
   });
   await settled();
 };
+
+/** Opens or closes the card of the answer's inline citation `number`. */
+const toggleCard = async (number: number): Promise<void> => {
+  const badge = document.querySelectorAll<HTMLElement>(
+    "[data-slot=inline-citation-trigger]"
+  )[number - 1];
+  await act(async () => {
+    badge?.click();
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+/** What the open citation card says. */
+const card = (): string | undefined =>
+  document.querySelector("[data-slot=inline-citation-card]")?.textContent;
 
 /** What each label of the answer is: a link to follow, or text. */
 const kinds = (...labels: string[]) =>
@@ -181,6 +204,69 @@ describe(MessageResponse, () => {
       at: "/",
       looked: ["minutes"],
       said: true,
+    });
+  });
+
+  it("shows each span core says cites a note as an inline citation, numbered as the answer's sources, with the words of the note it quotes", async () => {
+    const text =
+      "Leave lasts [sixteen weeks](grasp:note/leave), [paid](grasp:note/leave) and [planned](grasp:note/plan).";
+    const leave: ChatCitedDocument = {
+      documentId: "leave",
+      collectionId: "handbook",
+      title: "Parental leave",
+      path: "leave.md",
+      snippet: "Parental leave lasts sixteen weeks.",
+      spans: [
+        {
+          at: text.indexOf("[sixteen weeks]"),
+          text: "sixteen weeks",
+          quote: "Leave lasts sixteen weeks, paid in full.",
+        },
+        { at: text.indexOf("[paid]"), text: "paid", quote: null },
+      ],
+    };
+    // The plan is cited, but core lists it no more: its reader can't read
+    // it, so its link stays one with nothing of it shown.
+    const { router } = await shown(
+      text,
+      ["leave", "plan"],
+      { leave: "handbook" },
+      [leave]
+    );
+    const badges = [
+      ...document.querySelectorAll("[data-slot=inline-citation-trigger]"),
+    ].map((badge) => ({
+      label: badge.getAttribute("aria-label"),
+      text: badge.textContent.trim(),
+    }));
+    const plan = kinds("planned");
+
+    await toggleCard(1);
+    const quoted = card();
+    await toggleCard(1);
+    await toggleCard(2);
+    const unquoted = card();
+    await toggleCard(2);
+    await follow("sixteen weeks");
+
+    expect({
+      badges,
+      quoted,
+      unquoted,
+      kinds: plan,
+      at: router.state.location.pathname,
+      search: { ...router.state.location.search },
+    }).toStrictEqual({
+      badges: [
+        { label: "Source 1: Parental leave", text: "1" },
+        { label: "Source 1: Parental leave", text: "1" },
+      ],
+      quoted: "Parental leaveleave.mdLeave lasts sixteen weeks, paid in full.",
+      // No quote: the start of what the note says.
+      unquoted: "Parental leaveleave.mdParental leave lasts sixteen weeks.",
+      kinds: { planned: "button" },
+      at: "/knowledge/handbook",
+      search: { doc: "leave" },
     });
   });
 });

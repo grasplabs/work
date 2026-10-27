@@ -15,6 +15,7 @@ import { ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { formatDay } from "../../format.ts";
+import { ClaimBasis, isTeamClaim } from "../aggregate.tsx";
 import type { Interviewee, Kern, StatementRow } from "../article-kern.ts";
 import { Drawing, Panel } from "../brain-home.tsx";
 import { given, groupOf, quoted } from "../brain.ts";
@@ -164,6 +165,7 @@ export const StatementLine = ({
             <KindLabel kind={statement.kind} />
           </span>
         ) : null}
+        {isTeamClaim(statement.id) ? <ClaimBasis /> : null}
       </span>
       <Link
         className="text-muted-foreground hover:text-foreground max-w-64 truncate text-right text-xs hover:underline"

@@ -658,6 +658,12 @@ export interface AppBlueprintsApi {
 }
 
 /**
+ * The App registry and each App's code. An App is open to its owner, the
+ * organization's admins and the people and teams it is shared with
+ * (`members`): its users call what its screens use, its builders the
+ * rest.
+ */
+/**
  * An App as the person asking lists or opens it, with their own role in
  * it, as core decides it for every call they make: a `builder` changes
  * it, a `user` works in it. A page offers changes only to its builders;
@@ -668,12 +674,6 @@ export interface ViewedApp extends App {
   role: AppRole;
 }
 
-/**
- * The App registry and each App's code. An App is open to its owner, the
- * organization's admins and the people and teams it is shared with
- * (`members`): its users call what its screens use, its builders the
- * rest.
- */
 export interface AppsApi {
   create: (app: NewApp) => Promise<App>;
   /** The Apps the person has a role in, oldest first, each with that role. */

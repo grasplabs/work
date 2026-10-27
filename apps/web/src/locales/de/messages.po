@@ -1760,6 +1760,10 @@ msgstr "pro Monat"
 msgid "A new template"
 msgstr "Eine neue Vorlage"
 
+#: src/inbox/items.ts
+msgid "A new version of {name} is up for review, and you answer for it. It runs once it is made current, on the domain's page."
+msgstr "Eine neue Version von {name} wartet auf Prüfung, und Sie sind dafür verantwortlich. Sie läuft, sobald sie aktuell gemacht ist, auf der Seite der Domäne."
+
 #: src/screens/screen-frame.tsx
 msgid "A new version of this app is ready"
 msgstr "Eine neue Version dieser App ist bereit"
@@ -7548,6 +7552,10 @@ msgstr "Version {version} aktuell machen"
 msgid "Make version {version} current and publish"
 msgstr "Version {version} aktuell machen und veröffentlichen"
 
+#: src/inbox/items.ts
+msgid "Make version {version} of {name} live?"
+msgstr "Version {version} von {name} live schalten?"
+
 #: src/connections/integration-row.tsx
 msgid "Manage"
 msgstr "Verwalten"
@@ -10450,6 +10458,10 @@ msgstr "liest die Daten der Domäne"
 msgid "Ready"
 msgstr "Bereit"
 
+#: src/chat/thread.tsx
+msgid "Reasoning"
+msgstr "Überlegungen"
+
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Receipt"
 msgstr "Beleg"
@@ -11091,6 +11103,11 @@ msgstr "Läufe diese Woche"
 #: src/dashboard/report.ts
 msgid "Runs: {total}"
 msgstr "Läufe: {total}"
+
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+msgid "Said by five or more people"
+msgstr "Von fünf oder mehr Personen gesagt"
 
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
@@ -11748,6 +11765,10 @@ msgstr "Quelle"
 msgctxt "column: how Grasp knows an app is used"
 msgid "Source"
 msgstr "Quelle"
+
+#: src/chat/cited-note.tsx
+msgid "Source {number}: {title}"
+msgstr "Quelle {number}: {title}"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
@@ -13679,6 +13700,10 @@ msgstr "Diese Version der App wurde widerrufen und läuft nicht mehr. Ein Admin 
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
 msgstr "Die Datenänderung dieser Version wird noch angewendet. Versuchen Sie es gleich noch einmal."
+
+#: src/chat/thread.tsx
+msgid "Thought for {time}"
+msgstr "Hat {time} nachgedacht"
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
