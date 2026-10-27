@@ -169,6 +169,13 @@
       "when": 1793105824805,
       "tag": "0023_chat_thinking_ms",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1793140660989,
+      "tag": "0024_chat_app",
+      "breakpoints": true
     }
   ]
 }

@@ -349,6 +349,41 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         lastAt: chat.lastAt.toISOString(),
         running: false,
         projectId: chat.projectId,
+        appId: chat.appId,
+      };
+    });
+  }
+
+  async forApp(app: string): Promise<ChatSummary> {
+    return await withPerson(this.#check, async (person) => {
+      // A builder's, of an App that isn't archived: the chat changes it.
+      const { id, name } = await editableApp(this.#env, person, app);
+      const chats = this.#chatsOf(person.userId);
+      const kept = await chats.appChat(person.userId, id);
+      if (kept !== null) {
+        return kept;
+      }
+      // An App's name always fits a chat's title.
+      const title = chatTitleSchema.parse(name);
+      const chat = await chats.createChat(
+        title,
+        person.userId,
+        chatAgentId,
+        actorOf(person),
+        undefined,
+        undefined,
+        "web",
+        undefined,
+        id
+      );
+      return {
+        id: chat.id,
+        title: chat.title,
+        createdAt: chat.createdAt.toISOString(),
+        lastAt: chat.lastAt.toISOString(),
+        running: false,
+        projectId: chat.projectId,
+        appId: chat.appId,
       };
     });
   }
@@ -531,6 +566,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         createdAt: chat.createdAt.toISOString(),
         lastAt: chat.lastAt.toISOString(),
         projectId: chat.projectId,
+        appId: chat.appId,
       };
       try {
         await chats.send(chat.id, userId, {

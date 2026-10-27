@@ -65,11 +65,19 @@ export const chats = sqliteTable(
      * (`chat_audiences` in core's database).
      */
     thread: text(),
+    /**
+     * The App the chat is for (`ChatsApi.forApp`): the one its person
+     * builds there, which its agent is told of; null for any other chat.
+     * Only a pointer: what the agent may do to the App is decided on
+     * every call, as for any chat.
+     */
+    appId: text("app_id"),
   },
   // A person's list, most recently active first.
   (table) => [
     index("chats_person").on(table.personId, table.lastAt),
     index("chats_project").on(table.projectId),
+    index("chats_app").on(table.personId, table.appId),
   ]
 );
 

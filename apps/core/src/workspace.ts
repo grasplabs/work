@@ -58,7 +58,7 @@ import {
   identifierSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { ChatId } from "@grasp-os/shared/ids";
+import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelEfforts, modelErrors } from "@grasp-os/shared/models";
 import { operationErrors } from "@grasp-os/shared/operations";
@@ -973,7 +973,9 @@ export class Workspace extends DurableObject<Env> {
     fix?: RunToFix,
     projectId?: string,
     via: ChatChannel = "web",
-    thread?: string
+    thread?: string,
+    /** The App the chat is for (`appChat`), if any. */
+    appId?: AppId
   ): Chat {
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
@@ -994,12 +996,10 @@ export class Workspace extends DurableObject<Env> {
     const id = chatIdSchema.parse(crypto.randomUUID());
     const chat = this.ctx.storage.transactionSync(() => {
       if (by !== undefined) {
-        this.#outboxed(
-          by,
-          "chat.created",
-          id,
-          project === null ? {} : { project }
-        );
+        this.#outboxed(by, "chat.created", id, {
+          ...(project === null ? {} : { project }),
+          ...(appId === undefined ? {} : { app: appId }),
+        });
       }
       const now = new Date();
       const made = this.#db
@@ -1015,6 +1015,7 @@ export class Workspace extends DurableObject<Env> {
           projectId: project,
           via: channel,
           thread: thread ?? null,
+          appId: appId ?? null,
         })
         .returning()
         .get();
@@ -2750,20 +2751,64 @@ export class Workspace extends DurableObject<Env> {
         createdAt: chats.createdAt,
         lastAt: chats.lastAt,
         projectId: chats.projectId,
+        appId: chats.appId,
       })
       .from(chats)
       .where(eq(chats.personId, personId))
       .orderBy(desc(chats.lastAt))
       .limit(listedChats)
       .all()
-      .map(({ id, title, createdAt, lastAt, projectId }) => ({
+      .map(({ id, title, createdAt, lastAt, projectId, appId }) => ({
         id,
         title,
         createdAt: createdAt.toISOString(),
         lastAt: lastAt.toISOString(),
         running: this.#turns.has(id),
         projectId,
+        appId,
       }));
+  }
+
+  /**
+   * `personId`'s chat for App `appId`, the one they last used, as their
+   * list shows it; `null` while they have none. A chat others share on a
+   * chat platform is never one.
+   */
+  appChat(personId: string, appId: AppId): ChatSummary | null {
+    const chat = this.#db
+      .select()
+      .from(chats)
+      .where(
+        and(
+          eq(chats.personId, personId),
+          eq(chats.appId, appId),
+          isNull(chats.thread)
+        )
+      )
+      .orderBy(desc(chats.lastAt))
+      .get();
+    return chat === undefined
+      ? null
+      : {
+          id: chat.id,
+          title: chat.title,
+          createdAt: chat.createdAt.toISOString(),
+          lastAt: chat.lastAt.toISOString(),
+          running: this.#turns.has(chat.id),
+          projectId: chat.projectId,
+          appId: chat.appId,
+        };
+  }
+
+  /** The App chat `chatId` is for, or null: what its agent is told (`env.chat.info`). */
+  chatApp(chatId: ChatId): string | null {
+    return (
+      this.#db
+        .select({ appId: chats.appId })
+        .from(chats)
+        .where(eq(chats.id, chatId))
+        .get()?.appId ?? null
+    );
   }
 
   /**

@@ -56,6 +56,8 @@ export interface ChatSummary {
   running: boolean;
   /** The project it is in (`ChatsApi.projects`), or null for none. */
   projectId: string | null;
+  /** The App it is for (`ChatsApi.forApp`), or null for none. */
+  appId: string | null;
 }
 
 // Projects: a person groups their chats, and tells each chat's agent what
@@ -642,6 +644,12 @@ export interface ChatsApi {
   list: () => Promise<ChatSummary[]>;
   /** Makes a chat, in project `projectId` when one is named. */
   create: (title: string, projectId?: string | null) => Promise<ChatSummary>;
+  /**
+   * The person's chat for App `app`, where its agent changes the App with
+   * them: the one they last used, or a new one named after the App. Only
+   * for someone who builds the App, and not while it is archived.
+   */
+  forApp: (app: string) => Promise<ChatSummary>;
   /** Renames one of the person's chats. */
   rename: (chatId: string, title: string) => Promise<void>;
   /**
