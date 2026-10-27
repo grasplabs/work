@@ -115,6 +115,7 @@ import {
   matchesFilter,
   notCaught,
   raisedCode,
+  retryable,
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
@@ -631,7 +632,25 @@ interface StepOf {
    * recorded: never anything the isolate passes.
    */
   loop: Readonly<Record<string, Json>>;
+  /**
+   * The `try` tasks whose list holds its task, innermost first: whose
+   * catches, and their retry policies, a failure of it meets on its way out.
+   */
+  tries: readonly Extract<SealedTask, { kind: "try" }>[];
 }
+
+/** The `try` tasks of `build` whose list holds `task`, innermost first. */
+const triesAround = (
+  build: LoadedBuild,
+  task: SealedTask
+): Extract<SealedTask, { kind: "try" }>[] =>
+  build.tasks
+    .filter(
+      (around): around is Extract<SealedTask, { kind: "try" }> =>
+        around.kind === "try" &&
+        task.pointer.startsWith(`${around.pointer}/try/`)
+    )
+    .toSorted((a, b) => b.pointer.length - a.pointer.length);
 
 /**
  * Whether `task`'s own step is a durable wait the host makes, not a `do`:
@@ -718,6 +737,7 @@ const workflowStep = (
         place: "",
         scope: [],
         loop: {},
+        tries: [],
       }
     : undefined;
 
@@ -773,6 +793,7 @@ const sealedStep = (
     place: placeOf(task.id, outer),
     scope,
     loop: {},
+    tries: triesAround(build, task),
   };
 };
 
@@ -925,6 +946,19 @@ const outcomeSchema = z.discriminatedUnion("answered", [
   }),
   z.strictObject({ answered: z.literal(false) }),
 ]);
+
+/**
+ * What a retry's decision step records (`#decideRetry`): whether the step
+ * runs again, after how long, and when its first round failed.
+ */
+const retryDecisionSchema = z.strictObject({
+  retry: z.boolean(),
+  delayMs: z.int().min(0),
+  firstFailedAt: z.number(),
+});
+
+/** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
+const maxRetryDelayMs = 365 * 86_400_000;
 
 /**
  * What a catch step journals: its record, and the error its catch took,
@@ -1114,11 +1148,17 @@ const triedOnce = new Set<SealedCall["name"]>([
 const configOf = (step: StepOf) => {
   const { task } = step;
   // A listen's timeout is how long it waits for its events, never how
-  // long an attempt of its steps may take.
+  // long an attempt of its steps may take. A retry policy's attempt
+  // duration bounds each attempt of the steps of its try's list, as the
+  // task's own timeout does.
   const ownTimeout = task?.kind === "listen" ? undefined : task?.timeoutMs;
+  const attemptMs = step.tries.map(
+    (around) => around.catch.retry?.attemptMs ?? stepConfig.timeout
+  );
   const timeout = Math.min(
     stepConfig.timeout,
-    ownTimeout ?? stepConfig.timeout
+    ownTimeout ?? stepConfig.timeout,
+    ...attemptMs
   );
   const once =
     step.kind === "task" &&
@@ -1467,8 +1507,14 @@ const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
         }
       }
     } else if (task.kind === "try") {
-      // A catch's conditions: its catch step's, which the host evaluates.
-      for (const slot of [task.catch.when, task.catch.exceptWhen]) {
+      // A catch's conditions and its retry's, which the host evaluates.
+      const { retry } = task.catch;
+      for (const slot of [
+        task.catch.when,
+        task.catch.exceptWhen,
+        retry?.when,
+        retry?.exceptWhen,
+      ]) {
         if (slot !== undefined) {
           slots.add(slot);
         }
@@ -1644,6 +1690,12 @@ export class ResourceRunHost
   readonly #raceFailures = new Map<string, Set<number>>();
   /** The branch each race recorded as its winner, by its place. */
   readonly #raceWinners = new Map<string, number>();
+  /**
+   * The input each `try` task's enter step recorded, by its place, fresh or
+   * replayed: its own input, which its catch's conditions read when the
+   * host decides whether a failure in its list is tried again.
+   */
+  readonly #tryInputs = new Map<string, Json>();
 
   constructor(
     env: Env,
@@ -2044,13 +2096,46 @@ export class ResourceRunHost
     }
     const attemptStep = async (context: unknown): Promise<unknown> =>
       await this.#attempt(run, context, fn, stepDone);
-    let recorded = await this.#step.do(
-      stepName,
-      engineConfigOf(step),
-      attemptStep
-    );
-    recorded = await this.#rounds(run, recorded, attemptStep);
+    // A failure a catch's retry policy may try again: the step runs again
+    // in its place, under steps of its own, after a durable backoff, its
+    // call under the same key (`#retried`).
+    let recorded: unknown;
+    let firstFailedAt: number | undefined;
+    for (let round = 1; ; round += 1) {
+      const base = round === 1 ? stepName : `${stepName}:retry:${round}`;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one round at a time
+        recorded = await this.#roundsFrom(run, base, attemptStep);
+        break;
+      } catch (error) {
+        // oxlint-disable-next-line no-await-in-loop -- one round at a time
+        const retry = await this.#retried(run, error, round, firstFailedAt);
+        if (retry === undefined) {
+          throw error;
+        }
+        firstFailedAt = retry;
+      }
+    }
+    return this.#reached(step, entering, recorded);
+  }
+
+  /**
+   * What step `step` answers its code, from what it recorded at last
+   * (`recorded`), fresh or replayed: an enter step's record, a catch
+   * step's, or what it recorded; noted as what the run has reached.
+   */
+  #reached(step: StepOf, entering: boolean, recorded: unknown): unknown {
     let outcome = entering ? this.#entered(step, recorded) : recorded;
+    // A try's input, as its enter step recorded it: what a retry's
+    // decision reads its catch's conditions on (`#decideRetry`).
+    const record = entering ? recordSchema.safeParse(outcome).data : undefined;
+    if (
+      step.task?.kind === "try" &&
+      record !== undefined &&
+      !("skipped" in record)
+    ) {
+      this.#tryInputs.set(step.place, record.output);
+    }
     if (step.kind === "catch") {
       outcome = this.#noteCatch(step, recorded);
     } else {
@@ -2060,6 +2145,229 @@ export class ResourceRunHost
     // Fresh or replayed alike: what the run has reached, in order.
     this.#noteRecorded(step, outcome);
     return outcome;
+  }
+
+  /**
+   * Runs step `run` under the name `base` (its own, or a retry's): its
+   * attempt, then its rounds again under names of `base`'s, refused for
+   * load, waiting for its AI provider or held for its person (`#rounds`).
+   * What it recorded at last.
+   */
+  async #roundsFrom(
+    run: StepRun,
+    base: string,
+    attemptStep: (context: unknown) => Promise<unknown>
+  ): Promise<unknown> {
+    run.wait = loadWaitStart;
+    // A retry's round is a run of its own: it collects no held outcome,
+    // and its attempts take their lineage's host calls.
+    run.collecting = false;
+    const first = await this.#step.do(
+      base,
+      engineConfigOf(run.step),
+      attemptStep
+    );
+    return await this.#rounds(run, first, attemptStep, base);
+  }
+
+  /**
+   * Whether step `run`, whose round `round` failed with `error`, is tried
+   * again (spec 13.7): only a failure that may be tried again
+   * (resource-errors.ts, `retryable`) of a task in the list of a try whose
+   * catch has a retry policy. Then the host decides, in a step of its own
+   * that records it (`#decideRetry`), whether the innermost catch that
+   * takes the failure retries it, and after how long; sleeps that long,
+   * durably, as a timer of its own (`:retry:<n>:wait`); and answers when
+   * the first round failed, which every later decision reads. `undefined`
+   * when it isn't tried again: the original failure goes on unchanged,
+   * whatever a decision itself failed with. Fresh or replayed alike.
+   */
+  async #retried(
+    run: StepRun,
+    error: unknown,
+    round: number,
+    firstFailedAt: number | undefined
+  ): Promise<number | undefined> {
+    const { step, name } = run;
+    const { task } = step;
+    // Only while a try around it may still try it again.
+    const triesLeft = step.tries.some(
+      (around) => round < (around.catch.retry?.attempts ?? 0)
+    );
+    if (task === undefined || step.kind === "catch" || !triesLeft) {
+      return undefined;
+    }
+    const failure = failureOf(
+      failedWith(error),
+      task,
+      this.#tampered !== undefined
+    );
+    if (!retryable(failure, task)) {
+      return undefined;
+    }
+    // Named after the round it leads to, as that round's run is.
+    const prefix = `${name}:retry:${round + 1}`;
+    let decided: z.infer<typeof retryDecisionSchema>;
+    try {
+      decided = retryDecisionSchema.parse(
+        await this.#step.do(
+          `${prefix}:decide`,
+          { retries: stepConfig.retries, timeout: stepConfig.timeout },
+          async (context) =>
+            await this.#decideRetry(run, context, failure, round, firstFailedAt)
+        )
+      );
+    } catch {
+      return undefined;
+    }
+    if (!decided.retry) {
+      return undefined;
+    }
+    if (decided.delayMs > 0) {
+      this.#requireShortSleep(decided.delayMs);
+      await this.#step.sleep(`${prefix}:wait`, decided.delayMs);
+    }
+    await this.#requirePerson();
+    return decided.firstFailedAt;
+  }
+
+  /**
+   * The decision step of round `round` of step `run`, which failed with
+   * `failure`, as the engine claimed its attempt (`context`): admitted as
+   * any attempt is, then, for each try around the step's task, innermost
+   * first, whether its catch takes the failure, decided as its catch step
+   * would (`#takes`), on the try's own input as its enter step recorded
+   * it. The first that does decides: a retry while its policy has attempts
+   * left, its `when` holds and its `exceptWhen` doesn't (each evaluated
+   * here with the error bound to the catch's variable), and its backoff,
+   * jitter included, stays within its duration limit. What it decides is
+   * the step's record, so a replay waits as long, and decides the same.
+   */
+  async #decideRetry(
+    run: StepRun,
+    context: unknown,
+    failure: Failure,
+    round: number,
+    firstFailedAt: number | undefined
+  ): Promise<z.infer<typeof retryDecisionSchema>> {
+    const firstAt = firstFailedAt ?? Date.now();
+    const told = attemptContextSchema.parse(context);
+    const lease = this.#hooks.leaseOf(told.idempotencyKey, told.attempt);
+    if (lease === undefined) {
+      throw new Error(`Step "${run.name}"'s retry decision holds no lease`);
+    }
+    // Its conditions spend the activation's fuel as any attempt's do
+    // (`#attemptOf`): one the activation can't fund any more is cut off
+    // as the Loader cuts off an isolate past its CPU time, and the engine
+    // tries the decision again in the next activation.
+    if (this.#isolateStopped || this.#activationFuel < attemptFuel) {
+      throw toStepError(forIsolate(cpuLimitKill()));
+    }
+    const admitted = await this.#admitFunded(
+      { ...run, wait: loadWaitStart, collecting: false },
+      told,
+      lease,
+      true
+    );
+    if (!("settle" in admitted)) {
+      // Refused for load: tried again by the engine, as a timeout is.
+      throw toStepError({
+        name: "TimeoutError",
+        message: "The retry's decision waited for load.",
+      });
+    }
+    const attempt = ResourceRunHost.#newAttempt(run, told, lease, admitted);
+    try {
+      for (const around of run.step.tries) {
+        const scope = run.step.scope.slice(0, around.scope.length);
+        const input = this.#tryInputs.get(placeOf(around.id, scope));
+        if (input === undefined) {
+          // A try around a retrying one always enters (generate.ts): none
+          // recorded is a module that skipped it, which takes no retry.
+          break;
+        }
+        const asCatch: StepAttempt = {
+          ...attempt,
+          step: {
+            kind: "catch",
+            task: around,
+            name: `catch:${placeOf(around.id, scope)}`,
+            place: placeOf(around.id, scope),
+            scope,
+            loop: run.step.loop,
+            tries: [],
+          },
+          data: { input, context: run.data.context },
+          failure,
+          evaluated: new Set(),
+        };
+        // oxlint-disable-next-line no-await-in-loop -- innermost first
+        if (await this.#takes(asCatch, around)) {
+          // oxlint-disable-next-line no-await-in-loop -- the one that takes it
+          return await this.#retryOf(asCatch, around, round, firstAt);
+        }
+      }
+      return { retry: false, delayMs: 0, firstFailedAt: firstAt };
+    } finally {
+      attempt.over = true;
+      // What it didn't spend of its share goes back once every evaluation
+      // it started has settled, as an attempt's does.
+      await Promise.allSettled(attempt.pending);
+      this.#activationFuel += Math.max(0, attempt.budget.fuel);
+      await admitted.settle();
+    }
+  }
+
+  /**
+   * Whether try task `around`, whose catch takes the failure `attempt`
+   * decides on, tries round `round` again, and after how long: see
+   * `#decideRetry`.
+   */
+  async #retryOf(
+    attempt: StepAttempt,
+    around: Extract<SealedTask, { kind: "try" }>,
+    round: number,
+    firstFailedAt: number
+  ): Promise<z.infer<typeof retryDecisionSchema>> {
+    const stop = { retry: false, delayMs: 0, firstFailedAt };
+    const { retry } = around.catch;
+    if (retry === undefined || round >= retry.attempts) {
+      return stop;
+    }
+    const frame = { input: attempt.data.input, output: null };
+    const holds = async (slot: number): Promise<boolean> =>
+      (await this.#evaluated(
+        attempt,
+        this.#expressionOf(attempt, slot, true),
+        frame,
+        JSON.stringify(frame).length
+      )) === true;
+    if (retry.when !== undefined && !(await holds(retry.when))) {
+      return stop;
+    }
+    if (retry.exceptWhen !== undefined && (await holds(retry.exceptWhen))) {
+      return stop;
+    }
+    let factor = 1;
+    if (retry.backoff === "linear") {
+      factor = round;
+    } else if (retry.backoff === "exponential") {
+      factor = 2 ** (round - 1);
+    }
+    const { jitter } = retry;
+    const delayMs =
+      retry.delayMs * factor +
+      (jitter === undefined
+        ? 0
+        : Math.round(
+            jitter.fromMs + Math.random() * (jitter.toMs - jitter.fromMs)
+          ));
+    const limited =
+      retry.limitMs !== undefined &&
+      Date.now() + delayMs - firstFailedAt > retry.limitMs;
+    return limited || delayMs > maxRetryDelayMs
+      ? stop
+      : { retry: true, delayMs, firstFailedAt };
   }
 
   /**
@@ -2076,9 +2384,11 @@ export class ResourceRunHost
   async #rounds(
     run: StepRun,
     first: unknown,
-    attemptStep: (context: unknown) => Promise<unknown>
+    attemptStep: (context: unknown) => Promise<unknown>,
+    /** What its rounds are named after: its own name, or a retry's. */
+    stepName: string = run.name
   ): Promise<unknown> {
-    const { name: stepName, step } = run;
+    const { step } = run;
     let recorded = first;
     const waitKey = await waitKeyOf(stepName);
     // Its wait for its AI provider, over its rounds in a row.
@@ -2102,7 +2412,7 @@ export class ResourceRunHost
             step.task?.kind === "call" &&
             step.task.call.name === "grasp.connector";
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
-          await this.#waitWhileHeld(stepName, round);
+          await this.#waitWhileHeld(stepName, step.name, round);
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
           await this.#requirePerson();
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
@@ -2122,7 +2432,7 @@ export class ResourceRunHost
           continue;
         }
         // oxlint-disable-next-line no-await-in-loop -- once per wait
-        keyWait = await this.#providerWaitOver(stepName, keyWait);
+        keyWait = await this.#providerWaitOver(run.name, keyWait);
         const busy = busyOnly(stepName, marker);
         run.wait = loadWaitAfter(run.wait, busy);
         if (run.wait.sleepMs <= 0) {
@@ -2139,10 +2449,10 @@ export class ResourceRunHost
         );
       }
     } catch (error) {
-      await this.#providerWaitOverQuietly(stepName, keyWait);
+      await this.#providerWaitOverQuietly(run.name, keyWait);
       throw error;
     }
-    await this.#providerWaitOver(stepName, keyWait);
+    await this.#providerWaitOver(run.name, keyWait);
     return recorded;
   }
 
@@ -2782,9 +3092,9 @@ export class ResourceRunHost
   }
 
   /**
-   * Waits, in round `round`, while the call of step `stepName` (a call
-   * task's, whose key its call carries) is held for the run's person:
-   * each check a step of its own (retried, and replayed without asking
+   * Waits, in round `round` of the step run under the name `base`, while
+   * the call of step `callStep` (a call task's, whose key its call
+   * carries) is held for the run's person: each check a step of its own (retried, and replayed without asking
    * connect again), then a durable wait that the person's decision ends
    * (`heldWakeType`, wakes.ts), or else the next check: a first wait
    * (`waitMsOf`) doubling up to `maxWaits` of them, in steps named after
@@ -2798,12 +3108,19 @@ export class ResourceRunHost
    * a run suspended in one: Grasp has no release yet, so no such run
    * outlives a deploy.
    */
-  async #waitWhileHeld(stepName: string, round: number): Promise<void> {
+  async #waitWhileHeld(
+    base: string,
+    callStep: string,
+    round: number
+  ): Promise<void> {
     const first = waitMsOf(this.#env);
-    const prefix = `${stepName}:held:${round}`;
-    const wakeType = await heldWakeType(stepName);
+    const prefix = `${base}:held:${round}`;
+    // The call's own identity, never the round's: a retry's round
+    // (`base`, `…:retry:<n>`) calls under its step's key, which connect
+    // holds and the person's decision wakes.
+    const wakeType = await heldWakeType(callStep);
     // The key `#made` gives the task's call, in every attempt and round.
-    const idempotencyKey = stepIdempotencyKey(this.#run.runId, stepName);
+    const idempotencyKey = stepIdempotencyKey(this.#run.runId, callStep);
     for (let checks = 0; ; checks += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one check at a time
       const held = await this.#step.do(
@@ -3015,9 +3332,10 @@ export class ResourceRunHost
             );
           }
           // Its length alone, as sealed: the same on every replay.
-          this.#requireShortSleep(task.milliseconds);
+          const { milliseconds } = task;
+          this.#requireShortSleep(milliseconds);
           await this.#requirePerson();
-          await this.#step.sleep(sleeping.name, task.milliseconds);
+          await this.#step.sleep(sleeping.name, milliseconds);
           return null;
         })
     );

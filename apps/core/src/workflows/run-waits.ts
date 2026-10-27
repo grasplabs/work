@@ -73,6 +73,9 @@ const heldCheck = /^:held:(?<round>\d+):\d+:check$/u;
 const heldRun = /^:held:\d+:run$/u;
 const decisionWait = /^:decision:wait:\d+$/u;
 const decisionLook = /^:decision:(?:asked|reached|outcome|woken:\d+)$/u;
+/** A try's retry of a task's step: a round of it, and the backoff before one. */
+const retryRound = /^:retry:\d+$/u;
+const retryBackoff = /^:retry:\d+:wait$/u;
 
 /** The prefix of core's own steps of a wait (host.ts, `waitStepPrefix`). */
 const waitPrefix = `${coreStepPrefix.replaceAll("$", "\\$")}wait:`;
@@ -211,9 +214,17 @@ const heldOf = (
 /** The timer a task's sleep or retry is, if it is one a screen reads. */
 const timerOf = (wait: Pending, id: string, rest: string): Json[] => {
   if (wait.type === "retry") {
-    return rest === "" || heldRun.test(rest) || decisionLook.test(rest)
+    return rest === "" ||
+      heldRun.test(rest) ||
+      decisionLook.test(rest) ||
+      retryRound.test(rest)
       ? [retryWait(wait, id, id)]
       : [];
+  }
+  // A try's backoff before it runs a failed step again (resource-host.ts,
+  // `#retried`): a retry, as the engine's own are.
+  if (retryBackoff.test(rest)) {
+    return wait.deadline === null ? [] : [retryWait(wait, id, id)];
   }
   return rest === "" && wait.deadline !== null
     ? [

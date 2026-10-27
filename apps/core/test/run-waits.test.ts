@@ -137,6 +137,29 @@ describe("the waits a screen is shown of a run", () => {
     ]);
   });
 
+  it("shows a try's backoff before a step runs again, and that round's own retry, as retries, a loop item's too", () => {
+    expect(
+      shownWaits(
+        [
+          pendingOf(13, "task:hold:retry:2:wait"),
+          pendingOf(14, "task:hold@0/1:retry:3:wait"),
+          pendingOf(15, "task:send:retry:2", "retry"),
+          // A sleep of the run's code under a task's name: never shown.
+          pendingOf(16, "task:hold:retry:2:nap"),
+        ],
+        context
+      ).map((wait) =>
+        z
+          .object({ id: z.string(), kind: z.string(), purpose: z.string() })
+          .parse(wait)
+      )
+    ).toStrictEqual([
+      { id: "wait-13", kind: "timer", purpose: "retry" },
+      { id: "wait-14", kind: "timer", purpose: "retry" },
+      { id: "wait-15", kind: "timer", purpose: "retry" },
+    ]);
+  });
+
   it("shows a decision by the ID its event names, as the key the release sealed, and none of a key it didn't", () => {
     const decision = crypto.randomUUID();
     expect({
