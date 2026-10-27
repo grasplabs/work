@@ -1,5 +1,4 @@
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { ConnectionWorkflow } from "@grasp-os/shared/workflows";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -12,6 +11,7 @@ import { canConnect, canReconnect, ConnectDialog } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
 import { kindOf, stateOf } from "./integrations.ts";
 import { UsedBy } from "./workflows-using.tsx";
+import type { ConnectionUses } from "./workflows-using.tsx";
 
 // One app in the Integrations list, as the prototype's row
 // (`components/integration-row.tsx`, `integration-button.tsx`): its tile,
@@ -206,12 +206,12 @@ const IntegrationButton = ({
 export const IntegrationRow = ({
   integration,
   identity,
-  workflows,
+  uses,
 }: {
   integration: Integration;
   identity: Identity;
-  /** The workflows that use it; left out where the page doesn't say. */
-  workflows?: readonly ConnectionWorkflow[];
+  /** Which workflows use each connection; left out where the page doesn't say. */
+  uses?: ConnectionUses;
 }) => (
   <li className="flex h-14 min-w-0 items-center gap-3">
     <AppLogo logo={integration.logo} name={integration.name} />
@@ -228,7 +228,9 @@ export const IntegrationRow = ({
       </Link>
       <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
         <span className="truncate">{kindOf(integration)}</span>
-        {workflows === undefined ? null : <UsedBy workflows={workflows} />}
+        {uses === undefined ? null : (
+          <UsedBy integration={integration} uses={uses} />
+        )}
         {integration.listed && !integration.offered ? (
           <Badge variant="outline">
             <Trans>Not offered</Trans>

@@ -29,14 +29,16 @@ import {
   integrationsOf,
   parseIntegrationKey,
   stateOf,
-  workflowsOf,
 } from "../connections/integrations.ts";
 import type {
   Integration,
   IntegrationState,
 } from "../connections/integrations.ts";
 import { OfferSwitch } from "../connections/offer-switch.tsx";
-import { WorkflowsUsing } from "../connections/workflows-using.tsx";
+import {
+  WorkflowsCount,
+  WorkflowsUsing,
+} from "../connections/workflows-using.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatDayMonth } from "../format.ts";
 import { IntegrationsIcon } from "../frame/integrations-icon.tsx";
@@ -531,10 +533,6 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
     connection !== undefined &&
     integration.connections.some(({ id }) => id === connection);
   const count = integration.connections.length;
-  const workflows = workflowsOf(
-    integration,
-    uses.state === "ready" ? uses.data : []
-  );
   return (
     <>
       <SiteHeader
@@ -598,11 +596,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             </TabsTrigger>
             <TabsTrigger value="workflows">
               <Trans>Workflows</Trans>
-              {uses.state === "ready" ? (
-                <span className="text-muted-foreground tabular-nums">
-                  {workflows.length}
-                </span>
-              ) : null}
+              <WorkflowsCount integration={integration} uses={uses} />
             </TabsTrigger>
             <TabsTrigger value="account">
               <Trans>Account</Trans>
@@ -624,11 +618,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           </TabsContent>
           <TabsContent value="workflows">
             <div className="pt-4">
-              <WorkflowsUsing
-                app={integration.name}
-                uses={uses}
-                workflows={workflows}
-              />
+              <WorkflowsUsing integration={integration} uses={uses} />
             </div>
           </TabsContent>
           <TabsContent value="account">

@@ -1,4 +1,7 @@
-import type { ConnectionWorkflow } from "@grasp-os/shared/workflows";
+import type {
+  ConnectionWorkflow,
+  ConnectionWorkflows,
+} from "@grasp-os/shared/workflows";
 import {
   Popover,
   PopoverContent,
@@ -11,19 +14,33 @@ import {
 } from "@grasp-os/ui/components/tooltip";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+import { Await, Link } from "@tanstack/react-router";
 import { ChevronRightIcon, WorkflowIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { LoadingLines } from "../frame/page-states.tsx";
 import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import type { Integration } from "./integrations.ts";
+import { workflowsOf } from "./integrations.ts";
 
 // Which workflows use an app, as the prototype shows them: "Used by N
 // workflows" on its row in Integrations, opening the list of them
 // (`components/integration-row.tsx`), and its page's Workflows tab
 // (`routes/integrations/$integrationId.tsx`). Each opens the workflow's
-// page: an App's under its App, an independent one by its ID.
+// page: an App's under its App, an independent one by its ID. They come
+// from a read of their own, which the rest of either page never waits on.
+
+/** Which workflows use each connection, as the page reads it. */
+export type ConnectionUses = Promise<Loaded<ConnectionWorkflows[]>>;
+
+/** The workflows that use `integration`, of what was read: none if nothing was. */
+const usingOf = (
+  integration: Integration,
+  loaded: Loaded<ConnectionWorkflows[]>
+): ConnectionWorkflow[] =>
+  workflowsOf(integration, loaded.state === "ready" ? loaded.data : []);
 
 /** A workflow's name, opening its page; `className` for where it sits. */
 const WorkflowLink = ({
@@ -67,7 +84,7 @@ const useUsedByLabel = (count: number): string => {
  * How many workflows use the app, on its row: a count that opens the list
  * of them, each opening its workflow. Nothing while none does.
  */
-export const UsedBy = ({
+const UsedByCount = ({
   workflows,
 }: {
   workflows: readonly ConnectionWorkflow[];
@@ -126,12 +143,44 @@ export const UsedBy = ({
   );
 };
 
+/** `UsedByCount` once the workflows are read: nothing before, or if they can't be. */
+export const UsedBy = ({
+  integration,
+  uses,
+}: {
+  integration: Integration;
+  uses: ConnectionUses;
+}) => (
+  <Await fallback={null} promise={uses}>
+    {(loaded) => <UsedByCount workflows={usingOf(integration, loaded)} />}
+  </Await>
+);
+
+/** How many workflows use the app, beside its Workflows tab's name, once read. */
+export const WorkflowsCount = ({
+  integration,
+  uses,
+}: {
+  integration: Integration;
+  uses: ConnectionUses;
+}) => (
+  <Await fallback={null} promise={uses}>
+    {(loaded) =>
+      loaded.state === "ready" ? (
+        <span className="text-muted-foreground tabular-nums">
+          {usingOf(integration, loaded).length}
+        </span>
+      ) : null
+    }
+  </Await>
+);
+
 /**
  * The workflows that use the app, on its page's Workflows tab: each opens
  * its workflow, with its App beside it where it has one; or that none does
  * yet, or why that can't be read.
  */
-export const WorkflowsUsing = ({
+const WorkflowList = ({
   uses,
   workflows,
   app,
@@ -178,3 +227,22 @@ export const WorkflowsUsing = ({
     </ul>
   );
 };
+
+/** `WorkflowList` once the workflows are read. */
+export const WorkflowsUsing = ({
+  integration,
+  uses,
+}: {
+  integration: Integration;
+  uses: ConnectionUses;
+}) => (
+  <Await fallback={<LoadingLines />} promise={uses}>
+    {(loaded) => (
+      <WorkflowList
+        app={integration.name}
+        uses={loaded}
+        workflows={usingOf(integration, loaded)}
+      />
+    )}
+  </Await>
+);

@@ -40,13 +40,15 @@ export const loadIntegrations = async (
   identity: Identity,
   { held }: { held: boolean }
 ) => {
-  const [catalog, connections, uses, permissions] = await Promise.all([
+  // Not awaited: which workflows use each app is a count beside it, and a
+  // slow read of them never keeps anyone from their accounts.
+  const uses = loadFromCore(
+    core,
+    async (session) => await session.workflows.byConnection()
+  );
+  const [catalog, connections, permissions] = await Promise.all([
     loadFromCore(core, async (session) => await session.connections.catalog()),
     loadFromCore(core, async (session) => await session.connections.list()),
-    loadFromCore(
-      core,
-      async (session) => await session.workflows.byConnection()
-    ),
     held && canBuild(identity.role)
       ? loadFromCore(core, heldPermissions)
       : undefined,

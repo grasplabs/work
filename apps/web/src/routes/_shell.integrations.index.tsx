@@ -1,7 +1,6 @@
 import { catalogGroups } from "@grasp-os/shared/connect";
 import type { CatalogGroup } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   InputGroup,
@@ -35,7 +34,6 @@ import {
   keeps,
   roundedDown,
   sectionsOf,
-  workflowsOf,
 } from "../connections/integrations.ts";
 import type {
   Integration,
@@ -44,6 +42,7 @@ import type {
 } from "../connections/integrations.ts";
 import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
+import type { ConnectionUses } from "../connections/workflows-using.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
 import {
@@ -59,7 +58,6 @@ import { PageLoading } from "../frame/page-states.tsx";
 import { PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
-import type { Loaded } from "../load-from-core.tsx";
 
 // Integrations, as in the prototype (`routes/integrations/index.tsx`):
 // every app Grasp can work in. The page sidebar filters: everything, what
@@ -341,10 +339,9 @@ const Kinds = ({
 }: {
   sections: readonly IntegrationSection[];
   identity: Identity;
-  /** Which workflows use each connection: none shown while they can't be read. */
-  uses: Loaded<ConnectionWorkflows[]>;
+  /** Which workflows use each connection, read on its own. */
+  uses: ConnectionUses;
 }) => {
-  const using = uses.state === "ready" ? uses.data : [];
   const { i18n } = useLingui();
   const [drawn, setDrawn] = useState(step);
   const total = sections.reduce(
@@ -397,7 +394,7 @@ const Kinds = ({
                 identity={identity}
                 integration={integration}
                 key={integration.key}
-                workflows={workflowsOf(integration, using)}
+                uses={uses}
               />
             ))}
           </ul>
