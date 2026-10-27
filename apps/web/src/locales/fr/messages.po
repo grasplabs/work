@@ -12160,6 +12160,18 @@ msgstr "Magasin"
 msgid "Store {store}"
 msgstr "Magasin {store}"
 
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can read and change every record of {changes}, whoever owns it"
+msgstr "Magasin {store} d'un workflow. Il peut lire et modifier chaque enregistrement de {changes}, quel qu'en soit le propriétaire"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can read every record of {reads}, and read and change every record of {changes}, whoever owns it"
+msgstr "Magasin {store} d'un workflow. Il peut lire chaque enregistrement de {reads}, et lire et modifier chaque enregistrement de {changes}, quel qu'en soit le propriétaire"
+
+#: src/activity/pending.tsx
+msgid "Store {store}, a workflow's. This can read every record of {reads}, whoever owns it"
+msgstr "Magasin {store} d'un workflow. Il peut lire chaque enregistrement de {reads}, quel qu'en soit le propriétaire"
+
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
 msgstr "ID du magasin : {store}"

@@ -84,6 +84,7 @@ import { isUniqueViolation } from "./db/d1.ts";
 import { appHost, workspace } from "./durable-objects.ts";
 import { madeSensitiveByGrant, widenedByGrant } from "./screen-trust.ts";
 import type { Grantee } from "./screen-trust.ts";
+import { storeReachOf } from "./workflow-store-host.ts";
 
 // Permission records and the one check every server path runs. A person
 // asks for a permission (it allows nothing yet), an admin grants it, their
@@ -735,7 +736,10 @@ const requireStoreObject = async (
     return;
   }
   const row = await drizzle(env.DB)
-    .select({ owner: sdkStoreOwners.appId })
+    .select({
+      owner: sdkStoreOwners.appId,
+      workflow: sdkStoreOwners.workflowId,
+    })
     .from(businessStores)
     .innerJoin(sdkStoreOwners, eq(sdkStoreOwners.storeId, businessStores.id))
     .where(
@@ -745,6 +749,32 @@ const requireStoreObject = async (
       )
     )
     .get();
+  // A standalone workflow's store (GRA-682): asked for by someone with a
+  // role in that workflow, for another workflow, whose approved bindings
+  // its generated operations serve (workflow-store-operations.ts). An
+  // App's binding of one isn't served yet, so isn't asked for either.
+  if (row?.workflow !== null && row?.workflow !== undefined) {
+    try {
+      await roles.resource({ type: "workflow", id: row.workflow }, "user");
+    } catch (error) {
+      if (isExpectedError(error)) {
+        throw noSuchStore();
+      }
+      throw error;
+    }
+    if (subject.type !== "workflow") {
+      refuseRequest(
+        "object.storeId: Only a workflow calls a workflow's store's operations."
+      );
+      return;
+    }
+    if (subject.workflowId === row.workflow) {
+      refuseRequest(
+        "object.storeId: A workflow's store serves other workflows, not itself."
+      );
+    }
+    return;
+  }
   const owner = appIdSchema.safeParse(row?.owner);
   if (!owner.success) {
     throw noSuchStore();
@@ -1674,7 +1704,21 @@ export const listPermissions = async (
     // asked, are that person's alone: never listed to admins or builders.
     .where(and(ofOne, ofOpenApp, inStatus, eq(permissions.personal, false)))
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
-  return rows.map((row) => toPermission(row));
+  return await Promise.all(
+    rows.map(async (row) => {
+      const permission = toPermission(row);
+      if (permission.object.type !== "store") {
+        return permission;
+      }
+      // A workflow's store: what its operations reach, for the review.
+      const reach = await storeReachOf(
+        env,
+        permission.object.storeId,
+        permission.actions
+      );
+      return reach === undefined ? permission : { ...permission, reach };
+    })
+  );
 };
 
 /**

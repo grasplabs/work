@@ -533,6 +533,22 @@ export interface Permission {
    * agent works.
    */
   chat: string | null;
+  /**
+   * For a store a standalone workflow owns (GRA-682), what each listed
+   * operation reaches, as its owner's current version serves it: its
+   * table, and whether it changes it as well as reading it. Every one of
+   * them reaches every record of its table, whoever owns it: what an
+   * admin consents to. Absent for any other permission.
+   */
+  reach?: StoreReach[];
+}
+
+/** What one generated operation of a workflow's store reaches. */
+export interface StoreReach {
+  operation: string;
+  table: string;
+  /** Whether it changes records too (an insert or patch), not only reads. */
+  changes: boolean;
 }
 
 /**
