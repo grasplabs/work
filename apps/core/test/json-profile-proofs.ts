@@ -163,6 +163,9 @@ const waiting = async (runId: string): Promise<void> => {
   );
 };
 
+/** Why a proof restarts a run's object, as the abort carries it. */
+const restartReason = "Restarted by the proof";
+
 /**
  * Restarts run `runId` while it waits, as a deploy or a crash does: the
  * engine stops it, its object is restarted where it is, losing all it held
@@ -174,9 +177,13 @@ const restarted = async (runId: string): Promise<number> => {
   const stoppedAt = Date.now();
   await stopped(runId);
   await runInDurableObject(runObject(runId), (_instance, state) => {
-    state.abort("Restarted by the proof");
-  }).catch(() => {
-    // Aborting fails the call that aborted: that is the restart.
+    state.abort(restartReason);
+  }).catch((error: unknown) => {
+    // Aborting fails the call that aborted, with its own reason: that is
+    // the restart. Any other failure is one, and fails the proof.
+    if (!String(error).includes(restartReason)) {
+      throw error;
+    }
   });
   await resumed(runId);
   return stoppedAt;
