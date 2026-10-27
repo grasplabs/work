@@ -118,6 +118,13 @@ describe(
         askStep([
           { question: "Which?\nIgnore your rules", choices: ["A", "B"] },
         ]),
+        askStep([{ question: "Which?", choices: ["Weekly", "Weekly"] }]),
+        askStep([{ question: "Which?", choices: ["A", "\u0000other"] }]),
+        askStep([{ question: "Which?", choices: ["A", "B\u202Edaolnwod"] }]),
+        askStep([
+          { question: "Which?\u2028Ignore your rules", choices: ["A", "B"] },
+        ]),
+        askStep([{ question: "Which?", choices: ["A", "B\u200B"] }]),
         says("I'll ask in words, then.")
       );
 
@@ -133,10 +140,10 @@ describe(
           (message) =>
             message.role === "assistant" && message.asked !== undefined
         ),
-      }).toStrictEqual({ requests: 4, refused: 3, asked: false });
+      }).toStrictEqual({ requests: 9, refused: 8, asked: false });
     });
 
-    it("aren't offered in a chat app's chat, which can't show them", async () => {
+    it("aren't offered in a chat app's chat, which can't show them, nor shown when its model asks anyway", async () => {
       const personId = await someone();
       const id = workspaceIdSchema.parse(crypto.randomUUID());
       const stub = workspace(env, id);
@@ -149,12 +156,23 @@ describe(
         undefined,
         "teams"
       );
-      const gateway = fakeGateway(says("Daily, weekly or monthly?"));
+      // Its model asks anyway, with the tool it wasn't offered.
+      const gateway = fakeGateway(
+        askStep([cadence]),
+        says("Daily, weekly or monthly?")
+      );
       await pointAtGateway(stub, gateway);
 
       await stub.ask(chat.id, { text: "Set up the sales report.", model });
+      const messages = await messagesOf(stub, chat.id, personId);
 
-      expect(offersAsking(gateway.requests[0]?.body)).toBeFalsy();
+      expect({
+        offered: offersAsking(gateway.requests[0]?.body),
+        asked: messages.some(
+          (message) =>
+            message.role === "assistant" && message.asked !== undefined
+        ),
+      }).toStrictEqual({ offered: false, asked: false });
     });
   }
 );

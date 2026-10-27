@@ -317,13 +317,17 @@ export const partialOf = (message: AssistantMessage): ChatPartial => ({
 /**
  * A stored message as the person reads it; `undefined` for a system one.
  * An answer cites the notes `given` holds (`citedIn`): the documents its
- * chat's code was given before it.
+ * chat's code was given before it. It asks the person questions only in
+ * a chat whose agent is offered `askQuestions` (`asking`, Grasp's own
+ * app): one a chat app's model calls anyway was never offered, so it shows
+ * as the failed call it is, never as questions.
  */
 export const chatMessageOf = (
   id: number,
   message: Message,
   createdAt: Date,
-  given: (documentId: string) => boolean = givenNothing
+  given: (documentId: string) => boolean = givenNothing,
+  asking = false
 ): ChatMessage | undefined => {
   const at = createdAt.toISOString();
   if (message.role === "user") {
@@ -331,7 +335,7 @@ export const chatMessageOf = (
   }
   if (message.role === "assistant") {
     const usage = usageOf(message);
-    const asked = askedOf(message);
+    const asked = asking ? askedOf(message) : undefined;
     return {
       id,
       role: "assistant",

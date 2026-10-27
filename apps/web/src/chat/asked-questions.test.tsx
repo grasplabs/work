@@ -98,7 +98,7 @@ const click = (element: HTMLElement): void => {
 describe("questions with choices in place of the box", () => {
   afterEach(unmount);
 
-  it("goes one question at a time, sends nothing on a pick, and sends every answer once the last has one", () => {
+  it("goes one question at a time, sends nothing on a pick, and sends only the answers, numbered, once the last has one", () => {
     const { sent } = shown();
     const nextAtFirst = button("Next").disabled;
     pick("Weekly");
@@ -120,7 +120,9 @@ describe("questions with choices in place of the box", () => {
       nextOnceAnswered: false,
       sendAtLast: true,
       sentBeforeSend: 0,
-      sent: ["How often? Weekly\nTo whom? My team"],
+      // Only what the person picked: never the model's questions, which
+      // would be words they never saw composed, sent as theirs.
+      sent: ["1. Weekly\n2. My team"],
     });
   });
 
