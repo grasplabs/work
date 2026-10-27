@@ -12,6 +12,8 @@ import {
   composioFlows,
   connectionTokens,
   connections,
+  connectorEvents,
+  eventSources,
   idempotentCalls,
   oauthFlows,
   pendingActions,
@@ -182,6 +184,12 @@ export const erasePersonal = async (
         .delete(idempotentCalls)
         .where(inArray(idempotentCalls.connectionId, ids)),
       db.delete(callChanges).where(inArray(callChanges.connectionId, ids)),
+      // What their connections read for workflows: the mailboxes and items
+      // still to deliver, which name them and hold their provider's data.
+      db
+        .delete(connectorEvents)
+        .where(inArray(connectorEvents.connectionId, ids)),
+      db.delete(eventSources).where(inArray(eventSources.connectionId, ids)),
       db
         .delete(pendingActions)
         .where(eq(pendingActions.onBehalfOf, ownerUserId)),

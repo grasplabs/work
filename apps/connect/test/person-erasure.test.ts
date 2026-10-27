@@ -8,6 +8,8 @@ import {
   composioCleanups,
   connections,
   connectionTokens,
+  connectorEvents,
+  eventSources,
   idempotentCalls,
 } from "../src/db/schema.ts";
 import { connectApp, fakeApps } from "./app-provider.ts";
@@ -94,11 +96,54 @@ const madeCall = async (id: string, userId: string): Promise<void> => {
     });
 };
 
+/**
+ * A mailbox of theirs that connection `id` reads for a workflow, with an
+ * item read from it still to deliver.
+ */
+const readsFor = async (id: string, address: string): Promise<void> => {
+  const now = new Date();
+  await drizzle(env.DB).batch([
+    drizzle(env.DB).insert(eventSources).values({
+      id: crypto.randomUUID(),
+      connectionId: id,
+      type: "mail.received",
+      resource: address,
+      pollAt: now,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    drizzle(env.DB)
+      .insert(connectorEvents)
+      .values({
+        id: crypto.randomUUID(),
+        key: crypto.randomUUID(),
+        connectionId: id,
+        event: JSON.stringify({ from: address, subject: "Their mail" }),
+        retryAt: now,
+        createdAt: now,
+      }),
+  ]);
+};
+
+/** How many of what connection `id` read are still kept. */
+const readOf = async (id: string) => {
+  const db = drizzle(env.DB);
+  const [sources, events] = await Promise.all([
+    db.select().from(eventSources).where(eq(eventSources.connectionId, id)),
+    db
+      .select()
+      .from(connectorEvents)
+      .where(eq(connectorEvents.connectionId, id)),
+  ]);
+  return { sources: sources.length, events: events.length };
+};
+
 describe("erasing a person in connect", () => {
   it("revokes a grant still live at its provider before anything is emptied, and empties their connection", async () => {
     const person = someone();
     const { connectionId, refreshToken } = await liveConnection(person);
     await madeCall(connectionId, person.userId);
+    await readsFor(connectionId, person.email);
     expect(apps.holds(refreshToken)).toBeTruthy();
 
     await expect(erase(person)).resolves.toStrictEqual({ connections: 1 });
@@ -107,10 +152,12 @@ describe("erasing a person in connect", () => {
       revoked: apps.holds(refreshToken),
       asked: apps.revocations().length > 0,
       kept: await keptOf(connectionId),
+      read: await readOf(connectionId),
     }).toStrictEqual({
       revoked: false,
       asked: true,
       kept: { status: "disconnected", named: false, tokens: 0, calls: [] },
+      read: { sources: 0, events: 0 },
     });
   });
 
