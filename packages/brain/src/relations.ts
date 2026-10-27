@@ -17,7 +17,7 @@ import {
   collections,
   documents,
 } from "./db/schema.ts";
-import { requireBrainRead } from "./entities.ts";
+import { kindOf, requireBrainRead } from "./entities.ts";
 import { collectionIdSchema, documentIdSchema, memoryIdSchema } from "./ids.ts";
 import { citesReadable } from "./memory-cites.ts";
 
@@ -166,14 +166,20 @@ const readable = async <C>(
 ): Promise<{ relations: ReadRelation[]; cut: boolean }> => {
   const { db } = brain;
   const known = knownAt === undefined ? undefined : new Date(knownAt);
+  // Folded as the Brain keeps relations (`kindOf`): `Reports to` asks for
+  // `reports_to`.
+  const relation = predicate === undefined ? undefined : kindOf(predicate);
+  if (relation === "") {
+    throw brainErrors.create("brain.invalid");
+  }
   const where: SQL | undefined = and(
     or(
       eq(brainAssertions.subjectEntityId, entityId),
       eq(brainAssertions.objectEntityId, entityId)
     ),
-    predicate === undefined
+    relation === undefined
       ? undefined
-      : eq(brainAssertions.predicate, predicate),
+      : eq(brainAssertions.predicate, relation),
     at === undefined
       ? undefined
       : sql`(${brainAssertions.validFrom} IS NULL OR ${brainAssertions.validFrom} <= ${at}) AND (${brainAssertions.validTo} IS NULL OR ${brainAssertions.validTo} >= ${at})`,
