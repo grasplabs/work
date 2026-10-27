@@ -5216,11 +5216,25 @@ export class Onboarding extends DurableObject<Env> {
             other: clean(differs.other),
             at,
           };
-          this.#db
-            .insert(checkedDifferences)
-            .values({ work: work.id, ...shown })
-            .onConflictDoUpdate({ target: checkedDifferences.work, set: shown })
-            .run();
+          // Only while the drawing it checked is still held: one forgotten
+          // meanwhile (its teller withdrew or deleted their interview, or
+          // a document it had was purged) leaves no copy of its words.
+          const held = this.#db
+            .select({ drawn: drawnWorks.drawn })
+            .from(drawnWorks)
+            .where(eq(drawnWorks.work, work.id))
+            .all()
+            .some(({ drawn }) => drawingOf(drawn)?.at === work.drawn.at);
+          if (held) {
+            this.#db
+              .insert(checkedDifferences)
+              .values({ work: work.id, ...shown })
+              .onConflictDoUpdate({
+                target: checkedDifferences.work,
+                set: shown,
+              })
+              .run();
+          }
         } else {
           this.#db
             .delete(checkedDifferences)

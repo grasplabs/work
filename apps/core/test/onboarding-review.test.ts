@@ -386,6 +386,18 @@ describe("what needs the admin", { timeout: 120_000 }, () => {
     });
   });
 
+  it("writes no checked difference's words for a drawing someone it rests on withdrew from while it was checked", async () => {
+    const ids = await team();
+    let withdrawing: Promise<void> | undefined;
+    // While the intake checks who told what, the first of them withdraws.
+    const { tickets } = await drawn(ids, () => {
+      withdrawing ??= onLinkOf(ids.doers[0] ?? "", "withdraw");
+      return true;
+    });
+    await withdrawing;
+    await expect(checkedOf(tickets)).resolves.toStrictEqual([]);
+  });
+
   it("shows no difference whose other way fewer than five are checked to tell, the drawing's word for five notwithstanding", async () => {
     const ids = await team();
     // One of the five says something else, as the check finds.
