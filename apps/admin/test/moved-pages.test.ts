@@ -123,7 +123,7 @@ describe("the admin's pages, once under /admin", () => {
         "/admin/platform/releases/r260101-abcdef0",
         `/admin/organizations/${clientId}/setup?tab=deploys`,
         "/admin/new-organization?from=grid",
-        "/admin/sources",
+        "/admin/ask",
       ].map(movedTo)
     );
 
@@ -135,7 +135,7 @@ describe("the admin's pages, once under /admin", () => {
         "/platform/releases/r260101-abcdef0",
         `/organizations/${clientId}/setup?tab=deploys`,
         "/new-organization?from=grid",
-        "/sources",
+        "/ask",
       ].map((location) => ({ status: 301, location }))
     );
   });

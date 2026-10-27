@@ -51,7 +51,7 @@ import {
   slotAt,
 } from "./layout.ts";
 import type { GridShape } from "./layout.ts";
-import type { GoalProgress, WorkReturns } from "./returns.ts";
+import type { GoalProgress, TeamsRead, WorkReturns } from "./returns.ts";
 import { RunsWidget } from "./runs-widget.tsx";
 import { CouldBeBetter } from "./signals.tsx";
 import type { Signals } from "./signals.tsx";
@@ -91,9 +91,10 @@ import {
 // prototype's board has besides: changing a widget from a block's sparkle
 // (core can: `changeWidget`), drawing it in dots meanwhile, and the
 // blocks gliding out of each other's way. The goals widget reads the
-// board's goals from core, each with the workflows linked to it; the
-// return and teams widgets count hours and stages core doesn't keep yet:
-// they show what the prototype shows with nothing to count (`returns.ts`).
+// board's goals from core, each with the workflows linked to it, and the
+// teams widget the teams that own workflows; the return widget counts
+// hours core doesn't keep yet: it shows what the prototype shows with
+// nothing to count (`returns.ts`).
 
 /** The engines the person can open, with the workflows. */
 export interface EnginesRead {
@@ -109,8 +110,10 @@ export interface Board {
   offered: readonly StandardWidgetId[];
   /** The widgets Grasp made for them from what they asked, as core read them. */
   made: Loaded<CustomWidget[]>;
-  /** What the return and teams widgets count. */
+  /** What the return widget counts. */
   returns: WorkReturns;
+  /** The teams that own workflows, and what their workflows handled. */
+  teams: Promise<Loaded<TeamsRead>>;
   /** The board's goals, and how far the workflows that serve each are. */
   goals: Promise<Loaded<GoalProgress[]>>;
   workflows: Promise<Loaded<WorkflowSummary[]>>;
@@ -513,13 +516,23 @@ const widgetBlocks: Record<
       }
     </Await>
   ),
-  teams: ({ returns }, title) => (
-    <WidgetBlock
-      full={<TeamListView rows={returns.rows} teams={returns.teams} />}
-      title={title}
-    >
-      <TeamListView rows={returns.rows} teams={returns.teams} />
-    </WidgetBlock>
+  teams: (board, title) => (
+    <Await fallback={<WidgetLoading title={title} />} promise={board.teams}>
+      {(loaded) =>
+        loaded.state === "ready" ? (
+          <WidgetBlock
+            full={
+              <TeamListView rows={loaded.data.rows} teams={loaded.data.teams} />
+            }
+            title={title}
+          >
+            <TeamListView rows={loaded.data.rows} teams={loaded.data.teams} />
+          </WidgetBlock>
+        ) : (
+          <NotRead loaded={loaded} title={title} />
+        )
+      }
+    </Await>
   ),
   workflows: (board, title) => (
     <Await fallback={<WidgetLoading title={title} />} promise={board.workflows}>

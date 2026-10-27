@@ -23,6 +23,7 @@ import {
   dryRunWorkflow,
   listAllRuns,
   setOwner,
+  setTeam,
   workflowDetail,
   workflowOverview,
 } from "./overview.ts";
@@ -136,6 +137,17 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await setOwner(this.#env, by, app, workflow, owner)
+    );
+  }
+
+  async setTeam(
+    app: string,
+    workflow: string,
+    team: string | null
+  ): Promise<WorkflowSummary> {
+    return await withPerson(
+      this.#check,
+      async (by) => await setTeam(this.#env, by, app, workflow, team)
     );
   }
 

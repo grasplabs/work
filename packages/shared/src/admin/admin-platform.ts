@@ -30,6 +30,23 @@ export type DeployStep = (typeof DEPLOY_STEPS)[number];
 export const RINGS = [0, 1, 2] as const;
 export type Ring = (typeof RINGS)[number];
 
+/**
+ * The rings by name, as Grasp's staff say them: Alpha (Grasp's own test deployments, where a
+ * release goes first), Beta (the companies that want the latest changes), then Production (the
+ * safe tier, everyone else). Only the words: the rings stay numbers in every record.
+ */
+export const RING_NAMES: Readonly<Record<Ring, string>> = {
+  0: "Alpha",
+  1: "Beta",
+  2: "Production",
+};
+
+/** A ring by its name; one past the named three by its number, as the admin allows any. */
+export const ringName = (ring: number): string => {
+  const named = RINGS.find((each) => each === ring);
+  return named === undefined ? `Ring ${ring}` : RING_NAMES[named];
+};
+
 /** The Workers the admin deploys into a company's account. */
 export type WorkerName = "core" | "connect";
 

@@ -392,6 +392,8 @@ describe("the Workflows page", buildTime, () => {
       appName,
       version: 1,
       owner: { userId: owner.userId, name: owner.person.name },
+      // No team owns them (workflow-teams.test.ts).
+      team: null,
       scheduleStopped: false,
     };
     const invoiceWorkflows = [

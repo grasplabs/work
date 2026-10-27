@@ -38,6 +38,7 @@ const summary = (
   id,
   kind: "release",
   releaseId: "r1",
+  release: { notes: "feat(core): r1", versionMajor: 1, versionMinor: 0 },
   status,
   ring,
   startedBy: "ops@grasp.test",
@@ -62,6 +63,8 @@ const release = (id: string, built: number): ReleaseSummary => ({
   notes: `feat(core): ${id}`,
   builtAt: day(built),
   importedAt: day(built),
+  versionMajor: built,
+  versionMinor: 0,
 });
 
 const row = (id: string, input: Partial<GridRow> = {}): GridRow => ({

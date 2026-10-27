@@ -172,6 +172,17 @@ export const organizations = sqliteTable("organizations", {
   timeZone: text("time_zone"),
 });
 
+/**
+ * The organization's settings an admin keeps beside its name and time zone
+ * (org-settings.ts): one row per kind (`billing`, `pulse`), its value as
+ * JSON, checked again as it is read. None until an admin saves one.
+ */
+export const orgSettings = sqliteTable("org_settings", {
+  kind: text().primaryKey(),
+  value: text().notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
 /** A person's place in the organization, with their role. */
 export const members = sqliteTable(
   "members",
@@ -2853,6 +2864,31 @@ export const workflowOwners = sqliteTable(
     setAt: timestamp("set_at").notNull(),
   },
   (table) => [primaryKey({ columns: [table.appId, table.workflowId] })]
+);
+
+/**
+ * The team that owns a workflow (workflows/teams.ts): one of the
+ * organization's teams, set by an admin or a builder of its App, by App
+ * and workflow ID, so it holds across versions. A workflow without a row
+ * has no team; a team that goes takes its rows with it.
+ */
+export const workflowTeams = sqliteTable(
+  "workflow_teams",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    workflowId: text("workflow_id").notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.workflowId] }),
+    index("workflow_teams_team").on(table.teamId),
+  ]
 );
 
 /**

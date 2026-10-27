@@ -90,6 +90,7 @@ const shown = async (
     made: { state: "ready", data: [] },
     returns: noReturns,
     goals: never,
+    teams: never,
     workflows: never,
     engines: never,
     runs: never,

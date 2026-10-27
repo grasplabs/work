@@ -78,6 +78,7 @@ export const workflowErrors = defineErrorFamily({
     "Only a current member of the organization who can open the App can own its workflow.",
   "workflow.owner_conflict":
     "Someone changed the workflow's owner meanwhile. Try again.",
+  "workflow.team_invalid": "That isn't one of the organization's teams.",
   "workflow.email_taken":
     "Another App's workflow already receives mail at this address.",
   "workflow.attachment_not_found":
@@ -1209,10 +1210,12 @@ export interface WorkflowSummary {
    */
   owner: { userId: string; name: string | null };
   /**
-   * Whether the person may change its owner (`setOwner`): an admin, or a
-   * builder of the App; never Grasp staff.
+   * Whether the person may change its owner (`setOwner`) and its team
+   * (`setTeam`): an admin, or a builder of the App; never Grasp staff.
    */
   changesOwner: boolean;
+  /** The organization's team that owns it (`setTeam`); null for none. */
+  team: { id: string; name: string } | null;
   /**
    * Its latest run, of any version, `waiting` while it waits for a
    * decision; null before its first.
@@ -1342,6 +1345,11 @@ export interface RunActivityWorkflow {
   started: number;
   completed: number;
   failed: number;
+  /**
+   * Of those completed, the runs that asked no one for a decision: items
+   * it handled without a person.
+   */
+  completedAlone: number;
 }
 
 /**
@@ -1442,6 +1450,16 @@ export interface WorkflowsApi {
     app: string,
     workflow: string,
     owner: string
+  ) => Promise<WorkflowSummary>;
+  /**
+   * Makes one of the organization's teams (by ID) the team that owns an
+   * App's workflow, or none with `null`; for admins and the App's
+   * builders, audited. Returns the workflow's summary as it is now.
+   */
+  setTeam: (
+    app: string,
+    workflow: string,
+    team: string | null
   ) => Promise<WorkflowSummary>;
   /**
    * Dry-runs a workflow's tests at the App's current version, with the
