@@ -14,7 +14,7 @@ import { brainAssertions, collections, documents } from "./db/schema.ts";
 import { toHex } from "./encoding.ts";
 import type { Provenance } from "./knowledge.ts";
 import { currentRelations, readable, readRowsMax } from "./relations.ts";
-import type { ReadRelation, ReadScope } from "./relations.ts";
+import type { ReadRelation, ReadScope, ReadSource } from "./relations.ts";
 
 // A recall's network route (GRA-307, the Brain design's bounded activation):
 // from the entities the sources a recall found name, along the relations
@@ -219,17 +219,22 @@ const seedsOf = async <C>(
   return { seeds: [...seeds.values()], cut: rows.length > readRowsMax };
 };
 
-/** Reports what the route read to the host, as every Brain read is. */
+/**
+ * Reports what the route read to the host, as every Brain read is: every
+ * row its hops considered (`considered`, past a cap too, as relations.ts
+ * reports them), and how many relations it kept.
+ */
 const reported = async <C>(
   brain: Brain<C>,
   reader: C,
-  read: readonly ReadRelation[]
+  considered: readonly ReadSource[],
+  kept: number
 ): Promise<Provenance> => {
   const collectionIds = [
-    ...new Set(read.flatMap(({ collectionId }) => collectionId ?? [])),
+    ...new Set(considered.flatMap(({ collectionId }) => collectionId ?? [])),
   ];
   const documentIds = [
-    ...new Set(read.flatMap(({ documentId }) => documentId ?? [])),
+    ...new Set(considered.flatMap(({ documentId }) => documentId ?? [])),
   ];
   return await brain.ports.onRead(
     reader,
@@ -238,7 +243,8 @@ const reported = async <C>(
       documentIds: documentIds.slice(0, 20),
       detail: {
         read: "recall.network",
-        relations: read.length,
+        relations: kept,
+        considered: considered.length,
         documents: documentIds.length,
       },
     },
@@ -326,6 +332,10 @@ export const networkOf = async <C>(
   if (query.found.length === 0 || query.within?.length === 0) {
     return none;
   }
+  // No room for an item: nothing is read, so nothing labels the pack.
+  if (query.maxItems <= 0) {
+    return { ...none, cuts: ["items"] };
+  }
   if (brain.ports.clock().getTime() >= query.deadline) {
     return { ...none, cuts: ["deadline"] };
   }
@@ -344,7 +354,7 @@ export const networkOf = async <C>(
     query.found.map(({ documentId, version }) => `${documentId}@${version}`)
   );
   const seen = new Set<string>();
-  const read: ReadRelation[] = [];
+  const considered: ReadSource[] = [];
   const reached: { view: RelationView; seed: End; steps: NetworkStep[] }[] = [];
   const seedIds = new Set(seeds.map(({ entityId }) => entityId));
   let starts: Start[] = seeds.map((seed) => ({
@@ -373,7 +383,7 @@ export const networkOf = async <C>(
         { entityId: start.entity.entityId },
         query.within
       );
-      read.push(...hopRead.relations);
+      considered.push(...hopRead.considered);
       if (hopRead.cut) {
         cuts.add("rows");
       }
@@ -399,6 +409,8 @@ export const networkOf = async <C>(
     items,
     cuts: [...cuts],
     provenance:
-      read.length === 0 ? none.provenance : await reported(brain, reader, read),
+      considered.length === 0
+        ? none.provenance
+        : await reported(brain, reader, considered, reached.length),
   };
 };
