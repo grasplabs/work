@@ -171,6 +171,17 @@ export const organizations = sqliteTable("organizations", {
   timeZone: text("time_zone"),
 });
 
+/**
+ * The organization's settings an admin keeps beside its name and time zone
+ * (org-settings.ts): one row per kind (`billing`, `pulse`), its value as
+ * JSON, checked again as it is read. None until an admin saves one.
+ */
+export const orgSettings = sqliteTable("org_settings", {
+  kind: text().primaryKey(),
+  value: text().notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
 /** A person's place in the organization, with their role. */
 export const members = sqliteTable(
   "members",

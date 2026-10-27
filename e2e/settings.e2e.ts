@@ -6,9 +6,11 @@ import { apiOf, peopleIn, signInAs } from "./people.ts";
 
 // Settings, as in the prototype: the workspace's sections for admins, the
 // account's for everyone, listed beside the section where the page has the
-// room and as one control above it where it hasn't. The sections core
-// keeps nothing for yet (Pulse, billing, the link for AI apps) show the
-// prototype's empty state, and nothing in them can be changed. The emails a
+// room and as one control above it where it hasn't. Billing's details and
+// emails, and when Pulse may report and whom it counts, are kept by core
+// and changed here by the admin; what core has nothing for yet (a plan, a
+// card, invoices, Pulse's devices, the link for AI apps) shows the
+// prototype's empty state, and can't be changed. The emails a
 // person picks are kept, so their switches work, and the devices they are
 // signed in on can be signed out one by one. Members, Models, AI spend and the audit trail have tests
 // of their own (web, models, activity).
@@ -38,12 +40,31 @@ test("an admin opens Settings on the workspace, and each section from the list b
   await nav.getByRole("link", { name: "Pulse" }).click();
   await expect(page).toHaveURL(/\/settings\/pulse$/u);
   await expect(sectionOf(page, "Pulse")).toContainText("0 of 0");
-  await expect(sectionOf(page, "When Pulse may report")).toContainText(
-    "Pulse never reports."
-  );
   await expect(sectionOf(page, "People and devices")).toContainText(
     "Nobody matches."
   );
+  // The admin's schedule and domains are kept, over a reload.
+  const schedule = sectionOf(page, "When Pulse may report");
+  const monday = schedule.getByRole("switch", { name: "Monday" });
+  if (!(await monday.isChecked())) {
+    await monday.click();
+  }
+  await expect(monday).toBeChecked();
+  const who = sectionOf(page, "Who counts");
+  if ((await who.getByText("acme-old.test").count()) === 0) {
+    await who.getByLabel("Employee email domain").fill("@Acme-Old.test");
+    await who.getByRole("button", { name: "Add" }).click();
+  }
+  await expect(who.getByText("acme-old.test")).toBeVisible();
+  await page.reload();
+  await expect(
+    sectionOf(page, "When Pulse may report").getByRole("switch", {
+      name: "Monday",
+    })
+  ).toBeChecked();
+  await expect(
+    sectionOf(page, "Who counts").getByText("acme-old.test")
+  ).toBeVisible();
 
   await nav.getByRole("link", { name: "Billing" }).click();
   await expect(page).toHaveURL(/\/settings\/billing$/u);
@@ -55,6 +76,18 @@ test("an admin opens Settings on the workspace, and each section from the list b
     "No card on file"
   );
   await expect(sectionOf(page, "Invoices")).toContainText("No invoices yet.");
+  // The billing details are the admin's to keep, as each field is left.
+  const details = sectionOf(page, "Billing details");
+  await details.getByLabel("VAT number").fill("nl123456789b01");
+  await details.getByLabel("Billing email").fill("finance@acme.test");
+  await details.getByLabel("VAT number").focus();
+  await page.reload();
+  await expect(
+    sectionOf(page, "Billing details").getByLabel("VAT number")
+  ).toHaveValue("NL123456789B01");
+  await expect(
+    sectionOf(page, "Billing details").getByLabel("Billing email")
+  ).toHaveValue("finance@acme.test");
 
   await nav.getByRole("link", { name: "Notifications" }).click();
   await expect(page).toHaveURL(/\/settings\/notifications$/u);

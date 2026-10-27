@@ -1994,6 +1994,7 @@ msgid "Actor ID"
 msgstr "ID de l’acteur"
 
 #: src/onboarding/connect-steps.tsx
+#: src/routes/_shell.settings.pulse.tsx
 msgid "Add"
 msgstr "Ajouter"
 
@@ -3184,6 +3185,7 @@ msgctxt "where a workflow stands"
 msgid "Better split in two"
 msgstr "Mieux vaut le scinder en deux"
 
+#: src/routes/_shell.settings.billing.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Billing"
 msgstr "Facturation"
@@ -5120,10 +5122,6 @@ msgstr "Versions précédentes"
 msgid "Edit"
 msgstr "Modifier"
 
-#: src/routes/_shell.settings.billing.tsx
-msgid "Edit details"
-msgstr "Modifier les informations"
-
 #: src/chat/project-dialog.tsx
 msgid "Edit project"
 msgstr "Modifier le projet"
@@ -5150,6 +5148,10 @@ msgstr "IA embarquée"
 #: src/brain/brain-article/kern.tsx
 msgid "Employee"
 msgstr "Employé"
+
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Employee email domain"
+msgstr "Domaine e-mail des employés"
 
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Employee email domains"
@@ -10531,6 +10533,10 @@ msgstr "Retirer"
 msgid "Remove {documentName}"
 msgstr "Retirer {documentName}"
 
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Remove {domain}"
+msgstr "Retirer {domain}"
+
 #: src/onboarding/document-drop.tsx
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
@@ -14059,8 +14065,8 @@ msgid "Until {until}"
 msgstr "Jusqu'au {until}"
 
 #: src/routes/_shell.settings.billing.tsx
-msgid "Until it is, billing can be seen here but not changed."
-msgstr "D’ici là, la facturation est visible ici mais ne peut pas être modifiée."
+msgid "Until it is, there is no plan, card or invoice. The billing details and emails below are kept for when it is."
+msgstr "D’ici là, il n’y a ni forfait, ni carte, ni facture. Les coordonnées de facturation et les e-mails ci-dessous sont conservés pour ce moment-là."
 
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. Mend the record through the domain and the change is tried again, or abandon it."

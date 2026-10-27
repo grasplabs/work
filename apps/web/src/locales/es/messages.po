@@ -1994,6 +1994,7 @@ msgid "Actor ID"
 msgstr "ID del autor"
 
 #: src/onboarding/connect-steps.tsx
+#: src/routes/_shell.settings.pulse.tsx
 msgid "Add"
 msgstr "Añadir"
 
@@ -3184,6 +3185,7 @@ msgctxt "where a workflow stands"
 msgid "Better split in two"
 msgstr "Mejor dividirlo en dos"
 
+#: src/routes/_shell.settings.billing.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Billing"
 msgstr "Facturación"
@@ -5120,10 +5122,6 @@ msgstr "Versiones anteriores"
 msgid "Edit"
 msgstr "Editar"
 
-#: src/routes/_shell.settings.billing.tsx
-msgid "Edit details"
-msgstr "Editar datos"
-
 #: src/chat/project-dialog.tsx
 msgid "Edit project"
 msgstr "Editar proyecto"
@@ -5150,6 +5148,10 @@ msgstr "IA integrada"
 #: src/brain/brain-article/kern.tsx
 msgid "Employee"
 msgstr "Empleado"
+
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Employee email domain"
+msgstr "Dominio de correo de los empleados"
 
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Employee email domains"
@@ -10531,6 +10533,10 @@ msgstr "Quitar"
 msgid "Remove {documentName}"
 msgstr "Quitar {documentName}"
 
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Remove {domain}"
+msgstr "Quitar {domain}"
+
 #: src/onboarding/document-drop.tsx
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
@@ -14059,8 +14065,8 @@ msgid "Until {until}"
 msgstr "Hasta {until}"
 
 #: src/routes/_shell.settings.billing.tsx
-msgid "Until it is, billing can be seen here but not changed."
-msgstr "Hasta entonces, la facturación se ve aquí pero no se puede cambiar."
+msgid "Until it is, there is no plan, card or invoice. The billing details and emails below are kept for when it is."
+msgstr "Hasta entonces no hay plan, tarjeta ni factura. Los datos de facturación y los correos de abajo se guardan para entonces."
 
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. Mend the record through the domain and the change is tried again, or abandon it."

@@ -1994,6 +1994,7 @@ msgid "Actor ID"
 msgstr "Akteur-ID"
 
 #: src/onboarding/connect-steps.tsx
+#: src/routes/_shell.settings.pulse.tsx
 msgid "Add"
 msgstr "Hinzufügen"
 
@@ -3184,6 +3185,7 @@ msgctxt "where a workflow stands"
 msgid "Better split in two"
 msgstr "Besser in zwei aufteilen"
 
+#: src/routes/_shell.settings.billing.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Billing"
 msgstr "Abrechnung"
@@ -5120,10 +5122,6 @@ msgstr "Frühere Versionen"
 msgid "Edit"
 msgstr "Bearbeiten"
 
-#: src/routes/_shell.settings.billing.tsx
-msgid "Edit details"
-msgstr "Daten ändern"
-
 #: src/chat/project-dialog.tsx
 msgid "Edit project"
 msgstr "Projekt bearbeiten"
@@ -5150,6 +5148,10 @@ msgstr "Eingebettete KI"
 #: src/brain/brain-article/kern.tsx
 msgid "Employee"
 msgstr "Mitarbeitende"
+
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Employee email domain"
+msgstr "E-Mail-Domain der Mitarbeitenden"
 
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Employee email domains"
@@ -10531,6 +10533,10 @@ msgstr "Entfernen"
 msgid "Remove {documentName}"
 msgstr "{documentName} entfernen"
 
+#: src/routes/_shell.settings.pulse.tsx
+msgid "Remove {domain}"
+msgstr "{domain} entfernen"
+
 #: src/onboarding/document-drop.tsx
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
@@ -14059,8 +14065,8 @@ msgid "Until {until}"
 msgstr "Bis {until}"
 
 #: src/routes/_shell.settings.billing.tsx
-msgid "Until it is, billing can be seen here but not changed."
-msgstr "Bis dahin sehen Sie die Abrechnung hier, können sie aber nicht ändern."
+msgid "Until it is, there is no plan, card or invoice. The billing details and emails below are kept for when it is."
+msgstr "Bis dahin gibt es keinen Tarif, keine Karte und keine Rechnung. Die Rechnungsdaten und E-Mails unten werden dafür aufbewahrt."
 
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. Mend the record through the domain and the change is tried again, or abandon it."

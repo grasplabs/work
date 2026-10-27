@@ -96,6 +96,7 @@
     "./onboarding": "./src/onboarding.ts",
     "./operation-limits": "./src/operation-limits.ts",
     "./operations": "./src/operations.ts",
+    "./org-settings": "./src/org-settings.ts",
     "./organization": "./src/organization.ts",
     "./onboarding-choices": "./src/onboarding-choices.ts",
     "./onboarding-documents": "./src/onboarding-documents.ts",
