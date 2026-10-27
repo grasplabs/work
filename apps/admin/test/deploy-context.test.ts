@@ -46,4 +46,11 @@ describe("a deploy's shared secrets", () => {
     ).rejects.toBeInstanceOf(MissingStoreSecretError);
     expect(absent.shared.connect).toMatchObject({ APP_OAUTH_CLIENTS: "{}" });
   });
+
+  it("stand in for app OAuth clients when the deploy left them unbound, the store not having them", async () => {
+    const unbound: Env = { ...env };
+    Reflect.deleteProperty(unbound, "APP_OAUTH_CLIENTS");
+    const { shared } = await deploySecrets(unbound);
+    expect(shared.connect).toMatchObject({ APP_OAUTH_CLIENTS: "{}" });
+  });
 });
