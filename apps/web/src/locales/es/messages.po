@@ -937,14 +937,6 @@ msgstr "{name} {range}, cubierto por {resolved}"
 msgid "{name} {range}, not met"
 msgstr "{name} {range}, sin cubrir"
 
-#: src/chat/builds-state.ts
-msgid "{name} changed"
-msgstr "{name} cambió"
-
-#: src/chat/builds-state.ts
-msgid "{name} changed: it {does}"
-msgstr "{name} cambió: {does}"
-
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
 msgstr "No se ha podido eliminar {name}. Inténtalo de nuevo."
@@ -1009,14 +1001,6 @@ msgstr "Logotipo de {name}"
 #: src/connections/connect-dialog.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} puede escribir. Cambiar a Lectura"
-
-#: src/chat/builds-state.ts
-msgid "{name} no longer changes the domain's data (write → read)"
-msgstr "{name} ya no cambia los datos del dominio (escritura → lectura)"
-
-#: src/chat/builds-state.ts
-msgid "{name} now changes the domain's data (read → write)"
-msgstr "{name} ahora cambia los datos del dominio (lectura → escritura)"
 
 #: src/connections/connect-dialog.tsx
 msgid "{name} reads only. Change to Write"
@@ -3953,14 +3937,6 @@ msgstr "Cambios que Grasp envió por alguien cuya respuesta se perdió, así que
 msgid "Changes something"
 msgstr "Cambia algo"
 
-#: src/chat/builds-state.ts
-msgid "changes the domain's data"
-msgstr "cambia los datos del dominio"
-
-#: src/chat/builds.tsx
-msgid "Changes the domain's data"
-msgstr "Cambia los datos del dominio"
-
 #: src/engines/store-changes.tsx
 msgid "Changes to the domain's stores"
 msgstr "Cambios en los almacenes del dominio"
@@ -4655,10 +4631,6 @@ msgstr "Corregido por"
 #: src/dashboard/widget-board.tsx
 msgid "Could be better"
 msgstr "Podría ir mejor"
-
-#: src/activity/pending.tsx
-msgid "couldn't be read"
-msgstr "no se pudo leer"
 
 #: src/workflows/team-picker.tsx
 msgid "Couldn't change the team of {named}"
@@ -5808,14 +5780,6 @@ msgstr "Exportar el registro de auditoría"
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
 msgstr "Exportó el registro de auditoría"
-
-#: src/chat/builds.tsx
-msgid "Exports"
-msgstr "Exportaciones"
-
-#: src/activity/pending.tsx
-msgid "Exports of {domain}: {covered}"
-msgstr "Exportaciones de {domain}: {covered}"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -8447,6 +8411,10 @@ msgstr "Mover a un proyecto"
 msgid "Moved old entries out of the audit trail"
 msgstr "Sacó entradas antiguas del registro de auditoría"
 
+#: src/activity/pending.tsx
+msgid "Mutations and actions of {domain}"
+msgstr "Mutaciones y acciones de {domain}"
+
 #: src/interview/voice-bar.tsx
 msgctxt "turn your microphone off for a moment"
 msgid "Mute"
@@ -9324,10 +9292,6 @@ msgstr "Ninguna actual"
 #: src/onboarding/work-list.tsx
 msgid "None drawn yet. They show up here as the interviews come in."
 msgstr "Aún no hay ninguno dibujado. Aparecen aquí a medida que llegan las entrevistas."
-
-#: src/activity/pending.tsx
-msgid "none now"
-msgstr "ninguna ahora"
 
 #: src/engines/resource-bindings.tsx
 msgid "None of the domain's integration permissions serves {contract} with every action it declares. Grant one first."
@@ -10352,18 +10316,6 @@ msgctxt "the team for people a staff list gives no team"
 msgid "Other"
 msgstr "Otros"
 
-#: src/chat/builds-state.ts
-msgid "Other domains may no longer call {name}"
-msgstr "Otros dominios ya no pueden llamar a {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}"
-msgstr "Otros dominios ahora pueden llamar a {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}, which {does}"
-msgstr "Otros dominios ahora pueden llamar a {name}, que {does}"
-
 #: src/chat/failure.ts
 msgid "Other questions are using what's left of the model budget. Try again in a minute."
 msgstr "Otras preguntas están usando lo que queda del presupuesto de modelos. Vuelve a intentarlo en un minuto."
@@ -11077,6 +11029,14 @@ msgstr "Poniéndolo en tu panel…"
 msgid "Putting it right, try {attempt} of {attempts}…"
 msgstr "Corrigiéndolo, intento {attempt} de {attempts}…"
 
+#: src/activity/pending.tsx
+msgid "Queries of {domain}"
+msgstr "Consultas de {domain}"
+
+#: src/activity/pending.tsx
+msgid "Queries, mutations and actions of {domain}"
+msgstr "Consultas, mutaciones y acciones de {domain}"
+
 #: src/chat/suggestions.tsx
 msgid "Questions to start with"
 msgstr "Preguntas para empezar"
@@ -11287,10 +11247,6 @@ msgstr "Leyendo quién puede ser responsable…"
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Leyendo tu lista de personal"
-
-#: src/chat/builds-state.ts
-msgid "reads the domain's data"
-msgstr "lee los datos del dominio"
 
 #: src/knowledge/uploads.tsx
 #: src/onboarding/setup-frame.tsx
@@ -16159,10 +16115,6 @@ msgstr "Lo que te espera"
 #: src/workflows/requests/request-table.tsx
 msgid "What needs you can't be read right now."
 msgstr "Ahora no se puede leer lo que te necesita."
-
-#: src/chat/builds.tsx
-msgid "What other domains may call"
-msgstr "Lo que otros dominios pueden llamar"
 
 #: src/workflows/requests/request-table.tsx
 msgid "What people ask"

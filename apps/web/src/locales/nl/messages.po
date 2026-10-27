@@ -937,14 +937,6 @@ msgstr "{name} {range}, vervuld door {resolved}"
 msgid "{name} {range}, not met"
 msgstr "{name} {range}, niet vervuld"
 
-#: src/chat/builds-state.ts
-msgid "{name} changed"
-msgstr "{name} gewijzigd"
-
-#: src/chat/builds-state.ts
-msgid "{name} changed: it {does}"
-msgstr "{name} gewijzigd: {does}"
-
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
 msgstr "{name} kon niet worden verwijderd. Probeer het opnieuw."
@@ -1009,14 +1001,6 @@ msgstr "Logo van {name}"
 #: src/connections/connect-dialog.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} mag schrijven. Wijzigen naar Lezen"
-
-#: src/chat/builds-state.ts
-msgid "{name} no longer changes the domain's data (write → read)"
-msgstr "{name} wijzigt de gegevens van het domein niet meer (schrijven → lezen)"
-
-#: src/chat/builds-state.ts
-msgid "{name} now changes the domain's data (read → write)"
-msgstr "{name} wijzigt nu de gegevens van het domein (lezen → schrijven)"
 
 #: src/connections/connect-dialog.tsx
 msgid "{name} reads only. Change to Write"
@@ -3953,14 +3937,6 @@ msgstr "Wijzigingen die Grasp voor iemand verstuurde waarvan het antwoord verlor
 msgid "Changes something"
 msgstr "Wijzigt iets"
 
-#: src/chat/builds-state.ts
-msgid "changes the domain's data"
-msgstr "wijzigt de gegevens van het domein"
-
-#: src/chat/builds.tsx
-msgid "Changes the domain's data"
-msgstr "Wijzigt de gegevens van het domein"
-
 #: src/engines/store-changes.tsx
 msgid "Changes to the domain's stores"
 msgstr "Wijzigingen in de opslag van het domein"
@@ -4655,10 +4631,6 @@ msgstr "Gecorrigeerd door"
 #: src/dashboard/widget-board.tsx
 msgid "Could be better"
 msgstr "Kan beter"
-
-#: src/activity/pending.tsx
-msgid "couldn't be read"
-msgstr "kon niet worden gelezen"
 
 #: src/workflows/team-picker.tsx
 msgid "Couldn't change the team of {named}"
@@ -5808,14 +5780,6 @@ msgstr "Audittrail exporteren"
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
 msgstr "Het auditlogboek geëxporteerd"
-
-#: src/chat/builds.tsx
-msgid "Exports"
-msgstr "Exports"
-
-#: src/activity/pending.tsx
-msgid "Exports of {domain}: {covered}"
-msgstr "Exports van {domain}: {covered}"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -8447,6 +8411,10 @@ msgstr "Naar project verplaatsen"
 msgid "Moved old entries out of the audit trail"
 msgstr "Oude vermeldingen uit het auditlogboek verplaatst"
 
+#: src/activity/pending.tsx
+msgid "Mutations and actions of {domain}"
+msgstr "Mutaties en acties van {domain}"
+
 #: src/interview/voice-bar.tsx
 msgctxt "turn your microphone off for a moment"
 msgid "Mute"
@@ -9324,10 +9292,6 @@ msgstr "Geen actuele"
 #: src/onboarding/work-list.tsx
 msgid "None drawn yet. They show up here as the interviews come in."
 msgstr "Nog geen getekend. Ze verschijnen hier naarmate de interviews binnenkomen."
-
-#: src/activity/pending.tsx
-msgid "none now"
-msgstr "nu geen"
 
 #: src/engines/resource-bindings.tsx
 msgid "None of the domain's integration permissions serves {contract} with every action it declares. Grant one first."
@@ -10352,18 +10316,6 @@ msgctxt "the team for people a staff list gives no team"
 msgid "Other"
 msgstr "Overig"
 
-#: src/chat/builds-state.ts
-msgid "Other domains may no longer call {name}"
-msgstr "Andere domeinen mogen {name} niet meer aanroepen"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}"
-msgstr "Andere domeinen mogen nu {name} aanroepen"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}, which {does}"
-msgstr "Andere domeinen mogen nu {name} aanroepen, dat {does}"
-
 #: src/chat/failure.ts
 msgid "Other questions are using what's left of the model budget. Try again in a minute."
 msgstr "Andere vragen gebruiken wat er over is van het modelbudget. Probeer het over een minuut opnieuw."
@@ -11077,6 +11029,14 @@ msgstr "Wordt op je dashboard gezet…"
 msgid "Putting it right, try {attempt} of {attempts}…"
 msgstr "Wordt verbeterd, poging {attempt} van {attempts}…"
 
+#: src/activity/pending.tsx
+msgid "Queries of {domain}"
+msgstr "Queries van {domain}"
+
+#: src/activity/pending.tsx
+msgid "Queries, mutations and actions of {domain}"
+msgstr "Queries, mutaties en acties van {domain}"
+
 #: src/chat/suggestions.tsx
 msgid "Questions to start with"
 msgstr "Vragen om mee te beginnen"
@@ -11287,10 +11247,6 @@ msgstr "Lezen wie eigenaar kan zijn…"
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Je personeelslijst lezen"
-
-#: src/chat/builds-state.ts
-msgid "reads the domain's data"
-msgstr "leest de gegevens van het domein"
 
 #: src/knowledge/uploads.tsx
 #: src/onboarding/setup-frame.tsx
@@ -16159,10 +16115,6 @@ msgstr "Wat op jou wacht"
 #: src/workflows/requests/request-table.tsx
 msgid "What needs you can't be read right now."
 msgstr "Wat je nodig heeft, kan nu niet worden gelezen."
-
-#: src/chat/builds.tsx
-msgid "What other domains may call"
-msgstr "Wat andere domeinen mogen aanroepen"
 
 #: src/workflows/requests/request-table.tsx
 msgid "What people ask"
