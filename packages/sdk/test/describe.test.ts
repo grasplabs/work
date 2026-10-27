@@ -551,6 +551,7 @@ describe(describeWorkflow, () => {
       `return await brain(env.BRAIN).entities.list({ query: "On" });`,
       `return await brain(env.BRAIN).entities.sources({ entityId: "e" });`,
       `return await brain(env.BRAIN).relations.get({ entityId: "e" });`,
+      `return await brain(env.BRAIN).relations.explain({ entityId: "e" });`,
     ];
     expect(
       reads.map((code) => reviewedCalls(brainSource(code)).steps)

@@ -478,6 +478,8 @@ export const bindings = ({ connections, collections, brains = [] }) => {
         unwrapped(await currentAttempt().callBrain(name, "entitySources", request)),
       relationsGet: async (request) =>
         unwrapped(await currentAttempt().callBrain(name, "relationsGet", request)),
+      relationsExplain: async (request) =>
+        unwrapped(await currentAttempt().callBrain(name, "relationsExplain", request)),
     };
   }
   for (let index = 0; index < connections.length; index += 1) {

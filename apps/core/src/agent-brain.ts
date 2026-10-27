@@ -2,13 +2,14 @@ import type {
   BrainSourceRef,
   EntitySummary,
   MemoryPack,
+  RelationsExplanation,
   RelationView,
   SkillRead,
   SkillSelection,
 } from "@grasp-os/brain/contract";
 import { entitiesWithSources, entitySources } from "@grasp-os/brain/entities";
 import { recallWithSources } from "@grasp-os/brain/recall";
-import { relationsFor } from "@grasp-os/brain/relations";
+import { relationsExplain, relationsFor } from "@grasp-os/brain/relations";
 import {
   readSkillWithSources,
   selectSkillWithSources,
@@ -261,6 +262,28 @@ export class BrainAgentApi
   }
 
   /**
+   * The paths out from one entity through the chat's readable sources, one
+   * or two relations long, each relation with its passage.
+   */
+  async relationsExplain(input: unknown): Promise<RelationsExplanation> {
+    return await this.#delegated("brain.relationsExplain", async (reader) => {
+      const explained = await relationsExplain(
+        brainOf(this.env),
+        reader,
+        input
+      );
+      return {
+        value: explained,
+        ...citing(
+          explained.paths.flatMap(({ relations }) =>
+            relations.map(({ sourceRef }) => sourceRef)
+          )
+        ),
+      };
+    });
+  }
+
+  /**
    * `read` as the chat's delegate, after the run's check, with what it read
    * from recorded with the chat (`recordSources`) before it is handed over,
    * and the call recorded as every call of its code is, refused or not.
@@ -414,6 +437,8 @@ brain: {
   entitySources(input: { entityId: string }): Promise<Relation["sourceRef"][]>;
   /** What its sources say relates one entity to others (who owns or leads what), each with the source's own sentence: \`at\` (YYYY-MM-DD) for who held it on a date, \`knownAt\` (ISO instant) for what was known then. Quote the evidence; when relations conflict, say so and show both. */
   relations(input: { entityId: string; predicate?: string; at?: string; knownAt?: string }): Promise<Relation[]>;
+  /** How one entity connects to others, one or two relations out (\`hops\`, default 2), each path with every relation's passage, within \`budget\` (at most 50 paths); \`truncated\` when it was cut. Quote the evidence along the path. */
+  relationsExplain(input: { entityId: string; hops?: 1 | 2; predicate?: string; at?: string; knownAt?: string; budget?: { maxPaths?: number; deadlineMs?: number } }): Promise<{ paths: { relations: Relation[]; to: { entityId: string; name: string } }[]; truncated: boolean }>;
   /** Its open questions. Bring one up when the person could answer it, and say who can; you can't answer or close one yourself. */
   gaps(): Promise<BrainGap[]>;
   /** The skill that applies to a task, by its type and traits, or none: use none when none applies, never a skill that only seems close. */

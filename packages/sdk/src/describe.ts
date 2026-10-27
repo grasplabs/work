@@ -347,7 +347,7 @@ const isMethodCalled = (ancestors: Ancestor[]): boolean => {
 const brainGroupCalls: Readonly<Record<string, ReadonlySet<string>>> = {
   skills: new Set(["select", "read"]),
   entities: new Set(["list", "sources"]),
-  relations: new Set(["get"]),
+  relations: new Set(["get", "explain"]),
 };
 
 /**
