@@ -122,6 +122,7 @@ import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import {
   chatMessageOf,
+  noteLinksOf,
   coreMessageProvider,
   partialOf,
 } from "./chat-messages.ts";
@@ -2547,25 +2548,22 @@ export class Workspace extends DurableObject<Env> {
         )
       )
       .get();
-    const shown =
+    const links =
       stored === undefined
-        ? undefined
-        : chatMessageOf(
-            stored.id,
+        ? []
+        : noteLinksOf(
             storedMessageSchema.parse(JSON.parse(stored.message)),
-            stored.createdAt,
             this.#givenBy(scope.chatId)(stored.id)
           );
-    if (shown?.role !== "assistant" || shown.citations.length === 0) {
+    if (links.length === 0) {
       return [];
     }
-    const documentIds = shown.citations.map(({ documentId }) => documentId);
     return await readAsDelegate(
       this.env,
       chatAuthority(scope),
       chatContext(scope),
       undefined,
-      async (reader) => await cited(brainOf(this.env), reader, documentIds)
+      async (reader) => await cited(brainOf(this.env), reader, links)
     );
   }
 

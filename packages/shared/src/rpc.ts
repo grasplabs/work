@@ -32,6 +32,7 @@ import type { SignalsApi } from "./signals.ts";
 import type { StoresApi } from "./stores.ts";
 import type { ScreenSubmissionsApi } from "./submissions.ts";
 import type { UploadsApi } from "./uploads.ts";
+import type { WaitingApi } from "./waiting.ts";
 import type { WorkflowResourcesApi } from "./workflow-resources.ts";
 import type { WorkflowsApi } from "./workflows.ts";
 
@@ -143,6 +144,11 @@ export interface SessionApi {
    * them.
    */
   readonly notifications: NotificationsApi;
+  /**
+   * Everything that waits on the person, in one feed, each item with the
+   * verdicts it takes: what the inbox and the dashboard's to-do show.
+   */
+  readonly waiting: WaitingApi;
   /**
    * Decisions workflow runs wait for, answered by the people they are
    * from, whatever their role.

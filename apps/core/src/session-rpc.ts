@@ -37,6 +37,7 @@ import { staffAudited } from "./staff-audit.ts";
 import { StoresRpc } from "./stores-rpc.ts";
 import { TemplatesRpc } from "./templates-rpc.ts";
 import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
+import { WaitingRpc } from "./waiting-rpc.ts";
 import { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
 import { WorkflowsRpc } from "./workflows/rpc.ts";
 
@@ -85,6 +86,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #sessions: SessionsRpc;
   readonly #channelAccounts: ChannelAccountsRpc;
   readonly #notifications: NotificationsRpc;
+  readonly #waiting: WaitingRpc;
   readonly #onboarding: OnboardingRpc;
   readonly #onboardingStaff: OnboardingStaffRpc;
   readonly #onboardingGate: OnboardingGateRpc;
@@ -130,6 +132,19 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#sessions = new SessionsRpc(env, full, sessionId);
     this.#channelAccounts = new ChannelAccountsRpc(env, full);
     this.#notifications = new NotificationsRpc(env, full);
+    // Read from and acting through the namespaces above, with their checks.
+    this.#waiting = new WaitingRpc(full, {
+      pendingActions: this.#pendingActions,
+      unknownOutcomes: this.#unknownOutcomes,
+      permissions: this.#permissions,
+      dependencies: this.#dependencies,
+      screenTrust: this.#screenTrust,
+      apps: this.#apps,
+      notifications: this.#notifications,
+      connections: this.#connections,
+      decisions: this.#decisions,
+      chats: this.#chats,
+    });
     this.#onboarding = new OnboardingRpc(env, check);
     this.#onboardingStaff = new OnboardingStaffRpc(env, check);
     this.#onboardingGate = new OnboardingGateRpc(env, check);
@@ -145,6 +160,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get notifications(): NotificationsRpc {
     return this.#notifications;
+  }
+
+  get waiting(): WaitingRpc {
+    return this.#waiting;
   }
 
   get onboarding(): OnboardingRpc {

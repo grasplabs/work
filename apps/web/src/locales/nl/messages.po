@@ -1760,6 +1760,10 @@ msgstr "per maand"
 msgid "A new template"
 msgstr "Een nieuwe sjabloon"
 
+#: src/inbox/items.ts
+msgid "A new version of {name} is up for review, and you answer for it. It runs once it is made current, on the domain's page."
+msgstr "Een nieuwe versie van {name} wacht op beoordeling, en jij bent er verantwoordelijk voor. Hij draait zodra hij actueel is gemaakt, op de pagina van het domein."
+
 #: src/screens/screen-frame.tsx
 msgid "A new version of this app is ready"
 msgstr "Er staat een nieuwe versie van deze app klaar"
@@ -7511,6 +7515,10 @@ msgstr "Versie {version} actueel maken"
 msgid "Make version {version} current and publish"
 msgstr "Versie {version} actueel maken en publiceren"
 
+#: src/inbox/items.ts
+msgid "Make version {version} of {name} live?"
+msgstr "Versie {version} van {name} live zetten?"
+
 #: src/connections/integration-row.tsx
 msgid "Manage"
 msgstr "Beheren"
@@ -11704,6 +11712,10 @@ msgstr "Bron"
 msgctxt "column: how Grasp knows an app is used"
 msgid "Source"
 msgstr "Bron"
+
+#: src/chat/cited-note.tsx
+msgid "Source {number}: {title}"
+msgstr "Bron {number}: {title}"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
