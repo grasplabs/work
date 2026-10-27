@@ -230,6 +230,9 @@ const coreDb: D1State = {
       "App token signing keys, private keys encrypted with BETTER_AUTH_SECRET."
     ),
     organizations: exported(auth),
+    policy_documents: exported(`${core}policies.ts`),
+    policy_rules: exported(`${core}policies.ts`),
+    policy_exceptions: exported(`${core}policies.ts`),
     members: exported(auth),
     member_removals: exported(`${core}organization.ts`),
     channel_accounts: exported(`${core}channels/accounts.ts`),
@@ -448,6 +451,10 @@ const knowledgeDb: D1State = {
     brain_entity_keys: exported(
       `${brain}entities.ts`,
       `The exact evidence each entity is known by, as deployment-keyed HMACs. ${brainPending}`
+    ),
+    brain_assertions: exported(
+      `${brain}entities.ts`,
+      `Relations the Brain's sources state between their entities, with their passages: derived, but only by model calls again. ${brainPending}`
     ),
     brain_mentions: exported(
       `${brain}entities.ts`,

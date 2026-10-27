@@ -89,6 +89,7 @@ const shown = async (
     offered: [],
     made: { state: "ready", data: [] },
     returns: noReturns,
+    goals: never,
     workflows: never,
     engines: never,
     runs: never,

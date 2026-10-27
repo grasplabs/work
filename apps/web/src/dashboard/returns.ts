@@ -1,3 +1,5 @@
+import type { Goal } from "@grasp-os/shared/brain";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 
@@ -5,10 +7,12 @@ import { msg } from "@lingui/core/macro";
 // Grasp (`lib/dashboard.ts`): what each workflow brings back, how far the
 // board's goals are, and how far each team is with AI, read from the work
 // itself. The return, goals and teams widgets draw it
-// (`standard-widgets.tsx`). Core keeps none of it yet: no hours by hand,
-// no stage on the way to live, no goals, no team behind a workflow. So
-// the board gives those widgets nothing, and each says so as the
-// prototype does; once core has it, it fills these shapes. Euros are the
+// (`standard-widgets.tsx`). Core keeps the board's goals and the
+// workflows linked to each (`brain.goals`), but no hours by hand, no
+// stage on the way to live and no team behind a workflow yet. So the
+// goals widget shows each goal and how many of its workflows run, without
+// a return; the return and teams widgets get nothing, and say so as the
+// prototype does; once core has the rest, it fills these shapes. Euros are the
 // value of the hours by hand at the client's own rate, never money saved.
 
 /**
@@ -169,6 +173,48 @@ export interface TeamProgress {
   /** Behind the company: work drawn, nothing tested yet, and less of it redesigned than the company's. */
   needsHelp: boolean;
 }
+
+/**
+ * The board's goals as core keeps them (`brain.goals`), each by its newest
+ * wording, with the workflows linked to it that `workflows` lists: live
+ * once it handled items this week, else in its test (it is built, in an
+ * App, and handles nothing yet). Core keeps no hours, so no return: a
+ * workflow's is unknown.
+ */
+export const goalProgressOf = (
+  goals: readonly Goal[],
+  workflows: readonly WorkflowSummary[]
+): GoalProgress[] =>
+  goals.map((goal) => {
+    const rows = goal.workflows.flatMap(({ app, workflow }) => {
+      const summary = workflows.find(
+        (each) => each.app === app && each.workflow === workflow
+      );
+      if (summary === undefined) {
+        return [];
+      }
+      const row: WorkflowReturn = {
+        workflow: { app, name: workflow, teamId: null, goalId: goal.id },
+        stage: summary.handled > 0 ? "live" : "testing",
+        hoursBefore: null,
+        hoursAfter: null,
+        before: null,
+        after: null,
+        back: null,
+        cut: null,
+        basis: "unknown",
+      };
+      return [row];
+    });
+    return {
+      id: goal.id,
+      title: goal.versions.at(-1)?.title ?? "",
+      rows,
+      live: rows.filter(({ stage }) => stage === "live").length,
+      back: 0,
+      coming: 0,
+    };
+  });
 
 /** What the board's return, goals and teams widgets are drawn from. */
 export interface WorkReturns {

@@ -2,9 +2,15 @@ import {
   dashboardErrors,
   dashboardLayoutSchema,
 } from "@grasp-os/shared/dashboard";
-import type { DashboardApi, DashboardLayout } from "@grasp-os/shared/dashboard";
+import type {
+  BoardReport,
+  DashboardApi,
+  DashboardLayout,
+} from "@grasp-os/shared/dashboard";
 import type { CustomWidget, WidgetMade } from "@grasp-os/shared/widgets";
 
+import { boardReportOf } from "./board-report.ts";
+import type { BoardReportSources } from "./board-report.ts";
 import {
   customWidgetsOf,
   dashboardWork,
@@ -24,17 +30,27 @@ import type { SessionCheck } from "./session-check.ts";
 // check hands them over, so nobody reads or saves another's. Their
 // layout isn't audited: it changes what one person sees of what they may
 // already see, as marking notifications read does. Making, changing and
-// removing a widget is, with each model call.
+// removing a widget is, with each model call. Its weekly report is read
+// through the session's other namespaces (board-report.ts).
 
 /** The signed-in person's dashboard. */
 export class DashboardRpc extends CoreRpcTarget implements DashboardApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
+  readonly #sources: BoardReportSources;
 
-  constructor(env: Env, check: SessionCheck) {
+  constructor(env: Env, check: SessionCheck, sources: BoardReportSources) {
     super();
     this.#env = env;
     this.#check = check;
+    this.#sources = sources;
+  }
+
+  async report(): Promise<BoardReport> {
+    return await withPerson(
+      this.#check,
+      async (person) => await boardReportOf(this.#sources, person)
+    );
   }
 
   async layout(): Promise<DashboardLayout | null> {

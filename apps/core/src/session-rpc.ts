@@ -25,6 +25,7 @@ import { OrganizationRpc } from "./organization.ts";
 import { SessionsRpc } from "./own-sessions.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
+import { PoliciesRpc } from "./policies.ts";
 import { ResourceBindingsRpc } from "./resource-bindings-rpc.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { ScreenSubmissionsRpc } from "./screen-submissions.ts";
@@ -65,6 +66,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #templates: TemplatesRpc;
   readonly #connections: ConnectionsRpc;
   readonly #landscape: LandscapeRpc;
+  readonly #policies: PoliciesRpc;
   readonly #workflows: WorkflowsRpc;
   readonly #workflowResources: WorkflowResourcesRpc;
   readonly #decisions: DecisionsRpc;
@@ -111,6 +113,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#templates = new TemplatesRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
     this.#landscape = new LandscapeRpc(env, full);
+    this.#policies = new PoliciesRpc(env, full);
     this.#workflows = new WorkflowsRpc(env, full);
     this.#workflowResources = new WorkflowResourcesRpc(env, full);
     this.#decisions = new DecisionsRpc(env, full);
@@ -127,7 +130,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#screenSubmissions = new ScreenSubmissionsRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
-    this.#dashboard = new DashboardRpc(env, full);
     this.#emailPreferences = new EmailPreferencesRpc(env, full);
     this.#sessions = new SessionsRpc(env, full, sessionId);
     this.#channelAccounts = new ChannelAccountsRpc(env, full);
@@ -148,6 +150,14 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#onboarding = new OnboardingRpc(env, check);
     this.#onboardingStaff = new OnboardingStaffRpc(env, check);
     this.#onboardingGate = new OnboardingGateRpc(env, check);
+    // Its report read through the namespaces above, with their checks.
+    this.#dashboard = new DashboardRpc(env, full, {
+      onboarding: this.#onboarding,
+      workflows: this.#workflows,
+      signals: this.#signals,
+      knowledgeSignals: this.#knowledgeSignals,
+      apps: this.#apps,
+    });
   }
 
   get sessions(): SessionsRpc {
@@ -232,6 +242,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get landscape(): LandscapeRpc {
     return this.#landscape;
+  }
+
+  get policies(): PoliciesRpc {
+    return this.#policies;
   }
 
   get workflows(): WorkflowsRpc {

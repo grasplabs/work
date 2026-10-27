@@ -31,6 +31,7 @@
     "./purge": "./src/purge.ts",
     "./recall": "./src/recall.ts",
     "./recall-store": "./src/recall-store.ts",
+    "./relations": "./src/relations.ts",
     "./schema": "./src/db/schema.ts",
     "./search": "./src/search.ts",
     "./search-detail": "./src/search-detail.ts",
