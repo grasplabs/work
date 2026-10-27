@@ -1,4 +1,5 @@
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
+import { noContext } from "@grasp-os/shared/onboarding-context";
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -25,6 +26,7 @@ const view: OnboardingView = {
   agreed: false,
   paused: false,
   sponsor: null,
+  context: noContext,
   waiting: 0,
 };
 
