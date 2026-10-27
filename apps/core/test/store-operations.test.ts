@@ -1354,6 +1354,21 @@ describe("a workflow calling a store's public operation", () => {
       approval: null,
       contract: key,
     };
+    // Each approval and revocation audited, as the approval's batch and
+    // the revocation's own change decide, never the inventory's.
+    const events = await allEvents();
+    const audited = events
+      .filter(
+        ({ action, target }) =>
+          action.startsWith("workflow.binding.") && target?.id === workflow.id
+      )
+      .map(({ action, detail }) => [action, detail.approval]);
+    expect(audited).toStrictEqual([
+      ["workflow.binding.approved", first.id],
+      ["workflow.binding.approved", second.id],
+      // The first, replaced already, changed nothing when revoked.
+      ["workflow.binding.revoked", second.id],
+    ]);
     expect({
       published,
       approved,
