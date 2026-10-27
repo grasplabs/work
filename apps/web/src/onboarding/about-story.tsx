@@ -23,7 +23,13 @@ import {
 } from "../voice/voice.ts";
 import type { Tone } from "../voice/voice.ts";
 import { KnowledgeBar } from "./knowledge-bar.tsx";
-import { Explained, Primary, Seen, tones } from "./setup-parts.tsx";
+import {
+  Explained,
+  Primary,
+  Seen,
+  tones,
+  useEntrance,
+} from "./setup-parts.tsx";
 import type { StepProps } from "./setup-steps.tsx";
 import { readingSeconds } from "./setup.ts";
 
@@ -549,6 +555,11 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   );
 
   const line = lines[beat]?.text ?? "";
+  // Told before, the plan is there summed up at once.
+  const toldEntrance = useEntrance(
+    told ? "told" : "",
+    "animate-in fade-in duration-800"
+  );
   let shownLine = (
     <div
       className="animate-in fade-in slide-in-from-bottom-2 flex w-full flex-col items-center gap-5 duration-600"
@@ -561,10 +572,7 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   );
   if (told) {
     shownLine = (
-      <div
-        className="animate-in fade-in flex flex-col gap-2 duration-800"
-        key="told"
-      >
+      <div className={cn("flex flex-col gap-2", toldEntrance)} key="told">
         <p className="text-2xl font-medium tracking-tight">{t`Here’s the plan`}</p>
         <p className="text-muted-foreground text-balance">
           {t`Your people, documents and tools first. Then two weeks of short conversations with your team. At ${threshold}%, your team can start.`}

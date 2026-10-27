@@ -3069,6 +3069,10 @@ msgstr "Ausente estas semanas. Nada espera a {first}."
 msgid "Back"
 msgstr "Atrás"
 
+#: src/onboarding/setup-frame.tsx
+msgid "Back and forward"
+msgstr "Atrás y adelante"
+
 #: src/brain/atlas-overlays.tsx
 msgid "Back to {destination}"
 msgstr "Volver a {destination}"
@@ -5773,6 +5777,10 @@ msgstr "Solo para esta organización. Todas empiezan con los mismos valores, y G
 msgctxt "kind of app"
 msgid "Forms and surveys"
 msgstr "Formularios y encuestas"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Forward"
+msgstr "Adelante"
 
 #: src/connections/request-app-dialog.tsx
 msgid "Forwarded to our team"

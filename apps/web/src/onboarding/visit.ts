@@ -9,7 +9,7 @@ import type { SetupStep } from "./setup.ts";
 // in this tab for as long as it is open, so a step left for a sign-in and
 // come back to, or the page drawn anew in another language, counts too.
 // And what the admin changed on a step and didn't save yet, so it is as
-// they left it: kept while the page is open.
+// they left it, or that they confirmed it: kept while the page is open.
 
 /** Where this tab keeps the steps Stephen finished. */
 const heardKey = "grasp.setup.heard";
@@ -70,6 +70,9 @@ const draftSlot = <T>(): DraftSlot<T> => {
 
 /** Who leads which team and which take part, being confirmed. */
 export const orgDraft = draftSlot<Roster>();
+
+/** That the organization was confirmed as core has it, on this page: coming back to it, it still stands confirmed. */
+export const orgConfirmed = draftSlot<true>();
 
 /** When the interviews start, being chosen. */
 export const planDraft = draftSlot<SendChoice>();

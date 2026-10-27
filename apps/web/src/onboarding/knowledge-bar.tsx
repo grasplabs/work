@@ -7,6 +7,7 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { Fragment, useSyncExternalStore } from "react";
 
+import { useEntrance } from "./setup-parts.tsx";
 import { dotsOf } from "./setup.ts";
 import type { KnownDot } from "./setup.ts";
 
@@ -116,13 +117,15 @@ export const KnowledgeBar = ({
   const { t } = useLingui();
   const dots = dotsOf(parts, useDotCount());
   const cut = Math.round((threshold / 100) * dots.length);
+  const captionEntrance = useEntrance(
+    caption ?? "",
+    "animate-in fade-in duration-400"
+  );
   return (
     <div className="flex w-full flex-col gap-4 overflow-x-clip text-left">
       {/* Side by side where both fit; on a phone, in a longer language, where the team can start goes under. */}
       <div className="flex min-h-5 flex-wrap items-baseline justify-between gap-x-4">
-        <span className="animate-in fade-in font-medium duration-400">
-          {caption}
-        </span>
+        <span className={cn("font-medium", captionEntrance)}>{caption}</span>
         <span
           className={cn(
             "text-muted-foreground transition-opacity duration-600",
@@ -155,7 +158,7 @@ export const KnowledgeCorner = ({ parts, percent, threshold }: Knowledge) => {
   const gate = Math.round((threshold / 100) * dots.length);
   return (
     // On a screen too narrow even for 20 dots, the dots grow smaller with it, still round, and the percentage keeps its size; the name makes way first.
-    <div className="animate-in fade-in min-w-0 duration-500">
+    <div className="min-w-0">
       <Tooltip>
         <TooltipTrigger
           render={

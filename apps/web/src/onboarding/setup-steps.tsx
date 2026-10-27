@@ -101,11 +101,13 @@ import {
   LaterLink,
   MoreAbout,
   Onward,
+  Opening,
   Primary,
   Seen,
   stepLine,
   SupportLink,
   tones,
+  useEntrance,
   useSayFollowing,
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
@@ -119,7 +121,13 @@ import {
   staffListOf,
   withSaved,
 } from "./staff-list.ts";
-import { noteHeard, orgDraft, planDraft, wasHeard } from "./visit.ts";
+import {
+  noteHeard,
+  orgConfirmed,
+  orgDraft,
+  planDraft,
+  wasHeard,
+} from "./visit.ts";
 import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 
 // One screen of the client onboarding, by step (prototype
@@ -1235,6 +1243,10 @@ const Documents = (props: StepProps) => {
     ...pending,
   ];
   const ask = open?.reading.ask ?? null;
+  const askEntrance = useEntrance(
+    open?.id ?? "",
+    "animate-in fade-in slide-in-from-bottom-1 duration-300"
+  );
   return (
     <>
       <Heading
@@ -1293,7 +1305,7 @@ const Documents = (props: StepProps) => {
         )}
         {open === undefined || ask === null ? null : (
           <div
-            className="animate-in fade-in slide-in-from-bottom-1 flex flex-col items-center gap-2 duration-300"
+            className={cn("flex flex-col items-center gap-2", askEntrance)}
             key={open.id}
           >
             <p className="text-balance">
@@ -1361,7 +1373,12 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
     orgDraft.keep(from, next);
     setDraft(next);
   };
-  const [saved, setSaved] = useState(false);
+  // Confirmed as it stands: on this visit ("now"), or before, on this page, and nothing changed since ("before").
+  const [saved, setSaved] = useState<"now" | "before" | null>(() =>
+    orgDraft.of(from) === undefined && orgConfirmed.of(from) === true
+      ? "before"
+      : null
+  );
   // What Stephen says of the HR platform, once it was read or could not be.
   const [fromHr, setFromHr] = useState<Answer>();
   const teams = draft.teams
@@ -1377,7 +1394,7 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
     (team) => !team.off && team.lead === null
   ).length;
   const change = (id: string, next: Partial<Roster["teams"][number]>) => {
-    setSaved(false);
+    setSaved(null);
     redraft({
       ...draft,
       teams: draft.teams.map((team) =>
@@ -1386,17 +1403,18 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
     });
   };
   // A thank-you, said on its own every time it is saved, and quick: the count is only known as he says it.
-  const answer: Answer | undefined = saved
-    ? {
-        text: plural(leads, {
-          one: "Thank you. I’ll start with this lead.",
-          other: "Thank you. I’ll start with these # leads.",
-        }),
-        announce: true,
-        tone: tones.warm,
-        quick: true,
-      }
-    : fromHr;
+  const answer: Answer | undefined =
+    saved === null
+      ? fromHr
+      : {
+          text: plural(leads, {
+            one: "Thank you. I’ll start with this lead.",
+            other: "Thank you. I’ll start with these # leads.",
+          }),
+          announce: saved === "now",
+          tone: tones.warm,
+          quick: true,
+        };
   return (
     <>
       <Heading
@@ -1481,15 +1499,7 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
         <WaitingNote waiting={props.data.view.waiting} />
         <ErrorText>{failure}</ErrorText>
       </Onward>
-      {saved ? (
-        <Primary
-          onClick={() => {
-            props.go("team");
-          }}
-        >
-          {t`Continue`}
-        </Primary>
-      ) : (
+      {saved === null ? (
         <Primary
           busy={busy}
           onClick={() => {
@@ -1498,20 +1508,30 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
                 async (session) => await session.onboarding.confirmRoster(draft)
               );
               if (kept !== undefined) {
+                // Coming back while it stands as confirmed, it still is.
+                orgConfirmed.keep(JSON.stringify(kept.roster), true);
                 await refresh();
-                setSaved(true);
+                setSaved("now");
               }
             })();
           }}
         >
           {t`This is right`}
         </Primary>
+      ) : (
+        <Primary
+          onClick={() => {
+            props.go("team");
+          }}
+        >
+          {t`Continue`}
+        </Primary>
       )}
       <HrLeads
         hr={props.data.hr}
         onAnswer={setFromHr}
         onRoster={(roster) => {
-          setSaved(false);
+          setSaved(null);
           redraft(roster);
         }}
         roster={draft}
@@ -1762,6 +1782,10 @@ const ListeningStep = (props: StepProps) => {
   // oxlint-disable-next-line react/hook-use-state -- read once as the step arrives, never set
   const [mailShown] = useState(() => !props.settled.includes("mail"));
   const gateOpen = percent >= data.gate.threshold;
+  const gateEntrance = useEntrance(
+    gateOpen ? "open" : "",
+    "animate-in fade-in slide-in-from-bottom-2 duration-400"
+  );
   return (
     <>
       <Heading
@@ -1785,7 +1809,12 @@ const ListeningStep = (props: StepProps) => {
             view={data.view}
           />
           {gateOpen ? (
-            <div className="animate-in fade-in slide-in-from-bottom-2 flex w-full flex-col items-center gap-3 text-center duration-400">
+            <div
+              className={cn(
+                "flex w-full flex-col items-center gap-3 text-center",
+                gateEntrance
+              )}
+            >
               <Callout
                 text={t`I’ve heard enough to open. There are just a few things I need from you first.`}
               />
@@ -1965,8 +1994,9 @@ const bodies: Record<SetupStep, ComponentType<StepProps>> = {
  * One screen of the onboarding, by step: one title, one sentence, one
  * small action, one main button. `cramped`: on a phone, the step does not
  * fit beside even the smallest brain; `onMadeWay` hears how much room its
- * sentence frees as it makes way. A step Stephen finished before in this
- * tab is shown in full at once (`Seen`).
+ * sentence frees as it makes way. Each step fades in, but one Stephen
+ * finished before in this tab opens as it was left (`Seen`, `Opening`):
+ * in full at once, with what was given on it, and nothing coming in.
  */
 export const SetupStepBody = ({
   step,
@@ -1982,6 +2012,11 @@ export const SetupStepBody = ({
   // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
   const [seen] = useState(() => wasHeard(step));
   const [explained, setExplained] = useState(seen);
+  // Finished before, it opens as it was left: what is drawn as it arrives is there at once.
+  const opening = useRef(seen);
+  useEffect(() => {
+    opening.current = false;
+  }, []);
   // This step's line and the next one's are fetched ahead, so he starts the moment a step arrives; a step seen is not said again.
   const headlines = useHeadlines(props);
   const [here, ahead] = [step, steps[stepIndex(step) + 1]].map((each) => {
@@ -2002,9 +2037,18 @@ export const SetupStepBody = ({
   return (
     <Cramped value={{ cramped, onMadeWay }}>
       <Seen value={seen}>
-        <Explained value={{ explained, onExplained }}>
-          <Body {...props} />
-        </Explained>
+        <Opening value={opening}>
+          <Explained value={{ explained, onExplained }}>
+            <div
+              className={cn(
+                "flex w-full flex-col items-center gap-6",
+                !seen && "animate-in fade-in duration-500"
+              )}
+            >
+              <Body {...props} />
+            </div>
+          </Explained>
+        </Opening>
       </Seen>
     </Cramped>
   );

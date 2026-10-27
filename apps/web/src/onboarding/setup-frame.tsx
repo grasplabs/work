@@ -1,7 +1,8 @@
 import { Button } from "@grasp-os/ui/components/button";
+import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
-import { ArrowLeftIcon } from "lucide-react";
-import { useEffect } from "react";
+import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { GraspMark } from "../grasp-mark.tsx";
@@ -9,17 +10,20 @@ import { LanguageButton } from "../language-picker.tsx";
 import { SoundControls } from "../voice/sound-controls.tsx";
 import { KnowledgeCorner } from "./knowledge-bar.tsx";
 import type { Knowledge } from "./knowledge-bar.tsx";
-import { stepIndex, steps, wizardSteps } from "./setup.ts";
+import { stepIndex, steps, waysFrom, wizardSteps } from "./setup.ts";
 import type { SetupStep } from "./setup.ts";
+import { wasHeard } from "./visit.ts";
 
 // The frame of every onboarding screen (prototype
 // `components/onboarding/onboarding-frame.tsx`), with as little as possible
 // around the step: from the third step, what Grasp knows of the
 // organization, top centre, and from the second a way back a step, top
-// left, in the same row; one centred column; where you are, bottom centre;
+// left, in the same row, with a way on beside it as far as you have been;
+// one centred column; where you are, bottom centre;
 // bottom right, pause and the sound, with the language before them on
 // every step after the first, where it is chosen. The dots go back, and
-// forward again as far as you have been; so do the arrow keys; Escape
+// forward again as far as you have been; so do the arrow keys and the
+// arrows at the top (setup.ts `waysFrom`); Escape
 // leaves. After the wizard, a word says where things stand. The frame is
 // as high as the window and the page never scrolls, so the way on is
 // always in sight.
@@ -41,11 +45,12 @@ const dotOf = (at: number, index: number): string => {
 /** The dots for the wizard's steps, each a way back, and on as far as you have been. */
 const StepDots = ({
   index,
-  reached,
+  open,
   onGo,
 }: {
   index: number;
-  reached: number;
+  /** Whether the step at a place can be gone to. */
+  open: (at: number) => boolean;
   onGo: (step: SetupStep) => void;
 }) => {
   const { t } = useLingui();
@@ -58,7 +63,7 @@ const StepDots = ({
             aria-current={at === index ? "step" : undefined}
             aria-label={t`Step ${n}`}
             className="focus-visible:ring-ring/50 flex h-6 items-center rounded-full px-0.75 outline-none focus-visible:ring-3 disabled:cursor-default"
-            disabled={at > reached}
+            disabled={!open(at)}
             key={each}
             onClick={() => {
               onGo(each);
@@ -71,6 +76,29 @@ const StepDots = ({
       })}
     </span>
   );
+};
+
+/**
+ * Something around a step that turns up with it, such as the way back or
+ * the brain: it comes in (`motion`), unless it turns up on a step finished
+ * before (`settled`), as it was then. Decided as it turns up, so it never
+ * comes in again while it stays.
+ */
+export const Arriving = ({
+  settled,
+  className = "min-w-0",
+  motion = "animate-in fade-in duration-500",
+  children,
+}: {
+  settled: boolean;
+  className?: string;
+  /** How it comes in. */
+  motion?: string;
+  children: ReactNode;
+}) => {
+  // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
+  const [still] = useState(settled);
+  return <span className={cn(className, !still && motion)}>{children}</span>;
 };
 
 export const SetupFrame = ({
@@ -96,7 +124,9 @@ export const SetupFrame = ({
     open: t`Ready`,
   };
   const word = words[step];
-  const back = steps[index - 1];
+  const { back, on, open } = waysFrom(index, reached);
+  // Back on a step finished before, what turns up around it is there at once, too.
+  const settled = wasHeard(step);
 
   // With nothing on screen to leave by, Escape does it, unless something open is closing on it.
   useEffect(() => {
@@ -118,11 +148,14 @@ export const SetupFrame = ({
 
   return (
     <div className="bg-background flex h-svh flex-col overflow-hidden text-sm">
-      {/* A way back a step on the left, and how much Grasp knows of the organization in the middle, in one row. */}
+      {/* The ways back and on a step on the left, and how much Grasp knows of the organization in the middle, in one row. */}
       <header className="setup-header grid h-18 flex-none items-center px-4 sm:px-10">
-        <div className="flex items-center">
+        <nav
+          aria-label={t`Back and forward`}
+          className="flex items-center gap-1"
+        >
           {back === undefined ? null : (
-            <span className="animate-in fade-in duration-500">
+            <Arriving settled={settled}>
               <Button
                 onClick={() => {
                   onGo(back);
@@ -133,11 +166,28 @@ export const SetupFrame = ({
                 <ArrowLeftIcon data-icon="inline-start" />
                 {t`Back`}
               </Button>
-            </span>
+            </Arriving>
           )}
-        </div>
+          {/* On only as far as they have been: on the furthest step there is nowhere further to go. */}
+          {on === undefined ? null : (
+            <Arriving settled={settled}>
+              <Button
+                onClick={() => {
+                  onGo(on);
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                {t`Forward`}
+                <ArrowRightIcon data-icon="inline-end" />
+              </Button>
+            </Arriving>
+          )}
+        </nav>
         {index >= stepIndex("company") ? (
-          <KnowledgeCorner {...knowledge} />
+          <Arriving settled={settled}>
+            <KnowledgeCorner {...knowledge} />
+          </Arriving>
         ) : (
           <span />
         )}
@@ -151,7 +201,7 @@ export const SetupFrame = ({
         <GraspMark className="text-foreground size-5" />
         <nav aria-label={t`Onboarding steps`} className="flex items-center">
           {word === undefined ? (
-            <StepDots index={index} onGo={onGo} reached={reached} />
+            <StepDots index={index} onGo={onGo} open={open} />
           ) : (
             <span
               className="text-muted-foreground animate-in fade-in slide-in-from-bottom-1 duration-200"
