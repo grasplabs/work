@@ -18,23 +18,35 @@ export const notInList = (value: SQLWrapper, values: readonly string[]): SQL =>
 const maxBoundParameters = 100;
 
 /**
- * `rows` in chunks of as many as one insert of them binds within D1's
- * limit, counted from the statement `bound` says one row's insert binds:
- * a row can bind more than its columns (a version taken through a guarded
- * subselect binds the guard's own), so its columns are no measure.
+ * `rows` in chunks one insert each, every chunk binding no more than D1
+ * takes, by what `bound` says each row's insert binds: counted from the
+ * statement, since a row can bind more than its columns (a version taken
+ * through a guarded subselect binds the guard's own).
  */
 export const insertChunks = <Row>(
   rows: readonly Row[],
   bound: (row: Row) => number
 ): Row[][] => {
-  const [first] = rows;
-  if (first === undefined) {
-    return [];
-  }
-  const size = Math.max(1, Math.floor(maxBoundParameters / bound(first)));
   const chunks: Row[][] = [];
-  for (let start = 0; start < rows.length; start += size) {
-    chunks.push(rows.slice(start, start + size));
+  let chunk: Row[] = [];
+  let used = 0;
+  for (const row of rows) {
+    const needs = bound(row);
+    if (needs > maxBoundParameters) {
+      throw new RangeError(
+        `One row binds ${needs} parameters; D1 binds at most ${maxBoundParameters}.`
+      );
+    }
+    if (used + needs > maxBoundParameters) {
+      chunks.push(chunk);
+      chunk = [];
+      used = 0;
+    }
+    chunk.push(row);
+    used += needs;
+  }
+  if (chunk.length > 0) {
+    chunks.push(chunk);
   }
   return chunks;
 };
