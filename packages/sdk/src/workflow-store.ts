@@ -108,6 +108,12 @@ export type ObservedRun = Readonly<RunHandle> & {
 export type WorkflowRunView<Output> =
   | { readonly status: "idle" }
   | { readonly status: "loading"; readonly runId: string }
+  /**
+   * The run was shown, and the person may see it no more (a decision that
+   * asked them was answered, its alias bound elsewhere): nothing of it is
+   * shown, and it is no error. Shown again should access come back.
+   */
+  | { readonly status: "unavailable"; readonly runId: string }
   | (ObservedRun & {
       readonly status: "queued" | "running" | "waiting" | "paused";
       readonly finishedAt: null;
@@ -612,7 +618,11 @@ export class WorkflowStore {
       return Object.freeze({ ...commands, status: "idle" });
     }
     if (snapshot === undefined) {
-      return Object.freeze({ ...commands, status: "loading", runId });
+      return Object.freeze({
+        ...commands,
+        status: run?.unavailable === true ? "unavailable" : "loading",
+        runId,
+      });
     }
     return Object.freeze({ ...commands, ...runView(snapshot) });
   }
