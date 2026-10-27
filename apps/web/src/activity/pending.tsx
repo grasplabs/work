@@ -128,7 +128,7 @@ const coveredExports = (
 
 /** What it asks for, by ID: connections and collections have no names here. */
 export const objectOf = (
-  { object, actions }: Permission,
+  { object, actions, reach }: Permission,
   directory: Directory,
   exports: PendingRequests["exports"]
 ): string => {
@@ -165,6 +165,33 @@ export const objectOf = (
     return i18n._(
       msg`Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it`
     );
+  }
+  if (object.type === "store" && reach !== undefined) {
+    // Consent in plain words: a workflow's store, whose operations reach
+    // every record of their tables, whoever owns it.
+    const reads = formatList([
+      ...new Set(
+        reach.filter(({ changes }) => !changes).map(({ table }) => table)
+      ),
+    ]);
+    const changes = formatList([
+      ...new Set(
+        reach.filter(({ changes: writes }) => writes).map(({ table }) => table)
+      ),
+    ]);
+    const store = ph({ store: object.storeId });
+    if (changes === "") {
+      return i18n._(
+        msg`Store ${store}, a workflow's. This can read every record of ${reads}, whoever owns it`
+      );
+    }
+    return reads === ""
+      ? i18n._(
+          msg`Store ${store}, a workflow's. This can read and change every record of ${changes}, whoever owns it`
+        )
+      : i18n._(
+          msg`Store ${store}, a workflow's. This can read every record of ${reads}, and read and change every record of ${changes}, whoever owns it`
+        );
   }
   if (object.type === "store") {
     return i18n._(msg`Store ${ph({ store: object.storeId })}`);

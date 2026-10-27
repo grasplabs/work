@@ -163,7 +163,7 @@ const listsAll = (
  * The store `consumer`'s own permission names, if it lists every one of
  * `paths` (`grantOf`).
  */
-const grantedStore = async (
+export const grantedStore = async (
   env: Env,
   consumer: StoreConsumer,
   paths: readonly string[]
@@ -399,7 +399,7 @@ export const consumerFailure = (error: AppErrorPayload): Error => {
 };
 
 /** What the audit log records of a consumer's call: identifiers only. */
-const consumerDetail = (
+export const consumerDetail = (
   consumer: Pick<StoreConsumer, "subject" | "version" | "permissionId">,
   operation: string
 ): Record<string, string | number> => ({
