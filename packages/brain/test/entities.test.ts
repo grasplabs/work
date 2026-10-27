@@ -211,6 +211,36 @@ describe("entity linking", () => {
     });
   });
 
+  it("links a document that names as many entities as a source may hold, each with its identifier", async () => {
+    // More than a source keeps: it keeps the first `mentionsPerSource`.
+    const people = Array.from({ length: 200 }, (_, index) => ({
+      kind: "person",
+      name: `Person ${index} ${word()}`,
+      identifiers: [email(`p${index}`)],
+    }));
+    const host = testHost(gazetteer(people));
+    const collection = await newCollection(host.brain, "Directory");
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    await save(
+      host,
+      collection,
+      "directory.md",
+      people
+        .map(({ name, identifiers }) => `${name} (${identifiers[0]})`)
+        .join("\n")
+    );
+    await settle(host, new Set());
+    const found = await entitiesFor(host.brain, reader, { limit: 50 });
+
+    expect({
+      coverage: await linkCoverage(host.brain, reader),
+      found: found.length,
+    }).toStrictEqual({
+      coverage: { sources: 1, linked: 1, pending: 0, failed: 0, partial: 0 },
+      found: 50,
+    });
+  });
+
   it("links remembered statements by their identifier within the person's own memories, never to a collection's", async () => {
     const userId = `person-${word()}`;
     const address = email("anna");
