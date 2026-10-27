@@ -25,7 +25,6 @@ import { useRouter } from "@tanstack/react-router";
 import { PencilIcon, PlusIcon, WorkflowIcon } from "lucide-react";
 import { useId, useState } from "react";
 
-import { todayUtc } from "../dashboard/programme.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { listWorkflows } from "../workflows/reads.ts";
@@ -42,6 +41,9 @@ import type { GoalWording } from "./goal-records.ts";
 // off. Each change is the brain's records (goal-records.ts), which core
 // takes from admins alone and audits; the brain is read again after it.
 // Members see the goals as notes, and nothing here.
+
+/** Today in UTC, as the brain's records date a change: `YYYY-MM-DD`. */
+const todayUtc = (): string => new Date().toISOString().slice(0, 10);
 
 /** Longest a goal's title is, as the brain keeps it. */
 const titleMaxLength = 200;
