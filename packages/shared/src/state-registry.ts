@@ -449,6 +449,10 @@ const knowledgeDb: D1State = {
       `${brain}entities.ts`,
       `The exact evidence each entity is known by, as deployment-keyed HMACs. ${brainPending}`
     ),
+    brain_assertions: exported(
+      `${brain}entities.ts`,
+      `Relations the Brain's sources state between their entities, with their passages: derived, but only by model calls again. ${brainPending}`
+    ),
     brain_mentions: exported(
       `${brain}entities.ts`,
       `Entity mentions of each source's linked version: derived, but only by model calls again. ${brainPending}`
