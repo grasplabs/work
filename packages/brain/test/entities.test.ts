@@ -1104,10 +1104,13 @@ describe("entity linking", () => {
   it("decides a match only for a person who reads both sides, `same` only with evidence they read, audited, and shows it only to readers of both", async () => {
     const person = `Ada ${word()}`;
     const concept = `Payroll ${word()}`;
+    // A second person only Sales names.
+    const colleague = `Cy ${word()}`;
     const host = testHost(
       gazetteer([
         { kind: "person", name: person },
         { kind: "concept", name: concept },
+        { kind: "person", name: colleague },
       ])
     );
     const sales = await newCollection(host.brain, "Sales");
@@ -1121,6 +1124,7 @@ describe("entity linking", () => {
         "hr.md",
         "HR confirms both notes are about one person."
       ),
+      await save(host, sales, "d.md", `${colleague} joined.`),
     ];
     for (const { id } of saved) {
       // oxlint-disable-next-line no-await-in-loop -- in order, on purpose
@@ -1137,6 +1141,14 @@ describe("entity linking", () => {
     };
     const people = pairOf("person");
     const concepts = pairOf("concept");
+    const salesPerson =
+      proposals
+        .find((proposal) => proposal.kind === "person")
+        ?.entities.find(({ collectionIds }) => collectionIds.includes(sales.id))
+        ?.id ?? "";
+    const [onlySales] = await entitiesFor(host.brain, admin, {
+      query: colleague,
+    });
     const evidence = { documentId: saved[2]?.id ?? "", version: 1 };
     const decide = async (caller: Caller, input: unknown) =>
       await outcome(decideEntityMatch(host.brain, caller, input));
@@ -1153,6 +1165,11 @@ describe("entity linking", () => {
       }),
       // A name alone never makes two people one.
       noEvidence: await decide(admin, { entities: people, decision: "same" }),
+      // Two entities only one collection links: no match across collections.
+      sameCollection: await decide(admin, {
+        entities: [salesPerson, onlySales?.id ?? ""],
+        decision: "different",
+      }),
     };
     const accepted = await decideEntityMatch(host.brain, admin, {
       entities: people,
@@ -1183,6 +1200,7 @@ describe("entity linking", () => {
         byMember: "brain.not_found",
         noSuchEntity: "brain.not_found",
         noEvidence: "brain.invalid",
+        sameCollection: "brain.invalid",
       },
       accepted: "same",
       left: [],
@@ -1192,6 +1210,47 @@ describe("entity linking", () => {
       ids: [...people].toSorted(byText),
       audited: ["same", "different"],
     });
+  });
+
+  it("shows every counterpart decided the same, however many there are", async () => {
+    const hub = `Hub ${word()}`;
+    const many = Array.from({ length: 45 }, (_, i) => `Pat${i} ${word()}`);
+    const host = testHost(
+      gazetteer(
+        [hub, ...many].map((name) => ({ kind: "person", name }) as const)
+      )
+    );
+    const sales = await newCollection(host.brain, "Sales");
+    const support = await newCollection(host.brain, "Support");
+    const proof = await save(host, sales, "proof.md", "All the same caller.");
+    const saved = [proof, await save(host, sales, "hub.md", `${hub} called.`)];
+    for (const [i, name] of many.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, on purpose
+      saved.push(await save(host, support, `p${i}.md`, `${name} called.`));
+    }
+    for (const { id } of saved) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, on purpose
+      await link(host, id, 1);
+    }
+    const admin: Caller = { userId: "admin", reads: [sales.id, support.id] };
+    const [hubEntity] = await entitiesFor(host.brain, admin, { query: hub });
+    const everyone = await entitiesFor(host.brain, admin, { limit: 100 });
+    const others = everyone
+      .filter(({ id }) => id !== hubEntity?.id)
+      .map(({ id }) => id);
+    for (const other of others) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, on purpose
+      await decideEntityMatch(host.brain, admin, {
+        entities: [hubEntity?.id ?? "", other],
+        decision: "same",
+        evidence: { documentId: proof.id, version: 1 },
+      });
+    }
+
+    expect({
+      decided: others.length,
+      same: await sameAsFor(host.brain, admin, hubEntity?.id ?? ""),
+    }).toStrictEqual({ decided: many.length, same: others.toSorted() });
   });
 
   it("drops a decision with an entity an erasure removes, so none outlives it", async () => {
