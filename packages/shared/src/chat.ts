@@ -296,6 +296,55 @@ export interface ChatCitedDocument {
 export const citedSnippetMax = 200;
 
 /**
+ * How much the chat's agent may ask at once (`askQuestions`, GRA-1001):
+ * a few short questions, each with a few short choices, plain text, one
+ * line each. The person can always answer otherwise ("Something else") or
+ * type instead.
+ */
+export const chatAskLimits = {
+  questions: 4,
+  choicesMin: 2,
+  choices: 6,
+  questionLength: 300,
+  choiceLength: 120,
+} as const;
+
+/** Text with no line break in it. */
+const oneLine = /^[^\r\n]*$/u;
+
+/** One line of plain text, as a question or a choice is. */
+const askLine = (max: number) =>
+  z.string().trim().min(1).max(max).regex(oneLine);
+
+/** What the agent asks the person at once, as it calls `askQuestions`. */
+export const chatAskSchema = z.strictObject({
+  questions: z
+    .array(
+      z.strictObject({
+        question: askLine(chatAskLimits.questionLength),
+        choices: z
+          .array(askLine(chatAskLimits.choiceLength))
+          .min(chatAskLimits.choicesMin)
+          .max(chatAskLimits.choices),
+      })
+    )
+    .min(1)
+    .max(chatAskLimits.questions),
+});
+export type ChatAsk = z.infer<typeof chatAskSchema>;
+
+/**
+ * Questions the agent asked the person, with choices: data, never
+ * commands. A choice only says what the person may answer; their answer
+ * is their own next message, and anything the agent then changes still
+ * waits for them to confirm it in Grasp.
+ */
+export interface ChatAsked extends ChatAsk {
+  /** The call that asked them. */
+  callId: string;
+}
+
+/**
  * One stored message of a chat, oldest first by `id`. The agent's
  * instructions and the APIs it was shown aren't among them.
  */
@@ -314,6 +363,12 @@ export type ChatMessage =
       citations: ChatCitation[];
       /** The code it asked to run, each run in a code step. */
       code: ChatCode[];
+      /**
+       * The questions it asked the person, with choices, if it ended its
+       * response asking them (`askQuestions`): shown in place of the
+       * composer until they answer.
+       */
+      asked?: ChatAsked;
       end: ChatReplyEnd;
       /** Why it failed, in the model gateway's words. */
       error?: string;
