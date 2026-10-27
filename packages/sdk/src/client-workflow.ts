@@ -804,6 +804,12 @@ export interface WatchState<Value> {
    */
   readonly fresh: boolean;
   readonly error: GraspError | undefined;
+  /**
+   * Whether access to the run was lost after it was shown: nothing of it
+   * stays shown, and that is no error (a decision that asked the person
+   * was answered, say). Only a run never shown is refused as an error.
+   */
+  readonly unavailable: boolean;
 }
 
 const nothingYet: WatchState<never> = Object.freeze({
@@ -811,6 +817,7 @@ const nothingYet: WatchState<never> = Object.freeze({
   revision: 0,
   fresh: false,
   error: undefined,
+  unavailable: false,
 });
 
 /** One subscription to the host, while something follows it. */
@@ -1320,6 +1327,7 @@ export class WorkflowChannel {
         revision: push.revision,
         fresh: true,
         error: undefined,
+        unavailable: false,
       });
     } catch (error) {
       // Never delivered: what the host sent doesn't fit, and nothing of it
@@ -1346,14 +1354,18 @@ export class WorkflowChannel {
     if (entry.live === live) {
       live.retryAfterMs = hintOf(error);
       if (error.code === unavailableRun) {
-        // Access to the run is gone, for now: nothing of it stays shown,
-        // as after a fence, only why. Following goes on, and the host's
-        // next push of it shows it again, fresh. The revision shown is
-        // kept, so no older snapshot shows after it.
+        // Access to the run is gone, for now: nothing of it stays shown.
+        // Lost after it was shown, that is no error but a state of its
+        // own (`unavailable`); never shown, it is refused, only why.
+        // Following goes on, and the host's next push of it shows it
+        // again, fresh. The revision shown is kept, so no older snapshot
+        // shows after it.
+        const attached =
+          entry.state.value !== undefined || entry.state.unavailable;
         WorkflowChannel.#show(entry, {
           ...nothingYet,
           revision: entry.state.revision,
-          error,
+          ...(attached ? { unavailable: true } : { error }),
         });
         return;
       }
