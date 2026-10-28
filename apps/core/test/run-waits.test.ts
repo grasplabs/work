@@ -137,6 +137,44 @@ describe("the waits a screen is shown of a run", () => {
     ]);
   });
 
+  it("shows a retried round's held call as a first round's, once each round, and its run again as a retry", () => {
+    expect(
+      shownWaits(
+        [
+          pendingOf(
+            20,
+            "task:send:retry:2:held:1:0",
+            "waitForEvent",
+            "held-wake"
+          ),
+          pendingOf(21, "task:send:retry:2:held:1:1:check", "retry"),
+          // Another round's hold is a hold of its own.
+          pendingOf(
+            22,
+            "task:send:retry:3:held:1:0",
+            "waitForEvent",
+            "held-wake"
+          ),
+          pendingOf(23, "task:send:retry:2:held:1:run", "retry"),
+          // A step of the run's code under a retry's name: never shown.
+          pendingOf(
+            24,
+            "task:send:retry:2:held:x",
+            "waitForEvent",
+            "held-wake"
+          ),
+        ],
+        context
+      ).map((wait) =>
+        z.object({ id: z.string(), kind: z.string() }).loose().parse(wait)
+      )
+    ).toMatchObject([
+      { id: "hold-20", kind: "blocked", reason: "policy" },
+      { id: "hold-22", kind: "blocked", reason: "policy" },
+      { id: "wait-23", kind: "timer", purpose: "retry" },
+    ]);
+  });
+
   it("shows a try's backoff before a step runs again, and that round's own retry, as retries, a loop item's too", () => {
     expect(
       shownWaits(
