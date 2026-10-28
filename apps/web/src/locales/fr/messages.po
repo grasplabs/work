@@ -65,7 +65,7 @@ msgstr "{0, plural, one {# constat de plus non affiché : seuls les plus graves 
 msgid "{0, plural, one {# package in all, to run in: {targets}} other {# packages in all, to run in: {targets}}}"
 msgstr "{0, plural, one {# paquet au total, à exécuter dans : {targets}} other {# paquets au total, à exécuter dans : {targets}}}"
 
-#. placeholder {0}: app.users
+#. placeholder {0}: app.people
 #. placeholder {0}: team.people
 #: src/onboarding/send-plan-form.tsx
 #: src/policies/findings-table.tsx
