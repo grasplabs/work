@@ -10,6 +10,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { clock, clockStarter, clockTasks } from "../src/clock.ts";
+import { deliver, invoiceMail } from "./email-triggers.ts";
 import { whileLogDown } from "./maintenance.ts";
 
 // The client's clock (src/clock.ts) runs core's maintenance on its own
@@ -109,6 +110,46 @@ describe("the client's clock", () => {
     });
     // Due now, not a period on: the tasks it missed run at once.
     expect(((await alarmAt()) ?? 0) - now).toBeLessThanOrEqual(1000);
+  });
+
+  it("is armed by mail when nothing has armed it, as a quiet deployment may get only mail", async () => {
+    at(freshTime());
+    await clearAlarm();
+
+    await deliver(
+      "nobody@grasp.test",
+      invoiceMail({ to: "nobody@grasp.test" })
+    );
+
+    await vi.waitFor(async () => {
+      await expect(alarmAt()).resolves.not.toBeNull();
+    });
+  });
+
+  it("waits out a still-running task's lease rather than come back every second", async () => {
+    const now = freshTime();
+    at(now);
+    // Every task ran this slot; one minute task is still running, started
+    // by an alarm that may still be going.
+    await stub().ensure();
+    await runDurableObjectAlarm(stub());
+    const [first = ""] = minutes;
+    await runInDurableObject(stub(), (_, state) => {
+      state.storage.sql.exec(
+        "UPDATE clock_tasks SET running_since = ? WHERE name = ?",
+        now,
+        first
+      );
+    });
+
+    // Past the next slots it's still running: the alarm runs the rest and
+    // comes back at the next slot, not a second later.
+    const later = now + 5 * clockPeriods.minute;
+    at(later);
+    await runDurableObjectAlarm(stub());
+    const next =
+      (Math.floor(later / clockPeriods.minute) + 1) * clockPeriods.minute;
+    expect((await alarmAt()) ?? 0).toBeGreaterThanOrEqual(next);
   });
 
   it("leaves an armed alarm where it is, however often it's asked", async () => {

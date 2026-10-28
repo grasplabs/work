@@ -10,9 +10,15 @@ import { DurableObject } from "cloudflare:workers";
 // part way, evicted or crashed, is picked up by the watchdog alarm it armed
 // before it started anything.
 //
+// A task that outlives its lease (`clockLeaseMs`) is taken for dead and
+// may be started again while it still runs: every task must tolerate two
+// runs of itself at once, as they had to when crons could overlap: each
+// claims what it works on, or writes conditionally.
+//
 // Nothing arms the clock but its own alarm and `ensure`: a deployment's
-// first request, its provisioning probe, and (for connect's) core's clock
-// every minute call it, so the clock never depends on already running.
+// first request or mail, its provisioning probe, and (for connect's) core's
+// clock every minute call it, so the clock never depends on already
+// running.
 //
 // Nothing of a task's own work is here: a Worker gives the clock its tasks
 // (`ClockObject.clockTasks`) and how a failure is reported.
@@ -292,16 +298,23 @@ export abstract class ClockObject<E> extends DurableObject<E> {
   /**
    * When the alarm should next run: the nearest slot any task is due for,
    * a second from now at the earliest. A task another activation still
-   * runs is due again for the slot after the one it runs for.
+   * runs is due once that activation's lease is over, if that's later.
    */
   #nextAlarm(now: number): number {
     const state = this.#states();
-    const due = this.clockTasks.map((task) =>
-      dueAt(
+    const due = this.clockTasks.map((task) => {
+      const known = state.get(task.name);
+      const next = dueAt(
         task.period,
-        state.get(task.name)?.lastSlot ?? slotOf(task.period, now) - 1
-      )
-    );
+        known?.lastSlot ?? slotOf(task.period, now) - 1
+      );
+      // One another activation still runs is left to it until its lease
+      // is over: not before then, or the alarm would come every second.
+      const running = known?.runningSince ?? null;
+      return running !== null && now - running < clockLeaseMs
+        ? Math.max(next, running + clockLeaseMs)
+        : next;
+    });
     return Math.max(now + clockSlotOffsetMs, Math.min(...due));
   }
 }
