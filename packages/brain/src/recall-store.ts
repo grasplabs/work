@@ -109,13 +109,11 @@ const unchangedPins = async <C>(
   brain: Brain<C>,
   reader: C,
   pins: readonly PinnedVersion[]
-): Promise<Set<string>> => {
+): Promise<PinnedVersion[]> => {
   const readable = await readablePins(brain, reader, pins);
-  return new Set(
-    pins.flatMap((pin) =>
-      readable.get(pinKey(pin))?.text === pin.text ? [pinKey(pin)] : []
-    )
-  );
+  // Each pin by its own text: one pinned before a purge stays out though
+  // the same version, pinned again after it, is in.
+  return pins.filter((pin) => readable.get(pinKey(pin))?.text === pin.text);
 };
 
 /** The Brain's store, as recall reads it. */
@@ -152,14 +150,15 @@ export interface BrainStore<C> {
     pins: readonly PinnedVersion[]
   ) => Promise<void>;
   /**
-   * Of `pins`, those `reader` may still read as they were pinned, each as
-   * `pinKey` names it: one query, whatever their number. One gone, moved
-   * to another collection, or rewritten by a purge, is not.
+   * Of `pins`, those `reader` may still read as they were pinned, text and
+   * all: one query, whatever their number. One gone, moved to another
+   * collection, or rewritten by a purge, is not, though the same version
+   * pinned again since is.
    */
   unchangedPins: (
     reader: C,
     pins: readonly PinnedVersion[]
-  ) => Promise<Set<string>>;
+  ) => Promise<PinnedVersion[]>;
   /**
    * The vector lane (GRA-303), where the store has one: sections whose
    * meaning is close to `query`'s, best first, of those `reader` may read,
@@ -210,7 +209,7 @@ export const d1BrainStore = <C>(brain: Brain<C>): BrainStore<C> => ({
   },
   requireDocumentsReadable: async (reader, pins) => {
     const unchanged = await unchangedPins(brain, reader, pins);
-    if (pins.some((pin) => !unchanged.has(pinKey(pin)))) {
+    if (unchanged.length !== pins.length) {
       throw brainErrors.create("brain.not_found");
     }
   },

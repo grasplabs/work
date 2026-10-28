@@ -1,5 +1,5 @@
 import { brainErrors } from "@grasp-os/brain/contract";
-import { d1BrainStore, pinKey } from "@grasp-os/brain/recall-store";
+import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type { BrainStore, PinnedVersion } from "@grasp-os/brain/recall-store";
 import { collections } from "@grasp-os/brain/schema";
 import type { AppRole } from "@grasp-os/shared/apps";
@@ -141,7 +141,7 @@ const readableBrain = async (
       return [
         ...(granted ? [brainGrantRead] : []),
         ...refs.flatMap(({ source, pin }) =>
-          unchanged.has(pinKey(pin)) ? [source] : []
+          unchanged.includes(pin) ? [source] : []
         ),
       ];
     }
