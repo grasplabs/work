@@ -136,8 +136,25 @@ const frontendPage = (): Response =>
     headers: { "content-type": "text/html" },
   });
 
-/** The binding kinds core's probe asks (core's src/provision-probe.ts). */
-const probedKinds = new Set(["d1", "r2_bucket", "service"]);
+/** The binding kinds core's probe asks, of core and of connect (core's src/provision-probe.ts). */
+const probedKinds = new Set([
+  "d1",
+  "r2_bucket",
+  "durable_object_namespace",
+  "worker_loader",
+  "service",
+]);
+
+const bindingsSchema = z.array(
+  z
+    .object({
+      type: z.string(),
+      name: z.string(),
+      json: z.unknown().optional(),
+      service: z.string().optional(),
+    })
+    .loose()
+);
 
 /** A few of each clock's tasks, as core's and connect's src/clock.ts name them. */
 const clockTaskNames = {
@@ -180,17 +197,16 @@ const answerProbe = async (
   ) {
     return frontendPage();
   }
-  const bindings = z
-    .array(
-      z
-        .object({
-          type: z.string(),
-          name: z.string(),
-          json: z.unknown().optional(),
-        })
-        .loose()
-    )
-    .parse(live.metadata.bindings ?? []);
+  const bindings = bindingsSchema.parse(live.metadata.bindings ?? []);
+  // Connect's own, as core asks connect for them: the script its CONNECT
+  // binding names, at its latest version.
+  const connectScript = bindings.find(
+    ({ name }) => name === "CONNECT"
+  )?.service;
+  const connectBindings = bindingsSchema.parse(
+    account.scripts.get(connectScript ?? "")?.versions.at(-1)?.metadata
+      .bindings ?? []
+  );
   const clientId = bindings.find(({ name }) => name === "CLIENT_ID")?.json;
   const down = new Set(probe.down);
   const clock = (name: "core" | "connect") =>
@@ -202,9 +218,15 @@ const answerProbe = async (
     clientId:
       probe.asClient ?? (typeof clientId === "string" ? clientId : null),
     bindings: Object.fromEntries(
-      bindings
+      [
+        ...bindings.map((binding) => ({ ...binding, answers: binding.name })),
+        ...connectBindings.map((binding) => ({
+          ...binding,
+          answers: `connect.${binding.name}`,
+        })),
+      ]
         .filter(({ type }) => probedKinds.has(type))
-        .map(({ name }) => [name, !down.has(name)])
+        .map(({ answers }) => [answers, !down.has(answers)])
     ),
     clocks: { core: clock("core"), connect: clock("connect") },
   } satisfies ProvisionProbe);

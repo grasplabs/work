@@ -12,6 +12,8 @@ import type {
 
 import { clock } from "./clock.ts";
 import { consoleSigned } from "./console-signed.ts";
+import { inJurisdiction } from "./durable-objects.ts";
+import { callSandboxed } from "./sandboxed.ts";
 
 // The admin's provisioning probe (spec 40.2 step 7,
 // @grasp-os/shared/provision-probe): before it publishes a client's
@@ -59,6 +61,22 @@ const answers = async (
   }
 };
 
+/**
+ * Connect's private bindings, each as connect answered its no-op; none
+ * when connect didn't answer, which leaves each unanswered.
+ */
+const connectProbe = async (env: Env): Promise<Record<string, boolean>> => {
+  try {
+    return await env.CONNECT.probeBindings();
+  } catch (error) {
+    log.warn("probe.binding_failed", {
+      binding: "CONNECT",
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    return {};
+  }
+};
+
 /** A clock's registration, or null when it didn't answer. */
 const registration = async (
   name: string,
@@ -76,6 +94,68 @@ const registration = async (
   }
 };
 
+/**
+ * The sandbox's no-op: a fresh isolate of a module that answers one
+ * constant, on whichever sandbox this deployment runs App code in (the
+ * Loader on Cloudflare, the sandbox host elsewhere: sandboxed.ts). It
+ * reaches nothing: no env, no network.
+ */
+const sandboxProbe = {
+  mainModule: "probe.js",
+  modules: {
+    "probe.js": `import { WorkerEntrypoint } from "cloudflare:workers";
+export class Probe extends WorkerEntrypoint {
+  answer() {
+    return "probe";
+  }
+}
+`,
+  },
+};
+
+const sandbox = (env: Env) => async () => {
+  const answer = await callSandboxed(env, sandboxProbe, "Probe", "answer");
+  if (answer !== "probe") {
+    throw new Error("The sandbox answered something else");
+  }
+};
+
+/**
+ * Core's Durable Object namespaces, each as core reaches it: in the
+ * jurisdiction its objects are made in (durable-objects.ts). Asked for an
+ * ID only, so the probe makes no object and writes nothing.
+ */
+const objectNamespaces = (env: Env) =>
+  ({
+    WORKSPACES: env.WORKSPACES,
+    APPS: env.APPS,
+    AUDIT_LOG: env.AUDIT_LOG,
+    BUILTINS: env.BUILTINS,
+    CLOCK: env.CLOCK,
+    ONBOARDING: env.ONBOARDING,
+    MODEL_LEDGER: env.MODEL_LEDGER,
+    DATA_STORES: env.DATA_STORES,
+    WORKFLOW_RUNS: env.WORKFLOW_RUNS,
+    ACTION_INVOCATIONS: env.ACTION_INVOCATIONS,
+    CHAT_STATE: env.CHAT_STATE,
+  }) satisfies Record<
+    string,
+    DurableObjectNamespace<Rpc.DurableObjectBranded | undefined>
+  >;
+
+/** A namespace's no-op: an object's ID in core's jurisdiction, made but never used. */
+const objects =
+  (
+    env: Env,
+    namespace: DurableObjectNamespace<Rpc.DurableObjectBranded | undefined>
+  ) =>
+  async (): Promise<void> => {
+    // A namespace the deploy didn't bind, or can't restrict to the EU,
+    // throws here.
+    inJurisdiction(env, namespace).idFromName("platform/probe");
+    await Promise.resolve();
+  };
+
 /** A database's no-op: `SELECT 1`. */
 const d1 = (database: D1Database) => async () =>
   await database.prepare("SELECT 1").first();
@@ -89,16 +169,32 @@ const r2 = (bucket: R2Bucket) => async () => await bucket.head(absentKey);
  * core's own clock armed.
  */
 const probed = async (env: Env): Promise<ProvisionProbe> => {
-  const [db, knowledge, files, auditArchive, brainObjects, connect, core] =
-    await Promise.all([
-      answers("DB", d1(env.DB)),
-      answers("KNOWLEDGE", d1(env.KNOWLEDGE)),
-      answers("FILES", r2(env.FILES)),
-      answers("AUDIT_ARCHIVE", r2(env.AUDIT_ARCHIVE)),
-      answers("BRAIN_OBJECTS", r2(env.BRAIN_OBJECTS)),
-      registration("connect", async () => await env.CONNECT.ensureClock()),
-      registration("core", async () => await clock(env).ensureRegistered()),
-    ]);
+  const namespaces = Object.entries(objectNamespaces(env));
+  const [
+    db,
+    knowledge,
+    files,
+    auditArchive,
+    brainObjects,
+    loader,
+    connectBindings,
+    connect,
+    core,
+    ...namespaced
+  ] = await Promise.all([
+    answers("DB", d1(env.DB)),
+    answers("KNOWLEDGE", d1(env.KNOWLEDGE)),
+    answers("FILES", r2(env.FILES)),
+    answers("AUDIT_ARCHIVE", r2(env.AUDIT_ARCHIVE)),
+    answers("BRAIN_OBJECTS", r2(env.BRAIN_OBJECTS)),
+    answers("LOADER", sandbox(env)),
+    connectProbe(env),
+    registration("connect", async () => await env.CONNECT.ensureClock()),
+    registration("core", async () => await clock(env).ensureRegistered()),
+    ...namespaces.map(
+      async ([name, namespace]) => await answers(name, objects(env, namespace))
+    ),
+  ]);
   return {
     version: env.CF_VERSION_METADATA?.id ?? null,
     clientId: env.CLIENT_ID ?? null,
@@ -108,7 +204,20 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
       FILES: files,
       AUDIT_ARCHIVE: auditArchive,
       BRAIN_OBJECTS: brainObjects,
+      LOADER: loader,
       CONNECT: connect !== null,
+      ...Object.fromEntries(
+        namespaces.map(([name], index) => [name, namespaced[index] === true])
+      ),
+      // Connect's own, as connect answered for them; its clock, as it
+      // armed it.
+      ...Object.fromEntries(
+        Object.entries(connectBindings).map(([name, answered]) => [
+          `connect.${name}`,
+          answered,
+        ])
+      ),
+      "connect.CLOCK": connect !== null,
     },
     clocks: { core, connect },
   };

@@ -536,6 +536,21 @@ const probeFailures: ProbeFailure[] = [
     code: "probe_binding_unanswered",
   },
   {
+    name: "a Durable Object namespace core can't reach",
+    probe: { down: ["WORKSPACES"] },
+    code: "probe_binding_unanswered",
+  },
+  {
+    name: "a sandbox that doesn't run App code",
+    probe: { down: ["LOADER"] },
+    code: "probe_binding_unanswered",
+  },
+  {
+    name: "connect's own database not answering",
+    probe: { down: ["connect.DB"] },
+    code: "probe_binding_unanswered",
+  },
+  {
     name: "connect not answering",
     probe: { down: ["CONNECT"], clocksDown: ["connect"] },
     code: "probe_binding_unanswered",

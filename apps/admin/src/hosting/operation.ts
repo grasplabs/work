@@ -19,8 +19,8 @@
  * 7. `probe`: core answers its health check as the version live, with the
  *    router secret the router will send (`smokeCheck`), then the
  *    admin's signed probe (src/hosting/probe.ts): it runs as this
- *    client, each private binding the release gives it answers, and its
- *    clock and connect's are armed.
+ *    client, each private binding the release gives core and connect
+ *    answers, and its clock and connect's are armed.
  * 8. `mail`, then `route`: for a release that sends mail, the client's
  *    sending domain (`clientMailDomain`) with Email Sending on in the
  *    destination's account (`ensureSendingDomain`), as a deploy sets it
@@ -55,8 +55,10 @@
  * holds the client next finds and reconciles what it left (spec 39.1).
  *
  * Not here, on purpose:
- * - Probes beyond identity, private resources and clocks (a sandbox call,
- *   an owned workflow): core's probe doesn't make them yet.
+ * - A probe of an owned workflow's run: core's probe asks its identity,
+ *   every private binding of core and connect (databases, buckets,
+ *   Durable Object namespaces, the sandbox with a fresh isolate's answer,
+ *   connect) and both clocks, but starts no workflow.
  * - The model-spend admission ceiling (40.5) waits for a product decision
  *   (GRA-141), and the shared AI Gateway reference for a destination (37.5)
  *   isn't recorded yet. Until both exist, a release whose Worker binds
@@ -1163,7 +1165,10 @@ const probe = async (
   const fault = probeFault(answer, {
     clientId: held.clientId,
     version,
-    bindings: privateBindings(workerOf(loaded.manifest, "core")),
+    bindings: privateBindings(
+      workerOf(loaded.manifest, "core"),
+      workerOf(loaded.manifest, "connect")
+    ),
   });
   if (fault !== null) {
     throw new ProvisionOperationError(fault.code, fault.message);
