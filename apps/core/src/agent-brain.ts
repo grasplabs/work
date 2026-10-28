@@ -9,7 +9,7 @@ import type {
 } from "@grasp-os/brain/contract";
 import { entitiesWithSources, entitySources } from "@grasp-os/brain/entities";
 import { recallWithSources } from "@grasp-os/brain/recall";
-import { relationsExplain, relationsFor } from "@grasp-os/brain/relations";
+import { relationsExplain, relationsRead } from "@grasp-os/brain/relations";
 import {
   readSkillWithSources,
   selectSkillWithSources,
@@ -253,10 +253,28 @@ export class BrainAgentApi
    */
   async relations(input: unknown): Promise<RelationsAnswer> {
     return await this.#delegated("brain.relations", async (reader) => {
-      const answer = await relationsFor(brainOf(this.env), reader, input);
+      const { answer, considered } = await relationsRead(
+        brainOf(this.env),
+        reader,
+        input
+      );
+      const handed = citing(answer.relations.map(({ sourceRef }) => sourceRef));
       return {
         value: answer,
-        ...citing(answer.relations.map(({ sourceRef }) => sourceRef)),
+        ...handed,
+        // Labelled with every collection a claim it weighed came from, not
+        // only the answered ones': a claim past the cap still decided
+        // whether one is `conflicting`, so revoking any of them withholds
+        // the answer.
+        sources: {
+          ...handed.sources,
+          collections: [
+            ...new Set([
+              ...handed.sources.collections,
+              ...considered.collectionIds,
+            ]),
+          ],
+        },
       };
     });
   }
@@ -435,8 +453,8 @@ brain: {
   entities(input: { query: string; limit?: number }): Promise<Entity[]>;
   /** The sources that mention one entity, at their versions: documents, or the person's own memories. */
   entitySources(input: { entityId: string }): Promise<Relation["sourceRef"][]>;
-  /** What its sources say relates one entity to others (who owns or leads what), each with the source's own sentence: \`at\` (YYYY-MM-DD) for who held it on a date, \`knownAt\` (ISO instant) for what was known then. Quote the evidence; when relations conflict, say so and show both. */
-  relations(input: { entityId: string; predicate?: string; at?: string; knownAt?: string }): Promise<Relation[]>;
+  /** What its sources say relates one entity to others (who owns or leads what), each with the source's own sentence: \`at\` (YYYY-MM-DD) for who held it on a date, \`knownAt\` (ISO instant) for what was known then. Quote the evidence; when relations conflict, say so and show both. \`truncated\`: more relations exist than came back, so say what you show isn't all of them. */
+  relations(input: { entityId: string; predicate?: string; at?: string; knownAt?: string }): Promise<{ relations: Relation[]; truncated: boolean }>;
   /** How one entity connects to others, one or two relations out (\`hops\`, default 2), each path with every relation's passage, within \`budget\` (at most 50 paths); \`truncated\` when it was cut. Quote the evidence along the path. */
   relationsExplain(input: { entityId: string; hops?: 1 | 2; predicate?: string; at?: string; knownAt?: string; budget?: { maxPaths?: number; deadlineMs?: number } }): Promise<{ paths: { relations: Relation[]; to: { entityId: string; name: string } }[]; truncated: boolean }>;
   /** Its open questions. Bring one up when the person could answer it, and say who can; you can't answer or close one yourself. */
