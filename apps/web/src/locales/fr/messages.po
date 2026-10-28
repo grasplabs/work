@@ -1394,6 +1394,10 @@ msgid "{title} added to the dashboard."
 msgstr "{title} a été ajouté au tableau de bord."
 
 #: src/dashboard/widget-board.tsx
+msgid "{title} changed."
+msgstr "{title} a été modifié."
+
+#: src/dashboard/widget-board.tsx
 msgid "{title} is now in place {place} of {count}."
 msgstr "{title} est maintenant à la place {place} sur {count}."
 
@@ -2908,7 +2912,7 @@ msgid "Ask for it"
 msgstr "Demander"
 
 #: src/chat/chat-dock.tsx
-#: src/dashboard/widget-board.tsx
+#: src/dashboard/widget-ask.tsx
 msgid "Ask Grasp"
 msgstr "Demander à Grasp"
 
@@ -3572,6 +3576,10 @@ msgstr "Remplacer « {was} » par « {now} »."
 msgid "Change {first}'s details"
 msgstr "Modifier les informations de {first}"
 
+#: src/dashboard/widget-ask.tsx
+msgid "Change {title}"
+msgstr "Modifier {title}"
+
 #: src/onboarding/organization-dialogs.tsx
 msgctxt "button: change someone's name, email, job or team"
 msgid "Change details"
@@ -3600,6 +3608,10 @@ msgstr "Modifier ce qui est à eux"
 #: src/onboarding/organization-dialogs.tsx
 msgid "Change this team"
 msgstr "Modifier cette équipe"
+
+#: src/dashboard/widget-ask.tsx
+msgid "Change with Grasp"
+msgstr "Modifier avec Grasp"
 
 #: src/interview/read-back.tsx
 msgid "Change: {text}"
@@ -4400,6 +4412,10 @@ msgstr "Impossible de copier l’empreinte"
 #: src/activity/pending.tsx
 msgid "couldn't be read"
 msgstr "n’a pas pu être lu"
+
+#: src/workflows/team-picker.tsx
+msgid "Couldn't change the team of {named}"
+msgstr "Impossible de changer l’équipe de {named}"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "Couldn't load this domain's workflows."
@@ -6011,6 +6027,10 @@ msgstr "A accordé une autorisation"
 msgid "Grasp access"
 msgstr "Accès de Grasp"
 
+#: src/chat/thread.tsx
+msgid "Grasp added a widget to your dashboard."
+msgstr "Grasp a ajouté un widget à votre tableau de bord."
+
 #: src/chat/asked-questions.tsx
 msgid "Grasp asks"
 msgstr "Grasp demande"
@@ -6030,6 +6050,10 @@ msgstr "Grasp demande, {number} sur {total}"
 #: src/routes/sign-in.tsx
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp est injoignable pour le moment. Réessayez dans un instant."
+
+#: src/chat/thread.tsx
+msgid "Grasp changed a widget on your dashboard."
+msgstr "Grasp a modifié un widget de votre tableau de bord."
 
 #: src/connections/request-app-dialog.tsx
 msgctxt "“Requested” is the name of a section on the Integrations page."
@@ -6072,7 +6096,7 @@ msgstr "Grasp dans votre langue. Les nombres, les dates et les montants la suive
 msgid "Grasp is busy right now. Remove this policy and upload it again in a minute."
 msgstr "Grasp est occupé pour le moment. Retirez cette politique et importez-la de nouveau dans une minute."
 
-#: src/dashboard/widget-board.tsx
+#: src/dashboard/widget-ask.tsx
 msgid "Grasp is making it…"
 msgstr "Grasp le crée…"
 
@@ -8460,6 +8484,10 @@ msgstr "Aucune partie prenante désignée"
 msgid "No steps yet. They are drawn once someone who does this work has agreed to their interview."
 msgstr "Pas encore d’étapes. Elles sont dessinées dès qu’une personne qui fait ce travail a validé son entretien."
 
+#: src/workflows/team-picker.tsx
+msgid "No team"
+msgstr "Aucune équipe"
+
 #: src/onboarding/organization-words.ts
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "No team lead named"
@@ -9534,6 +9562,10 @@ msgstr "Ouvert depuis le feu vert de Grasp le {since}."
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Ouvrir le chat"
+
+#: src/chat/thread.tsx
+msgid "Open the dashboard"
+msgstr "Ouvrir le tableau de bord"
 
 #: src/workflows/workflows-table.tsx
 msgid "Open the domain {name}"
@@ -11562,6 +11594,10 @@ msgstr "Afficher les plus anciennes"
 msgid "Show older events to read further back."
 msgstr "Affichez les événements plus anciens pour remonter plus loin."
 
+#: src/dashboard/widget-ask.tsx
+msgid "Show only the failed runs."
+msgstr "Afficher uniquement les exécutions en échec."
+
 #: src/frame/site-header.tsx
 msgid "Show or hide the sidebar"
 msgstr "Afficher ou masquer la barre latérale"
@@ -12350,6 +12386,7 @@ msgstr "ID de la cible"
 #: src/dashboard/standard-widgets.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/pulse-people.tsx
+#: src/workflows/team-picker.tsx
 msgid "Team"
 msgstr "Équipe"
 
@@ -12420,6 +12457,10 @@ msgstr "Taille de l’équipe inconnue"
 #: src/brain/brain.ts
 msgid "Team size unknown."
 msgstr "Taille de l’équipe inconnue."
+
+#: src/workflows/team-picker.tsx
+msgid "Team: {name}"
+msgstr "Équipe : {name}"
 
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
@@ -14847,6 +14888,10 @@ msgstr "Ce qui a été exécuté"
 #: src/dashboard/report-dialog.tsx
 msgid "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
 msgstr "Ce qui a été exécuté, les décisions demandées, chaque workflow et ce qui pourrait être amélioré. Gardez-le en Markdown, ou enregistrez-le en PDF depuis la fenêtre d’impression."
+
+#: src/dashboard/widget-ask.tsx
+msgid "What should change?"
+msgstr "Que faut-il changer ?"
 
 #: src/connections/request-app-dialog.tsx
 msgid "What should Grasp do there?"

@@ -79,7 +79,8 @@ export const tellInChat = async (
       return false;
     }
     const locale = channelLocales.find((each) => each === chat.locale) ?? "en";
-    await teamsAdapter(env).postMessage(chat.threadId, line(locale));
+    const adapter = await teamsAdapter(env);
+    await adapter.postMessage(chat.threadId, line(locale));
     return true;
   } catch (error) {
     log.warn("channel.tell_failed", {

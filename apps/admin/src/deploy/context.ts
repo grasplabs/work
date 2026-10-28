@@ -125,18 +125,24 @@ const notInStore = /not found/iu;
 
 /**
  * A shared secret's value, or its stand-in while the store has none: not
- * there at all, or empty. A read that failed any other way stops the
- * deploy as a missing required secret does, so a store that answered
- * badly once never deploys connect without the apps' clients it has.
+ * there at all, or empty, or left unbound because the store didn't have
+ * it at deploy time (scripts/wrangler-deploy.ts). A read that failed any
+ * other way stops the deploy as a missing required secret does, so a
+ * store that answered badly once never deploys connect without the apps'
+ * clients it has.
  */
 const sharedSecret = async (env: Env, name: SharedSecret): Promise<string> => {
   const standIn = optionalSharedSecrets[name];
   if (standIn === undefined) {
     return await storeSecret(env, name);
   }
+  const binding: SecretsStoreSecret | undefined = env[name];
+  if (binding === undefined) {
+    return standIn;
+  }
   let value = "";
   try {
-    value = await env[name].get();
+    value = await binding.get();
   } catch (error) {
     if (!(error instanceof Error && notInStore.test(error.message))) {
       throw new MissingStoreSecretError(name);
