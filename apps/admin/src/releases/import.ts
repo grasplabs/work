@@ -10,6 +10,12 @@
  * corrupted uploads, not against whoever can write to the bucket: a
  * release that's consistent with its own manifest imports.
  *
+ * A release with more blobs than one run reads is checked a batch at a
+ * time, over as many runs as it takes: each run records how many of its
+ * blobs, in its manifest's order, are checked, for that manifest's sha256
+ * (`releaseImportProgress`), and the next run goes on from there. It is
+ * imported once the last batch checks out.
+ *
  * A release that doesn't verify is recorded as failed, audited, and tried
  * again after a wait that doubles with each attempt, so a broken release
  * costs a few reads a day and never holds up the releases after or before
@@ -32,7 +38,12 @@ import { eq, sql } from "drizzle-orm";
 
 import { actIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { auditEvents, releaseImportFailures, releases } from "../db/schema.ts";
+import {
+  auditEvents,
+  releaseImportFailures,
+  releaseImportProgress,
+  releases,
+} from "../db/schema.ts";
 import { startsMajor } from "./version.ts";
 
 /**
@@ -53,17 +64,18 @@ export const MAX_IMPORTS_PER_RUN = 5;
 
 /**
  * Most R2 reads a run makes, which count towards the Worker's subrequest
- * limit. A release costs its manifest plus one read per blob (about 70
- * today); it's verified only if all of them fit in what the run has left,
- * and otherwise waits for the next run.
+ * limit. A release costs its manifest plus one read per blob (about 700
+ * today); what doesn't fit in what the run has left is checked on the
+ * next runs.
  */
 export const MAX_READS_PER_RUN = 500;
 
 /**
- * Most blobs a release may name. Below the per-run reads, less the
- * manifest's, so a release that starts a run always fits in it.
+ * Most blobs a release may name: about three times today's, read over a
+ * few runs. A bound on a broken manifest, not on the runs: the batches
+ * keep each run within its reads whatever the count.
  */
-export const MAX_BLOBS_PER_RELEASE = 400;
+export const MAX_BLOBS_PER_RELEASE = 2000;
 
 /**
  * Blobs read at once. A release's largest module is about 10 MB today:
@@ -178,8 +190,9 @@ const parseManifest = (
 
 /**
  * Verifies release `id` and records it: `absent` when it has no manifest
- * (yet), `deferred` when its blobs don't fit in the run's reads. Throws
- * when it doesn't verify.
+ * (yet), `deferred` when the run's reads ran out before its last blob,
+ * the blobs checked so far recorded for the next run. Throws when it
+ * doesn't verify.
  */
 const importRelease = async (
   reader: Reader,
@@ -201,16 +214,38 @@ const importRelease = async (
       `Release ${id} names ${blobs} blobs; at most ${MAX_BLOBS_PER_RELEASE} are read`
     );
   }
-  if (reader.reads + blobs > MAX_READS_PER_RUN) {
+  const manifestSha256 = await sha256OfBytes(manifestBytes);
+  // Where an earlier run got to, for this very manifest: another (a broken
+  // upload put right) is checked from its start.
+  const [progress] = await db
+    .select()
+    .from(releaseImportProgress)
+    .where(eq(releaseImportProgress.releaseId, id));
+  const from =
+    progress?.manifestSha256 === manifestSha256
+      ? Math.min(progress.verifiedBlobs, blobs)
+      : 0;
+  const to = Math.min(blobs, from + MAX_READS_PER_RUN - reader.reads);
+  if (to <= from && from < blobs) {
     return "deferred";
   }
   await verifyReleaseBlobs(
     manifest,
     async (key, size) =>
       await reader.read(key, (actual) => actual === size, String(size)),
-    { concurrency: READ_CONCURRENCY }
+    { concurrency: READ_CONCURRENCY, from, to }
   );
-  const manifestSha256 = await sha256OfBytes(manifestBytes);
+  if (to < blobs) {
+    const updatedAt = new Date();
+    await db
+      .insert(releaseImportProgress)
+      .values({ releaseId: id, manifestSha256, verifiedBlobs: to, updatedAt })
+      .onConflictDoUpdate({
+        target: releaseImportProgress.releaseId,
+        set: { manifestSha256, verifiedBlobs: to, updatedAt },
+      });
+    return "deferred";
+  }
   await actIfChanged(
     db,
     "system",
@@ -233,9 +268,14 @@ const importRelease = async (
     }
   );
   // Bookkeeping only: the import itself is what's audited.
-  await db
-    .delete(releaseImportFailures)
-    .where(eq(releaseImportFailures.releaseId, id));
+  await db.batch([
+    db
+      .delete(releaseImportFailures)
+      .where(eq(releaseImportFailures.releaseId, id)),
+    db
+      .delete(releaseImportProgress)
+      .where(eq(releaseImportProgress.releaseId, id)),
+  ]);
   return "imported";
 };
 
@@ -277,13 +317,18 @@ const recordFailure = async (
     .select(
       sql`SELECT ${crypto.randomUUID()}, ${at}, 'system', 'release.import_failed', NULL, ${id}, json_object('attempts', ${attempts}) FROM ${releaseImportFailures} WHERE ${releaseImportFailures.releaseId} = ${id}`
     );
-  await db.batch([record, audit]);
+  // A failed attempt starts the next from the release's first blob.
+  const restart = db
+    .delete(releaseImportProgress)
+    .where(eq(releaseImportProgress.releaseId, id));
+  await db.batch([record, audit, restart]);
 };
 
 /**
  * Imports the releases published to `store` that `db` doesn't hold yet,
- * newest first: until {@link MAX_IMPORTS_PER_RUN} are imported or the
- * next one's reads don't fit in {@link MAX_READS_PER_RUN}. A release that failed is
+ * newest first: until {@link MAX_IMPORTS_PER_RUN} are imported or
+ * {@link MAX_READS_PER_RUN} are spent, a release the reads ran out in
+ * going on from there next run. A release that failed is
  * passed over until its next attempt is due.
  */
 export const importReleases = async (
@@ -328,7 +373,7 @@ export const importReleases = async (
       continue;
     }
     if (outcome === "deferred") {
-      // Its blobs don't fit in the reads left: it goes first next run.
+      // The reads ran out in its blobs: the next run goes on from there.
       break;
     }
     if (outcome === "imported") {
