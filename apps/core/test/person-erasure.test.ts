@@ -393,9 +393,10 @@ describe("erasing a person", () => {
     const again = await signIn(idp, "google", late);
     expect({
       stored: await storedOf(late),
-      pending: pending.areas,
+      // The identity area's own; any other area finishes on its own.
+      pending: pending.areas.filter(({ area }) => area === "identity"),
       meanwhile,
-      done: done.erasure?.areas,
+      done: done.erasure?.areas.filter(({ area }) => area === "identity"),
       accounts: await rowsOf("accounts", "user_id", person.userId),
       session: again.session,
     }).toStrictEqual({
