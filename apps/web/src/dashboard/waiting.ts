@@ -1,8 +1,8 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { HeldStart } from "@grasp-os/shared/held-starts";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import type {

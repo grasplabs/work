@@ -10,7 +10,7 @@ import {
   coreStartKeyPrefix,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
-import { and, asc, eq, gt, isNull, or } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -18,7 +18,11 @@ import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Member } from "./auth/identity.ts";
-import { agentHeldStarts, workflowResources } from "./db/core/schema.ts";
+import {
+  agentHeldStarts,
+  workflowResources,
+  workflowStartReceipts,
+} from "./db/core/schema.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import {
   decideWorkflowStart,
@@ -27,6 +31,7 @@ import {
   startWorkflow,
 } from "./workflow-starts.ts";
 import type { StartInvoker } from "./workflow-starts.ts";
+import { startResourceRun } from "./workflows/resource-runs.ts";
 
 // Starts of independent workflows a chat's agent asks for (agent-
 // workflows.ts, `start`), held until the person it acts for confirms them
@@ -385,6 +390,9 @@ export const confirmHeldStart = async (
       await waitingFor(env, by, row.id);
     }
   }
+  // Admitted only while it is still confirmed: a decline that lands first
+  // starts nothing (`declineHeldStart` declines only before admission).
+  const stillConfirmed = sql`EXISTS (SELECT 1 FROM ${agentHeldStarts} WHERE ${agentHeldStarts.id} = ${row.id} AND ${agentHeldStarts.decision} = 'confirmed')`;
   let started: Awaited<ReturnType<typeof startWorkflow>>;
   try {
     started = await startWorkflow(
@@ -396,10 +404,37 @@ export const confirmHeldStart = async (
         input: z.json().parse(JSON.parse(row.input)),
         key: startKeyOf(row.chatId, row.key),
       },
-      undefined,
+      stillConfirmed,
       { chat: row.chatId, workspace: row.workspaceId, held: row.id }
     );
   } catch (error) {
+    // Admitted before, where core stopped before noting it: that start
+    // stands, whatever refuses a new one now.
+    const receipt = await receiptOf(
+      env,
+      { type: "agent", id: row.agentId },
+      row.personId,
+      startKeyOf(row.chatId, row.key)
+    );
+    if (receipt !== undefined) {
+      await db
+        .update(agentHeldStarts)
+        .set({ startId: receipt.id })
+        .where(eq(agentHeldStarts.id, row.id));
+      return {
+        start: receipt.id,
+        run: await startResourceRun(env, receipt.id),
+      };
+    }
+    // Declined as it was admitted: it never starts.
+    const now = await db
+      .select({ decision: agentHeldStarts.decision })
+      .from(agentHeldStarts)
+      .where(eq(agentHeldStarts.id, row.id))
+      .get();
+    if (now?.decision === "declined") {
+      throw workflowResourceErrors.create("workflow.start_held_gone");
+    }
     if (isExpectedError(error) && !isStaleRefusal(error)) {
       // Refused for good: it never starts, and its agent is told why.
       await db
@@ -426,11 +461,13 @@ export const declineHeldStart = async (
 ): Promise<void> => {
   const row = await waitingFor(env, by, id);
   const db = drizzle(env.DB);
+  // Never once its start is admitted, noted yet or not: the start stands.
+  const notAdmitted = sql`NOT EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.invokerType} = 'agent' AND ${workflowStartReceipts.invokerId} = ${row.agentId} AND ${workflowStartReceipts.principalId} = ${row.personId} AND ${workflowStartReceipts.idempotencyKey} = ${startKeyOf(row.chatId, row.key)})`;
   const [decided] = await auditedBatch(env, db, [
     db
       .update(agentHeldStarts)
       .set({ decision: "declined", decidedAt: new Date() })
-      .where(stillOpen(row.id))
+      .where(and(stillOpen(row.id), notAdmitted))
       .returning({ id: agentHeldStarts.id }),
     outboxedIfChanged(db, {
       actor: actorOf(by),

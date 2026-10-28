@@ -384,6 +384,7 @@ describe(inInbox, () => {
       "asked:asked-1",
       "decision:decision-1",
       "goLive:app-invoices:4",
+      "heldStart:held-start-1",
       "stopped:stopped-1",
       "workflowGoLive:workflow-quotes:2",
     ]);
@@ -439,6 +440,6 @@ describe(listed, () => {
     expect(items.find(({ kind }) => kind === "stoppedSchedule")?.title).toBe(
       "The schedule of Nightly report stopped"
     );
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 6);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 7);
   });
 });

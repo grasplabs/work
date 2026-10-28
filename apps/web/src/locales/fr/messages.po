@@ -13114,9 +13114,6 @@ msgctxt "begin the interview"
 msgid "Start"
 msgstr "Commencer"
 
-#: src/routes/_shell.projects.$projectId.tsx
-msgid "Start a chat in {name}"
-msgstr "Commencer un chat dans {name}"
 #: src/inbox/item-detail.tsx
 msgid "Start {name}"
 msgstr "Lancer {name}"
@@ -13124,6 +13121,10 @@ msgstr "Lancer {name}"
 #: src/inbox/items.ts
 msgid "Start {name}?"
 msgstr "Lancer {name} ?"
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Start a chat in {name}"
+msgstr "Commencer un chat dans {name}"
 
 #: src/workflows/test-run.tsx
 msgid "Start a test run"
@@ -13182,12 +13183,11 @@ msgstr "A commencé à suivre une connexion en retard : les changements antérie
 msgid "Started following what changes at a connection"
 msgstr "A commencé à suivre ce qui change sur une connexion"
 
-#: src/workflows/run-status.ts
 #: src/inbox/item-detail.tsx
 msgid "Started: {name}."
 msgstr "Lancé : {name}."
 
-#: src/workflows/resource-runs.tsx
+#: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
 msgid "Starting"
 msgstr "Démarrage"
@@ -15996,6 +15996,7 @@ msgstr "attend votre rôle, {role}"
 #: src/workflows/today-lanes.tsx
 msgid "waits on your team, {team}"
 msgstr "attend votre équipe, {team}"
+
 #: src/inbox/items.ts
 msgid "Waits until"
 msgstr "Attend jusqu'au"
@@ -17448,10 +17449,6 @@ msgstr "Votre navigateur ne me laisse pas utiliser le micro. Autorisez-le à cô
 #: src/inbox/items.ts
 msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
 msgstr "L'agent de votre conversation a demandé à lancer ce workflow pour vous. Rien ne s'exécute avant que vous ne le confirmiez, avec exactement l'entrée affichée."
-
-#: src/chat/chat-list.tsx
-msgid "Your chats show up here."
-msgstr "Vos discussions apparaissent ici."
 
 #: src/interview/before.tsx
 msgid "Your choice"

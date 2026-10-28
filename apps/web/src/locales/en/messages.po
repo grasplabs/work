@@ -13114,9 +13114,6 @@ msgctxt "begin the interview"
 msgid "Start"
 msgstr "Start"
 
-#: src/routes/_shell.projects.$projectId.tsx
-msgid "Start a chat in {name}"
-msgstr "Start a chat in {name}"
 #: src/inbox/item-detail.tsx
 msgid "Start {name}"
 msgstr "Start {name}"
@@ -13124,6 +13121,10 @@ msgstr "Start {name}"
 #: src/inbox/items.ts
 msgid "Start {name}?"
 msgstr "Start {name}?"
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Start a chat in {name}"
+msgstr "Start a chat in {name}"
 
 #: src/workflows/test-run.tsx
 msgid "Start a test run"
@@ -13182,12 +13183,11 @@ msgstr "Started following a connection late: changes before then weren't read"
 msgid "Started following what changes at a connection"
 msgstr "Started following what changes at a connection"
 
-#: src/workflows/run-status.ts
 #: src/inbox/item-detail.tsx
 msgid "Started: {name}."
 msgstr "Started: {name}."
 
-#: src/workflows/resource-runs.tsx
+#: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
 msgid "Starting"
 msgstr "Starting"
@@ -15996,6 +15996,7 @@ msgstr "waits on your role, {role}"
 #: src/workflows/today-lanes.tsx
 msgid "waits on your team, {team}"
 msgstr "waits on your team, {team}"
+
 #: src/inbox/items.ts
 msgid "Waits until"
 msgstr "Waits until"
@@ -17448,10 +17449,6 @@ msgstr "Your browser is not letting me use the microphone. Allow it next to the 
 #: src/inbox/items.ts
 msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
 msgstr "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
-
-#: src/chat/chat-list.tsx
-msgid "Your chats show up here."
-msgstr "Your chats show up here."
 
 #: src/interview/before.tsx
 msgid "Your choice"

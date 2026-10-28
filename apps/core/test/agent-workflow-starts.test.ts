@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { AgentScope } from "../src/agent-scope.ts";
 import { memberOf } from "../src/auth/identity.ts";
+import { confirmHeldStart } from "../src/held-starts.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -416,6 +417,99 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
       meanwhile: "waiting",
       open: true,
       learned: { status: "started", start: confirmedAgain.start },
+      runs: [true],
+    });
+  });
+
+  it("never runs a start declined as it is admitted, refuses a decline once it was, and keeps a start core stopped before noting", async () => {
+    const person = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const { workflow, builder } = await workflowFor(person.userId);
+    const chats = await personalChatsOf(person.userId);
+    const grant = await grantStart(builder, chats.agent.agentId, workflow.id);
+    const chat = await chatOf(chats, person);
+    const by = await person.api.whoami();
+
+    // Declined while its confirmation is admitting it.
+    const raced = await chat.workflows.start(
+      workflow.id,
+      { who: "Ada" },
+      "raced"
+    );
+    const [racedOpen] = await person.api.heldStarts.list();
+    let admitting = false;
+    let declined = "";
+    const racing: D1Database = new Proxy(env.DB, {
+      get: (target, property): unknown => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "prepare") {
+          return (query: string) => {
+            if (/^insert into "workflow_start_receipts"/iu.test(query)) {
+              admitting = true;
+            }
+            return target.prepare(query);
+          };
+        }
+        if (property === "batch" && typeof value === "function") {
+          return async (...args: unknown[]): Promise<unknown> => {
+            if (admitting && declined === "") {
+              declined = await outcome(
+                person.api.heldStarts.decline(raced.held)
+              );
+            }
+            return await Reflect.apply(value, target, args);
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    const racedConfirm = await outcome(
+      confirmHeldStart(
+        { ...env, DB: racing },
+        by,
+        raced.held,
+        racedOpen?.inputHash ?? ""
+      )
+    );
+    const runsAfterRace = await runsOf(workflow.id);
+
+    // Admitted, then core stopped before noting its start.
+    const kept = await chat.workflows.start(workflow.id, { who: "Bo" }, "kept");
+    const [keptOpen] = await person.api.heldStarts.list();
+    const confirmed = await person.api.heldStarts.confirm(
+      kept.held,
+      keptOpen?.inputHash ?? ""
+    );
+    await env.DB.prepare(
+      "UPDATE agent_held_starts SET start_id = NULL WHERE id = ?"
+    )
+      .bind(kept.held)
+      .run();
+    const lateDecline = await outcome(person.api.heldStarts.decline(kept.held));
+    // The grant revoked meanwhile: confirming again names the start made.
+    await admin.api.permissions.revoke(grant);
+    const again = await person.api.heldStarts.confirm(
+      kept.held,
+      keptOpen?.inputHash ?? ""
+    );
+
+    const runsAtEnd = await runsOf(workflow.id);
+
+    expect({
+      declined,
+      racedConfirm,
+      runsAfterRace: runsAfterRace.length,
+      lateDecline,
+      again: again.start === confirmed.start,
+      runs: runsAtEnd.map(({ id }) => id === confirmed.run),
+    }).toStrictEqual({
+      declined: "ok",
+      racedConfirm: "workflow.start_held_gone",
+      runsAfterRace: 0,
+      lateDecline: "workflow.start_held_gone",
+      again: true,
       runs: [true],
     });
   });

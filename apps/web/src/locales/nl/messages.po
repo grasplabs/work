@@ -13114,9 +13114,6 @@ msgctxt "begin the interview"
 msgid "Start"
 msgstr "Beginnen"
 
-#: src/routes/_shell.projects.$projectId.tsx
-msgid "Start a chat in {name}"
-msgstr "Begin een chat in {name}"
 #: src/inbox/item-detail.tsx
 msgid "Start {name}"
 msgstr "{name} starten"
@@ -13124,6 +13121,10 @@ msgstr "{name} starten"
 #: src/inbox/items.ts
 msgid "Start {name}?"
 msgstr "{name} starten?"
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Start a chat in {name}"
+msgstr "Begin een chat in {name}"
 
 #: src/workflows/test-run.tsx
 msgid "Start a test run"
@@ -13182,12 +13183,11 @@ msgstr "Te laat begonnen een verbinding te volgen: eerdere wijzigingen zijn niet
 msgid "Started following what changes at a connection"
 msgstr "Begonnen te volgen wat er bij een verbinding verandert"
 
-#: src/workflows/run-status.ts
 #: src/inbox/item-detail.tsx
 msgid "Started: {name}."
 msgstr "Gestart: {name}."
 
-#: src/workflows/resource-runs.tsx
+#: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
 msgid "Starting"
 msgstr "Wordt gestart"
@@ -15996,6 +15996,7 @@ msgstr "wacht op je rol, {role}"
 #: src/workflows/today-lanes.tsx
 msgid "waits on your team, {team}"
 msgstr "wacht op je team, {team}"
+
 #: src/inbox/items.ts
 msgid "Waits until"
 msgstr "Wacht tot"
@@ -17448,10 +17449,6 @@ msgstr "Je browser laat me de microfoon niet gebruiken. Sta het toe naast het ad
 #: src/inbox/items.ts
 msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
 msgstr "De agent van je chat wil deze workflow voor je starten. Er draait niets tot je het bevestigt, met precies de getoonde invoer."
-
-#: src/chat/chat-list.tsx
-msgid "Your chats show up here."
-msgstr "Je chats verschijnen hier."
 
 #: src/interview/before.tsx
 msgid "Your choice"
