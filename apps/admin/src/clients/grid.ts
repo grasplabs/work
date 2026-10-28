@@ -90,7 +90,8 @@ export interface GridRow {
   name: string;
   status: "provisioning" | "active" | "offboarded";
   ring: number;
-  accountId: string;
+  /** Its own account, under the account-per-client path; null for a placed client. */
+  accountId: string | null;
   /** `<id>.<domain>`; null while the admin has no domain. */
   hostname: string | null;
   /** The release the admin made live on every Worker; null when none, or they differ. */
@@ -328,7 +329,7 @@ const liveOf = async (
     usage,
     manifestOf,
   }: LiveSources,
-  row: { id: string; accountId: string; hostname: string | null },
+  row: { id: string; accountId: string | null; hostname: string | null },
   signal: AbortSignal
 ): Promise<LiveStatus> => {
   const drift =
@@ -369,7 +370,7 @@ const liveOf = async (
       row.id
     ),
   ]);
-  const used = usage?.get(row.accountId);
+  const used = row.accountId === null ? undefined : usage?.get(row.accountId);
   return {
     drift: drift?.state ?? "unknown",
     sharedSecretsCurrent,
@@ -476,9 +477,16 @@ const deployerApiFor = async (
  * can, within `limits.rowDeadlineMs`. A client whose account the
  * analytics don't answer for is null, and the others stand.
  */
+/**
+ * The accounts of `rows` whose usage is read: a placed client has no
+ * account of its own, so none of its usage is read here.
+ */
+const accountsOf = (rows: readonly { accountId: string | null }[]): string[] =>
+  rows.flatMap(({ accountId }) => (accountId === null ? [] : [accountId]));
+
 export const monthCosts = async (
   env: Env,
-  rows: readonly { id: string; accountId: string }[],
+  rows: readonly { id: string; accountId: string | null }[],
   now: Date,
   limits: LiveReadLimits = defaultLiveReadLimits
 ): Promise<Record<string, MonthCost | null>> => {
@@ -487,14 +495,12 @@ export const monthCosts = async (
   const usage =
     apiFor === null
       ? null
-      : await usageWithin(
-          limits.rowDeadlineMs,
-          apiFor,
-          rows.map(({ accountId }) => accountId),
-          now
-        );
+      : await usageWithin(limits.rowDeadlineMs, apiFor, accountsOf(rows), now);
   return Object.fromEntries(
-    rows.map(({ id, accountId }) => [id, costOf(usage?.get(accountId))])
+    rows.map(({ id, accountId }) => [
+      id,
+      accountId === null ? null : costOf(usage?.get(accountId)),
+    ])
   );
 };
 
@@ -560,7 +566,7 @@ export const gridLive = async (
           : await usageWithin(
               options.rowDeadlineMs,
               apiFor,
-              toRead.map(({ accountId }) => accountId),
+              accountsOf(toRead),
               now
             ),
       manifestOf: async (id) => {

@@ -7,7 +7,7 @@
  * started for: one ring, one client, or every client, ring by ring, with
  * no approval between them (src/rollout/workflow.ts).
  */
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
@@ -23,6 +23,7 @@ import {
   rolloutTargets,
 } from "../db/schema.ts";
 import { latestDeployOf } from "../deploy/deploy.ts";
+import { DeployError } from "../deploy/errors.ts";
 import { mappedGeneration } from "../deploy/router.ts";
 import type { RouterHosts } from "../deploy/router.ts";
 
@@ -60,9 +61,10 @@ const byRing = (a: RolloutTarget, b: RolloutTarget): number =>
 /**
  * The active clients a rollout for `scope` reaches, each in the ring it's
  * in now: ring 0's, and the scope's. In the order it reaches them. A
- * client placed in a hosting destination is never one: a rollout deploys
- * account by account (src/deploy/deploy.ts), which a placed client's
- * Workers and resources aren't (src/hosting/).
+ * client placed in a hosting destination, or with no account of its own,
+ * is never one: a rollout deploys account by account
+ * (src/deploy/deploy.ts), which such a client's Workers and resources
+ * aren't (src/hosting/).
  */
 export const targetsOf = async (
   db: AdminDatabase,
@@ -76,6 +78,8 @@ export const targetsOf = async (
       and(
         eq(clients.status, "active"),
         isNull(clientPlacements.clientId),
+        // A client with no account of its own isn't one this path deploys.
+        isNotNull(clients.accountId),
         scopeFilter(scope)
       )
     );
@@ -124,7 +128,8 @@ export type PreviousRun = z.infer<typeof previousRunSchema>;
 /** The client a rollout reaches, as it reads it. */
 export interface TargetClient {
   id: string;
-  accountId: string;
+  /** Its own account; null for a client created as a placement, which no rollout targets. */
+  accountId: string | null;
   status: "provisioning" | "active" | "offboarded";
   pinnedReleaseId: string | null;
   /**
@@ -287,10 +292,17 @@ export const previousRunOf = async (
   hostname: string,
   client: TargetClient
 ): Promise<PreviousRun> => {
+  const { accountId } = client;
+  if (accountId === null) {
+    throw new DeployError(
+      "client_placed",
+      `${client.id} has no account of its own: it's provisioned as a placement`
+    );
+  }
   const versions: Record<string, string> = {};
   for (const { worker, scriptName } of client.workers) {
     // oxlint-disable-next-line no-await-in-loop -- two Workers
-    const live = await liveVersion(api, client.accountId, scriptName);
+    const live = await liveVersion(api, accountId, scriptName);
     if (live === undefined) {
       throw new TrafficSplitError(scriptName);
     }

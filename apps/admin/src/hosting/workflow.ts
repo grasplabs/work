@@ -16,7 +16,7 @@ import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { Staff } from "../access.ts";
 import { adminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
-import { ProvisionError } from "../provision/control.ts";
+import { ProvisionError } from "../provision/errors.ts";
 import { claimRun, currentRun, hasEnded } from "../runners.ts";
 import { asStepError, deployStepConfig, stop } from "../workflow-steps.ts";
 import { InventoryError } from "./inventory.ts";

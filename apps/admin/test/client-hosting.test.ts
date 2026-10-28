@@ -277,16 +277,16 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
   });
 
-  it("leaves a client whose run ended while provisioning it in an account of its own unplaced, for that run to resume", async () => {
+  it("leaves a client whose last run was another kind's unplaced, for that run's own path", async () => {
     await destination();
     const clientId = await client();
     const releaseId = await importedRelease();
-    // Its account-per-client run ended without saying so, long enough ago
-    // that it's no longer starting.
+    // Another kind's run ended without saying so, long enough ago that
+    // it's no longer starting.
     await db.insert(clientRuns).values({
       clientId,
-      runId: `${clientId}-own-account`,
-      kind: "provision",
+      runId: `${clientId}-apply`,
+      kind: "apply",
       claimedAt: new Date(Date.now() - 3_600_000),
     });
 
@@ -302,7 +302,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       refused: { runId: null, refused: "other_run_held", problems: [] },
       placement: undefined,
       operation: undefined,
-      run: [{ runId: `${clientId}-own-account`, kind: "provision" }],
+      run: [{ runId: `${clientId}-apply`, kind: "apply" }],
     });
   });
 
