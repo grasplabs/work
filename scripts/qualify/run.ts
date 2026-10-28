@@ -1,32 +1,37 @@
 /**
  * The real-account qualification of Workers for Platforms (GRA-430), as a
- * repeatable run against Grasp's Cloudflare account:
+ * repeatable run against Grasp's Cloudflare account, through the `cf` CLI
+ * alone, signed in with its own login:
  *
- *   op run --env-file qualify.env -- node scripts/qualify/run.ts <step>... [--live]
+ *   CLOUDFLARE_ACCOUNT_ID=<id> node scripts/qualify/run.ts <step>... [--live]
  *
- * where `qualify.env`, outside the repo, holds 1Password references, never
- * values: `CLOUDFLARE_ACCOUNT_ID=op://…` and `CLOUDFLARE_API_TOKEN=op://…`
- * (and, for the mail spike, `QUAL_MAIL_FROM`, `QUAL_MAIL_TO` and
- * optionally `QUAL_MAIL_FOREIGN_FROM`). Nothing is read from the command
- * line or written to the repo.
+ * The account comes from the environment (`op run --env-file <file> --`
+ * puts it there from 1Password, if it's kept there); nothing is read from
+ * the command line or written to the repo. A token in the environment is
+ * removed before cf runs (cf.ts), so cf acts only as its login. The mail
+ * spike also reads `QUAL_MAIL_FROM`, `QUAL_MAIL_TO` and optionally
+ * `QUAL_MAIL_FOREIGN_FROM`.
  *
- * Without `--live` every write is only planned and recorded; reads still
- * go to the account. Every resource the run writes is named after its
- * prefix (`--prefix`, `qual-<yyyymmdd>` by default), the API client
- * refuses any write that names something else (cloudflare.ts), so a run
- * only ever touches its own qualification resources. `preflight` refuses
- * an account holding anything it doesn't know (`knownName`): the run's
- * and earlier runs' (`qual-…`), the platform's own (`grasp-os-…`, as
+ * Without `--live` every write runs as cf's own `--dry-run`, which sends
+ * nothing; reads still go to the account. Every resource the run writes
+ * is named after its prefix (`--prefix`, `qual-<yyyymmdd>` by default),
+ * and a write naming anything else is refused (cf.ts), so a run only ever
+ * touches its own qualification resources. `preflight` refuses an account
+ * holding anything it doesn't know (`knownName`): the run's and earlier
+ * runs' (`qual-…`), the platform's own (`grasp-os-…`, as
  * scripts/cloudflare-account-setup.ts and deploys leave them) and placed
  * clients' (`g<deployment>-…`), so a run never starts in an account it
- * wasn't meant for. The evidence, one JSON line per call and per check, and the
- * run's state (the generated keys and ids, mode 0600) go to `--out`, by
- * default a directory under the system's temporary directory.
+ * wasn't meant for. The evidence, one JSON line per cf invocation and per
+ * check, and the run's state (its generated keys and ids, mode 0600) go to
+ * `--out`, by default a directory under the system's temporary directory.
+ *
+ * Every Worker is uploaded by `cf deploy --prebuilt` from Build Output the
+ * run writes (workers.ts), with its secrets in a `--secrets-file` it
+ * deletes once cf has read it.
  *
  * Steps, in the order a full run takes them (`all`):
- * - `preflight`: the token, the account, the Workers for Platforms
- *   entitlement, and the account's inventory, refused if it holds
- *   anything unknown.
+ * - `preflight`: the Workers for Platforms entitlement, and the account's
+ *   inventory, refused if it holds anything unknown.
  * - `namespace`: the run's dispatch namespace.
  * - `dispatcher`: an ordinary Worker on workers.dev that dispatches into
  *   the namespace, only with the run's dispatch key.
@@ -60,6 +65,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
@@ -79,16 +85,22 @@ import {
   reservedSecretNames,
   workerSecrets,
 } from "../../apps/admin/src/deploy/secrets.ts";
-import { layOutWorker } from "../release/deploy-lib.ts";
 import {
-  cloudflareApi,
-  CloudflareError,
-  knownName,
+  ASSETS_DIR,
+  layOutWorker,
+  MIGRATIONS_DIR,
+  WORKER_DIR,
+} from "../release/deploy-lib.ts";
+import {
+  CfError,
+  cfCli,
+  entriesOf,
   evidenceLog,
-  plannedWriteError,
-  verifyToken,
-} from "./cloudflare.ts";
-import type { Evidence } from "./cloudflare.ts";
+  knownName,
+  lastLines,
+  textField,
+} from "./cf.ts";
+import type { Evidence } from "./cf.ts";
 import {
   bindingKeys,
   clientConfig,
@@ -96,13 +108,15 @@ import {
   dispatcherSource,
   dispatchKeyHeader,
   mailSource,
+  outputOf,
   probeCompatibilityDate,
   probeSource,
   recorderSource,
   storageOf,
   targetHeader,
+  writeBuildOutput,
 } from "./workers.ts";
-import type { BindingKey, UploadMetadata } from "./workers.ts";
+import type { BindingKey, OutputModule, OutputWorker } from "./workers.ts";
 
 const steps = [
   "preflight",
@@ -127,11 +141,11 @@ const releaseApps = ["connect", "core"] as const;
 /**
  * The binding kinds left out of a refused upload, one more each attempt:
  * first those the admin already refuses for placed clients, then the
- * ones this run qualifies.
+ * ones this run qualifies. Workflows are always left out: a placed client
+ * binds none.
  */
 const fallbackOrder: readonly BindingKey[] = [
   "ai",
-  "workflows",
   "send_email",
   "version_metadata",
   "worker_loaders",
@@ -156,16 +170,12 @@ const { values: args, positionals } = parseArgs({
   },
 });
 
-const requiredEnv = (name: string): string => {
-  const value = process.env[name];
-  if (value === undefined || value === "") {
-    throw new Error(
-      `${name} is not set: run through \`op run --env-file <file> --\` with 1Password references`
-    );
-  }
-  return value;
-};
-
+const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
+if (accountId === "") {
+  throw new Error(
+    "CLOUDFLARE_ACCOUNT_ID is not set: run with the account's id in the environment (op run --env-file <file> -- for a 1Password reference)"
+  );
+}
 const today = new Date().toISOString().slice(0, 10).replaceAll("-", "");
 const prefix = args.prefix ?? `qual-${today}`;
 if (!prefixPattern.test(prefix)) {
@@ -184,20 +194,12 @@ const chosen: Step[] = asked.includes("all")
       return step;
     });
 
-const accountId = requiredEnv("CLOUDFLARE_ACCOUNT_ID");
-const token = requiredEnv("CLOUDFLARE_API_TOKEN");
 const outDir = path.resolve(
   args.out ?? path.join(tmpdir(), "grasp-qualify", prefix)
 );
 mkdirSync(outDir, { recursive: true, mode: 0o700 });
 const record = evidenceLog(path.join(outDir, "evidence.jsonl"));
-const api = cloudflareApi({
-  accountId,
-  token,
-  prefix,
-  live: args.live,
-  record,
-});
+const cf = cfCli({ accountId, prefix, live: args.live, record });
 
 /** What one step leaves for the next, kept between invocations. */
 const stateSchema = z.object({
@@ -219,13 +221,13 @@ const state: State = existsSync(stateFile)
       created: [],
     };
 for (const id of state.created) {
-  api.own(id);
+  cf.own(id);
 }
 const saveState = (): void => {
   writeFileSync(stateFile, JSON.stringify(state, null, 2), { mode: 0o600 });
 };
 const own = (id: string): void => {
-  api.own(id);
+  cf.own(id);
   if (!state.created.includes(id)) {
     state.created.push(id);
     saveState();
@@ -245,22 +247,11 @@ const check = (
   console.info(`${result.padEnd(8)} ${name}`);
 };
 
-/** `work`, or what a dry run planned instead of it. */
-const orPlanned = async <T>(work: () => Promise<T>): Promise<T | "planned"> => {
-  try {
-    return await work();
-  } catch (error) {
-    if (error instanceof Error && error.name === plannedWriteError) {
-      return "planned";
-    }
-    throw error;
-  }
-};
-
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-const namedList = z.array(z.object({ name: z.string() }).loose());
+const sha256 = (text: string): string =>
+  createHash("sha256").update(text).digest("hex");
 
 // ---------------------------------------------------------------------------
 // Inventory
@@ -282,48 +273,49 @@ const inventoryKinds: readonly (keyof Inventory)[] = [
   "namespaces",
 ];
 
-const sortedNames = (list: readonly { name: string }[]): string[] =>
-  list.map(({ name }) => name).toSorted((a, b) => a.localeCompare(b));
+/** The names cf listed, by the first of `keys` each entry has. */
+const namesIn = (
+  result: unknown,
+  keys: readonly string[],
+  listKey?: string
+): string[] =>
+  entriesOf(result, listKey)
+    .map((entry) => textField(entry, keys))
+    .filter((name): name is string => name !== undefined)
+    .toSorted((a, b) => a.localeCompare(b));
 
-const inventory = async (): Promise<Inventory> => {
-  const scripts = await api.call(
-    { method: "GET", path: "/workers/scripts" },
-    z.array(z.object({ id: z.string() }).loose())
-  );
-  const databases = await api.call(
-    { method: "GET", path: "/d1/database?per_page=10000" },
-    namedList
-  );
-  const bucketsSchema = z.object({ buckets: namedList });
-  const buckets = await api.call(
-    { method: "GET", path: "/r2/buckets" },
-    bucketsSchema
-  );
-  const euBuckets = await api.call(
-    {
-      method: "GET",
-      path: "/r2/buckets",
-      headers: { "cf-r2-jurisdiction": "eu" },
-    },
-    bucketsSchema
-  );
-  const namespaces = await api
-    .call({ method: "GET", path: "/workers/dispatch/namespaces" }, namedList)
-    .catch(() => []);
-  return {
-    scripts: scripts.map(({ id }) => id).toSorted((a, b) => a.localeCompare(b)),
-    databases: sortedNames(databases),
-    buckets: sortedNames(buckets.buckets),
-    euBuckets: sortedNames(euBuckets.buckets),
-    namespaces: sortedNames(namespaces),
-  };
-};
+const inventory = (): Inventory => ({
+  scripts: namesIn(
+    cf.read(["workers", "scripts", "search", "--per-page", "1000"]),
+    ["script_name", "id", "name"]
+  ),
+  databases: namesIn(cf.read(["d1", "list", "--per-page", "1000"]), ["name"]),
+  buckets: namesIn(
+    cf.read(["r2", "buckets", "list", "--per-page", "1000"]),
+    ["name"],
+    "buckets"
+  ),
+  euBuckets: namesIn(
+    cf.read([
+      "r2",
+      "buckets",
+      "list",
+      "--per-page",
+      "1000",
+      "--cf-r2-jurisdiction",
+      "eu",
+    ]),
+    ["name"],
+    "buckets"
+  ),
+  namespaces: namesIn(
+    cf.read(["workers-for-platforms", "dispatch-namespaces", "list"]),
+    ["namespace_name", "name"]
+  ),
+});
 
-const sha256 = (text: string): string =>
-  createHash("sha256").update(text).digest("hex");
-
-const recordInventory = async (label: string) => {
-  const found = await inventory();
+const recordInventory = (label: string): Inventory => {
+  const found = inventory();
   record({
     kind: "inventory",
     label,
@@ -336,73 +328,61 @@ const recordInventory = async (label: string) => {
 // ---------------------------------------------------------------------------
 // Uploads
 
-const userPath = (script: string): string =>
-  `/workers/dispatch/namespaces/${prefix}/scripts/${script}`;
+/** Where each uploaded Worker's Build Output is written. */
+const projectDir = (name: string): string =>
+  path.join(outDir, "projects", name);
 
-/** Uploads one Worker of plain modules (no bundling) to `scriptPath`. */
-const uploadScript = async (
-  scriptPath: string,
-  metadata: UploadMetadata,
-  modules: Readonly<Record<string, string>>
-): Promise<void> => {
-  const form = new FormData();
-  form.set(
-    "metadata",
-    new Blob([JSON.stringify(metadata)], { type: "application/json" })
-  );
-  for (const [name, source] of Object.entries(modules)) {
-    form.set(
-      name,
-      new File([source], name, { type: "application/javascript+module" })
-    );
-  }
-  await api.call({ method: "PUT", path: scriptPath, form }, z.unknown());
-};
-
-const require = createRequire(import.meta.url);
-const wranglerCli = path.join(
-  path.dirname(require.resolve("wrangler/package.json")),
-  "bin/wrangler.js"
-);
+interface DeployOptions {
+  /** An ordinary Worker of the account, not a user Worker in the namespace. */
+  ordinary?: boolean;
+  secrets?: Readonly<Record<string, string>>;
+  assetsFrom?: string;
+}
 
 /**
- * Runs Wrangler with the run's credentials (it reads them from the same
- * environment). Its output is kept out of the evidence: only whether it
- * succeeded, and its last line when it didn't.
+ * Uploads `worker` with `cf deploy --prebuilt`, into the run's namespace
+ * unless `ordinary`, with `secrets` in a file cf reads and the run then
+ * deletes. Answers cf's output: the deploy prints its URLs there.
  */
-const wrangler = (
-  wranglerArgs: readonly string[],
-  cwd: string = process.cwd()
-): { ok: boolean; output: string } => {
+const deploy = (
+  worker: Omit<OutputWorker, "manifest">,
+  mainModule: string,
+  modules: readonly OutputModule[],
+  { ordinary = false, secrets = {}, assetsFrom }: DeployOptions = {}
+): { planned: boolean; output: string } => {
+  const dir = projectDir(worker.name);
+  writeBuildOutput(dir, worker, mainModule, modules, assetsFrom);
+  writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify({ name: worker.name, private: true })
+  );
+  const secretsFile = path.join(dir, "secrets.json");
+  const hasSecrets = Object.keys(secrets).length > 0;
+  if (hasSecrets) {
+    writeFileSync(secretsFile, JSON.stringify(secrets), { mode: 0o600 });
+  }
   try {
-    const output = execFileSync(
-      process.execPath,
-      [wranglerCli, ...wranglerArgs],
-      {
-        cwd,
-        stdio: "pipe",
-        encoding: "utf-8",
-        timeout: 10 * 60 * 1000,
-      }
+    const { planned, output } = cf.write(
+      [
+        "deploy",
+        "--prebuilt",
+        ...(ordinary ? [] : ["--dispatch-namespace", prefix]),
+        ...(hasSecrets ? ["--secrets-file", secretsFile] : []),
+        "--message",
+        `Qualification run ${prefix}`,
+      ],
+      { names: ordinary ? [worker.name] : [prefix, worker.name], cwd: dir }
     );
-    return { ok: true, output };
-  } catch (error) {
-    const stderr =
-      typeof error === "object" && error !== null && "stderr" in error
-        ? String(error.stderr)
-        : errorText(error);
-    return { ok: false, output: stderr };
+    return { planned, output };
+  } finally {
+    rmSync(secretsFile, { force: true });
   }
 };
 
-/** The last non-empty lines of Wrangler's output, for the evidence. */
-const tail = (output: string): string =>
-  output
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "")
-    .slice(-3)
-    .join(" | ");
+/** A Worker of one JavaScript module, as the probes are. */
+const oneModule = (source: string): OutputModule[] => [
+  { name: "index.js", type: "esm", content: source },
+];
 
 /** Through the dispatcher, to user Worker `script`. */
 const dispatch = async (
@@ -435,16 +415,9 @@ const jsonOf = async (response: Response): Promise<unknown> => {
 // ---------------------------------------------------------------------------
 // Steps
 
-const preflight = async (): Promise<void> => {
-  const verified = await verifyToken(token);
-  check("token is active", verified.status === "active" ? "pass" : "fail", {
-    status: verified.status,
-  });
+const preflight = (): void => {
   try {
-    await api.call(
-      { method: "GET", path: "/workers/dispatch/namespaces" },
-      z.unknown()
-    );
+    cf.read(["workers-for-platforms", "dispatch-namespaces", "list"]);
     check("account is entitled to Workers for Platforms", "pass");
   } catch (error) {
     check("account is entitled to Workers for Platforms", "fail", {
@@ -454,7 +427,7 @@ const preflight = async (): Promise<void> => {
       cause: error,
     });
   }
-  const found = await recordInventory("before");
+  const found = recordInventory("before");
   const foreign = inventoryKinds.flatMap((kind) =>
     found[kind]
       .filter((name) => !knownName(name))
@@ -472,124 +445,110 @@ const preflight = async (): Promise<void> => {
   }
 };
 
-const namespaceStep = async (): Promise<void> => {
-  const existing = await api.call(
-    { method: "GET", path: "/workers/dispatch/namespaces" },
-    namedList
+const namespaceStep = (): void => {
+  const existing = namesIn(
+    cf.read(["workers-for-platforms", "dispatch-namespaces", "list"]),
+    ["namespace_name", "name"]
   );
-  if (existing.some(({ name }) => name === prefix)) {
+  if (existing.includes(prefix)) {
     check("dispatch namespace exists", "observed", { namespace: prefix });
     return;
   }
-  const made = await orPlanned(
-    async () =>
-      await api.call(
-        {
-          method: "POST",
-          path: "/workers/dispatch/namespaces",
-          json: { name: prefix },
-        },
-        z.object({ namespace_id: z.string() }).loose(),
-        { creates: prefix }
-      )
+  const { planned } = cf.write(
+    [
+      "workers-for-platforms",
+      "dispatch-namespaces",
+      "create",
+      "--name",
+      prefix,
+    ],
+    { names: [prefix] }
   );
-  check("dispatch namespace created", made === "planned" ? "skipped" : "pass", {
+  check("dispatch namespace created", planned ? "skipped" : "pass", {
     namespace: prefix,
   });
 };
 
-const dispatcherStep = async (): Promise<void> => {
+/** A workers.dev address cf printed for `name`. */
+const workersDevUrl = (output: string, name: string): string | undefined =>
+  new RegExp(`https://${name}\\.[a-z0-9-]+\\.workers\\.dev`, "u").exec(
+    output
+  )?.[0];
+
+const dispatcherStep = (): void => {
   const name = `${prefix}-dispatcher`;
-  const uploaded = await orPlanned(async () => {
-    await uploadScript(
-      `/workers/scripts/${name}`,
-      {
-        main_module: "dispatcher.js",
-        compatibility_date: probeCompatibilityDate,
-        bindings: [
-          { type: "dispatch_namespace", name: "DISPATCHER", namespace: prefix },
-          {
-            type: "secret_text",
-            name: "DISPATCH_KEY",
-            text: state.dispatchKey,
-          },
-        ],
+  const { planned, output } = deploy(
+    {
+      name,
+      compatibilityDate: probeCompatibilityDate,
+      workersDev: true,
+      previewUrls: false,
+      env: {
+        DISPATCHER: { type: "dispatch-namespace", namespace: prefix },
       },
-      { "dispatcher.js": dispatcherSource(prefix) }
-    );
-    await api.call(
-      {
-        method: "POST",
-        path: `/workers/scripts/${name}/subdomain`,
-        json: { enabled: true, previews_enabled: false },
-      },
-      z.unknown()
-    );
-  });
-  if (uploaded === "planned") {
+    },
+    "index.js",
+    oneModule(dispatcherSource(prefix)),
+    { ordinary: true, secrets: { DISPATCH_KEY: state.dispatchKey } }
+  );
+  if (planned) {
     check("dispatcher uploaded", "skipped");
     return;
   }
-  const { subdomain } = await api.call(
-    { method: "GET", path: "/workers/subdomain" },
-    z.object({ subdomain: z.string() })
-  );
-  state.dispatcherUrl = `https://${name}.${subdomain}.workers.dev`;
+  const url = workersDevUrl(output, name);
+  if (url === undefined) {
+    check("dispatcher uploaded", "fail", { reason: "no workers.dev address" });
+    return;
+  }
+  state.dispatcherUrl = url;
   saveState();
-  check("dispatcher uploaded", "pass", { url: state.dispatcherUrl });
+  check("dispatcher uploaded", "pass", { url });
 };
 
 /** The id of the client's database `name`, created in the EU if it isn't there. */
-const ensureDatabase = async (name: string): Promise<string> => {
-  const found = await api.call(
-    { method: "GET", path: `/d1/database?name=${encodeURIComponent(name)}` },
-    z.array(z.object({ name: z.string(), uuid: z.string() }).loose())
+const ensureDatabase = (name: string): string => {
+  const found = entriesOf(cf.read(["d1", "list", "--name", name])).find(
+    (entry) => textField(entry, ["name"]) === name
   );
-  const existing = found.find((database) => database.name === name);
+  const existing = textField(found, ["uuid"]);
   if (existing !== undefined) {
-    own(existing.uuid);
-    return existing.uuid;
+    own(existing);
+    return existing;
   }
-  const made = await orPlanned(
-    async () =>
-      await api.call(
-        {
-          method: "POST",
-          path: "/d1/database",
-          json: { name, jurisdiction: "eu" },
-        },
-        z.object({ uuid: z.string() }).loose(),
-        { creates: name }
-      )
+  const { planned, result } = cf.write(
+    ["d1", "create", "--name", name, "--jurisdiction", "eu"],
+    { names: [name] }
   );
-  if (made === "planned") {
+  const made = textField(result, ["uuid"]);
+  if (planned || made === undefined) {
     return `planned-${name}`;
   }
-  own(made.uuid);
-  return made.uuid;
+  own(made);
+  return made;
 };
 
 /** The client's EU bucket `name`, created if it isn't there. */
-const ensureBucket = async (name: string): Promise<void> => {
-  await orPlanned(async () => {
-    try {
-      await api.call(
-        {
-          method: "POST",
-          path: "/r2/buckets",
-          json: { name },
-          headers: { "cf-r2-jurisdiction": "eu" },
-        },
-        z.unknown(),
-        { creates: name }
-      );
-    } catch (error) {
-      // Already there: one of the run's, from an earlier invocation.
-      if (!(error instanceof CloudflareError && error.status === 409)) {
-        throw error;
-      }
-    }
-  });
+const ensureBucket = (name: string): void => {
+  const found = namesIn(
+    cf.read([
+      "r2",
+      "buckets",
+      "list",
+      "--name-contains",
+      name,
+      "--cf-r2-jurisdiction",
+      "eu",
+    ]),
+    ["name"],
+    "buckets"
+  );
+  if (found.includes(name)) {
+    return;
+  }
+  cf.write(
+    ["r2", "buckets", "create", "--name", name, "--cf-r2-jurisdiction", "eu"],
+    { names: [name] }
+  );
 };
 
 /** Client `client`'s id, as its core runs as and its secrets derive from. */
@@ -600,13 +559,14 @@ const clientIdOf = (client: Client): string =>
 const routerSecretOf = async (client: Client): Promise<string> =>
   await deriveRouterSecret(state.routerKey, clientIdOf(client), 1);
 
-/** Puts `app`'s secrets on `script`, as the admin derives them. */
-const deliverSecrets = async (
+type ReleaseWorker = Awaited<ReturnType<typeof layOutWorker>>["worker"];
+
+/** `app`'s secrets for `client`, as the admin derives them. */
+const secretsOf = async (
   client: Client,
   app: string,
-  script: string,
-  worker: Awaited<ReturnType<typeof layOutWorker>>["worker"]
-): Promise<void> => {
+  worker: ReleaseWorker
+): Promise<Record<string, string>> => {
   const shared = Object.fromEntries(
     worker.requiredSecrets
       .filter((name) => !reservedSecretNames.has(name))
@@ -624,27 +584,28 @@ const deliverSecrets = async (
     new Date(),
     new Map()
   );
-  for (const { name, value } of secrets) {
-    // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-    await api.call(
-      {
-        method: "PUT",
-        path: `${userPath(script)}/secrets`,
-        json: { name, text: value, type: "secret_text" },
-      },
-      z.unknown()
-    );
+  return Object.fromEntries(secrets.map(({ name, value }) => [name, value]));
+};
+
+/** Core's vars for `client`, as the admin derives them; none for connect. */
+const varsOf = (client: Client, app: string): Record<string, unknown> => {
+  if (app !== "core") {
+    return {};
   }
-  check(`${client}: ${app} has its secrets`, "pass", {
-    names: secrets.map(({ name }) => name),
+  const { MODEL_GATEWAY: _gateway, ...derived } = derivedCoreConfig({
+    clientId: clientIdOf(client),
+    signIn: null,
+    domain: "qual.invalid",
+    apps: {},
   });
+  return derived;
 };
 
 /**
- * Uploads `app` of the release for `client` with Wrangler, from the
- * release's verified bytes (deploy-lib.ts), leaving out one more binding
- * kind after each refusal. Returns the kinds it went without, or
- * undefined when every attempt was refused.
+ * Uploads `app` of the release for `client` from the release's verified
+ * bytes (deploy-lib.ts), its D1 migrations applied first, leaving out one
+ * more binding kind after each refusal. Returns the kinds it went without,
+ * or undefined when every attempt was refused.
  */
 const deployReleaseWorker = async (
   releaseDir: string,
@@ -660,28 +621,40 @@ const deployReleaseWorker = async (
   const storage = storageOf(original);
   const databaseIds: Record<string, string> = {};
   for (const database of storage.databases) {
-    // oxlint-disable-next-line no-await-in-loop -- a few, in turn
-    databaseIds[database] = await ensureDatabase(
+    databaseIds[database] = ensureDatabase(
       clientName({ prefix, client }, database)
     );
   }
   for (const bucket of storage.buckets) {
-    // oxlint-disable-next-line no-await-in-loop -- a few, in turn
-    await ensureBucket(clientName({ prefix, client }, bucket));
+    ensureBucket(clientName({ prefix, client }, bucket));
   }
-  const vars =
-    app === "core"
-      ? (() => {
-          const { MODEL_GATEWAY: _gateway, ...derived } = derivedCoreConfig({
-            clientId: clientIdOf(client),
-            signIn: null,
-            domain: "qual.invalid",
-            apps: {},
-          });
-          return derived;
-        })()
-      : {};
-  const without = new Set<BindingKey>();
+  for (const database of laidOut.worker.d1Databases) {
+    const id = databaseIds[database.databaseName];
+    if (id === undefined) {
+      continue;
+    }
+    cf.write(
+      [
+        "d1",
+        "migrations",
+        "apply",
+        id,
+        "--dir",
+        path.join(dir, MIGRATIONS_DIR, database.binding),
+      ],
+      { names: [id] }
+    );
+  }
+  const secrets = await secretsOf(client, app, laidOut.worker);
+  const modules: OutputModule[] = laidOut.worker.modules.map(
+    ({ name, type }) => ({
+      name,
+      type,
+      content: readFileSync(path.join(dir, WORKER_DIR, name)),
+    })
+  );
+  const assetsDir = path.join(dir, ASSETS_DIR);
+  const without = new Set<BindingKey>(["workflows"]);
   for (let attempt = 0; attempt <= fallbackOrder.length; attempt += 1) {
     const config = {
       ...clientConfig(original, {
@@ -691,66 +664,47 @@ const deployReleaseWorker = async (
         databaseIds,
         without,
       }),
-      vars,
+      vars: varsOf(client, app),
     };
-    writeFileSync(laidOut.config, JSON.stringify(config, null, 2));
-    const script = config.name;
-    if (!args.live) {
-      record({ kind: "planned", method: "wrangler deploy", path: script });
-      check(`${client}: ${app} uploaded as a user Worker`, "skipped");
+    try {
+      const { planned } = deploy(
+        outputOf(config),
+        laidOut.worker.mainModule,
+        modules,
+        {
+          secrets,
+          ...(existsSync(assetsDir) ? { assetsFrom: assetsDir } : {}),
+        }
+      );
+      check(
+        `${client}: ${app} uploaded as a user Worker`,
+        planned ? "skipped" : "pass",
+        {
+          script: config.name,
+          without: [...without],
+          bindings: bindingKeys.filter((key) => Object.hasOwn(config, key)),
+          secrets: Object.keys(secrets),
+        }
+      );
       return without;
-    }
-    for (const database of laidOut.worker.d1Databases) {
-      const migrated = wrangler([
-        "d1",
-        "migrations",
-        "apply",
-        database.binding,
-        "--remote",
-        "--config",
-        laidOut.config,
-      ]);
+    } catch (error) {
+      if (!(error instanceof CfError)) {
+        throw error;
+      }
       record({
-        kind: "wrangler",
-        what: "d1 migrations apply",
-        script,
-        database: database.binding,
-        ok: migrated.ok,
-        ...(migrated.ok ? {} : { error: tail(migrated.output) }),
-      });
-    }
-    const deployed = wrangler([
-      "deploy",
-      "--config",
-      laidOut.config,
-      "--dispatch-namespace",
-      prefix,
-    ]);
-    record({
-      kind: "wrangler",
-      what: "deploy",
-      script,
-      without: [...without],
-      ok: deployed.ok,
-      ...(deployed.ok ? {} : { error: tail(deployed.output) }),
-    });
-    if (deployed.ok) {
-      check(`${client}: ${app} uploaded as a user Worker`, "pass", {
-        script,
+        kind: "refused upload",
+        script: config.name,
         without: [...without],
-        bindings: bindingKeys.filter((key) => Object.hasOwn(config, key)),
+        error: lastLines(error.output),
       });
-      // oxlint-disable-next-line no-await-in-loop -- once, on the attempt that succeeded
-      await deliverSecrets(client, app, script, laidOut.worker);
-      return without;
+      const next = fallbackOrder.find(
+        (key) => !without.has(key) && Object.hasOwn(original, key)
+      );
+      if (next === undefined) {
+        break;
+      }
+      without.add(next);
     }
-    const next = fallbackOrder.find(
-      (key) => !without.has(key) && original[key] !== undefined
-    );
-    if (next === undefined) {
-      break;
-    }
-    without.add(next);
   }
   check(`${client}: ${app} uploaded as a user Worker`, "fail");
   return undefined;
@@ -817,10 +771,7 @@ const releaseStep = async (): Promise<void> => {
     check(
       `${client}: core answers its health check`,
       answer.ok ? "pass" : "fail",
-      {
-        status: answer.status,
-        body,
-      }
+      { status: answer.status, body }
     );
   }
 };
@@ -829,51 +780,90 @@ const probeName = (client: Client): string =>
   clientName({ prefix, client }, "probe");
 const recorderName = `${prefix}-effects`;
 
-const uploadRecorder = async (): Promise<void> => {
-  await uploadScript(
-    userPath(recorderName),
+/** Uploads the recorder; true unless only planned. */
+const deployRecorder = (): boolean =>
+  !deploy(
     {
-      main_module: "recorder.js",
-      compatibility_date: probeCompatibilityDate,
-      bindings: [
-        {
-          type: "durable_object_namespace",
-          name: "EFFECTS_OBJECT",
-          class_name: "Effects",
+      name: recorderName,
+      compatibilityDate: probeCompatibilityDate,
+      env: {
+        EFFECTS_OBJECT: {
+          type: "durable-object",
+          worker: recorderName,
+          exportName: "Effects",
         },
-      ],
-      migrations: { new_tag: "v1", new_sqlite_classes: ["Effects"] },
+      },
+      exports: { Effects: { type: "durable-object", storage: "sqlite" } },
     },
-    { "recorder.js": recorderSource }
+    "index.js",
+    oneModule(recorderSource)
+  ).planned;
+
+/** Uploads client `client`'s probe; true unless only planned. */
+const deployProbe = (client: Client): boolean => {
+  const name = probeName(client);
+  return !deploy(
+    {
+      name,
+      compatibilityDate: probeCompatibilityDate,
+      env: {
+        PROBE_OBJECT: {
+          type: "durable-object",
+          worker: name,
+          exportName: "ProbeObject",
+        },
+        LOADER: { type: "worker-loader" },
+        PEER: { type: "worker", worker: recorderName },
+      },
+      exports: { ProbeObject: { type: "durable-object", storage: "sqlite" } },
+    },
+    "index.js",
+    oneModule(probeSource)
+  ).planned;
+};
+
+const probeChecks = async (client: Client): Promise<void> => {
+  const probe = probeName(client);
+  const object = await jsonOf(await dispatch(probe, "/object"));
+  const placed = z
+    .object({ jurisdiction: z.string().nullable(), sql: z.number() })
+    .safeParse(object);
+  check(
+    `${client}: a SQLite Durable Object made in the EU jurisdiction`,
+    placed.success && placed.data.jurisdiction === "eu" && placed.data.sql === 1
+      ? "pass"
+      : "fail",
+    { answer: object }
+  );
+  const loader = await jsonOf(
+    await dispatch(probe, "/loader?target=https%3A%2F%2Fexample.com%2F")
+  );
+  const sandboxed = z
+    .object({ fetch: z.unknown(), cache: z.unknown(), env: z.number() })
+    .safeParse(loader);
+  check(
+    `${client}: a sandboxed Loader isolate has no network, no Cache API and an empty env`,
+    sandboxed.success &&
+      typeof sandboxed.data.fetch === "string" &&
+      sandboxed.data.cache !== "put" &&
+      sandboxed.data.env === 0
+      ? "pass"
+      : "fail",
+    { answer: loader }
+  );
+  const peer = await jsonOf(await dispatch(probe, "/peer"));
+  check(
+    `${client}: a service binding reaches another user Worker in the namespace`,
+    z.object({ status: z.literal(200) }).safeParse(peer).success
+      ? "pass"
+      : "fail",
+    { answer: peer }
   );
 };
 
 const probesStep = async (): Promise<void> => {
-  const uploaded = await orPlanned(async () => {
-    await uploadRecorder();
-    for (const client of clients) {
-      // oxlint-disable-next-line no-await-in-loop -- one client at a time
-      await uploadScript(
-        userPath(probeName(client)),
-        {
-          main_module: "probe.js",
-          compatibility_date: probeCompatibilityDate,
-          bindings: [
-            {
-              type: "durable_object_namespace",
-              name: "PROBE_OBJECT",
-              class_name: "ProbeObject",
-            },
-            { type: "worker_loader", name: "LOADER" },
-            { type: "service", name: "PEER", service: recorderName },
-          ],
-          migrations: { new_tag: "v1", new_sqlite_classes: ["ProbeObject"] },
-        },
-        { "probe.js": probeSource }
-      );
-    }
-  });
-  if (uploaded === "planned") {
+  const uploaded = [deployRecorder(), ...clients.map(deployProbe)];
+  if (uploaded.includes(false)) {
     check("probes uploaded", "skipped");
     return;
   }
@@ -882,61 +872,31 @@ const probesStep = async (): Promise<void> => {
     "pass"
   );
   for (const client of clients) {
-    const probe = probeName(client);
-    // oxlint-disable-next-line no-await-in-loop -- in turn
-    const object = await jsonOf(await dispatch(probe, "/object"));
-    const placed = z
-      .object({ jurisdiction: z.string().nullable(), sql: z.number() })
-      .safeParse(object);
-    check(
-      `${client}: a SQLite Durable Object made in the EU jurisdiction`,
-      placed.success &&
-        placed.data.jurisdiction === "eu" &&
-        placed.data.sql === 1
-        ? "pass"
-        : "fail",
-      { answer: object }
-    );
-    // oxlint-disable-next-line no-await-in-loop -- in turn
-    const loaderAnswer = await dispatch(
-      probe,
-      "/loader?target=https%3A%2F%2Fexample.com%2F"
-    );
-    // oxlint-disable-next-line no-await-in-loop -- in turn
-    const loader = await jsonOf(loaderAnswer);
-    const sandboxed = z
-      .object({ fetch: z.unknown(), cache: z.unknown(), env: z.number() })
-      .safeParse(loader);
-    check(
-      `${client}: a sandboxed Loader isolate has no network, no Cache API and an empty env`,
-      sandboxed.success &&
-        typeof sandboxed.data.fetch === "string" &&
-        sandboxed.data.cache !== "put" &&
-        sandboxed.data.env === 0
-        ? "pass"
-        : "fail",
-      { answer: loader }
-    );
-    // oxlint-disable-next-line no-await-in-loop -- in turn
-    const peer = await jsonOf(await dispatch(probe, "/peer"));
-    check(
-      `${client}: a service binding reaches another user Worker in the namespace`,
-      z.object({ status: z.literal(200) }).safeParse(peer).success
-        ? "pass"
-        : "fail",
-      { answer: peer }
-    );
+    // oxlint-disable-next-line no-await-in-loop -- one client at a time
+    await probeChecks(client);
   }
 };
 
 const durableName = `${prefix}-durable`;
 
-/** Workerflow's death fixture, bundled as a deploy would (its own harness's way). */
+const require = createRequire(import.meta.url);
+const wranglerCli = path.join(
+  path.dirname(require.resolve("wrangler/package.json")),
+  "bin/wrangler.js"
+);
+
+/**
+ * Workerflow's death fixture, bundled on this machine as its own harness
+ * bundles it (packages/workerflow/test/process/workerd.ts): Wrangler's dry
+ * run, which writes a file and reaches no account. Only cf uploads it.
+ */
 const bundledFixture = (): string => {
   const dir = path.join(outDir, "fixture");
   mkdirSync(dir, { recursive: true });
-  const bundled = wrangler(
+  execFileSync(
+    process.execPath,
     [
+      wranglerCli,
       "deploy",
       "test/death-fixture.ts",
       "--dry-run",
@@ -949,47 +909,47 @@ const bundledFixture = (): string => {
       "--compatibility-flags",
       "nodejs_als",
     ],
-    path.resolve("packages/workerflow")
+    { cwd: path.resolve("packages/workerflow"), stdio: "pipe" }
   );
-  if (!bundled.ok) {
-    throw new Error(
-      `Bundling the death fixture failed: ${tail(bundled.output)}`
-    );
-  }
   const module = readdirSync(dir).find((file) => file.endsWith(".js"));
   if (module === undefined) {
-    throw new Error("Wrangler wrote no module for the death fixture");
+    throw new Error("Bundling wrote no module for the death fixture");
   }
   return readFileSync(path.join(dir, module), "utf-8");
 };
 
-const uploadFixture = async (source: string): Promise<void> => {
-  await uploadScript(
-    userPath(durableName),
+/** Uploads the death fixture; true unless only planned. */
+const deployFixture = (source: string): boolean =>
+  !deploy(
     {
-      main_module: "fixture.js",
-      compatibility_date: probeCompatibilityDate,
-      compatibility_flags: ["nodejs_als"],
-      bindings: [
-        { type: "durable_object_namespace", name: "RUNS", class_name: "Runs" },
-        { type: "service", name: "EFFECTS", service: recorderName },
-      ],
-      migrations: { new_tag: "v1", new_sqlite_classes: ["Runs"] },
+      name: durableName,
+      compatibilityDate: probeCompatibilityDate,
+      compatibilityFlags: ["nodejs_als"],
+      env: {
+        RUNS: {
+          type: "durable-object",
+          worker: durableName,
+          exportName: "Runs",
+        },
+        EFFECTS: { type: "worker", worker: recorderName },
+      },
+      exports: { Runs: { type: "durable-object", storage: "sqlite" } },
     },
-    { "fixture.js": source }
-  );
-};
+    "index.js",
+    oneModule(source)
+  ).planned;
 
 const effectRows = z.array(
   z.object({ run: z.string(), label: z.string(), key: z.string() }).loose()
 );
 
-const effectsOf = async (id: string) =>
-  effectRows.parse(
-    await jsonOf(
-      await dispatch(recorderName, `/list?run=${encodeURIComponent(id)}`)
-    )
+const effectsOf = async (id: string) => {
+  const answer = await dispatch(
+    recorderName,
+    `/list?run=${encodeURIComponent(id)}`
   );
+  return effectRows.parse(await jsonOf(answer));
+};
 
 /** Waits until `ready` holds, polling, or throws at the deadline. */
 const until = async (
@@ -1006,6 +966,14 @@ const until = async (
     await sleep(pollMs);
   }
   throw new Error(`Timed out waiting for ${what}`);
+};
+
+const runStatus = async (id: string): Promise<unknown> => {
+  const answer = await dispatch(
+    durableName,
+    `/status?definition=napper&id=${id}`
+  );
+  return await jsonOf(answer);
 };
 
 /**
@@ -1038,11 +1006,7 @@ const killAndResume = async (
       const status = z
         .object({ status: z.string() })
         .loose()
-        .safeParse(
-          await jsonOf(
-            await dispatch(durableName, `/status?definition=napper&id=${id}`)
-          )
-        );
+        .safeParse(await runStatus(id));
       return (
         status.success && ["complete", "errored"].includes(status.data.status)
       );
@@ -1057,30 +1021,24 @@ const killAndResume = async (
   const effects = await effectsOf(id);
   const count = (label: string) =>
     effects.filter((effect) => effect.label === label).length;
-  const status = await jsonOf(
-    await dispatch(durableName, `/status?definition=napper&id=${id}`)
-  );
   check(
     `durability (${how}): finished, each completed effect once`,
     count("before") === 1 && count("after") === 1 ? "pass" : "fail",
-    { effects, status }
+    { effects, status: await runStatus(id) }
   );
 };
 
 const durabilityStep = async (): Promise<void> => {
   const source = bundledFixture();
-  const uploaded = await orPlanned(async () => {
-    await uploadRecorder();
-    await uploadFixture(source);
-  });
-  if (uploaded === "planned") {
+  if (!(deployRecorder() && deployFixture(source))) {
     check("durability fixture uploaded", "skipped");
     return;
   }
   check("durability fixture uploaded as a user Worker", "pass");
   // A new version of the script: workerd restarts its objects.
   await killAndResume("new-version", async () => {
-    await uploadFixture(source);
+    deployFixture(source);
+    await Promise.resolve();
   });
   // The run object reset from inside (`ctx.abort`), as an eviction is.
   await killAndResume("evicted", async (id) => {
@@ -1088,11 +1046,61 @@ const durabilityStep = async (): Promise<void> => {
   });
 };
 
-const settingsSchema = z
-  .object({
-    bindings: z.array(z.object({ type: z.string(), name: z.string() }).loose()),
-  })
-  .loose();
+/** Client `client`'s script `app`'s settings, as cf reads them; or the error. */
+const settingsOf = (client: Client, app: string): unknown => {
+  try {
+    return cf.read([
+      "workers-for-platforms",
+      "dispatch-namespaces",
+      "scripts",
+      "settings",
+      "get",
+      clientName({ prefix, client }, app),
+      "--dispatch-namespace",
+      prefix,
+    ]);
+  } catch (error) {
+    return { error: errorText(error) };
+  }
+};
+
+const auditBindings = (): void => {
+  for (const client of clients) {
+    const other = clients.find((name) => name !== client) ?? client;
+    const otherPrefix = `${prefix}-${other}-`;
+    for (const app of [...releaseApps, "probe"]) {
+      const settings = settingsOf(client, app);
+      const text = JSON.stringify(settings);
+      check(
+        `${client}: ${app}'s bindings name nothing of ${other}`,
+        text.includes('"error"') || text.includes(otherPrefix)
+          ? "fail"
+          : "pass",
+        { settings }
+      );
+    }
+  }
+  const objects = entriesOf(
+    cf.read(["durable-objects", "namespaces", "list", "--per-page", "1000"])
+  );
+  const ofClient = (client: Client) =>
+    objects.filter(
+      (object) =>
+        textField(object, ["script"])?.startsWith(`${prefix}-${client}-`) ===
+        true
+    );
+  const idsB = new Set(
+    ofClient("b").map((object) => textField(object, ["id"]))
+  );
+  const shared = ofClient("a").filter((object) =>
+    idsB.has(textField(object, ["id"]))
+  );
+  check(
+    "a's and b's Durable Object namespaces are their own",
+    ofClient("a").length > 0 && shared.length === 0 ? "pass" : "fail",
+    { a: ofClient("a"), b: ofClient("b") }
+  );
+};
 
 const attackStep = async (): Promise<void> => {
   if (!args.live) {
@@ -1114,9 +1122,7 @@ const attackStep = async (): Promise<void> => {
   check(
     "b's core answers b's own router secret (control)",
     withB === 200 ? "pass" : "fail",
-    {
-      status: withB,
-    }
+    { status: withB }
   );
   check("b's core refuses a's router secret", withA >= 400 ? "pass" : "fail", {
     status: withA,
@@ -1144,94 +1150,46 @@ const attackStep = async (): Promise<void> => {
     reached.success && reached.data.status >= 400 ? "pass" : "fail",
     { answer: inside }
   );
-  // Every binding of each client's scripts names only its own.
-  for (const client of clients) {
-    const other = clients.find((name) => name !== client) ?? client;
-    const otherPrefix = `${prefix}-${other}-`;
-    for (const app of [...releaseApps, "probe"]) {
-      const script = clientName({ prefix, client }, app);
-      // oxlint-disable-next-line no-await-in-loop -- in turn
-      const settings = await api
-        .call(
-          { method: "GET", path: `${userPath(script)}/settings` },
-          settingsSchema
-        )
-        .catch((error: unknown) => ({ error: errorText(error) }));
-      const namesOther =
-        "error" in settings || JSON.stringify(settings).includes(otherPrefix);
-      check(
-        `${client}: ${app}'s bindings name nothing of ${other}`,
-        namesOther ? "fail" : "pass",
-        { settings }
-      );
+  auditBindings();
+};
+
+/** Uploads the mail spike's Worker; null when cf refused the binding. */
+const deployMail = (name: string, to: string | undefined): boolean | null => {
+  try {
+    return !deploy(
+      {
+        name,
+        compatibilityDate: probeCompatibilityDate,
+        env: {
+          EMAIL: {
+            type: "send-email",
+            ...(to === undefined ? {} : { destinationAddress: to }),
+          },
+        },
+      },
+      "index.js",
+      oneModule(mailSource)
+    ).planned;
+  } catch (error) {
+    if (error instanceof CfError) {
+      check("a user Worker may have a send_email binding", "fail", {
+        error: lastLines(error.output),
+      });
+      return null;
     }
+    throw error;
   }
-  const objects = await api.call(
-    {
-      method: "GET",
-      path: "/workers/durable_objects/namespaces?per_page=1000",
-    },
-    z.array(
-      z
-        .object({
-          id: z.string(),
-          script: z.string().optional(),
-          class: z.string().optional(),
-        })
-        .loose()
-    )
-  );
-  const ofClient = (client: Client) =>
-    objects.filter(
-      ({ script }) => script?.startsWith(`${prefix}-${client}-`) === true
-    );
-  const shared = ofClient("a").filter(({ id }) =>
-    ofClient("b").some((object) => object.id === id)
-  );
-  check(
-    "a's and b's Durable Object namespaces are their own",
-    ofClient("a").length > 0 && shared.length === 0 ? "pass" : "fail",
-    { a: ofClient("a"), b: ofClient("b") }
-  );
 };
 
 const emailStep = async (): Promise<void> => {
   const name = `${prefix}-mail`;
   const to = process.env.QUAL_MAIL_TO;
-  const uploaded = await orPlanned(async () => {
-    try {
-      await uploadScript(
-        userPath(name),
-        {
-          main_module: "mail.js",
-          compatibility_date: probeCompatibilityDate,
-          bindings: [
-            {
-              type: "send_email",
-              name: "EMAIL",
-              ...(to === undefined ? {} : { destination_address: to }),
-            },
-          ],
-        },
-        { "mail.js": mailSource }
-      );
-      return true;
-    } catch (error) {
-      if (error instanceof CloudflareError) {
-        check("a user Worker may have a send_email binding", "fail", {
-          error: errorText(error),
-          codes: error.codes,
-        });
-        return false;
-      }
-      throw error;
-    }
-  });
-  if (uploaded === "planned") {
-    check("a user Worker may have a send_email binding", "skipped");
+  const uploaded = deployMail(name, to);
+  if (uploaded === null) {
     return;
   }
   if (!uploaded) {
+    check("a user Worker may have a send_email binding", "skipped");
     return;
   }
   check("a user Worker may have a send_email binding", "pass");
@@ -1259,75 +1217,77 @@ const emailStep = async (): Promise<void> => {
   );
   const foreign = process.env.QUAL_MAIL_FOREIGN_FROM;
   if (foreign !== undefined) {
-    const answer = await send(foreign);
     check("send_email from a domain outside the account", "observed", {
-      answer,
+      answer: await send(foreign),
     });
   }
 };
 
-const cleanupStep = async (): Promise<void> => {
+/** Deletes every user Worker in the run's namespace. */
+const deleteUserWorkers = (): void => {
+  const scripts = namesIn(
+    cf.read([
+      "workers-for-platforms",
+      "dispatch-namespaces",
+      "scripts",
+      "list",
+      "--dispatch-namespace",
+      prefix,
+    ]),
+    ["id", "script_name", "name"]
+  );
+  for (const script of scripts) {
+    cf.write(
+      [
+        "workers-for-platforms",
+        "dispatch-namespaces",
+        "scripts",
+        "delete",
+        script,
+        "--dispatch-namespace",
+        prefix,
+        "--force",
+      ],
+      { names: [prefix, script] }
+    );
+  }
+};
+
+const cleanupStep = (): void => {
   if (!args.live) {
     check("cleanup", "skipped");
     return;
   }
-  const found = await inventory();
+  const found = inventory();
   const ours = (names: readonly string[]) =>
     names.filter((name) => name.startsWith(prefix));
-  const scripts = await api
-    .call(
-      { method: "GET", path: `/workers/dispatch/namespaces/${prefix}/scripts` },
-      z.array(z.object({ id: z.string() }).loose())
-    )
-    .catch(() => []);
-  for (const { id } of scripts) {
-    // oxlint-disable-next-line no-await-in-loop -- in turn
-    await api.call(
-      { method: "DELETE", path: `${userPath(id)}?force=true` },
-      z.unknown()
-    );
+  if (found.namespaces.includes(prefix)) {
+    deleteUserWorkers();
   }
   for (const name of ours(found.namespaces)) {
-    // oxlint-disable-next-line no-await-in-loop -- in turn
-    await api.call(
-      { method: "DELETE", path: `/workers/dispatch/namespaces/${name}` },
-      z.unknown()
-    );
+    cf.write(["workers-for-platforms", "dispatch-namespaces", "delete", name], {
+      names: [name],
+    });
   }
   for (const name of ours(found.scripts)) {
-    // oxlint-disable-next-line no-await-in-loop -- in turn
-    await api.call(
-      { method: "DELETE", path: `/workers/scripts/${name}?force=true` },
-      z.unknown()
-    );
+    cf.write(["workers", "delete", name, "--force"], { names: [name] });
   }
-  const databases = await api.call(
-    { method: "GET", path: "/d1/database?per_page=10000" },
-    z.array(z.object({ name: z.string(), uuid: z.string() }).loose())
-  );
-  for (const { name, uuid } of databases.filter((database) =>
-    database.name.startsWith(prefix)
+  for (const database of entriesOf(
+    cf.read(["d1", "list", "--per-page", "1000"])
   )) {
-    own(uuid);
-    // oxlint-disable-next-line no-await-in-loop -- in turn
-    await api.call(
-      { method: "DELETE", path: `/d1/database/${uuid}` },
-      z.unknown()
-    );
-    record({ kind: "deleted", what: "d1", name });
+    const name = textField(database, ["name"]);
+    const uuid = textField(database, ["uuid"]);
+    if (name?.startsWith(prefix) === true && uuid !== undefined) {
+      own(uuid);
+      cf.write(["d1", "delete", uuid, "--force"], { names: [uuid] });
+    }
   }
   for (const name of ours(found.euBuckets)) {
-    // oxlint-disable-next-line no-await-in-loop -- in turn
-    await api.call(
-      {
-        method: "DELETE",
-        path: `/r2/buckets/${name}`,
-        headers: { "cf-r2-jurisdiction": "eu" },
-      },
-      z.unknown()
-    );
+    cf.write(["r2", "buckets", "delete", name, "--cf-r2-jurisdiction", "eu"], {
+      names: [name],
+    });
   }
-  const after = await recordInventory("after cleanup");
+  const after = recordInventory("after cleanup");
   const left = inventoryKinds
     .flatMap((kind) => after[kind])
     .filter((name) => name.startsWith(prefix));
@@ -1336,7 +1296,7 @@ const cleanupStep = async (): Promise<void> => {
   });
 };
 
-const run: Record<Step, () => Promise<void>> = {
+const run: Record<Step, () => Promise<void> | void> = {
   preflight,
   namespace: namespaceStep,
   dispatcher: dispatcherStep,
@@ -1345,8 +1305,8 @@ const run: Record<Step, () => Promise<void>> = {
   durability: durabilityStep,
   attack: attackStep,
   email: emailStep,
-  inventory: async () => {
-    await recordInventory("after");
+  inventory: () => {
+    recordInventory("after");
   },
   cleanup: cleanupStep,
 };
@@ -1359,7 +1319,7 @@ record({
   accountSha256: sha256(accountId),
 });
 console.info(
-  `Qualification run ${prefix}${args.live ? "" : " (dry run: writes are only planned)"}; evidence in ${outDir}`
+  `Qualification run ${prefix}${args.live ? "" : " (dry run: writes run as cf --dry-run)"}; evidence in ${outDir}`
 );
 // Preflight first, always: nothing writes to an account it refuses.
 const order = chosen.includes("preflight")
