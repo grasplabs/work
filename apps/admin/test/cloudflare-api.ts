@@ -163,6 +163,27 @@ const clockTaskNames = {
 };
 
 /**
+ * The connect beside a core in a dispatch namespace, which has no CONNECT
+ * binding there (Workers for Platforms documents none for user Workers):
+ * the same deployment's connect script in the same namespace. It stands in
+ * for however GRA-430 qualifies a namespaced core reaching connect; until
+ * then a real one answers none of connect's bindings.
+ */
+const namespacedConnect = (
+  account: AccountState,
+  live: VersionState
+): ScriptState | undefined => {
+  for (const scripts of account.namespaces.values()) {
+    for (const [name, script] of scripts) {
+      if (script.versions.includes(live) && name.endsWith("-core")) {
+        return scripts.get(`${name.slice(0, -"-core".length)}-connect`);
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
  * What a client's core answers the admin's provisioning probe with, as
  * core does (core's src/provision-probe.ts), once the signature checks
  * out with the key its live version's auth secret gives and the request
@@ -204,8 +225,10 @@ const answerProbe = async (
     ({ name }) => name === "CONNECT"
   )?.service;
   const connectBindings = bindingsSchema.parse(
-    account.scripts.get(connectScript ?? "")?.versions.at(-1)?.metadata
-      .bindings ?? []
+    (connectScript === undefined
+      ? namespacedConnect(account, live)
+      : account.scripts.get(connectScript)
+    )?.versions.at(-1)?.metadata.bindings ?? []
   );
   const clientId = bindings.find(({ name }) => name === "CLIENT_ID")?.json;
   const down = new Set(probe.down);
