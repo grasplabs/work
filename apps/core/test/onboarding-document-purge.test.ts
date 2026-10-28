@@ -15,13 +15,13 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { brainOf } from "../src/knowledge/ports.ts";
+import { checkReadings, readingCheckMs } from "../src/onboarding/documents.ts";
 import {
   drawingErasure,
   interviewErasure,
 } from "../src/onboarding/interview-erasure.ts";
 import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
-import { brainOf } from "../src/knowledge/ports.ts";
-import { checkReadings, readingCheckMs } from "../src/onboarding/documents.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { keptLine } from "../src/speech-cache.ts";
 import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
