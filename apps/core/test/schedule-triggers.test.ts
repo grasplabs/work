@@ -7,7 +7,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
-import { maxFailedStarts } from "@grasp-os/shared/workflows";
+import { maxFailedStarts, workflowErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -29,6 +29,7 @@ import {
   publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
+import { startWorkflow } from "../src/workflow-starts.ts";
 import {
   resourceRunFor,
   terminateResourceRun,
@@ -261,6 +262,53 @@ const changedBeforeAdmission = (meanwhile: () => Promise<void>): Env => {
       if (property === "batch") {
         return async (statements: D1PreparedStatement[]): Promise<unknown> => {
           if (admitting && !ran) {
+            ran = true;
+            await meanwhile();
+          }
+          const answer: unknown = await target.batch(statements);
+          return answer;
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { ...env, DB: db };
+};
+
+/**
+ * `env` in which one clock run's try fails in the workflow's own terms
+ * (its queue full, as at its run limit), and `meanwhile` runs just before
+ * that failure is recorded: another clock run's try of the same
+ * occurrence, admitted in between.
+ */
+const failingWhileAnotherStarts = (meanwhile: () => Promise<void>): Env => {
+  let admitting = false;
+  let recording = false;
+  let refused = false;
+  let ran = false;
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): unknown => {
+          if (/^insert into "workflow_start_receipts"/iu.test(query)) {
+            admitting = true;
+          }
+          if (/^update "trigger_schedules"/iu.test(query)) {
+            recording = true;
+          }
+          return target.prepare(query);
+        };
+      }
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]): Promise<unknown> => {
+          if (admitting && !refused) {
+            refused = true;
+            throw workflowErrors.create("workflow.queue_full");
+          }
+          if (recording && !ran) {
             ran = true;
             await meanwhile();
           }
@@ -695,6 +743,54 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       next: after?.nextAt,
       failedStarts: after?.failedStarts,
     }).toStrictEqual({ runs: 0, next: reworked, failedStarts: 0 });
+  });
+
+  it("never count an occurrence failed, or stop for it, once another clock run started it", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const trigger = await scheduleTrigger(admin, workflow.id);
+    const occurrence = lastMinute();
+    // One more failure would stop it.
+    await dueAt(trigger.id, occurrence, maxFailedStarts - 1);
+    await startDueScheduleTriggers(
+      failingWhileAnotherStarts(async () => {
+        // The other clock run's try of the same occurrence, admitted.
+        await startWorkflow(
+          env,
+          { type: "trigger", triggerId: trigger.id },
+          workflow.id,
+          { version: 1, input: nightly, key: keyOf(trigger.id, 1, occurrence) },
+          undefined,
+          { scheduledAt: occurrence.toISOString(), triggerVersion: "1" }
+        );
+      })
+    );
+    const between = await scheduleOf(trigger.id);
+    // The next clock run moves it on from the occurrence started.
+    await startDueScheduleTriggers(env);
+    const after = await scheduleOf(trigger.id);
+    const runs = await runsOf(trigger.id);
+    const logged = await allEvents();
+
+    expect({
+      between: { next: between?.nextAt, failedStarts: between?.failedStarts },
+      movedOn: (after?.nextAt ?? 0) > occurrence.getTime(),
+      failedStarts: after?.failedStarts,
+      runs: runs.map(({ key }) => key),
+      stopped: logged.filter(
+        ({ action, target }) =>
+          action === "trigger.schedule.stopped" && target?.id === trigger.id
+      ).length,
+    }).toStrictEqual({
+      between: {
+        next: occurrence.getTime(),
+        failedStarts: maxFailedStarts - 1,
+      },
+      movedOn: true,
+      failedStarts: 0,
+      runs: [keyOf(trigger.id, 1, occurrence)],
+      stopped: 0,
+    });
   });
 
   it("fire once per local time they name through the hour the autumn change repeats", async () => {

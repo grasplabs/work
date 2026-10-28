@@ -12,6 +12,7 @@ import {
   triggerResources,
   triggerResourceVersions,
   triggerSchedules,
+  workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { stopNoticed } from "../notifications.ts";
 import { nextOccurrence } from "../trigger-resources.ts";
@@ -65,7 +66,11 @@ import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 //   Only a live, enabled trigger whose current version is the one its
 //   schedule was worked out for is read as due; enabling or moving it
 //   works out its next occurrence again, from then, so what it missed
-//   meanwhile starts nothing. A start read before such a change and
+//   meanwhile starts nothing. Two clock runs trying one occurrence at once
+//   can't count it failed once either has started it: a failure is
+//   recorded only while no start of it was admitted (`unadmitted`), and
+//   moving on after a start writes over the occurrence whatever its
+//   counts (`sameOccurrence`). A start read before such a change and
 //   admitted after it is fenced on the occurrence still being the
 //   schedule's next (`stillNext`), so it starts nothing either.
 
@@ -133,6 +138,26 @@ const asRead = (schedule: DueSchedule) =>
     eq(triggerSchedules.attempts, schedule.attempts)
   );
 
+/**
+ * That no start of `schedule`'s occurrence was admitted, as SQL: another
+ * clock run's try of the same occurrence may have started it while this
+ * one's failed, and a started occurrence is never counted as failing.
+ */
+const unadmitted = (schedule: DueSchedule) =>
+  sql`NOT EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.invokerType} = 'trigger' AND ${workflowStartReceipts.invokerId} = ${schedule.triggerId} AND ${workflowStartReceipts.idempotencyKey} = ${startKeyOf(schedule)})`;
+
+/**
+ * That `schedule`'s occurrence is still the one due, whatever its counts,
+ * as SQL: what moving on after its start writes over, so a failed try of
+ * it recorded meanwhile can't keep it from moving on.
+ */
+const sameOccurrence = (schedule: DueSchedule) =>
+  and(
+    eq(triggerSchedules.triggerId, schedule.triggerId),
+    eq(triggerSchedules.version, schedule.version),
+    eq(triggerSchedules.nextAt, schedule.nextAt)
+  );
+
 /** That `schedule`'s occurrence is still its trigger's next, as SQL. */
 const stillNext = (schedule: DueSchedule) =>
   sql`EXISTS (SELECT 1 FROM ${triggerSchedules} WHERE ${triggerSchedules.triggerId} = ${schedule.triggerId} AND ${triggerSchedules.version} = ${schedule.version} AND ${triggerSchedules.nextAt} = ${schedule.nextAt.getTime()})`;
@@ -191,7 +216,7 @@ const recordFailure = async (
     db
       .update(triggerSchedules)
       .set({ nextAt, failedStarts, attempts, lastAttemptAt })
-      .where(asRead(schedule)),
+      .where(and(asRead(schedule), unadmitted(schedule))),
     ...(failure.kind === "refused"
       ? [
           outboxedIfChanged(
@@ -287,7 +312,7 @@ const startScheduled = async (
       attempts: 0,
       lastAttemptAt: null,
     })
-    .where(asRead(schedule));
+    .where(sameOccurrence(schedule));
 };
 
 /**
