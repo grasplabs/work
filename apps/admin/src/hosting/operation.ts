@@ -800,6 +800,11 @@ interface Loaded {
     signIn: string | null;
     teamsBot: string | null;
   };
+  /**
+   * When `client` and the settings were about to be read: what core runs
+   * once this run's upload of it is observed, as `configuredAt` records it.
+   */
+  readAt: Date;
 }
 
 /** The operation's progress, read afresh. */
@@ -882,6 +887,105 @@ const recordProgress = async (
   if (!recorded) {
     await assertHolds(db, held);
   }
+};
+
+/**
+ * How long after it was sent a call that changes a client's Workers is
+ * taken to have landed or gone with the run that sent it. An upload
+ * answers in seconds; a run whose isolate died holds no request open, and
+ * its marker stays behind until then (`settledSends`).
+ *
+ * What's left: Cloudflare may still apply a call whose sender died, or one
+ * still unanswered past this bound, after a rollback that waited it out
+ * has made its own. Nothing here can see that call land; the client would
+ * then run the rollout's Worker while the admin records the rollback's,
+ * until drift (src/rollout/drift.ts) shows it and the next run replaces it.
+ */
+const sendSettleMs = 5 * 60_000;
+
+/**
+ * Sends `send`, a call that changes client `loaded.held.clientId`'s
+ * Workers, while `loaded.held` holds the client, marked on its operation
+ * (`progress.sending`, outside `progressSchema`, so any later progress
+ * write drops it) from before it's sent until it answers.
+ *
+ * A runner that takes the client over can't stop a call already sent: a
+ * rollback waits for the mark to clear (`settledSends`), so the call lands
+ * before the rollback's own and never after. Marked in the same statement
+ * that checks the claim, so a call is sent only marked; cleared by the
+ * change, not the claim, so a call answered after its runner lost the
+ * client still clears it.
+ */
+const sendHolding = async (
+  db: AdminDatabase,
+  { operation, held }: Loaded,
+  send: () => Promise<void>
+): Promise<void> => {
+  const marked = await db
+    .update(clientProvisions)
+    .set({
+      progress: sql`json_set(coalesce(${clientProvisions.progress}, '{}'), '$.sending', ${Date.now()})`,
+    })
+    .where(and(eq(clientProvisions.id, operation.id), stillHolds(held)))
+    .returning({ id: clientProvisions.id });
+  if (marked.length === 0) {
+    throw new ProvisionOperationError(
+      "runner_replaced",
+      `${held.runId} no longer holds ${held.clientId}`
+    );
+  }
+  try {
+    await send();
+  } finally {
+    await db
+      .update(clientProvisions)
+      .set({
+        progress: sql`json_remove(${clientProvisions.progress}, '$.sending')`,
+      })
+      .where(
+        and(
+          eq(clientProvisions.id, operation.id),
+          eq(clientProvisions.change, operation.change)
+        )
+      );
+  }
+};
+
+/**
+ * Waits until no call sent for client `clientId`'s change `change` is
+ * still on its way (`sendHolding`): none marked, or the one marked sent
+ * at least `sendSettleMs` ago. What a runner that took the client over
+ * waits for before it changes the client's Workers itself.
+ */
+export const settledSends = async (
+  context: ProvisionContext,
+  clientId: string,
+  change: number
+): Promise<void> => {
+  const delayMs = context.observe?.retryDelayMs ?? defaultObserveDelayMs;
+  const sending = async (): Promise<boolean> => {
+    const row = await context.db
+      .select({
+        since: sql<
+          number | null
+        >`json_extract(${clientProvisions.progress}, '$.sending')`,
+      })
+      .from(clientProvisions)
+      .where(
+        and(
+          eq(clientProvisions.clientId, clientId),
+          eq(clientProvisions.change, change)
+        )
+      )
+      .get();
+    const since = row?.since ?? null;
+    return since !== null && Date.now() - since < sendSettleMs;
+  };
+  // oxlint-disable no-await-in-loop -- reads in turn, waiting between
+  while (await sending()) {
+    await scheduler.wait(delayMs);
+  }
+  // oxlint-enable no-await-in-loop
 };
 
 /** The release's Worker `app`. */
@@ -1038,6 +1142,9 @@ const load = async (
   held: HeldClient,
   operation: Operation
 ): Promise<Loaded> => {
+  // Before any setting is read, so one changed while this run goes on
+  // reads as changed after it (`configuredAt`).
+  const readAt = new Date();
   const row = await db
     .select({
       status: clients.status,
@@ -1095,6 +1202,7 @@ const load = async (
     destination,
     accountId: destination.accountId,
     client,
+    readAt,
   };
 };
 
@@ -1335,8 +1443,6 @@ const upload = async (
     lockMailSender(binding, mailSender);
   }
   const target = targetOf(loaded, inventory, app);
-  // Before the settings are read: one changed after it waits for the next.
-  const configuredAt = new Date().toISOString();
   const vars = varsOf(
     loaded,
     app,
@@ -1404,13 +1510,14 @@ const upload = async (
       progress,
       { app, history: worker.durableObjectMigrations },
       async () => {
-        await assertHolds(db, held);
-        await uploadTargetScript(api, target, {
-          ...prepared,
-          metadata: {
-            ...prepared.metadata,
-            ...(migrations === undefined ? {} : { migrations }),
-          },
+        await sendHolding(db, loaded, async () => {
+          await uploadTargetScript(api, target, {
+            ...prepared,
+            metadata: {
+              ...prepared.metadata,
+              ...(migrations === undefined ? {} : { migrations }),
+            },
+          });
         });
       }
     );
@@ -1442,10 +1549,13 @@ const upload = async (
     });
   }
   if (app === "core") {
-    // Core live with the settings as read: what's pending is what changed
-    // after.
+    // Core live with the settings as this run read them: what's pending is
+    // what changed after it started reading (`readAt`), sign-in included.
     const now = await progressNow(db, loaded.operation.id);
-    await recordProgress(db, loaded, { ...now, configuredAt });
+    await recordProgress(db, loaded, {
+      ...now,
+      configuredAt: loaded.readAt.toISOString(),
+    });
   }
   // What the client runs, as a deploy records it: only while the runner
   // holds the client, in the same statement.
@@ -1535,9 +1645,9 @@ const revokeRetired = async (
   );
   for (const name of retired) {
     // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-    await assertHolds(db, loaded.held);
-    // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-    await deleteTargetSecret(api, target, name);
+    await sendHolding(db, loaded, async () => {
+      await deleteTargetSecret(api, target, name);
+    });
     // Recorded as it goes, by name: a run that fails after it still
     // leaves what it removed in the audit log.
     // oxlint-disable-next-line no-await-in-loop -- one secret at a time
@@ -1604,9 +1714,9 @@ const deliverSecrets = async (
     }
     for (const secret of secrets) {
       // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-      await assertHolds(db, loaded.held);
-      // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-      await putTargetSecret(api, target, secret);
+      await sendHolding(db, loaded, async () => {
+        await putTargetSecret(api, target, secret);
+      });
       delivered += 1;
     }
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time

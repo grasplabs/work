@@ -60,6 +60,7 @@ import {
   assertCanRollBack,
   ProvisionOperationError,
   runClientProvision,
+  settledSends,
   startClientRelease,
 } from "../hosting/operation.ts";
 import {
@@ -302,9 +303,10 @@ export const rollbackClient = async (
  * Takes client `held.clientId`'s operation back to release `back` as
  * rollback `held`, and runs it, by what its operation recorded first, so
  * a retry after any part of it does the rest and nothing twice:
- * - the rollout's change still the latest: the rollout's operation, if
- *   still running, is stopped (the rollout lost the client), and the
- *   rollback started, a change of its own;
+ * - the rollout's change still the latest: once any call the rollout's
+ *   run sent to the client's Workers has landed (`settledSends`), the
+ *   rollout's operation, if still running, is stopped (the rollout lost
+ *   the client), and the rollback started, a change of its own;
  * - its own change, the one right after the rollout's, on `back`: already
  *   started, it's run (resumed, or nothing left to do once done);
  * - anything else changed it since: refused (`superseded`).
@@ -346,7 +348,12 @@ const runBack = async (
     );
   }
   try {
+    const context = await deployContext(env);
     if (!started) {
+      // A call the rollout's run sent before the rollback took the client
+      // can't be stopped, only waited for: it lands before the rollback's
+      // own, so none lands after them and undoes them.
+      await settledSends(context, held.clientId, rolloutsChange ?? -1);
       await db
         .update(clientProvisions)
         .set({ status: "failed", error: "rolled_back", updatedAt: new Date() })
@@ -364,7 +371,7 @@ const runBack = async (
       });
     }
     // A rollback isn't rolled back on its own: staff see it fail.
-    await runClientProvision(await deployContext(env), held, {
+    await runClientProvision(context, held, {
       rollBackOnProbe: false,
     });
   } catch (error) {

@@ -1501,6 +1501,157 @@ describe("a client's changes, counted", () => {
         .safeParse(platformChangeOf(internal.account, core)).data?.what,
     }).toStrictEqual({ pending: false, what: "settings" });
   });
+
+  it("leaves a sign-in changed while a run goes on waiting, though core went live after the change", async () => {
+    const before = await placedRelease("feat(core): before");
+    const internal = await live(0, before);
+    const runId = `apply-${crypto.randomUUID().slice(0, 8)}`;
+    await db
+      .delete(clientRuns)
+      .where(eq(clientRuns.clientId, internal.clientId));
+    await db.insert(clientRuns).values({
+      clientId: internal.clientId,
+      runId,
+      kind: "apply",
+      claimedAt: new Date(),
+    });
+    const held = { clientId: internal.clientId, runId };
+    await startClientRelease(db, staff, held, {
+      releaseId: before,
+      again: true,
+      what: "settings",
+    });
+    // Staff change the sign-in once the run read the client, as its first
+    // call reaches the client's account; nothing refuses a claimed client.
+    cloudflare.beforeAnswering(
+      (call) => call.path.startsWith(`/accounts/${internal.account.id}/`),
+      async () => {
+        await setSignIn(env, staff, {
+          clientId: internal.clientId,
+          signIn: {
+            domains: ["globex.test"],
+            admins: ["ada@globex.test"],
+            googleHostedDomain: "globex.test",
+          },
+        });
+      }
+    );
+    await runClientProvision(await deployContext(env), held);
+
+    const client = await db
+      .select({ configChangedAt: clients.configChangedAt })
+      .from(clients)
+      .where(eq(clients.id, internal.clientId))
+      .get();
+    expect({
+      changed: client?.configChangedAt !== null,
+      pending: await isConfigPending(
+        db,
+        internal.clientId,
+        client?.configChangedAt ?? null
+      ),
+    }).toStrictEqual({ changed: true, pending: true });
+  });
+
+  it("rolls a client back only once the rollout's upload already sent has answered, so it can't land after the rollback's", async () => {
+    const before = await placedRelease("feat(core): before");
+    const internal = await live(0, before);
+    const release = await placedRelease("feat(core): rolled out");
+    const core = await coreScriptOf(internal.clientId);
+    await using rollbacks = await followRollbacks();
+    await using _rollouts = await followRollouts();
+    // Whether the rollback has put core back.
+    const coreBack = async (): Promise<boolean> => {
+      const operation = await db
+        .select({
+          releaseId: clientProvisions.releaseId,
+          step: clientProvisions.step,
+          status: clientProvisions.status,
+        })
+        .from(clientProvisions)
+        .where(eq(clientProvisions.clientId, internal.clientId))
+        .get();
+      return (
+        operation?.releaseId === before &&
+        (operation.status === "done" || operation.step === "core")
+      );
+    };
+    const isCoreUpload = (call: { method: string; path: string }) =>
+      call.method === "PUT" && call.path.endsWith(`/scripts/${core}`);
+    // The rollout's core upload is on its way when staff roll the client
+    // back, and answers only once the test lets it; the rollback's own
+    // core upload, the next, notes whether that one was still on its way.
+    // Cloudflare would still apply an upload whose sender then stopped; the
+    // fake applies it only if its sender lives on, so the order is what's
+    // asserted.
+    const held = Promise.withResolvers<boolean>();
+    let answered = false;
+    let rolledBack = false;
+    let sentBeforeIt: boolean | undefined;
+    cloudflare.beforeAnswering(isCoreUpload, async () => {
+      await rollbackClient(env, staff, await openRollout(), internal.clientId);
+      rolledBack = true;
+      // oxlint-disable-next-line require-await -- the fake waits on it
+      cloudflare.beforeAnswering(isCoreUpload, async () => {
+        sentBeforeIt = !answered;
+      });
+      await held.promise;
+    });
+
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await vi.waitUntil(() => rolledBack, { timeout: 20_000 });
+    // The rollback puts core back, or waits for the upload, for a while.
+    await vi.waitUntil(coreBack, { timeout: 3000 }).catch(() => false);
+    answered = true;
+    held.resolve(true);
+    await vi.waitUntil(() => sentBeforeIt !== undefined, { timeout: 20_000 });
+    await rollbacks.settle();
+
+    expect({
+      target: await targetOf(rolloutId, internal.clientId),
+      releases: await releasesOf(internal.clientId),
+      // What Cloudflare runs, not only what the admin recorded.
+      live: z
+        .looseObject({ release: z.string() })
+        .safeParse(platformChangeOf(internal.account, core)).data?.release,
+      sentBeforeIt,
+    }).toStrictEqual({
+      target: { ring: 0, status: "rolled_back", error: null },
+      releases: on(before),
+      live: before,
+      sentBeforeIt: false,
+    });
+  });
+
+  it("rolls a client back past a call marked sent long ago by a run that died with it", async () => {
+    const before = await placedRelease("feat(core): before");
+    const internal = await live(0, before);
+    await live(1, before);
+    const release = await placedRelease("feat(core): rolled out");
+    await using run = await followRollouts();
+    await using rollbacks = await followRollbacks();
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    // Marked sent ten minutes ago, by a run that never cleared it.
+    const sentAt = Date.now() - 10 * 60_000;
+    await db
+      .update(clientProvisions)
+      .set({
+        progress: sql`json_set(${clientProvisions.progress}, '$.sending', ${sentAt})`,
+      })
+      .where(eq(clientProvisions.clientId, internal.clientId));
+
+    await rollbackClient(env, staff, rolloutId, internal.clientId);
+    await rollbacks.settle();
+
+    expect({
+      target: await targetOf(rolloutId, internal.clientId),
+      releases: await releasesOf(internal.clientId),
+    }).toStrictEqual({
+      target: { ring: 0, status: "rolled_back", error: null },
+      releases: on(before),
+    });
+  });
 });
 
 describe("a rollout's run dying on a client, and staff acting on the client after", () => {

@@ -18,7 +18,7 @@ import { deadline } from "@grasp-os/shared/deadline";
 import { log } from "@grasp-os/shared/log";
 import { onboardingSummarySchema } from "@grasp-os/shared/onboarding-summary";
 import { deriveRouterSecret, routerTargetOf } from "@grasp-os/shared/router";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { accountUsage, monthCostUsd } from "../cloudflare/analytics.ts";
