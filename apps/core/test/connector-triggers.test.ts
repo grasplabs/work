@@ -19,7 +19,10 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
-import { createTriggerResource } from "../src/trigger-resources.ts";
+import {
+  createTriggerResource,
+  setTriggerEnabled,
+} from "../src/trigger-resources.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -28,7 +31,11 @@ import {
   deliverConnectorEvent,
   listenersOf,
 } from "../src/workflows/connector-events.ts";
-import { maxHeldMs } from "../src/workflows/connector-triggers.ts";
+import {
+  holdsKeptMs,
+  maxHeldMs,
+  sweepConnectorTriggerHolds,
+} from "../src/workflows/connector-triggers.ts";
 import { stampedMail } from "../src/workflows/mail-stamps.ts";
 import {
   resourceRunFor,
@@ -732,6 +739,130 @@ describe("connector triggers", { timeout: 120_000 }, () => {
       dropped: ["hourly_limit"],
     });
   });
+
+  // Each trigger's turn at an event is a small state machine: started
+  // already, settled already (a tombstone), held past its day, or tried.
+  // Each case: what `subject` came to for one event, delivered again as
+  // connect does while another trigger on the connection (`other`) fails
+  // the shared delivery.
+  const scenes = [
+    {
+      scene: "delivered again after it was dropped",
+      atLimit: ["subject"],
+      before: "aged",
+      expected: { runs: 1, dropped: 1, refused: 0, holds: ["dropped"] },
+    },
+    {
+      scene: "held past its day though its hour has room again",
+      atLimit: ["subject"],
+      before: "aged and freed",
+      expected: { runs: 1, dropped: 1, refused: 0, holds: ["dropped"] },
+    },
+    {
+      scene: "held, then its trigger disabled",
+      atLimit: ["subject"],
+      before: "disabled",
+      expected: { runs: 1, dropped: 0, refused: 0, holds: ["held"] },
+    },
+    {
+      scene: "refused for good, its start revoked",
+      atLimit: ["other"],
+      before: "revoked",
+      expected: { runs: 1, dropped: 0, refused: 1, holds: ["refused"] },
+    },
+    {
+      scene:
+        "started, then the shared delivery failed and its grant was revoked",
+      atLimit: ["other"],
+      before: "started then revoked",
+      expected: { runs: 2, dropped: 0, refused: 0, holds: [] },
+    },
+  ] as const;
+
+  it.each(scenes)(
+    "settle an event once for a trigger when $scene, however often it is delivered, and sweep what's left past retention",
+    async ({ atLimit, before, expected }) => {
+      const admin = await person("admin");
+      const workflow = await filing(admin);
+      const shared = await connection();
+      const subject = await connectorTrigger(admin, workflow.id, shared);
+      const other = await connectorTrigger(admin, workflow.id, shared);
+      const triggers = { subject, other };
+      // One run each, then the hours asked for filled.
+      await deliverConnectorEvent(env, mailEvent(shared));
+      for (const name of atLimit) {
+        // oxlint-disable-next-line no-await-in-loop -- one trigger at a time
+        const [first] = await runsOf(triggers[name].id);
+        // oxlint-disable-next-line no-await-in-loop -- one trigger at a time
+        await fillHour(first?.id ?? "");
+      }
+      const warned = vi.spyOn(console, "warn").mockReturnValue();
+      const event = mailEvent(shared);
+      const deliver = async () =>
+        await outcome(deliverConnectorEvent(env, event));
+      if (before === "revoked") {
+        await revokePermission(env, admin, subject.start);
+      }
+      // The first delivery: the subject held back, refused, or started.
+      await deliver();
+      if (before === "aged" || before === "aged and freed") {
+        await env.DB.prepare(
+          "UPDATE connector_trigger_holds SET held_since = ? WHERE trigger_id = ?"
+        )
+          .bind(Date.now() - maxHeldMs - 1000, subject.id)
+          .run();
+      }
+      if (before === "aged and freed") {
+        // An hour on: its hour has room again.
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(Date.now() + 61 * 60 * 1000);
+      }
+      if (before === "disabled") {
+        await setTriggerEnabled(env, admin, subject.id, false);
+      }
+      if (before === "started then revoked") {
+        await revokePermission(env, admin, subject.start);
+      }
+      // Delivered again, twice: the other trigger still fails it.
+      await deliver();
+      await deliver();
+      warned.mockRestore();
+      vi.useRealTimers();
+      const all = await allEvents();
+      const logged = all.filter(({ target }) => target?.id === subject.id);
+      // What its rows say: held, or the tombstone of how it was settled.
+      const holdsOf = async () => {
+        const { results } = await env.DB.prepare(
+          "SELECT settled FROM connector_trigger_holds WHERE trigger_id = ?"
+        )
+          .bind(subject.id)
+          .all<{ settled: string | null }>();
+        return results.map(({ settled }) => settled ?? "held");
+      };
+      const subjectRuns = await runsOf(subject.id);
+      const observed = {
+        runs: subjectRuns.filter(({ key }) => !key.startsWith("filler-"))
+          .length,
+        dropped: logged.filter(
+          ({ action }) => action === "workflow.event.dropped"
+        ).length,
+        refused: logged.filter(
+          ({ action }) => action === "workflow.event.refused"
+        ).length,
+        holds: await holdsOf(),
+      };
+      await sweepConnectorTriggerHolds(
+        env,
+        // Past retention, however far a scene's clock moved on.
+        new Date(Date.now() + holdsKeptMs + 2 * 60 * 60 * 1000)
+      );
+
+      expect({ ...observed, swept: await holdsOf() }).toStrictEqual({
+        ...expected,
+        swept: [],
+      });
+    }
+  );
 
   it("are granted only their own connection, for their event's read, and connect listens where they do", async () => {
     const admin = await person("admin");

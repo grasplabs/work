@@ -3839,11 +3839,13 @@ export const triggerSchedules = sqliteTable(
 );
 
 /**
- * The events a connector trigger held back because it was at its hourly
- * limit (src/workflows/connector-triggers.ts): since when, by the
- * trigger and the event's key. One held past a day is dropped, audited,
- * so connect's backlog can't grow without end; one that starts its run
- * goes.
+ * Where an event stands for a connector trigger that didn't start its run
+ * (src/workflows/connector-triggers.ts), by the trigger and the event's
+ * key: held back at its hourly limit since `held_since` (`settled` null),
+ * or settled for it for good: `dropped`, held past a day, or `refused`,
+ * refused for good. A settled row is a tombstone, so the same event
+ * delivered again for another trigger's sake is known and starts nothing
+ * here. The clock sweeps both past their retention.
  */
 export const connectorTriggerHolds = sqliteTable(
   "connector_trigger_holds",
@@ -3853,6 +3855,8 @@ export const connectorTriggerHolds = sqliteTable(
       .references(() => triggerResources.id),
     eventKey: text("event_key").notNull(),
     heldSince: timestamp("held_since").notNull(),
+    settled: text({ enum: ["dropped", "refused"] }),
+    settledAt: timestamp("settled_at"),
   },
   (table) => [primaryKey({ columns: [table.triggerId, table.eventKey] })]
 );

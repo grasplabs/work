@@ -15,7 +15,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import {
   connectorTriggerHolds,
   permissions,
@@ -88,6 +88,17 @@ import { triggeredRunsPerHour } from "./runs.ts";
 //   native, such as Composio's) is anyone's mail, a root, so a workflow
 //   mailing its own watched mailbox that way goes on at up to the hourly
 //   limit; the drop bounds only the backlog.
+// - An event a trigger settled taken as new, or one held past its day
+//   started after all. Each trigger's turn at an event is a small state
+//   machine (`startConnectorTriggers`): started already (a receipt under
+//   its key): settled, nothing asked again; settled for it already (a
+//   tombstone: dropped or refused): nothing; held past `maxHeldMs`:
+//   dropped, checked before any try; else tried. A drop or a refusal for
+//   good leaves a tombstone, audited once by the write that made it, so a
+//   delivery again for another trigger's sake starts and audits nothing
+//   more. Holds and tombstones of events that stopped coming (a trigger
+//   disabled or its grant revoked, connect giving up) are swept by the
+//   clock past `holdsKeptMs`.
 // - An event dropped silently. A trigger that refuses it for good (its
 //   grant to start revoked, its person gone, an input its workflow doesn't
 //   take, its lineage full, an App run's mail) is audited
@@ -206,70 +217,78 @@ export const inputOf = (mapping: InputMapping, event: ConnectorEvent): Json => {
   return input;
 };
 
-/** Audits that `taker` won't start `event`'s run, as `action`, with `detail`. */
-const audited = async (
-  env: Env,
-  taker: Taker,
-  event: ConnectorEvent,
-  action: "workflow.event.refused" | "workflow.event.dropped",
-  detail: Record<string, string | number>
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      actor: { type: "system" },
-      action,
-      target: { type: "trigger", id: taker.id },
-      detail: { event: event.type, version: taker.version, ...detail },
-    }),
-  ]);
-};
+/** Where `taker`'s row for the event of key `same` is, as SQL. */
+const holdOf = (taker: Taker, same: string) =>
+  and(
+    eq(connectorTriggerHolds.triggerId, taker.id),
+    eq(connectorTriggerHolds.eventKey, same)
+  );
 
 /**
- * `taker` at its hourly limit for the event of key `same`: held back, to
- * be delivered again (`retry`), or, held since longer than
- * {@link maxHeldMs}, dropped for it, audited (`gone`).
+ * `taker` at its hourly limit for the event of key `same`: held back since
+ * its first such try, to be delivered again. Whether it is dropped is
+ * decided before its next try (`startFor`).
  */
 const heldBack = async (
   env: Env,
   taker: Taker,
-  event: ConnectorEvent,
   same: string
-): Promise<"gone" | "retry"> => {
-  const db = drizzle(env.DB);
-  await db
+): Promise<"retry"> => {
+  await drizzle(env.DB)
     .insert(connectorTriggerHolds)
     .values({ triggerId: taker.id, eventKey: same, heldSince: new Date() })
     .onConflictDoNothing();
-  const held = await db
-    .select({ since: connectorTriggerHolds.heldSince })
-    .from(connectorTriggerHolds)
-    .where(
-      and(
-        eq(connectorTriggerHolds.triggerId, taker.id),
-        eq(connectorTriggerHolds.eventKey, same)
-      )
-    )
-    .get();
-  if (held === undefined || Date.now() - held.since.getTime() < maxHeldMs) {
-    log.warn("workflow.trigger_rate_limited", {
-      type: "connector",
-      trigger: taker.id,
-    });
-    return "retry";
-  }
-  await audited(env, taker, event, "workflow.event.dropped", {
-    reason: "hourly_limit",
-    heldSince: held.since.toISOString(),
+  log.warn("workflow.trigger_rate_limited", {
+    type: "connector",
+    trigger: taker.id,
   });
-  await db
-    .delete(connectorTriggerHolds)
-    .where(
-      and(
-        eq(connectorTriggerHolds.triggerId, taker.id),
-        eq(connectorTriggerHolds.eventKey, same)
-      )
-    );
+  return "retry";
+};
+
+/**
+ * Settles the event of key `same` for `taker` for good, as `settled`: a
+ * tombstone (`connectorTriggerHolds`), so a delivery of it again for
+ * another trigger's sake starts nothing here, and audited as `action`
+ * once, only by the write that settled it.
+ */
+const settle = async (
+  env: Env,
+  taker: Taker,
+  event: ConnectorEvent,
+  same: string,
+  settled: "dropped" | "refused",
+  detail: Record<string, string | number>
+): Promise<"gone"> => {
+  const db = drizzle(env.DB);
+  const now = new Date();
+  await auditedBatch(env, db, [
+    db
+      .insert(connectorTriggerHolds)
+      .values({
+        triggerId: taker.id,
+        eventKey: same,
+        heldSince: now,
+        settled,
+        settledAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          connectorTriggerHolds.triggerId,
+          connectorTriggerHolds.eventKey,
+        ],
+        set: { settled, settledAt: now },
+        setWhere: isNull(connectorTriggerHolds.settled),
+      }),
+    outboxedIfChanged(db, {
+      actor: { type: "system" },
+      action:
+        settled === "dropped"
+          ? "workflow.event.dropped"
+          : "workflow.event.refused",
+      target: { type: "trigger", id: taker.id },
+      detail: { event: event.type, version: taker.version, ...detail },
+    }),
+  ]);
   return "gone";
 };
 
@@ -305,7 +324,7 @@ const refusalOf = async (
       sql`SELECT ${hearsSql(taker.id, event)} AS hears, ${roomSql(taker.id)} AS room`
     );
     if (now.hears === 1 && now.room === 0) {
-      return await heldBack(env, taker, event, same);
+      return await heldBack(env, taker, same);
     }
     if (now.hears === 1) {
       return "retry";
@@ -314,8 +333,7 @@ const refusalOf = async (
   } else if (!refusedForGood.has(code)) {
     return "retry";
   }
-  await audited(env, taker, event, "workflow.event.refused", { code });
-  return "gone";
+  return await settle(env, taker, event, same, "refused", { code });
 };
 
 /**
@@ -372,14 +390,60 @@ export const startConnectorTriggers = async (
   const outcomes = await Promise.all(
     takers.map(async (taker): Promise<"started" | "gone" | "retry"> => {
       const key = `${coreStartKeyPrefix}connector:${taker.id}:${same}`;
+      const db = drizzle(env.DB);
+      // 1. Started already, by an earlier delivery: nothing is asked again
+      //    (its grant, its room), and nothing of its hold is left.
+      const admitted = await db
+        .select({ id: workflowStartReceipts.id })
+        .from(workflowStartReceipts)
+        .where(
+          and(
+            eq(workflowStartReceipts.invokerType, "trigger"),
+            eq(workflowStartReceipts.invokerId, taker.id),
+            eq(workflowStartReceipts.idempotencyKey, key)
+          )
+        )
+        .get();
+      if (admitted !== undefined) {
+        await db
+          .delete(connectorTriggerHolds)
+          .where(
+            and(holdOf(taker, same), isNull(connectorTriggerHolds.settled))
+          );
+        return "started";
+      }
+      const state = await db
+        .select({
+          heldSince: connectorTriggerHolds.heldSince,
+          settled: connectorTriggerHolds.settled,
+        })
+        .from(connectorTriggerHolds)
+        .where(holdOf(taker, same))
+        .get();
+      // 2. Settled for it already (dropped, or refused for good), delivered
+      //    again for another trigger's sake: known, so nothing starts.
+      if (state?.settled !== undefined && state.settled !== null) {
+        return "gone";
+      }
+      // 3. Held back longer than a day: dropped, before any try, whatever
+      //    room it has now.
+      if (
+        state !== undefined &&
+        Date.now() - state.heldSince.getTime() >= maxHeldMs
+      ) {
+        return await settle(env, taker, event, same, "dropped", {
+          reason: "hourly_limit",
+          heldSince: state.heldSince.toISOString(),
+        });
+      }
+      // 4. Tried, admitted only while its grant to hear and its room hold.
       try {
         const cause = await causeOf(env, taker, same, stamped);
         if (cause === "unjoinable") {
           // Never a new root: that is how a loop would go on.
-          await audited(env, taker, event, "workflow.event.refused", {
+          return await settle(env, taker, event, same, "refused", {
             code: "lineage.unjoinable",
           });
-          return "gone";
         }
         const mapping = inputMappingSchema.parse(
           JSON.parse(taker.inputMapping ?? "{}")
@@ -409,13 +473,10 @@ export const startConnectorTriggers = async (
             ...(cause === undefined ? {} : { emittingRun: cause.runId }),
           }
         );
-        await drizzle(env.DB)
+        await db
           .delete(connectorTriggerHolds)
           .where(
-            and(
-              eq(connectorTriggerHolds.triggerId, taker.id),
-              eq(connectorTriggerHolds.eventKey, same)
-            )
+            and(holdOf(taker, same), isNull(connectorTriggerHolds.settled))
           );
         return "started";
       } catch (error) {
@@ -486,4 +547,32 @@ export const triggerListeners = async (
     }
   }
   return listeners.slice(0, limit);
+};
+
+/**
+ * How long a hold or a tombstone is kept: past connect's two days of
+ * deliveries of an event (connect's events.ts, `maxDeliveryAttempts`), so
+ * every delivery of it finds its tombstone, and long past a hold's day.
+ */
+export const holdsKeptMs = 7 * 24 * 60 * 60 * 1000;
+
+/** Most holds and tombstones one sweep removes. */
+const holdsPerSweep = 500;
+
+/**
+ * Removes the holds and tombstones of connector triggers past
+ * {@link holdsKeptMs} before `now`: events that stopped arriving (the
+ * trigger disabled or its grant revoked, connect giving up), and events
+ * settled long ago. The clock runs it.
+ */
+export const sweepConnectorTriggerHolds = async (
+  env: Env,
+  now: Date
+): Promise<void> => {
+  const before = now.getTime() - holdsKeptMs;
+  await env.DB.prepare(
+    "DELETE FROM connector_trigger_holds WHERE rowid IN (SELECT rowid FROM connector_trigger_holds WHERE coalesce(settled_at, held_since) < ? LIMIT ?)"
+  )
+    .bind(before, holdsPerSweep)
+    .run();
 };
