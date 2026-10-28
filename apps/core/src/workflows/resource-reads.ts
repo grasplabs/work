@@ -408,12 +408,21 @@ const ancestorsMax = 64;
  * reads now: the permission still the workflow's and active
  * (`boundCollection`), the Brain still admitting the run, each document
  * still in its collection, readable there and unpurged. A test run
- * recalls nothing, so has nothing to check. A child run (run-children.ts, GRA-1093) took
- * its input from its parent's steps, so it is held to each ancestor's
- * evidence too,
- * each under that ancestor's own authority and bindings as they are now.
- * An ancestor no longer going (a child lives only while its parent does)
- * is refused as `brain.revoked`, as is a lineage past `ancestorsMax`.
+ * recalls nothing, so has nothing to check. A child run (run-children.ts,
+ * GRA-1093) took its input from its parent's steps, so it is held to each
+ * ancestor's evidence too, each under that ancestor's own authority and
+ * bindings as they are now. An ancestor no longer going (a child lives
+ * only while its parent does) is refused as `brain.revoked`, as is a
+ * lineage past `ancestorsMax`.
+ *
+ * What a running run shows needs no check: its details (`resourceRunFor`)
+ * hold its output or failure only once it ended, which this checks first,
+ * and an App's workflow queries answer run metadata alone
+ * (workflow-reference-queries.ts), a failure as a platform code.
+ *
+ * It checks, then the caller acts: a revoke, erase or purge landing in
+ * between lets that one call through, as on an App's run
+ * (run-evidence.ts). Every later one is refused, and the run with it.
  */
 export const requireResourceRunEvidenceReadable = async (
   env: Env,
