@@ -135,7 +135,7 @@ const DraftPicker = ({
   const { t } = useLingui();
   return (
     <fieldset className="flex flex-none flex-wrap gap-1 border-b px-3 py-2">
-      <legend className="sr-only">{t`Apps being built in this chat`}</legend>
+      <legend className="sr-only">{t`Domains being built in this chat`}</legend>
       {drafts.map(({ draft, name }) => (
         <Button
           aria-pressed={draft.app === shown}
@@ -186,7 +186,7 @@ const ViewToggle = ({
       size="sm"
       variant={view === "app" ? "secondary" : "ghost"}
     >
-      <Trans context="the App being built, beside its chat">App</Trans>
+      <Trans context="the domain being built, beside its chat">Domain</Trans>
     </Button>
   </div>
 );

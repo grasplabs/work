@@ -1,4 +1,5 @@
 import { adminAskPath } from "@grasp-os/shared/admin-ask";
+import { adminKickoffPath } from "@grasp-os/shared/admin-kickoff";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
@@ -26,6 +27,7 @@ import { screenFramePath } from "@grasp-os/shared/screens";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
 import { adminAskResponse } from "./admin-ask.ts";
+import { adminKickoffResponse } from "./admin-kickoff.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import {
@@ -296,6 +298,7 @@ const pathHandlers: ReadonlyMap<
   [quotaPolicyReportPath, quotaPolicyReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminAskPath, adminAskResponse],
+  [adminKickoffPath, adminKickoffResponse],
   [platformUpdatePath, platformUpdateResponse],
   [mailIngressPath, mailIngressResponse],
 ]);

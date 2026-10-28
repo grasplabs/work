@@ -38,6 +38,7 @@ const chat = (
   lastAt,
   running: false,
   projectId: null,
+  appId: null,
 });
 
 let root: Root | undefined;

@@ -42,6 +42,7 @@ import type {
 } from "../connections/integrations.ts";
 import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
+import type { ConnectionUses } from "../connections/workflows-using.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
 import {
@@ -334,9 +335,12 @@ const upTo = (
 const Kinds = ({
   sections,
   identity,
+  uses,
 }: {
   sections: readonly IntegrationSection[];
   identity: Identity;
+  /** Which workflows use each connection, read on its own. */
+  uses: ConnectionUses;
 }) => {
   const { i18n } = useLingui();
   const [drawn, setDrawn] = useState(step);
@@ -390,6 +394,7 @@ const Kinds = ({
                 identity={identity}
                 integration={integration}
                 key={integration.key}
+                uses={uses}
               />
             ))}
           </ul>
@@ -505,7 +510,7 @@ const FilterSelect = ({
 };
 
 const Integrations = () => {
-  const { catalog, connections, requests } = Route.useLoaderData();
+  const { catalog, connections, uses, requests } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const search = Route.useSearch();
   const { q, connectionError, connection } = search;
@@ -623,6 +628,7 @@ const Integrations = () => {
               identity={identity}
               key={`${JSON.stringify(filter)}·${q ?? ""}`}
               sections={sections}
+              uses={uses}
             />
             {/* Under the whole catalog only: not a kind, nor a search's match. */}
             {wholeCatalog ? <RequestedApps requests={requests} /> : null}

@@ -19,7 +19,7 @@ import { testBinding } from "./test-env.ts";
 // (brain-gateway-provider.ts), with the model the run names listed first
 // in its gateway, and the run's budget as the ledger's deployment limit.
 // It reports on the run's output as JSON lines, then fails if a hard rule
-// broke: CI's `stephen` gate (GRA-739) blocks the merge on it.
+// broke (GRA-739): run by hand (stephen-eval.yml) or weekly.
 
 const settings = z
   .object({

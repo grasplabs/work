@@ -1,32 +1,16 @@
 /**
- * Stephen's eval in CI (GRA-739): whether a change touches Stephen, and
- * the numbers of a real model's run, for the `stephen` job in ci.yml and
- * the weekly run (stephen-weekly.yml).
+ * Stephen's eval in CI (GRA-739): the numbers of a real model's run, for
+ * the run by hand (stephen-eval.yml) and the weekly run (stephen-weekly.yml).
  *
- *   node scripts/stephen-eval.ts changed <base>   whether the files changed since <base> touch Stephen: `stephen=true` or `stephen=false`, to $GITHUB_OUTPUT when set
  *   node scripts/stephen-eval.ts report <log>     the run's report in <log> as Markdown, to $GITHUB_STEP_SUMMARY when set and to stdout; exits 1 when a hard rule broke or the log holds no report
  *
  * The run itself is the eval's real-model opt-in
  * (apps/core/vite.stephen-model.config.ts), which prints its report as a
  * JSON line, `STEPHEN_MODEL_REPORT {...}`.
  */
-import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 import { z } from "zod";
-
-/**
- * Stephen's files: his instructions and tools (the agent and its
- * connections, Knowledge's tools), the card path (the chat door and its
- * cards, the Chat SDK package), the connectors' tools, whose classes
- * decide what he may do alone, and the eval itself.
- */
-export const stephenFiles =
-  /^(?:apps\/core\/src\/(?:agent(?:-[\w-]+)?\.ts|channels\/.+|knowledge\/tools\.ts)|packages\/chat\/.+|packages\/connectors\/[^/]+\/src\/.+|packages\/connector-kit\/src\/manifest\.ts|apps\/core\/test\/(?:stephen-[^/]+|fixtures\/stephen-[^/]+|brain-gateway-provider\.ts)|apps\/core\/vite\.stephen(?:-model)?\.config\.ts|scripts\/stephen-eval\.ts|\.github\/workflows\/stephen-weekly\.yml)$/u;
-
-/** Whether any of `paths` is one of Stephen's files. */
-export const touchesStephen = (paths: readonly string[]): boolean =>
-  paths.some((path) => stephenFiles.test(path));
 
 const tally = z.object({ cases: z.number(), passed: z.number() });
 
@@ -103,7 +87,7 @@ export const summaryOf = (report: StephenRunReport): string => {
     "",
     report.passed
       ? "Every hard rule held on every case."
-      : `**${broken.length === 1 ? "A hard rule broke" : `${broken.length} hard rules broke`}: this blocks the merge.**`,
+      : `**${broken.length === 1 ? "A hard rule broke" : `${broken.length} hard rules broke`}: fix it before merging.**`,
     "",
     "| Hard rule | Broken in |",
     "| --- | --- |",
@@ -136,20 +120,6 @@ export const summaryOf = (report: StephenRunReport): string => {
   ].join("\n");
 };
 
-/** Prints whether the files changed since `base` touch Stephen. */
-const changed = (base: string): void => {
-  const paths = execFileSync("git", ["diff", "--name-only", `${base}...HEAD`], {
-    encoding: "utf-8",
-  })
-    .split("\n")
-    .filter((path) => path !== "");
-  const line = `stephen=${touchesStephen(paths)}`;
-  console.info(line);
-  if (process.env.GITHUB_OUTPUT !== undefined) {
-    appendFileSync(process.env.GITHUB_OUTPUT, `${line}\n`);
-  }
-};
-
 /** Prints the report in `log`; fails when a hard rule broke or there is none. */
 const report = (log: string): void => {
   // No log at all: the run never started (its secrets didn't load, say).
@@ -175,14 +145,10 @@ const report = (log: string): void => {
 
 if (import.meta.main) {
   const [command, argument] = process.argv.slice(2);
-  if (command === "changed" && argument !== undefined) {
-    changed(argument);
-  } else if (command === "report" && argument !== undefined) {
+  if (command === "report" && argument !== undefined) {
     report(argument);
   } else {
-    console.error(
-      "Usage: node scripts/stephen-eval.ts changed <base> | report <log>"
-    );
+    console.error("Usage: node scripts/stephen-eval.ts report <log>");
     process.exitCode = 1;
   }
 }

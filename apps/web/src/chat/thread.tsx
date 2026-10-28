@@ -42,7 +42,7 @@ import {
 } from "./message.tsx";
 import { signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
-import { AnswerSources } from "./sources.tsx";
+import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
 
 // A chat as the person reads it, in the prototype's look
@@ -301,14 +301,29 @@ const ReplyActions = ({
 }: {
   cited?: { chatId: string; messageId: number };
   children: ReactNode;
-}) =>
-  cited === undefined ? (
+}) => {
+  const sources = useCitedDocuments();
+  return cited === undefined ? (
     <MessageActions>{children}</MessageActions>
   ) : (
-    <AnswerSources chatId={cited.chatId} messageId={cited.messageId}>
-      {children}
-    </AnswerSources>
+    <AnswerSources cited={sources}>{children}</AnswerSources>
   );
+};
+
+/** An answer's words, each span that cites a document an inline citation. */
+const ReplyText = ({
+  text,
+  citations,
+}: {
+  text: string;
+  citations?: ChatCitation[];
+}) => (
+  <MessageResponse
+    cited={citations?.map(({ documentId }) => documentId)}
+    sources={useCitedDocuments()}
+    text={text}
+  />
+);
 
 /** One response of the agent's, stored or being written. */
 const Reply = ({
@@ -347,7 +362,7 @@ const Reply = ({
   const { t } = useLingui();
   const answer = reply.text.trim();
   const quiet = writing || sign !== undefined;
-  return (
+  const shown = (
     <div className="flex w-full min-w-0 flex-col gap-3">
       {top}
       <Message from="assistant">
@@ -359,10 +374,7 @@ const Reply = ({
             />
           )}
           {answer === "" ? null : (
-            <MessageResponse
-              cited={reply.citations?.map(({ documentId }) => documentId)}
-              text={reply.text}
-            />
+            <ReplyText citations={reply.citations} text={reply.text} />
           )}
           {reply.code.map((code) => (
             <CodeStep
@@ -414,6 +426,12 @@ const Reply = ({
         )}
       </Message>
     </div>
+  );
+  // Only an answer that cites documents asks core what it cites.
+  return cited === undefined ? (
+    shown
+  ) : (
+    <AnswerCited cited={cited}>{shown}</AnswerCited>
   );
 };
 

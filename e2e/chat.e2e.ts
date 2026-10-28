@@ -220,7 +220,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   // granted this connection, so it's refused, and the write still waits.
   await waiting.getByRole("button", { name: `Confirm ${described}` }).click();
   await expect(waiting.getByRole("alert")).toHaveText(
-    "This App or agent has no permission to do that."
+    "This domain or agent has no permission to do that."
   );
   await expect(waiting).toContainText("cleo@acme.test");
   // Rejecting each drops it.

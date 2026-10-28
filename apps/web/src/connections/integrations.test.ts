@@ -2,6 +2,8 @@ import type {
   ListedConnection,
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
+import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
+import type { ConnectionWorkflow } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -14,6 +16,7 @@ import {
   roundedDown,
   sectionsOf,
   stateOf,
+  workflowsOf,
 } from "./integrations.ts";
 
 // The Integrations page's one list: what is connected must never drop out
@@ -289,5 +292,54 @@ describe("beyond and nearestApps", () => {
 
   it("offers at most the number asked for", () => {
     expect(nearestApps(beyond(listed), "hubspot", 1)).toHaveLength(1);
+  });
+});
+
+const appWorkflow = (
+  appName: string,
+  workflow: string
+): ConnectionWorkflow => ({
+  kind: "app",
+  app: appIdSchema.parse(`app-${appName}`),
+  appName,
+  workflow: workflowIdSchema.parse(workflow),
+});
+
+const independent = (name: string): ConnectionWorkflow => ({
+  kind: "independent",
+  id: `workflow-${name}`,
+  name,
+});
+
+describe(workflowsOf, () => {
+  it("lists each workflow that uses any of an app's connections once, App workflows first, by App and name", () => {
+    const shared = connection("microsoft", "shared", "active");
+    const personal = connection("microsoft", "personal", "active");
+    const elsewhere = connection("google", "shared", "active");
+    const [microsoft] = integrationsOf(
+      [entry("microsoft", [])],
+      [shared, personal, elsewhere]
+    );
+    const uses = [
+      {
+        connectionId: shared.id,
+        workflows: [appWorkflow("Payroll", "remind"), independent("Digest")],
+      },
+      {
+        connectionId: personal.id,
+        workflows: [
+          appWorkflow("Invoices", "send"),
+          appWorkflow("Payroll", "remind"),
+        ],
+      },
+      { connectionId: elsewhere.id, workflows: [independent("Calendar")] },
+    ];
+    expect(
+      microsoft === undefined ? undefined : workflowsOf(microsoft, uses)
+    ).toStrictEqual([
+      appWorkflow("Invoices", "send"),
+      appWorkflow("Payroll", "remind"),
+      independent("Digest"),
+    ]);
   });
 });

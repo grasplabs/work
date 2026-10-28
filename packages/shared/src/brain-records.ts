@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
+import { appIdSchema, workflowIdSchema } from "./ids.ts";
 
 // The brain's records as core keeps them (core's brain-records.ts), and
 // what `brain.addRecords` takes: where a fact came from (`source`), the
@@ -29,6 +30,11 @@ import { defineErrorFamily } from "./errors.ts";
 // Every member reads them. Who added a record is in the audit log alone;
 // only a gap's answer carries the name of who gave it, as they gave it.
 //
+// The board's goals are records too (GRA-516): a goal (`goal`, its first
+// wording), each later wording of it (`goalVersion`, the newest counting),
+// and each time one of the company's workflows was linked to it or taken
+// off (`goalLink`, the newest for an App's workflow counting).
+//
 // The onboarding adds records of its own (GRA-367): each roster team as a
 // team record (`team-<id>`), the statements its people agreed to, and each
 // piece of work as drawn (`workflow`, and a `workflowVersion` for each
@@ -50,6 +56,9 @@ export const brainRecordsMaxPerType = {
   gap: 1000,
   workflow: 500,
   workflowVersion: 5000,
+  goal: 200,
+  goalVersion: 2000,
+  goalLink: 5000,
 } as const;
 
 /** Longest a gap's question, or its answer, may be. */
@@ -381,6 +390,48 @@ const workflowVersionRecordSchema = z.strictObject({
   open: z.array(shortText).max(5),
 });
 
+/** Longest a goal's "how we notice", in characters. */
+export const brainGoalNoticeMaxLength = 1000;
+
+const goalWording = {
+  /** The goal, as the board says it. */
+  title: label,
+  /** How the company will notice it is met: empty while nobody said. */
+  howWeNotice: z.string().trim().max(brainGoalNoticeMaxLength),
+  sourceId: brainRecordIdSchema,
+  date: day,
+};
+
+/** A board goal, as it was first set: its first wording. */
+const goalRecordSchema = z.strictObject({
+  type: z.literal("goal"),
+  id: ownIdSchema,
+  ...goalWording,
+});
+
+/** A later wording of a board goal: the newest counts. */
+const goalVersionRecordSchema = z.strictObject({
+  type: z.literal("goalVersion"),
+  id: ownIdSchema,
+  goalId: brainRecordIdSchema,
+  ...goalWording,
+});
+
+/**
+ * One of the company's workflows linked to a board goal it serves
+ * (`linked: true`), or taken off it (`false`): the newest for the App's
+ * workflow counts.
+ */
+const goalLinkRecordSchema = z.strictObject({
+  type: z.literal("goalLink"),
+  id: ownIdSchema,
+  goalId: brainRecordIdSchema,
+  app: appIdSchema,
+  workflow: workflowIdSchema,
+  linked: z.boolean(),
+  date: day,
+});
+
 /**
  * What a gap may be about: the records that are notes of their own, so
  * each opens its page. A team's count or stakeholder is a value of its
@@ -406,6 +457,9 @@ export const brainRecordSchema = z.discriminatedUnion("type", [
   gapRecordSchema,
   workflowRecordSchema,
   workflowVersionRecordSchema,
+  goalRecordSchema,
+  goalVersionRecordSchema,
+  goalLinkRecordSchema,
 ]);
 export type BrainRecordInput = z.input<typeof brainRecordSchema>;
 export type BrainRecord = z.infer<typeof brainRecordSchema>;
