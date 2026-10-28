@@ -29,7 +29,7 @@
  * Read on demand: it reads every active client's account, a few at a
  * time, each within a deadline (src/live-reads.ts).
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { cloudflareApi } from "../cloudflare/api.ts";
@@ -37,7 +37,9 @@ import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
   clientPlacements,
+  clientProvisions,
   clients,
+  clientWorkers,
   rollouts,
   rolloutTargets,
 } from "../db/schema.ts";
@@ -46,19 +48,21 @@ import {
   deploySecrets,
   MissingStoreSecretError,
 } from "../deploy/context.ts";
-import { recordedPrintOf } from "../deploy/deploy.ts";
 import { sharedSecretPrints } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import { defaultLiveReadLimits, eachLimited, within } from "../live-reads.ts";
 import type { LiveReadLimits } from "../live-reads.ts";
 import { driftOf } from "./drift.ts";
 import type { ClientDrift } from "./drift.ts";
-import { parsePrevious } from "./targets.ts";
+import { deliveredShared, parsePrevious } from "./targets.ts";
 
 /** Shared-secret fingerprints, by secret name. */
 export type SharedPrints = Record<string, string>;
 
 const sharedPrintsSchema = z.record(z.string(), z.string());
+
+/** A Worker the admin deploys, as `client_workers` names it. */
+const workerSchema = z.enum(clientWorkers.worker.enumValues);
 
 /** Client ids in order. */
 const byId = (a: string, b: string): number => a.localeCompare(b);
@@ -90,8 +94,9 @@ const holdersOf = (
   );
 
 /**
- * The shared-secret fingerprints client `clientId`'s deploys recorded for
- * `app`'s version `version`, by name; null when none are on record.
+ * The shared-secret fingerprints client `clientId`'s operation delivered
+ * to `app`, by name, while `app` runs `version`, the one its operation
+ * recorded live; null when it runs another, or none are on record.
  */
 export const recordedShared = async (
   db: AdminDatabase,
@@ -99,20 +104,44 @@ export const recordedShared = async (
   app: string,
   version: string
 ): Promise<SharedPrints | null> => {
-  const text = await recordedPrintOf(db, clientId, app, version, "shared");
-  if (text === null) {
+  const worker = workerSchema.safeParse(app);
+  if (!worker.success) {
     return null;
   }
-  const parsed = sharedPrintsSchema.safeParse(JSON.parse(text));
-  return parsed.success ? parsed.data : null;
+  const row = await db
+    .select({
+      versionId: clientWorkers.versionId,
+      progress: clientProvisions.progress,
+      status: clientProvisions.status,
+    })
+    .from(clientWorkers)
+    .innerJoin(
+      clientProvisions,
+      eq(clientProvisions.clientId, clientWorkers.clientId)
+    )
+    .where(
+      and(
+        eq(clientWorkers.clientId, clientId),
+        eq(clientWorkers.worker, worker.data)
+      )
+    )
+    .get();
+  if (row === undefined || row.status !== "done") {
+    return null;
+  }
+  if (row.versionId !== version) {
+    return null;
+  }
+  return deliveredShared(row.progress)[app] ?? null;
 };
 
 /**
  * For each shared secret, whether the client whose drift is `drift` (read
  * live, `driftOf`) runs `expected`'s value on every Worker of its release
  * that holds it (`holders`), by name. A Worker that's unrecorded, split,
- * unreadable or live on a version without fingerprints runs none of the
- * secrets it holds; a client with no Worker read runs none at all.
+ * unreadable, not read at all, or live on a version without fingerprints
+ * runs none of the secrets it holds; a client with no Worker read runs
+ * none at all.
  */
 const liveMatches = async (
   db: AdminDatabase,
@@ -144,7 +173,15 @@ const liveMatches = async (
       };
     })
   );
-  for (const { held, prints } of workers) {
+  // A Worker drift doesn't read (connect, in a namespace, whose versions
+  // only core's health tells) runs none: what its operation delivered
+  // doesn't say what it runs now, and a secret it still runs must never
+  // read as revocable.
+  const read = new Set(drift.workers.map(({ worker }) => worker));
+  const unread = Object.keys(holders)
+    .filter((app) => !read.has(app))
+    .map((app) => ({ held: holders[app] ?? [], prints: null }));
+  for (const { held, prints } of [...workers, ...unread]) {
     for (const name of held) {
       const runs = prints !== null && prints[name] === expected[name];
       matches.set(name, (matches.get(name) ?? true) && runs);
@@ -176,17 +213,20 @@ export const storeCheck = async (
  * every shared secret in the store now (`check`), on every Worker holding
  * it; null when that can't be told: its drift is unknown (nothing
  * recorded, or its account didn't answer), or a Worker's live versions
- * weren't read. Only what was read and differs is behind.
+ * weren't read, or drift doesn't read a Worker holding one (connect, in a
+ * namespace). Only what was read and differs is behind.
  */
 export const sharedSecretsStatus = async (
   db: AdminDatabase,
   drift: ClientDrift | null,
   check: StoreCheck
 ): Promise<boolean | null> => {
+  const read = new Set(drift?.workers.map(({ worker }) => worker));
   if (
     drift === null ||
     drift.state === "unknown" ||
-    drift.workers.some(({ live }) => live === null)
+    drift.workers.some(({ live }) => live === null) ||
+    Object.keys(check.holders).some((app) => !read.has(app))
   ) {
     return null;
   }
@@ -290,14 +330,9 @@ export const checkRevocation = async (
     if (previous === null) {
       continue;
     }
-    // oxlint-disable-next-line no-await-in-loop -- a few apps per target
-    const before = await Promise.all(
-      Object.entries(previous.versions).map(
-        async ([app, version]) =>
-          await recordedShared(db, target.clientId, app, version)
-      )
-    );
-    if (before.some((prints) => prints === null)) {
+    // What its operation had delivered as the rollout claimed it.
+    const before = Object.values(previous.shared ?? {});
+    if (previous.shared === undefined || before.length === 0) {
       unproven.push(target.clientId);
       continue;
     }
@@ -310,15 +345,13 @@ export const checkRevocation = async (
   const storeChanged = Object.keys({ ...started.data, ...now }).filter(
     (name) => started.data[name] !== now[name]
   );
-  // Placed clients' secrets are their operation's to deliver
-  // (src/hosting/operation.ts), not this path's: they aren't read here.
+  // Every active placed client: what its operation delivered is read
+  // back from where it runs.
   const active = await db
     .select({ id: clients.id })
     .from(clients)
-    .leftJoin(clientPlacements, eq(clientPlacements.clientId, clients.id))
-    .where(
-      and(eq(clients.status, "active"), isNull(clientPlacements.clientId))
-    );
+    .innerJoin(clientPlacements, eq(clientPlacements.clientId, clients.id))
+    .where(eq(clients.status, "active"));
   // Read once: every client's reads make their API from it, each stopped
   // by its own deadline.
   const token = await deployerToken(env);
@@ -338,7 +371,10 @@ export const checkRevocation = async (
             });
             return await liveMatches(
               db,
-              await driftOf(api, db, id),
+              await driftOf(api, db, id, {
+                fetch,
+                routerKey: secrets.routerKey,
+              }),
               holders,
               now
             );

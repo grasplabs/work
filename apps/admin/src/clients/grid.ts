@@ -18,7 +18,7 @@ import { deadline } from "@grasp-os/shared/deadline";
 import { log } from "@grasp-os/shared/log";
 import { onboardingSummarySchema } from "@grasp-os/shared/onboarding-summary";
 import { deriveRouterSecret, routerTargetOf } from "@grasp-os/shared/router";
-import { asc, sql } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { accountUsage, monthCostUsd } from "../cloudflare/analytics.ts";
@@ -27,7 +27,7 @@ import { cloudflareApi } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clientDeploys, clients, clientWorkers } from "../db/schema.ts";
+import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
 import {
   clientDomain,
   deployerToken,
@@ -99,10 +99,13 @@ export interface GridRow {
   /** The release the admin made live on every Worker; null when none, or they differ. */
   release: string | null;
   pinnedReleaseId: string | null;
-  /** Its latest deploy. */
+  /**
+   * Its operation's latest run (src/hosting/operation.ts): the release, how
+   * it ended, and when it last changed; null before it has one.
+   */
   lastDeploy: {
     releaseId: string;
-    status: "running" | "done" | "failed" | "superseded";
+    status: "running" | "done" | "failed";
     at: Date;
   } | null;
 }
@@ -148,13 +151,14 @@ const unknownStatus: LiveStatus = {
  * Whether every column of `live` was read. Only such an answer is kept:
  * an unknown is an account, the store or the analytics not answering, and
  * kept, it would still show as unknown a minute after they answer again.
+ * A client with no account of its own (`accountless`, every placed one)
+ * has no usage or cost to read: those stay null, known.
  */
-const allKnown = (live: LiveStatus): boolean =>
+const allKnown = (live: LiveStatus, accountless: boolean): boolean =>
   live.drift !== "unknown" &&
   live.sharedSecretsCurrent !== null &&
   live.reach !== "unknown" &&
-  live.day !== null &&
-  live.costUsd !== null &&
+  (accountless || (live.day !== null && live.costUsd !== null)) &&
   live.onboarding !== null;
 
 /**
@@ -171,18 +175,14 @@ const recordedClients = async (db: AdminDatabase) => {
       accountId: clients.accountId,
       pinnedReleaseId: clients.pinnedReleaseId,
       lastDeploy: {
-        releaseId: clientDeploys.releaseId,
-        status: clientDeploys.status,
-        at: clientDeploys.createdAt,
+        releaseId: clientProvisions.releaseId,
+        status: clientProvisions.status,
+        at: clientProvisions.updatedAt,
       },
     })
     .from(clients)
-    // Its latest deploy, found through client_deploys_client_idx. Written
-    // out, since `clients.id` must name the outer row's.
-    .leftJoin(
-      clientDeploys,
-      sql`${clientDeploys.id} = (SELECT latest.id FROM client_deploys AS latest WHERE latest.client_id = clients.id ORDER BY latest.created_at DESC, latest.rowid DESC LIMIT 1)`
-    )
+    // Its one operation, unique by client.
+    .leftJoin(clientProvisions, eq(clientProvisions.clientId, clients.id))
     .orderBy(asc(clients.id));
   // Two rows a client, core's and connect's: as many as the clients.
   const workers = await db
@@ -331,16 +331,7 @@ const orElse = async <T>(
  * Its requests stop when `signal` aborts.
  */
 const liveOf = async (
-  {
-    env,
-    db,
-    apiFor,
-    routerKey,
-    secrets,
-    store,
-    usage,
-    manifestOf,
-  }: LiveSources,
+  { env, db, apiFor, routerKey, secrets, store, usage }: LiveSources,
   row: { id: string; accountId: string | null; hostname: string | null },
   signal: AbortSignal
 ): Promise<LiveStatus> => {
@@ -348,7 +339,13 @@ const liveOf = async (
     apiFor === null
       ? null
       : await orElse(
-          async () => await driftOf(apiFor(signal), db, row.id, manifestOf),
+          async () =>
+            await driftOf(
+              apiFor(signal),
+              db,
+              row.id,
+              routerKey === null ? undefined : { fetch, routerKey }
+            ),
           null,
           "grid.drift_unread",
           row.id
@@ -441,7 +438,10 @@ const usageWithin = async (
  * anything unknown in it (`allKnown`; none is kept now, but one kept
  * before that rule may still be there): the answer is read again.
  */
-const cached = async (clientId: string): Promise<LiveStatus | undefined> => {
+const cached = async (
+  clientId: string,
+  accountless: boolean
+): Promise<LiveStatus | undefined> => {
   try {
     const cache = await caches.open(cacheName);
     const hit = await cache.match(cacheKey(clientId));
@@ -449,7 +449,9 @@ const cached = async (clientId: string): Promise<LiveStatus | undefined> => {
       return undefined;
     }
     const parsed = liveStatusSchema.safeParse(await hit.json());
-    return parsed.success && allKnown(parsed.data) ? parsed.data : undefined;
+    return parsed.success && allKnown(parsed.data, accountless)
+      ? parsed.data
+      : undefined;
   } catch (error) {
     log.warn("grid.cache_unread", { clientId, error: errorCode(error) });
     return undefined;
@@ -552,9 +554,15 @@ export const gridLive = async (
       status === "active" && (only === undefined || id === only)
   );
   const answers = new Map<string, LiveStatus>();
+  // Clients with no account of its own: no usage or cost to read.
+  const accountless = new Set(
+    active.filter(({ accountId }) => accountId === null).map(({ id }) => id)
+  );
   if (options.cache) {
     const kept = await Promise.all(
-      active.map(async ({ id }) => [id, await cached(id)] as const)
+      active.map(
+        async ({ id }) => [id, await cached(id, accountless.has(id))] as const
+      )
     );
     for (const [id, live] of kept) {
       if (live !== undefined) {
@@ -612,7 +620,7 @@ export const gridLive = async (
     if (options.cache) {
       await Promise.all(
         read
-          .filter(([, live]) => allKnown(live))
+          .filter(([id, live]) => allKnown(live, accountless.has(id)))
           .map(async ([id, live]) => {
             await keep(id, live);
           })
