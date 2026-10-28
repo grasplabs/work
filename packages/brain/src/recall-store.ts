@@ -5,14 +5,9 @@ import type { Brain } from "./brain.ts";
 import { readableCollection } from "./collections.ts";
 import { brainErrors } from "./contract.ts";
 import { inList } from "./db/d1.ts";
-import {
-  brainPayloads,
-  collections,
-  documents,
-  versions,
-} from "./db/schema.ts";
+import { collections, documents, versions } from "./db/schema.ts";
+import { sha256Hex } from "./encoding.ts";
 import type { CollectionId } from "./ids.ts";
-import { keyed } from "./keyed.ts";
 import type { Provenance } from "./knowledge.ts";
 import { searchSections } from "./search.ts";
 import type { FoundSection } from "./search.ts";
@@ -43,10 +38,12 @@ export interface VersionRef {
 }
 
 /**
- * A version as it was when recalled: `text` stands for its text, keyed to
- * this deployment, so it says when a purge rewrote that version since
- * (purge.ts rewrites a version in place) without being a hash anyone
- * could check a guess of the text against.
+ * A version as it was when recalled: `text` stands for its text, a hash
+ * of the payload the version was stored as. A purge points the version at
+ * a new payload (purge.ts rewrites a version in place), so `text` changes
+ * with it. The payload's key holds a random part, so `text` is no hash
+ * anyone could check a guess of the text against, and no key derived from
+ * a secret: rotating one leaves pins as they were.
  */
 export interface PinnedVersion extends VersionRef {
   text: string;
@@ -74,12 +71,11 @@ const readablePins = async <C>(
       documentId: documents.id,
       collectionId: documents.collectionId,
       version: versions.number,
-      sha256: brainPayloads.sha256,
+      payloadKey: versions.payloadKey,
     })
     .from(versions)
     .innerJoin(documents, eq(documents.id, versions.documentId))
     .innerJoin(collections, eq(collections.id, documents.collectionId))
-    .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
     .where(
       and(
         inList(documents.id, [
@@ -92,13 +88,9 @@ const readablePins = async <C>(
       )
     );
   const pins = await Promise.all(
-    rows.map(async ({ sha256, ...ref }) => ({
+    rows.map(async ({ payloadKey, ...ref }) => ({
       ...ref,
-      text: await keyed(brain, "grasp-os brain pinned version", [
-        ref.documentId,
-        ref.version,
-        sha256,
-      ]),
+      text: await sha256Hex(payloadKey),
     }))
   );
   return new Map(pins.map((pin) => [pinKey(pin), pin]));

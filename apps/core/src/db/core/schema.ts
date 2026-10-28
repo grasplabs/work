@@ -2209,7 +2209,7 @@ export const brainCaptureIntents = sqliteTable(
 /**
  * Every document version a run's recalls cited (GRA-299; workflows/
  * run-evidence.ts), with the Brain binding's permission each came through:
- * identifiers and a keyed stand-in for each text only. It only grows while
+ * identifiers and a stand-in for each text only. It only grows while
  * the run lives, so no recall can narrow it, and before the run's next
  * model, connection or App call, decision or output, the host checks the
  * run may still read them all, under those permissions, as they were
@@ -2225,8 +2225,8 @@ export const runBrainEvidence = sqliteTable(
     /** The document's version it recalled. */
     version: integer().notNull(),
     /**
-     * That version's text as it was recalled, keyed to the deployment
-     * (`PinnedVersion` in @grasp-os/brain/recall-store): changed by a purge.
+     * What stood for that version's text as it was recalled (`PinnedVersion`
+     * in @grasp-os/brain/recall-store): changed by a purge.
      */
     pinned: text().notNull(),
     /** The `brain` permission of the binding that recalled it. */

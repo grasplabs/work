@@ -418,13 +418,12 @@ const runWorkflow = async (
   // so does its error, which its code may have made of recalled text
   // (catching a refusal and throwing what it recalled, say): neither once
   // it may no longer read what it recalled (run-evidence.ts). A run caught
-  // tampering fails with that refusal, checked or not.
+  // tampering fails all the same, but checked first: the refusal can hold
+  // what the run said (a step it named with what it recalled, say).
   const evidenceRefused =
-    tampered === undefined && hosted !== undefined
-      ? await evidenceRefusal(env, hosted)
-      : undefined;
+    hosted === undefined ? undefined : await evidenceRefusal(env, hosted);
   const failed =
-    tampered ?? evidenceRefused ?? (result.ok ? undefined : result.error);
+    evidenceRefused ?? tampered ?? (result.ok ? undefined : result.error);
   if (failed) {
     // A failed run stops here, whatever failed: the step's retries (only
     // for failures trying again may fix, host.ts) are behind it. Its

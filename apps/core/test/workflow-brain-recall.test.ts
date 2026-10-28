@@ -3,8 +3,11 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { appVersions } from "../src/db/core/schema.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -476,6 +479,85 @@ describe("a workflow's recall through the Brain binding", () => {
         recalledText: false,
         purgedText: false,
       },
+    });
+  });
+
+  it("fails as revoked a run caught running a step named with what it recalled, once it may no longer read it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const word = rareWord();
+    const handbook = await collectionSaying(admin, "Handbook", word);
+    const { id: app } = await admin.api.apps.create({ name: "Recall" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    const collectionGrant = await requestGranted(
+      idp,
+      admin,
+      readCollection(app_, handbook)
+    );
+    await requestGranted(idp, admin, brainFor(app));
+    /** A workflow that recalls, sleeps, then runs a step named `third`. */
+    const naming = (id: string, third: string, named: string) =>
+      workflowFiles(
+        id,
+        `  const recalled = await step.do("recall", { description: "Recall the plan" }, async () => {
+    const pack = await brain(env.BRAIN).recall({ query: ${JSON.stringify(word)} });
+    return pack.items.map(({ statement }) => statement).join(" ") as Json;
+  });
+  await step.sleep("go", { description: "Wait", duration: "1 day" });
+  await step.do(${third}, { description: "Name it" }, async () => null);
+  return null;`,
+        { recall: "", [named]: null }
+      );
+    await release(admin, app, {
+      ...sampleApp(),
+      ...withBrain({
+        ...naming("shown", `"rename"`, "rename"),
+        // Named with the recalled word: a step name holds no spaces.
+        ...naming(
+          "renamer",
+          'String(recalled).match(/zq[a-f]+/u)?.[0] ?? "none"',
+          "none"
+        ),
+      }),
+    });
+    // What the review shows `renamer` running: its first two steps, as
+    // `shown` writes them, so its third, named by the run, is tampering.
+    const [row] = await drizzle(env.DB)
+      .select({ calls: appVersions.workflowCalls })
+      .from(appVersions)
+      .where(and(eq(appVersions.appId, app), eq(appVersions.version, 1)));
+    const stored = row?.calls ?? {};
+    const { shown } = stored;
+    if (shown?.steps === null || shown === undefined) {
+      throw new Error("The review didn't read shown's steps");
+    }
+    const { rename: _step, ...steps } = shown.steps;
+    const { rename: _kind, ...kinds } = shown.kinds;
+    await drizzle(env.DB)
+      .update(appVersions)
+      .set({
+        workflowCalls: { ...stored, renamer: { ...shown, steps, kinds } },
+      })
+      .where(and(eq(appVersions.appId, app), eq(appVersions.version, 1)));
+
+    const { id } = await admin.api.workflows.start(app, "renamer");
+    await sleeping(id, "go");
+    await stopped(id);
+    await admin.api.permissions.revoke(collectionGrant);
+    await woken(id);
+    await finished(id);
+    const { status, error, failure } = await admin.api.workflows.status(id);
+    const stored_ = JSON.stringify([failure ?? null, error ?? null]);
+
+    // Refused for its evidence, not for its step: the step's name, made of
+    // what it recalled, nowhere in its failure.
+    expect({
+      status,
+      code: failure?.error.code ?? null,
+      recalledText: stored_.includes(word),
+    }).toStrictEqual({
+      status: "failed",
+      code: "brain.revoked",
+      recalledText: false,
     });
   });
 });
