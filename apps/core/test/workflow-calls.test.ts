@@ -1556,6 +1556,9 @@ describe("a JSON workflow's model call limit, when the quota policy can't be rea
     expect({ failed, limit: value }).toStrictEqual({
       failed: true,
       limit: platformLimits.lineageModelRequests,
+    });
+  });
+});
 
 let budgetMonths = 0;
 
