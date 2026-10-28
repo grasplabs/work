@@ -30,6 +30,7 @@ import {
 import type { Writer } from "./documents.ts";
 import { versionText } from "./documents.ts";
 import { fromBase64Url, sha256Hex, toBase64Url } from "./encoding.ts";
+import { canonicalJson } from "./json.ts";
 import type { Json } from "./json.ts";
 import { knowledgeErrors } from "./knowledge.ts";
 import type { ExportStatus } from "./knowledge.ts";
@@ -109,6 +110,55 @@ export interface OnExport {
 }
 
 const hostNamePattern = /^[a-z][a-z0-9-]{0,40}$/u;
+
+/**
+ * The key a manifest is signed with: derived by the host from a secret it
+ * already holds (core: HKDF from its auth secret), under a purpose of its
+ * own and a version, so a bundle edited after it was written is refused
+ * on restore. Only a Brain holding the same secret verifies it.
+ */
+const manifestKey = async <C>(
+  brain: Brain<C>,
+  usages: ("sign" | "verify")[]
+): Promise<CryptoKey> =>
+  await brain.ports.keys.hmac("grasp-os brain export manifest v1", usages);
+
+/** What a manifest's signature signs: everything in it but the signature. */
+const manifestData = (body: Json): Uint8Array =>
+  new TextEncoder().encode(canonicalJson(body));
+
+/** The signature of manifest `body`, base64url. */
+const manifestSignature = async <C>(
+  brain: Brain<C>,
+  body: Json
+): Promise<string> =>
+  toBase64Url(
+    new Uint8Array(
+      await crypto.subtle.sign(
+        "HMAC",
+        await manifestKey(brain, ["sign"]),
+        manifestData(body)
+      )
+    )
+  );
+
+/** Whether `signature` is this Brain's signature of manifest `body`. */
+export const manifestSigned = async <C>(
+  brain: Brain<C>,
+  body: Json,
+  signature: string
+): Promise<boolean> => {
+  try {
+    return await crypto.subtle.verify(
+      "HMAC",
+      await manifestKey(brain, ["verify"]),
+      fromBase64Url(signature),
+      manifestData(body)
+    );
+  } catch {
+    return false;
+  }
+};
 
 /** Everything export `exportId` keeps in the bucket is under this. */
 const prefixOf = (exportId: string): string => `exports/${exportId}/`;
@@ -720,7 +770,10 @@ const writeNext = async <C>(
       rows,
     })),
   };
-  const manifest = JSON.stringify(body);
+  const manifest = JSON.stringify({
+    ...body,
+    signature: await manifestSignature(brain, body),
+  });
   const manifestObject = objectFor(exportId, manifestName);
   await brain.ports.blobs.put(manifestObject, manifest);
   const now = brain.ports.clock();
