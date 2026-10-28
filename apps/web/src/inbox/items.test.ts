@@ -350,6 +350,6 @@ describe(listed, () => {
     expect(items.find(({ kind }) => kind === "stoppedSchedule")?.title).toBe(
       "The schedule of Nightly report stopped"
     );
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 5);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 6);
   });
 });
