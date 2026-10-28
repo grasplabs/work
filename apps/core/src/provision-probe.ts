@@ -120,28 +120,40 @@ const sandbox = (env: Env) => async () => {
   }
 };
 
+/** Every Durable Object namespace binding core has, by name, as typegen reads wrangler.jsonc. */
+type NamespaceName = {
+  [Name in keyof Env]-?: NonNullable<Env[Name]> extends DurableObjectNamespace<
+    infer _Class
+  >
+    ? Name
+    : never;
+}[keyof Env];
+
 /**
  * Core's Durable Object namespaces, each as core reaches it: in the
  * jurisdiction its objects are made in (durable-objects.ts). Asked for an
- * ID only, so the probe makes no object and writes nothing.
+ * ID only, so the probe makes no object and writes nothing. Typed by
+ * every namespace binding core has, so a binding added to wrangler.jsonc
+ * and not here fails the type check rather than provisioning.
  */
-const objectNamespaces = (env: Env) =>
-  ({
-    WORKSPACES: env.WORKSPACES,
-    APPS: env.APPS,
-    AUDIT_LOG: env.AUDIT_LOG,
-    BUILTINS: env.BUILTINS,
-    CLOCK: env.CLOCK,
-    ONBOARDING: env.ONBOARDING,
-    MODEL_LEDGER: env.MODEL_LEDGER,
-    DATA_STORES: env.DATA_STORES,
-    WORKFLOW_RUNS: env.WORKFLOW_RUNS,
-    ACTION_INVOCATIONS: env.ACTION_INVOCATIONS,
-    CHAT_STATE: env.CHAT_STATE,
-  }) satisfies Record<
-    string,
-    DurableObjectNamespace<Rpc.DurableObjectBranded | undefined>
-  >;
+const objectNamespaces = (
+  env: Env
+): Record<
+  NamespaceName,
+  DurableObjectNamespace<Rpc.DurableObjectBranded | undefined>
+> => ({
+  WORKSPACES: env.WORKSPACES,
+  APPS: env.APPS,
+  AUDIT_LOG: env.AUDIT_LOG,
+  BUILTINS: env.BUILTINS,
+  CLOCK: env.CLOCK,
+  ONBOARDING: env.ONBOARDING,
+  MODEL_LEDGER: env.MODEL_LEDGER,
+  DATA_STORES: env.DATA_STORES,
+  WORKFLOW_RUNS: env.WORKFLOW_RUNS,
+  ACTION_INVOCATIONS: env.ACTION_INVOCATIONS,
+  CHAT_STATE: env.CHAT_STATE,
+});
 
 /** A namespace's no-op: an object's ID in core's jurisdiction, made but never used. */
 const objects =
