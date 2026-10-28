@@ -14,6 +14,7 @@ const chat = (id: string, projectId: string | null): ChatSummary => ({
   lastAt: "2026-10-20T08:00:00.000Z",
   running: false,
   projectId,
+  appId: null,
 });
 
 describe("a project's documents", () => {
