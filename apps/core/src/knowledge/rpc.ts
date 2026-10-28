@@ -430,7 +430,12 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) =>
-        await startExport(brainOf(this.#env), purgerOf(person), token)
+        await startExport(
+          brainOf(this.#env),
+          purgerOf(person),
+          token,
+          coreExport(this.#env)
+        )
     );
   }
 

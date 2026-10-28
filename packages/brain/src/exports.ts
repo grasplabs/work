@@ -4,17 +4,17 @@ import {
   count,
   eq,
   gt,
-  gte,
   inArray,
   isNull,
   lt,
   ne,
-  notInArray,
   or,
+  sql,
 } from "drizzle-orm";
 
-import { auditedBatch, outboxed } from "./audit.ts";
+import { auditedBatch, outboxed, outboxedIfChanged } from "./audit.ts";
 import type { Brain } from "./brain.ts";
+import { inList, notInList } from "./db/d1.ts";
 import {
   brainErasedEvidence,
   brainExportFiles,
@@ -59,7 +59,17 @@ import { citesReadable } from "./memory-cites.ts";
 //
 // A purge that runs while it is written, or before its files are
 // downloaded, fails it (`knowledge.export_purged`): it may hold what the
-// purge erased, so its files are deleted, to be asked for again. Its files
+// purge erased, so its files are deleted, to be asked for again. One
+// still unfinished as it would begin refuses it
+// (`knowledge.export_purge_open`). What it holds is decided once, as it
+// begins: its collections, frozen with it, so every file reads the same.
+//
+// One run writes at a time, under a claim with a lease; every write a run
+// makes is fenced on its claim, so a run that lost it (past its lease)
+// changes nothing of what the run that took over writes. Each file's
+// object is a key of its own, recorded before it is uploaded and marked
+// stored after: an upload cut short is written again, and whatever a lost
+// run uploaded anyway is swept with the rest of the export's prefix. Its files
 // are downloaded by the admin who asked for it, for a day
 // (`exportLifetimeMs`), and then deleted. It holds the company's sensitive
 // collections too: the admin who exports takes the company's data whole.
@@ -100,9 +110,15 @@ export interface OnExport {
 
 const hostNamePattern = /^[a-z][a-z0-9-]{0,40}$/u;
 
-/** Where file `name` of export `exportId` is kept in the bucket. */
-const keyOf = (exportId: string, name: string): string =>
-  `exports/${exportId}/${name}`;
+/** Everything export `exportId` keeps in the bucket is under this. */
+const prefixOf = (exportId: string): string => `exports/${exportId}/`;
+
+/** A new object for file `name` of export `exportId`: never reused. */
+const objectFor = (exportId: string, name: string): string =>
+  `${prefixOf(exportId)}${crypto.randomUUID()}-${name}`;
+
+/** The marker that the host's files are all written, naming them. */
+const hostedName = "hosted.jsonl";
 
 /** Rows as JSON Lines. */
 const linesOf = (rows: readonly unknown[]): string =>
@@ -123,24 +139,45 @@ const exportedCollections = async <C>(
       and(
         ne(collections.access, "me"),
         ne(collections.source, "grasp"),
-        excluded.length === 0
-          ? undefined
-          : notInArray(collections.id, [...excluded])
+        excluded.length === 0 ? undefined : notInList(collections.id, excluded)
       )
     )
     .orderBy(asc(collections.id));
 
-/** Whether a purge began or ran again since `since`: what an export holds may be erased. */
+/** The rowid of a purge record: its place in the order they were written. */
+const purgeSequence = sql<number>`${brainPurges}.rowid`;
+
+/**
+ * The newest purge record now: what `purgedSince` is asked from. Purge
+ * records are never deleted, so their rowids only grow.
+ */
+const purgeMarkOf = async <C>(brain: Brain<C>): Promise<number> => {
+  const [row] = await brain.db
+    .select({ mark: sql<number | null>`max(${purgeSequence})` })
+    .from(brainPurges);
+  return row?.mark ?? 0;
+};
+
+/** A purge still unfinished: neither complete nor superseded. */
+const purgeOpen = and(
+  isNull(brainPurges.completedAt),
+  isNull(brainPurges.supersededBy)
+);
+
+/**
+ * Whether a purge may have erased what an export begun at `mark` holds:
+ * one recorded since (begun, or a finished one run again, which records
+ * a new one: purge-ledger.ts), or one still unfinished, whose steps may
+ * run again at any time.
+ */
 const purgedSince = async <C>(
   brain: Brain<C>,
-  since: Date
+  mark: number
 ): Promise<boolean> => {
   const found = await brain.db
     .select({ id: brainPurges.id })
     .from(brainPurges)
-    .where(
-      or(gte(brainPurges.createdAt, since), gte(brainPurges.updatedAt, since))
-    )
+    .where(or(gt(purgeSequence, mark), purgeOpen))
     .limit(1);
   return found.length > 0;
 };
@@ -182,7 +219,7 @@ export const prepareExport = async <C>(
       : await brain.db
           .select({ documents: count() })
           .from(documents)
-          .where(inArray(documents.collectionId, ids));
+          .where(inList(documents.collectionId, ids));
   const expiresAt = brain.ports.clock().getTime() + exportTokenLifetimeMs;
   const mac = await crypto.subtle.sign(
     "HMAC",
@@ -241,11 +278,24 @@ const requireExportToken = async <C>(
 export const startExport = async <C>(
   brain: Brain<C>,
   by: Writer,
-  token: unknown
+  token: unknown,
+  onExport: Pick<OnExport, "excluded">
 ): Promise<{ exportId: string }> => {
   await requireExportToken(brain, by, token);
   const exportId = crypto.randomUUID();
   const now = brain.ports.clock();
+  // The mark first: a purge recorded after it is one `purgedSince` sees.
+  const purgeMark = await purgeMarkOf(brain);
+  const [open] = await brain.db
+    .select({ id: brainPurges.id })
+    .from(brainPurges)
+    .where(purgeOpen)
+    .limit(1);
+  if (open !== undefined) {
+    throw knowledgeErrors.create("knowledge.export_purge_open");
+  }
+  // What it holds, frozen now (`OnExport.excluded`, the host's as it is).
+  const company = await exportedCollections(brain, onExport.excluded);
   // One being written at a time (`brain_exports_running_idx`).
   const [running] = await brain.db
     .select({ id: brainExports.id })
@@ -260,6 +310,8 @@ export const startExport = async <C>(
       brain.db.insert(brainExports).values({
         id: exportId,
         by: by.userId,
+        collectionIds: JSON.stringify(company.map(({ id }) => id)),
+        purgeMark,
         createdAt: now,
         updatedAt: now,
       }),
@@ -279,7 +331,7 @@ export const startExport = async <C>(
   return { exportId };
 };
 
-/** The files export `exportId` wrote so far, in order. */
+/** The files export `exportId` recorded so far, in order. */
 const filesOf = async <C>(brain: Brain<C>, exportId: string) =>
   await brain.db
     .select()
@@ -287,29 +339,129 @@ const filesOf = async <C>(brain: Brain<C>, exportId: string) =>
     .where(eq(brainExportFiles.exportId, exportId))
     .orderBy(asc(brainExportFiles.position));
 
-/** Writes file `name` of the export, and records it, with its checksum. */
+/** The files export `exportId` stored, in order: what its manifest names. */
+const storedOf = async <C>(brain: Brain<C>, exportId: string) => {
+  const files = await filesOf(brain, exportId);
+  return files.filter(({ stored }) => stored);
+};
+
+/** A run writing an export, as it holds it. */
+interface ExportRun {
+  exportId: string;
+  /** Its claim on the export: every write it makes is fenced on it. */
+  claim: string;
+  createdAt: Date;
+  /** The collections it holds, frozen as it began. */
+  collectionIds: readonly string[];
+  /** The newest purge record as it began. */
+  purgeMark: number;
+}
+
+/** An export's frozen collections, as its row keeps them. */
+const collectionIdsOf = (text: string): string[] => {
+  const parsed: unknown = JSON.parse(text);
+  return Array.isArray(parsed)
+    ? parsed.filter((id): id is string => typeof id === "string")
+    : [];
+};
+
+/** A run that lost its claim: it stops, writing nothing more. */
+class ClaimLostError extends Error {
+  override name = "ClaimLostError";
+}
+
+/** That `run` still holds its export's claim, as a condition of a write. */
+const holding = (run: ExportRun) =>
+  sql`EXISTS (SELECT 1 FROM ${brainExports} WHERE ${brainExports.id} = ${run.exportId} AND ${brainExports.claim} = ${run.claim} AND ${brainExports.state} = 'running')`;
+
+/** Deletes `objects` from the bucket, a thousand at a time. */
+const deleteObjects = async <C>(
+  brain: Brain<C>,
+  objects: readonly string[]
+): Promise<void> => {
+  for (let at = 0; at < objects.length; at += 1000) {
+    // oxlint-disable-next-line no-await-in-loop -- one batch after another
+    await brain.ports.blobs.delete(objects.slice(at, at + 1000));
+  }
+};
+
+/**
+ * Removes `files` of `run`'s export, records and objects: an upload cut
+ * short, or the host's files of a run that stopped among them.
+ */
+const removeFiles = async <C>(
+  brain: Brain<C>,
+  run: ExportRun,
+  files: readonly { name: string; object: string }[]
+): Promise<void> => {
+  if (files.length === 0) {
+    return;
+  }
+  const removed = await brain.db
+    .delete(brainExportFiles)
+    .where(
+      and(
+        eq(brainExportFiles.exportId, run.exportId),
+        inList(
+          brainExportFiles.name,
+          files.map(({ name }) => name)
+        ),
+        holding(run)
+      )
+    )
+    .returning({ object: brainExportFiles.object });
+  if (removed.length === 0) {
+    throw new ClaimLostError();
+  }
+  await deleteObjects(
+    brain,
+    removed.map(({ object }) => object)
+  );
+};
+
+/**
+ * Writes file `name` of `run`'s export: recorded first, with its checksum
+ * and an object of its own, then uploaded, then marked stored, each step
+ * only while the run holds its claim.
+ */
 const writeFile = async <C>(
   brain: Brain<C>,
-  exportId: string,
+  run: ExportRun,
   position: number,
   name: string,
   body: string,
   rows: number,
   cursor: string | null = null
 ): Promise<void> => {
-  await brain.ports.blobs.put(keyOf(exportId, name), body);
-  await brain.db
+  const object = objectFor(run.exportId, name);
+  const sha256 = await sha256Hex(body);
+  const bytes = new TextEncoder().encode(body).byteLength;
+  const recorded = await brain.db
     .insert(brainExportFiles)
-    .values({
-      exportId,
-      name,
-      position,
-      sha256: await sha256Hex(body),
-      bytes: new TextEncoder().encode(body).byteLength,
-      rows,
-      cursor,
-    })
-    .onConflictDoNothing();
+    .select(
+      sql`SELECT ${run.exportId}, ${name}, ${position}, ${sha256}, ${bytes}, ${rows}, ${cursor}, ${object}, 0 WHERE ${holding(run)}`
+    )
+    .onConflictDoNothing()
+    .returning({ name: brainExportFiles.name });
+  if (recorded.length === 0) {
+    throw new ClaimLostError();
+  }
+  await brain.ports.blobs.put(object, body);
+  const stored = await brain.db
+    .update(brainExportFiles)
+    .set({ stored: true })
+    .where(
+      and(
+        eq(brainExportFiles.exportId, run.exportId),
+        eq(brainExportFiles.name, name),
+        eq(brainExportFiles.object, object),
+        holding(run)
+      )
+    )
+    .returning({ name: brainExportFiles.name });
+  if (stored.length === 0) {
+    throw new ClaimLostError();
+  }
 };
 
 /** The next file of documents after `after`, with each version's text. */
@@ -324,7 +476,7 @@ const documentsFile = async <C>(
     .from(documents)
     .where(
       and(
-        inArray(documents.collectionId, [...collectionIds]),
+        inList(documents.collectionId, collectionIds),
         after === null ? undefined : gt(documents.id, after)
       )
     )
@@ -386,21 +538,38 @@ const documentsFile = async <C>(
 };
 
 /**
- * Writes the next file export `exportId` owes, or its manifest when none
- * is left. Whether more is left to write.
+ * Writes the next file `run`'s export owes, or its manifest when none is
+ * left. Whether more is left to write.
  */
 const writeNext = async <C>(
   brain: Brain<C>,
-  exportId: string,
-  createdAt: Date,
+  run: ExportRun,
   onExport: OnExport
 ): Promise<boolean> => {
-  const written = await filesOf(brain, exportId);
+  const { exportId, collectionIds } = run;
+  // A purge since it began may have erased what it holds: it goes.
+  if (await purgedSince(brain, run.purgeMark)) {
+    throw knowledgeErrors.create("knowledge.export_purged");
+  }
+  // An upload cut short: written again.
+  const recorded = await filesOf(brain, exportId);
+  await removeFiles(
+    brain,
+    run,
+    recorded.filter(({ stored }) => !stored)
+  );
+  const written = recorded.filter(({ stored }) => stored);
   const names = new Set(written.map(({ name }) => name));
   const position = written.length;
-  const company = await exportedCollections(brain, onExport.excluded);
-  const collectionIds = company.map(({ id }) => id);
   if (!names.has("collections.jsonl")) {
+    const company =
+      collectionIds.length === 0
+        ? []
+        : await brain.db
+            .select()
+            .from(collections)
+            .where(inList(collections.id, collectionIds))
+            .orderBy(asc(collections.id));
     const rows = company.map((collection) => ({
       id: collection.id,
       name: collection.name,
@@ -413,7 +582,7 @@ const writeNext = async <C>(
     }));
     await writeFile(
       brain,
-      exportId,
+      run,
       position,
       "collections.jsonl",
       linesOf(rows),
@@ -432,7 +601,7 @@ const writeNext = async <C>(
     const name = `documents-${String(parts.length + 1).padStart(4, "0")}.jsonl`;
     await writeFile(
       brain,
-      exportId,
+      run,
       position,
       name,
       linesOf(rows),
@@ -460,7 +629,7 @@ const writeNext = async <C>(
     }));
     await writeFile(
       brain,
-      exportId,
+      run,
       position,
       "memories.jsonl",
       linesOf(shown),
@@ -496,7 +665,7 @@ const writeNext = async <C>(
     ];
     await writeFile(
       brain,
-      exportId,
+      run,
       position,
       "erasures.jsonl",
       linesOf(rows),
@@ -504,17 +673,25 @@ const writeNext = async <C>(
     );
     return true;
   }
-  if (!written.some(({ name }) => name.startsWith("host-"))) {
+  if (!names.has(hostedName)) {
+    // The host's files are written all from one ask: any a run stopped
+    // among are written again with the rest, never mixed with another's.
+    const stale = written.filter(({ name }) => name.startsWith("host-"));
+    await removeFiles(brain, run, stale);
     const files = await onExport.files(collectionIds);
-    let at = position;
+    const hostNames = files.map(({ name }) => name);
+    if (
+      hostNames.some((name) => !hostNamePattern.test(name)) ||
+      new Set(hostNames).size !== hostNames.length
+    ) {
+      throw knowledgeErrors.create("knowledge.invalid");
+    }
+    let at = position - stale.length;
     for (const file of files) {
-      if (!hostNamePattern.test(file.name)) {
-        throw knowledgeErrors.create("knowledge.invalid");
-      }
       // oxlint-disable-next-line no-await-in-loop -- one file after another, in order
       await writeFile(
         brain,
-        exportId,
+        run,
         at,
         `host-${file.name}.jsonl`,
         linesOf(file.rows),
@@ -522,35 +699,33 @@ const writeNext = async <C>(
       );
       at += 1;
     }
-    // None of its own: noted, so the host isn't asked again.
-    if (files.length === 0) {
-      await writeFile(brain, exportId, at, "host-none.jsonl", "", 0);
-    }
+    // Then that they all are, naming them: a run stopped before this
+    // writes them again.
+    const hosted = hostNames.map((name) => ({ name: `host-${name}.jsonl` }));
+    await writeFile(brain, run, at, hostedName, linesOf(hosted), hosted.length);
     return true;
   }
-  // A purge since it began may have erased what it holds: it goes.
-  if (await purgedSince(brain, createdAt)) {
-    throw knowledgeErrors.create("knowledge.export_purged");
-  }
-  const manifest = JSON.stringify({
+  const body = {
     format: exportFormat,
     version: exportFormatVersion,
     exportId,
-    createdAt: createdAt.toISOString(),
+    createdAt: run.createdAt.toISOString(),
     files: written.map(({ name, sha256, bytes, rows }) => ({
       name,
       sha256,
       bytes,
       rows,
     })),
-  });
-  await brain.ports.blobs.put(keyOf(exportId, manifestName), manifest);
+  };
+  const manifest = JSON.stringify(body);
+  const manifestObject = objectFor(exportId, manifestName);
+  await brain.ports.blobs.put(manifestObject, manifest);
   const now = brain.ports.clock();
   const [exported] = await brain.db
     .select({ by: brainExports.by })
     .from(brainExports)
     .where(eq(brainExports.id, exportId));
-  await auditedBatch(brain.ports, brain.db, [
+  const [completed] = await auditedBatch(brain.ports, brain.db, [
     brain.db
       .update(brainExports)
       .set({
@@ -558,12 +733,20 @@ const writeNext = async <C>(
         completedAt: now,
         expiresAt: new Date(now.getTime() + exportLifetimeMs),
         manifestSha256: await sha256Hex(manifest),
+        manifestObject,
         claim: null,
         claimedAt: null,
         updatedAt: now,
       })
-      .where(eq(brainExports.id, exportId)),
-    outboxed(brain, {
+      .where(
+        and(
+          eq(brainExports.id, exportId),
+          eq(brainExports.claim, run.claim),
+          eq(brainExports.state, "running")
+        )
+      )
+      .returning({ id: brainExports.id }),
+    outboxedIfChanged(brain, {
       actor: { type: "system" },
       action: "knowledge.export.completed",
       target: { type: "export", id: exportId },
@@ -574,19 +757,34 @@ const writeNext = async <C>(
       },
     }),
   ]);
+  if (completed === undefined || completed.length === 0) {
+    throw new ClaimLostError();
+  }
   return false;
 };
 
-/** Deletes every file export `exportId` wrote, its manifest too. */
+/**
+ * Deletes everything export `exportId` keeps in the bucket: every object
+ * under its prefix, what a run that lost its claim uploaded too.
+ */
 const deleteFiles = async <C>(
   brain: Brain<C>,
   exportId: string
 ): Promise<void> => {
-  const written = await filesOf(brain, exportId);
-  await brain.ports.blobs.delete([
-    ...written.map(({ name }) => keyOf(exportId, name)),
-    keyOf(exportId, manifestName),
-  ]);
+  let cursor: string | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const listed = await brain.ports.blobs.list({
+      prefix: prefixOf(exportId),
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    await deleteObjects(
+      brain,
+      listed.objects.map(({ key }) => key)
+    );
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor !== undefined);
 };
 
 /**
@@ -616,14 +814,25 @@ export const advanceExport = async <C>(
         )
       )
     )
-    .returning({ createdAt: brainExports.createdAt });
+    .returning({
+      createdAt: brainExports.createdAt,
+      collectionIds: brainExports.collectionIds,
+      purgeMark: brainExports.purgeMark,
+    });
   if (held === undefined) {
     return false;
   }
+  const run: ExportRun = {
+    exportId,
+    claim,
+    createdAt: held.createdAt,
+    collectionIds: collectionIdsOf(held.collectionIds),
+    purgeMark: held.purgeMark,
+  };
   try {
     while (brain.ports.clock().getTime() < until.getTime()) {
       // oxlint-disable-next-line no-await-in-loop -- one file after another
-      const more = await writeNext(brain, exportId, held.createdAt, onExport);
+      const more = await writeNext(brain, run, onExport);
       if (!more) {
         return true;
       }
@@ -634,6 +843,10 @@ export const advanceExport = async <C>(
       .where(and(eq(brainExports.id, exportId), eq(brainExports.claim, claim)));
     return false;
   } catch (error) {
+    // Taken over past its lease: the run that took it goes on.
+    if (error instanceof ClaimLostError) {
+      return false;
+    }
     // Only while it is still this run's: one that took over past its
     // lease says how it ended.
     const failed = await brain.db
@@ -692,12 +905,12 @@ export const expireExports = async <C>(
 ): Promise<void> => {
   // A complete one a purge ran after: it may hold what was erased.
   const complete = await brain.db
-    .select({ id: brainExports.id, createdAt: brainExports.createdAt })
+    .select({ id: brainExports.id, purgeMark: brainExports.purgeMark })
     .from(brainExports)
     .where(eq(brainExports.state, "complete"));
-  for (const { id, createdAt } of complete) {
+  for (const { id, purgeMark } of complete) {
     // oxlint-disable-next-line no-await-in-loop -- one export at a time
-    if (await purgedSince(brain, createdAt)) {
+    if (await purgedSince(brain, purgeMark)) {
       // oxlint-disable-next-line no-await-in-loop -- one export at a time
       await failPurged(brain, id);
     }
@@ -743,7 +956,7 @@ export const exportStatus = async <C>(
   if (row === undefined || row.by !== by.userId) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
-  const written = await filesOf(brain, exportId);
+  const written = await storedOf(brain, exportId);
   return {
     exportId,
     state: row.state,
@@ -781,25 +994,28 @@ export const exportFile = async <C>(
     .select()
     .from(brainExports)
     .where(eq(brainExports.id, exportId));
-  const written = await filesOf(brain, exportId);
-  const listed =
-    name === manifestName || written.some((file) => file.name === name);
+  const written = await storedOf(brain, exportId);
+  const objectKey =
+    name === manifestName
+      ? row?.manifestObject
+      : written.find((file) => file.name === name)?.object;
   if (
     row === undefined ||
     row.by !== by.userId ||
     row.state !== "complete" ||
     row.expiresAt === null ||
     row.expiresAt.getTime() <= now.getTime() ||
-    !listed
+    objectKey === undefined ||
+    objectKey === null
   ) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
   // A purge since it began: what it holds may be erased, so it goes.
-  if (await purgedSince(brain, row.createdAt)) {
+  if (await purgedSince(brain, row.purgeMark)) {
     await failPurged(brain, exportId);
     throw knowledgeErrors.create("knowledge.not_found");
   }
-  const object = await brain.ports.blobs.get(keyOf(exportId, name));
+  const object = await brain.ports.blobs.get(objectKey);
   if (object === null) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
