@@ -260,12 +260,71 @@ const failureOf = (error: unknown): Failure | "gone" => {
     : { kind: "failed" };
 };
 
-/** Starts the run of `schedule`'s due occurrence, then sets its next one. */
+/** Whether a start of `schedule`'s occurrence was admitted already. */
+const admitted = async (env: Env, schedule: DueSchedule): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ id: workflowStartReceipts.id })
+    .from(workflowStartReceipts)
+    .where(
+      and(
+        eq(workflowStartReceipts.invokerType, "trigger"),
+        eq(workflowStartReceipts.invokerId, schedule.triggerId),
+        eq(workflowStartReceipts.idempotencyKey, startKeyOf(schedule))
+      )
+    )
+    .get();
+  return row !== undefined;
+};
+
+/**
+ * Moves `schedule` on from its occurrence, which started: to its next
+ * occurrence after `now`, every one missed up to now covered by the one
+ * started, its counts cleared. Only over that occurrence, whatever its
+ * counts (`sameOccurrence`).
+ */
+const movedOn = async (
+  env: Env,
+  schedule: DueSchedule,
+  now: Date
+): Promise<void> => {
+  await drizzle(env.DB)
+    .update(triggerSchedules)
+    .set({
+      nextAt: nextOccurrence(schedule.cron, schedule.timeZone, now) ?? null,
+      failedStarts: 0,
+      attempts: 0,
+      lastAttemptAt: null,
+    })
+    .where(sameOccurrence(schedule));
+};
+
+/**
+ * One clock run's turn at `schedule`'s due occurrence, as a small state
+ * machine, so whatever stopped an earlier turn (core dying anywhere) and
+ * whatever changed since (a grant revoked, the trigger disabled or moved,
+ * the run limit full), it ends in one of three places:
+ *
+ * 1. Started already (a start of it was admitted, by an earlier turn
+ *    that stopped before moving on, or another turn at once): it moves on,
+ *    and nothing else is asked. Its run's start, admitted under the
+ *    authority it had then, is sent to the engine by the start repair
+ *    (resource-runs.ts) if it wasn't; no grant, capacity or permission
+ *    read now holds a started occurrence back.
+ * 2. Not started: a start is tried, admitted only while the occurrence
+ *    is still the schedule's next (`stillNext`) and, being keyed by the
+ *    occurrence, once. Admitted, it moves on.
+ * 3. The try failed: recorded only while no start of it was admitted
+ *    (`unadmitted`); one admitted meanwhile moves on instead.
+ */
 const startScheduled = async (
   env: Env,
   schedule: DueSchedule,
   now: Date
 ): Promise<void> => {
+  if (await admitted(env, schedule)) {
+    await movedOn(env, schedule, now);
+    return;
+  }
   try {
     await startWorkflow(
       env,
@@ -286,6 +345,11 @@ const startScheduled = async (
       }
     );
   } catch (error) {
+    if (await admitted(env, schedule)) {
+      // Another turn started it meanwhile: started, so it moves on.
+      await movedOn(env, schedule, now);
+      return;
+    }
     const failure = failureOf(error);
     if (failure === "gone") {
       // Disabled, deleted or moved since it was read: it is read as due no
@@ -303,16 +367,7 @@ const startScheduled = async (
     await recordFailure(env, schedule, now, failure);
     return;
   }
-  // Every occurrence missed up to now, the one just started for them all.
-  await drizzle(env.DB)
-    .update(triggerSchedules)
-    .set({
-      nextAt: nextOccurrence(schedule.cron, schedule.timeZone, now) ?? null,
-      failedStarts: 0,
-      attempts: 0,
-      lastAttemptAt: null,
-    })
-    .where(sameOccurrence(schedule));
+  await movedOn(env, schedule, now);
 };
 
 /**

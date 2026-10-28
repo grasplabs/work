@@ -324,6 +324,38 @@ const failingWhileAnotherStarts = (meanwhile: () => Promise<void>): Env => {
   return { ...env, DB: db };
 };
 
+/** `env` whose run limit is full: every start's admission refused so. */
+const runLimitFull = (): Env => {
+  let admitting = false;
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): unknown => {
+          if (/^insert into "workflow_start_receipts"/iu.test(query)) {
+            admitting = true;
+          }
+          return target.prepare(query);
+        };
+      }
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]): Promise<unknown> => {
+          if (admitting) {
+            admitting = false;
+            throw workflowErrors.create("workflow.queue_full");
+          }
+          const answer: unknown = await target.batch(statements);
+          return answer;
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { ...env, DB: db };
+};
+
 const minuteMs = 60_000;
 
 /** The minute before the current one began: due now. */
@@ -792,6 +824,79 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       stopped: 0,
     });
   });
+
+  // Where core may have died in an earlier turn at an occurrence, and what
+  // may have changed since: each pair, the next turn ends where it should.
+  // Dying before the start, while sending it (before its receipt) or
+  // before recording a failure leaves nothing written; dying after the
+  // receipt leaves the occurrence started, not moved on.
+  const crashes = [
+    { crash: "before the start", started: false },
+    { crash: "after the start was sent, before its receipt", started: false },
+    { crash: "after the receipt, before moving on", started: true },
+    { crash: "before a failure was recorded", started: false },
+  ] as const;
+  const changes = ["revoked", "disabled", "moved", "run limit full"] as const;
+  const pairs = crashes.flatMap(({ crash, started }) =>
+    changes.map((change) => ({ crash, started, change }))
+  );
+
+  it.each(pairs)(
+    "end where they should when core died $crash and the trigger was then $change",
+    async ({ started, change }) => {
+      const admin = await person("admin");
+      const workflow = await reporting(admin);
+      await publishWorkflowVersion(env, admin, workflow.id, {
+        definition: definitionOf(workflow.name, "report", "2.0.0"),
+        basedOn: 1,
+      });
+      const trigger = await scheduleTrigger(admin, workflow.id);
+      const occurrence = lastMinute();
+      await dueAt(trigger.id, occurrence);
+      if (started) {
+        await startWorkflow(
+          env,
+          { type: "trigger", triggerId: trigger.id },
+          workflow.id,
+          { version: 1, input: nightly, key: keyOf(trigger.id, 1, occurrence) },
+          undefined,
+          { scheduledAt: occurrence.toISOString(), triggerVersion: "1" }
+        );
+      }
+      if (change === "revoked") {
+        await revokePermission(env, admin, trigger.permission);
+      } else if (change === "disabled") {
+        await setTriggerEnabled(env, admin, trigger.id, false);
+      } else if (change === "moved") {
+        await updateTriggerVersion(env, admin, trigger.id, 2);
+      }
+      await startDueScheduleTriggers(
+        change === "run limit full" ? runLimitFull() : env
+      );
+      const schedule = await scheduleOf(trigger.id);
+      const runs = await runsOf(trigger.id);
+      const counted = (schedule?.failedStarts ?? 0) > 0;
+      const movedOn =
+        schedule?.version === 1 &&
+        (schedule.nextAt ?? 0) > occurrence.getTime();
+
+      // Started: moved on whatever changed, unless the trigger was
+      // disabled or moved, which works its schedule out again.
+      const expected = started
+        ? {
+            runs: 1,
+            counted: false,
+            movedOn: change === "revoked" || change === "run limit full",
+          }
+        : {
+            runs: 0,
+            counted: change === "revoked" || change === "run limit full",
+            // Refused for good moves on; a full run limit retries it.
+            movedOn: change === "revoked",
+          };
+      expect({ runs: runs.length, counted, movedOn }).toStrictEqual(expected);
+    }
+  );
 
   it("fire once per local time they name through the hour the autumn change repeats", async () => {
     const admin = await person("admin");
