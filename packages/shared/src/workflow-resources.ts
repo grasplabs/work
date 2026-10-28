@@ -240,6 +240,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "The task's call took effect, then the task failed. What the call did stands.",
   "workflow.raised":
     "The workflow raised an error of its own, and nothing in it caught that error.",
+  "workflow.creates_exhausted":
+    "This chat created as many Apps and workflows as one question may. Tell the person what you made.",
 });
 
 /**
