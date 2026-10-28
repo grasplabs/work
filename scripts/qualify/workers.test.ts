@@ -37,19 +37,40 @@ describe("a test client's copy of a release Worker", () => {
     });
 
     expect(config).toMatchObject({
-      name: "qual-20261028-a-core",
+      name: "gqual20261028a-grasp-os-core",
       workers_dev: false,
       preview_urls: false,
       triggers: { crons: [] },
       d1_databases: [
-        { database_name: "qual-20261028-a-grasp-os-core", database_id: "db-a" },
+        { database_name: "gqual20261028a-grasp-os-core", database_id: "db-a" },
       ],
       r2_buckets: [
-        { bucket_name: "qual-20261028-a-grasp-os-files", jurisdiction: "eu" },
+        { bucket_name: "gqual20261028a-grasp-os-files", jurisdiction: "eu" },
       ],
-      services: [{ binding: "CONNECT", service: "qual-20261028-a-connect" }],
+      services: [
+        { binding: "CONNECT", service: "gqual20261028a-grasp-os-connect" },
+      ],
     });
-    expect(JSON.stringify(config)).not.toContain("qual-20261028-b-");
+    expect(JSON.stringify(config)).not.toContain("gqual20261028b-");
+  });
+
+  it("binds its services through the connect gateway when the run has one, its props naming the client's own script", () => {
+    const config = clientConfig(core, {
+      prefix: "qual-20261028",
+      client: "a",
+      apps,
+      databaseIds: { "grasp-os-core": "db-a" },
+      without: new Set(),
+      gateway: "qual-20261028-connect-gateway",
+    });
+
+    expect(config.services).toStrictEqual([
+      {
+        binding: "CONNECT",
+        service: "qual-20261028-connect-gateway",
+        props: { script: "gqual20261028a-grasp-os-connect" },
+      },
+    ]);
   });
 
   it("leaves out the binding kinds an attempt goes without", () => {
@@ -115,6 +136,8 @@ describe("the run's writes", () => {
       none: owns([]),
       // Another run's, whose prefix only starts the same.
       longer: owns(["qual-202610280-dispatcher"]),
+      resource: owns(["gqual20261028a-grasp-os-core"]),
+      longerResource: owns(["gqual202610280a-grasp-os-core"]),
       prefixItself: owns(["qual-20261028"]),
     }).toStrictEqual({
       own: true,
@@ -126,6 +149,8 @@ describe("the run's writes", () => {
       none: false,
       longer: false,
       prefixItself: true,
+      resource: true,
+      longerResource: false,
     });
   });
 });
@@ -172,7 +197,7 @@ describe("a client's release Worker as Build Output", () => {
     );
 
     expect(outputOf(config)).toStrictEqual({
-      name: "qual-x-a-core",
+      name: "gqualxa-grasp-os-core",
       compatibilityDate: "2026-09-15",
       compatibilityFlags: ["nodejs_compat"],
       workersDev: false,
@@ -186,10 +211,10 @@ describe("a client's release Worker as Build Output", () => {
         DB: { type: "d1", id: "db-a" },
         FILES: {
           type: "r2",
-          name: "qual-x-a-grasp-os-files",
+          name: "gqualxa-grasp-os-files",
           jurisdiction: "eu",
         },
-        CONNECT: { type: "worker", worker: "qual-x-a-connect" },
+        CONNECT: { type: "worker", worker: "gqualxa-grasp-os-connect" },
         CLIENT_ID: { type: "text", value: "qual-x-a-client" },
         MAIL_FROM: { type: "json", value: { address: "a@b" } },
         ASSETS: { type: "assets" },

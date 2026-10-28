@@ -159,9 +159,11 @@ export default {
         const other = url.searchParams.get("other") ?? "";
         return Response.json({
           fetched: await tried(async () => await (await env.CONNECT.fetch("http://connect/name")).text()),
-          rpc: await tried(async () => await env.CONNECT.call("name", [])),
-          asked: await tried(async () => await env.CONNECT.call("name", [other])),
-          stub: await tried(async () => await (await env.CONNECT.target(other)).name()),
+          rpc: await tried(async () => await env.CONNECT.name()),
+          asked: await tried(async () => await env.CONNECT.name(other)),
+          // A method named as one of the gateway's own would be, were it to have any.
+          call: await tried(async () => await env.CONNECT.call(other)),
+          stream: await tried(async () => await new Response(await env.CONNECT.bytes()).text()),
         });
       }
       if (url.pathname === "/reach" && request.method === "POST") {
@@ -239,13 +241,35 @@ export interface ClientWorker {
   databaseIds: Readonly<Record<string, string>>;
   /** Binding kinds left out of this attempt. */
   without: ReadonlySet<BindingKey>;
+  /**
+   * The connect gateway's script, when the run has one: each service
+   * binding then binds it, its props naming the client's own script, as
+   * the admin renders a placed core's (GRA-1217).
+   */
+  gateway?: string;
 }
 
-/** A client's resource or script name: `<prefix>-<client>-<name>`. */
+/** A client's probe or stand-in name: `<prefix>-<client>-<name>`. */
 export const clientName = (
   { prefix, client }: Pick<ClientWorker, "prefix" | "client">,
   name: string
 ): string => `${prefix}-${client}-${name}`;
+
+/** The run's prefix as a placed client's deployment id carries it: its letters and digits. */
+export const compactPrefix = (prefix: string): string =>
+  prefix.replaceAll(/[^a-z0-9]/gu, "");
+
+/**
+ * A test client's release resource or script, named as the admin names a
+ * placed client's (`g<deployment>-<logical name>`, apps/admin's
+ * hosting/inventory.ts): the deployment id is the run's prefix, compacted,
+ * then the client. So the connect gateway, which serves only scripts
+ * named as a client connect's, serves the run's.
+ */
+export const clientResourceName = (
+  { prefix, client }: Pick<ClientWorker, "prefix" | "client">,
+  logicalName: string
+): string => `g${compactPrefix(prefix)}${client}-${logicalName}`;
 
 const listOf = (value: unknown): Record<string, unknown>[] =>
   Array.isArray(value)
@@ -276,10 +300,10 @@ export const clientConfig = (
   config: ReleaseConfig,
   worker: ClientWorker
 ): ReleaseConfig => {
-  const rename = (name: string) => clientName(worker, name);
+  const rename = (name: string) => clientResourceName(worker, name);
   const rewritten: ReleaseConfig = {
     ...config,
-    name: rename(worker.apps[config.name] ?? config.name),
+    name: rename(config.name),
     workers_dev: false,
     preview_urls: false,
     triggers: { crons: [] },
@@ -302,7 +326,14 @@ export const clientConfig = (
           `${config.name} binds ${textOf(service, "service")}, which isn't a Worker of the release`
         );
       }
-      return { ...service, service: rename(app) };
+      const script = rename(textOf(service, "service"));
+      return worker.gateway === undefined
+        ? { ...service, service: script }
+        : {
+            binding: textOf(service, "binding"),
+            service: worker.gateway,
+            props: { script },
+          };
     }),
   };
   const dropped: ReadonlySet<string> = worker.without;
@@ -509,11 +540,12 @@ export const outputOf = (
     };
   }
   for (const service of listOf(config.services)) {
-    const { entrypoint } = service;
+    const { entrypoint, props } = service;
     env[textOf(service, "binding")] = {
       type: "worker",
       worker: textOf(service, "service"),
       ...(typeof entrypoint === "string" ? { exportName: entrypoint } : {}),
+      ...(typeof props === "object" && props !== null ? { props } : {}),
     };
   }
   for (const mail of listOf(config.send_email)) {
@@ -570,20 +602,23 @@ export const outputOf = (
  */
 export const gatewaySource = `
 import { WorkerEntrypoint } from "cloudflare:workers";
+// Every method its caller calls, fetch included, is the client's
+// connect's, called on the script the binding's props name, whatever the
+// caller passes: the gateway has no method of its own.
 export default class Gateway extends WorkerEntrypoint {
-  #connect() {
-    return this.env.CLIENTS.get(this.ctx.props.script);
+  constructor(ctx, env) {
+    super(ctx, env);
+    const client = () => env.CLIENTS.get(ctx.props.script);
+    return new Proxy(this, {
+      get: (target, key, receiver) =>
+        typeof key !== "string" || key === "constructor"
+          ? Reflect.get(target, key, receiver)
+          : (...args) => client()[key](...args),
+    });
   }
-  // What its caller passes is ignored: the script is the binding's.
-  target(_asked) {
-    return this.#connect();
-  }
-  // One RPC method of the client's connect, called with \`args\`.
-  call(method, args) {
-    return this.#connect()[method](...args);
-  }
-  fetch(request) {
-    return this.#connect().fetch(request);
+  // Declared for the upload, which wants a handler; the proxy answers it.
+  fetch() {
+    return new Response(null, { status: 500 });
   }
 }
 `;
@@ -594,6 +629,13 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 export default class Connect extends WorkerEntrypoint {
   name() {
     return ${JSON.stringify(name)};
+  }
+  call() {
+    return ${JSON.stringify(name)};
+  }
+  // A stream, as a file read through connect is.
+  bytes() {
+    return new Blob([${JSON.stringify(name)}]).stream();
   }
   fetch() {
     return new Response(${JSON.stringify(name)});
