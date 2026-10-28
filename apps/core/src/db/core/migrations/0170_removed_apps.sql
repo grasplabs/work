@@ -123,6 +123,12 @@ BEGIN
 	SELECT RAISE(ABORT, 'workflow_owners: takes nothing new for a removed App');
 END;
 --> statement-breakpoint
+CREATE TRIGGER `workflow_teams_removed_app_insert` BEFORE INSERT ON `workflow_teams`
+WHEN EXISTS (SELECT 1 FROM `apps` WHERE `id` = NEW.`app_id` AND `removed_at` IS NOT NULL)
+BEGIN
+	SELECT RAISE(ABORT, 'workflow_teams: takes nothing new for a removed App');
+END;
+--> statement-breakpoint
 CREATE TRIGGER `workflow_param_values_removed_app_insert` BEFORE INSERT ON `workflow_param_values`
 WHEN EXISTS (SELECT 1 FROM `apps` WHERE `id` = NEW.`app_id` AND `removed_at` IS NOT NULL)
 BEGIN
