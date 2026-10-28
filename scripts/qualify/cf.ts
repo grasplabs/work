@@ -65,12 +65,17 @@ export const knownName = (name: string): boolean =>
   clientResource.test(name);
 
 /**
- * Whether `name` is the run's own by its name: the prefix itself, or a
- * name under it (`<prefix>-…`). Never one that merely starts the same,
- * which another run's prefix could (`qual-2026` and `qual-20261028`).
+ * Whether `name` is the run's own by its name: the prefix itself, a name
+ * under it (`<prefix>-…`), or a test client's release resource. Never one
+ * that merely starts the same, which another run's prefix could
+ * (`qual-2026` and `qual-20261028`).
  */
 export const isOwnName = (name: string, prefix: string): boolean =>
-  name === prefix || name.startsWith(`${prefix}-`);
+  name === prefix ||
+  name.startsWith(`${prefix}-`) ||
+  // A test client's release resource, named as the admin names a placed
+  // client's: `g<compacted prefix><client letter>-…` (workers.ts).
+  new RegExp(`^g${prefix.replaceAll(/[^a-z0-9]/gu, "")}[a-z]-`, "u").test(name);
 
 /** A name or id as the run makes them: nothing a path or flag could hide. */
 const plainName = /^[A-Za-z0-9_-]+$/u;

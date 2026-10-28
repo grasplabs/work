@@ -83,9 +83,11 @@ import { z } from "zod";
 
 import { derivedCoreConfig } from "../../apps/admin/src/deploy/core-config.ts";
 import {
+  clientAuthSecret,
   reservedSecretNames,
   workerSecrets,
 } from "../../apps/admin/src/deploy/secrets.ts";
+import { probeCore } from "../../apps/admin/src/hosting/probe.ts";
 import {
   ASSETS_DIR,
   layOutWorker,
@@ -107,6 +109,7 @@ import {
   bindingKeys,
   clientConfig,
   clientName,
+  clientResourceName,
   dispatcherSource,
   dispatchKeyHeader,
   connectStandInSource,
@@ -235,6 +238,12 @@ if (existsSync(evidenceFile)) {
   chmodSync(evidenceFile, 0o600);
 }
 const cf = cfCli({ accountId, prefix, live: args.live, record });
+
+const require = createRequire(import.meta.url);
+const wranglerCli = path.join(
+  path.dirname(require.resolve("wrangler/package.json")),
+  "bin/wrangler.js"
+);
 
 /** What one step leaves for the next, kept between invocations. */
 const stateSchema = z.object({
@@ -636,6 +645,56 @@ const ensureBucket = (name: string): void => {
   );
 };
 
+/** Client `client`'s core script. */
+const coreOf = (client: Client): string =>
+  clientResourceName({ prefix, client }, "grasp-os-core");
+
+/** The real connect gateway's script, for the run (apps/gateway, GRA-1217). */
+const realGatewayName = `${prefix}-connect-gateway`;
+
+/**
+ * Uploads the repo's own connect gateway (apps/gateway), bundled on this
+ * machine as Wrangler's dry run bundles it, as an ordinary Worker reaching
+ * the run's namespace. Its script, or undefined in a checkout without the
+ * gateway, where core's binding to connect is left out instead.
+ */
+const deployRealGateway = (): string | undefined => {
+  const app = path.resolve("apps/gateway");
+  if (!existsSync(path.join(app, "src", "index.ts"))) {
+    return undefined;
+  }
+  const dir = path.join(outDir, "gateway-bundle");
+  mkdirSync(dir, { recursive: true });
+  execFileSync(
+    process.execPath,
+    [
+      wranglerCli,
+      "deploy",
+      "--dry-run",
+      "--outdir",
+      dir,
+      "--name",
+      realGatewayName,
+    ],
+    { cwd: app, stdio: "pipe" }
+  );
+  const module = readdirSync(dir).find((file) => file.endsWith(".js"));
+  if (module === undefined) {
+    throw new Error("Bundling wrote no module for the connect gateway");
+  }
+  deploy(
+    {
+      name: realGatewayName,
+      compatibilityDate: probeCompatibilityDate,
+      env: { CLIENTS: { type: "dispatch-namespace", namespace: prefix } },
+    },
+    "index.js",
+    oneModule(readFileSync(path.join(dir, module), "utf-8")),
+    { ordinary: true }
+  );
+  return realGatewayName;
+};
+
 /** Client `client`'s id, as its core runs as and its secrets derive from. */
 const clientIdOf = (client: Client): string =>
   clientName({ prefix, client }, "client");
@@ -696,7 +755,8 @@ const deployReleaseWorker = async (
   releaseDir: string,
   client: Client,
   app: (typeof releaseApps)[number],
-  apps: Record<string, string>
+  apps: Record<string, string>,
+  gateway: string | undefined
 ): Promise<ReadonlySet<BindingKey> | undefined> => {
   const dir = path.join(outDir, "release", client, app);
   const laidOut = await layOutWorker(releaseDir, app, dir);
@@ -707,11 +767,11 @@ const deployReleaseWorker = async (
   const databaseIds: Record<string, string> = {};
   for (const database of storage.databases) {
     databaseIds[database] = ensureDatabase(
-      clientName({ prefix, client }, database)
+      clientResourceName({ prefix, client }, database)
     );
   }
   for (const bucket of storage.buckets) {
-    ensureBucket(clientName({ prefix, client }, bucket));
+    ensureBucket(clientResourceName({ prefix, client }, bucket));
   }
   for (const database of laidOut.worker.d1Databases) {
     const id = databaseIds[database.databaseName];
@@ -748,6 +808,7 @@ const deployReleaseWorker = async (
         apps,
         databaseIds,
         without,
+        ...(gateway === undefined ? {} : { gateway }),
       }),
       vars: varsOf(client, app),
     };
@@ -819,6 +880,41 @@ const releaseDirOf = (): string => {
   return dir;
 };
 
+/**
+ * The admin's own signed probe of client `client`'s core (apps/admin's
+ * hosting/probe.ts), through the dispatcher: it arms connect's clock
+ * through core's binding to connect, so its answer says whether core
+ * reaches its own connect (through the gateway, in a namespace).
+ */
+const signedProbe = async (client: Client): Promise<void> => {
+  const routerSecret = await routerSecretOf(client);
+  const answer = await probeCore({
+    origin: state.dispatcherUrl ?? "",
+    routerSecret,
+    authSecret: await clientAuthSecret(
+      { routerKey: state.routerKey, clientKey: state.clientKey },
+      clientIdOf(client),
+      1
+    ),
+    fetch: async (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set(targetHeader, coreOf(client));
+      headers.set(dispatchKeyHeader, state.dispatchKey);
+      return await fetch(input, { ...init, headers });
+    },
+    timeoutMs: 30_000,
+  });
+  check(
+    `${client}: core reaches its own connect (the signed probe arms connect's clock)`,
+    answer?.clocks.connect?.armed === true &&
+      answer.clientId === clientIdOf(client) &&
+      answer.bindings.CONNECT !== false
+      ? "pass"
+      : "fail",
+    { answer: answer ?? null }
+  );
+};
+
 const releaseStep = async (): Promise<void> => {
   const releaseDir = releaseDirOf();
   const manifestText = readFileSync(
@@ -841,10 +937,16 @@ const releaseStep = async (): Promise<void> => {
   const apps = Object.fromEntries(
     Object.entries(manifest.workers).map(([app, { name }]) => [name, app])
   );
+  const gateway = deployRealGateway();
+  check(
+    "the connect gateway is the repo's own, reaching the run's namespace",
+    gateway === undefined ? "skipped" : "pass",
+    { gateway: gateway ?? null }
+  );
   for (const client of clients) {
     for (const app of releaseApps) {
       // oxlint-disable-next-line no-await-in-loop -- connect before core, which binds it
-      await deployReleaseWorker(releaseDir, client, app, apps);
+      await deployReleaseWorker(releaseDir, client, app, apps, gateway);
     }
   }
   if (!args.live) {
@@ -854,11 +956,9 @@ const releaseStep = async (): Promise<void> => {
     // oxlint-disable-next-line no-await-in-loop -- one client at a time
     const secret = await routerSecretOf(client);
     // oxlint-disable-next-line no-await-in-loop -- as above
-    const answer = await dispatch(
-      clientName({ prefix, client }, "core"),
-      "/health",
-      { headers: { [routerSecretHeader]: secret } }
-    );
+    const answer = await dispatch(coreOf(client), "/health", {
+      headers: { [routerSecretHeader]: secret },
+    });
     // oxlint-disable-next-line no-await-in-loop -- as above
     const body = await jsonOf(answer);
     check(
@@ -866,6 +966,10 @@ const releaseStep = async (): Promise<void> => {
       answer.ok ? "pass" : "fail",
       { status: answer.status, body }
     );
+  }
+  for (const client of clients) {
+    // oxlint-disable-next-line no-await-in-loop -- one client at a time
+    await signedProbe(client);
   }
 };
 
@@ -993,12 +1097,6 @@ const probesStep = async (): Promise<void> => {
 };
 
 const durableName = `${prefix}-durable`;
-
-const require = createRequire(import.meta.url);
-const wranglerCli = path.join(
-  path.dirname(require.resolve("wrangler/package.json")),
-  "bin/wrangler.js"
-);
 
 /**
  * Workerflow's death fixture, bundled on this machine as its own harness
@@ -1158,6 +1256,17 @@ const durabilityStep = async (): Promise<void> => {
 };
 
 /** Client `client`'s script `app`'s settings, as cf reads them; or the error. */
+/** Client `client`'s script for `app`: a release Worker's, or its probe. */
+const scriptOf = (client: Client, app: string): string =>
+  app === "probe"
+    ? clientName({ prefix, client }, app)
+    : clientResourceName({ prefix, client }, `grasp-os-${app}`);
+
+/** Whether `name` is one of client `client`'s scripts or resources. */
+const ofClientNamed = (client: Client, name: string): boolean =>
+  name.startsWith(`${prefix}-${client}-`) ||
+  name.startsWith(clientResourceName({ prefix, client }, ""));
+
 const settingsOf = (client: Client, app: string): unknown => {
   try {
     return cf.read([
@@ -1166,7 +1275,7 @@ const settingsOf = (client: Client, app: string): unknown => {
       "scripts",
       "settings",
       "get",
-      clientName({ prefix, client }, app),
+      scriptOf(client, app),
       "--dispatch-namespace",
       prefix,
     ]);
@@ -1178,13 +1287,17 @@ const settingsOf = (client: Client, app: string): unknown => {
 const auditBindings = (): void => {
   for (const client of clients) {
     const other = clients.find((name) => name !== client) ?? client;
-    const otherPrefix = `${prefix}-${other}-`;
+    const otherNames = [
+      `${prefix}-${other}-`,
+      clientResourceName({ prefix, client: other }, ""),
+    ];
     for (const app of [...releaseApps, "probe"]) {
       const settings = settingsOf(client, app);
       const text = JSON.stringify(settings);
       check(
         `${client}: ${app}'s bindings name nothing of ${other}`,
-        text.includes('"error"') || text.includes(otherPrefix)
+        text.includes('"error"') ||
+          otherNames.some((otherName) => text.includes(otherName))
           ? "fail"
           : "pass",
         { settings }
@@ -1193,10 +1306,8 @@ const auditBindings = (): void => {
   }
   const objects = allPages(["durable-objects", "namespaces", "list"]);
   const ofClient = (client: Client) =>
-    objects.filter(
-      (object) =>
-        textField(object, ["script"])?.startsWith(`${prefix}-${client}-`) ===
-        true
+    objects.filter((object) =>
+      ofClientNamed(client, textField(object, ["script"]) ?? "")
     );
   const idsB = new Set(
     ofClient("b").map((object) => textField(object, ["id"]))
@@ -1218,7 +1329,7 @@ const attackStep = async (): Promise<void> => {
   }
   const secretA = await routerSecretOf("a");
   const secretB = await routerSecretOf("b");
-  const coreB = clientName({ prefix, client: "b" }, "core");
+  const coreB = coreOf("b");
   const statusOf = async (secret?: string): Promise<number> => {
     const answer = await dispatch(coreB, "/health", {
       headers: secret === undefined ? {} : { [routerSecretHeader]: secret },
@@ -1446,7 +1557,8 @@ const gatewayAnswerSchema = z
     fetched: z.string(),
     rpc: z.string(),
     asked: z.string(),
-    stub: z.string(),
+    call: z.string(),
+    stream: z.string(),
   })
   .loose();
 
@@ -1491,19 +1603,18 @@ const gatewayStep = async (): Promise<void> => {
     const answer = await throughGateway(client);
     const reached = gatewayAnswerSchema.safeParse(answer);
     check(
-      `${client}: reaches only its own connect through the gateway, by fetch and forwarded RPC, whatever it asks`,
+      `${client}: reaches only its own connect through the gateway, by fetch, RPC and a stream, whatever it asks`,
       reached.success &&
-        reached.data.fetched === ownConnect &&
-        reached.data.rpc === ownConnect &&
-        reached.data.asked === ownConnect
+        [
+          reached.data.fetched,
+          reached.data.rpc,
+          reached.data.asked,
+          reached.data.call,
+          reached.data.stream,
+        ].every((reply) => reply === ownConnect)
         ? "pass"
         : "fail",
       { answer }
-    );
-    check(
-      `${client}: the gateway can hand back its connect's stub over RPC`,
-      reached.success && reached.data.stub === ownConnect ? "pass" : "observed",
-      { stub: reached.success ? reached.data.stub : null }
     );
     let settings: unknown;
     try {
