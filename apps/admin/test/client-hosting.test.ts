@@ -13,12 +13,17 @@ import {
   releases,
 } from "../src/db/schema.ts";
 import {
+  deletePlacedClientFn,
   fetchClientHosting,
+  offboardPlacedClientFn,
   placeAndProvisionFn,
   releasePlacedClientFn,
   rollbackPlacedClientFn,
 } from "../src/hosting/functions.ts";
-import { placeClient } from "../src/hosting/inventory.ts";
+import {
+  allocateClientResources,
+  placeClient,
+} from "../src/hosting/inventory.ts";
 import { getClientHosting } from "../src/hosting/placement.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
@@ -517,6 +522,67 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       place: false,
       refused: [true, true],
       operation: { releaseId: current, status: "done" },
+    });
+  });
+
+  it("offers to offboard a placed client, then to delete its resources with no export confirmed, and refuses both to anyone Access doesn't vouch for", async () => {
+    const destinationId = await destination();
+    const clientId = await client();
+    await placeClient(db, staff, { clientId, destinationId, policyId });
+    // Its resources, as provisioning records them before it makes them.
+    await allocateClientResources(db, staff, {
+      clientId,
+      manifest: await release(),
+      operationId: "op",
+    });
+    await db
+      .update(clients)
+      .set({ status: "active" })
+      .where(eq(clients.id, clientId));
+
+    const live = await page(`/organizations/${clientId}/setup`, caller);
+    const refused = await Promise.all([
+      callServerFn(offboardPlacedClientFn, { clientId }, { email: null }).then(
+        () => "answered",
+        String
+      ),
+      callServerFn(
+        deletePlacedClientFn,
+        { clientId, exportConfirmed: true },
+        { email: null }
+      ).then(() => "answered", String),
+    ]);
+    const offboarded = await callServerFn(
+      offboardPlacedClientFn,
+      { clientId },
+      { email: caller }
+    );
+    const early = await callServerFn(
+      deletePlacedClientFn,
+      { clientId, exportConfirmed: true },
+      { email: caller }
+    );
+    // Offboarded, it has no page among the organizations: its deletion is
+    // on Platform's Offboarded page.
+    const gone = await page(`/organizations/${clientId}/setup`, caller);
+    const after = await page("/platform/offboarded", caller);
+
+    expect({
+      offer: live.html.includes("Offboard it"),
+      refused: refused.map((answer) => answer.includes("answered 403")),
+      offboarded,
+      early,
+      gone: gone.status,
+      deleteOffer: after.html.includes("Delete its resources"),
+      kept: after.html.includes(`${clientId})`),
+    }).toStrictEqual({
+      offer: true,
+      refused: [true, true],
+      offboarded: { refused: null, deletion: null },
+      early: { refused: "retention_running", deletion: null },
+      gone: 404,
+      deleteOffer: true,
+      kept: true,
     });
   });
 });

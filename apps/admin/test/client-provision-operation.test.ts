@@ -32,6 +32,10 @@ import {
   clientInventory,
 } from "../src/hosting/inventory.ts";
 import {
+  deletePlacedClient,
+  offboardPlacedClient,
+} from "../src/hosting/offboarding.ts";
+import {
   runClientProvision,
   startClientProvision,
   startClientRelease,
@@ -697,6 +701,14 @@ const codeOf = async (promise: Promise<unknown>): Promise<string> => {
       : "thrown";
   }
   return "started";
+};
+
+/** When client `clientId` was offboarded, moved `days` into the past. */
+const offboardedDaysAgo = async (clientId: string, days: number) => {
+  await db
+    .update(clients)
+    .set({ offboardedAt: new Date(Date.now() - days * 86_400_000) })
+    .where(eq(clients.id, clientId));
 };
 
 describe("provisioning a placed client", () => {
@@ -2094,6 +2106,142 @@ describe("provisioning a placed client", () => {
     } finally {
       await attempts.dispose();
     }
+  });
+
+  // Offboarding, then deleting its resources (src/hosting/offboarding.ts):
+  // the threat model is in its header.
+
+  it("offboards a live client at once, unrouting it and deleting nothing, and no later release routes it again", async () => {
+    const first = await importRelease("dedicated");
+    const { account, clientId } = await liveClient(first);
+    const before = holdings(account);
+    const later = await importRelease("dedicated", {
+      notes: "feat(core): later",
+    });
+
+    await offboardPlacedClient(env, staff, clientId);
+    // Again: it's offboarded already, and its hostname stays out.
+    await offboardPlacedClient(env, staff, clientId);
+    const refused = await codeOf(
+      startClientRelease(db, staff, clientId, { releaseId: later.releaseId })
+    );
+    const client = await db
+      .select({ status: clients.status, offboardedAt: clients.offboardedAt })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get();
+
+    expect({
+      status: client?.status,
+      offboarded: client?.offboardedAt instanceof Date,
+      route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
+      holdings: holdings(account),
+      refused,
+    }).toStrictEqual({
+      status: "offboarded",
+      offboarded: true,
+      route: null,
+      holdings: before,
+      refused: "client_not_active",
+    });
+  });
+
+  it("deletes an offboarded client's resources only after its retention, with staff confirming no export, and only its own", async () => {
+    const first = await importRelease("dedicated");
+    const { account, clientId } = await liveClient(first);
+    const other = await liveClient(first);
+    const others = holdings(other.account);
+    await offboardPlacedClient(env, staff, clientId);
+
+    const early = await codeOf(
+      deletePlacedClient(env, staff, clientId, { exportConfirmed: true })
+    );
+    await offboardedDaysAgo(clientId, 31);
+    const unconfirmed = await codeOf(
+      deletePlacedClient(env, staff, clientId, { exportConfirmed: false })
+    );
+    const live = await codeOf(
+      deletePlacedClient(env, staff, other.clientId, { exportConfirmed: true })
+    );
+    const kept = holdings(account);
+    const deletion = await deletePlacedClient(env, staff, clientId, {
+      exportConfirmed: true,
+    });
+    const inventory = await clientInventory(db, clientId);
+
+    expect({
+      early,
+      unconfirmed,
+      live,
+      kept: kept.d1.length > 0 && kept.scripts.length > 0,
+      deletion: deletion.emptying,
+      gone: holdings(account),
+      recorded: inventory.every((row) => row.deletedAt !== null),
+      others: holdings(other.account),
+    }).toStrictEqual({
+      early: "retention_running",
+      unconfirmed: "export_unconfirmed",
+      live: "not_offboarded",
+      kept: true,
+      deletion: [],
+      gone: { d1: [], buckets: [], scripts: [] },
+      recorded: true,
+      others,
+    });
+  });
+
+  it("empties a bucket that still holds objects and deletes it on a later run, and keeps a database whose name another id has", async () => {
+    const first = await importRelease("dedicated");
+    const { account, clientId } = await liveClient(first);
+    await offboardPlacedClient(env, staff, clientId);
+    await offboardedDaysAgo(clientId, 31);
+    const files = await resourceOf(clientId, "r2:grasp-os-files");
+    account.fullBuckets.add(files.physicalName);
+
+    const firstRun = await deletePlacedClient(env, staff, clientId, {
+      exportConfirmed: true,
+    });
+    const emptying = {
+      emptying: firstRun.emptying,
+      rule: account.lifecycles.has(files.physicalName),
+      kept: account.buckets.some(({ name }) => name === files.physicalName),
+    };
+    // Its objects expired since: the next run deletes it.
+    account.fullBuckets.delete(files.physicalName);
+    const secondRun = await deletePlacedClient(env, staff, clientId, {
+      exportConfirmed: true,
+    });
+
+    // Another client's database under the recorded name: kept.
+    const next = await liveClient(first);
+    await offboardPlacedClient(env, staff, next.clientId);
+    await offboardedDaysAgo(next.clientId, 31);
+    const database = await resourceOf(next.clientId, "d1:grasp-os-core");
+    const swapped = next.account.d1.find(
+      ({ uuid }) => uuid === database.providerId
+    );
+    if (swapped !== undefined) {
+      swapped.uuid = crypto.randomUUID();
+    }
+    const notOwned = await codeOf(
+      deletePlacedClient(env, staff, next.clientId, { exportConfirmed: true })
+    );
+
+    expect({
+      emptying,
+      second: secondRun.emptying,
+      bucketGone: account.buckets.length,
+      notOwned,
+      databaseKept: next.account.d1.some(
+        ({ name }) => name === database.physicalName
+      ),
+    }).toStrictEqual({
+      emptying: { emptying: [files.physicalName], rule: true, kept: true },
+      second: [],
+      bucketGone: 0,
+      notOwned: "resource_not_owned",
+      databaseKept: true,
+    });
   });
 });
 

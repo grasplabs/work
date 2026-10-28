@@ -99,6 +99,12 @@ export const clients = sqliteTable(
     status: text({ enum: ["provisioning", "active", "offboarded"] })
       .notNull()
       .default("provisioning"),
+    /**
+     * When staff offboarded it (src/hosting/offboarding.ts): its hostname
+     * left the router's map then, and its resources may be deleted once
+     * the retention window from here is over. Null while it isn't.
+     */
+    offboardedAt: timestamp("offboarded_at"),
     /** The staff member who added it (src/provision/). */
     createdBy: text("created_by"),
     /**
@@ -587,6 +593,12 @@ export const clientResources = sqliteTable(
     lifecycle: text({ enum: ["allocated", "tombstoned"] })
       .notNull()
       .default("allocated"),
+    /**
+     * When an explicit deletion removed it from its destination
+     * (src/hosting/offboarding.ts); null while it's there, or was never
+     * made. Kept, so the record says what the client had and when it went.
+     */
+    deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },

@@ -49,9 +49,9 @@ const doneOn = async (page: Page, releaseId: string): Promise<void> => {
 };
 
 // Staff add an organization, provision it in a dedicated destination,
-// release it to a later release and roll it back, from the console alone
-// (GRA-387): no engineer, no command line.
-test("staff provision a client as a placement, release it, and roll it back", async ({
+// release it to a later release, roll it back and offboard it, from the
+// console alone (GRA-387, GRA-384): no engineer, no command line.
+test("staff provision a client as a placement, release it, roll it back and offboard it", async ({
   page,
   request,
 }) => {
@@ -97,4 +97,23 @@ test("staff provision a client as a placement, release it, and roll it back", as
   await expect(
     section.getByRole("button", { name: `Roll back to ${second}` })
   ).toBeVisible();
+
+  // Offboarded: unrouted at once, and listed for deletion once its
+  // retention is over, which it isn't yet.
+  await section
+    .getByRole("checkbox", { name: "It stops serving its people now" })
+    .click();
+  await section.getByRole("button", { name: "Offboard it" }).click();
+  await visit(page, "/platform/offboarded");
+  const listed = page.getByRole("listitem").filter({ hasText: clientId });
+  await expect(listed).toBeVisible();
+  await listed
+    .getByRole("checkbox", {
+      name: "No export of it was made, and I delete its resources without one",
+    })
+    .click();
+  await listed.getByRole("button", { name: "Delete its resources" }).click();
+  await expect(listed.getByRole("alert")).toContainText(
+    "kept for 30 days after it was offboarded"
+  );
 });

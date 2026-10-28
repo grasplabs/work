@@ -24,6 +24,7 @@ import { DeployError } from "./errors.ts";
 export interface RouterHosts {
   get: (key: string, type: "json") => Promise<unknown>;
   put: (key: string, value: string) => Promise<void>;
+  delete: (key: string) => Promise<void>;
 }
 
 const subdomainSchema = z.object({ subdomain: z.string() });
@@ -302,4 +303,29 @@ export const registerHostname = async (
     );
   }
   checkReplaceable(key, written, entry);
+};
+
+/**
+ * Takes `hostname` out of the router's map, so the router sends nothing
+ * on to client `clientId`'s core: what offboarding does. An entry that's
+ * gone already counts as removed; one the map gives another client is
+ * refused (`hostname_taken`) and left. `beforeWrite` runs as the last
+ * thing before the delete, as for `registerHostname`.
+ */
+export const unregisterHostname = async (
+  hosts: RouterHosts,
+  hostname: string,
+  clientId: string,
+  beforeWrite: () => Promise<void>
+): Promise<void> => {
+  const key = routerHostKey(hostname);
+  const current = await storedEntry(hosts, key);
+  if (current === null) {
+    return;
+  }
+  if (current.clientId !== clientId) {
+    throw new DeployError("hostname_taken", `${key} routes to another client`);
+  }
+  await beforeWrite();
+  await hosts.delete(key);
 };

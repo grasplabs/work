@@ -677,6 +677,7 @@ export const allocateClientResources = async (
         owner: placement.deploymentId,
         operationId,
         lifecycle: role.tombstoned ? "tombstoned" : "allocated",
+        deletedAt: null,
         createdAt: now,
         updatedAt: now,
       })
