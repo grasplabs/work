@@ -87,7 +87,18 @@ import {
   deriveRouterSecret,
 } from "@grasp-os/shared/router";
 import type { RouterTarget } from "@grasp-os/shared/router";
-import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  sql,
+} from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
 
 import type { StaffAlert } from "../alerts.ts";
@@ -144,6 +155,7 @@ import { sealedWorkerSecrets } from "../deploy/sealed-secrets.ts";
 import {
   clientAuthSecret,
   retainedPreviousKeys,
+  sharedSecretPrints,
   workerSecrets,
 } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
@@ -165,7 +177,11 @@ import {
   placementOf,
   renderClientWorker,
 } from "./inventory.ts";
-import type { ClientPlacement, ClientResource } from "./inventory.ts";
+import type {
+  ClientPlacement,
+  ClientResource,
+  RenderOptions,
+} from "./inventory.ts";
 import { privateBindings, probeCore, probeFault } from "./probe.ts";
 import { ensureClientResources } from "./provision.ts";
 
@@ -229,6 +245,11 @@ export const provisionOperationErrorCodes = [
    * client's ran: an older release, which only a rollback may go to.
    */
   "release_behind_migration",
+  /**
+   * The release failed its probe once live and was rolled back to the
+   * release before on its own: a rollout counts the client failed.
+   */
+  "release_rolled_back",
 ] as const;
 
 export type ProvisionOperationErrorCode =
@@ -333,8 +354,19 @@ const progressSchema = z.object({
   uploads: z.record(z.string(), z.string()).default({}),
   /** Each Worker's delivered secrets: their fingerprint, names and values. */
   secrets: z.record(z.string(), z.string()).default({}),
+  /**
+   * Each Worker's shared secrets as last delivered, each by name with its
+   * own keyed fingerprint (`sharedSecretPrints`): what proves a rotated
+   * shared secret reached the client (src/rollout/shared-secrets.ts).
+   */
+  shared: z.record(z.string(), z.record(z.string(), z.string())).default({}),
   /** The core origin the probe passed at. */
   origin: z.string().optional(),
+  /**
+   * When the settings core last went live with were read (ISO): a change
+   * to them after it waits for the next run (src/rollout/targets.ts).
+   */
+  configuredAt: z.string().optional(),
   /**
    * The newest-built release whose database migrations may have run,
    * recorded before they run (src/deploy/compatibility.ts `appliedSchema`):
@@ -363,18 +395,32 @@ const appSchema = z.enum(apps);
 /**
  * Binding kinds Cloudflare documents for Workers for Platforms user
  * Workers: D1, R2 and Durable Objects (configuration/bindings), and
- * static assets (configuration/static-assets). The vars and secrets the
- * admin adds go in the upload's own metadata and secrets calls. Every
- * other kind core and connect bind (a service binding to connect, Worker
- * Loader, version metadata, email) waits for real-account qualification
- * (GRA-430) rather than be assumed to work.
+ * static assets (configuration/static-assets), and what the GRA-430 run
+ * on a real namespace (28 Oct) qualified: the Worker Loader, version
+ * metadata and a service binding, which renders to the connect gateway (a
+ * user Worker can't bind another, 10143; `renderOptionsOf`). A
+ * `send_email` binding uploads, but whether it delivers is GRA-965's
+ * spike, still open. The vars and secrets the admin adds go in the
+ * upload's own metadata and secrets calls.
  */
 const wfpBindings: ReadonlySet<string> = new Set([
   "d1",
   "r2_bucket",
   "durable_object_namespace",
   "assets",
+  "worker_loader",
+  "version_metadata",
+  "service",
 ]);
+
+/**
+ * How `loaded`'s destination takes a Worker's bindings: in a Workers for
+ * Platforms namespace, a service binding binds the connect gateway, with
+ * props naming the client's own script (GRA-1217).
+ */
+const renderOptionsOf = (loaded: Loaded): RenderOptions => ({
+  connectGateway: loaded.destination.kind === "workers_for_platforms",
+});
 
 /** Throws `runner_replaced` unless `held` still holds its client. */
 const assertHolds = async (
@@ -391,6 +437,11 @@ const assertHolds = async (
 
 const actorName = (actor: Actor): string =>
   actor === "system" ? actor : actor.email;
+
+/** What a change takes live, as a client's core records it. */
+export type ChangeKind = NonNullable<
+  (typeof clientProvisions.$inferSelect)["what"]
+>;
 
 /** Client `clientId`'s operation, if it has one. */
 export const provisionOf = async (db: AdminDatabase, clientId: string) =>
@@ -423,7 +474,7 @@ export const startClientProvision = async (
     db
       .insert(clientProvisions)
       .select(
-        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
+        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
       )
       .onConflictDoNothing(),
     {
@@ -521,6 +572,63 @@ const assertCanGo = async (
   }
 };
 
+/** How a release start is audited: a rollback, a run again of what runs, or a release. */
+const releaseAction = ({
+  rollback,
+  again,
+}: {
+  rollback?: boolean;
+  again?: boolean;
+}): string => {
+  if (rollback === true) {
+    return "release.rollback";
+  }
+  return again === true ? "release.again" : "release.start";
+};
+
+type Operation = NonNullable<Awaited<ReturnType<typeof provisionOf>>>;
+
+/**
+ * Throws unless client `clientId` may go back to release `back`, as a
+ * rollback would: by the Durable Object migrations each of its scripts
+ * was seen at (`assertCanGo`), before anything of the rollback is claimed
+ * or uploaded.
+ */
+export const assertCanRollBack = async (
+  db: AdminDatabase,
+  clientId: string,
+  back: string
+): Promise<void> => {
+  const operation = await provisionOf(db, clientId);
+  if (operation !== undefined) {
+    await assertCanGo(db, operation, back, true);
+  }
+};
+
+/**
+ * Whether `operation` has `target` already, so starting it changes
+ * nothing: done on it, unless asked to run it `again` (its settings or
+ * secrets as they are now); failed on it, or left running by a runner
+ * that ended, which the holder runs again to resume it. A rollback onto
+ * what it runs done is refused (`nothing_to_roll_back`).
+ */
+const hasAlready = (
+  operation: { releaseId: string; status: string; clientId: string },
+  target: string,
+  { rollback, again }: { rollback?: boolean; again?: boolean }
+): boolean => {
+  if (operation.releaseId !== target) {
+    return false;
+  }
+  if (rollback === true && operation.status === "done") {
+    throw new ProvisionOperationError(
+      "nothing_to_roll_back",
+      `${operation.clientId} runs ${target} already`
+    );
+  }
+  return again !== true || operation.status !== "done";
+};
+
 /**
  * The one release every Worker of client `clientId` was seen running
  * (`client_workers`, written once an upload is observed), or null when
@@ -539,6 +647,17 @@ const observedRelease = async (
   const [only = null] = ids.size === 1 ? ids : [];
   return only;
 };
+
+/**
+ * Whether client operation `started.operationId` is at change
+ * `started.change`: the condition a record made alongside a start
+ * (`startClientRelease`) lands on, so it lands only with that start.
+ */
+export const startedAs = (started: {
+  operationId: string;
+  change: number;
+}): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${clientProvisions} WHERE ${clientProvisions.id} = ${started.operationId} AND ${clientProvisions.change} = ${started.change})`;
 
 /**
  * Takes active client `held.clientId`'s one operation to release
@@ -579,9 +698,30 @@ export const startClientRelease = async (
   {
     releaseId,
     rollback,
+    again,
+    what,
     cause,
-  }: { releaseId?: string; rollback?: boolean; cause?: string }
-): Promise<{ operationId: string; releaseId: string }> => {
+    alongside,
+  }: {
+    releaseId?: string;
+    rollback?: boolean;
+    again?: boolean;
+    /** What a run again takes live: its settings unless said. */
+    what?: ChangeKind;
+    cause?: string;
+    /**
+     * What the starter records of the change in the same batch as its
+     * start, given the operation and the change it starts: never a start
+     * without its record, nor a record without its start, so the caller
+     * conditions each on the start having landed. Not run when the change
+     * started already (`hasAlready`).
+     */
+    alongside?: (started: {
+      operationId: string;
+      change: number;
+    }) => BatchItem<"sqlite">[];
+  }
+): Promise<{ operationId: string; releaseId: string; change: number }> => {
   const { clientId } = held;
   const client = await db
     .select({ status: clients.status })
@@ -608,26 +748,33 @@ export const startClientRelease = async (
     );
   }
   const target =
-    rollback === true ? operation.previousReleaseId : (releaseId ?? null);
+    releaseId ??
+    (rollback === true ? operation.previousReleaseId : null) ??
+    (again === true ? operation.releaseId : null);
   if (target === null) {
     throw new ProvisionOperationError(
       "nothing_to_roll_back",
       `${clientId} has no release before ${operation.releaseId}`
     );
   }
-  if (operation.releaseId === target) {
-    if (rollback === true && operation.status === "done") {
-      throw new ProvisionOperationError(
-        "nothing_to_roll_back",
-        `${clientId} runs ${target} already`
-      );
-    }
-    // Done: it runs it already. Failed, or left running by a runner that
-    // ended: the holder runs it again, which resumes it.
-    return { operationId: operation.id, releaseId: target };
+  if (hasAlready(operation, target, { rollback, again })) {
+    return {
+      operationId: operation.id,
+      releaseId: target,
+      change: operation.change,
+    };
   }
   await assertCanGo(db, operation, target, rollback === true);
-  const before = await observedRelease(db, clientId);
+  // Run again, it goes on from what it went on from; a new release, from
+  // what every Worker was seen running, or, split between releases (a
+  // change that stopped part way), the last whole release carried forward,
+  // so a client never loses its way back.
+  const before =
+    (await observedRelease(db, clientId)) ?? operation.previousReleaseId;
+  let previousReleaseId = before === target ? null : before;
+  if (target === operation.releaseId) {
+    ({ previousReleaseId } = operation);
+  }
   const now = new Date();
   // Conditional on the claim, and the operation as read: a start that lost
   // either starts nothing.
@@ -638,10 +785,13 @@ export const startClientRelease = async (
       .update(clientProvisions)
       .set({
         releaseId: target,
-        previousReleaseId: before === target ? null : before,
+        previousReleaseId,
         status: "running",
         step: null,
         error: null,
+        // A change of its own, counted: what a rollout's rollback reads.
+        change: operation.change + 1,
+        what: target === operation.releaseId ? (what ?? "settings") : "release",
         startedBy: actorName(actor),
         createdAt: now,
         updatedAt: now,
@@ -651,11 +801,12 @@ export const startClientRelease = async (
           eq(clientProvisions.id, operation.id),
           eq(clientProvisions.status, operation.status),
           eq(clientProvisions.releaseId, operation.releaseId),
+          eq(clientProvisions.change, operation.change),
           stillHolds(held)
         )
       ),
     {
-      action: rollback === true ? "release.rollback" : "release.start",
+      action: releaseAction({ rollback, again }),
       clientId,
       target,
       detail: {
@@ -663,7 +814,9 @@ export const startClientRelease = async (
         from: operation.releaseId,
         ...(cause === undefined ? {} : { cause }),
       },
-    }
+    },
+    alongside?.({ operationId: operation.id, change: operation.change + 1 }) ??
+      []
   );
   if (!started) {
     throw new ProvisionOperationError(
@@ -671,10 +824,12 @@ export const startClientRelease = async (
       `${clientId}'s operation or its claim changed as the release started`
     );
   }
-  return { operationId: operation.id, releaseId: target };
+  return {
+    operationId: operation.id,
+    releaseId: target,
+    change: operation.change + 1,
+  };
 };
-
-type Operation = NonNullable<Awaited<ReturnType<typeof provisionOf>>>;
 
 /** What a run of the operation works on, loaded once. */
 interface Loaded {
@@ -690,6 +845,11 @@ interface Loaded {
     signIn: string | null;
     teamsBot: string | null;
   };
+  /**
+   * When `client` and the settings were about to be read: what core runs
+   * once this run's upload of it is observed, as `configuredAt` records it.
+   */
+  readAt: Date;
 }
 
 /** The operation's progress, read afresh. */
@@ -774,6 +934,105 @@ const recordProgress = async (
   }
 };
 
+/**
+ * How long after it was sent a call that changes a client's Workers is
+ * taken to have landed or gone with the run that sent it. An upload
+ * answers in seconds; a run whose isolate died holds no request open, and
+ * its marker stays behind until then (`settledSends`).
+ *
+ * What's left: Cloudflare may still apply a call whose sender died, or one
+ * still unanswered past this bound, after a rollback that waited it out
+ * has made its own. Nothing here can see that call land; the client would
+ * then run the rollout's Worker while the admin records the rollback's,
+ * until drift (src/rollout/drift.ts) shows it and the next run replaces it.
+ */
+const sendSettleMs = 5 * 60_000;
+
+/**
+ * Sends `send`, a call that changes client `loaded.held.clientId`'s
+ * Workers, while `loaded.held` holds the client, marked on its operation
+ * (`progress.sending`, outside `progressSchema`, so any later progress
+ * write drops it) from before it's sent until it answers.
+ *
+ * A runner that takes the client over can't stop a call already sent: a
+ * rollback waits for the mark to clear (`settledSends`), so the call lands
+ * before the rollback's own and never after. Marked in the same statement
+ * that checks the claim, so a call is sent only marked; cleared by the
+ * change, not the claim, so a call answered after its runner lost the
+ * client still clears it.
+ */
+const sendHolding = async (
+  db: AdminDatabase,
+  { operation, held }: Loaded,
+  send: () => Promise<void>
+): Promise<void> => {
+  const marked = await db
+    .update(clientProvisions)
+    .set({
+      progress: sql`json_set(coalesce(${clientProvisions.progress}, '{}'), '$.sending', ${Date.now()})`,
+    })
+    .where(and(eq(clientProvisions.id, operation.id), stillHolds(held)))
+    .returning({ id: clientProvisions.id });
+  if (marked.length === 0) {
+    throw new ProvisionOperationError(
+      "runner_replaced",
+      `${held.runId} no longer holds ${held.clientId}`
+    );
+  }
+  try {
+    await send();
+  } finally {
+    await db
+      .update(clientProvisions)
+      .set({
+        progress: sql`json_remove(${clientProvisions.progress}, '$.sending')`,
+      })
+      .where(
+        and(
+          eq(clientProvisions.id, operation.id),
+          eq(clientProvisions.change, operation.change)
+        )
+      );
+  }
+};
+
+/**
+ * Waits until no call sent for client `clientId`'s change `change` is
+ * still on its way (`sendHolding`): none marked, or the one marked sent
+ * at least `sendSettleMs` ago. What a runner that took the client over
+ * waits for before it changes the client's Workers itself.
+ */
+export const settledSends = async (
+  context: ProvisionContext,
+  clientId: string,
+  change: number
+): Promise<void> => {
+  const delayMs = context.observe?.retryDelayMs ?? defaultObserveDelayMs;
+  const sending = async (): Promise<boolean> => {
+    const row = await context.db
+      .select({
+        since: sql<
+          number | null
+        >`json_extract(${clientProvisions.progress}, '$.sending')`,
+      })
+      .from(clientProvisions)
+      .where(
+        and(
+          eq(clientProvisions.clientId, clientId),
+          eq(clientProvisions.change, change)
+        )
+      )
+      .get();
+    const since = row?.since ?? null;
+    return since !== null && Date.now() - since < sendSettleMs;
+  };
+  // oxlint-disable no-await-in-loop -- reads in turn, waiting between
+  while (await sending()) {
+    await scheduler.wait(delayMs);
+  }
+  // oxlint-enable no-await-in-loop
+};
+
 /** The release's Worker `app`. */
 const workerOf = (manifest: ReleaseManifest, app: App): WorkerEntry => {
   const worker = manifest.workers[app];
@@ -808,8 +1067,12 @@ const targetOf = (
   const worker = workerOf(loaded.manifest, app);
   return {
     accountId: loaded.accountId,
-    scriptName: renderClientWorker(worker, loaded.placement, inventory)
-      .scriptName,
+    scriptName: renderClientWorker(
+      worker,
+      loaded.placement,
+      inventory,
+      renderOptionsOf(loaded)
+    ).scriptName,
     namespace:
       loaded.destination.kind === "workers_for_platforms"
         ? loaded.destination.namespace
@@ -840,6 +1103,18 @@ const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
     throw new ProvisionOperationError(
       "wfp_binding_unqualified",
       `${worker.name}'s ${unqualified.name} is a ${unqualified.type} binding, which Workers for Platforms doesn't document for user Workers`
+    );
+  }
+  // The gateway reaches one namespace, the clients': a service binding of
+  // a Worker in any other would reach nothing.
+  const service = worker.bindings.find(({ type }) => type === "service");
+  if (
+    service !== undefined &&
+    loaded.destination.namespace !== clientDispatchNamespace
+  ) {
+    throw new ProvisionOperationError(
+      "wfp_binding_unqualified",
+      `${worker.name}'s ${service.name} needs the connect gateway, which serves namespace ${clientDispatchNamespace} alone`
     );
   }
   if (worker.crons.length > 0) {
@@ -873,7 +1148,9 @@ const coreVarsOf = async (
     derived,
     {
       by: loaded.operation.startedBy,
-      what: "release",
+      // What started it: a release, or new settings or secrets on the
+      // release it runs, as its core records it in its Activity.
+      what: loaded.operation.what ?? "release",
       release: loaded.operation.releaseId,
       // When the operation started: the same however often it's resumed.
       at: loaded.operation.createdAt.toISOString(),
@@ -926,6 +1203,9 @@ const load = async (
   held: HeldClient,
   operation: Operation
 ): Promise<Loaded> => {
+  // Before any setting is read, so one changed while this run goes on
+  // reads as changed after it (`configuredAt`).
+  const readAt = new Date();
   const row = await db
     .select({
       status: clients.status,
@@ -983,6 +1263,7 @@ const load = async (
     destination,
     accountId: destination.accountId,
     client,
+    readAt,
   };
 };
 
@@ -1215,7 +1496,12 @@ const upload = async (
   const { api, db, store } = context;
   const { manifest, held, placement } = loaded;
   const worker = workerOf(manifest, app);
-  const rendered = renderClientWorker(worker, placement, inventory);
+  const rendered = renderClientWorker(
+    worker,
+    placement,
+    inventory,
+    renderOptionsOf(loaded)
+  );
   // Its mail sends from the client's onboarding sender alone, as a
   // deploy's does (`renderBindings`).
   const mailSender = mailSenderOf(context, held.clientId);
@@ -1290,13 +1576,14 @@ const upload = async (
       progress,
       { app, history: worker.durableObjectMigrations },
       async () => {
-        await assertHolds(db, held);
-        await uploadTargetScript(api, target, {
-          ...prepared,
-          metadata: {
-            ...prepared.metadata,
-            ...(migrations === undefined ? {} : { migrations }),
-          },
+        await sendHolding(db, loaded, async () => {
+          await uploadTargetScript(api, target, {
+            ...prepared,
+            metadata: {
+              ...prepared.metadata,
+              ...(migrations === undefined ? {} : { migrations }),
+            },
+          });
         });
       }
     );
@@ -1325,6 +1612,15 @@ const upload = async (
     await setScriptSubdomain(api, target.accountId, target.scriptName, {
       enabled: worker.workersDev,
       previewsEnabled: false,
+    });
+  }
+  if (app === "core") {
+    // Core live with the settings as this run read them: what's pending is
+    // what changed after it started reading (`readAt`), sign-in included.
+    const now = await progressNow(db, loaded.operation.id);
+    await recordProgress(db, loaded, {
+      ...now,
+      configuredAt: loaded.readAt.toISOString(),
     });
   }
   // What the client runs, as a deploy records it: only while the runner
@@ -1415,9 +1711,9 @@ const revokeRetired = async (
   );
   for (const name of retired) {
     // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-    await assertHolds(db, loaded.held);
-    // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-    await deleteTargetSecret(api, target, name);
+    await sendHolding(db, loaded, async () => {
+      await deleteTargetSecret(api, target, name);
+    });
     // Recorded as it goes, by name: a run that fails after it still
     // leaves what it removed in the audit log.
     // oxlint-disable-next-line no-await-in-loop -- one secret at a time
@@ -1484,9 +1780,9 @@ const deliverSecrets = async (
     }
     for (const secret of secrets) {
       // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-      await assertHolds(db, loaded.held);
-      // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-      await putTargetSecret(api, target, secret);
+      await sendHolding(db, loaded, async () => {
+        await putTargetSecret(api, target, secret);
+      });
       delivered += 1;
     }
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
@@ -1506,9 +1802,12 @@ const deliverSecrets = async (
     const removed = await revokeRetired(context, loaded, target, given, names);
     revoked.push(...removed);
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
+    const shared = await sharedSecretPrints(context.secrets, app);
+    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
     await recordProgress(db, loaded, {
       ...progress,
       secrets: { ...progress.secrets, [app]: print },
+      shared: { ...progress.shared, [app]: shared },
     });
   }
   // The names removed, never a value: what an operator set by hand and
@@ -1518,6 +1817,47 @@ const deliverSecrets = async (
     revoked: revoked.length,
     revokedNames: revoked.join(","),
   });
+};
+
+/**
+ * Records each Worker's version live, as its probe found it, on what the
+ * client runs (`client_workers`): what drift compares against
+ * (src/rollout/drift.ts). Core's is the version its probe answered as;
+ * connect's, read from its script in an account's own Workers, or none in
+ * a namespace, whose versions the admin reads only through core's health.
+ * Only while the runner holds the client.
+ */
+const recordLiveVersions = async (
+  context: ProvisionContext,
+  loaded: Loaded,
+  inventory: readonly ClientResource[],
+  coreVersion: string
+): Promise<void> => {
+  const { api, db } = context;
+  const { held } = loaded;
+  for (const app of appsOf(loaded.manifest)) {
+    const target = targetOf(loaded, inventory, app);
+    let version: string | null = coreVersion;
+    if (app !== "core") {
+      version =
+        target.namespace === null
+          ? // oxlint-disable-next-line no-await-in-loop -- two Workers
+            ((await liveVersion(api, target.accountId, target.scriptName)) ??
+            null)
+          : null;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- two Workers
+    await db
+      .update(clientWorkers)
+      .set({ versionId: version })
+      .where(
+        and(
+          eq(clientWorkers.clientId, held.clientId),
+          eq(clientWorkers.worker, app),
+          stillHolds(held)
+        )
+      );
+  }
 };
 
 /** How long core's signed probe may take, its body included. */
@@ -1642,6 +1982,7 @@ const probe = async (
   if (fault !== null) {
     throw new ProvisionOperationError(fault.code, fault.message);
   }
+  await recordLiveVersions(context, loaded, inventory, version);
   const progress = await progressNow(db, loaded.operation.id);
   await recordStep(
     db,
@@ -1802,6 +2143,21 @@ const complete = async (db: AdminDatabase, loaded: Loaded): Promise<void> => {
             stillHolds(held)
           )
         ),
+      // A rotation it delivered is live from now, while the generation is
+      // still the one it delivered (src/deploy/rotation.ts): the previous
+      // keys' window counts from here (src/deploy/secrets.ts).
+      db
+        .update(clients)
+        .set({ rotationLiveAt: now })
+        .where(
+          and(
+            eq(clients.id, held.clientId),
+            eq(clients.generation, loaded.client.generation),
+            isNotNull(clients.rotatedAt),
+            isNull(clients.rotationLiveAt),
+            stillHolds(held)
+          )
+        ),
       releaseRun(db, held.clientId, held.runId),
     ]
   );
@@ -1894,7 +2250,8 @@ const runOperation = async (
       renderClientWorker(
         workerOf(loaded.manifest, app),
         loaded.placement,
-        inventory
+        inventory,
+        renderOptionsOf(loaded)
       );
     }
     for (const app of order) {
@@ -2028,18 +2385,22 @@ const rollBackAfterProbe = async (
  * to resume one that failed. On a failure it records the step and the
  * error's code, audited, and throws the error; except that a live
  * client's release that fails its probe is rolled back to the release
- * before on its own (`rollsBack`), and staff are told.
+ * before on its own (`rollsBack`), and staff are told. Only for a release
+ * to another release: a run of the release it runs again (settings,
+ * rotation, a secrets rollout) or a rollback passes `rollBackOnProbe`
+ * false, as going back a release wouldn't undo what failed.
  */
 export const runClientProvision = async (
   context: ProvisionContext,
-  held: HeldClient
+  held: HeldClient,
+  { rollBackOnProbe = true }: { rollBackOnProbe?: boolean } = {}
 ): Promise<void> => {
   const stopped = await runOperation(context, held);
   if (stopped === undefined) {
     return;
   }
   const { operation, step, code, error } = stopped;
-  if (await rollsBack(context.db, operation, step, code)) {
+  if (rollBackOnProbe && (await rollsBack(context.db, operation, step, code))) {
     await rollBackAfterProbe(context, held, operation, code);
     return;
   }

@@ -1,21 +1,29 @@
 /**
- * Drift: what a client's account runs, read live, against what the
- * admin last made live there (`client_workers`, which deploys, rollouts
- * and rollbacks keep). A Worker running another version was changed
- * outside the admin (a `wrangler deploy`, a rollback in the
- * dashboard); one whose traffic is split is part way through a gradual
- * deployment, or was left so.
+ * Drift: what a placed client's destination runs, read live, against what
+ * the admin last made live there (`client_workers`, which its operation
+ * keeps, src/hosting/operation.ts). A Worker running another version was
+ * changed outside the admin (a `wrangler deploy`, a rollback in the
+ * dashboard); one whose traffic is split was left so.
  */
 import { log } from "@grasp-os/shared/log";
+import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { listDeployments } from "../cloudflare/workers.ts";
 import type { WorkerDeployment } from "../cloudflare/workers.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clientPlacements, clients, clientWorkers } from "../db/schema.ts";
+import {
+  clientPlacements,
+  clientProvisions,
+  clients,
+  clientWorkers,
+} from "../db/schema.ts";
 import { errorCode } from "../deploy/deploy.ts";
-import { importedManifest } from "../deploy/release.ts";
+import type { importedManifest } from "../deploy/release.ts";
+import { answeringVersion } from "../deploy/router.ts";
+import { clientInventory, destinationOf } from "../hosting/inventory.ts";
 
 /**
  * A Worker's drift: `in_sync` (all its traffic on the version the admin
@@ -86,63 +94,105 @@ export type ManifestOf = (
   releaseId: string
 ) => ReturnType<typeof importedManifest>;
 
-/**
- * Every Worker the releases `releaseIds` have, by app, with its script's
- * name: what a client on them should run, whether or not the admin
- * recorded each.
- */
-const expectedWorkers = async (
-  manifestOf: ManifestOf,
-  releaseIds: readonly (string | null)[]
-): Promise<Map<string, string>> => {
-  const expected = new Map<string, string>();
-  for (const id of new Set(releaseIds)) {
-    if (id === null) {
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one or two releases
-    const manifest = await manifestOf(id);
-    for (const [app, { name }] of Object.entries(manifest?.workers ?? {})) {
-      expected.set(app, name);
-    }
-  }
-  return expected;
+/** How drift reads core's version where only its health tells it: in a namespace. */
+export interface HealthReads {
+  fetch: typeof fetch;
+  /** The router's key, which the client's router secret is derived from. */
+  routerKey: string;
+  timeoutMs?: number;
+}
+
+/** How long a health read of core may take. */
+const healthTimeoutMs = 5000;
+
+const originSchema = z.object({ origin: z.string().optional() }).loose();
+
+/** Core's origin, as its operation's probe passed at; null before it did. */
+const coreOriginOf = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<string | null> => {
+  const row = await db
+    .select({ progress: clientProvisions.progress })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId))
+    .get();
+  const parsed = originSchema.safeParse(JSON.parse(row?.progress ?? "{}"));
+  return parsed.success ? (parsed.data.origin ?? null) : null;
 };
 
 /**
- * Client `clientId`'s drift, read live from its account; null when the
- * admin has no such client, or it's placed in a hosting destination or
- * has no account of its own. Every Worker of the releases it runs or is
- * pinned to is read, recorded or not: one the admin has no record of
- * (a deploy that stopped part way, or whose record was lost) is never in
- * sync, `drifted` when its account answers. A Worker whose deployments
- * can't be read is `unknown`, and logged.
+ * Core's drift where only its health names its version: `in_sync` when it
+ * names the version recorded, `drifted` when another, `unknown` when it
+ * can't be asked or doesn't answer.
+ */
+const healthDrift = async (
+  worker: { worker: string; scriptName: string; versionId: string | null },
+  origin: string | null,
+  health: HealthReads | undefined,
+  client: { clientId: string; generation: number }
+): Promise<WorkerDrift> => {
+  const unknown: WorkerDrift = {
+    worker: worker.worker,
+    scriptName: worker.scriptName,
+    recorded: worker.versionId,
+    live: null,
+    state: "unknown",
+  };
+  if (origin === null || health === undefined) {
+    return unknown;
+  }
+  const version = await answeringVersion(
+    health.fetch,
+    origin,
+    await deriveRouterSecret(
+      health.routerKey,
+      client.clientId,
+      client.generation
+    ),
+    health.timeoutMs ?? healthTimeoutMs
+  );
+  if (version === undefined) {
+    return unknown;
+  }
+  return {
+    ...unknown,
+    live: [{ version_id: version, percentage: 100 }],
+    state: version === worker.versionId ? "in_sync" : "drifted",
+  };
+};
+
+/**
+ * Client `clientId`'s drift, read live from its destination; null when the
+ * admin has no such client, or it isn't placed. Each Worker the admin
+ * recorded is read: in an account's own Workers, from its deployments; in
+ * a Workers for Platforms namespace, core alone, from the version its
+ * health names through its origin (`health`), as its probe found it, and
+ * `unknown` without `health`. A Worker of its inventory the admin has no
+ * record of (an operation that stopped part way) is never in sync. A
+ * Worker that can't be read is `unknown`, and logged.
  */
 export const driftOf = async (
   api: CloudflareApi,
   db: AdminDatabase,
   clientId: string,
-  manifestOf: ManifestOf = async (id) => await importedManifest(db, id)
+  health?: HealthReads
 ): Promise<ClientDrift | null> => {
   const [client] = await db
     .select({
-      accountId: clients.accountId,
       pinnedReleaseId: clients.pinnedReleaseId,
-      placed: clientPlacements.clientId,
+      generation: clients.generation,
+      destinationId: clientPlacements.destinationId,
     })
     .from(clients)
-    .leftJoin(clientPlacements, eq(clientPlacements.clientId, clients.id))
+    .innerJoin(clientPlacements, eq(clientPlacements.clientId, clients.id))
     .where(eq(clients.id, clientId));
-  // A placed client's Workers are its inventory's, in its destination
-  // (src/hosting/): reading this path's script names in its account would
-  // report Workers it never had.
-  if (client === undefined || client.placed !== null) {
+  if (client === undefined) {
     return null;
   }
-  const { accountId } = client;
-  if (accountId === null) {
-    return null;
-  }
+  const destination = await destinationOf(db, client.destinationId);
+  const accountId = destination.accountId ?? "";
+  const inNamespace = destination.kind === "workers_for_platforms";
   const recorded = await db
     .select({
       worker: clientWorkers.worker,
@@ -152,42 +202,60 @@ export const driftOf = async (
     })
     .from(clientWorkers)
     .where(eq(clientWorkers.clientId, clientId));
-  const expected = await expectedWorkers(manifestOf, [
-    ...recorded.map(({ releaseId }) => releaseId),
-    ...(client.pinnedReleaseId === null ? [] : [client.pinnedReleaseId]),
-  ]);
-  const unrecorded = [...expected]
-    .filter(([worker]) => !recorded.some((row) => row.worker === worker))
-    .map(([worker, scriptName]) => ({ worker, scriptName, versionId: null }));
-  const workers = await Promise.all(
-    [...recorded, ...unrecorded].map(
-      async ({ worker, scriptName, versionId }) => {
-        try {
-          const [current] = await listDeployments(api, accountId, scriptName);
-          const live = current?.versions ?? [];
-          return {
-            worker,
-            scriptName,
-            recorded: versionId,
-            live,
-            state: stateOf(versionId, live),
-          };
-        } catch (error) {
-          log.warn("drift.unread", {
-            clientId,
-            worker,
-            error: errorCode(error),
-          });
-          return {
-            worker,
-            scriptName,
-            recorded: versionId,
-            live: null,
-            state: "unknown" as const,
-          };
-        }
-      }
+  const inventory = await clientInventory(db, clientId);
+  const scripts = inventory.filter(
+    ({ kind, deletedAt }) => kind === "worker_script" && deletedAt === null
+  );
+  const unrecorded = scripts
+    .filter(
+      ({ physicalName }) =>
+        !recorded.some(({ scriptName }) => scriptName === physicalName)
     )
+    .map(({ role, physicalName }) => ({
+      worker: role.replace(/^worker:/u, ""),
+      scriptName: physicalName,
+      versionId: null,
+    }));
+  // In a namespace the admin reads only core, through its health.
+  const read = [...recorded, ...unrecorded].filter(
+    ({ worker }) => !inNamespace || worker === "core"
+  );
+  const origin = inNamespace ? await coreOriginOf(db, clientId) : null;
+  const workers = await Promise.all(
+    read.map(async ({ worker, scriptName, versionId }) => {
+      try {
+        if (inNamespace) {
+          return await healthDrift(
+            { worker, scriptName, versionId },
+            origin,
+            health,
+            { clientId, generation: client.generation }
+          );
+        }
+        const [current] = await listDeployments(api, accountId, scriptName);
+        const live = current?.versions ?? [];
+        return {
+          worker,
+          scriptName,
+          recorded: versionId,
+          live,
+          state: stateOf(versionId, live),
+        };
+      } catch (error) {
+        log.warn("drift.unread", {
+          clientId,
+          worker,
+          error: errorCode(error),
+        });
+        return {
+          worker,
+          scriptName,
+          recorded: versionId,
+          live: null,
+          state: "unknown" as const,
+        };
+      }
+    })
   );
   const states = new Set<ClientDriftState>(workers.map(({ state }) => state));
   const releases = new Set(recorded.map(({ releaseId }) => releaseId));

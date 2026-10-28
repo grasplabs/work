@@ -1,4 +1,4 @@
-# Deploys the admin and router to Grasp's Cloudflare account, the one
+# Deploys the admin, router and connect gateway to Grasp's Cloudflare account, the one
 # staging's core and connect run in too: the admin holds a token for every
 # client, so it never changes on a merge. Run it by hand from main once
 # the change works in staging. Require a reviewer on the grasp-os-ops
@@ -144,6 +144,12 @@ jobs:
       # its provisioning Workflow).
       - if: ${{ !inputs.secrets-only }}
         run: vp run --filter @grasp-os/router deploy
+      # The connect gateway (apps/gateway, GRA-1217), next to the router:
+      # every placed client's core reaches its own connect in the clients'
+      # dispatch namespace through it. The admin only binds placed cores to
+      # it, so deploying it changes nothing for anyone until it does.
+      - if: ${{ !inputs.secrets-only }}
+        run: vp run --filter @grasp-os/gateway deploy
       # The admin verifies every request's Access JWT against its Access
       # application (apps/admin/src/access.ts) and refuses everyone
       # without these, so a deploy without them would lock staff out: stop

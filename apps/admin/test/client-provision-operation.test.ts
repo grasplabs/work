@@ -1,3 +1,4 @@
+import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
 import { provisionProbePath } from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { moduleKey } from "@grasp-os/shared/release";
@@ -87,6 +88,15 @@ const documented = new Set([
   "durable_object_namespace",
   "assets",
 ]);
+
+/** Core binding its connect, as the real one does (`adjust` for `importRelease`). */
+const bindsConnect = (core: WorkerEntry): WorkerEntry => ({
+  ...core,
+  bindings: [
+    ...core.bindings,
+    { type: "service", name: "CONNECT", service: "grasp-os-connect" },
+  ],
+});
 
 /**
  * A release imported for a placed client: core binds its own Durable
@@ -629,7 +639,8 @@ const refusals: Refusal[] = [
     code: "model_spend_undecided",
   },
   {
-    name: "a binding Workers for Platforms doesn't document for user Workers",
+    // The connect gateway serves the clients' namespace alone (GRA-1217).
+    name: "a service binding in a namespace the connect gateway doesn't serve",
     kind: "workers_for_platforms",
     adjust: (core) => ({
       ...core,
@@ -1081,8 +1092,13 @@ describe("provisioning a placed client", () => {
     }
   );
 
-  it("probes a core in the namespace the router binds through that binding, and routes its hostname to its script", async () => {
-    const manifest = await importRelease("workers_for_platforms");
+  it("probes a core in the namespace the router binds through that binding, its connect through the gateway, and routes its hostname to its script", async () => {
+    // Core binds its connect, as the real one does: through the gateway.
+    const manifest = await importRelease(
+      "workers_for_platforms",
+      {},
+      bindsConnect
+    );
     const { account, clientId, held } = await setUp(
       "workers_for_platforms",
       manifest,
@@ -1104,7 +1120,15 @@ describe("provisioning a placed client", () => {
       held
     );
 
-    const { core } = await scriptsOf(clientId);
+    const { core, connect } = await scriptsOf(clientId);
+    const bindings = z
+      .array(z.object({ name: z.string() }).loose())
+      .parse(
+        account.namespaces
+          .get(clientDispatchNamespace)
+          ?.get(core)
+          ?.versions.at(-1)?.metadata.bindings ?? []
+      );
     const [probed] = await db
       .select({ detail: auditEvents.detail })
       .from(auditEvents)
@@ -1121,6 +1145,8 @@ describe("provisioning a placed client", () => {
         .object({ versionUnchecked: z.number().optional() })
         .parse(JSON.parse(probed?.detail ?? "{}")).versionUnchecked,
       entry: await env.ROUTER_HOSTS.get(`${clientId}.${domain}`, "json"),
+      // Its connect, as core binds it: the gateway, naming its own script.
+      connectBinding: bindings.find(({ name }) => name === "CONNECT"),
       // Its health and the admin's probe, through the namespace, at the
       // hostname the router will reach it at: never over workers.dev.
       dispatched: cloudflare.dispatched().map(({ script, url }) => ({
@@ -1135,6 +1161,12 @@ describe("provisioning a placed client", () => {
       operation: { status: "done" },
       versionUnchecked: 1,
       entry: { clientId, script: core, generation: 1 },
+      connectBinding: {
+        type: "service",
+        name: "CONNECT",
+        service: connectGatewayScript,
+        props: { script: connect },
+      },
       dispatched: [
         { script: core, path: "/health", host: `${clientId}.${domain}` },
         {
@@ -2637,7 +2669,7 @@ interface Expected {
  * what every Worker ran when B started (A), refused once a script ran B's
  * new migration, nothing when B never started; a release records as the
  * one before what every Worker was seen running as it started, never how
- * B's run ended.
+ * B's run ended, and split between releases the last whole one (A).
  */
 const expectedOf = (
   point: CrashPoint,
@@ -2655,8 +2687,6 @@ const expectedOf = (
   let previous: string | null = ids.a;
   if (action === "another" && point.bothRanB) {
     previous = ids.b;
-  } else if (action === "another" && point.connectRanB) {
-    previous = null;
   }
   return {
     startedAs: "started",
@@ -2732,6 +2762,80 @@ const crashedAt = async (point: CrashPoint) => {
 
 describe("a release's runner crashing, and another action on the client after", () => {
   useStoreSecrets({ deployer: token, tenant: `${token}-tenant-admin` });
+
+  it("keeps the worst case when core's upload gets a 4xx Cloudflare didn't write: a rollback past its new migration stays refused", async () => {
+    const point = crashPoints.find(({ at }) => at === "after connect's upload");
+    if (point === undefined) {
+      throw new Error("No such crash point");
+    }
+    const { clientId } = await crashedAt({
+      ...point,
+      plan: ({ core }) => {
+        // Refused, by its status, but by no answer of Cloudflare's: what
+        // reached it may have run.
+        cloudflare.failNext(isUpload(core), "400-uncoded");
+      },
+    });
+
+    const back = await codeOf(
+      startClientRelease(db, staff, await attempt(clientId), {
+        rollback: true,
+      })
+    );
+
+    expect(back).toBe("rollback_past_migration");
+  });
+
+  it("keeps the way back across two forward moves that each stop part way, so a rollback takes it back to the last whole release", async () => {
+    const a = await importRelease("dedicated");
+    const { clientId } = await liveClient(a);
+    const { core } = await scriptsOf(clientId);
+    const b = await importRelease("dedicated", {
+      notes: "feat(core): b",
+      core: "export default { core: 'b2' };",
+    });
+    const l = await importRelease("dedicated", {
+      notes: "feat(core): l",
+      core: "export default { core: 'l' };",
+    });
+    // B stops after connect's upload, core's refused: split, B and A.
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: b.releaseId,
+    });
+    cloudflare.failNext(isUpload(core), 400);
+    await failing(await attempt(clientId));
+    const afterB = await runs(clientId);
+    // L, from that split, stops the same way: split, L and A.
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: l.releaseId,
+    });
+    cloudflare.failNext(isUpload(core), 400);
+    await failing(await attempt(clientId));
+    const afterL = await runs(clientId);
+    const operation = await operationOf(clientId);
+    const carried = operation?.previousReleaseId;
+
+    const holder = await attempt(clientId);
+    const back = await codeOf(
+      startClientRelease(db, staff, holder, { rollback: true })
+    );
+    await runClientProvision(context, holder);
+
+    expect({
+      afterB,
+      afterL,
+      carried,
+      back,
+      endsOn: await runs(clientId),
+    }).toStrictEqual({
+      afterB: { connect: b.releaseId, core: a.releaseId },
+      afterL: { connect: l.releaseId, core: a.releaseId },
+      // A, the last whole release, carried forward across both.
+      carried: a.releaseId,
+      back: "started",
+      endsOn: { connect: a.releaseId, core: a.releaseId },
+    });
+  });
 
   it.each(walk)(
     "$at, then $action: ends coherent, by what its Workers ran, and the dead runner writes nothing",

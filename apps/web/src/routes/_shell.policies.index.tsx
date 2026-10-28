@@ -26,6 +26,7 @@ import {
   loadPolicies,
 } from "../policies/policies-data.ts";
 import { PoliciesTable } from "../policies/policies-table.tsx";
+import { editsPolicies, PoliciesActions } from "../policies/policy-editing.tsx";
 import { findingsWith, inForce, peopleAffected } from "../policies/policy.ts";
 import type { Finding } from "../policies/policy.ts";
 import { RulesTable } from "../policies/rules-table.tsx";
@@ -34,9 +35,8 @@ import { RulesTable } from "../policies/rules-table.tsx";
 // the rules the company set for the apps its people use, the apps that
 // break them, and the policies the rules come from. Core keeps the
 // policies, rules and exceptions, and works out which apps the rules
-// catch (policies/policies-data.ts); uploading
-// a policy and making a rule, which the prototype offers here, come with
-// the policy pages' port.
+// catch (policies/policies-data.ts); the organization's own admins upload
+// a policy and make a rule here (policies/policy-editing.tsx).
 
 type Tab = "rules" | "apps" | "policies";
 
@@ -103,6 +103,7 @@ const Figure = ({
 const PoliciesPage = () => {
   const { t, i18n } = useLingui();
   const { book, found: read } = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   const navigate = useNavigate();
   const tab = Route.useSearch().tab ?? "rules";
   const [show, setShow] = useState<Show>("inForce");
@@ -138,6 +139,11 @@ const PoliciesPage = () => {
       <SiteHeader crumbs={[{ label: t`Policies` }]} />
       <Page wide>
         <PageHeading
+          action={
+            editsPolicies(identity) ? (
+              <PoliciesActions policies={policies} />
+            ) : undefined
+          }
           description={t`Rules for the apps and AI tools your people use, drawn from your own policies.`}
           title={t`Policies`}
         />

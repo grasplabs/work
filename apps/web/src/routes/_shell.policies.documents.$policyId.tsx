@@ -26,6 +26,7 @@ import {
   findingsOfLoaded,
   loadPolicies,
 } from "../policies/policies-data.ts";
+import { editsPolicies, PolicyActions } from "../policies/policy-editing.tsx";
 import {
   ConditionChips,
   PolicyExcerpt,
@@ -43,10 +44,11 @@ import type {
 // One of the company's policies, as in the prototype
 // (`routes/policies/documents/$policyId.tsx`): while Grasp reads it, the
 // page says so; then each proposed rule waits for a decision, and its
-// published rules are listed. The prototype keeps, edits and leaves out a
-// proposal, publishes and removes the policy here; Grasp keeps no
-// policies yet (policies/policies-data.ts), so every link to one finds the
-// prototype's state for a policy that isn't there.
+// published rules are listed. The organization's own admins publish and
+// remove the policy here, and make a rule from one of its passages
+// (policies/policy-editing.tsx). Grasp doesn't read policies yet, so
+// there are no proposals to keep or leave out. A link to a policy that
+// isn't there finds the prototype's state for one.
 
 const readingProblem: Record<PolicyReadingProblem, MessageDescriptor> = {
   notSetUp: msg`Reading policies is not set up yet. Add your own Anthropic key in Settings, under Models, and upload the policy again.`,
@@ -104,10 +106,13 @@ const PolicyDetail = ({
   policy,
   proposals,
   book,
+  edits,
 }: {
   policy: PolicyDocument;
   proposals: readonly ProposalCatch[];
   book: PolicyBook;
+  /** Whether the reader may change it. */
+  edits: boolean;
 }) => {
   const { t, i18n } = useLingui();
   const uploadedOn = formatDate(policy.uploadedAt);
@@ -123,6 +128,11 @@ const PolicyDetail = ({
       />
       <Page>
         <PageHeading
+          action={
+            edits ? (
+              <PolicyActions policies={book.policies} policy={policy} />
+            ) : undefined
+          }
           description={policy.summary}
           meta={
             <span className="text-muted-foreground">
@@ -276,6 +286,7 @@ const PolicyPage = () => {
   const { t } = useLingui();
   const { policyId } = Route.useParams();
   const { found, book: loaded } = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   const book = bookOf(loaded);
   const policy = book.policies.find(({ id }) => id === policyId);
   if (policy === undefined) {
@@ -312,6 +323,7 @@ const PolicyPage = () => {
   return (
     <PolicyDetail
       book={book}
+      edits={editsPolicies(identity)}
       policy={policy}
       proposals={findingsOfLoaded(found).proposals}
     />

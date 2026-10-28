@@ -5,14 +5,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { summaryOf } from "../src/clients/quota-policy-card.tsx";
 import { clientQuotaPolicy } from "../src/clients/quota-policy.ts";
 import type { ClientQuotaPolicy } from "../src/clients/quota-policy.ts";
-import { act, adminDatabase } from "../src/db/act.ts";
+import { adminDatabase } from "../src/db/act.ts";
 import { clients, settings } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { publishRelease } from "./releases.ts";
+import { deployPlaced, placedClientRecord, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 // A client's quota policy on its page: the generation the admin sets
@@ -27,35 +24,12 @@ mockAccess();
 const db = adminDatabase(env.DB);
 const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
-/** A release, published and imported. */
-const importedRelease = async (notes: string): Promise<string> => {
-  const release = await publishRelease({ notes });
-  await importReleases(env.RELEASES, db);
-  return release.id;
-};
+/** A release a placed client runs, imported. */
+const importedRelease = async (notes: string): Promise<string> =>
+  await placedRelease(notes);
 
-/** A client recorded as active, on a new account in the fake. */
-const recordClient = async () => {
-  const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const account = cloudflare.addAccount(`Acme ${clientId}`);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name: `Acme ${clientId}`,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  return { clientId, account };
-};
+/** A client added and placed in a destination of its own, not provisioned yet. */
+const recordClient = async () => await placedClientRecord(cloudflare, 1);
 
 /** Sets client `clientId`'s `QUOTA_LIMITS` to `generation`, lowering its steps. */
 const setQuota = async (
@@ -79,12 +53,9 @@ const setQuota = async (
     });
 };
 
-/** Deploys `releaseId` to client `clientId`, settings and all. */
+/** Runs client `clientId`'s operation for `releaseId`, settings and all. */
 const deploy = async (clientId: string, releaseId: string): Promise<void> => {
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, releaseId)
-  );
+  await deployPlaced(clientId, releaseId);
 };
 
 /** A policy in state `state`: the admin's generation, and core's, if read. */
@@ -211,21 +182,17 @@ describe("a client's quota policy", () => {
     await setQuota(clientId, 3, 100);
     await deploy(clientId, release);
     await setQuota(clientId, 4, 50);
-    // Its versions uploaded, the switch of traffic to them refused.
+    // Its connect uploaded, core's upload refused: nothing of the new
+    // settings live.
     cloudflare.failNext(
-      (call) =>
-        call.method === "POST" &&
-        call.path.endsWith("/workers/scripts/grasp-os-core/deployments"),
+      (call) => call.method === "PUT" && call.path.endsWith("-grasp-os-core"),
       400
     );
-    const deployId = await startDeploy(db, staff, clientId, release);
     const logged = vi.spyOn(console, "error").mockImplementation(() => {
-      /* the failed deploy's log line */
+      /* the failed operation's log line */
     });
     try {
-      await expect(
-        runDeploy(await deployContext(env), deployId)
-      ).rejects.toBeInstanceOf(Error);
+      await expect(deploy(clientId, release)).rejects.toBeInstanceOf(Error);
     } finally {
       logged.mockRestore();
     }

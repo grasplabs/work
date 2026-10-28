@@ -25,18 +25,8 @@ export const rolloutErrorCodes = [
   "unknown_client",
   /** The rollout didn't reach the client, or recorded nothing to go back to. */
   "nothing_to_roll_back",
-  /**
-   * The client is placed in a hosting destination (src/hosting/): its
-   * Workers are its inventory's, which a rollback here doesn't touch.
-   */
-  "client_placed",
   /** Something newer was deployed to the client after the rollout. */
   "superseded",
-  /**
-   * What the client ran before isn't the release right before the
-   * rollout's, or the same one: its migrations only keep those working.
-   */
-  "too_far_back",
   /**
    * What the client ran before doesn't work with what it runs now, or
    * declares nothing of what it works with (src/deploy/compatibility.ts).
@@ -48,24 +38,15 @@ export const rolloutErrorCodes = [
    * (src/deploy/compatibility.ts).
    */
   "schema_incompatible",
-  /** The client's secrets rotated since, which its previous versions don't have. */
-  "rotated_since",
-  /**
-   * A shared secret the client's previous versions run was replaced in
-   * Secrets Store since, or what they run isn't on record: going back
-   * could bring a retired provider key back.
-   */
-  "shared_secret_replaced",
-  /**
-   * A secret of the client's own, sealed in the admin (its Teams bot's),
-   * that its previous versions run was replaced since: going back could
-   * bring a revoked bot secret back.
-   */
-  "sealed_secret_replaced",
   /** Another runner (provisioning, another rollout, a rollback) has the client. */
   "client_busy",
   /** The rollback's run failed or was ended before it finished. */
   "rollback_failed",
+  /**
+   * The rollout's release added a Durable Object migration since the
+   * release before, which a script never goes back past.
+   */
+  "rollback_past_migration",
   /** A secrets rollout can't start while Secrets Store is missing a shared secret. */
   "secrets_store_incomplete",
   /**

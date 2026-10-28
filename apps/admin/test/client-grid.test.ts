@@ -12,12 +12,9 @@ import {
 import type { GridRow, LiveOptions } from "../src/clients/grid.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-grid-4b7d21";
@@ -26,12 +23,9 @@ const cloudflare = mockCloudflareApi(token, tenantToken);
 const db = adminDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };
 
-/** A release, published and imported. */
-const importedRelease = async (notes: string): Promise<string> => {
-  const release = await publishRelease({ notes });
-  await importReleases(env.RELEASES, db);
-  return release.id;
-};
+/** A release a placed client runs, imported. */
+const importedRelease = async (notes: string): Promise<string> =>
+  await placedRelease(notes);
 
 /** A client recorded as provisioning leaves it, on a new account in the fake. */
 const recordClient = async (
@@ -59,15 +53,9 @@ const recordClient = async (
   return { clientId, account };
 };
 
-/** An active client running `releaseId`, as a deploy made it live. */
-const liveClient = async (releaseId: string) => {
-  const client = await recordClient("active");
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, client.clientId, releaseId)
-  );
-  return client;
-};
+/** An active client placed in a destination of its own, live on `releaseId`. */
+const liveClient = async (releaseId: string) =>
+  await livePlacedClient(cloudflare, 2, releaseId);
 
 /** Client `clientId`'s row in `grid`. */
 const rowOf = (grid: GridRow[], clientId: string): GridRow | undefined =>
@@ -106,7 +94,7 @@ describe("the client grid", () => {
       .where(eq(clients.status, "active"));
   });
 
-  it("shows each client's release, ring and last deploy from what the admin recorded, reading no account", async () => {
+  it("shows each client's release, ring and its operation's latest run from what the admin recorded, reading no account", async () => {
     const release = await importedRelease("feat(core): on the grid");
     const acme = await liveClient(release);
     const waiting = await recordClient("provisioning");
@@ -131,16 +119,9 @@ describe("the client grid", () => {
     });
   });
 
-  it("reads a live client's drift, shared secrets, health, errors and cost this month, and nothing for one that isn't live", async () => {
+  it("reads a live placed client's drift, shared secrets, health and onboarding, and nothing for one that isn't live", async () => {
     const release = await importedRelease("feat(core): live on the grid");
     const acme = await liveClient(release);
-    acme.account.usage = {
-      monthRequests: 12_000_000,
-      monthCpuTimeUs: 40_000_000_000,
-      monthAiCost: 1.25,
-      dayRequests: 1000,
-      dayErrors: 20,
-    };
     const waiting = await recordClient("provisioning");
 
     const live = await gridLive(env, new Date(), uncached);
@@ -148,16 +129,15 @@ describe("the client grid", () => {
     expect({
       acme: live[acme.clientId],
       waiting: live[waiting.clientId],
+      // A placed client has no account of its own to read usage from.
       analyticsCalls: analyticsCalls(),
     }).toStrictEqual({
       acme: {
         drift: "in_sync",
         sharedSecretsCurrent: true,
         reach: "reachable",
-        day: { requests: 1000, errors: 20 },
-        // $5 of Workers Paid, 2M requests past the 10M it includes at
-        // $0.30 per million, 10M ms of CPU past its 30M at $0.02.
-        costUsd: { workers: 5.8, ai: 1.25 },
+        day: null,
+        costUsd: null,
         onboarding: {
           stage: "none",
           day: null,
@@ -167,7 +147,7 @@ describe("the client grid", () => {
         },
       },
       waiting: undefined,
-      analyticsCalls: 1,
+      analyticsCalls: 0,
     });
   });
 
@@ -452,8 +432,8 @@ describe("the client grid", () => {
       globex: live[globex.clientId],
     }).toMatchObject({
       reads: 1,
-      acme: { drift: "in_sync", costUsd: { workers: 5, ai: 0 } },
-      globex: { drift: "in_sync", costUsd: { workers: 5, ai: 0 } },
+      acme: { drift: "in_sync", reach: "reachable" },
+      globex: { drift: "in_sync", reach: "reachable" },
     });
   });
 

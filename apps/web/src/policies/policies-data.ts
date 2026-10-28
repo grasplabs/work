@@ -26,6 +26,14 @@ export const readPolicyBook = async (
 export const bookOf = (loaded: Loaded<PolicyBook>): PolicyBook =>
   loaded.state === "ready" ? loaded.data : emptyBook;
 
+/** Today, as an exception's last day is compared: "2026-09-28". */
+export const policyToday = (): string => {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+};
+
 /** What core found while it couldn't be read: no rule catches an app. */
 export const noFindings: PolicyFindings = { findings: [], proposals: [] };
 

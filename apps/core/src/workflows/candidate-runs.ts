@@ -291,7 +291,12 @@ export const startCandidateRun = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  /**
+   * Admits the start, right before its row commits, after its build was
+   * compiled and stored: throws to start nothing.
+   */
+  admit?: () => Promise<void>
 ): Promise<{ runId: string }> => {
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "builder");
@@ -361,6 +366,7 @@ export const startCandidateRun = async (
     // that names them; given back, as is any part stored, if the row
     // isn't written.
     await storeBuild(env, { id: reservation, version: 1 }, built.compiled);
+    await admit?.();
     await auditedBatch(env, db, [
       db.insert(workflowCandidateRuns).values({
         id: runId,

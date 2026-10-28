@@ -12,12 +12,15 @@ import { formatDate } from "../format.ts";
 import { PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading, SectionTitle } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { loadLandscape } from "../landscape/landscape-data.ts";
+import type { LandscapeApp } from "../landscape/landscape.ts";
 import { FindingsTable } from "../policies/findings-table.tsx";
+import { bookOf, findingsOfLoaded } from "../policies/policies-data.ts";
 import {
-  bookOf,
-  findingsOfLoaded,
-  loadPolicies,
-} from "../policies/policies-data.ts";
+  editsPolicies,
+  RuleActions,
+  RuleExceptions,
+} from "../policies/policy-editing.tsx";
 import {
   ConditionChips,
   PolicyExcerpt,
@@ -37,19 +40,25 @@ import type {
 
 // One rule, as in the prototype (`routes/policies/rules/$ruleId.tsx`):
 // what it checks and why, whether it is on, and the apps it catches now.
-// Core keeps the rules (policies/policies-data.ts); editing, deleting and
-// turning a rule on or off here, as the prototype does, come with the
-// policy pages' port. A link to a rule that isn't there finds the
-// prototype's state for one.
+// Core keeps the rules (policies/policies-data.ts); the organization's own
+// admins edit, delete and turn a rule on or off here, and let an app break
+// it until a day (policies/policy-editing.tsx). A link to a rule that
+// isn't there finds the prototype's state for one.
 
 const RuleDetail = ({
   rule,
   found: all,
+  apps,
   book,
+  edits,
 }: {
   rule: PolicyRule;
   found: readonly PolicyFinding[];
+  /** The Landscape's apps, an exception is granted to one of. */
+  apps: readonly LandscapeApp[];
   book: PolicyBook;
+  /** Whether the reader may change it. */
+  edits: boolean;
 }) => {
   const { t, i18n } = useLingui();
   const policy =
@@ -69,6 +78,11 @@ const RuleDetail = ({
       />
       <Page>
         <PageHeading
+          action={
+            edits ? (
+              <RuleActions policies={book.policies} rule={rule} />
+            ) : undefined
+          }
           description={rule.description === "" ? undefined : rule.description}
           meta={<RuleStatusBadge status={rule.status} />}
           title={rule.name}
@@ -145,6 +159,13 @@ const RuleDetail = ({
             showRule={false}
           />
         </section>
+
+        <RuleExceptions
+          apps={apps}
+          edits={edits}
+          exceptions={book.exceptions}
+          rule={rule}
+        />
       </Page>
     </>
   );
@@ -153,7 +174,8 @@ const RuleDetail = ({
 const RulePage = () => {
   const { t } = useLingui();
   const { ruleId } = Route.useParams();
-  const { found, book: loaded } = Route.useLoaderData();
+  const { apps, found, book: loaded } = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   const book = bookOf(loaded);
   const rule = book.rules.find(({ id }) => id === ruleId);
   if (rule === undefined) {
@@ -192,6 +214,8 @@ const RulePage = () => {
   return (
     <RuleDetail
       book={book}
+      apps={apps.state === "ready" ? apps.data : []}
+      edits={editsPolicies(identity)}
       found={findingsOfLoaded(found).findings}
       rule={rule}
     />
@@ -199,7 +223,9 @@ const RulePage = () => {
 };
 
 export const Route = createFileRoute("/_shell/policies/rules/$ruleId")({
-  loader: async ({ context: { core } }) => await loadPolicies(core),
+  // The Landscape's apps too: an exception is granted to one of them.
+  loader: async ({ context: { core, identity } }) =>
+    await loadLandscape(core, identity),
   pendingComponent: PageLoading,
   component: RulePage,
 });

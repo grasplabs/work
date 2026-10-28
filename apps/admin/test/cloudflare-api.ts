@@ -30,6 +30,10 @@ import {
 } from "@grasp-os/shared/admin-snapshot";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
+import {
+  connectGatewayScript,
+  gatewayScriptOf,
+} from "@grasp-os/shared/connect-gateway";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { toHex } from "@grasp-os/shared/encoding";
 import {
@@ -60,6 +64,7 @@ import {
   quotaPolicyReportRequestSchema,
 } from "@grasp-os/shared/quota-policy-report";
 import type { QuotaPolicyReport } from "@grasp-os/shared/quota-policy-report";
+import { clientDispatchNamespace } from "@grasp-os/shared/router";
 import { z } from "zod";
 
 import {
@@ -163,24 +168,25 @@ const clockTaskNames = {
 };
 
 /**
- * The connect beside a core in a dispatch namespace, which has no CONNECT
- * binding there (Workers for Platforms documents none for user Workers):
- * the same deployment's connect script in the same namespace. It stands in
- * for however GRA-430 qualifies a namespaced core reaching connect; until
- * then a real one answers none of connect's bindings.
+ * The connect script core's `CONNECT` binding reaches: the script it names
+ * in the account's own Workers, or, bound to the connect gateway, the
+ * script its props name in the clients' dispatch namespace, as the gateway
+ * forwards to it (@grasp-os/shared/connect-gateway). A core with no
+ * `CONNECT` binding reaches no connect.
  */
-const namespacedConnect = (
+const connectOf = (
   account: AccountState,
-  live: VersionState
+  binding: z.infer<typeof bindingsSchema>[number] | undefined
 ): ScriptState | undefined => {
-  for (const scripts of account.namespaces.values()) {
-    for (const [name, script] of scripts) {
-      if (script.versions.includes(live) && name.endsWith("-core")) {
-        return scripts.get(`${name.slice(0, -"-core".length)}-connect`);
-      }
-    }
+  if (binding?.service !== connectGatewayScript) {
+    return binding?.service === undefined
+      ? undefined
+      : account.scripts.get(binding.service);
   }
-  return undefined;
+  const script = gatewayScriptOf(binding.props);
+  return script === undefined
+    ? undefined
+    : account.namespaces.get(clientDispatchNamespace)?.get(script);
 };
 
 /**
@@ -221,13 +227,10 @@ const answerProbe = async (
   const bindings = bindingsSchema.parse(live.metadata.bindings ?? []);
   // Connect's own, as core asks connect for them: the script its CONNECT
   // binding names, at its latest version.
-  const connectScript = bindings.find(
-    ({ name }) => name === "CONNECT"
-  )?.service;
   const connectBindings = bindingsSchema.parse(
-    (connectScript === undefined
-      ? namespacedConnect(account, live)
-      : account.scripts.get(connectScript)
+    connectOf(
+      account,
+      bindings.find(({ name }) => name === "CONNECT")
     )?.versions.at(-1)?.metadata.bindings ?? []
   );
   const clientId = bindings.find(({ name }) => name === "CLIENT_ID")?.json;
@@ -861,6 +864,11 @@ const routeOf = (
 export type Failure =
   /** A refusal: the admin retries none. */
   | 400
+  /**
+   * A 400 with no answer Cloudflare wrote, as a proxy in front of it may
+   * send: no error code to read.
+   */
+  | "400-uncoded"
   | 408
   | 429
   | 500
@@ -896,6 +904,12 @@ const failed = (failure: Exclude<Failure, "lost">): Response => {
   }
   if (failure === 400) {
     return refusal(400, 10_000, "Bad request");
+  }
+  if (failure === "400-uncoded") {
+    return new Response("<html>Bad request</html>", {
+      status: 400,
+      headers: { "content-type": "text/html" },
+    });
   }
   if (failure === 408) {
     return refusal(408, 10_000, "Request timeout");
