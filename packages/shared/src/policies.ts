@@ -233,17 +233,18 @@ export interface PolicyDocument {
   uploadedAt: string;
   /**
    * Reading: Grasp is going through it. Review: waiting for an admin to
-   * publish it. Published: its rules are in use. Grasp doesn't read
-   * policies yet, so an upload waits for review.
+   * decide its proposals and publish it. Published: its rules are in use.
+   * Failed: Grasp could not read it (`error`); an admin can have it read
+   * again, or make its rules by hand.
    */
   status: "reading" | "review" | "published" | "failed";
   /** Why reading failed. */
   error?: PolicyReadingProblem;
   /** What the policy covers, in a sentence or two. */
   summary?: string;
-  /** Rules proposed from it: none until Grasp reads policies. */
+  /** Rules Grasp proposed from it, each waiting for an admin to keep or leave out. */
   proposals: RuleProposal[];
-  /** Requirements no rule can check: none until Grasp reads policies. */
+  /** Requirements in it no rule can check. */
   unchecked: UncheckedRequirement[];
   /** ISO 8601. */
   publishedAt?: string;
@@ -341,8 +342,28 @@ export interface PoliciesApi {
    * own admins, over the apps they can see for anyone else.
    */
   findings: () => Promise<PolicyFindings>;
-  /** Keeps a policy document for review. The organization's own admins only; audited. */
+  /**
+   * Keeps a policy document and has Grasp read it into proposed rules,
+   * answering once it has: for review, or failed with why. The
+   * organization's own admins only; audited.
+   */
   upload: (upload: PolicyUpload) => Promise<PolicyDocument>;
+  /**
+   * Has Grasp read a policy again whose reading failed, or never finished,
+   * in place of what it proposed before. The organization's own admins
+   * only; audited.
+   */
+  readAgain: (policyId: string) => Promise<PolicyDocument>;
+  /**
+   * Keeps a proposed rule: it becomes a watching rule from its policy.
+   * The organization's own admins only; audited.
+   */
+  acceptProposal: (policyId: string, proposalId: string) => Promise<PolicyRule>;
+  /** Leaves a proposed rule out. The organization's own admins only; audited. */
+  rejectProposal: (
+    policyId: string,
+    proposalId: string
+  ) => Promise<PolicyDocument>;
   /** Puts a policy in use. The organization's own admins only; audited. */
   publish: (policyId: string) => Promise<PolicyDocument>;
   /**
