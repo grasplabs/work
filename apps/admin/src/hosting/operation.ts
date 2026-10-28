@@ -1667,6 +1667,25 @@ const rollsBack = async (
 };
 
 /**
+ * Sends `alert` to staff, a failure logged and not thrown: an alert that
+ * can't be sent never hides what the operation did, or why it stopped.
+ */
+const tellStaff = async (
+  context: ProvisionContext,
+  alert: StaffAlert
+): Promise<void> => {
+  try {
+    await context.alert?.(alert);
+  } catch (error) {
+    log.error("provision.alert_unsent", {
+      clientId: alert.clientId,
+      kind: alert.kind,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+  }
+};
+
+/**
  * Rolls client `held.clientId` back to the release it ran before
  * `failed`, which failed its probe with `code`: through its operation,
  * as runner `held`, audited as the system's rollback with the cause, and
@@ -1694,14 +1713,14 @@ const rollBackAfterProbe = async (
       clientId: held.clientId,
       error: operationErrorCode(error),
     });
-    await context.alert?.({
+    await tellStaff(context, {
       clientId: held.clientId,
       kind: "release_rollback_failed",
       subject,
     });
     throw error;
   }
-  await context.alert?.({
+  await tellStaff(context, {
     clientId: held.clientId,
     kind: "release_rolled_back",
     subject,

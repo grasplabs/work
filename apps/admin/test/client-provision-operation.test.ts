@@ -1891,7 +1891,11 @@ describe("provisioning a placed client", () => {
         )
       );
 
-    // A rollback that fails its probe too: thrown, and staff told so.
+    // A rollback that fails its probe too: thrown, and staff told so; an
+    // alert that can't be sent hides neither.
+    const unsent = vi
+      .fn<(alert: StaffAlert) => Promise<void>>()
+      .mockRejectedValue(new Error("channel down"));
     const stuck = await liveClient(first);
     await startClientRelease(db, staff, stuck.clientId, {
       releaseId: later.releaseId,
@@ -1899,7 +1903,7 @@ describe("provisioning a placed client", () => {
     stuck.account.coreProbe = { asClient: "someone-else" };
     const stuckErrors = vi.spyOn(console, "error").mockImplementation(() => {});
     const stuckError = await runClientProvision(
-      alerting,
+      { ...context, alert: unsent },
       await attempt(stuck.clientId)
     ).then(
       () => null,
@@ -1918,7 +1922,7 @@ describe("provisioning a placed client", () => {
         error: stuckError,
         operation: await operationOf(stuck.clientId),
       },
-      alerts: alert.mock.calls.map(([sent]) => sent),
+      alerts: [...alert.mock.calls, ...unsent.mock.calls].map(([sent]) => sent),
     }).toMatchObject({
       operation: { releaseId: first.releaseId, status: "done" },
       runs: { core: first.releaseId, connect: first.releaseId },
