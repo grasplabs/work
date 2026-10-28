@@ -6,6 +6,8 @@ CREATE TABLE `brain_export_files` (
 	`bytes` integer NOT NULL,
 	`rows` integer NOT NULL,
 	`cursor` text,
+	`object` text NOT NULL,
+	`stored` integer DEFAULT false NOT NULL,
 	PRIMARY KEY(`export_id`, `name`),
 	FOREIGN KEY (`export_id`) REFERENCES `brain_exports`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -20,6 +22,9 @@ CREATE TABLE `brain_exports` (
 	`completed_at` integer,
 	`expires_at` integer,
 	`manifest_sha256` text,
+	`manifest_object` text,
+	`collection_ids` text NOT NULL,
+	`purge_mark` integer NOT NULL,
 	`claim` text,
 	`claimed_at` integer
 );

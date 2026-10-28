@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6d61b05f-7f0c-4e5b-9eab-61a4fa498cc1",
+  "id": "988f9cf5-5dc4-46f8-82f8-83f2b1c02f9a",
   "prevId": "a12dc428-d868-43fc-8cc0-ace9f0b0b5e1",
   "tables": {
     "audit_outbox": {
@@ -764,6 +764,21 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "object": {
+          "name": "object",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stored": {
+          "name": "stored",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         }
       },
       "indexes": {},
@@ -859,6 +874,27 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        },
+        "manifest_object": {
+          "name": "manifest_object",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "collection_ids": {
+          "name": "collection_ids",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "purge_mark": {
+          "name": "purge_mark",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "claim": {

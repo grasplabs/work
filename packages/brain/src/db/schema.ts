@@ -450,6 +450,18 @@ export const brainExports = sqliteTable(
     expiresAt: timestamp("expires_at"),
     /** The manifest's SHA-256 (hex); null before it is written. */
     manifestSha256: text("manifest_sha256"),
+    /** Where the manifest is kept in the bucket; null before it is written. */
+    manifestObject: text("manifest_object"),
+    /**
+     * JSON array: the collections it holds, frozen as it began, so every
+     * file of it reads the same ones.
+     */
+    collectionIds: text("collection_ids").notNull(),
+    /**
+     * The newest purge record as it began (`brain_purges` rowid): a purge
+     * past it ran during the export (../exports.ts, `purgedSince`).
+     */
+    purgeMark: integer("purge_mark").notNull(),
     /** A run's claim while it writes, and when: one writer at a time. */
     claim: text(),
     claimedAt: timestamp("claimed_at"),
@@ -465,8 +477,8 @@ export const brainExports = sqliteTable(
 
 /**
  * The files an export wrote, in order (../exports.ts): each one's name,
- * SHA-256 and size, and, for a part of a long list, where the next part
- * goes on from (`cursor`).
+ * SHA-256, size and object, and, for a part of a long list, where the
+ * next part goes on from (`cursor`).
  */
 export const brainExportFiles = sqliteTable(
   "brain_export_files",
@@ -480,6 +492,14 @@ export const brainExportFiles = sqliteTable(
     bytes: integer().notNull(),
     rows: integer().notNull(),
     cursor: text(),
+    /**
+     * Where it is kept in the bucket: a key of its own each time it is
+     * written, recorded before it is uploaded, so no upload outlives its
+     * record unnoticed and no stale writer overwrites another's file.
+     */
+    object: text().notNull(),
+    /** Whether its upload finished: one that didn't is written again. */
+    stored: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [primaryKey({ columns: [table.exportId, table.name] })]
 );

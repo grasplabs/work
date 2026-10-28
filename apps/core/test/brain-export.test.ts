@@ -79,6 +79,14 @@ const statusOf = async (
   return response.status;
 };
 
+/** Every object the bucket keeps for export `exportId`. */
+const objectsOf = async (exportId: string): Promise<string[]> => {
+  const listed = await env.BRAIN_OBJECTS.list({
+    prefix: `exports/${exportId}/`,
+  });
+  return listed.objects.map(({ key }) => key);
+};
+
 const manifestSchema = z.object({
   format: z.string(),
   files: z.array(z.object({ name: z.string(), sha256: z.string() })),
@@ -236,6 +244,8 @@ describe("exporting the company's Brain", setUpTime, () => {
         "erasures.jsonl",
         "host-collection-teams.jsonl",
         "host-grants.jsonl",
+        // That the host's files are all written, naming them.
+        "hosted.jsonl",
         "memories.jsonl",
       ],
       holds: {
@@ -280,13 +290,13 @@ describe("exporting the company's Brain", setUpTime, () => {
       reason: status.reason,
       files: status.files.length,
       download: await statusOf(admin.session, exportId, "manifest.json"),
-      left: await env.BRAIN_OBJECTS.head(`exports/${exportId}/manifest.json`),
+      left: await objectsOf(exportId),
     }).toStrictEqual({
       state: "failed",
       reason: "knowledge.export_purged",
       files: 0,
       download: 404,
-      left: null,
+      left: [],
     });
   });
 
@@ -319,13 +329,13 @@ describe("exporting the company's Brain", setUpTime, () => {
       download: downloaded,
       state: status.state,
       reason: status.reason,
-      left: await env.BRAIN_OBJECTS.head(`exports/${exportId}/manifest.json`),
+      left: await objectsOf(exportId),
     }).toStrictEqual({
       before: "complete",
       download: 404,
       state: "failed",
       reason: "knowledge.export_purged",
-      left: null,
+      left: [],
     });
   });
 
