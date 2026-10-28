@@ -68,30 +68,29 @@
 import { log } from "@grasp-os/shared/log";
 import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 
 import type { Staff } from "../access.ts";
+import { sendStaffAlert } from "../alerts.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
-  clientDeploys,
+  clientProvisions,
   releases,
   rollouts,
   rolloutTargets,
 } from "../db/schema.ts";
 import { deployContext } from "../deploy/context.ts";
-import {
-  errorCode,
-  finishDeploy,
-  makeDeployWorkerLive,
-  prepareDeploy,
-  redeployKind,
-  shiftDeployTraffic,
-  startDeploy,
-  uploadDeployWorker,
-} from "../deploy/deploy.ts";
-import type { DeployContext, DeployKind } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/deploy.ts";
 import type { DeployErrorCode } from "../deploy/errors.ts";
+import { InventoryError } from "../hosting/inventory.ts";
+import {
+  ProvisionOperationError,
+  runClientProvision,
+  startClientRelease,
+  startedAs,
+} from "../hosting/operation.ts";
+import type { ChangeKind } from "../hosting/operation.ts";
 import {
   claimRun,
   currentRun,
@@ -110,15 +109,14 @@ import {
 } from "../workflow-steps.ts";
 import { ClientEndedError } from "./client-ended.ts";
 import {
+  parsePrevious,
   previousRunOf,
   ringsOf,
   runningRelease,
   skipReason,
   targetClient,
-  TrafficSplitError,
-  unfinishedPrevious,
 } from "./targets.ts";
-import type { PreviousRun, TargetClient } from "./targets.ts";
+import type { TargetClient } from "./targets.ts";
 
 /** What a rollout's run is started with: identifiers only, since Workflows stores them. */
 export interface RolloutParams {
@@ -139,15 +137,6 @@ export const retryEvent = (round: number): string => `retry-${round}`;
 export const approvalEvent = (ring: number): string => `approve-ring-${ring}`;
 
 /**
- * A Worker's new version's share of the traffic at each stage before all
- * of it, and how long it's held there.
- */
-export const gradualStages = [
-  { percent: 10, hold: "5 minutes" },
-  { percent: 50, hold: "5 minutes" },
-] as const;
-
-/**
  * The most steps a rollout's run may be expected to take: under
  * Workflows' default limit of 1,024 steps per instance, with room to
  * spare. A rollout over it is refused when it starts
@@ -156,9 +145,12 @@ export const gradualStages = [
  */
 export const stepBudget = 900;
 
-/** The steps of one client of a release with `apps` Workers, deployed by the rollout's run itself. */
-const clientSteps = (apps: number): number =>
-  5 + apps * (2 + 2 * gradualStages.length);
+/**
+ * The steps of one client deployed by the rollout's run itself, however
+ * many Workers its release has: its claim, its operation's run, done, and
+ * a failure recorded.
+ */
+const clientSteps = (_apps: number): number => 4;
 
 /**
  * The steps of the rollout's run a fleet client takes, however many
@@ -253,14 +245,13 @@ const claimStep = {
 } as const;
 
 /**
- * What the claim step leaves for the rest: identifiers only. `running`
- * is what the client ran as the rollout claimed it, which its new
- * versions share traffic with by stages.
+ * What the claim step leaves for the rest: identifiers only, the
+ * client's operation the rollout runs for its release among them.
  */
 type Claimed =
   | { state: "skipped" }
   | { state: "cancelled" }
-  | { state: "claimed"; deployId: string; running: PreviousRun };
+  | { state: "claimed"; operationId: string };
 
 /** How rollout `rolloutId` ended while still deploying clients. */
 type StoppedAs = "cancelled" | "failed";
@@ -292,16 +283,27 @@ const targetWhere = (rolloutId: string, clientId: string) =>
   );
 
 /**
- * Deploy `deployId` marked failed (`cancelled`) if it's still running, as
- * a statement to batch: a cancelled rollout never finishes it, and a
- * rollback of its client doesn't wait for it.
+ * The client's operation `operationId` marked failed (`cancelled`) if it's
+ * still running the change the rollout started (`change`) and the rollout
+ * still holds the client, as a statement to batch: a cancelled rollout
+ * never finishes it, and never touches a change another runner made since.
+ * Started again, it resumes (src/hosting/operation.ts).
  */
-const cancelDeploy = (db: AdminDatabase, deployId: string) =>
+const cancelDeploy = (
+  db: AdminDatabase,
+  held: { clientId: string; runId: string },
+  { operationId, change }: { operationId: string; change: number }
+) =>
   db
-    .update(clientDeploys)
+    .update(clientProvisions)
     .set({ status: "failed", error: "cancelled", updatedAt: new Date() })
     .where(
-      and(eq(clientDeploys.id, deployId), eq(clientDeploys.status, "running"))
+      and(
+        eq(clientProvisions.id, operationId),
+        eq(clientProvisions.status, "running"),
+        eq(clientProvisions.change, change),
+        stillHolds(held)
+      )
     );
 
 /**
@@ -365,11 +367,22 @@ const endIfCancelled = async (
     .select({
       status: rolloutTargets.status,
       deployId: rolloutTargets.deployId,
+      change: rolloutTargets.change,
     })
     .from(rolloutTargets)
     .where(targetWhere(rolloutId, clientId));
-  const deployId = target?.deployId ?? null;
-  const cancelling = deployId === null ? [] : [cancelDeploy(db, deployId)];
+  const operationId = target?.deployId ?? null;
+  const change = target?.change ?? null;
+  const cancelling =
+    operationId === null || change === null
+      ? []
+      : [
+          cancelDeploy(
+            db,
+            { clientId, runId: rolloutId },
+            { operationId, change }
+          ),
+        ];
   if (target?.status !== "deploying") {
     // Nothing of it started, or its target ended already (a rollback of
     // this client): skipped only while pending, released either way.
@@ -454,31 +467,6 @@ const claimClient = async (
 };
 
 /**
- * What `client` runs now (`previousRunOf`); a client whose traffic is
- * split has none to go back to, which stops the rollout
- * (`traffic_split`).
- */
-const readPrevious = async (
-  env: Env,
-  client: TargetClient
-): Promise<PreviousRun> => {
-  const { api, router } = await deployContext(env);
-  try {
-    return await previousRunOf(
-      api,
-      router.hosts,
-      `${client.id}.${router.domain}`,
-      client
-    );
-  } catch (error) {
-    if (error instanceof TrafficSplitError) {
-      throw stop("traffic_split", error.message);
-    }
-    throw error;
-  }
-};
-
-/**
  * Why rollout `params` skips `client` before claiming it, or null: one no
  * longer active (`not_active`); for a release rollout, what `skipReason`
  * says. A secrets rollout skips no active client here: it deploys the
@@ -510,66 +498,143 @@ const skipFor = async (
 };
 
 /**
- * What a claimed target deploys: the deploy it started already, or else
- * the release to start one of, the rollout's or, for a secrets rollout,
- * the one `client` runs; null when it has neither.
+ * What a run again of the release `client` runs takes live: new secrets
+ * for a secrets rollout; otherwise what waits for it, its settings, new
+ * secrets, or both.
  */
-const deployPlan = (
-  deployId: string | null,
-  releaseId: string | null,
-  client: TargetClient
-): { deployId: string } | { releaseId: string } | null => {
-  if (deployId !== null) {
-    return { deployId };
+const againKind = (params: RolloutParams, client: TargetClient): ChangeKind => {
+  if (params.releaseId === null) {
+    return "secrets";
   }
-  const release = releaseId ?? runningRelease(client);
-  return release === null ? null : { releaseId: release };
+  if (client.configPending && client.rotationPending) {
+    return "settings_and_secrets";
+  }
+  return client.rotationPending ? "secrets" : "settings";
 };
 
 /**
- * What the deploy a rollout of `releaseId` starts on `client` changes,
- * as its core records it (`redeployKind`). A secrets rollout (no release)
- * brings new secrets, and with them any settings of the client's that
- * wait for a deploy. A release rollout brings the `release`, unless the
- * client runs it already (`running`): then it reaches the client only for
- * what waits, its settings, its own rotated secrets, or both.
+ * Starts the rollout's change on client `clientId`, which it holds: its
+ * rollback target saved first, then the operation started for the
+ * release (or run again), and the change it started recorded, each while
+ * the rollout holds the client.
  */
-const deployKind = (
-  releaseId: string | null,
-  running: string | null,
-  client: TargetClient
-): DeployKind => {
-  if (releaseId === null) {
-    return redeployKind({ settings: client.configPending, secrets: true });
+const startTarget = async (
+  db: AdminDatabase,
+  params: RolloutParams,
+  clientId: string,
+  {
+    status,
+    change: recorded,
+    client,
+  }: { status: string; change: number | null; client: TargetClient }
+): Promise<Claimed> => {
+  const { rolloutId } = params;
+  // Read again now the rollout holds the client: no other runner changes
+  // what it runs from here. What skips it is decided again on this read:
+  // a newer release or a pin that landed between the rollout's first read
+  // and its claim skips it too, while nothing of it has started.
+  const held = (await targetClient(db, clientId)) ?? client;
+  const skip = await skipFor(db, params, held);
+  if (skip !== null && status === "pending") {
+    await skipTarget(db, rolloutId, clientId, skip);
+    return { state: "skipped" };
   }
-  if (running !== releaseId) {
-    return "release";
+  const running = runningRelease(held);
+  const release = params.releaseId ?? running;
+  if (release === null) {
+    await skipTarget(db, rolloutId, clientId, "no_release");
+    return { state: "skipped" };
   }
-  return redeployKind({
-    settings: client.configPending,
-    secrets: client.rotationPending,
-  });
+  const holder = { clientId, runId: rolloutId };
+  // What a rollback goes back to, read now the rollout holds the client,
+  // and recorded with the change it starts and its operation in the batch
+  // that starts it: a step that dies before it started nothing and
+  // recorded nothing, so its retry reads it again, from whatever staff
+  // took the client to since. Each record lands only with that start.
+  const previousRun = JSON.stringify(previousRunOf(held));
+  // As the client's runner: the rollout claimed it above. Run again, it
+  // takes live what waits: new secrets, its settings, or both.
+  const { operationId, change } = await startClientRelease(
+    db,
+    params.startedBy,
+    holder,
+    {
+      releaseId: release,
+      again: release === running,
+      what: againKind(params, held),
+      alongside: (started) => [
+        db
+          .update(rolloutTargets)
+          .set({
+            previous: previousRun,
+            deployId: started.operationId,
+            change: started.change,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              targetWhere(rolloutId, clientId),
+              stillHolds(holder),
+              startedAs(started)
+            )
+          ),
+      ],
+    }
+  );
+  // Started already, as a retry finds it (`hasAlready`): recorded. The way
+  // back saved is kept only for the change this target recorded; one
+  // someone else started and the rollout takes over goes back to what
+  // the client ran before that one, read now.
+  await db
+    .update(rolloutTargets)
+    .set({
+      deployId: operationId,
+      change,
+      previous:
+        change === recorded
+          ? sql`coalesce(${rolloutTargets.previous}, ${previousRun})`
+          : previousRun,
+      updatedAt: new Date(),
+    })
+    .where(and(targetWhere(rolloutId, clientId), stillHolds(holder)));
+  return { state: "claimed", operationId };
+};
+
+/**
+ * The operation `target` started, if its change is still client
+ * `clientId`'s latest, read once the rollout holds the client; else null.
+ * What the rollout read before claiming it, another runner could have
+ * changed since (a release or an apply that finished in between); held,
+ * nothing else changes it.
+ */
+const stillResumed = async (
+  db: AdminDatabase,
+  clientId: string,
+  target: { deployId: string | null; change: number | null }
+): Promise<string | null> => {
+  if (target.deployId === null || target.change === null) {
+    return null;
+  }
+  const held = await targetClient(db, clientId);
+  return held?.operation?.change === target.change ? target.deployId : null;
 };
 
 /**
  * Claims client `clientId` for the rollout, unless it skips it, and
- * returns the deploy it runs and what the client runs now. A client it
- * skips (`skipFor`) is skipped, audited, unless the rollout is deploying
- * it already; a rollout staff stopped goes no further, and ends the
- * client as every later step does (`endIfCancelled`): skipped, the deploy
- * an earlier try of the step started cancelled, and the client released
- * if that try claimed it. A secrets rollout reads the release the client
- * runs once it holds the client, so no other runner changes it after, and
- * skips (`no_release`) a client whose Workers don't run one release,
- * unless it started its deploy already. What a rollback puts back
- * (`previous`) is settled once, before anything of the release is live:
- * what the client runs now, or, when the rollout that last deployed to it
- * never finished it and this one retries its release or finds the client
- * between releases, what it ran before that one (`unfinishedPrevious`).
- * It's kept on the target with the deploy's id in the batch that starts
- * the deploy, so a try of the step that runs again finds both or neither,
- * never a deploy its target doesn't name. The target stays `pending`
- * until its first step starts (`markStarted`).
+ * returns its operation, taken to the release the rollout runs. A client
+ * it skips (`skipFor`) is skipped, audited, unless the rollout is
+ * deploying it already; a rollout staff stopped goes no further, and ends
+ * the client as every later step does (`endIfCancelled`). A secrets
+ * rollout runs the release the client runs again, read once it holds the
+ * client, and skips (`no_release`) one that runs no release whole. So does
+ * a release rollout reaching a client on the release already, for the
+ * settings or rotated secrets it waits for. What a rollback takes it back
+ * to (`previous`) is settled once, before its operation starts on the
+ * release: the release it last ran whole (`previousRunOf`). The target
+ * names the operation and `previous` once it started; a try of the step
+ * that runs again finds the operation on the release already, and goes on
+ * (`startClientRelease`). The target stays `pending` until its first step
+ * starts (`markStarted`).
  */
 const claimTarget = async (
   env: Env,
@@ -585,6 +650,7 @@ const claimTarget = async (
     .select({
       status: rolloutTargets.status,
       deployId: rolloutTargets.deployId,
+      change: rolloutTargets.change,
       previous: rolloutTargets.previous,
     })
     .from(rolloutTargets)
@@ -593,76 +659,107 @@ const claimTarget = async (
     return { state: "skipped" };
   }
   const client = await targetClient(db, clientId);
-  // A deploy it started already is resumed, whatever the client runs now:
-  // one that failed after its Workers went live runs the release already,
-  // and a retry still has to finish it.
+  // The change it started, while still the client's latest, is resumed,
+  // whatever the client runs now; one since (a rollback after a failed
+  // probe, or staff's) makes it start afresh.
+  const resumes =
+    target.deployId !== null &&
+    client?.operation?.change === target.change &&
+    target.change !== null;
   let skip: string | null = null;
-  if (client === undefined) {
+  if (client?.operation === null || client === undefined) {
     skip = "not_active";
-  } else if (target.deployId === null) {
+  } else if (!resumes) {
     skip = await skipFor(db, params, client);
   }
-  if (client === undefined || (skip !== null && target.status === "pending")) {
+  if (
+    client?.operation === null ||
+    client === undefined ||
+    (skip !== null && target.status === "pending")
+  ) {
     await skipTarget(db, rolloutId, clientId, skip ?? "not_active");
     return { state: "skipped" };
   }
   await claimClient(env, db, rolloutId, clientId);
-  // Read again now the rollout holds the client: no other runner changes
-  // what it runs from here.
-  const held = (await targetClient(db, clientId)) ?? client;
-  // The deploy it started already, or the release to start one of.
-  const plan = deployPlan(target.deployId, params.releaseId, held);
-  if (plan === null) {
-    await skipTarget(db, rolloutId, clientId, "no_release");
-    return { state: "skipped" };
+  const resumed = resumes ? await stillResumed(db, clientId, target) : null;
+  if (resumed !== null) {
+    return { state: "claimed", operationId: resumed };
   }
-  // Read before a deploy starts: one that stops here leaves none behind.
-  const running = await readPrevious(env, held);
-  if ("deployId" in plan) {
-    // An earlier try of the step started it, and kept `previous` with it.
-    return { state: "claimed", deployId: plan.deployId, running };
-  }
-  const carried = await unfinishedPrevious(db, clientId, {
-    releaseId: plan.releaseId,
-    running: running.release,
+  return await startTarget(db, params, clientId, {
+    status: target.status,
+    change: target.change,
+    client,
   });
-  const previous = carried ?? running;
-  // Its target names the deploy, and what a rollback of it puts back, in
-  // the batch that starts it. Still pending: claimed, but nothing of it
-  // started yet.
-  const deployId = await startDeploy(
-    db,
-    params.startedBy,
-    clientId,
-    plan.releaseId,
-    deployKind(params.releaseId, running.release, held),
-    (started) => [
-      db
-        .update(rolloutTargets)
-        .set({
-          deployId: started,
-          previous: JSON.stringify(previous),
-          updatedAt: new Date(),
-        })
-        .where(targetWhere(rolloutId, clientId)),
-    ]
-  );
-  return { state: "claimed", deployId, running };
 };
 
 /**
- * The deploy context for the rollout's work on client `clientId`, as its
- * runner: it stops (`runner_replaced`) as soon as the rollout no longer
- * holds the client, and writes nothing to its record after.
+ * Runs client `clientId`'s operation as rollout `rolloutId`, its runner:
+ * the operation stops (`runner_replaced`) as soon as the rollout no longer
+ * holds the client, and writes nothing to its record after. Its own
+ * failures and the inventory's stop the step at once, as they stop a
+ * provisioning attempt (src/hosting/workflow.ts); anything else is
+ * retried, resuming the operation.
+ *
+ * Taking the client to another release than it ran, a probe failing once
+ * live rolls it back on its own (src/hosting/operation.ts), staff told;
+ * the rollout then counts it failed (`release_rolled_back`). Running the
+ * release it runs again (a secrets rollout) is never rolled back.
  */
-const contextFor = async (
+const runOperation = async (
   env: Env,
-  rolloutId: string,
+  params: RolloutParams,
   clientId: string
-): Promise<DeployContext> => ({
-  ...(await deployContext(env)),
-  runner: { clientId, runId: rolloutId },
-});
+): Promise<void> => {
+  const db = adminDatabase(env.DB);
+  const target = await db
+    .select({
+      previous: rolloutTargets.previous,
+      change: rolloutTargets.change,
+    })
+    .from(rolloutTargets)
+    .where(targetWhere(params.rolloutId, clientId))
+    .get();
+  const ran = parsePrevious(target?.previous ?? null)?.release ?? null;
+  const toAnother = params.releaseId !== null && ran !== params.releaseId;
+  try {
+    await runClientProvision(
+      {
+        ...(await deployContext(env)),
+        alert: async (alert) => {
+          await sendStaffAlert(env, alert);
+        },
+      },
+      { clientId, runId: params.rolloutId },
+      { rollBackOnProbe: toAnother }
+    );
+  } catch (error) {
+    if (
+      error instanceof ProvisionOperationError ||
+      error instanceof InventoryError
+    ) {
+      throw stop(error.code, error.message);
+    }
+    throw error;
+  }
+  const operation = await db
+    .select({
+      releaseId: clientProvisions.releaseId,
+      change: clientProvisions.change,
+    })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId))
+    .get();
+  // Rolled back on its own: a change after the rollout's, on another release.
+  const rolledBack =
+    operation?.change !== target?.change ||
+    operation?.releaseId !== params.releaseId;
+  if (toAnother && rolledBack) {
+    throw stop(
+      "release_rolled_back",
+      `${clientId} failed its probe on ${params.releaseId ?? ""} and was rolled back`
+    );
+  }
+};
 
 /** Marks client `clientId` done in the rollout and releases it, audited once. */
 const completeTarget = async (
@@ -722,121 +819,31 @@ const clientStep = async <T>(
 };
 
 /**
- * The steps of client `clientId`'s deploy once the rollout claimed it,
- * each of them `clientStep`, named after `label`: prepared (marked
- * started first), each Worker uploaded, moved by stages and made live,
- * finished, then done.
+ * The steps of client `clientId` once the rollout claimed it, each of
+ * them `clientStep`, named after `label`: its operation run for the
+ * release (marked started first), then done. A placed client's stable
+ * scripts go live as each is uploaded, connect before core, which binds
+ * it; the operation's probe passes before its hostname moves.
  */
 const deployClaimed = async (
   env: Env,
   step: WorkflowStep,
   params: RolloutParams,
   clientId: string,
-  { deployId, running }: Extract<Claimed, { state: "claimed" }>,
   label: string
 ): Promise<void> => {
   const { rolloutId } = params;
   const db = adminDatabase(env.DB);
   const client = { rolloutId, clientId };
-  const context = async () => await contextFor(env, rolloutId, clientId);
-  const prepared = await clientStep(
-    step,
-    db,
-    client,
-    `${label} prepare`,
-    deployStepConfig,
-    async () => {
-      await markStarted(db, rolloutId, clientId);
-      return await prepareDeploy(await context(), deployId);
-    }
-  );
-  for (const app of prepared?.apps ?? []) {
-    const before = running.versions[app];
-    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    const uploaded = await clientStep(
-      step,
-      db,
-      client,
-      `${label} ${app} upload`,
-      deployStepConfig,
-      async () =>
-        await uploadDeployWorker(
-          await context(),
-          deployId,
-          app,
-          prepared?.databases ?? {},
-          before
-        )
-    );
-    if (uploaded === null) {
-      // The deploy was done already: an earlier run of this step's
-      // successors got that far.
-      break;
-    }
-    // Versions with different secrets can't share traffic, so new ones go
-    // live at once: a rotation still to go live (the new versions carry a
-    // generation the router doesn't send yet), shared secrets changed in
-    // Secrets Store since the version before, or one whose secrets aren't
-    // on record. A secrets rollout exists to change them: always at once.
-    const sameSecrets =
-      params.releaseId !== null &&
-      uploaded.sameSecrets &&
-      prepared?.generation === running.generation;
-    // The release the client runs already: only its config (sign-in)
-    // changes, with the same code, so at once too.
-    const newCode = running.release !== params.releaseId;
-    if (
-      !uploaded.live &&
-      sameSecrets &&
-      newCode &&
-      before !== undefined &&
-      before !== uploaded.version
-    ) {
-      for (const { percent, hold } of gradualStages) {
-        // oxlint-disable-next-line no-await-in-loop -- one stage at a time
-        await clientStep(
-          step,
-          db,
-          client,
-          `${label} ${app} ${percent}%`,
-          quickStep,
-          async () => {
-            await shiftDeployTraffic(await context(), deployId, app, {
-              version: uploaded.version,
-              previous: before,
-              percent,
-            });
-          }
-        );
-        // oxlint-disable-next-line no-await-in-loop -- held before the next stage
-        await step.sleep(`${label} ${app} ${percent}% hold`, hold);
-      }
-    }
-    // oxlint-disable-next-line no-await-in-loop -- live before the next Worker
-    await clientStep(
-      step,
-      db,
-      client,
-      `${label} ${app} live`,
-      quickStep,
-      async () => {
-        await makeDeployWorkerLive(
-          await context(),
-          deployId,
-          app,
-          uploaded.version
-        );
-      }
-    );
-  }
   await clientStep(
     step,
     db,
     client,
-    `${label} finish`,
+    `${label} run`,
     deployStepConfig,
     async () => {
-      await finishDeploy(await context(), deployId);
+      await markStarted(db, rolloutId, clientId);
+      await runOperation(env, params, clientId);
     }
   );
   await clientStep(step, db, client, `${label} done`, quickStep, async () => {
@@ -868,7 +875,7 @@ export const deployClient = async (
     return claimed.state === "skipped";
   }
   try {
-    await deployClaimed(env, step, params, clientId, claimed, label);
+    await deployClaimed(env, step, params, clientId, label);
     return true;
   } catch (error) {
     if (error instanceof ClientEndedError) {

@@ -1,11 +1,13 @@
 /**
  * Publishes releases to the test pool's R2 bucket laid out as CI publishes
  * them (scripts/release/upload-release.ts): content-addressed blobs first,
- * then `releases/<id>/manifest.json`.
+ * then the limit evidence (with the SHA-256 R2 checks on write), then
+ * `releases/<id>/manifest.json`.
  */
 import {
   assetContentKey,
   assetKey,
+  limitEvidenceKey,
   MANIFEST_VERSION,
   manifestKey,
   migrationKey,
@@ -14,8 +16,13 @@ import {
   sha256OfBytes,
 } from "@grasp-os/shared/release";
 import type {
+  LimitEvidence,
+  LimitEvidenceFile,
+  PlatformLimits,
+  PreviousRelease,
   ReleaseCompatibility,
   ReleaseManifest,
+  RuntimeProfile,
   WorkerEntry,
 } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
@@ -53,7 +60,38 @@ export interface ReleaseSpec {
    * without it, none, as releases built before that did.
    */
   compatibleFrom?: Record<string, number>;
+  /** Its platform limits: {@link testLimits} by default, none when null. */
+  platformLimits?: PlatformLimits | null;
+  /** The release before it, as its evidence file names it: none by default. */
+  previousRelease?: PreviousRelease;
+  /** Its limit evidence, made for the release once its id and commit are known. */
+  limitEvidence?: (release: { id: string; commit: string }) => LimitEvidence[];
 }
+
+/** The platform limits a test release has unless its spec says otherwise. */
+export const testLimits: PlatformLimits = {
+  workflowSteps: 1000,
+  workflowBranches: 8,
+};
+
+/**
+ * Evidence for raising `limit` to `raisedTo` on `profile`, as CI makes it
+ * for `release`: its own commit and id, a capacity run on that commit.
+ */
+export const evidenceFor = (
+  release: { id: string; commit: string },
+  limit: string,
+  raisedTo: number | null,
+  profile: RuntimeProfile = "cloudflare"
+): LimitEvidence => ({
+  limit,
+  raisedTo,
+  commit: release.commit,
+  releaseId: release.id,
+  profile,
+  capacityRun: { jobId: 4242, commit: release.commit, profile },
+  securityReview: { pullRequest: 101, approvedBy: "nickruigrok" },
+});
 
 /** What a test release's code works with unless its spec says otherwise. */
 export const declared: ReleaseCompatibility = {
@@ -72,6 +110,8 @@ export interface TestRelease {
   /** The manifest as it's stored. */
   manifestText: string;
   blobs: Map<string, Uint8Array>;
+  /** Its limit evidence file as it's stored; none without limits. */
+  limitEvidenceText: string | undefined;
 }
 
 // A fresh range per test file, rising within it, so each new release is the
@@ -150,6 +190,29 @@ const databasesOf = (
   };
 };
 
+/** The limits a release of `spec` records, and its evidence file. */
+const limitsOf = (
+  spec: ReleaseSpec,
+  id: string,
+  commit: string
+): {
+  manifest: { platformLimits?: PlatformLimits };
+  evidence: LimitEvidenceFile | undefined;
+} => {
+  if (spec.platformLimits === null) {
+    return { manifest: {}, evidence: undefined };
+  }
+  return {
+    manifest: { platformLimits: spec.platformLimits ?? testLimits },
+    evidence: {
+      releaseId: id,
+      commit,
+      previousRelease: spec.previousRelease ?? null,
+      limitEvidence: spec.limitEvidence?.({ id, commit }) ?? [],
+    },
+  };
+};
+
 /** Builds release `id` from `spec`, without publishing it. */
 export const buildRelease = async (
   spec: ReleaseSpec,
@@ -190,6 +253,7 @@ export const buildRelease = async (
     blobs.set(assetKey(hash), bytes);
   }
   const commit = `${id.slice(-7)}${randomHex(33)}`;
+  const limits = limitsOf(spec, id, commit);
   const manifest = releaseManifestSchema.parse({
     manifestVersion: MANIFEST_VERSION,
     releaseId: id,
@@ -242,6 +306,7 @@ export const buildRelease = async (
             class_name: "WorkflowDispatcher",
           },
           { type: "service", name: "CONNECT", service: "grasp-os-connect" },
+          { type: "worker_loader", name: "LOADER" },
           { type: "version_metadata", name: "CF_VERSION_METADATA" },
           { type: "assets", name: "ASSETS" },
           { type: "d1", name: "DB", id: "$D1_DB_ID" },
@@ -282,12 +347,17 @@ export const buildRelease = async (
             ...databasesOf(spec, migrations.length - 1),
           },
         }),
+    ...limits.manifest,
   });
   return {
     id,
     manifest,
     manifestText: `${JSON.stringify(manifest, null, 2)}\n`,
     blobs,
+    limitEvidenceText:
+      limits.evidence === undefined
+        ? undefined
+        : `${JSON.stringify(limits.evidence)}\n`,
   };
 };
 
@@ -302,8 +372,25 @@ export const putBlobs = async (
   );
 };
 
-/** Stores a release's manifest, as CI does last. */
+/**
+ * Stores a release's limit evidence with its SHA-256, as CI does just
+ * before the manifest, R2 checking it on write.
+ */
+export const putLimitEvidence = async (
+  release: Pick<TestRelease, "id" | "limitEvidenceText">
+): Promise<void> => {
+  if (release.limitEvidenceText === undefined) {
+    return;
+  }
+  const bytes = encoder.encode(release.limitEvidenceText);
+  await env.RELEASES.put(limitEvidenceKey(release.id), bytes, {
+    sha256: await sha256OfBytes(bytes),
+  });
+};
+
+/** Stores a release's manifest, as CI does last, its evidence just before. */
 export const putManifest = async (release: TestRelease): Promise<void> => {
+  await putLimitEvidence(release);
   await env.RELEASES.put(manifestKey(release.id), release.manifestText);
 };
 

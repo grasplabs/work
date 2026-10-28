@@ -4,6 +4,7 @@ import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import type {
   GapAskedNotification,
   RunFailedNotification,
+  TriggerStoppedNotification,
 } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
@@ -53,6 +54,7 @@ export type InboxKind =
   | "packages"
   | "appApproval"
   | "failedRun"
+  | "stoppedSchedule"
   | "decision";
 
 /** Where an item can be opened: the page of what it is about. */
@@ -79,6 +81,7 @@ export type InboxSource =
     }
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
+  | { type: "stopped"; notification: TriggerStoppedNotification }
   | { type: "decision"; decision: DecisionView };
 
 export interface InboxItem {
@@ -128,6 +131,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   packages: "apps",
   appApproval: "apps",
   failedRun: "workflows",
+  stoppedSchedule: "workflows",
   decision: "workflows",
 };
 
@@ -429,6 +433,31 @@ const askedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
     ];
   });
 
+/** A schedule trigger of the person's that stopped after its starts kept failing, until they enable it again. */
+const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "trigger_stopped") {
+      return [];
+    }
+    const { workflowName, at } = notification;
+    return [
+      {
+        id: `stopped:${notification.id}`,
+        kind: "stoppedSchedule",
+        title: t`The schedule of ${workflowName} stopped`,
+        context: workflowName,
+        body: [
+          t`Its runs kept failing to start, so it starts no more. Fix what stopped them, then enable the trigger again: it goes on from its next time.`,
+        ],
+        facts: [{ label: t`Stopped`, value: formatDateTime(at) }],
+        forWhom: { person: me },
+        date: at,
+        urgent: false,
+        source: { type: "stopped", notification },
+      },
+    ];
+  });
+
 /**
  * A decision a workflow's run waits for the person to answer: answered on
  * its own page, where they review what it is about and confirm.
@@ -532,6 +561,7 @@ export const inboxItems = (
     ...versionItems(versions, me, readAt),
     ...(failed === undefined ? [] : failedItems(failed, me)),
     ...(failed === undefined ? [] : askedItems(failed, me)),
+    ...(failed === undefined ? [] : stoppedItems(failed, me)),
     ...reconnect,
   ].toSorted(order);
 };

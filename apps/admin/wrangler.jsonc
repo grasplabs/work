@@ -79,15 +79,7 @@
   "triggers": {
     "crons": ["*/5 * * * *", "0 6,7 * * 1-5", "15 7 * * *", "45 * * * *"],
   },
-  // Onboards a client (src/provision/workflow.ts): an instance per attempt,
-  // each claimed in D1 first (src/runners.ts), so two runs for one
-  // client can't overlap.
   "workflows": [
-    {
-      "name": "grasp-os-provision-client",
-      "binding": "PROVISION_CLIENT",
-      "class_name": "ProvisionClient",
-    },
     // Rolls a release out to clients, ring by ring (src/rollout/workflow.ts):
     // an instance per rollout, which claims each client in D1 while it
     // deploys it (src/runners.ts), so it never runs beside the
@@ -143,10 +135,17 @@
   "kv_namespaces": [
     { "binding": "ROUTER_HOSTS", "id": "router-hosts-namespace" },
   ],
+  // The clients' Workers for Platforms namespace, as the router binds it
+  // (@grasp-os/shared/router, `clientDispatchNamespace`): how the admin
+  // reaches a client's core there, to check it before its hostname goes in
+  // the map and to ask it what staff read (src/clients/core-address.ts).
+  "dispatch_namespaces": [
+    { "binding": "DISPATCHER", "namespace": "grasp-os-clients" },
+  ],
   // What provisioning and deploys need from the account's Secrets Store
-  // (src/deploy/context.ts): the tenant admin's token, which only creates
-  // accounts and makes the deployer a member (src/provision/workflow.ts);
-  // the deployer's token, with deploy permissions only, on every client
+  // (src/deploy/context.ts): the tenant admin's token, which created client
+  // accounts while clients had accounts of their own, and nothing reads
+  // now (it goes with the account-per-client path); the deployer's token, with deploy permissions only, on every client
   // account (AI Gateway edit among them: provisioning makes each client's
   // gateway; and Zone and Email Sending edit: a deploy makes the client's
   // sending domain, src/cloudflare/email-sending.ts); the keys each client's own secrets are derived from; and the

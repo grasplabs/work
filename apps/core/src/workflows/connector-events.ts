@@ -36,12 +36,16 @@ import {
   allowingPermissionSql,
   listeningPermissionSql,
 } from "../permissions.ts";
+import {
+  startConnectorTriggers,
+  triggerListeners,
+} from "./connector-triggers.ts";
 import { lineageRefusals, stampedEventRun } from "./mail-stamps.ts";
 import { deliveryRoom, startRun } from "./runs.ts";
 
 // Events connections report, to workflows' event triggers
 // (trigger-registry.ts). Connect can't reach core, so core drives it, as
-// it drains connect's audit outbox: every minute, the cron trigger
+// it drains connect's audit outbox: every minute, the clock
 // tells connect who listens for events where (`listenersOf`), which is
 // where connect listens and nowhere else, then takes the events connect
 // read, delivers each here, and settles them (`pumpConnectorEvents`).
@@ -77,6 +81,10 @@ import { deliveryRoom, startRun } from "./runs.ts";
 // (`stampedEventRun`). The run never gets the stamp. A run its lineage
 // refuses is audited (`workflow.event.refused`) and the event settled,
 // since delivering it again would be refused again.
+//
+// The same event starts independent workflows' connector triggers too
+// (connector-triggers.ts), by their own grants; connect listens where
+// they do as well.
 
 /**
  * The event triggers of Apps' current versions for `event`'s type, in
@@ -203,9 +211,11 @@ export const deliverConnectorEvent = async (
   const withRoom = receivers.filter((_, index) => rooms[index] !== "capped");
   // A run's own mail, to a mailbox it watches through a connection,
   // starts its runs under the run (mail-stamps.ts), admitted against its
-  // lineage; anything else is a root. Asked only when a workflow listens.
-  const parent =
-    receivers.length === 0 ? undefined : await stampedEventRun(env, delivered);
+  // lineage; anything else is a root. An App's workflows join an App run's
+  // lineage only; connector triggers decide for themselves
+  // (connector-triggers.ts). Asked once, for both.
+  const stamped = await stampedEventRun(env, delivered);
+  const parent = stamped?.kind === "app" ? stamped.runId : undefined;
   // A refusal recorded is final for its delivery: one delivered again
   // (its acknowledgement lost) starts nothing, even once an operator
   // raised the limits that refused it.
@@ -239,6 +249,20 @@ export const deliverConnectorEvent = async (
         })
     )
   );
+  // Independent workflows' connector triggers, each by its own grant: one
+  // that may go another time fails the delivery, after the rest are tried.
+  let triggerRuns = 0;
+  let triggersFailed: unknown;
+  try {
+    ({ runs: triggerRuns } = await startConnectorTriggers(
+      env,
+      event,
+      same,
+      stamped
+    ));
+  } catch (error) {
+    triggersFailed = error;
+  }
   const refused = lineageRefusals(started, toStart);
   const failures = started.flatMap((result): unknown[] =>
     result.status === "rejected" &&
@@ -253,7 +277,7 @@ export const deliverConnectorEvent = async (
       ...errorFields(failure),
     });
   }
-  if (failures.length > 0) {
+  if (failures.length > 0 || triggersFailed !== undefined) {
     throw new Error(`Event ${event.type} didn't start every run it should`);
   }
   if (withRoom.length < receivers.length) {
@@ -310,7 +334,9 @@ export const deliverConnectorEvent = async (
       })
     );
   }
-  return { runs: receivers.length - refused.length - refusedBefore.size };
+  return {
+    runs: receivers.length - refused.length - refusedBefore.size + triggerRuns,
+  };
 };
 
 /**
@@ -357,6 +383,9 @@ export const listenersOf = async (env: Env): Promise<EventListener[]> => {
       }
     }
   }
+  for (const listener of await triggerListeners(env, eventListenersMax + 1)) {
+    listeners.set(JSON.stringify(listener), listener);
+  }
   const all = [...listeners.values()];
   if (all.length > eventListenersMax) {
     log.error("workflow.event_listeners_capped", {
@@ -367,10 +396,10 @@ export const listenersOf = async (env: Env): Promise<EventListener[]> => {
   return all.slice(0, eventListenersMax);
 };
 
-/** Events one cron run delivers, at most: one take's worth. */
+/** Events one clock run delivers, at most: one take's worth. */
 const defaultEventsPerRun = 100;
 
-/** Events one cron run delivers: fewer in tests (`CONNECTOR_EVENTS_PER_RUN`). */
+/** Events one clock run delivers: fewer in tests (`CONNECTOR_EVENTS_PER_RUN`). */
 const eventsPerRun = (env: Env): number => {
   const configured = Number(env.CONNECTOR_EVENTS_PER_RUN);
   return Number.isInteger(configured) && configured > 0
@@ -407,7 +436,7 @@ const deliverOne = async (
 };
 
 /**
- * Every minute, from the cron trigger: tells connect who listens for
+ * Every minute, from the clock: tells connect who listens for
  * events where, then delivers at most `eventsPerRun` of the events it
  * read and settles them; the rest wait for the next run. Those read
  * before are delivered even when telling connect fails.

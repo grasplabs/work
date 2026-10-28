@@ -40,7 +40,7 @@ import { stopsUnsettled } from "./workflows/resource-runs.ts";
 // - Learning that a draft exists: it is answered as an App that isn't
 //   there (`app.not_found`), in lists and errors alike.
 // - A trigger or run outliving the archive: archiving cancels the App's
-//   unfinished runs (`cancelRunsOf`), the cron trigger cancels any left or
+//   unfinished runs (`cancelRunsOf`), the clock cancels any left or
 //   started in a race with it (`cancelArchivedRuns`), and a start reads
 //   the status again once its row is written (`startRun`). A restore
 //   waits for the stops still settling (`cancelledBeforeRestore`).
@@ -113,7 +113,7 @@ const maxCancelPages = 10;
 /**
  * Finishes, before a restore, the cancels its archive still owes: every
  * unfinished run of the App not yet asked to cancel (a cancel that failed,
- * one the cron trigger hadn't reached, or a start that overlapped the
+ * one the clock hadn't reached, or a start that overlapped the
  * archive's write), so none of them goes on as the App's again. While it
  * is archived nothing of it starts, so each is the archive's.
  */
@@ -130,7 +130,7 @@ const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
   const by = row?.by ?? { userId: app.owner, staff: false };
   // A page at a time, until a page comes back short. A cancel that failed
   // refuses the restore: once restored, nothing would ask again, and the
-  // run would go on as the App's (the cron trigger asks while archived).
+  // run would go on as the App's (the clock asks while archived).
   let finished = false;
   for (let page = 0; page < maxCancelPages && !finished; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
@@ -152,7 +152,7 @@ const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
     finished = asked < cancelPage;
   }
   if (!finished) {
-    // Too many to finish in one call: the restore waits for the cron trigger.
+    // Too many to finish in one call: the restore waits for the clock.
     throw appErrors.create("app.conflict");
   }
   // A short page proves every cancel was asked, not that every stop of a
@@ -160,7 +160,7 @@ const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
   // sender that died before sending, is skipped for `stopRetryMs`. Once
   // restored, no repair looks at the App's runs again, so such a run would
   // go on. So the restore waits until each claimed stop has ended its run,
-  // the cron trigger sending again any that was lost. Keeping a repair
+  // the clock sending again any that was lost. Keeping a repair
   // alive across the restore instead would have to tell an archive's stops
   // apart from runs the restored App starts afresh.
   if (await stopsUnsettled(env, app.id)) {

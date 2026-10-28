@@ -12,6 +12,7 @@ import type {
   PolicyBook,
   PolicyDocument,
   PolicyException,
+  PolicyFindings,
   PolicyRule,
   PolicyUpload,
   RuleInput,
@@ -30,6 +31,7 @@ import {
   policyExceptions,
   policyRules,
 } from "./db/core/schema.ts";
+import { policyFindings } from "./policy-findings.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -557,6 +559,14 @@ export class PoliciesRpc extends CoreRpcTarget implements PoliciesApi {
 
   async book(): Promise<PolicyBook> {
     return await withPerson(this.#check, async () => await readBook(this.#env));
+  }
+
+  async findings(): Promise<PolicyFindings> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await policyFindings(this.#env, by, await readBook(this.#env))
+    );
   }
 
   async upload(input: PolicyUpload): Promise<PolicyDocument> {

@@ -7,8 +7,8 @@ import { z } from "zod";
 import { appHost } from "../src/durable-objects.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { requestGranted } from "./apps.ts";
-import { runCron } from "./cron.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
 import type { Opened, Screens } from "./screen-client.ts";
 import {
@@ -845,7 +845,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     });
   });
 
-  it("tells an App's host later, from the cron trigger, when it can't be reached when access drops", async () => {
+  it("tells an App's host later, from the clock, when it can't be reached when access drops", async () => {
     const opened = await openedApp();
     const { them, lease, member } = await memberOf(opened);
     const follower = await followedList(opened, member.api.screens, lease);
@@ -858,13 +858,13 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     await core.authenticate().apps.members.remove(opened.app, them);
     await scheduler.wait(1500);
     const before = follower.state.released;
-    await runCron();
+    await runMinuteTasks();
 
     expect(before).toBeFalsy();
     await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });
 
-  it("drops a kept revocation once it is a day old, however many others the cron trigger tells first", async () => {
+  it("drops a kept revocation once it is a day old, however many others the clock tells first", async () => {
     const opened = await openedApp();
     const now = Date.now();
     const keep = env.DB.prepare(
@@ -881,7 +881,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       keep.bind(expired, opened.app, 1, now - 25 * 60 * 60 * 1000),
     ]);
 
-    await runCron();
+    await runMinuteTasks();
 
     const left = await env.DB.prepare(
       "select id from access_revocations where id = ?"
@@ -891,7 +891,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     expect(left).toBeNull();
   });
 
-  it("clears the screen from the cron trigger when the database goes away right after an unsharing commits", async () => {
+  it("clears the screen from the clock when the database goes away right after an unsharing commits", async () => {
     const opened = await openedApp();
     const { them, lease, member } = await memberOf(opened);
     const follower = await followedList(opened, member.api.screens, lease);
@@ -908,13 +908,13 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     await outcome(core.authenticate().apps.members.remove(opened.app, them));
     await scheduler.wait(1500);
     const before = follower.state.released;
-    await runCron();
+    await runMinuteTasks();
 
     expect(before).toBeFalsy();
     await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });
 
-  it("clears the screen of someone removed who reached the App through a team, from the cron trigger when the database goes away right after", async () => {
+  it("clears the screen of someone removed who reached the App through a team, from the clock when the database goes away right after", async () => {
     const opened = await openedApp();
     const admin = await personApi("admin");
     const member = await personApi("user");
@@ -940,7 +940,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     await outcome(core.authenticate().members.remove(member.userId));
     await scheduler.wait(1500);
     const before = follower.state.released;
-    await runCron();
+    await runMinuteTasks();
 
     expect(before).toBeFalsy();
     await expect(whenLetGo(follower)).resolves.toStrictEqual({
@@ -971,7 +971,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     });
   });
 
-  it("stops showing builders' data to someone lowered to user, from the cron trigger when the database goes away right after", async () => {
+  it("stops showing builders' data to someone lowered to user, from the clock when the database goes away right after", async () => {
     const opened = await openedApp(withSecrets());
     const tell = referenceTo<{ text: string }, unknown, "mutation">(
       opened.release,
@@ -1014,7 +1014,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     await outcome(core.authenticate().members.setRole(member.userId, "user"));
     await scheduler.wait(1500);
     const before = showsSecret();
-    await runCron();
+    await runMinuteTasks();
 
     expect(before).toBeTruthy();
     await vi.waitFor(() => {
@@ -1032,7 +1032,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
         .bind(opened.app)
         .first<number>("kept");
     // A connection that can't tell the App's host: whatever it keeps
-    // stays for the cron trigger.
+    // stays for the clock.
     const { core } = await openRpc(opened.cookie, {
       coreEnv: { ...env, APPS: unreachableRevocations(env.APPS) },
     });

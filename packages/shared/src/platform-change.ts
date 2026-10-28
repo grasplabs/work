@@ -30,7 +30,7 @@ export type PlatformChange = z.infer<typeof platformChangeSchema>;
 
 /**
  * Where the admin tells core of a platform update that made no new
- * version, a rollback to one core has run before, which the cron would
+ * version, a rollback to one core has run before, which the clock would
  * never record again: core records it as `platform.updated` (core's
  * src/platform-updates.ts). Behind the router-secret check like every
  * route, and signed (`platformUpdateSignatureHeader`).

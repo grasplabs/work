@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { canonicalJson } from "../src/json.ts";
+import { canonicalJson, valueAtPointer } from "../src/json.ts";
 
 describe("canonical JSON", () => {
   it("gives the same text whatever order the keys were written in", () => {
@@ -27,5 +27,74 @@ describe("canonical JSON", () => {
 
   it("refuses numbers JSON can't represent", () => {
     expect(() => canonicalJson({ amount: Number.NaN })).toThrow(TypeError);
+  });
+});
+
+describe("JSON Pointers", () => {
+  // RFC 6901, section 5's document and pointers.
+  const document = {
+    foo: ["bar", "baz"],
+    "": 0,
+    "a/b": 1,
+    "c%d": 2,
+    "e^f": 3,
+    "g|h": 4,
+    "i\\j": 5,
+    'k"l': 6,
+    " ": 7,
+    "m~n": 8,
+  };
+
+  it("resolves the RFC's examples", () => {
+    expect(
+      [
+        "",
+        "/foo",
+        "/foo/0",
+        "/",
+        "/a~1b",
+        "/c%d",
+        "/e^f",
+        "/g|h",
+        "/i\\j",
+        '/k"l',
+        "/ ",
+        "/m~0n",
+      ].map((pointer) => valueAtPointer(document, pointer))
+    ).toStrictEqual([
+      document,
+      ["bar", "baz"],
+      "bar",
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+    ]);
+  });
+
+  it("finds nothing where the document has nothing, nor for what isn't a pointer", () => {
+    const pointers = [
+      "/foo/2",
+      "/foo/01",
+      "/foo/-",
+      "/missing/deeper",
+      "/foo/0/x",
+      "foo",
+      "/~2",
+      "/a~",
+      "{{ secrets }}",
+      "/constructor",
+      "/__proto__",
+    ];
+    expect(
+      pointers.filter(
+        (pointer) => valueAtPointer(document, pointer) !== undefined
+      )
+    ).toStrictEqual([]);
   });
 });

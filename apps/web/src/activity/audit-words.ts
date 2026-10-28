@@ -150,6 +150,15 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "app", text: msg`Changed a domain` },
   { action: "member.removed", text: msg`Removed a member` },
+  {
+    action: "member.erasure.requested",
+    text: msg`Asked to erase a removed member`,
+  },
+  { action: "member.erased", text: msg`Erased a removed member` },
+  {
+    action: "member.address.released",
+    text: msg`Let an erased member's old address in again`,
+  },
   { action: "member.role", text: msg`Changed a member's role` },
   { action: "member.invited", text: msg`Invited someone` },
   {

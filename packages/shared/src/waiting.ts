@@ -17,6 +17,7 @@ import type { AppId } from "./ids.ts";
 import type {
   GapAskedNotification,
   RunFailedNotification,
+  TriggerStoppedNotification,
 } from "./notifications.ts";
 import { grantReviewSchema } from "./permissions.ts";
 import type { Permission } from "./permissions.ts";
@@ -122,6 +123,13 @@ export interface OpenQuestionItem extends ItemBase {
   notification: GapAskedNotification;
 }
 
+/** A schedule trigger the person owns that stopped after too many failed starts: enabled again where they manage it. */
+export interface StoppedScheduleItem extends ItemBase {
+  kind: "stoppedSchedule";
+  verdicts: never[];
+  notification: TriggerStoppedNotification;
+}
+
 /** A connection whose access ran out, which the person can sign in to again on its page. */
 export interface SignInAgainItem extends ItemBase {
   kind: "signInAgain";
@@ -147,6 +155,7 @@ export type WaitingItem =
   | GoLiveItem
   | FailedRunItem
   | OpenQuestionItem
+  | StoppedScheduleItem
   | SignInAgainItem
   | DecisionItem;
 

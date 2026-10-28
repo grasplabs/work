@@ -25,7 +25,7 @@ import { appHost } from "./durable-objects.ts";
 // its release revoked, release-retention.ts), for everyone of the App,
 // keep a revocation for each App they reached in their own batch
 // (`revocationsOf`), so it commits with the change or not at all, and tell
-// the hosts from those rows once it has (`tellKept`); the cron trigger
+// the hosts from those rows once it has (`tellKept`); the clock
 // tells again whatever is still kept (`retryAccessRevocations`). Better
 // Auth's team endpoints (a team left or deleted, auth/auth.ts) commit in
 // the plugin's own batch, so they look the Apps up after it and call
@@ -71,7 +71,7 @@ const withRetries = async <T>(attempt: () => Promise<T>): Promise<T> => {
 };
 
 /**
- * Keeps a revocation `app`'s host couldn't be told of, for the cron
+ * Keeps a revocation `app`'s host couldn't be told of, for the clock
  * trigger to tell it again (`retryAccessRevocations`). A database away
  * too is logged: the screens then fall back on the check before each push.
  */
@@ -133,7 +133,7 @@ const tellHost = async (
  * Tells the hosts of `apps` that `userIds` (everyone, when `null`) may
  * have lost their role in them, after a change that couldn't keep its
  * revocations in its own batch committed. A host that still can't be
- * reached after its retries is told again by the cron trigger
+ * reached after its retries is told again by the clock
  * (`retryAccessRevocations`). No periodic recheck (spec 11.4).
  */
 const accessMayHaveDropped = async (
@@ -159,7 +159,7 @@ const accessMayHaveDropped = async (
  * after `retryDelaysMs` while the host can't be reached. A host that
  * restarted meanwhile let go of every connection, and each looks again
  * as it follows anew, reading the version then. One that still can't be
- * reached gets a revocation for everyone, kept for the cron trigger
+ * reached gets a revocation for everyone, kept for the clock
  * (`keepForLater`): the looks it causes read the version too, so no page
  * misses it. Never throws: the version is current already.
  */
@@ -210,7 +210,7 @@ export const revocationsOf = (
 /**
  * Tells the host of one revocation a change kept (`revocationsOf`), and
  * drops the row once it took it. A host that still can't be reached after
- * `retryDelaysMs`, or a row the database won't drop, is left to the cron
+ * `retryDelaysMs`, or a row the database won't drop, is left to the clock
  * trigger, which tells it (again): a second word changes nothing.
  */
 const tellKeptOne = async (env: Env, row: KeptRevocation): Promise<void> => {
@@ -243,7 +243,7 @@ const tellKeptOne = async (env: Env, row: KeptRevocation): Promise<void> => {
  * Tells the hosts of the revocations a change kept in its batch
  * (`revocationsOf`), a few at a time, from the rows themselves: no read
  * of the database, which may be away. Never throws: the change has
- * committed, and whatever isn't told now the cron trigger tells.
+ * committed, and whatever isn't told now the clock tells.
  */
 export const tellKept = async (
   env: Env,
@@ -259,7 +259,7 @@ export const tellKept = async (
   }
 };
 
-/** Most kept revocations one run of the cron trigger tells. */
+/** Most kept revocations one run of the clock tells. */
 const retriedAtOnce = 100;
 
 /**
@@ -313,7 +313,7 @@ const dropExpired = async (env: Env): Promise<void> => {
  * Tells the hosts of the revocations still kept: those a change kept that
  * weren't told yet (`revocationsOf`), and those a host couldn't be told of
  * (`keepForLater`), least tried first, once those a day old are dropped.
- * The cron trigger runs it every minute.
+ * The clock runs it every minute.
  */
 export const retryAccessRevocations = async (env: Env): Promise<void> => {
   await dropExpired(env);

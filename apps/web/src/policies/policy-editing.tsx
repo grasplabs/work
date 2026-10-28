@@ -1,0 +1,1323 @@
+import {
+  policyTextMax,
+  ruleConditionSchema,
+  ruleEffectSchema,
+  ruleStatusSchema,
+} from "@grasp-os/shared/policies";
+import type {
+  RuleEffect,
+  RuleInput,
+  RuleStatus,
+} from "@grasp-os/shared/policies";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/ui/components/native-select";
+import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { useNavigate, useRouter } from "@tanstack/react-router";
+import { PencilIcon, PlusIcon, UploadIcon, XIcon } from "lucide-react";
+import { useId, useState } from "react";
+
+import { changeThenRefresh } from "../change-then-refresh.ts";
+import { ErrorText } from "../error-text.tsx";
+import { formatDay } from "../format.ts";
+import { SectionTitle } from "../frame/page.tsx";
+import { exposureMeta } from "../landscape/landscape.ts";
+import type { LandscapeApp } from "../landscape/landscape.ts";
+import { useCoreAction } from "../use-core-action.ts";
+import { policyToday } from "./policies-data.ts";
+import {
+  accessLabel,
+  aiKindLabel,
+  certificateLabel,
+  dpaLabel,
+  effectLabel,
+  extensionLabel,
+  regionLabel,
+  ruleStatusLabel,
+  trainingLabel,
+} from "./policy.ts";
+import type {
+  PolicyDocument,
+  PolicyException,
+  PolicyRule,
+  RuleCondition,
+  RuleField,
+} from "./policy.ts";
+
+// The policy pages as an admin changes them: uploading a policy and
+// publishing or removing it, making a rule by hand or from a policy's
+// passage and editing or deleting it, and letting one app break one rule
+// until a day. Each is core's own call (`session.policies`), which takes it
+// from the organization's own admins alone and audits it; the page is read
+// again after it. Everyone else sees the pages as they are, with none of
+// this.
+
+/** Whether `identity` may change the policies: the organization's own admins, never Grasp staff. */
+export const editsPolicies = (identity: Pick<Identity, "role" | "staff">) =>
+  isMemberAdmin(identity);
+
+/* ── Conditions ──────────────────────────────────────────────────────── */
+
+/** Each kind of condition, by the fact it checks, in the order offered. */
+const fieldLabel: Record<RuleField, MessageDescriptor> = {
+  hosting: msg({ message: "Where it's hosted", context: "rule condition" }),
+  vendor: msg({ message: "Vendor", context: "rule condition" }),
+  ai: msg({ message: "Kind of AI", context: "rule condition" }),
+  training: msg({
+    message: "Training on your data",
+    context: "rule condition",
+  }),
+  data: msg({ message: "Data it touches", context: "rule condition" }),
+  people: msg({ message: "People using it", context: "rule condition" }),
+  owner: msg({ message: "Nobody owns it", context: "rule condition" }),
+  certificate: msg({
+    message: "Vendor certificates",
+    context: "rule condition",
+  }),
+  dpa: msg({ message: "Processing agreement", context: "rule condition" }),
+  access: msg({ message: "Access to company data", context: "rule condition" }),
+  extension: msg({ message: "Browser extension", context: "rule condition" }),
+};
+
+const fields: readonly RuleField[] = [
+  "hosting",
+  "vendor",
+  "ai",
+  "training",
+  "data",
+  "people",
+  "owner",
+  "certificate",
+  "dpa",
+  "access",
+  "extension",
+];
+
+/**
+ * A condition as the dialog edits it, loose so a row can be half done:
+ * core's schema (`ruleConditionSchema`) says whether it is one, as it
+ * would when the rule is saved.
+ */
+export interface DraftCondition {
+  field: RuleField;
+  op?: string;
+  values: string[];
+  moreThan: number;
+}
+
+/** The ways a condition with a choice of how it reads can read; the first is its start. */
+const opsOf: Partial<
+  Record<RuleField, { value: string; label: MessageDescriptor }[]>
+> = {
+  hosting: [
+    { value: "outside", label: msg`Hosted outside all of` },
+    { value: "in", label: msg`Hosted in one of` },
+  ],
+  vendor: [
+    { value: "is", label: msg`Made by one of` },
+    { value: "isNot", label: msg`Made by none of` },
+  ],
+  certificate: [
+    { value: "lacksAny", label: msg`Lacks any of` },
+    { value: "lacksAll", label: msg`Lacks all of` },
+  ],
+};
+
+/** A condition of `field` as it starts: nothing picked yet. */
+export const freshCondition = (field: RuleField): DraftCondition => ({
+  field,
+  op: opsOf[field]?.[0]?.value,
+  values: [],
+  moreThan: 50,
+});
+
+/** What a row says, in the shape core's schema reads. */
+const candidateOf = ({ field, op, values, moreThan }: DraftCondition) => {
+  if (field === "people") {
+    return { field, moreThan };
+  }
+  if (field === "owner") {
+    return { field };
+  }
+  return { field, ...(op === undefined ? {} : { op }), values };
+};
+
+/** The condition core takes from a row, or none while it isn't one yet. */
+export const conditionOf = (
+  draft: DraftCondition
+): RuleCondition | undefined => {
+  const parsed = ruleConditionSchema.safeParse(candidateOf(draft));
+  return parsed.success ? parsed.data : undefined;
+};
+
+/** A rule's condition as a row. */
+const draftConditionOf = (condition: RuleCondition): DraftCondition => ({
+  field: condition.field,
+  op: "op" in condition ? condition.op : undefined,
+  values: "values" in condition ? [...condition.values] : [],
+  moreThan: "moreThan" in condition ? condition.moreThan : 50,
+});
+
+const labelsOf = (labels: Record<string, MessageDescriptor>) =>
+  Object.entries(labels).map(([value, label]) => ({ value, label }));
+
+/** The values a listing condition picks from, each with its words. */
+const choicesOf: Partial<
+  Record<RuleField, { value: string; label: MessageDescriptor }[]>
+> = {
+  hosting: labelsOf(regionLabel),
+  ai: labelsOf(aiKindLabel),
+  training: labelsOf(trainingLabel),
+  data: Object.entries(exposureMeta).map(([value, { label }]) => ({
+    value,
+    label,
+  })),
+  certificate: labelsOf(certificateLabel),
+  dpa: labelsOf(dpaLabel),
+  access: labelsOf(accessLabel),
+  extension: labelsOf(extensionLabel),
+};
+
+/** Vendors as typed, one per comma: trimmed, none empty. */
+const vendorsOf = (typed: string): string[] =>
+  typed
+    .split(",")
+    .map((vendor) => vendor.trim())
+    .filter((vendor) => vendor !== "");
+
+/** One condition: what it checks, and the values it checks for. */
+const ConditionRow = ({
+  condition,
+  index,
+  disabled,
+  onChange,
+  onRemove,
+}: {
+  condition: DraftCondition;
+  index: number;
+  disabled: boolean;
+  onChange: (condition: DraftCondition) => void;
+  onRemove: () => void;
+}) => {
+  const { t, i18n } = useLingui();
+  const ids = useId();
+  const ops = opsOf[condition.field] ?? [];
+  const choices = choicesOf[condition.field] ?? [];
+  const position = index + 1;
+  return (
+    <div className="bg-muted/40 flex flex-col gap-3 rounded-lg border p-3">
+      <FieldSet>
+        <FieldLegend className="sr-only">
+          <Trans>Condition {position}</Trans>
+        </FieldLegend>
+        <div className="flex flex-wrap items-center gap-2">
+          <NativeSelect
+            aria-label={t`What condition ${position} checks`}
+            disabled={disabled}
+            onChange={(event) => {
+              const field = fields.find((each) => each === event.target.value);
+              if (field !== undefined) {
+                onChange(freshCondition(field));
+              }
+            }}
+            size="sm"
+            value={condition.field}
+          >
+            {fields.map((field) => (
+              <NativeSelectOption key={field} value={field}>
+                {i18n._(fieldLabel[field])}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          {ops.length === 0 ? null : (
+            <NativeSelect
+              aria-label={t`How condition ${position} reads`}
+              disabled={disabled}
+              onChange={(event) => {
+                onChange({ ...condition, op: event.target.value });
+              }}
+              size="sm"
+              value={condition.op}
+            >
+              {ops.map((op) => (
+                <NativeSelectOption key={op.value} value={op.value}>
+                  {i18n._(op.label)}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          )}
+          <Button
+            aria-label={t`Remove condition ${position}`}
+            className="ml-auto"
+            disabled={disabled}
+            onClick={onRemove}
+            size="icon-sm"
+            type="button"
+            variant="ghost"
+          >
+            <XIcon />
+          </Button>
+        </div>
+        {condition.field === "vendor" ? (
+          <Field>
+            <FieldLabel htmlFor={`${ids}-vendors`}>
+              <Trans>Vendors, separated by commas</Trans>
+            </FieldLabel>
+            <Input
+              defaultValue={condition.values.join(", ")}
+              disabled={disabled}
+              id={`${ids}-vendors`}
+              onChange={(event) => {
+                onChange({
+                  ...condition,
+                  values: vendorsOf(event.target.value),
+                });
+              }}
+              placeholder="OpenAI, DeepSeek"
+            />
+          </Field>
+        ) : null}
+        {condition.field === "people" ? (
+          <Field>
+            <FieldLabel htmlFor={`${ids}-people`}>
+              <Trans>Used by more than this many people</Trans>
+            </FieldLabel>
+            <Input
+              disabled={disabled}
+              id={`${ids}-people`}
+              min={0}
+              onChange={(event) => {
+                const moreThan = Math.trunc(Number(event.target.value));
+                onChange({
+                  ...condition,
+                  moreThan: Number.isFinite(moreThan)
+                    ? Math.max(0, moreThan)
+                    : 0,
+                });
+              }}
+              type="number"
+              value={condition.moreThan}
+            />
+          </Field>
+        ) : null}
+        {choices.length === 0 ? null : (
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
+            {choices.map((choice) => {
+              const id = `${ids}-${choice.value}`;
+              return (
+                <label
+                  className="flex items-center gap-2"
+                  htmlFor={id}
+                  key={id}
+                >
+                  <Checkbox
+                    checked={condition.values.includes(choice.value)}
+                    disabled={disabled}
+                    id={id}
+                    onCheckedChange={(checked) => {
+                      onChange({
+                        ...condition,
+                        values: checked
+                          ? [...condition.values, choice.value]
+                          : condition.values.filter(
+                              (each) => each !== choice.value
+                            ),
+                      });
+                    }}
+                  />
+                  {i18n._(choice.label)}
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </FieldSet>
+    </div>
+  );
+};
+
+/* ── Rules ───────────────────────────────────────────────────────────── */
+
+/** A rule as the dialog edits it. */
+export interface RuleDraft {
+  name: string;
+  description: string;
+  conditions: DraftCondition[];
+  effect: RuleEffect;
+  status: RuleStatus;
+  policyId: string | null;
+  excerpt: string;
+}
+
+export const draftOf = (
+  rule: PolicyRule | undefined,
+  policyId: string | null
+): RuleDraft =>
+  rule === undefined
+    ? {
+        name: "",
+        description: "",
+        conditions: [freshCondition("data")],
+        effect: "flag",
+        // A new rule only shows what it would do until someone turns it on.
+        status: "watching",
+        policyId,
+        excerpt: "",
+      }
+    : {
+        name: rule.name,
+        description: rule.description,
+        conditions: rule.conditions.map(draftConditionOf),
+        effect: rule.effect,
+        status: rule.status,
+        policyId: rule.policyId,
+        excerpt: rule.excerpt ?? "",
+      };
+
+/** The rule core takes, from what the dialog holds; none while a condition isn't one yet. */
+export const ruleInputOf = (draft: RuleDraft): RuleInput | undefined => {
+  const excerpt = draft.excerpt.trim();
+  const conditions = draft.conditions.map(conditionOf);
+  if (conditions.length === 0 || conditions.includes(undefined)) {
+    return undefined;
+  }
+  return {
+    name: draft.name.trim(),
+    description: draft.description.trim(),
+    conditions: conditions.filter((each) => each !== undefined),
+    effect: draft.effect,
+    status: draft.status,
+    policyId: draft.policyId,
+    ...(draft.policyId === null || excerpt === "" ? {} : { excerpt }),
+  };
+};
+
+/** Makes a rule, by hand or from a policy, or edits `rule`. */
+export const RuleDialog = ({
+  rule,
+  policyId = null,
+  policies,
+  open,
+  onOpenChange,
+}: {
+  /** The rule to edit; none to make one. */
+  rule?: PolicyRule;
+  /** The policy a new rule comes from, when made from one. */
+  policyId?: string | null;
+  policies: readonly PolicyDocument[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) => {
+  const { t, i18n } = useLingui();
+  const ids = useId();
+  const router = useRouter();
+  const navigate = useNavigate();
+  const { busy, failure, run } = useCoreAction();
+  const [draft, setDraft] = useState<RuleDraft>(() => draftOf(rule, policyId));
+  const input = ruleInputOf(draft);
+  const canSave = draft.name.trim() !== "" && input !== undefined && !busy;
+  const save = async (): Promise<void> => {
+    if (input === undefined) {
+      return;
+    }
+    const saved = await run(async (session) =>
+      rule === undefined
+        ? await session.policies.createRule(input)
+        : await session.policies.updateRule(rule.id, input)
+    );
+    if (saved === undefined) {
+      return;
+    }
+    onOpenChange(false);
+    if (rule === undefined) {
+      await navigate({
+        to: "/policies/rules/$ruleId",
+        params: { ruleId: saved.id },
+      });
+    }
+    // Every page, the policy manager's kept one included, shows it.
+    await router.invalidate();
+  };
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-h-svh overflow-y-auto sm:max-w-2xl">
+        <form
+          className="flex flex-col gap-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSave) {
+              void save();
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {rule === undefined ? (
+                <Trans>New rule</Trans>
+              ) : (
+                <Trans>Edit the rule</Trans>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-name`}>
+              <Trans context="the name of a policy rule">Name</Trans>
+            </FieldLabel>
+            <Input
+              autoComplete="off"
+              disabled={busy}
+              id={`${ids}-name`}
+              maxLength={120}
+              onChange={(event) => {
+                setDraft({ ...draft, name: event.target.value });
+              }}
+              placeholder={t`Customer data stays in the EU`}
+              value={draft.name}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-description`}>
+              <Trans>What it&apos;s for</Trans>
+            </FieldLabel>
+            <Textarea
+              disabled={busy}
+              id={`${ids}-description`}
+              maxLength={2000}
+              onChange={(event) => {
+                setDraft({ ...draft, description: event.target.value });
+              }}
+              rows={2}
+              value={draft.description}
+            />
+          </Field>
+          <FieldSet>
+            <FieldLegend>
+              <Trans>It catches an app when every one of these holds</Trans>
+            </FieldLegend>
+            <div className="flex flex-col gap-3">
+              {draft.conditions.map((condition, index) => (
+                <ConditionRow
+                  condition={condition}
+                  disabled={busy}
+                  index={index}
+                  // A row's place is its identity while the dialog is open.
+                  key={index}
+                  onChange={(changed) => {
+                    setDraft({
+                      ...draft,
+                      conditions: draft.conditions.map((each, at) =>
+                        at === index ? changed : each
+                      ),
+                    });
+                  }}
+                  onRemove={() => {
+                    setDraft({
+                      ...draft,
+                      conditions: draft.conditions.filter(
+                        (_each, at) => at !== index
+                      ),
+                    });
+                  }}
+                />
+              ))}
+              <Button
+                className="self-start"
+                disabled={busy || draft.conditions.length >= 20}
+                onClick={() => {
+                  setDraft({
+                    ...draft,
+                    conditions: [
+                      ...draft.conditions,
+                      freshCondition("hosting"),
+                    ],
+                  });
+                }}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <PlusIcon data-icon="inline-start" />
+                <Trans>Add a condition</Trans>
+              </Button>
+            </div>
+          </FieldSet>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <Field>
+              <FieldLabel htmlFor={`${ids}-effect`}>
+                <Trans>What it does</Trans>
+              </FieldLabel>
+              <NativeSelect
+                className="w-full"
+                disabled={busy}
+                id={`${ids}-effect`}
+                onChange={(event) => {
+                  const effect = ruleEffectSchema.safeParse(event.target.value);
+                  if (effect.success) {
+                    setDraft({ ...draft, effect: effect.data });
+                  }
+                }}
+                value={draft.effect}
+              >
+                {(["flag", "block"] as const).map((effect) => (
+                  <NativeSelectOption key={effect} value={effect}>
+                    {i18n._(effectLabel[effect])}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`${ids}-status`}>
+                <Trans>Status</Trans>
+              </FieldLabel>
+              <NativeSelect
+                className="w-full"
+                disabled={busy}
+                id={`${ids}-status`}
+                onChange={(event) => {
+                  const status = ruleStatusSchema.safeParse(event.target.value);
+                  if (status.success) {
+                    setDraft({ ...draft, status: status.data });
+                  }
+                }}
+                value={draft.status}
+              >
+                {(["watching", "active", "paused"] as const).map((status) => (
+                  <NativeSelectOption key={status} value={status}>
+                    {i18n._(ruleStatusLabel[status])}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+          </div>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-source`}>
+              <Trans>Where it comes from</Trans>
+            </FieldLabel>
+            <NativeSelect
+              className="w-full"
+              disabled={busy}
+              id={`${ids}-source`}
+              onChange={(event) => {
+                const chosen = event.target.value;
+                setDraft({
+                  ...draft,
+                  policyId: chosen === "" ? null : chosen,
+                });
+              }}
+              value={draft.policyId ?? ""}
+            >
+              <NativeSelectOption value="">{t`Made by hand`}</NativeSelectOption>
+              {policies.map((policy) => (
+                <NativeSelectOption key={policy.id} value={policy.id}>
+                  {policy.title}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+          {draft.policyId === null ? null : (
+            <Field>
+              <FieldLabel htmlFor={`${ids}-excerpt`}>
+                <Trans>The passage it says</Trans>
+              </FieldLabel>
+              <Textarea
+                disabled={busy}
+                id={`${ids}-excerpt`}
+                maxLength={4000}
+                onChange={(event) => {
+                  setDraft({ ...draft, excerpt: event.target.value });
+                }}
+                rows={3}
+                value={draft.excerpt}
+              />
+              <FieldDescription>
+                <Trans>Word for word, as the policy has it.</Trans>
+              </FieldDescription>
+            </Field>
+          )}
+          <ErrorText>{failure}</ErrorText>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              <Trans>Cancel</Trans>
+            </DialogClose>
+            <Button disabled={!canSave} type="submit">
+              {busy ? <Spinner data-icon="inline-start" /> : null}
+              <Trans>Save</Trans>
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/* ── Policies ────────────────────────────────────────────────────────── */
+
+/** A file's name without its extension: the title a policy starts with. */
+const titleOf = (fileName: string): string => fileName.replace(/\.[^.]+$/u, "");
+
+/**
+ * Uploads a policy for review: its text, from a text or Markdown file or
+ * pasted in. Grasp reads no PDF or Word file yet, so a policy in one is
+ * pasted as its text.
+ */
+export const UploadPolicyDialog = ({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) => {
+  const { t } = useLingui();
+  const ids = useId();
+  const navigate = useNavigate();
+  const router = useRouter();
+  const { busy, failure, run } = useCoreAction();
+  const [title, setTitle] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [text, setText] = useState("");
+  const canUpload = title.trim() !== "" && text.trim() !== "" && !busy;
+  const upload = async (): Promise<void> => {
+    const uploaded = await run(
+      async (session) =>
+        await session.policies.upload({
+          title: title.trim(),
+          fileName: fileName === "" ? `${title.trim()}.txt` : fileName,
+          text: text.trim(),
+        })
+    );
+    if (uploaded !== undefined) {
+      onOpenChange(false);
+      await navigate({
+        to: "/policies/documents/$policyId",
+        params: { policyId: uploaded.id },
+      });
+      await router.invalidate();
+    }
+  };
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-h-svh overflow-y-auto sm:max-w-2xl">
+        <form
+          className="flex flex-col gap-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canUpload) {
+              void upload();
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              <Trans>Upload a policy</Trans>
+            </DialogTitle>
+          </DialogHeader>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-file`}>
+              <Trans>Text or Markdown file</Trans>
+            </FieldLabel>
+            <Input
+              accept=".txt,.md,text/plain,text/markdown"
+              disabled={busy}
+              id={`${ids}-file`}
+              onChange={(event) => {
+                const [file] = event.target.files ?? [];
+                if (file === undefined) {
+                  return;
+                }
+                setFileName(file.name);
+                if (title.trim() === "") {
+                  setTitle(titleOf(file.name));
+                }
+                void (async () => {
+                  setText(await file.text());
+                })();
+              }}
+              type="file"
+            />
+            <FieldDescription>
+              <Trans>
+                Or paste the policy&apos;s text below: Grasp doesn&apos;t read
+                PDF or Word files yet.
+              </Trans>
+            </FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-title`}>
+              <Trans context="the title of a policy document">Title</Trans>
+            </FieldLabel>
+            <Input
+              autoComplete="off"
+              disabled={busy}
+              id={`${ids}-title`}
+              maxLength={200}
+              onChange={(event) => {
+                setTitle(event.target.value);
+              }}
+              placeholder={t`Acceptable use of AI`}
+              value={title}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-text`}>
+              <Trans>The policy&apos;s text</Trans>
+            </FieldLabel>
+            <Textarea
+              disabled={busy}
+              id={`${ids}-text`}
+              maxLength={policyTextMax}
+              onChange={(event) => {
+                setText(event.target.value);
+              }}
+              rows={8}
+              value={text}
+            />
+            <FieldDescription>
+              <Trans>
+                It waits for you to publish it. Everyone in the company can see
+                its title and its rules, never its text here.
+              </Trans>
+            </FieldDescription>
+          </Field>
+          <ErrorText>{failure}</ErrorText>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              <Trans>Cancel</Trans>
+            </DialogClose>
+            <Button disabled={!canUpload} type="submit">
+              {busy ? <Spinner data-icon="inline-start" /> : null}
+              <Trans>Upload</Trans>
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/** Asks before removing what can't be had back. */
+export const RemoveDialog = ({
+  title,
+  description,
+  open,
+  onOpenChange,
+  onRemove,
+}: {
+  title: string;
+  description: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onRemove: () => void;
+}) => (
+  <AlertDialog onOpenChange={onOpenChange} open={open}>
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{title}</AlertDialogTitle>
+        <AlertDialogDescription>{description}</AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel>
+          <Trans>Cancel</Trans>
+        </AlertDialogCancel>
+        <AlertDialogAction onClick={onRemove} variant="destructive">
+          <Trans>Remove</Trans>
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
+);
+
+/* ── Exceptions ──────────────────────────────────────────────────────── */
+
+/** Lets one app break `rule` until a day, in place of any exception it had. */
+export const ExceptionDialog = ({
+  rule,
+  apps,
+  open,
+  onOpenChange,
+}: {
+  rule: PolicyRule;
+  /** The Landscape's apps, to pick the one from. */
+  apps: readonly LandscapeApp[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) => {
+  const ids = useId();
+  const router = useRouter();
+  const { busy, failure, run } = useCoreAction();
+  const [appId, setAppId] = useState(apps[0]?.id ?? "");
+  const [reason, setReason] = useState("");
+  const [until, setUntil] = useState("");
+  const today = policyToday();
+  const canGrant =
+    appId !== "" && reason.trim() !== "" && until >= today && !busy;
+  const grant = async (): Promise<void> => {
+    const granted = await run(
+      async (session) =>
+        await session.policies.grantException({
+          ruleId: rule.id,
+          appId,
+          reason: reason.trim(),
+          until,
+        })
+    );
+    if (granted !== undefined) {
+      onOpenChange(false);
+      await router.invalidate();
+    }
+  };
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <form
+          className="flex flex-col gap-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canGrant) {
+              void grant();
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              <Trans>Let an app break this rule</Trans>
+            </DialogTitle>
+          </DialogHeader>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-app`}>
+              <Trans context="an app in the landscape">App</Trans>
+            </FieldLabel>
+            <NativeSelect
+              className="w-full"
+              disabled={busy || apps.length === 0}
+              id={`${ids}-app`}
+              onChange={(event) => {
+                setAppId(event.target.value);
+              }}
+              value={appId}
+            >
+              {apps.map((app) => (
+                <NativeSelectOption key={app.id} value={app.id}>
+                  {app.name}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-reason`}>
+              <Trans>Why</Trans>
+            </FieldLabel>
+            <Textarea
+              disabled={busy}
+              id={`${ids}-reason`}
+              maxLength={2000}
+              onChange={(event) => {
+                setReason(event.target.value);
+              }}
+              rows={3}
+              value={reason}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${ids}-until`}>
+              <Trans>Until</Trans>
+            </FieldLabel>
+            <Input
+              disabled={busy}
+              id={`${ids}-until`}
+              min={today}
+              onChange={(event) => {
+                setUntil(event.target.value);
+              }}
+              type="date"
+              value={until}
+            />
+            <FieldDescription>
+              <Trans>
+                Its last day: the rule catches the app again after it.
+              </Trans>
+            </FieldDescription>
+          </Field>
+          <ErrorText>{failure}</ErrorText>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              <Trans>Cancel</Trans>
+            </DialogClose>
+            <Button disabled={!canGrant} type="submit">
+              {busy ? <Spinner data-icon="inline-start" /> : null}
+              <Trans>Grant</Trans>
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/* ── The pages' actions ──────────────────────────────────────────────── */
+
+/** The policy manager's actions: upload a policy, make a rule by hand. */
+export const PoliciesActions = ({
+  policies,
+}: {
+  policies: readonly PolicyDocument[];
+}) => {
+  const [uploading, setUploading] = useState(false);
+  const [making, setMaking] = useState(false);
+  return (
+    <>
+      <Button
+        onClick={() => {
+          setUploading(true);
+        }}
+        size="sm"
+        variant="outline"
+      >
+        <UploadIcon data-icon="inline-start" />
+        <Trans>Upload a policy</Trans>
+      </Button>
+      <Button
+        onClick={() => {
+          setMaking(true);
+        }}
+        size="sm"
+      >
+        <PlusIcon data-icon="inline-start" />
+        <Trans>New rule</Trans>
+      </Button>
+      {/* Mounted while open, so each opening starts from nothing. */}
+      {uploading ? (
+        <UploadPolicyDialog onOpenChange={setUploading} open={uploading} />
+      ) : null}
+      {making ? (
+        <RuleDialog
+          onOpenChange={setMaking}
+          open={making}
+          policies={policies}
+        />
+      ) : null}
+    </>
+  );
+};
+
+/**
+ * Leaves the page for `to` and reads every page again, so none shows what
+ * was just changed or removed.
+ */
+const useLeaveAndReload = () => {
+  const navigate = useNavigate();
+  const router = useRouter();
+  return async (to: "/policies"): Promise<void> => {
+    await navigate({ to });
+    await router.invalidate();
+  };
+};
+
+/** A policy's actions: publish it while it waits for review, make a rule from it, remove it. */
+export const PolicyActions = ({
+  policy,
+  policies,
+}: {
+  policy: PolicyDocument;
+  policies: readonly PolicyDocument[];
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const leave = useLeaveAndReload();
+  const { busy, failure, run } = useCoreAction();
+  const [making, setMaking] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const { title } = policy;
+  const publish = async (): Promise<void> => {
+    await run(async (session) => {
+      await changeThenRefresh(
+        async () => await session.policies.publish(policy.id),
+        async () => {
+          await router.invalidate();
+        }
+      );
+    });
+  };
+  const remove = async (): Promise<void> => {
+    const removed = await run(async (session) => {
+      await session.policies.removePolicy(policy.id);
+      return true;
+    });
+    if (removed === true) {
+      await leave("/policies");
+    }
+  };
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button
+          disabled={busy}
+          onClick={() => {
+            setRemoving(true);
+          }}
+          size="sm"
+          variant="outline"
+        >
+          <Trans>Remove</Trans>
+        </Button>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            setMaking(true);
+          }}
+          size="sm"
+          variant="outline"
+        >
+          <PlusIcon data-icon="inline-start" />
+          <Trans>Make a rule from it</Trans>
+        </Button>
+        {policy.status === "review" ? (
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void publish();
+            }}
+            size="sm"
+          >
+            {busy ? <Spinner data-icon="inline-start" /> : null}
+            <Trans>Publish</Trans>
+          </Button>
+        ) : null}
+      </div>
+      <ErrorText>{failure}</ErrorText>
+      {making ? (
+        <RuleDialog
+          onOpenChange={setMaking}
+          open={making}
+          policies={policies}
+          policyId={policy.id}
+        />
+      ) : null}
+      <RemoveDialog
+        description={t`Its rules stay, as rules made by hand. This can't be undone.`}
+        onOpenChange={setRemoving}
+        onRemove={() => {
+          setRemoving(false);
+          void remove();
+        }}
+        open={removing}
+        title={t`Remove ${title}?`}
+      />
+    </div>
+  );
+};
+
+/** A rule's actions: edit it, its status included, or delete it. */
+export const RuleActions = ({
+  rule,
+  policies,
+}: {
+  rule: PolicyRule;
+  policies: readonly PolicyDocument[];
+}) => {
+  const { t } = useLingui();
+  const leave = useLeaveAndReload();
+  const { busy, failure, run } = useCoreAction();
+  const [editing, setEditing] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const { name } = rule;
+  const remove = async (): Promise<void> => {
+    const removed = await run(async (session) => {
+      await session.policies.removeRule(rule.id);
+      return true;
+    });
+    if (removed === true) {
+      await leave("/policies");
+    }
+  };
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button
+          disabled={busy}
+          onClick={() => {
+            setRemoving(true);
+          }}
+          size="sm"
+          variant="outline"
+        >
+          <Trans>Delete</Trans>
+        </Button>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            setEditing(true);
+          }}
+          size="sm"
+        >
+          <PencilIcon data-icon="inline-start" />
+          <Trans>Edit</Trans>
+        </Button>
+      </div>
+      <ErrorText>{failure}</ErrorText>
+      {editing ? (
+        <RuleDialog
+          onOpenChange={setEditing}
+          open={editing}
+          policies={policies}
+          rule={rule}
+        />
+      ) : null}
+      <RemoveDialog
+        description={t`Its exceptions go with it. This can't be undone.`}
+        onOpenChange={setRemoving}
+        onRemove={() => {
+          setRemoving(false);
+          void remove();
+        }}
+        open={removing}
+        title={t`Delete ${name}?`}
+      />
+    </div>
+  );
+};
+
+/** The apps allowed to break `rule`, and for an admin, granting and revoking that. */
+export const RuleExceptions = ({
+  rule,
+  apps,
+  exceptions,
+  edits,
+}: {
+  rule: PolicyRule;
+  apps: readonly LandscapeApp[];
+  exceptions: readonly PolicyException[];
+  edits: boolean;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const { busy, failure, run } = useCoreAction();
+  const [granting, setGranting] = useState(false);
+  const own = exceptions.filter(({ ruleId }) => ruleId === rule.id);
+  const today = policyToday();
+  const revoke = async (appId: string): Promise<void> => {
+    await run(async (session) => {
+      await changeThenRefresh(
+        async () => {
+          await session.policies.revokeException(rule.id, appId);
+        },
+        async () => {
+          await router.invalidate();
+        }
+      );
+    });
+  };
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <SectionTitle>
+          <Trans>Exceptions</Trans>
+        </SectionTitle>
+        {edits ? (
+          <Button
+            disabled={busy || apps.length === 0}
+            onClick={() => {
+              setGranting(true);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <PlusIcon data-icon="inline-start" />
+            <Trans>Grant an exception</Trans>
+          </Button>
+        ) : null}
+      </div>
+      {own.length === 0 ? (
+        <p className="bg-card text-muted-foreground rounded-xl border p-4">
+          <Trans>No app is allowed to break this rule.</Trans>
+        </p>
+      ) : (
+        <ul className="bg-card flex flex-col divide-y rounded-xl border">
+          {own.map((exception) => {
+            const app =
+              apps.find(({ id }) => id === exception.appId)?.name ??
+              exception.appId;
+            const until = formatDay(exception.until);
+            const ended = exception.until < today;
+            return (
+              <li
+                className="flex flex-wrap items-start justify-between gap-3 p-4"
+                key={exception.appId}
+              >
+                <div className="flex min-w-0 flex-col gap-1">
+                  <span className="font-medium">{app}</span>
+                  <span className="text-muted-foreground">
+                    {exception.reason}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {ended ? (
+                      <Trans>Ended on {until}</Trans>
+                    ) : (
+                      <Trans>Until {until}</Trans>
+                    )}
+                  </span>
+                </div>
+                {edits ? (
+                  <Button
+                    aria-label={t`Revoke the exception for ${app}`}
+                    disabled={busy}
+                    onClick={() => {
+                      void revoke(exception.appId);
+                    }}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <Trans>Revoke</Trans>
+                  </Button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <ErrorText>{failure}</ErrorText>
+      {granting ? (
+        <ExceptionDialog
+          apps={apps}
+          onOpenChange={setGranting}
+          open={granting}
+          rule={rule}
+        />
+      ) : null}
+    </section>
+  );
+};

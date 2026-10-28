@@ -1,5 +1,6 @@
 import {
   assetKey,
+  limitEvidenceKey,
   manifestKey,
   moduleKey,
   sha256OfBytes,
@@ -26,10 +27,13 @@ import type { ReleaseStore } from "../src/releases/import.ts";
 import worker from "../src/server.ts";
 import {
   buildRelease,
+  evidenceFor,
   nextReleaseId,
   publishRelease,
   putBlobs,
+  putLimitEvidence,
   putManifest,
+  testLimits,
 } from "./releases.ts";
 import type { TestRelease } from "./releases.ts";
 
@@ -104,6 +108,29 @@ const assetOf = (release: TestRelease): string => {
 const sameSizeOther = (text: string): string =>
   text.replaceAll(/[0-9a-f]/gu, (char) => (char === "0" ? "1" : "0"));
 
+/** A release of about as many blobs as one built from main today. */
+/** 700 static assets of `token`'s own: as many blobs as a release from main. */
+const largeAssets = (token: string): Record<string, string> =>
+  Object.fromEntries(
+    Array.from({ length: 700 }, (_, index) => [
+      `/asset-${index}.txt`,
+      `${token} ${index}`,
+    ])
+  );
+
+/** A release of about as many blobs as one built from main today. */
+const largeRelease = async (notes: string) =>
+  await publishRelease({ notes, assets: largeAssets(crypto.randomUUID()) });
+
+/** Every read `reads` counted, the manifests' included. */
+const allReads = (reads: ReadonlyMap<string, number>): number =>
+  [...reads.values()].reduce((sum, count) => sum + count, 0);
+
+const blobReadsOf = (reads: ReadonlyMap<string, number>): number[] =>
+  [...reads]
+    .filter(([key]) => key.startsWith("blobs/"))
+    .map(([, count]) => count);
+
 describe("importing releases", () => {
   it("records a published release once its blobs verify, and audits it", async () => {
     const release = await publishRelease({ notes: "feat(core): one" });
@@ -128,6 +155,7 @@ describe("importing releases", () => {
       detail: JSON.stringify({
         commit: release.manifest.commit,
         manifestSha256: row?.manifestSha256,
+        limitEvidenceSha256: row?.limitEvidenceSha256,
       }),
     });
   });
@@ -408,9 +436,10 @@ CREATE TABLE t (id TEXT);`,
     ]);
   });
 
-  it("refuses a release naming more blobs than a run may read for one, before reading them", async () => {
+  it("refuses a release naming more blobs than it may, before reading them", async () => {
     const token = crypto.randomUUID();
-    const release = await publishRelease({
+    // Its manifest alone: none of its blobs is read.
+    const release = await buildRelease({
       notes: "feat(core): too many blobs",
       assets: Object.fromEntries(
         Array.from({ length: MAX_BLOBS_PER_RELEASE + 1 }, (_, index) => [
@@ -419,6 +448,7 @@ CREATE TABLE t (id TEXT);`,
         ])
       ),
     });
+    await putManifest(release);
     const { store, reads } = countingStore();
 
     const result = await runImport(store);
@@ -466,6 +496,103 @@ CREATE TABLE t (id TEXT);`,
     expect(second.imported).toContain(oldest);
   });
 
+  it("imports a release of 700 blobs a batch a run, reading each blob once", async () => {
+    const release = await largeRelease("feat(core): 700 blobs");
+    const { store, reads } = countingStore();
+
+    const first = await runImport(store);
+    // Every read of the run, each manifest's and blob's alike.
+    const readFirst = allReads(reads);
+    const second = await runImport(store);
+    const readSecond = allReads(reads) - readFirst;
+    const blobReads = blobReadsOf(reads);
+
+    expect({
+      first: first.imported.includes(release.id),
+      firstFailed: first.failed.includes(release.id),
+      firstWithinReads: readFirst <= MAX_READS_PER_RUN,
+      secondWithinReads: readSecond <= MAX_READS_PER_RUN,
+      second: second.imported.includes(release.id),
+      everyBlobOnce: blobReads.every((count) => count === 1),
+      blobs: blobReads.length,
+    }).toStrictEqual({
+      first: false,
+      firstFailed: false,
+      firstWithinReads: true,
+      secondWithinReads: true,
+      second: true,
+      everyBlobOnce: true,
+      blobs: release.blobs.size,
+    });
+    await expect(importEvents(release.id)).resolves.toHaveLength(1);
+  });
+
+  it("checks a release from its first blob again once its manifest was replaced partway", async () => {
+    const assets = largeAssets(crypto.randomUUID());
+    const release = await publishRelease({
+      notes: "feat(core): before",
+      assets,
+    });
+    const { store, reads } = countingStore();
+    const first = await runImport(store);
+    // The blobs the first run checked, before the manifest changed.
+    const checked = [...release.blobs.keys()].filter(
+      (key) => (reads.get(key) ?? 0) === 1
+    );
+    // Another manifest under the same id: the same blobs, another note.
+    const replaced = await buildRelease(
+      { notes: "feat(core): after", assets },
+      release.id
+    );
+    await putManifest(replaced);
+
+    const second = await runImport(store);
+    const third = await runImport(store);
+    const row = await releaseRow(release.id);
+
+    expect({
+      first: first.imported.includes(release.id),
+      checkedSome: checked.length > 0,
+      // Each read again, so checked from the start, and not imported yet.
+      readAgain: checked.every((key) => reads.get(key) === 2),
+      second: second.imported.includes(release.id),
+      third: third.imported.includes(release.id),
+      note: row?.manifest.includes("feat(core): after"),
+    }).toStrictEqual({
+      first: false,
+      checkedSome: true,
+      readAgain: true,
+      second: false,
+      third: true,
+      note: true,
+    });
+  });
+
+  it("fails a large release on a blob in a later batch, and checks it from its first blob next attempt", async () => {
+    const release = await largeRelease("feat(core): 700 blobs, one broken");
+    const [lastKey, lastBytes] = [...release.blobs].at(-1) ?? [];
+    if (lastKey === undefined || lastBytes === undefined) {
+      throw new Error("expected a blob");
+    }
+    await env.RELEASES.put(
+      lastKey,
+      sameSizeOther(new TextDecoder().decode(lastBytes))
+    );
+
+    const first = await runImport();
+    const second = await runImport();
+    expect(second.failed).toContain(release.id);
+    expect(first.failed).not.toContain(release.id);
+
+    await env.RELEASES.put(lastKey, lastBytes);
+    const { store, reads } = countingStore();
+    await runImport(store, { now: inMinutes(10) });
+    const third = await runImport(store, { now: inMinutes(10) });
+
+    expect(third.imported).toContain(release.id);
+    expect(blobReadsOf(reads)).toHaveLength(release.blobs.size);
+  });
+
   it("reads the whole listing, a page at a time", async () => {
     const release = await publishRelease({ notes: "feat(core): paged" });
     const pages: string[] = [];
@@ -494,5 +621,232 @@ CREATE TABLE t (id TEXT);`,
     );
 
     await expect(releaseRow(release.id)).resolves.toBeDefined();
+  });
+});
+
+describe("importing a release that raises a platform limit", () => {
+  /** A published, imported release with `testLimits`: what the next ones raise over. */
+  const importedPrevious = async () => {
+    const previous = await publishRelease({ notes: "feat(core): before" });
+    await runImport();
+    await expect(releaseRow(previous.id)).resolves.toBeDefined();
+    return { releaseId: previous.id, platformLimits: testLimits };
+  };
+
+  const raised = { ...testLimits, workflowSteps: 2000 };
+
+  it("refuses one without evidence, with evidence made for another commit, release or capacity run, or for another value", async () => {
+    const previousRelease = await importedPrevious();
+    const otherCommit = "f".repeat(40);
+    const refused = await Promise.all(
+      [
+        () => [],
+        (release: { id: string; commit: string }) => [
+          evidenceFor(
+            { ...release, commit: otherCommit },
+            "workflowSteps",
+            2000
+          ),
+        ],
+        (release: { id: string; commit: string }) => [
+          evidenceFor(
+            { ...release, id: previousRelease.releaseId },
+            "workflowSteps",
+            2000
+          ),
+        ],
+        (release: { id: string; commit: string }) => [
+          {
+            ...evidenceFor(release, "workflowSteps", 2000),
+            capacityRun: {
+              jobId: 1,
+              commit: otherCommit,
+              profile: "cloudflare" as const,
+            },
+          },
+        ],
+        (release: { id: string; commit: string }) => [
+          evidenceFor(release, "workflowSteps", 1500),
+        ],
+      ].map(
+        async (limitEvidence, index) =>
+          await publishRelease({
+            notes: `feat(core): raised ${index}`,
+            platformLimits: raised,
+            previousRelease,
+            limitEvidence,
+          })
+      )
+    );
+
+    const result = await runImport();
+
+    const ids = refused.map((release) => release.id);
+    expect(result.failed).toStrictEqual(expect.arrayContaining(ids));
+    const rows = await Promise.all(ids.map(releaseRow));
+    expect(rows.filter((row) => row !== undefined)).toStrictEqual([]);
+    const failures = await Promise.all(
+      ids.map(async (id) => await eventsFor("release.import_failed", id))
+    );
+    expect(failures.map((events) => events.length)).toStrictEqual(
+      ids.map(() => 1)
+    );
+  });
+
+  it("refuses one that raises over other limits than the release it names as previous has", async () => {
+    const previousRelease = await importedPrevious();
+    // Claims the raise was already there, so it would need no evidence.
+    const hiding = await publishRelease({
+      notes: "feat(core): hides a raise",
+      platformLimits: raised,
+      previousRelease: { ...previousRelease, platformLimits: raised },
+    });
+
+    const result = await runImport();
+
+    expect(result.failed).toContain(hiding.id);
+    await expect(releaseRow(hiding.id)).resolves.toBeUndefined();
+  });
+
+  it("refuses one that names a release built after it as previous", async () => {
+    const early = await buildRelease({ notes: "feat(core): built first" });
+    const later = await publishRelease({ notes: "feat(core): built later" });
+    await runImport();
+    const named = await buildRelease(
+      {
+        notes: "feat(core): names a later one",
+        previousRelease: {
+          releaseId: later.id,
+          platformLimits: testLimits,
+        },
+      },
+      early.id
+    );
+    await putBlobs(named);
+    await putManifest(named);
+
+    const result = await runImport();
+
+    expect(result.failed).toContain(named.id);
+  });
+
+  it("imports one whose evidence is its own, and audits what it raises on which profiles", async () => {
+    const previousRelease = await importedPrevious();
+    const release = await publishRelease({
+      notes: "feat(core): raised with evidence",
+      platformLimits: raised,
+      previousRelease,
+      limitEvidence: (own) => [
+        evidenceFor(own, "workflowSteps", 2000, "cloudflare"),
+        evidenceFor(own, "workflowSteps", 2000, "workerd"),
+      ],
+    });
+
+    const result = await runImport();
+
+    expect(result.imported).toContain(release.id);
+    const [event] = await importEvents(release.id);
+    expect(JSON.parse(event?.detail ?? "{}")).toMatchObject({
+      raised: "workflowSteps to 2000 on cloudflare+workerd",
+    });
+  });
+});
+
+describe("a release's limit evidence file", () => {
+  it("is read once and checked before anything is stored: missing, unrecorded by R2, or another release's file refuses the import", async () => {
+    const missing = await buildRelease({ notes: "feat(core): no evidence" });
+    await putBlobs(missing);
+    await env.RELEASES.put(manifestKey(missing.id), missing.manifestText);
+    const unrecorded = await buildRelease({
+      notes: "feat(core): evidence R2 didn't check",
+    });
+    await putBlobs(unrecorded);
+    await env.RELEASES.put(
+      limitEvidenceKey(unrecorded.id),
+      unrecorded.limitEvidenceText ?? ""
+    );
+    await env.RELEASES.put(manifestKey(unrecorded.id), unrecorded.manifestText);
+    const other = await buildRelease({ notes: "feat(core): another's file" });
+    const borrowing = await buildRelease({
+      notes: "feat(core): borrows a file",
+    });
+    await putBlobs(borrowing);
+    await putLimitEvidence({
+      id: borrowing.id,
+      limitEvidenceText: other.limitEvidenceText,
+    });
+    await env.RELEASES.put(manifestKey(borrowing.id), borrowing.manifestText);
+    const ids = [missing.id, unrecorded.id, borrowing.id];
+
+    const result = await runImport();
+    const rows = await Promise.all(ids.map(releaseRow));
+
+    expect({
+      failed: ids.filter((id) => result.failed.includes(id)),
+      stored: rows.filter((row) => row !== undefined),
+    }).toStrictEqual({ failed: ids, stored: [] });
+  });
+
+  it("is recorded with the release and its sha256, in the import's audit event", async () => {
+    const release = await publishRelease({ notes: "feat(core): evidenced" });
+
+    await runImport();
+    const row = await releaseRow(release.id);
+    const [event] = await importEvents(release.id);
+    const sha256 = await sha256OfBytes(
+      new TextEncoder().encode(release.limitEvidenceText ?? "")
+    );
+
+    expect({
+      text: row?.limitEvidence,
+      sha256: row?.limitEvidenceSha256,
+      audited: (event?.detail ?? "").includes(
+        `"limitEvidenceSha256":"${sha256}"`
+      ),
+    }).toStrictEqual({
+      text: release.limitEvidenceText,
+      sha256,
+      audited: true,
+    });
+  });
+
+  it("is taken with the SHA-256 CI also gives in its metadata, where R2 doesn't report its checksum to a Worker", async () => {
+    const release = await buildRelease({ notes: "feat(core): metadata only" });
+    await putBlobs(release);
+    const bytes = new TextEncoder().encode(release.limitEvidenceText ?? "");
+    await env.RELEASES.put(limitEvidenceKey(release.id), bytes, {
+      customMetadata: { sha256: await sha256OfBytes(bytes) },
+    });
+    await env.RELEASES.put(manifestKey(release.id), release.manifestText);
+    const forged = await buildRelease({ notes: "feat(core): wrong metadata" });
+    await putBlobs(forged);
+    await env.RELEASES.put(
+      limitEvidenceKey(forged.id),
+      forged.limitEvidenceText ?? "",
+      { customMetadata: { sha256: "0".repeat(64) } }
+    );
+    await env.RELEASES.put(manifestKey(forged.id), forged.manifestText);
+
+    const result = await runImport();
+
+    expect({
+      imported: result.imported.includes(release.id),
+      refused: result.failed.includes(forged.id),
+    }).toStrictEqual({ imported: true, refused: true });
+  });
+
+  it("isn't needed by a release built before limits were recorded", async () => {
+    const release = await publishRelease({
+      notes: "feat(core): from before limits",
+      platformLimits: null,
+    });
+
+    const result = await runImport();
+
+    expect(result.imported).toContain(release.id);
+    await expect(releaseRow(release.id)).resolves.toMatchObject({
+      limitEvidence: null,
+      limitEvidenceSha256: null,
+    });
   });
 });

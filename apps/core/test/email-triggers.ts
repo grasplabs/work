@@ -1,3 +1,7 @@
+import {
+  createExecutionContext,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -145,7 +149,9 @@ export const deliver = async (
     reply: async () =>
       await Promise.reject(new Error("Core never replies to mail")),
   };
-  await worker.email(message, { ...env, ...changes });
+  const ctx = createExecutionContext();
+  await worker.email(message, { ...env, ...changes }, ctx);
+  await waitOnExecutionContext(ctx);
   return delivery;
 };
 

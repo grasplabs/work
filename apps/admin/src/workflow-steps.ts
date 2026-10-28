@@ -1,5 +1,5 @@
 /**
- * How the admin's Workflows (provisioning, src/provision/workflow.ts,
+ * How the admin's Workflows (provisioning, src/hosting/workflow.ts,
  * and rollouts, src/rollout/workflow.ts) run their steps: their retry
  * configs, and how a step fails. A failure a retry can fix is retried;
  * any other stops the run at once (`NonRetryableError`, carrying its

@@ -17,8 +17,8 @@
 import { deadline } from "@grasp-os/shared/deadline";
 import { log } from "@grasp-os/shared/log";
 import { onboardingSummarySchema } from "@grasp-os/shared/onboarding-summary";
-import { deriveRouterSecret } from "@grasp-os/shared/router";
-import { asc, sql } from "drizzle-orm";
+import { deriveRouterSecret, routerTargetOf } from "@grasp-os/shared/router";
+import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { accountUsage, monthCostUsd } from "../cloudflare/analytics.ts";
@@ -27,7 +27,7 @@ import { cloudflareApi } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clientDeploys, clients, clientWorkers } from "../db/schema.ts";
+import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
 import {
   clientDomain,
   deployerToken,
@@ -46,6 +46,8 @@ import { driftOf } from "../rollout/drift.ts";
 import type { ManifestOf } from "../rollout/drift.ts";
 import { sharedSecretsStatus, storeCheck } from "../rollout/shared-secrets.ts";
 import type { StoreCheck } from "../rollout/shared-secrets.ts";
+import { coreAddressOf } from "./core-address.ts";
+import type { ClientDispatcher, CoreAddress } from "./core-address.ts";
 import { onboardingSummaryOf } from "./onboarding.ts";
 import type { OnboardingCell } from "./onboarding.ts";
 
@@ -90,16 +92,20 @@ export interface GridRow {
   name: string;
   status: "provisioning" | "active" | "offboarded";
   ring: number;
-  accountId: string;
+  /** Its own account, under the account-per-client path; null for a placed client. */
+  accountId: string | null;
   /** `<id>.<domain>`; null while the admin has no domain. */
   hostname: string | null;
   /** The release the admin made live on every Worker; null when none, or they differ. */
   release: string | null;
   pinnedReleaseId: string | null;
-  /** Its latest deploy. */
+  /**
+   * Its operation's latest run (src/hosting/operation.ts): the release, how
+   * it ended, and when it last changed; null before it has one.
+   */
   lastDeploy: {
     releaseId: string;
-    status: "running" | "done" | "failed" | "superseded";
+    status: "running" | "done" | "failed";
     at: Date;
   } | null;
 }
@@ -145,13 +151,14 @@ const unknownStatus: LiveStatus = {
  * Whether every column of `live` was read. Only such an answer is kept:
  * an unknown is an account, the store or the analytics not answering, and
  * kept, it would still show as unknown a minute after they answer again.
+ * A client with no account of its own (`accountless`, every placed one)
+ * has no usage or cost to read: those stay null, known.
  */
-const allKnown = (live: LiveStatus): boolean =>
+const allKnown = (live: LiveStatus, accountless: boolean): boolean =>
   live.drift !== "unknown" &&
   live.sharedSecretsCurrent !== null &&
   live.reach !== "unknown" &&
-  live.day !== null &&
-  live.costUsd !== null &&
+  (accountless || (live.day !== null && live.costUsd !== null)) &&
   live.onboarding !== null;
 
 /**
@@ -168,18 +175,14 @@ const recordedClients = async (db: AdminDatabase) => {
       accountId: clients.accountId,
       pinnedReleaseId: clients.pinnedReleaseId,
       lastDeploy: {
-        releaseId: clientDeploys.releaseId,
-        status: clientDeploys.status,
-        at: clientDeploys.createdAt,
+        releaseId: clientProvisions.releaseId,
+        status: clientProvisions.status,
+        at: clientProvisions.updatedAt,
       },
     })
     .from(clients)
-    // Its latest deploy, found through client_deploys_client_idx. Written
-    // out, since `clients.id` must name the outer row's.
-    .leftJoin(
-      clientDeploys,
-      sql`${clientDeploys.id} = (SELECT latest.id FROM client_deploys AS latest WHERE latest.client_id = clients.id ORDER BY latest.created_at DESC, latest.rowid DESC LIMIT 1)`
-    )
+    // Its one operation, unique by client.
+    .leftJoin(clientProvisions, eq(clientProvisions.clientId, clients.id))
     .orderBy(asc(clients.id));
   // Two rows a client, core's and connect's: as many as the clients.
   const workers = await db
@@ -201,14 +204,20 @@ const recordedClients = async (db: AdminDatabase) => {
   });
 };
 
-/** What the router knows of client `clientId`'s core: its route, and the secret it sends. */
+/**
+ * What the router knows of client `clientId`'s core: where it answers (its
+ * script through `dispatcher`, or its origin: `coreAddressOf`), and the
+ * secret the router sends. A script without a dispatcher to reach it by is
+ * `unknown`, never another client's core.
+ */
 export const routeOf = async (
   hosts: RouterHosts,
   routerKey: string | null,
   clientId: string,
-  hostname: string | null
+  hostname: string | null,
+  dispatcher: ClientDispatcher | undefined
 ): Promise<
-  | { coreUrl: string; generation: number; secret: string }
+  | { core: CoreAddress; generation: number; secret: string }
   | "no_route"
   | "unknown"
 > => {
@@ -219,8 +228,12 @@ export const routeOf = async (
   if (route === null || route.clientId !== clientId) {
     return "no_route";
   }
+  const core = coreAddressOf(routerTargetOf(route), hostname, dispatcher);
+  if (core === undefined) {
+    return "unknown";
+  }
   return {
-    coreUrl: route.coreUrl,
+    core,
     generation: route.generation,
     secret: await deriveRouterSecret(routerKey, clientId, route.generation),
   };
@@ -240,7 +253,7 @@ const reachOf = async (
   }
   // Its own deadline starts as it's sent; the row's stops it too.
   const fetchCore: typeof fetch = async (input, init) =>
-    await fetch(input, {
+    await route.core.fetch(input, {
       ...init,
       signal:
         init?.signal === undefined || init.signal === null
@@ -249,7 +262,7 @@ const reachOf = async (
     });
   const version = await answeringVersion(
     fetchCore,
-    route.coreUrl,
+    route.core.origin,
     route.secret,
     healthTimeoutMs
   );
@@ -270,7 +283,7 @@ const onboardingOf = async (
     return null;
   }
   return await onboardingSummaryOf({
-    coreUrl: route.coreUrl,
+    core: route.core,
     routerSecret: route.secret,
     authSecret: await clientAuthSecret(secrets, clientId, route.generation),
     signal: AbortSignal.any([signal, AbortSignal.timeout(healthTimeoutMs)]),
@@ -318,31 +331,34 @@ const orElse = async <T>(
  * Its requests stop when `signal` aborts.
  */
 const liveOf = async (
-  {
-    env,
-    db,
-    apiFor,
-    routerKey,
-    secrets,
-    store,
-    usage,
-    manifestOf,
-  }: LiveSources,
-  row: { id: string; accountId: string; hostname: string | null },
+  { env, db, apiFor, routerKey, secrets, store, usage }: LiveSources,
+  row: { id: string; accountId: string | null; hostname: string | null },
   signal: AbortSignal
 ): Promise<LiveStatus> => {
   const drift =
     apiFor === null
       ? null
       : await orElse(
-          async () => await driftOf(apiFor(signal), db, row.id, manifestOf),
+          async () =>
+            await driftOf(
+              apiFor(signal),
+              db,
+              row.id,
+              routerKey === null ? undefined : { fetch, routerKey }
+            ),
           null,
           "grid.drift_unread",
           row.id
         );
   const route = await orElse(
     async () =>
-      await routeOf(env.ROUTER_HOSTS, routerKey, row.id, row.hostname),
+      await routeOf(
+        env.ROUTER_HOSTS,
+        routerKey,
+        row.id,
+        row.hostname,
+        env.DISPATCHER
+      ),
     "unknown" as const,
     "grid.route_unread",
     row.id
@@ -369,7 +385,7 @@ const liveOf = async (
       row.id
     ),
   ]);
-  const used = usage?.get(row.accountId);
+  const used = row.accountId === null ? undefined : usage?.get(row.accountId);
   return {
     drift: drift?.state ?? "unknown",
     sharedSecretsCurrent,
@@ -422,7 +438,10 @@ const usageWithin = async (
  * anything unknown in it (`allKnown`; none is kept now, but one kept
  * before that rule may still be there): the answer is read again.
  */
-const cached = async (clientId: string): Promise<LiveStatus | undefined> => {
+const cached = async (
+  clientId: string,
+  accountless: boolean
+): Promise<LiveStatus | undefined> => {
   try {
     const cache = await caches.open(cacheName);
     const hit = await cache.match(cacheKey(clientId));
@@ -430,7 +449,9 @@ const cached = async (clientId: string): Promise<LiveStatus | undefined> => {
       return undefined;
     }
     const parsed = liveStatusSchema.safeParse(await hit.json());
-    return parsed.success && allKnown(parsed.data) ? parsed.data : undefined;
+    return parsed.success && allKnown(parsed.data, accountless)
+      ? parsed.data
+      : undefined;
   } catch (error) {
     log.warn("grid.cache_unread", { clientId, error: errorCode(error) });
     return undefined;
@@ -476,9 +497,16 @@ const deployerApiFor = async (
  * can, within `limits.rowDeadlineMs`. A client whose account the
  * analytics don't answer for is null, and the others stand.
  */
+/**
+ * The accounts of `rows` whose usage is read: a placed client has no
+ * account of its own, so none of its usage is read here.
+ */
+const accountsOf = (rows: readonly { accountId: string | null }[]): string[] =>
+  rows.flatMap(({ accountId }) => (accountId === null ? [] : [accountId]));
+
 export const monthCosts = async (
   env: Env,
-  rows: readonly { id: string; accountId: string }[],
+  rows: readonly { id: string; accountId: string | null }[],
   now: Date,
   limits: LiveReadLimits = defaultLiveReadLimits
 ): Promise<Record<string, MonthCost | null>> => {
@@ -487,14 +515,12 @@ export const monthCosts = async (
   const usage =
     apiFor === null
       ? null
-      : await usageWithin(
-          limits.rowDeadlineMs,
-          apiFor,
-          rows.map(({ accountId }) => accountId),
-          now
-        );
+      : await usageWithin(limits.rowDeadlineMs, apiFor, accountsOf(rows), now);
   return Object.fromEntries(
-    rows.map(({ id, accountId }) => [id, costOf(usage?.get(accountId))])
+    rows.map(({ id, accountId }) => [
+      id,
+      accountId === null ? null : costOf(usage?.get(accountId)),
+    ])
   );
 };
 
@@ -528,9 +554,15 @@ export const gridLive = async (
       status === "active" && (only === undefined || id === only)
   );
   const answers = new Map<string, LiveStatus>();
+  // Clients with no account of its own: no usage or cost to read.
+  const accountless = new Set(
+    active.filter(({ accountId }) => accountId === null).map(({ id }) => id)
+  );
   if (options.cache) {
     const kept = await Promise.all(
-      active.map(async ({ id }) => [id, await cached(id)] as const)
+      active.map(
+        async ({ id }) => [id, await cached(id, accountless.has(id))] as const
+      )
     );
     for (const [id, live] of kept) {
       if (live !== undefined) {
@@ -560,7 +592,7 @@ export const gridLive = async (
           : await usageWithin(
               options.rowDeadlineMs,
               apiFor,
-              toRead.map(({ accountId }) => accountId),
+              accountsOf(toRead),
               now
             ),
       manifestOf: async (id) => {
@@ -588,7 +620,7 @@ export const gridLive = async (
     if (options.cache) {
       await Promise.all(
         read
-          .filter(([, live]) => allKnown(live))
+          .filter(([id, live]) => allKnown(live, accountless.has(id)))
           .map(async ([id, live]) => {
             await keep(id, live);
           })

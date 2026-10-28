@@ -195,10 +195,6 @@ export const fetchDrift = createServerFn({ method: "GET" })
   .validator(clientSchema)
   .handler(async ({ data }): Promise<DriftCheck | null> => {
     const db = adminDatabase(env.DB);
-    const drift = await driftOf(await deployerApi(env), db, data.clientId);
-    if (drift === null) {
-      return null;
-    }
     let store: DeploySecrets | null = null;
     try {
       store = await deploySecrets(env);
@@ -206,6 +202,15 @@ export const fetchDrift = createServerFn({ method: "GET" })
       if (!(error instanceof MissingStoreSecretError)) {
         throw error;
       }
+    }
+    const drift = await driftOf(
+      await deployerApi(env),
+      db,
+      data.clientId,
+      store === null ? undefined : { fetch, routerKey: store.routerKey }
+    );
+    if (drift === null) {
+      return null;
     }
     return {
       ...drift,

@@ -13,6 +13,15 @@ export const rolloutErrorCodes = [
   "ring_zero_only",
   /** It would take its run past the step budget: roll out to fewer clients at a time. */
   "too_large",
+  /**
+   * The release raises a platform limit, over what a client it would reach
+   * runs, without capacity and security evidence for that client's profile.
+   */
+  "limit_evidence_missing",
+  /** The release was built before platform limits were recorded, and isn't made live. */
+  "release_without_limits",
+  /** A release on the way to it isn't imported, so its evidence can't be read. */
+  "release_history_incomplete",
   /** Another rollout is running or waiting for approval. */
   "rollout_running",
   /** The rollout isn't waiting for approval. */
@@ -28,11 +37,6 @@ export const rolloutErrorCodes = [
   /** Something newer was deployed to the client after the rollout. */
   "superseded",
   /**
-   * What the client ran before isn't the release right before the
-   * rollout's, or the same one: its migrations only keep those working.
-   */
-  "too_far_back",
-  /**
    * What the client ran before doesn't work with what it runs now, or
    * declares nothing of what it works with (src/deploy/compatibility.ts).
    */
@@ -43,24 +47,15 @@ export const rolloutErrorCodes = [
    * (src/deploy/compatibility.ts).
    */
   "schema_incompatible",
-  /** The client's secrets rotated since, which its previous versions don't have. */
-  "rotated_since",
-  /**
-   * A shared secret the client's previous versions run was replaced in
-   * Secrets Store since, or what they run isn't on record: going back
-   * could bring a retired provider key back.
-   */
-  "shared_secret_replaced",
-  /**
-   * A secret of the client's own, sealed in the admin (its Teams bot's),
-   * that its previous versions run was replaced since: going back could
-   * bring a revoked bot secret back.
-   */
-  "sealed_secret_replaced",
   /** Another runner (provisioning, another rollout, a rollback) has the client. */
   "client_busy",
   /** The rollback's run failed or was ended before it finished. */
   "rollback_failed",
+  /**
+   * The rollout's release added a Durable Object migration since the
+   * release before, which a script never goes back past.
+   */
+  "rollback_past_migration",
   /** A secrets rollout can't start while Secrets Store is missing a shared secret. */
   "secrets_store_incomplete",
   /**

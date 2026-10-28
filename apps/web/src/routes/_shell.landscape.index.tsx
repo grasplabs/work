@@ -54,8 +54,8 @@ import type {
 } from "../landscape/landscape.ts";
 import { hoverDelay, Toolbar, ToolbarLabel } from "../landscape/toolbar.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
-import { bookOf, policyToday } from "../policies/policies-data.ts";
-import { applyPolicy, findings } from "../policies/policy.ts";
+import { bookOf, findingsOfLoaded } from "../policies/policies-data.ts";
+import { applyPolicy, findingsWith } from "../policies/policy.ts";
 
 // The Landscape, as in the prototype (`routes/landscape/index.tsx`): every
 // app the company uses, how Grasp knows about it, what data it touches and
@@ -69,7 +69,7 @@ type ToolbarMenu = "filter" | "layout" | "columns";
 
 const LandscapePage = () => {
   const { t } = useLingui();
-  const { apps: loaded, book: read } = Route.useLoaderData();
+  const { apps: loaded, book: read, found } = Route.useLoaderData();
   const book = bookOf(read);
   const navigate = useNavigate();
   const view = Route.useSearch().view ?? "table";
@@ -95,7 +95,7 @@ const LandscapePage = () => {
   const raw: LandscapeApp[] = loaded.state === "ready" ? loaded.data : [];
   const apps = applyPolicy(
     raw,
-    findings(book.rules, raw, book.exceptions, policyToday())
+    findingsWith(book, findingsOfLoaded(found).findings)
   );
   const shown = sortApps(
     apps.filter((app) => matchesLandscape(app, filters, query)),

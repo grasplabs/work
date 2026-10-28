@@ -788,6 +788,27 @@ const targetPath = ({ accountId, scriptName, namespace }: ScriptTarget) =>
     : `/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${scriptName}`;
 
 /**
+ * Deletes the script `target` names with what it binds of its own (its
+ * Durable Object namespaces and their data: `force`). One that's gone
+ * already counts as deleted.
+ */
+export const deleteTargetScript = async (
+  api: CloudflareApi,
+  target: ScriptTarget
+): Promise<void> => {
+  try {
+    await api.call(
+      { method: "DELETE", path: targetPath(target), query: { force: "true" } },
+      z.unknown()
+    );
+  } catch (error) {
+    if (!isNotFound(error)) {
+      throw error;
+    }
+  }
+};
+
+/**
  * Uploads `upload` as the script `target` names, live at once (a dispatch
  * namespace has no gradual deployments), keeping the secrets its latest
  * version has (`keep_bindings`): a placed client's secrets are delivered
@@ -798,7 +819,8 @@ const targetPath = ({ accountId, scriptName, namespace }: ScriptTarget) =>
 export const uploadTargetScript = async (
   api: CloudflareApi,
   target: ScriptTarget,
-  upload: WorkerUpload
+  upload: WorkerUpload,
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   const path = targetPath(target);
   await api.call(
@@ -807,13 +829,17 @@ export const uploadTargetScript = async (
       path,
       body: await uploadForm(api, target.accountId, path, upload, "keep"),
       idempotent: upload.metadata.migrations === undefined,
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
 };
 
+// A script the namespace hasn't got answers 200 with a null `script` (the
+// namespace's own details), not a 404, as a real namespace showed
+// (GRA-430, 28 Oct).
 const dispatchScriptSchema = z.object({
-  script: z.object({ migration_tag: z.string().nullish() }),
+  script: z.object({ migration_tag: z.string().nullish() }).nullable(),
 });
 
 /**
@@ -833,6 +859,9 @@ export const targetMigrationState = async (
       { method: "GET", path: targetPath(target) },
       dispatchScriptSchema
     );
+    if (script === null) {
+      return { exists: false };
+    }
     const tag = script.migration_tag;
     return {
       exists: true,
@@ -855,16 +884,44 @@ export const targetMigrationState = async (
 export const putTargetSecret = async (
   api: CloudflareApi,
   target: ScriptTarget,
-  secret: Secret
+  secret: Secret,
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   await api.call(
     {
       method: "PUT",
       path: `${targetPath(target)}/secrets`,
       json: { name: secret.name, text: secret.value, type: "secret_text" },
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
+};
+
+/**
+ * Removes the secret `name` from the script `target` names. One that's
+ * already gone counts as removed, so a retried step succeeds.
+ */
+export const deleteTargetSecret = async (
+  api: CloudflareApi,
+  target: ScriptTarget,
+  name: string,
+  { signal }: { signal?: AbortSignal } = {}
+): Promise<void> => {
+  try {
+    await api.call(
+      {
+        method: "DELETE",
+        path: `${targetPath(target)}/secrets/${encodeURIComponent(name)}`,
+        ...(signal === undefined ? {} : { signal }),
+      },
+      z.unknown()
+    );
+  } catch (error) {
+    if (!isNotFound(error)) {
+      throw error;
+    }
+  }
 };
 
 /** The names of the secrets the script `target` names has; their values are never read. */

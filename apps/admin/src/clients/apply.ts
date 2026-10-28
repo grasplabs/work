@@ -1,14 +1,14 @@
 /**
- * Applying a client's settings now, without waiting for a rollout: a
- * deploy of the release it runs, so its core gets its sign-in, with
- * every Worker live at once (a config change doesn't wait for a gradual
- * rollout). Staff start it from the client's page.
+ * Applying a client's settings now, without waiting for a rollout: its
+ * operation run again for the release it runs (src/hosting/operation.ts),
+ * so its core gets its sign-in and settings, and a rotation of its
+ * secrets that waits goes live. Staff start it from the client's page.
  *
  * It's a runner like the others (src/runners.ts): it claims the client
  * with the same conditional write, audited (`client.apply_settings`), so
  * it never runs beside a rollout, a rollback or provisioning, and its
- * Workflow (`ApplyClient`) deploys as that runner and releases the client
- * when it's done, whether the deploy worked or not.
+ * Workflow (`ApplyClient`) runs the operation as that runner and releases
+ * the client when it's done, whether it worked or not.
  */
 import { log } from "@grasp-os/shared/log";
 import { WorkflowEntrypoint } from "cloudflare:workers";
@@ -18,12 +18,13 @@ import type { Staff } from "../access.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
+import { errorCode } from "../deploy/deploy.ts";
+import { InventoryError } from "../hosting/inventory.ts";
 import {
-  errorCode,
-  redeployKind,
-  runDeploy,
-  startDeploy,
-} from "../deploy/deploy.ts";
+  ProvisionOperationError,
+  runClientProvision,
+  startClientRelease,
+} from "../hosting/operation.ts";
 import { runningRelease, targetClient } from "../rollout/targets.ts";
 import { claimRun, currentRun, hasEnded, releaseRun } from "../runners.ts";
 import {
@@ -124,12 +125,10 @@ export const applySettings = async (
 };
 
 /**
- * Applies a client's settings: deploys the release it runs again, as the
- * client's runner, every Worker live at once (`runDeploy`), then releases
- * the client, whether the deploy worked or not. Its core records it as a
- * `settings` change, with its secrets' too when a rotation of them waits
- * for a deploy, which this one is (`redeployKind`). The release is read
- * in the run, which holds the client: no other runner changes it after.
+ * Applies a client's settings: runs its operation again for the release it
+ * runs, as the client's runner (`startClientRelease`, `again`), then
+ * releases the client, whether it worked or not. The release is read in
+ * the run, which holds the client: no other runner changes it after.
  */
 export class ApplyClient extends WorkflowEntrypoint<Env, ApplyParams> {
   override async run(
@@ -139,7 +138,7 @@ export class ApplyClient extends WorkflowEntrypoint<Env, ApplyParams> {
     const { clientId, startedBy } = event.payload;
     const db = adminDatabase(this.env.DB);
     try {
-      const deployId = await step.do(
+      await step.do(
         "start",
         quickStep,
         guarded(async () => {
@@ -152,12 +151,19 @@ export class ApplyClient extends WorkflowEntrypoint<Env, ApplyParams> {
               `${clientId}'s Workers don't run one release`
             );
           }
-          return await startDeploy(
+          // As the client's runner, which claimed it before this run began.
+          await startClientRelease(
             db,
             startedBy,
-            clientId,
-            releaseId,
-            redeployKind({ settings: true, secrets: client.rotationPending })
+            { clientId, runId: event.instanceId },
+            {
+              releaseId,
+              again: true,
+              // New secrets go with it when a rotation waits too.
+              what: client.rotationPending
+                ? "settings_and_secrets"
+                : "settings",
+            }
           );
         })
       );
@@ -166,13 +172,23 @@ export class ApplyClient extends WorkflowEntrypoint<Env, ApplyParams> {
         deployStepConfig,
         guarded(async () => {
           // As the client's runner: it stops if another takes the client.
-          await runDeploy(
-            {
-              ...(await deployContext(this.env)),
-              runner: { clientId, runId: event.instanceId },
-            },
-            deployId
-          );
+          try {
+            // The release it runs, again: going back a release wouldn't
+            // undo a setting that broke it.
+            await runClientProvision(
+              await deployContext(this.env),
+              { clientId, runId: event.instanceId },
+              { rollBackOnProbe: false }
+            );
+          } catch (error) {
+            if (
+              error instanceof ProvisionOperationError ||
+              error instanceof InventoryError
+            ) {
+              throw stop(error.code, error.message);
+            }
+            throw error;
+          }
         })
       );
     } catch (error) {

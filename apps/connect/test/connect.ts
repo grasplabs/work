@@ -17,12 +17,14 @@ import type {
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
+import { runClockTasks } from "@grasp-os/workerflow/clock";
 import { createExecutionContext } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { beforeEach } from "vite-plus/test";
 import type { z } from "zod";
 
+import { clockTasks, report } from "../src/clock.ts";
 import { connections } from "../src/db/schema.ts";
 import Connect from "../src/index.ts";
 import type { Account, fakeProviders } from "./oauth-provider.ts";
@@ -183,6 +185,22 @@ export const callAs = async (
  */
 export const connectWith = (vars: Partial<Env>): Connect =>
   new Connect(createExecutionContext(), { ...env, ...vars });
+
+/**
+ * Runs connect's clock tasks once, as its alarm does every minute, on an
+ * env with `vars`, for now.
+ */
+export const runMaintenance = async (
+  vars: Partial<Env> = {}
+): Promise<void> => {
+  await runClockTasks(
+    { ...env, ...vars },
+    clockTasks,
+    "minute",
+    Date.now(),
+    report
+  );
+};
 
 /** The code connect refused or failed with, or "ok" if it didn't. */
 export const outcome = async (promise: Promise<unknown>): Promise<string> => {

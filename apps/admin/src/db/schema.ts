@@ -24,6 +24,15 @@ export const releases = sqliteTable("releases", {
   manifest: text().notNull(),
   /** The manifest's sha256, hex. */
   manifestSha256: text("manifest_sha256").notNull(),
+  /**
+   * Its limit evidence file, as CI's publish wrote it next to the manifest
+   * (@grasp-os/shared/release `limitEvidenceFileSchema`): JSON, checked on
+   * import against the manifest and R2's SHA-256. Null for a release that
+   * records no platform limits (built before they were).
+   */
+  limitEvidence: text("limit_evidence"),
+  /** That file's sha256, hex; null with it. */
+  limitEvidenceSha256: text("limit_evidence_sha256"),
   builtAt: timestamp("built_at").notNull(),
   importedAt: timestamp("imported_at").notNull(),
   /**
@@ -47,6 +56,20 @@ export const releaseImportFailures = sqliteTable("release_import_failures", {
   nextAttemptAt: timestamp("next_attempt_at").notNull(),
 });
 
+/**
+ * How far the import has checked a published release whose blobs don't fit
+ * in one run's reads (src/releases/import.ts): the first `verifiedBlobs`
+ * of them, in its manifest's order, for the manifest with that sha256.
+ * Gone once it's imported, or once an attempt fails.
+ */
+export const releaseImportProgress = sqliteTable("release_import_progress", {
+  releaseId: text("release_id").primaryKey(),
+  /** The manifest the checked blobs are its: another starts again. */
+  manifestSha256: text("manifest_sha256").notNull(),
+  verifiedBlobs: integer("verified_blobs").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
 /** A client: one deployment of Grasp OS in its own Cloudflare account. */
 export const clients = sqliteTable(
   "clients",
@@ -54,8 +77,12 @@ export const clients = sqliteTable(
     /** The client's slug: its subdomain, `<slug>.<domain>`. */
     id: text().primaryKey(),
     name: text().notNull(),
-    /** The Cloudflare account the admin adopted for it. */
-    accountId: text("account_id").notNull().unique(),
+    /**
+     * The Cloudflare account the admin adopted for it, under the
+     * account-per-client path; null for a client created as a placement in
+     * a hosting destination (src/hosting/), which every new client is.
+     */
+    accountId: text("account_id").unique(),
     /**
      * The generation of the client's derived secrets: each is
      * `HMAC(<master key>, "<purpose>:<id>:<generation>")`
@@ -81,7 +108,13 @@ export const clients = sqliteTable(
     status: text({ enum: ["provisioning", "active", "offboarded"] })
       .notNull()
       .default("provisioning"),
-    /** The staff member who started provisioning it (src/provision/). */
+    /**
+     * When staff offboarded it (src/hosting/offboarding.ts): its hostname
+     * left the router's map then, and its resources may be deleted once
+     * the retention window from here is over. Null while it isn't.
+     */
+    offboardedAt: timestamp("offboarded_at"),
+    /** The staff member who added it (src/provision/). */
     createdBy: text("created_by"),
     /**
      * How its people sign in, as staff gave it when provisioning: JSON
@@ -165,10 +198,8 @@ export const clientRuns = sqliteTable("client_runs", {
    * (src/hosting/workflow.ts).
    */
   kind: text({
-    enum: ["provision", "rollout", "rollback", "apply", "provision_placed"],
-  })
-    .notNull()
-    .default("provision"),
+    enum: ["rollout", "rollback", "apply", "provision_placed"],
+  }).notNull(),
 });
 
 /**
@@ -310,6 +341,16 @@ export const rolloutTargets = sqliteTable(
     error: text(),
     /** The client's deploy of the release, once the rollout started it. */
     deployId: text("deploy_id"),
+    /**
+     * The client's change the rollout started (`client_provisions.change`):
+     * a rollback of it may go only while that is still the client's latest.
+     */
+    change: integer(),
+    /**
+     * The client's change a rollback of the client from the rollout
+     * started: one that failed is retried while it's still the latest.
+     */
+    rollbackChange: integer("rollback_change"),
     /**
      * What the client ran before the rollout reached it, which a rollback
      * restores: JSON (`PreviousRun`, src/rollout/targets.ts). For a
@@ -571,6 +612,12 @@ export const clientResources = sqliteTable(
     lifecycle: text({ enum: ["allocated", "tombstoned"] })
       .notNull()
       .default("allocated"),
+    /**
+     * When an explicit deletion removed it from its destination
+     * (src/hosting/offboarding.ts); null while it's there, or was never
+     * made. Kept, so the record says what the client had and when it went.
+     */
+    deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
@@ -597,10 +644,19 @@ export const clientProvisions = sqliteTable("client_provisions", {
     .notNull()
     .unique()
     .references(() => clients.id),
-  /** The release it provisions: fixed for the operation. */
+  /**
+   * The release it provisions, or the later one (or the one before) a
+   * release or rollback took it to: fixed while it runs.
+   */
   releaseId: text("release_id")
     .notNull()
     .references(() => releases.id),
+  /**
+   * The release the client ran before the latest release or rollback
+   * started (src/hosting/operation.ts): what a rollback takes it back to;
+   * null before its first release after provisioning.
+   */
+  previousReleaseId: text("previous_release_id").references(() => releases.id),
   status: text({ enum: ["running", "failed", "done"] }).notNull(),
   /** The last step that finished, such as `resources`; null before the first. */
   step: text(),
@@ -616,6 +672,21 @@ export const clientProvisions = sqliteTable("client_provisions", {
   progress: text(),
   /** The runner that last recorded a step: a Workflow instance (src/runners.ts). */
   runId: text("run_id"),
+  /**
+   * Counts every change started on the client: each release, run again
+   * and rollback raises it (src/hosting/operation.ts). What a rollout or
+   * rollback reads to know its change is still the client's latest,
+   * rather than comparing releases, which a later change can return to.
+   */
+  change: integer().notNull().default(0),
+  /**
+   * What the change started is, as the client's core records it
+   * (`platform.updated`): a release, or new settings or secrets, or both,
+   * on the release it runs. Null before its first change.
+   */
+  what: text({
+    enum: ["release", "secrets", "settings", "settings_and_secrets"],
+  }),
   /** The staff member who started it. */
   startedBy: text("started_by").notNull(),
   createdAt: timestamp("created_at").notNull(),
