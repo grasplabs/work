@@ -59,6 +59,13 @@ export const PlatformNav = () => (
     >
       Rollouts
     </Link>
+    <Link
+      activeProps={{ className: activeTab }}
+      inactiveProps={{ className: tab }}
+      to="/platform/offboarded"
+    >
+      Offboarded
+    </Link>
   </nav>
 );
 

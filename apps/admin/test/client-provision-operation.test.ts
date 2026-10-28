@@ -1,6 +1,6 @@
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { moduleKey } from "@grasp-os/shared/release";
-import { deriveRouterSecret } from "@grasp-os/shared/router";
+import { deriveRouterSecret, routerHostKey } from "@grasp-os/shared/router";
 import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -32,6 +32,10 @@ import {
   clientInventory,
 } from "../src/hosting/inventory.ts";
 import {
+  deletePlacedClient,
+  offboardPlacedClient,
+} from "../src/hosting/offboarding.ts";
+import {
   runClientProvision,
   startClientProvision,
   startClientRelease,
@@ -40,7 +44,7 @@ import {
   provisionPlacedClient,
   releasePlacedClient,
 } from "../src/hosting/workflow.ts";
-import { claimRun } from "../src/runners.ts";
+import { claimRun, currentRun, startingMs } from "../src/runners.ts";
 import type { HeldClient } from "../src/runners.ts";
 import { envelope, notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
@@ -697,6 +701,14 @@ const codeOf = async (promise: Promise<unknown>): Promise<string> => {
       : "thrown";
   }
   return "started";
+};
+
+/** When client `clientId` was offboarded, moved `days` into the past. */
+const offboardedDaysAgo = async (clientId: string, days: number) => {
+  await db
+    .update(clients)
+    .set({ offboardedAt: new Date(Date.now() - days * 86_400_000) })
+    .where(eq(clients.id, clientId));
 };
 
 describe("provisioning a placed client", () => {
@@ -2095,6 +2107,271 @@ describe("provisioning a placed client", () => {
       await attempts.dispose();
     }
   });
+
+  // Offboarding, then deleting its resources (src/hosting/offboarding.ts):
+  // the threat model is in its header.
+
+  it("offboards a live client at once, unrouting it and deleting nothing, and no later release routes it again", async () => {
+    const first = await importRelease("dedicated");
+    const { account, clientId } = await liveClient(first);
+    const before = holdings(account);
+    const later = await importRelease("dedicated", {
+      notes: "feat(core): later",
+    });
+
+    await offboardPlacedClient(env, staff, clientId);
+    // Again: it's offboarded already, and its hostname stays out.
+    await offboardPlacedClient(env, staff, clientId);
+    const refused = await codeOf(
+      startClientRelease(db, staff, await attempt(clientId), {
+        releaseId: later.releaseId,
+      })
+    );
+    const client = await db
+      .select({ status: clients.status, offboardedAt: clients.offboardedAt })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get();
+
+    expect({
+      status: client?.status,
+      offboarded: client?.offboardedAt instanceof Date,
+      route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
+      holdings: holdings(account),
+      refused,
+    }).toStrictEqual({
+      status: "offboarded",
+      offboarded: true,
+      route: null,
+      holdings: before,
+      refused: "client_not_active",
+    });
+  });
+
+  it("deletes an offboarded client's resources only after its retention, with staff confirming no export, and only its own", async () => {
+    const first = await importRelease("dedicated");
+    const { account, clientId } = await liveClient(first);
+    const other = await liveClient(first);
+    const others = holdings(other.account);
+    await offboardPlacedClient(env, staff, clientId);
+
+    const early = await codeOf(
+      deletePlacedClient(env, staff, clientId, { exportConfirmed: true })
+    );
+    await offboardedDaysAgo(clientId, 31);
+    const unconfirmed = await codeOf(
+      deletePlacedClient(env, staff, clientId, { exportConfirmed: false })
+    );
+    const live = await codeOf(
+      deletePlacedClient(env, staff, other.clientId, { exportConfirmed: true })
+    );
+    const kept = holdings(account);
+    const deletion = await deletePlacedClient(env, staff, clientId, {
+      exportConfirmed: true,
+    });
+    const inventory = await clientInventory(db, clientId);
+    const events = await db
+      .select({ action: auditEvents.action, detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(eq(auditEvents.clientId, clientId));
+    const deletedEvents = events.filter(
+      ({ action }) => action === "client.delete_resource"
+    );
+    const summary = events.find(
+      ({ action }) => action === "client.delete_resources"
+    );
+
+    expect({
+      early,
+      unconfirmed,
+      live,
+      kept: kept.d1.length > 0 && kept.scripts.length > 0,
+      deletion: deletion.emptying,
+      gone: holdings(account),
+      recorded: inventory.every((row) => row.deletedAt !== null),
+      // Each resource audited as it went, then the whole, with what staff
+      // confirmed.
+      audited: deletedEvents.length,
+      summary: z.unknown().parse(JSON.parse(summary?.detail ?? "null")),
+      others: holdings(other.account),
+    }).toMatchObject({
+      early: "retention_running",
+      unconfirmed: "export_unconfirmed",
+      live: "not_offboarded",
+      kept: true,
+      deletion: [],
+      gone: { d1: [], buckets: [], scripts: [] },
+      recorded: true,
+      audited: inventory.length,
+      summary: { deleted: inventory.length, exportConfirmed: true },
+      others,
+    });
+  });
+
+  it("empties a bucket that still holds objects and deletes it on a later run, and keeps a database whose name another id has", async () => {
+    const first = await importRelease("dedicated");
+    const { account, clientId } = await liveClient(first);
+    await offboardPlacedClient(env, staff, clientId);
+    await offboardedDaysAgo(clientId, 31);
+    const files = await resourceOf(clientId, "r2:grasp-os-files");
+    account.fullBuckets.add(files.physicalName);
+
+    const firstRun = await deletePlacedClient(env, staff, clientId, {
+      exportConfirmed: true,
+    });
+    const [emptied] = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "client.empty_bucket")
+        )
+      );
+    const emptying = {
+      emptying: firstRun.emptying,
+      rule: account.lifecycles.has(files.physicalName),
+      kept: account.buckets.some(({ name }) => name === files.physicalName),
+      audited: z.unknown().parse(JSON.parse(emptied?.detail ?? "null")),
+    };
+    // Its objects expired since: the next run deletes it.
+    account.fullBuckets.delete(files.physicalName);
+    const secondRun = await deletePlacedClient(env, staff, clientId, {
+      exportConfirmed: true,
+    });
+
+    // Another client's database under the recorded name: kept.
+    const next = await liveClient(first);
+    await offboardPlacedClient(env, staff, next.clientId);
+    await offboardedDaysAgo(next.clientId, 31);
+    const database = await resourceOf(next.clientId, "d1:grasp-os-core");
+    const swapped = next.account.d1.find(
+      ({ uuid }) => uuid === database.providerId
+    );
+    if (swapped !== undefined) {
+      swapped.uuid = crypto.randomUUID();
+    }
+    const before = holdings(next.account);
+    const notOwned = await codeOf(
+      deletePlacedClient(env, staff, next.clientId, { exportConfirmed: true })
+    );
+
+    expect({
+      emptying,
+      second: secondRun.emptying,
+      bucketGone: account.buckets.length,
+      notOwned,
+      // Refused before anything went: its scripts and their objects too.
+      untouched: holdings(next.account),
+    }).toStrictEqual({
+      emptying: {
+        emptying: [files.physicalName],
+        rule: true,
+        kept: true,
+        audited: { role: files.role, physicalName: files.physicalName },
+      },
+      second: [],
+      bucketGone: 0,
+      notOwned: "resource_not_owned",
+      untouched: before,
+    });
+  });
+
+  it("refuses deleting a row not named for its deployment, or a database whose id was never recorded, before anything goes", async () => {
+    const first = await importRelease("dedicated");
+    const misnamed = await liveClient(first);
+    const unrecorded = await liveClient(first);
+    for (const { clientId } of [misnamed, unrecorded]) {
+      // oxlint-disable-next-line no-await-in-loop -- two, in order
+      await offboardPlacedClient(env, staff, clientId);
+      // oxlint-disable-next-line no-await-in-loop -- two, in order
+      await offboardedDaysAgo(clientId, 31);
+    }
+    const files = await resourceOf(misnamed.clientId, "r2:grasp-os-files");
+    await db
+      .update(clientResources)
+      .set({ physicalName: "gsomeone-else-files" })
+      .where(
+        and(
+          eq(clientResources.clientId, misnamed.clientId),
+          eq(clientResources.role, files.role)
+        )
+      );
+    await db
+      .update(clientResources)
+      .set({ providerId: null })
+      .where(
+        and(
+          eq(clientResources.clientId, unrecorded.clientId),
+          eq(clientResources.role, "d1:grasp-os-core")
+        )
+      );
+    const before = {
+      misnamed: holdings(misnamed.account),
+      unrecorded: holdings(unrecorded.account),
+    };
+
+    const refused = {
+      misnamed: await codeOf(
+        deletePlacedClient(env, staff, misnamed.clientId, {
+          exportConfirmed: true,
+        })
+      ),
+      unrecorded: await codeOf(
+        deletePlacedClient(env, staff, unrecorded.clientId, {
+          exportConfirmed: true,
+        })
+      ),
+    };
+
+    expect({
+      refused,
+      untouched: {
+        misnamed: holdings(misnamed.account),
+        unrecorded: holdings(unrecorded.account),
+      },
+    }).toStrictEqual({
+      refused: {
+        misnamed: "resource_not_owned",
+        unrecorded: "resource_not_owned",
+      },
+      untouched: before,
+    });
+  });
+
+  it("refuses offboarding with no client domain set, or a hostname the router gives another client, and leaves the route", async () => {
+    const first = await importRelease("dedicated");
+    const { clientId } = await liveClient(first);
+    const other = await liveClient(first);
+    const hostname = `${clientId}.${domain}`;
+
+    const unconfigured = await codeOf(
+      offboardPlacedClient({ ...env, CLIENT_DOMAIN: "" }, staff, clientId)
+    );
+    const status = await db
+      .select({ status: clients.status })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get();
+    // The map gives its hostname the other client's entry.
+    const otherEntry = await env.ROUTER_HOSTS.get(
+      routerHostKey(`${other.clientId}.${domain}`)
+    );
+    await env.ROUTER_HOSTS.put(routerHostKey(hostname), otherEntry ?? "");
+    const notOurs = await codeOf(offboardPlacedClient(env, staff, clientId));
+
+    expect({
+      unconfigured,
+      status: status?.status,
+      notOurs,
+      route: await mappedRoute(env.ROUTER_HOSTS, hostname),
+    }).toMatchObject({
+      unconfigured: "routing_unconfigured",
+      status: "active",
+      notOurs: "hostname_not_ours",
+      route: { clientId: other.clientId },
+    });
+  });
 });
 
 /** Where a release B's runner stops for good, as a crash leaves it. */
@@ -2244,59 +2521,79 @@ const expectedOf = (
   };
 };
 
+/**
+ * A live client on release A, with B (a new class and table) and C (B's,
+ * and a table more) imported, and B's runner stopped for good at `point`:
+ * its run left running, as a crash leaves it.
+ */
+const crashedAt = async (point: CrashPoint) => {
+  const { started, claimed, plan } = point;
+  const a = await importRelease("dedicated");
+  const { clientId } = await liveClient(a);
+  const scripts = await scriptsOf(clientId);
+  // B adds a class (a Durable Object migration) and a table; C keeps
+  // both and adds a table of its own.
+  const b = await importRelease(
+    "dedicated",
+    {
+      notes: "feat(core): b",
+      core: "export default { core: 'b' };",
+      migrations: {
+        "0000_init.sql": "CREATE TABLE a (id TEXT);",
+        "0001_more.sql": "CREATE TABLE b (id TEXT);",
+      },
+    },
+    withExtraClass
+  );
+  const c = await importRelease(
+    "dedicated",
+    {
+      notes: "feat(core): c",
+      core: "export default { core: 'c' };",
+      migrations: {
+        "0000_init.sql": "CREATE TABLE a (id TEXT);",
+        "0001_more.sql": "CREATE TABLE b (id TEXT);",
+        "0002_most.sql": "CREATE TABLE c (id TEXT);",
+      },
+    },
+    withExtraClass
+  );
+
+  // B's runner, to where it stops: then it dies, its run left running.
+  let dead: HeldClient | undefined;
+  if (claimed) {
+    dead = await attempt(clientId);
+  }
+  if (started && dead !== undefined) {
+    await startClientRelease(db, staff, dead, { releaseId: b.releaseId });
+    const restore = plan?.(scripts);
+    await failing(dead);
+    restore?.();
+    await db
+      .update(clientProvisions)
+      .set({ status: "running", error: null })
+      .where(eq(clientProvisions.clientId, clientId));
+  }
+
+  if (dead !== undefined) {
+    // Its instance gone long since, as a crash leaves it: its claim may be
+    // replaced, and nothing counts it as starting.
+    await db
+      .update(clientRuns)
+      .set({ claimedAt: new Date(Date.now() - 2 * startingMs) })
+      .where(eq(clientRuns.clientId, clientId));
+  }
+  return { clientId, dead, a, b, c };
+};
+
 describe("a release's runner crashing, and another action on the client after", () => {
   useStoreSecrets({ deployer: token, tenant: `${token}-tenant-admin` });
 
   it.each(walk)(
     "$at, then $action: ends coherent, by what its Workers ran, and the dead runner writes nothing",
     async ({ action, ...point }) => {
-      const { started, claimed, plan } = point;
-      const a = await importRelease("dedicated");
-      const { clientId } = await liveClient(a);
-      const scripts = await scriptsOf(clientId);
-      // B adds a class (a Durable Object migration) and a table; C keeps
-      // both and adds a table of its own.
-      const b = await importRelease(
-        "dedicated",
-        {
-          notes: "feat(core): b",
-          core: "export default { core: 'b' };",
-          migrations: {
-            "0000_init.sql": "CREATE TABLE a (id TEXT);",
-            "0001_more.sql": "CREATE TABLE b (id TEXT);",
-          },
-        },
-        withExtraClass
-      );
-      const c = await importRelease(
-        "dedicated",
-        {
-          notes: "feat(core): c",
-          core: "export default { core: 'c' };",
-          migrations: {
-            "0000_init.sql": "CREATE TABLE a (id TEXT);",
-            "0001_more.sql": "CREATE TABLE b (id TEXT);",
-            "0002_most.sql": "CREATE TABLE c (id TEXT);",
-          },
-        },
-        withExtraClass
-      );
-
-      // B's runner, to where it stops: then it dies, its run left running.
-      let dead: HeldClient | undefined;
-      if (claimed) {
-        dead = await attempt(clientId);
-      }
-      if (started && dead !== undefined) {
-        await startClientRelease(db, staff, dead, { releaseId: b.releaseId });
-        const restore = plan?.(scripts);
-        await failing(dead);
-        restore?.();
-        await db
-          .update(clientProvisions)
-          .set({ status: "running", error: null })
-          .where(eq(clientProvisions.clientId, clientId));
-      }
+      const { started } = point;
+      const { clientId, dead, a, b, c } = await crashedAt(point);
 
       // The next action, as a new holder.
       const holder = await attempt(clientId);
@@ -2352,6 +2649,191 @@ describe("a release's runner crashing, and another action on the client after", 
             }),
         staleWrote: false,
         schemaAtLeastB: true,
+      });
+    }
+  );
+
+  it("offboards or releases a client asked for both at once, never both: the loser changes nothing", async () => {
+    const first = await importRelease("dedicated");
+    const { clientId } = await liveClient(first);
+    const later = await importRelease("dedicated", {
+      notes: "feat(core): later",
+    });
+    const hostname = `${clientId}.${domain}`;
+    const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
+    try {
+      await attempts.modifyAll(async (modifier) => {
+        await modifier.disableRetryDelays();
+      });
+      const [offboarded, released] = await Promise.all([
+        codeOf(offboardPlacedClient(env, staff, clientId)),
+        codeOf(
+          releasePlacedClient(env, staff, clientId, {
+            releaseId: later.releaseId,
+          })
+        ),
+      ]);
+      const started = await attempts.get();
+      await Promise.all(
+        started.map(async (instance) => {
+          await instance.waitForStatus("complete").catch(() => {
+            /* a run the offboarding refused ends errored */
+          });
+        })
+      );
+      const client = await db
+        .select({ status: clients.status })
+        .from(clients)
+        .where(eq(clients.id, clientId))
+        .get();
+      const route = await mappedRoute(env.ROUTER_HOSTS, hostname);
+      const offboardWon = offboarded === "started";
+
+      expect({
+        oneWon: offboardWon !== (released === "started"),
+        status: client?.status,
+        routed: route !== null,
+      }).toStrictEqual({
+        oneWon: true,
+        status: offboardWon ? "offboarded" : "active",
+        // Offboarded: never routed again; released: still served.
+        routed: !offboardWon,
+      });
+    } finally {
+      await attempts.dispose();
+    }
+  });
+
+  it("holds the client while it offboards: a release asked for as its hostname is deleted can't claim it, and starts nothing", async () => {
+    const first = await importRelease("dedicated");
+    const { clientId } = await liveClient(first);
+    const later = await importRelease("dedicated", {
+      notes: "feat(core): later",
+    });
+    const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
+    try {
+      let meanwhile = "not asked";
+      const remove = env.ROUTER_HOSTS.delete.bind(env.ROUTER_HOSTS);
+      const deleting = vi
+        .spyOn(env.ROUTER_HOSTS, "delete")
+        .mockImplementationOnce(async (key: string) => {
+          // A release asked for while offboarding deletes the route.
+          meanwhile = await codeOf(
+            releasePlacedClient(env, staff, clientId, {
+              releaseId: later.releaseId,
+            })
+          );
+          await remove(key);
+        });
+
+      const offboarded = await codeOf(
+        offboardPlacedClient(env, staff, clientId)
+      );
+      deleting.mockRestore();
+      const started = await attempts.get();
+
+      expect({
+        offboarded,
+        meanwhile,
+        started: started.length,
+        route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
+      }).toStrictEqual({
+        offboarded: "started",
+        meanwhile: "already_running",
+        started: 0,
+        route: null,
+      });
+    } finally {
+      await attempts.dispose();
+    }
+  });
+
+  it("keeps a client it couldn't unroute as it was, the route and its claim given back, and offboards it when tried again", async () => {
+    const first = await importRelease("dedicated");
+    const { clientId } = await liveClient(first);
+    const hostname = `${clientId}.${domain}`;
+    const deleting = vi
+      .spyOn(env.ROUTER_HOSTS, "delete")
+      .mockRejectedValueOnce(new Error("KV unavailable"));
+
+    const failed = await codeOf(offboardPlacedClient(env, staff, clientId));
+    deleting.mockRestore();
+    const row = await db
+      .select({ status: clients.status })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get();
+    const stillRouted = await mappedRoute(env.ROUTER_HOSTS, hostname);
+    const afterFailure = {
+      status: row?.status,
+      routed: stillRouted !== null,
+      claimed: await currentRun(env, clientId),
+    };
+    const retried = await codeOf(offboardPlacedClient(env, staff, clientId));
+
+    expect({
+      failed,
+      afterFailure,
+      retried,
+      route: await mappedRoute(env.ROUTER_HOSTS, hostname),
+    }).toMatchObject({
+      failed: "thrown",
+      afterFailure: { status: "active", routed: true, claimed: null },
+      retried: "started",
+      route: null,
+    });
+  });
+
+  it.each(crashPoints)(
+    "$at, then offboarding: unrouted at once, and neither the dead runner nor a later start serves it again",
+    async (point) => {
+      const { clientId, dead, b } = await crashedAt(point);
+      const hostname = `${clientId}.${domain}`;
+
+      const offboarded = await codeOf(
+        offboardPlacedClient(env, staff, clientId)
+      );
+      const routeAfter = await mappedRoute(env.ROUTER_HOSTS, hostname);
+      const settled = await operationOf(clientId);
+      // The dead runner, waking: holds nothing, writes and routes nothing.
+      const stale =
+        dead === undefined
+          ? "none"
+          : String(
+              await failing(dead).then((error) =>
+                error instanceof Error && "code" in error ? error.code : error
+              )
+            );
+      const later = await codeOf(
+        startClientRelease(db, staff, await attempt(clientId), {
+          releaseId: b.releaseId,
+        })
+      );
+      let staleExpected = "none";
+      if (point.started) {
+        staleExpected = "runner_replaced";
+      } else if (dead !== undefined) {
+        staleExpected = "null";
+      }
+
+      expect({
+        offboarded,
+        routeAfter,
+        stale: dead === undefined ? "none" : stale,
+        unchanged:
+          JSON.stringify(await operationOf(clientId)) ===
+          JSON.stringify(settled),
+        routeAtEnd: await mappedRoute(env.ROUTER_HOSTS, hostname),
+        later,
+      }).toStrictEqual({
+        offboarded: "started",
+        routeAfter: null,
+        // It lost its claim with the offboarding; one that never started
+        // finds its operation done, and runs nothing.
+        stale: staleExpected,
+        unchanged: true,
+        routeAtEnd: null,
+        later: "client_not_active",
       });
     }
   );

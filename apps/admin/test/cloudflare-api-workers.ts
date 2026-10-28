@@ -403,6 +403,12 @@ const deleteSecret = (
 
 export const workerRoutes: Route[] = [
   {
+    method: "DELETE",
+    path: /^\/workers\/scripts\/(?<script>[^/]+)$/u,
+    answer: ({ account, params }) =>
+      account.scripts.delete(params.script ?? "") ? envelope(null) : notFound(),
+  },
+  {
     method: "PUT",
     path: /^\/workers\/scripts\/(?<script>[^/]+)$/u,
     answer: async ({ account, call, params }) =>
@@ -666,6 +672,17 @@ const userWorkerOf = (
 };
 
 export const dispatchRoutes: Route[] = [
+  {
+    method: "DELETE",
+    path: dispatchPath(""),
+    answer: ({ account, params }) => {
+      const scripts = namespaceOf(account, params);
+      if (scripts instanceof Response) {
+        return scripts;
+      }
+      return scripts.delete(params.script ?? "") ? envelope(null) : notFound();
+    },
+  },
   {
     method: "PUT",
     path: dispatchPath(""),

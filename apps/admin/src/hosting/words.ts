@@ -5,6 +5,7 @@
  * them, as staff search the audit log and the code by them.
  */
 import type { InventoryErrorCode } from "./inventory.ts";
+import type { OffboardingErrorCode } from "./offboarding.ts";
 import type { ProvisionOperationErrorCode } from "./operation.ts";
 import type { DestinationProblem, PlaceRefusal } from "./placement.ts";
 import type { Capability } from "./policy.ts";
@@ -162,3 +163,25 @@ export const placeRefusals: Readonly<Record<PlaceRefusal, string>> = {
   not_provisioning:
     "The client isn't being provisioned: it's live or offboarded.",
 };
+
+/** What staff read when offboarding or deleting is refused, by its code. */
+export const offboardRefusals: Readonly<Record<OffboardingErrorCode, string>> =
+  {
+    client_unknown: "There's no such client.",
+    not_placed:
+      "It isn't placed in a hosting destination, which this offboarding is for.",
+    client_busy:
+      "Something is working on it right now: wait for that to end, then try again.",
+    not_offboarded: "It isn't offboarded: offboard it first.",
+    retention_running:
+      "Its resources are kept for 30 days after it was offboarded: try again once that's over.",
+    export_unconfirmed:
+      "Confirm that no export of it was made before deleting its resources.",
+    resource_not_owned:
+      "A resource recorded for it, or what its destination has under that name, isn't its own, so it was left: look at its inventory.",
+    destination_unsupported: "Its destination isn't one the admin deletes in.",
+    routing_unconfigured:
+      "The admin has no client domain set, so it can't take the client's hostname out of the router: set CLIENT_DOMAIN first.",
+    hostname_not_ours:
+      "Its hostname routes to another client in the router's map, so it was left: find out why before offboarding it.",
+  };

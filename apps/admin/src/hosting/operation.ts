@@ -913,8 +913,9 @@ const load = async (
   held: HeldClient,
   operation: Operation
 ): Promise<Loaded> => {
-  const client = await db
+  const row = await db
     .select({
+      status: clients.status,
       generation: clients.generation,
       rotationLiveAt: clients.rotationLiveAt,
       signIn: clients.signIn,
@@ -923,10 +924,19 @@ const load = async (
     .from(clients)
     .where(eq(clients.id, held.clientId))
     .get();
-  if (client === undefined) {
+  if (row === undefined) {
     throw new ProvisionOperationError(
       "client_unknown",
       `No client ${held.clientId}`
+    );
+  }
+  // An offboarded client is served no more: no attempt runs for it, so
+  // none puts its hostname back (src/hosting/offboarding.ts).
+  const { status, ...client } = row;
+  if (status === "offboarded") {
+    throw new ProvisionOperationError(
+      "client_not_active",
+      `${held.clientId} is offboarded`
     );
   }
   const manifest = await importedManifest(db, operation.releaseId);
@@ -1636,6 +1646,17 @@ const route = async (
     // The last thing before the write: KV can't make it conditional.
     async () => {
       await assertHolds(context.db, held);
+      const now = await context.db
+        .select({ status: clients.status })
+        .from(clients)
+        .where(eq(clients.id, held.clientId))
+        .get();
+      if (now?.status === "offboarded") {
+        throw new ProvisionOperationError(
+          "client_not_active",
+          `${held.clientId} was offboarded`
+        );
+      }
     }
   );
   // The map now has this generation, so the router sends its secret: a

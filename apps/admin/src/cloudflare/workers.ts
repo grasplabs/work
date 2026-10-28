@@ -788,6 +788,27 @@ const targetPath = ({ accountId, scriptName, namespace }: ScriptTarget) =>
     : `/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${scriptName}`;
 
 /**
+ * Deletes the script `target` names with what it binds of its own (its
+ * Durable Object namespaces and their data: `force`). One that's gone
+ * already counts as deleted.
+ */
+export const deleteTargetScript = async (
+  api: CloudflareApi,
+  target: ScriptTarget
+): Promise<void> => {
+  try {
+    await api.call(
+      { method: "DELETE", path: targetPath(target), query: { force: "true" } },
+      z.unknown()
+    );
+  } catch (error) {
+    if (!isNotFound(error)) {
+      throw error;
+    }
+  }
+};
+
+/**
  * Uploads `upload` as the script `target` names, live at once (a dispatch
  * namespace has no gradual deployments), keeping the secrets its latest
  * version has (`keep_bindings`): a placed client's secrets are delivered

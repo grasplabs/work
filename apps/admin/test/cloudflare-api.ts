@@ -663,6 +663,55 @@ const accountRoutes: Route[] = [
     },
   },
   {
+    method: "DELETE",
+    path: /^\/d1\/database\/(?<uuid>[^/]+)$/u,
+    answer: ({ account, params }) => {
+      const index = account.d1.findIndex(({ uuid }) => uuid === params.uuid);
+      if (index === -1) {
+        return notFound();
+      }
+      account.d1.splice(index, 1);
+      return envelope(null);
+    },
+  },
+  {
+    method: "DELETE",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)$/u,
+    answer: ({ account, call, params }) => {
+      const index = account.buckets.findIndex(
+        ({ name, jurisdiction }) =>
+          name === params.name && jurisdiction === jurisdictionOf(call)
+      );
+      if (index === -1) {
+        return notFound();
+      }
+      if (account.fullBuckets.has(params.name ?? "")) {
+        return refusal(
+          409,
+          10_008,
+          "The bucket you tried to delete is not empty"
+        );
+      }
+      account.buckets.splice(index, 1);
+      return envelope(null);
+    },
+  },
+  {
+    method: "PUT",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)\/lifecycle$/u,
+    answer: ({ account, call, params, json }) => {
+      const bucket = account.buckets.find(
+        ({ name, jurisdiction }) =>
+          name === params.name && jurisdiction === jurisdictionOf(call)
+      );
+      if (bucket === undefined) {
+        return notFound();
+      }
+      account.lifecycles.set(bucket.name, json);
+      return envelope(null);
+    },
+  },
+  {
     method: "GET",
     path: /^\/ai-gateway\/gateways\/(?<id>[^/]+)$/u,
     answer: ({ account, params }) => {
@@ -936,6 +985,8 @@ export const fakeCloudflareApi = (
       members: new Map([[member, "accepted"]]),
       d1: [],
       buckets: [],
+      fullBuckets: new Set(),
+      lifecycles: new Map(),
       gateways: [],
       zones: [],
       scripts: new Map(),
