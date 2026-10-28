@@ -1,3 +1,16 @@
+import type {
+  AiKind,
+  DataAccessKind,
+  DpaState,
+  ExtensionKind,
+  PolicyException,
+  PolicyRule,
+  RequiredCertificate,
+  RuleCondition,
+  RuleEffect,
+  RuleStatus,
+  TrainingKind,
+} from "@grasp-os/shared/policies";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural, t } from "@lingui/core/macro";
@@ -15,147 +28,29 @@ import type {
 // reads one fact below. What a rule then does to the app follows from its
 // status: a watching rule only shows what it would do, an active one flags
 // or blocks, a paused one does nothing. An exception lets one app break one
-// rule until a date. Nothing in Grasp keeps rules, policies or exceptions
-// yet (policies-data.ts), so for now every list here is empty.
+// rule until a date. Core keeps the rules, policies and exceptions
+// (`session.policies`, @grasp-os/shared/policies); which apps they catch
+// is worked out here, from the Landscape's facts.
 
-/** What kind of AI an app is, as a rule asks for it. */
-export type AiKind = "tool" | "builtIn" | "none";
-
-/** Whether the vendor trains its models on the company's data. */
-export type TrainingKind = "trains" | "optOut" | "noTraining" | "unknown";
-
-/** A certificate a rule can require of a vendor. */
-export type RequiredCertificate = "iso27001" | "soc2" | "iso27701" | "iso42001";
-
-/** Where the processing agreement with the vendor stands. */
-export type DpaState = "signed" | "pending" | "notFound";
-
-/** What a permission lets an app do with company data. */
-export type DataAccessKind = "read" | "write" | "admin";
-
-/** Whether an app has a browser extension, and whether people in the company use it. */
-export type ExtensionKind = "inUse" | "available";
-
-/**
- * One thing a rule checks about an app. A rule matches an app when every
- * one of its conditions does. Each condition reads one fact Grasp keeps
- * about the app, so a rule never asks for more than Grasp knows.
- */
-export type RuleCondition =
-  /** Hosted in one of these regions, or anywhere outside all of them. */
-  | { field: "hosting"; op: "in" | "outside"; values: HostingRegion[] }
-  /** Made by one of these vendors, or by none of them. */
-  | { field: "vendor"; op: "is" | "isNot"; values: string[] }
-  | { field: "ai"; values: AiKind[] }
-  | { field: "training"; values: TrainingKind[] }
-  /** Touches any of these kinds of data. */
-  | { field: "data"; values: DataExposureType[] }
-  /** Used by more than this many people. */
-  | { field: "people"; moreThan: number }
-  /** Nobody owns it. */
-  | { field: "owner" }
-  /**
-   * The vendor lacks certificates: any one of these (every one is
-   * required), or all of them (one of them is enough). A certificate the
-   * vendor does not declare counts as lacking: no evidence is no
-   * certificate.
-   */
-  | {
-      field: "certificate";
-      op: "lacksAny" | "lacksAll";
-      values: RequiredCertificate[];
-    }
-  /** The processing agreement with the vendor is in one of these states. */
-  | { field: "dpa"; values: DpaState[] }
-  /** It holds a permission of one of these kinds on company data. */
-  | { field: "access"; values: DataAccessKind[] }
-  /** Its browser extension is in use, or offered but not seen in use. */
-  | { field: "extension"; values: ExtensionKind[] };
-
-export type RuleField = RuleCondition["field"];
-
-/** What happens to an app that breaks a rule. */
-export type RuleEffect = "flag" | "block";
-
-/** Watching shows what a rule would do without doing it; paused rules do nothing. */
-export type RuleStatus = "watching" | "active" | "paused";
-
-/** A rule the company set for the apps its people use, usually drawn from one of its policies. */
-export interface PolicyRule {
-  id: string;
-  name: string;
-  /** What the rule is for, in the company's own words. */
-  description: string;
-  conditions: RuleCondition[];
-  effect: RuleEffect;
-  status: RuleStatus;
-  /** The policy it comes from, or null for a rule made by hand. */
-  policyId: string | null;
-  /** The passage in that policy the rule says. */
-  excerpt?: string;
-  createdBy: string;
-  /** ISO minute. */
-  createdAt: string;
-}
-
-/** A rule Grasp proposed from a policy, waiting for someone to take or leave it. */
-export interface RuleProposal {
-  id: string;
-  name: string;
-  description: string;
-  conditions: RuleCondition[];
-  effect: RuleEffect;
-  /** The passage in the policy it comes from, word for word. */
-  excerpt: string;
-  decision: "open" | "accepted" | "rejected";
-}
-
-/** A requirement in a policy that no rule can check yet, with the passage it comes from. */
-export interface UncheckedRequirement {
-  requirement: string;
-  excerpt: string;
-}
-
-/** Why Grasp could not read a policy. */
-export type PolicyReadingProblem =
-  | "notSetUp"
-  | "busy"
-  | "badKey"
-  | "unreadable"
-  | "offline";
-
-/** A policy the company wrote, uploaded so Grasp can propose rules from it. */
-export interface PolicyDocument {
-  id: string;
-  title: string;
-  fileName: string;
-  uploadedBy: string;
-  /** ISO minute. */
-  uploadedAt: string;
-  /** Reading: Grasp is going through it. Review: rules wait for a decision. Published: its rules are in use. */
-  status: "reading" | "review" | "published" | "failed";
-  /** Why reading failed. */
-  error?: PolicyReadingProblem;
-  /** What the policy covers, in a sentence or two. */
-  summary?: string;
-  proposals: RuleProposal[];
-  unchecked: UncheckedRequirement[];
-  /** ISO minute. */
-  publishedAt?: string;
-}
-
-/** An app allowed to break a rule for a while, and why. */
-export interface PolicyException {
-  ruleId: string;
-  /** The app's row in the Landscape. */
-  appId: string;
-  reason: string;
-  /** ISO date the exception ends. */
-  until: string;
-  grantedBy: string;
-  /** ISO minute. */
-  grantedAt: string;
-}
+export type {
+  AiKind,
+  PolicyBook,
+  DataAccessKind,
+  DpaState,
+  ExtensionKind,
+  PolicyDocument,
+  PolicyException,
+  PolicyReadingProblem,
+  PolicyRule,
+  RequiredCertificate,
+  RuleCondition,
+  RuleEffect,
+  RuleField,
+  RuleProposal,
+  RuleStatus,
+  TrainingKind,
+  UncheckedRequirement,
+} from "@grasp-os/shared/policies";
 
 /** What Grasp knows about an app that a rule can check. Null is a fact Grasp does not know. */
 export interface AppFacts {

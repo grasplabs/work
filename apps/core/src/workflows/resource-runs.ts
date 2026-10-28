@@ -68,12 +68,13 @@ import {
   countedStep,
   forIsolate,
   fromIsolate,
+  modelCallLimitOf,
   settle,
   stepLimitOf,
   unadmitted,
 } from "./host.ts";
 import type { RunStep } from "./host.ts";
-import { admitAttempt, quotaPolicy } from "./quotas.ts";
+import { admitAttempt } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import { callingRunOf } from "./resource-authority.ts";
 import {
@@ -804,7 +805,9 @@ const loadedRun = async (
   if (contract === undefined) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
-  const { limits } = await quotaPolicy(env);
+  // Never an end of the run when the policy can't be read for a moment
+  // (`modelCallLimitOf`): its last read, else the platform's limit.
+  const modelCalls = await modelCallLimitOf(env);
   const calling = await callingRunOf(env, pin.workflow, runId);
   if (calling === undefined) {
     throw new Error(`Run ${runId} has ended`);
@@ -825,8 +828,8 @@ const loadedRun = async (
       calling,
       // The workflow's own limit only ever lowers the host's ceiling.
       maxModelCalls: Math.min(
-        limits.lineageModelRequests,
-        build.limits.maxModelCalls ?? limits.lineageModelRequests
+        modelCalls,
+        build.limits.maxModelCalls ?? modelCalls
       ),
     },
     output: JSON.stringify(contract.output),

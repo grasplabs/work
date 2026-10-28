@@ -663,11 +663,22 @@ export interface AppBlueprintsApi {
  * (`members`): its users call what its screens use, its builders the
  * rest.
  */
+/**
+ * An App as the person asking lists or opens it, with their own role in
+ * it, as core decides it for every call they make: a `builder` changes
+ * it, a `user` works in it. A page offers changes only to its builders;
+ * core refuses anyone else all the same. Grasp staff are builders of every
+ * App here, as admins are, yet their sessions change none.
+ */
+export interface ViewedApp extends App {
+  role: AppRole;
+}
+
 export interface AppsApi {
   create: (app: NewApp) => Promise<App>;
-  /** The Apps the person has a role in, oldest first. */
-  list: () => Promise<App[]>;
-  get: (app: string) => Promise<App>;
+  /** The Apps the person has a role in, oldest first, each with that role. */
+  list: () => Promise<ViewedApp[]>;
+  get: (app: string) => Promise<ViewedApp>;
   /** The screens and workflows of the App's current version. */
   contents: (app: string) => Promise<AppContents>;
   /**
@@ -754,21 +765,22 @@ export const openCandidateStates = [
 
 /** Why a call to the App registry was refused. */
 export const appErrors = defineErrorFamily({
-  "app.invalid": "That isn't a valid request for an App.",
-  "app.not_found": "There's no such App.",
-  "app.member_invalid": "The App can't be shared with them like that.",
+  "app.invalid": "That isn't a valid request for a domain.",
+  "app.not_found": "There's no such domain.",
+  "app.member_invalid": "The domain can't be shared with them like that.",
   "app.responsible_invalid":
-    "Only a member of the organization who can open the App can answer for it.",
+    "Only a member of the organization who can open the domain can answer for it.",
   "app.audience_invalid":
-    "The App can only be made for a member or a team of the organization.",
-  "app.integrations_full": "The App has as many integrations added as it may.",
+    "The domain can only be made for a member or a team of the organization.",
+  "app.integrations_full":
+    "The domain has as many integrations added as it may.",
   "app.share_unreadable":
-    "This App has read data they can't read where it comes from, such as someone else's mailbox or a collection they can't read, so it can't be shared with them.",
+    "This domain has read data they can't read where it comes from, such as someone else's mailbox or a collection they can't read, so it can't be shared with them.",
   "app.unreadable":
-    "This App has read data you can't read where it comes from, so it isn't open to you. Ask whoever shared it.",
+    "This domain has read data you can't read where it comes from, so it isn't open to you. Ask whoever shared it.",
   "app.blueprint_not_found": "There's no such blueprint.",
-  "app.version_not_found": "The App has no such version.",
-  "app.too_large": "The App's files would be over its limits.",
+  "app.version_not_found": "The domain has no such version.",
+  "app.too_large": "The domain's files would be over its limits.",
   "app.nothing_to_commit": "The changes leave the latest version as it is.",
   "app.exports_invalid":
     "The App's exports (app/exports.json) aren't valid, so it can't be committed.",
@@ -783,7 +795,8 @@ export const appErrors = defineErrorFamily({
   "app.call_too_deep": "Too many Apps call one another in this one call.",
   "app.call_deadlock":
     "The App called is itself waiting, directly or through other Apps, for this call's App, so neither could go on. This call was stopped so the other can. Try again in a moment.",
-  "app.conflict": "Someone else changed this App at the same time. Try again.",
+  "app.conflict":
+    "Someone else changed this domain at the same time. Try again.",
   "app.candidate_busy":
     "This version is already being checked to be made current. Try again in a moment.",
   "app.candidate_attempts":
@@ -793,22 +806,23 @@ export const appErrors = defineErrorFamily({
   "app.candidate_release_changed":
     "This version's sealed release no longer matches the one that was checked, so it can't be made current. Make the change again to check it anew.",
   "app.candidate_superseded":
-    "A newer change to this App replaced this version's check before it finished. Make the version current again if you still want it.",
-  "app.not_running": "The App has no current version to run yet.",
-  "app.no_version": "Make a version of the App current before publishing it.",
-  "app.archived": "The App is archived. A builder can restore it.",
+    "A newer change to this domain replaced this version's check before it finished. Make the version current again if you still want it.",
+  "app.not_running": "The domain has no current version to run yet.",
+  "app.no_version":
+    "Make a version of the domain current before publishing it.",
+  "app.archived": "The domain is archived. A builder can restore it.",
   "app.stops_pending":
-    "Runs the App started are still being stopped from when it was archived. Try restoring it again in a few minutes.",
+    "Runs the domain started are still being stopped from when it was archived. Try restoring it again in a few minutes.",
   "app.not_published":
     "The App isn't published, so other Apps and workflows can't call it.",
-  "app.build_failed": "The App's server code doesn't build.",
+  "app.build_failed": "The domain's server code doesn't build.",
   "app.method_invalid": "The App's server has no method by that name.",
-  "app.failed": "The App's server code failed.",
+  "app.failed": "The domain's server code failed.",
   "app.answer_invalid":
-    "The App's server code answered with something other than plain data.",
-  "app.timed_out": "The App's server code took too long to answer.",
+    "The domain's server code answered with something other than plain data.",
+  "app.timed_out": "The domain's server code took too long to answer.",
   "app.busy":
-    "The App is busy with other calls and couldn't take this one in time. Try again in a moment.",
+    "The domain is busy with other calls and couldn't take this one in time. Try again in a moment.",
   "app.caller_invalid":
     "Pass the caller of the App method this runs in, while that call runs.",
   "app.read_only":

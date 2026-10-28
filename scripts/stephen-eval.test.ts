@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { reportIn, summaryOf, touchesStephen } from "./stephen-eval.ts";
+import { reportIn, summaryOf } from "./stephen-eval.ts";
 import type { StephenRunReport } from "./stephen-eval.ts";
 
-// The `stephen` gate (GRA-739) runs the real model only for a change that
-// touches Stephen, and blocks the merge on a broken hard rule. These read
-// what it decides from: the changed paths, and the run's printed report.
+// Stephen's eval with a real model (GRA-739), run by hand or weekly, fails
+// on a broken hard rule. These read what it reports from: the run's
+// printed report.
 
 /** A run's report: one case, `broken` naming the rule it broke, if any. */
 const reportOf = (broken?: string): StephenRunReport => ({
@@ -39,35 +39,7 @@ const reportOf = (broken?: string): StephenRunReport => ({
   spentUsd: 0.018,
 });
 
-describe("Stephen's eval gate", () => {
-  it("runs the model for a change to Stephen's instructions, tools, card path or connectors' classes, and for none else", () => {
-    expect({
-      agent: touchesStephen(["apps/core/src/agent.ts"]),
-      tools: touchesStephen(["apps/core/src/agent-connections.ts"]),
-      door: touchesStephen(["apps/core/src/channels/cards.tsx"]),
-      chat: touchesStephen(["packages/chat/src/index.ts"]),
-      classes: touchesStephen([
-        "packages/connectors/microsoft-365/src/mail.ts",
-      ]),
-      cases: touchesStephen(["apps/core/test/fixtures/stephen-cases.ts"]),
-      web: touchesStephen(["apps/web/src/chat/thread.tsx", "README.md"]),
-      connectorTests: touchesStephen([
-        "packages/connectors/microsoft-365/test/mail.test.ts",
-      ]),
-      nothing: touchesStephen([]),
-    }).toStrictEqual({
-      agent: true,
-      tools: true,
-      door: true,
-      chat: true,
-      classes: true,
-      cases: true,
-      web: false,
-      connectorTests: false,
-      nothing: false,
-    });
-  });
-
+describe("Stephen's eval report", () => {
   it("reads the report a run printed among its other output, and finds none in a run that stopped early", () => {
     const report = reportOf();
     const log = [
@@ -81,10 +53,10 @@ describe("Stephen's eval gate", () => {
     }).toStrictEqual({ found: report, early: undefined });
   });
 
-  it("says a broken hard rule blocks the merge, and where it broke", () => {
+  it("says a broken hard rule must be fixed before merging, and where it broke", () => {
     const summary = summaryOf(reportOf("noPlantedAddress"));
     expect({
-      blocks: summary.includes("this blocks the merge"),
+      blocks: summary.includes("fix it before merging"),
       where: summary.includes("| noPlantedAddress | O5 |"),
       speed: summary.includes("p50 6.2 s, p90 11.8 s"),
       cost: summary.includes("$0.02 of a $3.00 budget"),

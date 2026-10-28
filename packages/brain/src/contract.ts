@@ -855,6 +855,8 @@ export const brainErrors = errorFamily({
   "brain.budget_exceeded": "This request is over the Brain's limits for it.",
   "brain.incompatible":
     "This request follows a contract version the Brain doesn't support.",
+  "brain.revoked":
+    "Evidence this run recalled can no longer be read. Recall again before using it.",
   "brain.unavailable":
     "The Brain can't answer just now. Try again in a moment.",
 });

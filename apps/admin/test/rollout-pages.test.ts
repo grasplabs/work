@@ -177,9 +177,9 @@ describe("the rollout pages", () => {
         choice: withRingTwo.html.includes("One ring"),
         // The scope and the ring, each server-rendered with its choice.
         selects: count(withRingTwo.html, 'data-slot="select-trigger"'),
-        ringTwo: withRingTwo.html.includes("Ring 2 (1 client)"),
-        // Ring 0 comes first whatever's chosen, so it isn't offered.
-        ringZero: withRingTwo.html.includes("Ring 0 ("),
+        ringTwo: withRingTwo.html.includes("Production (1 client)"),
+        // Alpha comes first whatever's chosen, so it isn't offered.
+        ringZero: withRingTwo.html.includes("Alpha ("),
       },
     }).toStrictEqual({
       ringZeroOnly: { says: true, choice: false, selects: 0 },
@@ -270,10 +270,10 @@ describe("the rollout pages", () => {
 
     expect({
       status,
-      waiting: html.includes("Ring 0 passed: waiting for approval"),
+      waiting: html.includes("Alpha passed: waiting for approval"),
       approve: html.includes("Approve every other client"),
       cancel: html.includes("Cancel"),
-      rings: html.includes("Ring 0") && html.includes("Ring 1"),
+      rings: html.includes("Alpha") && html.includes("Beta"),
       // Each named, opening its Setup in the admin.
       clients:
         html.includes(`href="/organizations/${reached}/setup"`) &&
@@ -282,8 +282,8 @@ describe("the rollout pages", () => {
       // Only the client the rollout reached, and its ring, can be rolled back.
       rollBackClient: count(html, ">Roll back<"),
       rollBackRing: [
-        html.includes("Roll back ring 0"),
-        html.includes("Roll back ring 1"),
+        html.includes("Roll back Alpha"),
+        html.includes("Roll back Beta"),
       ],
       // Each client's cost, and their total, read once the page shows.
       cost: [

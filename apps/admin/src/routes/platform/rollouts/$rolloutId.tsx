@@ -28,6 +28,7 @@ import {
   totalCostWords,
 } from "../../../admin/rollout-parts.tsx";
 import { formatTime } from "../../../releases/format.ts";
+import { versionWords } from "../../../releases/version.ts";
 import type { RolloutCost } from "../../../rollout/cost.ts";
 import { fetchRollout, fetchRolloutCost } from "../../../rollout/functions.ts";
 import type { RolloutView } from "../../../rollout/queries.ts";
@@ -48,7 +49,7 @@ const readCost = async (rolloutId: string): Promise<RolloutCost | "failed"> => {
 const titleOf = (rollout: RolloutView): string =>
   rollout.kind === "secrets"
     ? "Rollout of new secrets"
-    : `Rollout of ${rollout.releaseId ?? ""}`;
+    : `Rollout of ${(rollout.release === null ? null : versionWords(rollout.release)) ?? rollout.releaseId ?? ""}`;
 
 /**
  * One rollout: where it stands ring by ring, what staff can do to it

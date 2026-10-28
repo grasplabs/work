@@ -1,3 +1,4 @@
+import type { ChatCitedDocument } from "@grasp-os/shared/chat";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,7 +37,7 @@ import {
   textOf,
 } from "./answer-blocks.ts";
 import type { TableFormat } from "./answer-blocks.ts";
-import { CitedNote, citedNoteLink } from "./cited-note.tsx";
+import { CitedNote, citedNoteLink, CitedSpan } from "./cited-note.tsx";
 
 // The agent's answers, as the prototype renders them with Streamdown
 // (grasplabs/prototype `components/ai-elements/message.tsx`): a code block
@@ -263,6 +264,15 @@ const noneCited: readonly string[] = [];
  */
 const CitedNotes = createContext<readonly string[]>(noneCited);
 
+/** No source looked up. */
+const noSources: readonly ChatCitedDocument[] = [];
+
+/**
+ * What core says the answer being rendered cites (`ChatCitedDocument`),
+ * with the spans that cite each: a context, as `CitedNotes` is.
+ */
+const CitedSources = createContext<readonly ChatCitedDocument[]>(noSources);
+
 /**
  * A link in an answer: to a note it cites, the note, here; to any other
  * note, its text alone, whatever the answer says; anywhere else, out of
@@ -270,28 +280,49 @@ const CitedNotes = createContext<readonly string[]>(noneCited);
  */
 const AnswerLink = ({
   href,
+  at,
   children,
 }: {
   href?: string | undefined;
+  /** Where the link starts in the answer's Markdown. */
+  at?: number | undefined;
   children?: ReactNode;
 }) => {
   const cited = use(CitedNotes);
+  const sources = use(CitedSources);
   const documentId =
     href === undefined ? undefined : citedNoteLink.exec(href)?.groups?.id;
   if (documentId === undefined) {
     return <LeavingLink href={href}>{children}</LeavingLink>;
   }
-  return cited.includes(documentId) ? (
+  if (!cited.includes(documentId)) {
+    return <span>{children}</span>;
+  }
+  // The span core found at this link's place, citing this note.
+  const index = sources.findIndex(
+    (source) =>
+      source.documentId === documentId &&
+      source.spans.some((span) => span.at === at)
+  );
+  const source = sources[index];
+  const span = source?.spans.find((each) => each.at === at);
+  return source === undefined || span === undefined ? (
     <CitedNote documentId={documentId}>{children}</CitedNote>
   ) : (
-    <span>{children}</span>
+    <CitedSpan number={index + 1} quote={span.quote} source={source}>
+      {children}
+    </CitedSpan>
   );
 };
 
 /** The answer's components: the plain ones, with these in their place. */
 const answerComponents: Components = {
   ...plainComponents(noneCited, LeavingLink),
-  a: ({ href, children }) => <AnswerLink href={href}>{children}</AnswerLink>,
+  a: ({ node, href, children }) => (
+    <AnswerLink at={node?.position?.start.offset} href={href}>
+      {children}
+    </AnswerLink>
+  ),
   pre: ({ node, children }) => {
     const code = codeOf(node);
     return (
@@ -314,25 +345,32 @@ const rehypePlugins: Options["rehypePlugins"] = [
 ];
 const remarkPlugins: Options["remarkPlugins"] = [remarkGfm];
 
-/** An answer's Markdown; its links to the notes `cited` names open them. */
+/**
+ * An answer's Markdown; its links to the notes `cited` names open them,
+ * each an inline citation where `sources` holds a span at its place.
+ */
 export const AnswerMarkdown = ({
   text,
   cited = noneCited,
+  sources = noSources,
 }: {
   text: string;
   cited?: readonly string[];
+  sources?: readonly ChatCitedDocument[];
 }) => (
-  <CitedNotes value={cited}>
-    <div className="flex min-w-0 flex-col gap-3">
-      <Markdown
-        components={answerComponents}
-        rehypePlugins={rehypePlugins}
-        remarkPlugins={remarkPlugins}
-        skipHtml
-        urlTransform={plainUrl}
-      >
-        {text}
-      </Markdown>
-    </div>
-  </CitedNotes>
+  <CitedSources value={sources}>
+    <CitedNotes value={cited}>
+      <div className="flex min-w-0 flex-col gap-3">
+        <Markdown
+          components={answerComponents}
+          rehypePlugins={rehypePlugins}
+          remarkPlugins={remarkPlugins}
+          skipHtml
+          urlTransform={plainUrl}
+        >
+          {text}
+        </Markdown>
+      </div>
+    </CitedNotes>
+  </CitedSources>
 );

@@ -1,6 +1,7 @@
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
+import { noContext } from "@grasp-os/shared/onboarding-context";
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
 import {
   onboardingSummaryPath,
@@ -138,6 +139,7 @@ const view = (more: Partial<OnboardingView> = {}): OnboardingView => ({
   agreed: true,
   paused: false,
   sponsor: null,
+  context: noContext,
   waiting: 0,
   ...more,
 });

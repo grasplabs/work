@@ -1,5 +1,6 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { OnboardingView, Roster } from "@grasp-os/shared/onboarding";
+import { noContext } from "@grasp-os/shared/onboarding-context";
 import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -178,6 +179,7 @@ describe("Grasp's go", () => {
       agreed: true,
       paused: false,
       sponsor: null,
+      context: noContext,
       waiting: 0,
       progress: {
         teams: [],

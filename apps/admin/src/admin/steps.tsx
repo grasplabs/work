@@ -15,7 +15,6 @@
  * conversation, not what the research found, only what the model counts.
  */
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
-import type { VisionField } from "@grasp-os/shared/admin/interviews";
 import {
   dateOn,
   listenDays,
@@ -51,6 +50,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { Kickoff, visionWords } from "./kickoff.tsx";
 import { Done, KnowledgeDots, Panel, PanelRow, Tile } from "./parts.tsx";
 import { sectionTo } from "./sections.ts";
 import {
@@ -168,20 +168,6 @@ const StageList = ({
   );
 };
 
-/** The ten things Stephen needs from the first conversation, by name. */
-const visionWords: Record<VisionField, string> = {
-  business: "The business in one sentence",
-  teams: "The teams, and what each does",
-  goals: "Goals for the next two years, and why AI now",
-  success: "What success is, in hours or workflows",
-  stakeholders: "Who decides, who can block, who hears first",
-  pain: "The work the sponsor already suspects",
-  limits: "What Stephen must not touch",
-  sensitivities: "What is sensitive right now",
-  systems: "The main tools",
-  languages: "The languages the teams work in",
-};
-
 /**
  * What the first conversation brought, as the model counts it: which of
  * the ten things are in, by name, never what was said about them.
@@ -230,12 +216,22 @@ const Brought = ({ view }: { view: OrgView }) => {
   );
 };
 
-/** The first conversation with the sponsor: whether it is in, whether Stephen read it, and what it brought. */
-const Conversation = ({ view }: { view: OrgView }) => {
+/**
+ * The first conversation with the sponsor: whether it is in, whether
+ * Stephen read it, and what it brought; and bringing it in, with the
+ * sponsor's answers to what it left open (src/admin/kickoff.tsx).
+ */
+const Conversation = ({
+  view,
+  clientId,
+}: {
+  view: OrgView;
+  clientId: string;
+}) => {
   const { conversation } = view.state;
   return (
     <Panel
-      description="Grasp’s first talk with the sponsor. Stephen reads the transcript, and says what is still missing."
+      description="Grasp’s first talk with the sponsor. Bring the transcript in here: Stephen reads it, and says what is still missing."
       title="The first conversation"
     >
       <div className="flex flex-col items-start gap-3 border-t px-5 py-4">
@@ -260,10 +256,8 @@ const Conversation = ({ view }: { view: OrgView }) => {
           <Done>Brought in</Done>
         )}
       </PanelRow>
-      <NotHere>
-        Bringing in the transcript, having Stephen read it and filling in what
-        the sponsor answered aren’t in the admin yet.
-      </NotHere>
+      {/* Keyed by the company: another's drafts and answers never carry over. */}
+      <Kickoff clientId={clientId} key={clientId} />
     </Panel>
   );
 };
@@ -938,7 +932,9 @@ export const OrgSteps = ({
 }) => (
   <>
     <StageList clientId={clientId} stage={stage} view={view} />
-    {stage === "conversation" ? <Conversation view={view} /> : null}
+    {stage === "conversation" ? (
+      <Conversation clientId={clientId} view={view} />
+    ) : null}
     {stage === "research" ? <Research view={view} /> : null}
     {stage === "agreed" ? <Agreed paused={paused} view={view} /> : null}
     {stage === "connected" ? <Company view={view} /> : null}

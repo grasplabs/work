@@ -7,6 +7,7 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { Fragment, useSyncExternalStore } from "react";
 
+import { useEntrance } from "./setup-parts.tsx";
 import { dotsOf } from "./setup.ts";
 import type { KnownDot } from "./setup.ts";
 
@@ -116,13 +117,15 @@ export const KnowledgeBar = ({
   const { t } = useLingui();
   const dots = dotsOf(parts, useDotCount());
   const cut = Math.round((threshold / 100) * dots.length);
+  const captionEntrance = useEntrance(
+    caption ?? "",
+    "animate-in fade-in duration-400"
+  );
   return (
     <div className="flex w-full flex-col gap-4 overflow-x-clip text-left">
       {/* Side by side where both fit; on a phone, in a longer language, where the team can start goes under. */}
       <div className="flex min-h-5 flex-wrap items-baseline justify-between gap-x-4">
-        <span className="animate-in fade-in font-medium duration-400">
-          {caption}
-        </span>
+        <span className={cn("font-medium", captionEntrance)}>{caption}</span>
         <span
           className={cn(
             "text-muted-foreground transition-opacity duration-600",
@@ -144,32 +147,38 @@ export const KnowledgeBar = ({
 
 /**
  * The bar at the top of every step after "How this works": how much Grasp
- * knows, and on hover what that means.
+ * knows of the organization, named as such beside it, and on hover what
+ * that means. It is not how far the admin is through the steps (the dots
+ * at the bottom say that), so it says so: it fills as the documents come
+ * in and the team talks, long after the steps are done.
  */
 export const KnowledgeCorner = ({ parts, percent, threshold }: Knowledge) => {
   const { t } = useLingui();
   const dots = dotsOf(parts, useDotCount());
   const gate = Math.round((threshold / 100) * dots.length);
   return (
-    // On a screen too narrow even for 20 dots, the dots grow smaller with it, still round, and the percentage keeps its size.
-    <div className="animate-in fade-in min-w-0 duration-500">
+    // On a screen too narrow even for 20 dots, the dots grow smaller with it, still round, and the percentage keeps its size; the name makes way first.
+    <div className="min-w-0">
       <Tooltip>
         <TooltipTrigger
           render={
             <button
-              aria-label={t`${percent}% known. Your team can start at ${threshold}%.`}
+              aria-label={t`What I know about your organization: ${percent}%. This is not how far you are in these steps. Your team can start at ${threshold}%.`}
               className="focus-visible:ring-ring/50 flex max-w-full items-center gap-2.5 rounded-full px-2 py-1 outline-none focus-visible:ring-3"
               type="button"
             />
           }
         >
+          <span className="text-muted-foreground hidden whitespace-nowrap lg:inline">
+            {t`Known about your organization`}
+          </span>
           <span className="flex min-w-0 items-center gap-1">
             <Dots breathing cut={gate} dots={dots} gate />
           </span>
           <span className="tabular-nums">{percent}%</span>
         </TooltipTrigger>
         <TooltipContent>
-          {t`${percent}% known. Your team can start at ${threshold}%, and I keep learning after that.`}
+          {t`How much I know about your organization, not how far you are in these steps. It grows as you share and as I talk to your team. Your team can start at ${threshold}%, and I keep learning after that.`}
         </TooltipContent>
       </Tooltip>
     </div>

@@ -375,4 +375,48 @@ describe("an organization's interviews", () => {
       { label: "By voice", shown: [">–<"] },
     ]);
   });
+
+  it("measures Stephen across every organization in the Lab, each opening its interviewers, never with what anyone said", async () => {
+    const interviewing = await liveClient();
+    interviewing.account.admin = interviewingSnapshot();
+    const quiet = await liveClient();
+    quiet.account.admin = emptyAdminSnapshot("Acme");
+
+    const { status, html } = await page("/lab");
+    const name = `Acme ${interviewing.clientId}`;
+    const row = html.slice(
+      html.indexOf(`>${name}</a>`),
+      html.indexOf("</tr>", html.indexOf(`>${name}</a>`))
+    );
+
+    expect({
+      status,
+      inAll: [
+        "Finished",
+        "What people thought",
+        "Left in",
+        "Stopped halfway",
+      ].map((label) => html.includes(`>${label}<`)),
+      // One row a company whose interviews started, opening its interviewers.
+      opens: html.includes(
+        `href="/organizations/${interviewing.clientId}/interviews?tab=interviewers"`
+      ),
+      // Ana gave Claire a 5; Ben stopped at the steps.
+      rated: row.includes("5.0 (1)"),
+      quietListed: html.includes(`>Acme ${quiet.clientId}</a>`),
+      quietCounted: html.includes("started interviews yet."),
+      // The practice benches aren't published to the admin: it says so.
+      benches: html.includes("Measured on practice companies"),
+      leaked: missingIn(html, [said, fact, linkCode]).length,
+    }).toStrictEqual({
+      status: 200,
+      inAll: [true, true, true, true],
+      opens: true,
+      rated: true,
+      quietListed: false,
+      quietCounted: true,
+      benches: true,
+      leaked: 3,
+    });
+  });
 });

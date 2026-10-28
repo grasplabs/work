@@ -190,7 +190,8 @@ export const SendPlanForm = ({
         </legend>
         <ul
           className={cn(
-            "grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2",
+            // Many teams scroll in the list, so the step still fits on screen.
+            "grid max-h-36 grid-cols-1 gap-x-4 gap-y-1.5 overflow-y-auto sm:grid-cols-2",
             !choosing && "max-sm:hidden"
           )}
           id={teamsList}
