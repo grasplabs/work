@@ -94,6 +94,10 @@
   // Email Sending outside core. Without it core sends no mail, and each
   // mail it means to send fails, saying why.
   //
+  // And how much calibrating learning suites' graders may spend,
+  // `BRAIN_CALIBRATION_BUDGET_USD` (src/knowledge/eval-judge.ts): US
+  // dollars a calendar month, nothing unless set above zero.
+  //
   // And the runtime profile, `RUNTIME_PROFILE` (src/code-mode.ts): only
   // `cloudflare` makes Code Mode's run record claim the CPU limit as
   // enforced. Not a var here, which local dev and tests read too: staging's

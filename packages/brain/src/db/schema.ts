@@ -22,6 +22,7 @@ import {
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   uniqueIndex,
@@ -430,6 +431,68 @@ export const brainEvalCases = sqliteTable(
       table.suiteId,
       table.version,
       table.split
+    ),
+  ]
+);
+
+/**
+ * The outputs a learning suite version's owner labelled, each with their
+ * own verdict (GRA-311, L4, ../eval-calibration.ts): what its grader is
+ * calibrated against, the owner's alone. One label per case and output.
+ */
+export const brainEvalLabels = sqliteTable(
+  "brain_eval_labels",
+  {
+    suiteId: text("suite_id").notNull(),
+    version: integer().notNull(),
+    caseId: text("case_id").notNull(),
+    /** SHA-256 of the output, as canonical JSON: what makes it one. */
+    outputDigest: text("output_digest").notNull(),
+    output: text().notNull(),
+    verdict: text({ enum: ["pass", "fail"] }).notNull(),
+    /** User ID of the owner who labelled it. */
+    labeledBy: text("labeled_by").notNull(),
+    at: timestamp("at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.suiteId, table.version, table.caseId, table.outputDigest],
+    }),
+  ]
+);
+
+/**
+ * Each calibration of a learning suite version's grader against its
+ * owner's reviewed labels (GRA-311, L4, ../eval-calibration.ts): how often
+ * it agreed, how often repeated grading disagreed with itself, what failed
+ * to grade, and what it cost. Counts alone, never an output or a label.
+ */
+export const brainEvalCalibrations = sqliteTable(
+  "brain_eval_calibrations",
+  {
+    id: text().primaryKey(),
+    suiteId: text("suite_id").notNull(),
+    version: integer().notNull(),
+    /** User ID of the evaluator who ran it. */
+    by: text().notNull(),
+    samples: integer().notNull(),
+    repeats: integer().notNull(),
+    /** Samples graded every time, of `samples`. */
+    graded: integer().notNull(),
+    /** Grading attempts that failed (a timeout, a provider error). */
+    errors: integer().notNull(),
+    /** Of `graded`, agreeing with the owner's label by majority, 0 to 1. */
+    agreement: real().notNull(),
+    /** Of `graded`, whose repeats didn't all agree, 0 to 1. */
+    instability: real().notNull(),
+    cost: real().notNull(),
+    passed: integer({ mode: "boolean" }).notNull(),
+    at: timestamp("at").notNull(),
+  },
+  (table) => [
+    index("brain_eval_calibrations_version_idx").on(
+      table.suiteId,
+      table.version
     ),
   ]
 );

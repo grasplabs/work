@@ -4,10 +4,15 @@ import { describe, expect, it } from "vite-plus/test";
 import { brainEvalCases, brainEvalSuiteVersions } from "../src/db/schema.ts";
 import { sha256Hex } from "../src/encoding.ts";
 import {
+  calibrateSuiteVersion,
+  labelOutputs,
+} from "../src/eval-calibration.ts";
+import {
   changeSuiteOwner,
   decideVersion,
   moveSuiteVersion,
   proposeSuiteVersion,
+  suiteVersion,
 } from "../src/eval-suites.ts";
 import type { EvalSuiteProposal } from "../src/eval-suites.ts";
 import { canonicalJson } from "../src/json.ts";
@@ -115,6 +120,50 @@ const threeSplits = [
   caseOf("c", "final"),
 ];
 
+/** Thirty labels the owner gave: case a's expected outcome a pass, wrong answers fails. */
+const ownerLabels = {
+  labels: Array.from({ length: 30 }, (_each, index) => ({
+    caseId: index % 2 === 0 ? "a" : "b",
+    output:
+      index === 0
+        ? { answer: "secret answer for a" }
+        : { answer: `wrong ${index}` },
+    verdict: index === 0 ? ("pass" as const) : ("fail" as const),
+  })),
+};
+
+/** How a calibration is asked for. */
+const labelsOfA = { repeats: 2 };
+
+/** Suite `suiteId`'s version 1, calibrated by its evaluator: as it stands then. */
+const calibrate = async (
+  brain: ReturnType<typeof testHost>["brain"],
+  suiteId: string
+) => {
+  await labelOutputs(
+    brain,
+    { userId: "owner", reads: [] },
+    writerOf("owner"),
+    suiteId,
+    1,
+    ownerLabels
+  );
+  const asCalibrator = {
+    userId: "evaluator",
+    reads: [],
+    evaluation: ["evaluator"] as const,
+  };
+  await calibrateSuiteVersion(
+    brain,
+    asCalibrator,
+    writerOf("evaluator"),
+    suiteId,
+    1,
+    labelsOfA
+  );
+  return await suiteVersion(brain, asCalibrator, suiteId, 1);
+};
+
 describe("a learning suite version", () => {
   it("keeps related variants and sources in one split, and every split filled", async () => {
     const { brain } = testHost();
@@ -218,7 +267,7 @@ describe("a learning suite version", () => {
   it("is accepted only by its owner, once calibrated, from the revision they read, and never changes after", async () => {
     const { brain } = testHost();
     const suiteId = `suite-${crypto.randomUUID()}`;
-    const proposed = await proposeSuiteVersion(
+    await proposeSuiteVersion(
       brain,
       asDesigner,
       designer,
@@ -227,15 +276,7 @@ describe("a learning suite version", () => {
     const early = await codeOf(
       moveSuiteVersion(brain, asOwner, owner, suiteId, 1, "accepted", 1)
     );
-    const calibrated = await moveSuiteVersion(
-      brain,
-      asEvaluator,
-      evaluator,
-      suiteId,
-      1,
-      "calibrated",
-      proposed.revision
-    );
+    const calibrated = await calibrate(brain, suiteId);
     const byDesigner = await codeOf(
       moveSuiteVersion(brain, asDesigner, designer, suiteId, 1, "accepted", 2)
     );
@@ -252,14 +293,13 @@ describe("a learning suite version", () => {
       calibrated.revision
     );
     const again = await codeOf(
-      moveSuiteVersion(
+      calibrateSuiteVersion(
         brain,
         asEvaluator,
         evaluator,
         suiteId,
         1,
-        "calibrated",
-        3
+        labelsOfA
       )
     );
     const retiredByDesigner = await codeOf(
@@ -477,7 +517,7 @@ describe("a learning suite version", () => {
         proposalOf(suiteId, threeSplits)
       )
     );
-    const proposed = await proposeSuiteVersion(
+    await proposeSuiteVersion(
       brain,
       asDesigner,
       designer,
@@ -498,15 +538,7 @@ describe("a learning suite version", () => {
     const unaccepted = await codeOf(
       decideVersion(brain, asEvaluator, suiteId, 1, comparison)
     );
-    const calibrated = await moveSuiteVersion(
-      brain,
-      asEvaluator,
-      evaluator,
-      suiteId,
-      1,
-      "calibrated",
-      proposed.revision
-    );
+    const calibrated = await calibrate(brain, suiteId);
     await moveSuiteVersion(
       brain,
       asOwner,

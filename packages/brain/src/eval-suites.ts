@@ -211,7 +211,7 @@ const pinsSchema = z.object({
 });
 
 /** Suite `suiteId`'s version `version`, ungated: never its cases. */
-const versionOf = async <C>(
+export const versionOf = async <C>(
   brain: Brain<C>,
   suiteId: string,
   version: number
@@ -449,9 +449,11 @@ export const proposeSuiteVersion = async <C>(
   return await versionOf(brain, proposal.suiteId, version);
 };
 
-/** Which states a version may move to, from which. */
+/**
+ * Which states a version may move to here, from which. A version is
+ * calibrated only by a calibration that passed (eval-calibration.ts).
+ */
 const moves = {
-  calibrated: ["proposed"],
   accepted: ["calibrated"],
   retired: ["proposed", "calibrated", "accepted"],
 } as const;
@@ -472,12 +474,8 @@ export const moveSuiteVersion = async <C>(
   expectedRevision: number
 ): Promise<EvalSuiteVersion> => {
   requireSame(brain, reader, by);
-  // Calibration is the evaluator's; acceptance the owner's alone, never
-  // its proposer's; retirement the owner's or the evaluator's: anyone
-  // else finds nothing.
-  if (to === "calibrated") {
-    await requireCapability(brain, reader, suiteId, "evaluator");
-  }
+  // Acceptance the owner's alone, never its proposer's; retirement the
+  // owner's or the evaluator's: anyone else finds nothing.
   const current = await versionOf(brain, suiteId, version);
   const held = await capabilitiesOf(brain, reader, suiteId);
   // Never one who optimizes against it, though they own it.
@@ -486,7 +484,7 @@ export const moveSuiteVersion = async <C>(
     current.proposedBy !== by.userId &&
     !held.has("optimizer");
   const evaluates = to === "retired" && held.has("evaluator");
-  if (to !== "calibrated" && !owns && !evaluates) {
+  if (!owns && !evaluates) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
   const from: readonly string[] = moves[to];
@@ -695,4 +693,15 @@ export const decideVersion = async <C>(
     comparison,
     rows.map(({ family }) => family)
   );
+};
+
+/** Refuses, as missing, `reader` unless the evaluator of suite `suiteId`, and `by` them. */
+export const requireEvaluator = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  by: Writer,
+  suiteId: string
+): Promise<void> => {
+  requireSame(brain, reader, by);
+  await requireCapability(brain, reader, suiteId, "evaluator");
 };

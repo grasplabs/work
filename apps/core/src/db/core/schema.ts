@@ -4590,6 +4590,19 @@ export const brainGapStates = sqliteTable("brain_gap_states", {
 // They name Knowledge's collections and documents by ID, with no foreign
 // key: no batch holds both databases.
 
+/**
+ * What calibrating learning suites' graders reserved and spent each UTC
+ * month (knowledge/eval-judge.ts): every judge call reserves before it is
+ * made and settles after, a failed one charged in full, so the month's
+ * budget holds across runs, failures and calls at once. Micro-dollars.
+ */
+export const brainCalibrationSpend = sqliteTable("brain_calibration_spend", {
+  /** The UTC month, such as `2026-10`. */
+  period: text().primaryKey(),
+  reservedMicros: integer("reserved_micros").notNull().default(0),
+  spentMicros: integer("spent_micros").notNull().default(0),
+});
+
 /** The teams that may read a `teams` collection (knowledge/access.ts). */
 export const collectionTeams = sqliteTable(
   "collection_teams",

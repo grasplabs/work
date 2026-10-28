@@ -2,6 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { EvalCapability } from "../src/brain.ts";
 import {
+  calibrateSuiteVersion,
+  labelOutputs,
+} from "../src/eval-calibration.ts";
+import {
   moveSuiteVersion,
   proposeSuiteVersion,
   suiteCases,
@@ -84,11 +88,53 @@ const proposalOf = (suiteId: string) => ({
   },
 });
 
+/** Thirty labels the owner gave: case a's expected outcome a pass, wrong answers fails. */
+const ownerLabels = {
+  labels: Array.from({ length: 30 }, (_each, index) => ({
+    caseId: index % 2 === 0 ? "a" : "b",
+    output:
+      index === 0 ? { answer: "answer for a" } : { answer: `wrong ${index}` },
+    verdict: index === 0 ? ("pass" as const) : ("fail" as const),
+  })),
+};
+
+/** How a calibration is asked for. */
+const labelsOfA = { repeats: 2 };
+
+/** Suite `suiteId`'s version 1, calibrated by its evaluator: as it stands then. */
+const calibrate = async (
+  brain: ReturnType<typeof testHost>["brain"],
+  suiteId: string
+) => {
+  await labelOutputs(
+    brain,
+    { userId: "owner", reads: [] },
+    writerOf("owner"),
+    suiteId,
+    1,
+    ownerLabels
+  );
+  const asCalibrator = {
+    userId: "evaluator",
+    reads: [],
+    evaluation: ["evaluator"] as const,
+  };
+  await calibrateSuiteVersion(
+    brain,
+    asCalibrator,
+    writerOf("evaluator"),
+    suiteId,
+    1,
+    labelsOfA
+  );
+  return await suiteVersion(brain, asCalibrator, suiteId, 1);
+};
+
 describe("who may do what with a learning suite", () => {
   it("lets an optimizer read the development cases of an accepted version, and nothing else", async () => {
     const { brain } = testHost();
     const suiteId = `suite-${crypto.randomUUID()}`;
-    const proposed = await proposeSuiteVersion(
+    await proposeSuiteVersion(
       brain,
       asDesigner,
       writerOf("designer"),
@@ -97,15 +143,7 @@ describe("who may do what with a learning suite", () => {
     const beforeAccepted = await codeOf(
       suiteCases(brain, asOptimizer, suiteId, 1, "development")
     );
-    const calibrated = await moveSuiteVersion(
-      brain,
-      asEvaluator,
-      writerOf("evaluator"),
-      suiteId,
-      1,
-      "calibrated",
-      proposed.revision
-    );
+    const calibrated = await calibrate(brain, suiteId);
     await moveSuiteVersion(
       brain,
       asOwner,
@@ -138,14 +176,13 @@ describe("who may do what with a learning suite", () => {
         )
       ),
       calibrate: await codeOf(
-        moveSuiteVersion(
+        calibrateSuiteVersion(
           brain,
           asOptimizer,
           writerOf("optimizer"),
           suiteId,
           1,
-          "calibrated",
-          3
+          labelsOfA
         )
       ),
       retire: await codeOf(
@@ -241,14 +278,13 @@ describe("who may do what with a learning suite", () => {
     const shownToNobody = await codeOf(suiteVersion(brain, nobody, suiteId, 1));
     const shownToOwner = await suiteVersion(brain, asOwner, suiteId, 1);
     const mismatched = await codeOf(
-      moveSuiteVersion(
+      calibrateSuiteVersion(
         brain,
         asEvaluator,
         writerOf("someone-else"),
         suiteId,
         1,
-        "calibrated",
-        1
+        labelsOfA
       )
     );
     const retired = await moveSuiteVersion(
@@ -286,21 +322,13 @@ describe("who may do what with a learning suite", () => {
   it("never lets an owner who optimizes against a suite accept it", async () => {
     const { brain } = testHost();
     const suiteId = `suite-${crypto.randomUUID()}`;
-    const proposed = await proposeSuiteVersion(
+    await proposeSuiteVersion(
       brain,
       asDesigner,
       writerOf("designer"),
       proposalOf(suiteId)
     );
-    const calibrated = await moveSuiteVersion(
-      brain,
-      asEvaluator,
-      writerOf("evaluator"),
-      suiteId,
-      1,
-      "calibrated",
-      proposed.revision
-    );
+    const calibrated = await calibrate(brain, suiteId);
     const owningOptimizer = callerOf("owner", ["optimizer"]);
     const accepted = await codeOf(
       moveSuiteVersion(

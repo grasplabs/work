@@ -194,6 +194,22 @@ export interface BrainPorts<C> {
     ) => Promise<readonly EvalCapability[]>;
     /** Security gates every suite's decision policy must hold. */
     mandatedGates?: readonly string[];
+    /**
+     * Grades one output against a case with a suite version's grader
+     * (eval-calibration.ts): the host's judge, through its model gateway
+     * and budget. `spent` is what this calibration spent so far. Throws
+     * `brain.budget_exceeded` to stop it: a real run spends only what the
+     * host's own budget allows, and nothing by default.
+     */
+    grade?: (request: {
+      suiteId: string;
+      version: number;
+      grader: Json;
+      input: Json;
+      expected: Json;
+      output: Json;
+      spent: number;
+    }) => Promise<{ verdict: "pass" | "fail"; cost: number }>;
   };
   memories: {
     /**

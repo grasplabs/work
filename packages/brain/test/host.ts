@@ -171,6 +171,16 @@ export const testHost = (
     evaluation: {
       capabilities: async (caller) =>
         await Promise.resolve(caller.evaluation ?? []),
+      // A judge standing in for the host's: an output passes when it is
+      // the case's expected outcome, at no cost.
+      grade: async ({ expected, output }) =>
+        await Promise.resolve({
+          verdict:
+            JSON.stringify(expected) === JSON.stringify(output)
+              ? ("pass" as const)
+              : ("fail" as const),
+          cost: 0,
+        }),
     },
     blobs: env.BLOBS,
     audit: {
