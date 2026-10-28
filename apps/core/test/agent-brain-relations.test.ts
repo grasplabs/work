@@ -5,7 +5,14 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { portsOf } from "../src/knowledge/ports.ts";
-import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
+import {
+  codeResults,
+  codeStep,
+  personalChatsOf,
+  readApiStep,
+  says,
+  transcript,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
@@ -97,6 +104,7 @@ describe("a chat's entity and relation reads", setUpTime, () => {
       person.userId,
       readRelations(thing),
       says("I can't read the brain."),
+      readApiStep("brain"),
       readRelations(thing),
       says("Anna owns it."),
       listEverything,
@@ -122,12 +130,27 @@ describe("a chat's entity and relation reads", setUpTime, () => {
     const relations: unknown = JSON.parse(
       (reads.at(-1)?.text ?? "").replace(/^Returned:\n/u, "")
     );
+    // What the model was told `relations` answers, before it called it.
+    const told = await transcript(stub, after.chat.id);
+    const declared = told
+      .flatMap((message) =>
+        message.role === "toolResult" && message.toolName === "readApi"
+          ? message.content.flatMap((part) =>
+              part.type === "text" ? [part.text] : []
+            )
+          : []
+      )
+      .join("");
 
     expect({
       refused: refused?.text.includes("may not use that part of the Brain"),
       // No list of every name for a caller that isn't a person.
       listed: listings.at(-1)?.text,
     }).toStrictEqual({ refused: true, listed: "Returned:\nbrain.invalid" });
+    // The declaration says the shape the call answers with.
+    expect(declared).toContain(
+      "Promise<{ relations: Relation[]; truncated: boolean }>"
+    );
     expect(relations).toMatchObject({
       relations: [
         {

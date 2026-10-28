@@ -18,6 +18,7 @@ import {
   readRowsMax,
   relationsExplain,
   relationsFor,
+  relationsRead,
 } from "../src/relations.ts";
 import type { Caller, StartedJob } from "./host.ts";
 import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
@@ -431,6 +432,76 @@ describe("typed relations", () => {
       benAnswered: false,
       allConflicting: true,
       truncated: true,
+    });
+  });
+
+  it("say where every claim it weighed came from, one past the answer's cap too", async () => {
+    const thing = `Rota ${word()}`;
+    // The oldest source first: its relation is weighed past the cap.
+    const files = Array.from({ length: 5 }, (_file, batch) =>
+      Array.from(
+        { length: batch === 0 ? 1 : relationsPerSource },
+        (_line, index) => `Person ${batch}-${index} owns ${thing}.`
+      )
+    );
+    const host = testHost(
+      modelOf(
+        Object.fromEntries(
+          files.map((lines) => [
+            lines.join("\n"),
+            {
+              entities: [
+                ...lines.map((line) => ({
+                  kind: "person",
+                  name: line.split(" owns ")[0] ?? "",
+                })),
+                { kind: "thing", name: thing },
+              ],
+              relations: lines.map((line) => ({
+                subject: line.split(" owns ")[0] ?? "",
+                predicate: "owns",
+                object: thing,
+                evidence: line,
+              })),
+            },
+          ])
+        )
+      )
+    );
+    const collection = await newCollection(host.brain, "Rotas");
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    const saved: string[] = [];
+    for (const [index, lines] of files.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- oldest first, in order
+      const doc = await savedAndLinked(
+        host,
+        collection,
+        `rota-${index}.md`,
+        lines.join("\n")
+      );
+      saved.push(doc.id);
+      // oxlint-disable-next-line no-await-in-loop -- apart in time
+      await scheduler.wait(2);
+    }
+    const { answer, considered } = await relationsRead(host.brain, reader, {
+      entityId: await entityOf(host, reader, thing),
+      predicate: "owns",
+    });
+    const [oldest] = saved;
+
+    expect({
+      answered: answer.relations.length,
+      oldestAnswered: answer.relations.some(
+        ({ sourceRef }) =>
+          sourceRef.kind === "document" && sourceRef.documentId === oldest
+      ),
+      oldestWeighed: considered.documentIds.includes(oldest ?? ""),
+      collections: considered.collectionIds,
+    }).toStrictEqual({
+      answered: 200,
+      oldestAnswered: false,
+      oldestWeighed: true,
+      collections: [collection.id],
     });
   });
 
