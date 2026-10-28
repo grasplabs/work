@@ -326,8 +326,12 @@ const requireConnectorServes = async (
         allowed.includes(action.tool) &&
         sameShape(action.input, connectorShapeOf(shape.input)) &&
         sameShape(action.output, connectorShapeOf(shape.output)) &&
-        // A file answer the contract records is the connector's too.
-        (shape.answersFile ?? false) === (action.answersFile ?? false)
+        // A file answer the contract records is the connector's too. One
+        // it doesn't record, the connector may offer: the contract never
+        // asks for it (a call's `into` is refused unless the sealed
+        // contract records it, resource-calls.ts), and its shapes are
+        // compared above all the same.
+        (shape.answersFile !== true || action.answersFile === true)
       );
     });
   if (!serves) {
