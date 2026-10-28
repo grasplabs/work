@@ -23,9 +23,9 @@ import type { CollectedModule } from "./hash-lib.ts";
 import { verifyRelease } from "./manifest-lib.ts";
 
 /** Where each part of a laid-out Worker goes, relative to its wrangler.json. */
-const WORKER_DIR = "worker";
-const ASSETS_DIR = "assets";
-const MIGRATIONS_DIR = "migrations";
+export const WORKER_DIR = "worker";
+export const ASSETS_DIR = "assets";
+export const MIGRATIONS_DIR = "migrations";
 /** The config Wrangler deploys, next to the parts it names. */
 export const DEPLOY_CONFIG = "wrangler.json";
 

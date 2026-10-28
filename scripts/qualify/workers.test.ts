@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { knownName, namesOwn } from "./cloudflare.ts";
-import { clientConfig, storageOf } from "./workers.ts";
+import { knownName, ownsAll } from "./cf.ts";
+import { clientConfig, liveClasses, outputOf, storageOf } from "./workers.ts";
 
 // A release's core, as deploy-lib.ts writes its wrangler.json: what each
 // test client's copy is made from.
@@ -103,35 +103,24 @@ describe("a test client's copy of a release Worker", () => {
 describe("the run's writes", () => {
   it("may name only the run's own resources", () => {
     const created = new Set(["0b3c-uuid"]);
+    const owns = (names: string[]) => ownsAll(names, "qual-20261028", created);
     expect({
-      own: namesOwn(
-        "/workers/scripts/qual-20261028-dispatcher",
-        "qual-20261028",
-        created
-      ),
-      created: namesOwn("/d1/database/0b3c-uuid", "qual-20261028", created),
-      other: namesOwn(
-        "/workers/scripts/grasp-os-core",
-        "qual-20261028",
-        created
-      ),
-      // Ours by its first segment, another's by its last.
-      nested: namesOwn(
-        "/workers/dispatch/namespaces/qual-20261028/scripts/grasp-os-core/secrets",
-        "qual-20261028",
-        created
-      ),
-      encoded: namesOwn(
-        "/workers/scripts/qual-20261028%2F..%2Fgrasp-os-core",
-        "qual-20261028",
-        created
-      ),
+      own: owns(["qual-20261028-dispatcher"]),
+      created: owns(["0b3c-uuid"]),
+      other: owns(["grasp-os-core"]),
+      // Ours by its first name, another's by its second.
+      mixed: owns(["qual-20261028", "grasp-os-core"]),
+      hidden: owns(["qual-20261028/../grasp-os-core"]),
+      flag: owns(["qual-20261028 --force"]),
+      none: owns([]),
     }).toStrictEqual({
       own: true,
       created: true,
       other: false,
-      nested: false,
-      encoded: false,
+      mixed: false,
+      hidden: false,
+      flag: false,
+      none: false,
     });
   });
 });
@@ -148,5 +137,74 @@ describe("the account a run starts in", () => {
         "g-grasp-os-core",
       ].map((name) => knownName(name))
     ).toStrictEqual([true, true, true, true, false, false]);
+  });
+});
+
+describe("a client's release Worker as Build Output", () => {
+  it("names each binding by the kind cf names it, its vars as text or JSON, its classes as exports", () => {
+    const config = clientConfig(
+      {
+        ...core,
+        compatibility_date: "2026-09-15",
+        compatibility_flags: ["nodejs_compat"],
+        vars: { CLIENT_ID: "qual-x-a-client", MAIL_FROM: { address: "a@b" } },
+        assets: {
+          binding: "ASSETS",
+          not_found_handling: "single-page-application",
+        },
+        migrations: [
+          { tag: "v1", new_sqlite_classes: ["Workspace", "Old"] },
+          { tag: "v2", renamed_classes: [{ from: "Old", to: "AuditLog" }] },
+        ],
+      },
+      {
+        prefix: "qual-x",
+        client: "a",
+        apps,
+        databaseIds: { "grasp-os-core": "db-a" },
+        without: new Set(["ai"]),
+      }
+    );
+
+    expect(outputOf(config)).toStrictEqual({
+      name: "qual-x-a-core",
+      compatibilityDate: "2026-09-15",
+      compatibilityFlags: ["nodejs_compat"],
+      workersDev: false,
+      previewUrls: false,
+      env: {
+        WORKSPACE: {
+          type: "durable-object",
+          worker: "qual-x-a-core",
+          exportName: "Workspace",
+        },
+        LOADER: { type: "worker-loader" },
+        DB: { type: "d1", id: "db-a" },
+        FILES: {
+          type: "r2",
+          name: "qual-x-a-grasp-os-files",
+          jurisdiction: "eu",
+        },
+        CONNECT: { type: "worker", worker: "qual-x-a-connect" },
+        CLIENT_ID: { type: "text", value: "qual-x-a-client" },
+        MAIL_FROM: { type: "json", value: { address: "a@b" } },
+        ASSETS: { type: "assets" },
+      },
+      exports: {
+        Workspace: { type: "durable-object", storage: "sqlite" },
+        AuditLog: { type: "durable-object", storage: "sqlite" },
+      },
+      assets: { notFoundHandling: "single-page-application" },
+    });
+  });
+
+  it("declares only the classes its migrations leave live", () => {
+    expect(
+      liveClasses([
+        { new_sqlite_classes: ["A", "B"] },
+        { new_classes: ["Legacy"] },
+        { renamed_classes: [{ from: "B", to: "C" }], deleted_classes: ["A"] },
+      ])
+    ).toStrictEqual({ Legacy: "legacy-kv", C: "sqlite" });
   });
 });

@@ -2,9 +2,13 @@
  * What the real-account qualification (run.ts) uploads besides the
  * release: small Workers whose every line is here, so what they prove is
  * plain, and the rewrite of a release Worker's wrangler.json for one test
- * client in the run's dispatch namespace. Each Worker is JavaScript text,
- * uploaded as it is (no bundling), so the account runs exactly this.
+ * client in the run's dispatch namespace. Every Worker is uploaded by
+ * `cf deploy --prebuilt` from Build Output this module writes (`writeBuildOutput`):
+ * the modules as they are, unbundled, so the account runs exactly them.
  */
+
+import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 
 /** The compatibility date the probes run at: core's. */
 export const probeCompatibilityDate = "2026-09-15";
@@ -182,21 +186,6 @@ export default {
 };
 `;
 
-/** A binding in an upload's metadata, as the API takes it. */
-export type UploadBinding = Record<string, unknown> & {
-  type: string;
-  name: string;
-};
-
-/** What a user Worker's upload says besides its modules. */
-export interface UploadMetadata {
-  main_module: string;
-  compatibility_date: string;
-  compatibility_flags?: string[];
-  bindings: UploadBinding[];
-  migrations?: { new_tag: string; new_sqlite_classes: string[] };
-}
-
 /** A Worker of a release's wrangler.json, as deploy-lib.ts writes it. */
 export type ReleaseConfig = Record<string, unknown> & { name: string };
 
@@ -314,3 +303,226 @@ export const storageOf = (
     textOf(bucket, "bucket_name")
   ),
 });
+
+/** A binding in Build Output's `worker.config.json`, as cf reads it. */
+export type OutputBinding = Record<string, unknown> & { type: string };
+
+/** A Worker as Build Output describes it (cf's Build Output Specification, v0). */
+export interface OutputWorker {
+  name: string;
+  compatibilityDate: string;
+  compatibilityFlags?: string[];
+  workersDev?: boolean;
+  previewUrls?: boolean;
+  env?: Record<string, OutputBinding>;
+  exports?: Record<
+    string,
+    { type: "durable-object"; storage: "sqlite" | "legacy-kv" }
+  >;
+  assets?: Record<string, unknown>;
+  manifest: {
+    type: "complete";
+    mainModule: string;
+    modules: Record<string, { type: string }>;
+  };
+}
+
+/** One module of a Worker: its name, its type and its bytes. */
+export interface OutputModule {
+  name: string;
+  type: string;
+  content: string | Uint8Array;
+}
+
+/**
+ * Writes `worker` as Build Output under `projectDir`
+ * (`.cloudflare/output/v0/`), with its modules and, from `assetsFrom`, its
+ * static files: what `cf deploy --prebuilt` uploads, with no build.
+ */
+export const writeBuildOutput = (
+  projectDir: string,
+  worker: Omit<OutputWorker, "manifest">,
+  mainModule: string,
+  modules: readonly OutputModule[],
+  assetsFrom?: string
+): void => {
+  const root = path.join(projectDir, ".cloudflare", "output", "v0");
+  const own = path.join(root, "workers", "default");
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(path.join(own, "bundle"), { recursive: true });
+  writeFileSync(
+    path.join(root, "config.json"),
+    JSON.stringify({ buildContext: { isPreview: false } })
+  );
+  for (const { name, content } of modules) {
+    const file = path.join(own, "bundle", name);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, content);
+  }
+  if (assetsFrom !== undefined) {
+    cpSync(assetsFrom, path.join(own, "assets"), { recursive: true });
+  }
+  const full: OutputWorker = {
+    ...worker,
+    manifest: {
+      type: "complete",
+      mainModule,
+      modules: Object.fromEntries(
+        modules.map(({ name, type }) => [name, { type }])
+      ),
+    },
+  };
+  writeFileSync(path.join(own, "worker.config.json"), JSON.stringify(full));
+};
+
+/** A Durable Object migration, as a release's wrangler.json lists them. */
+interface Migration {
+  new_sqlite_classes?: string[];
+  new_classes?: string[];
+  renamed_classes?: { from: string; to: string }[];
+  deleted_classes?: string[];
+}
+
+/**
+ * The Durable Object classes `migrations` leave live, with their storage:
+ * what Build Output declares as exports. A fresh upload has no history to
+ * replay, so only the classes live at the end are declared.
+ */
+export const liveClasses = (
+  migrations: readonly Migration[]
+): Record<string, "sqlite" | "legacy-kv"> => {
+  const live = new Map<string, "sqlite" | "legacy-kv">();
+  for (const migration of migrations) {
+    for (const name of migration.new_sqlite_classes ?? []) {
+      live.set(name, "sqlite");
+    }
+    for (const name of migration.new_classes ?? []) {
+      live.set(name, "legacy-kv");
+    }
+    for (const { from, to } of migration.renamed_classes ?? []) {
+      const storage = live.get(from);
+      live.delete(from);
+      if (storage !== undefined) {
+        live.set(to, storage);
+      }
+    }
+    for (const name of migration.deleted_classes ?? []) {
+      live.delete(name);
+    }
+  }
+  return Object.fromEntries(live);
+};
+
+const recordOf = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : {};
+
+const stringsOf = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+
+const migrationsOf = (value: unknown): Migration[] =>
+  listOf(value).map((entry) => ({
+    new_sqlite_classes: stringsOf(entry.new_sqlite_classes),
+    new_classes: stringsOf(entry.new_classes),
+    deleted_classes: stringsOf(entry.deleted_classes),
+    renamed_classes: listOf(entry.renamed_classes).map((renamed) => ({
+      from: textOf(renamed, "from"),
+      to: textOf(renamed, "to"),
+    })),
+  }));
+
+/** A release's assets settings (wrangler.json's), as Build Output names them. */
+const assetSettings: Readonly<Record<string, string>> = {
+  html_handling: "htmlHandling",
+  not_found_handling: "notFoundHandling",
+  run_worker_first: "runWorkerFirst",
+};
+
+/**
+ * A client's release Worker (`clientConfig`'s wrangler.json) as Build
+ * Output describes it, but for its manifest: each binding by the kind cf
+ * names it, its vars as text or JSON, its Durable Object classes as
+ * exports. Workflows are left out: a placed client binds none.
+ */
+export const outputOf = (
+  config: ReleaseConfig
+): Omit<OutputWorker, "manifest"> => {
+  const env: Record<string, OutputBinding> = {};
+  for (const binding of listOf(recordOf(config.durable_objects).bindings)) {
+    env[textOf(binding, "name")] = {
+      type: "durable-object",
+      worker: config.name,
+      exportName: textOf(binding, "class_name"),
+    };
+  }
+  for (const loader of listOf(config.worker_loaders)) {
+    env[textOf(loader, "binding")] = { type: "worker-loader" };
+  }
+  for (const database of listOf(config.d1_databases)) {
+    env[textOf(database, "binding")] = {
+      type: "d1",
+      id: textOf(database, "database_id"),
+    };
+  }
+  for (const bucket of listOf(config.r2_buckets)) {
+    env[textOf(bucket, "binding")] = {
+      type: "r2",
+      name: textOf(bucket, "bucket_name"),
+      jurisdiction: textOf(bucket, "jurisdiction"),
+    };
+  }
+  for (const service of listOf(config.services)) {
+    const { entrypoint } = service;
+    env[textOf(service, "binding")] = {
+      type: "worker",
+      worker: textOf(service, "service"),
+      ...(typeof entrypoint === "string" ? { exportName: entrypoint } : {}),
+    };
+  }
+  for (const mail of listOf(config.send_email)) {
+    env[textOf(mail, "name")] = { type: "send-email" };
+  }
+  const ai = recordOf(config.ai);
+  if (typeof ai.binding === "string") {
+    env[ai.binding] = { type: "ai" };
+  }
+  const metadata = recordOf(config.version_metadata);
+  if (typeof metadata.binding === "string") {
+    env[metadata.binding] = { type: "version-metadata" };
+  }
+  for (const [name, value] of Object.entries(recordOf(config.vars))) {
+    env[name] =
+      typeof value === "string"
+        ? { type: "text", value }
+        : { type: "json", value };
+  }
+  const assets = recordOf(config.assets);
+  if (typeof assets.binding === "string") {
+    env[assets.binding] = { type: "assets" };
+  }
+  const settings = Object.fromEntries(
+    Object.entries(assets).flatMap(([key, value]) => {
+      const name = assetSettings[key];
+      return name === undefined ? [] : [[name, value]];
+    })
+  );
+  const classes = liveClasses(migrationsOf(config.migrations));
+  return {
+    name: config.name,
+    compatibilityDate: textOf(config, "compatibility_date"),
+    compatibilityFlags: stringsOf(config.compatibility_flags),
+    workersDev: false,
+    previewUrls: false,
+    env,
+    exports: Object.fromEntries(
+      Object.entries(classes).map(([name, storage]) => [
+        name,
+        { type: "durable-object" as const, storage },
+      ])
+    ),
+    ...(Object.keys(settings).length === 0 ? {} : { assets: settings }),
+  };
+};
