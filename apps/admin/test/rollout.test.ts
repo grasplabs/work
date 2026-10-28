@@ -2,7 +2,7 @@ import type { WorkerEntry } from "@grasp-os/shared/release";
 import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { applySettings } from "../src/clients/apply.ts";
 import { setSignIn } from "../src/clients/settings.ts";
@@ -30,6 +30,7 @@ import {
 import type { StartRolloutInput } from "../src/rollout/control.ts";
 import { driftOf } from "../src/rollout/drift.ts";
 import { rollbackClient, rollbackRing } from "../src/rollout/rollback.ts";
+import { clientEndedEvent, fleetConcurrency } from "../src/rollout/workflow.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, staff } from "./hosting.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
@@ -87,10 +88,14 @@ const followRollouts = async () => {
       const run = await latest();
       return await run.waitForStepResult(step);
     },
-    waitForStatus: async (status: "complete" | "errored" | "terminated") => {
+    waitForStatus: async (
+      status: "complete" | "errored" | "terminated" | "paused"
+    ) => {
       const run = await latest();
       await run.waitForStatus(status);
     },
+    /** The children started so far: one per fleet client it deployed. */
+    childRuns: async () => await children.get(),
     [Symbol.asyncDispose]: async () => {
       await runs.dispose();
       await children.dispose();
@@ -122,6 +127,18 @@ const followRollbacks = async () => {
       await runs.dispose();
     },
   };
+};
+
+/** The rollout running or waiting now: one at a time. */
+const openRollout = async (): Promise<string> => {
+  const [open] = await db
+    .select({ id: rollouts.id })
+    .from(rollouts)
+    .where(inArray(rollouts.status, ["running", "waiting"]));
+  if (open === undefined) {
+    throw new Error("No rollout is open");
+  }
+  return open.id;
 };
 
 /** Starts a rollout of `releaseId` for `scope`, as staff. */
@@ -573,6 +590,8 @@ describe("rolling a release out to placed clients", () => {
     await run.waitForStepResult({ name: "ring 1 approved" });
     await pauseRollout(env, staff, rolloutId);
     await approveRollout(env, staff, rolloutId, ringChecked);
+    // The run took the pause: what the fleet runs now is what it left.
+    await run.waitForStatus("paused");
     const paused = await releasesOf(acme.clientId);
     await resumeRollout(env, staff, rolloutId);
     await run.waitForStatus("complete");
@@ -594,6 +613,245 @@ describe("rolling a release out to placed clients", () => {
       cancelled: { ring: 1, status: "pending" },
       stillOn: on(release),
       internal: on(next),
+    });
+  });
+
+  it("refuses the next ring's approval without the eval passed and the demo sent, and goes on once both are", async () => {
+    const before = await placedRelease("feat(core): before");
+    await live(0, before);
+    const acme = await live(1, before);
+    const release = await placedRelease("feat(core): checked");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+
+    const refused = await Promise.all(
+      [
+        { evalPassed: false, demoSent: false },
+        { evalPassed: true, demoSent: false },
+        { evalPassed: false, demoSent: true },
+      ].map(
+        async (checks) =>
+          await codeOf(approveRollout(env, staff, rolloutId, checks))
+      )
+    );
+    const held = await rolloutRow(rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
+    await run.waitForStatus("complete");
+
+    expect({
+      refused,
+      held,
+      acme: await releasesOf(acme.clientId),
+    }).toStrictEqual({
+      refused: [
+        "ring_checks_missing",
+        "ring_checks_missing",
+        "ring_checks_missing",
+      ],
+      held: { status: "waiting", ring: 0 },
+      acme: on(release),
+    });
+  });
+
+  it("runs a ring's clients side by side, never more at once than its limit", async () => {
+    const before = await placedRelease("feat(core): before");
+    await live(0, before);
+    const fleet = [];
+    for (let index = 0; index < fleetConcurrency + 2; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one provisioning at a time
+      fleet.push(await live(1, before));
+    }
+    const release = await placedRelease("feat(core): side by side");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    // How many of its fleet clients run at once, as their targets say.
+    let peak = 0;
+    const watching = setInterval(() => {
+      void (async () => {
+        const [row] = await db
+          .select({ going: sql<number>`count(*)` })
+          .from(rolloutTargets)
+          .where(
+            and(
+              eq(rolloutTargets.rolloutId, rolloutId),
+              eq(rolloutTargets.ring, 1),
+              eq(rolloutTargets.status, "deploying")
+            )
+          );
+        peak = Math.max(peak, row?.going ?? 0);
+      })();
+    }, 5);
+    try {
+      await approveRollout(env, staff, rolloutId, ringChecked);
+      await run.waitForStatus("complete");
+    } finally {
+      clearInterval(watching);
+    }
+    const children = await run.childRuns();
+
+    expect({
+      withinLimit: peak <= fleetConcurrency,
+      children: children.length,
+      releases: await Promise.all(
+        fleet.map(async ({ clientId }) => await releasesOf(clientId))
+      ),
+    }).toStrictEqual({
+      withinLimit: true,
+      children: fleet.length,
+      releases: fleet.map(() => on(release)),
+    });
+  });
+
+  it("fails a fleet client whose run was ended outside the admin as run_ended, and retries it in the same rollout", async () => {
+    const before = await placedRelease("feat(core): before");
+    await live(0, before);
+    const acme = await live(1, before);
+    const release = await placedRelease("feat(core): ended outside");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    // Its operation's first call to its account waits, so its run is
+    // going when it's terminated from the dashboard.
+    const held = Promise.withResolvers<boolean>();
+    cloudflare.beforeAnswering(
+      (call) => call.path.startsWith(`/accounts/${acme.account.id}/`),
+      async () => {
+        await held.promise;
+      }
+    );
+
+    await approveRollout(env, staff, rolloutId, ringChecked);
+    await vi.waitUntil(async () => {
+      const target = await targetOf(rolloutId, acme.clientId);
+      return target?.status === "deploying";
+    });
+    // Its first round's child, as the rollout names it, ends without
+    // telling the run; the run wakes, as its wait's timeout would wake it.
+    const child = await env.ROLLOUT_CLIENT.get(
+      `${rolloutId}-${acme.clientId}-0`
+    );
+    await child.terminate();
+    held.resolve(true);
+    const parent = await env.ROLLOUT.get(rolloutId);
+    await parent.sendEvent({ type: clientEndedEvent, payload: {} });
+    await run.waitForStepResult({ name: "retry 1 asked" });
+    const ended = await targetOf(rolloutId, acme.clientId);
+    await retryRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+
+    expect({
+      ended,
+      retried: await targetOf(rolloutId, acme.clientId),
+      releases: await releasesOf(acme.clientId),
+      runner: await runnerOf(acme.clientId),
+    }).toMatchObject({
+      ended: { ring: 1, status: "failed", error: "run_ended" },
+      retried: { ring: 1, status: "done", error: null },
+      releases: on(release),
+      runner: null,
+    });
+  });
+
+  it("stops a rollout whose next client it just claimed when a rollback of another lands then, releasing that client", async () => {
+    const before = await placedRelease("feat(core): before");
+    // Ring 0 goes in the order of client ids: the first done, then the
+    // second claimed.
+    const [first, second] = [
+      await live(0, before),
+      await live(0, before),
+    ].toSorted((x, y) => x.clientId.localeCompare(y.clientId));
+    if (first === undefined || second === undefined) {
+      throw new Error("Two clients were set up");
+    }
+    const release = await placedRelease("feat(core): two in a ring");
+    await using rollbacks = await followRollbacks();
+    // The rollout claimed the second client, and its operation's first
+    // read reaches its account: the first client's rollback lands then.
+    let landed = false;
+    cloudflare.beforeAnswering(
+      (call) => call.path.startsWith(`/accounts/${second.account.id}/`),
+      async () => {
+        landed = true;
+        await rollbackClient(env, staff, await openRollout(), first.clientId);
+        // Landed: done before the second client's call is answered.
+        await rollbacks.settle();
+      }
+    );
+    await using run = await followRollouts();
+
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    await rollbacks.settle();
+    const targets = await targetsOf(rolloutId);
+
+    expect({
+      landed,
+      first: targets[first.clientId],
+      rollout: await rolloutRow(rolloutId),
+      // The second client ends on one release, its runner released.
+      secondCoherent: new Set(Object.values(await releasesOf(second.clientId)))
+        .size,
+      secondRunner: await runnerOf(second.clientId),
+      firstRunner: await runnerOf(first.clientId),
+    }).toMatchObject({
+      landed: true,
+      first: { ring: 0, status: "rolled_back" },
+      rollout: { status: "cancelled", ring: 0 },
+      secondCoherent: 1,
+      secondRunner: null,
+      firstRunner: null,
+    });
+  });
+
+  it("stops a paused rollout once a rollback of one of its clients cancels it, releasing every client", async () => {
+    const before = await placedRelease("feat(core): before");
+    const clientsInRing = [await live(0, before), await live(0, before)];
+    // Ring 0 goes in the order of client ids: the first done, the second
+    // paused on as its operation starts.
+    const [first, second] = clientsInRing.toSorted((x, y) =>
+      x.clientId.localeCompare(y.clientId)
+    );
+    if (first === undefined || second === undefined) {
+      throw new Error("Two clients were set up");
+    }
+    const release = await placedRelease("feat(core): paused, then cancelled");
+    cloudflare.beforeAnswering(
+      (call) => call.path.startsWith(`/accounts/${second.account.id}/`),
+      async () => {
+        await pauseRollout(env, staff, await openRollout());
+      }
+    );
+    await using run = await followRollouts();
+    await using rollbacks = await followRollbacks();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("paused");
+
+    await rollbackClient(env, staff, rolloutId, first.clientId);
+    await rollbacks.settle();
+    await vi.waitUntil(async () => {
+      const status = await statusOf(rolloutId);
+      return status === "cancelled";
+    });
+    await run.waitForStatus("complete");
+    const secondReleases = await releasesOf(second.clientId);
+
+    expect({
+      rollout: await rolloutRow(rolloutId),
+      first: await targetOf(rolloutId, first.clientId),
+      firstOn: await releasesOf(first.clientId),
+      secondCoherent: new Set(Object.values(secondReleases)).size,
+      runners: [
+        await runnerOf(first.clientId),
+        await runnerOf(second.clientId),
+      ],
+    }).toMatchObject({
+      rollout: { status: "cancelled" },
+      first: { status: "rolled_back" },
+      firstOn: on(before),
+      secondCoherent: 1,
+      runners: [null, null],
     });
   });
 
