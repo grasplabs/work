@@ -33,6 +33,7 @@ import {
 import { provisionPlacedClient } from "../src/hosting/workflow.ts";
 import { claimRun } from "../src/runners.ts";
 import type { HeldClient } from "../src/runners.ts";
+import { notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, placedClient, staff } from "./hosting.ts";
@@ -55,6 +56,7 @@ const context = {
   store: env.RELEASES,
   secrets,
   router: { hosts: env.ROUTER_HOSTS, domain, smoke: { retryDelayMs: 0 } },
+  observe: { retryDelayMs: 0 },
 };
 const namespace = "production";
 
@@ -169,6 +171,35 @@ const operationOf = async (clientId: string) =>
     .get();
 
 /** Runs the operation expecting it to fail, its logged failure kept out of the output, and returns the error. */
+/** A user Worker's script in a dispatch namespace: where it's put and read. */
+const userScriptPath =
+  /\/workers\/dispatch\/namespaces\/[^/]+\/scripts\/[^/]+$/u;
+
+/**
+ * Cloudflare's read-after-write lag: the next `stale` reads of a user
+ * Worker's script after each upload answer as before it, that it isn't
+ * there. Returns how many reads were answered so, by script path.
+ */
+const laggingUploads = (stale: number): Map<string, number> => {
+  const behind = new Map<string, number>();
+  const answeredStale = new Map<string, number>();
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const request = new Request(input, init);
+    const { pathname } = new URL(request.url);
+    if (userScriptPath.test(pathname)) {
+      if (request.method === "PUT") {
+        behind.set(pathname, stale);
+      } else if (request.method === "GET" && (behind.get(pathname) ?? 0) > 0) {
+        behind.set(pathname, (behind.get(pathname) ?? 0) - 1);
+        answeredStale.set(pathname, (answeredStale.get(pathname) ?? 0) + 1);
+        return notFound();
+      }
+    }
+    return await cloudflare.fetch(input, init);
+  });
+  return answeredStale;
+};
+
 const failing = async (held: HeldClient): Promise<unknown> => {
   const errors = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
@@ -950,6 +981,42 @@ describe("provisioning a placed client", () => {
         )
         .map(({ path }) => path)
     ).toStrictEqual([]);
+  });
+
+  it("reads an upload back through Cloudflare's lag, and goes on", async () => {
+    const manifest = await importRelease("workers_for_platforms");
+    const { held, clientId } = await setUp("workers_for_platforms", manifest);
+    const stale = laggingUploads(3);
+
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    expect({
+      operation: await operationOf(clientId),
+      staleReads: [...stale.values()],
+    }).toMatchObject({
+      operation: { status: "failed", error: "probe_unqualified" },
+      // Each Worker's upload read back once the lag passed.
+      staleReads: [3, 3],
+    });
+  });
+
+  it("stops at an upload that never reads back, after a bounded number of tries", async () => {
+    const manifest = await importRelease("workers_for_platforms");
+    const { held, clientId } = await setUp("workers_for_platforms", manifest);
+    const stale = laggingUploads(Number.POSITIVE_INFINITY);
+
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "upload_unobserved",
+    });
+    expect({
+      operation: await operationOf(clientId),
+      staleReads: [...stale.values()],
+    }).toMatchObject({
+      operation: { status: "failed", error: "upload_unobserved" },
+      // Connect's, read six times, then the run stopped.
+      staleReads: [6],
+    });
   });
 
   it("keeps two clients in one destination to their own resources", async () => {
