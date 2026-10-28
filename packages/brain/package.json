@@ -30,6 +30,7 @@
     "./outcomes": "./src/outcomes.ts",
     "./payloads": "./src/payloads.ts",
     "./purge": "./src/purge.ts",
+    "./purge-ledger": "./src/purge-ledger.ts",
     "./recall": "./src/recall.ts",
     "./recall-store": "./src/recall-store.ts",
     "./relations": "./src/relations.ts",

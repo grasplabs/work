@@ -412,6 +412,79 @@ export const brainEvalCases = sqliteTable(
 );
 
 /**
+ * Each purge, as a durable erasure (GRA-1122, ../purge-ledger.ts): who ran
+ * it, when, and, while it isn't finished, a keyed digest of exactly what
+ * it purges (`key`: an HMAC under the Brain's own key, never a plain hash,
+ * so a guessed term can't be checked against it), by which running the
+ * same purge again resumes it. Never a term or anything it erased.
+ */
+export const brainPurges = sqliteTable(
+  "brain_purges",
+  {
+    /** The purge's ID, as its audit event names it. */
+    id: text().primaryKey(),
+    kind: text({ enum: ["personal", "content"] }).notNull(),
+    key: text().notNull(),
+    /** User ID of the admin who first ran it. */
+    by: text().notNull(),
+    /** What it counted as it began, as JSON: documents and versions. */
+    counts: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    /** When its last step completed; null while any hasn't. */
+    completedAt: timestamp("completed_at"),
+    /**
+     * The purge an admin started fresh in its place, unfinished (kept as
+     * it stood, as history); null otherwise.
+     */
+    supersededBy: text("superseded_by"),
+  },
+  (table) => [
+    // One open purge of the same input: running it again resumes it.
+    uniqueIndex("brain_purges_open_key_idx")
+      .on(table.key)
+      .where(
+        sql`${table.completedAt} IS NULL AND ${table.supersededBy} IS NULL`
+      ),
+    index("brain_purges_created_idx").on(table.createdAt),
+  ]
+);
+
+/**
+ * Each projection a purge reaches, as one step of it (../purge-ledger.ts):
+ * where it stands, why it is blocked as a stable code (never an error's
+ * message, which might repeat a term), and what it changed, as counts.
+ */
+export const brainPurgeSteps = sqliteTable(
+  "brain_purge_steps",
+  {
+    purgeId: text("purge_id")
+      .notNull()
+      .references(() => brainPurges.id, { onDelete: "cascade" }),
+    /** Which projection, such as `search` or `document:<ID>`. */
+    step: text().notNull(),
+    /** Its place among the purge's steps, from 0. */
+    position: integer().notNull(),
+    state: text({ enum: ["queued", "running", "complete", "blocked"] })
+      .notNull()
+      .default("queued"),
+    /** Why it is blocked: an error code or name; null otherwise. */
+    reason: text(),
+    /** What it changed, as JSON counts; null before it completed. */
+    counts: text(),
+    /** When a run claimed it, while it runs (a lease). */
+    claimedAt: timestamp("claimed_at"),
+    /**
+     * The run that claimed it, random: only that run sets how it ended, so
+     * one that ran past its lease never overwrites the one that took over.
+     */
+    claim: text(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.purgeId, table.step] })]
+);
+
+/**
  * The Brain's memory records (../memories.ts): what a person, or
  * later an App or agent acting for one, asked the Brain to remember, as
  * they said it. A record starts `proposed`, never an accepted fact.

@@ -538,6 +538,14 @@ const knowledgeDb: D1State = {
       `${brain}eval-suites.ts`,
       "The cases of each learning suite version, by split, with their answer keys."
     ),
+    brain_purges: exported(
+      `${brain}purge-ledger.ts`,
+      "Each purge as a durable erasure: who ran it, when, and whether it finished; never what it erased."
+    ),
+    brain_purge_steps: exported(
+      `${brain}purge-ledger.ts`,
+      "Each projection a purge reaches, where it stands, and why it is blocked."
+    ),
     brain_erased_evidence: exported(
       `${brain}outcomes.ts`,
       "Execution records whose events were erased, and single events taken back: late captures stay erased."
