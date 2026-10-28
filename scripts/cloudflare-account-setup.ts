@@ -444,10 +444,8 @@ const zoneSteps = async (
   const zones = listOf(
     await cf(["zones", "list", "--name", domain, "--account-id", accountId])
   );
-  const zoneId = field(
-    zones.find((each) => field(each, "name") === domain),
-    "id"
-  );
+  const found = zones.find((each) => field(each, "name") === domain);
+  const zoneId = field(found, "id");
   if (typeof zoneId !== "string") {
     reports.push({
       step: `zone ${domain}`,
@@ -457,7 +455,18 @@ const zoneSteps = async (
     });
     return;
   }
-  reports.push({ step: `zone ${domain}`, outcome: "exists" });
+  const nameServers = listOf(field(found, "name_servers")).map(String);
+  // Added but not yet delegated: DNS can be prepared, Email Routing can't.
+  const active = field(found, "status") === "active";
+  reports.push(
+    active
+      ? { step: `zone ${domain}`, outcome: "exists" }
+      : {
+          step: `zone ${domain}`,
+          outcome: "pending",
+          detail: `point its nameservers at ${nameServers.join(" and ")}, then run again`,
+        }
+  );
   const zone = ["--zone", zoneId];
   const { admin, router } = accountPlan.workers;
   const wildcard = `*.${domain}`;
@@ -530,6 +539,14 @@ const zoneSteps = async (
     }
   );
 
+  if (!active) {
+    reports.push({
+      step: `Email Routing on ${domain}`,
+      outcome: "pending",
+      detail: "Email Routing needs the zone active",
+    });
+    return;
+  }
   const emailOn = await ensure(
     reports,
     `Email Routing on ${domain}`,

@@ -30,7 +30,8 @@ interface FakeState {
   kv: string[];
   stores: string[];
   secrets: string[];
-  zone: boolean;
+  /** The zone: none, added but not delegated yet, or active. */
+  zone: "none" | "pending" | "active";
   workers: string[];
   dns: { type: string; name: string; content: string; proxied: boolean }[];
   emailRouting: boolean;
@@ -120,8 +121,15 @@ const commandsOf = (
       flags
     ),
   "zones list": (flags) =>
-    state.zone && flags.get("account-id") === accountId
-      ? [{ id: zoneId, name: flags.get("name") }]
+    state.zone !== "none" && flags.get("account-id") === accountId
+      ? [
+          {
+            id: zoneId,
+            name: flags.get("name"),
+            status: state.zone,
+            name_servers: ["kay.ns.cloudflare.com", "trey.ns.cloudflare.com"],
+          },
+        ]
       : [],
   "workers list": (flags) =>
     pageOf(
@@ -175,7 +183,7 @@ const fakeCf = (start: Partial<FakeState> = {}) => {
     kv: [],
     stores: ["store-1"],
     secrets: [],
-    zone: true,
+    zone: "active",
     workers: [],
     dns: [],
     emailRouting: start.catchAll !== undefined && start.catchAll !== null,
@@ -321,7 +329,7 @@ describe("setting up a fresh account", () => {
 
   it("waits on the router's first deploy for the catch-all, and on the zone for everything on it", async () => {
     const undeployed = fakeCf();
-    const noZone = fakeCf({ zone: false });
+    const noZone = fakeCf({ zone: "none" });
 
     const beforeDeploy = outcomes(
       await setUpAccount(optionsFor(undeployed.cf))
@@ -346,6 +354,32 @@ describe("setting up a fresh account", () => {
       zone: "pending",
       zoneSteps: ["zone ongrasp.app"],
       zoneWrites: [],
+    });
+  });
+
+  it("prepares a zone that isn't delegated yet, and leaves Email Routing until it is", async () => {
+    const cloudflare = fakeCf({ zone: "pending" });
+
+    const reports = await setUpAccount(optionsFor(cloudflare.cf));
+    const byStep = outcomes(reports);
+
+    expect({
+      zone: reports.find(({ step }) => step === "zone ongrasp.app"),
+      wildcard: byStep["DNS record *.ongrasp.app"],
+      emailRouting: byStep["Email Routing on ongrasp.app"],
+      emailWrites: cloudflare.writes.filter((write) =>
+        write.startsWith("email-routing")
+      ),
+    }).toStrictEqual({
+      zone: {
+        step: "zone ongrasp.app",
+        outcome: "pending",
+        detail:
+          "point its nameservers at kay.ns.cloudflare.com and trey.ns.cloudflare.com, then run again",
+      },
+      wildcard: "created",
+      emailRouting: "pending",
+      emailWrites: [],
     });
   });
 
