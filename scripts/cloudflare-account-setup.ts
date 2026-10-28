@@ -9,7 +9,7 @@
  * It drives Cloudflare's `cf` CLI, signed in with its own login (`cf
  * login`), never an API token: the account is `--account`, or
  * CLOUDFLARE_ACCOUNT_ID when that's not given. In order:
- * 1. the clients' dispatch namespace (`grasp-os-clients`), which the router
+ * 1. the clients' dispatch namespace (`grasp-work-clients`), which the router
  *    and the admin bind;
  * 2. the admin's D1 database and R2 bucket, in the EU jurisdiction, and the
  *    router's hostname map (KV, which holds routing only), by the names the
@@ -48,16 +48,16 @@ export const accountPlan = {
    * The clients' Workers for Platforms namespace (@grasp-os/shared/router,
    * `clientDispatchNamespace`, once GRA-283's router lands).
    */
-  dispatchNamespace: "grasp-os-clients",
+  dispatchNamespace: "grasp-work-clients",
   /** The admin's database (apps/admin/wrangler.jsonc, `DB`). */
-  d1: [{ name: "grasp-os-admin", jurisdiction: "eu" }],
+  d1: [{ name: "grasp-work-admin", jurisdiction: "eu" }],
   /** The admin's releases (apps/admin/wrangler.jsonc, `RELEASES`). */
-  r2: [{ name: "grasp-os-releases", jurisdiction: "eu" }],
+  r2: [{ name: "grasp-work-releases", jurisdiction: "eu" }],
   /** The router's hostname map, by the title scripts/wrangler-deploy.ts finds. */
-  kv: ["grasp-os-router-hosts"],
+  kv: ["grasp-work-router-hosts"],
   /** The store's name, when the account has none yet. */
-  secretsStore: "grasp-os",
-  workers: { admin: "grasp-os-admin", router: "grasp-os-router" },
+  secretsStore: "grasp-work",
+  workers: { admin: "grasp-work-admin", router: "grasp-work-router" },
 } as const;
 
 /** The wrangler configs whose Secrets Store bindings name the secrets needed. */
