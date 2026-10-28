@@ -183,6 +183,7 @@ const fakeCloudflare = (
     workers?: string[];
     secrets?: string[];
     route?: string;
+    catchAll?: string;
   } = {}
 ) => {
   const state: FakeState = {
@@ -200,8 +201,8 @@ const fakeCloudflare = (
         ? []
         : [{ pattern: "*.ongrasp.app/*", script: start.route }],
     domains: [],
-    emailRouting: false,
-    catchAll: null,
+    emailRouting: start.catchAll !== undefined,
+    catchAll: start.catchAll ?? null,
   };
   const routes = routesOf(state);
   const writes: string[] = [];
@@ -385,6 +386,25 @@ describe("setting up a fresh account", () => {
     expect(cloudflare.state.routes).toStrictEqual([
       { pattern: "*.ongrasp.app/*", script: "someone-else" },
     ]);
+  });
+});
+
+describe("what points elsewhere already", () => {
+  it("refuses to repoint an Email Routing catch-all that sends mail somewhere else", async () => {
+    const cloudflare = fakeCloudflare({
+      workers: ["grasp-os-admin", "grasp-os-router"],
+      catchAll: "someone-elses-worker",
+    });
+
+    await expect(setUpAccount(optionsFor(cloudflare.send))).rejects.toThrow(
+      "sends mail somewhere other than grasp-os-router"
+    );
+    expect({
+      catchAll: cloudflare.state.catchAll,
+      catchAllWrites: cloudflare.writes.filter((write) =>
+        write.endsWith("/catch_all")
+      ),
+    }).toStrictEqual({ catchAll: "someone-elses-worker", catchAllWrites: [] });
   });
 });
 
