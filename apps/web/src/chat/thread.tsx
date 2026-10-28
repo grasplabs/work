@@ -5,11 +5,13 @@ import type {
   ChatOutput,
   ChatPartial,
   ChatReasoning,
+  ChatToolEvent,
 } from "@grasp-os/shared/chat";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { Link } from "@tanstack/react-router";
 import {
   BrainIcon,
   CheckCircleIcon,
@@ -19,11 +21,12 @@ import {
   ClockIcon,
   CodeIcon,
   CopyIcon,
+  LayoutDashboardIcon,
   RefreshCcwIcon,
   TriangleAlertIcon,
   XCircleIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { createContext, Fragment, use, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { AskedLine } from "./asked-questions.tsx";
@@ -44,6 +47,7 @@ import { signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
+import { widgetLinesOf } from "./widget-lines.ts";
 
 // A chat as the person reads it, in the prototype's look
 // (grasplabs/prototype `components/chat/chat-thread.tsx` and
@@ -325,6 +329,29 @@ const ReplyText = ({
   />
 );
 
+/** The calls the chat's code made, as the thread was given them. */
+const ChatTools = createContext<readonly ChatToolEvent[]>([]);
+
+/** Under a code step: each widget it made or changed on the dashboard, with the way there. */
+const WidgetLines = ({ callId }: { callId: string }) => {
+  const lines = widgetLinesOf(use(ChatTools), callId);
+  return lines.map(({ id, done }) => (
+    <p className="text-muted-foreground flex items-center gap-2" key={id}>
+      <LayoutDashboardIcon aria-hidden="true" className="size-4 flex-none" />
+      <span>
+        {done === "made" ? (
+          <Trans>Grasp added a widget to your dashboard.</Trans>
+        ) : (
+          <Trans>Grasp changed a widget on your dashboard.</Trans>
+        )}{" "}
+        <Link className="text-foreground underline" to="/dashboard">
+          <Trans>Open the dashboard</Trans>
+        </Link>
+      </span>
+    </p>
+  ));
+};
+
 /** One response of the agent's, stored or being written. */
 const Reply = ({
   reply,
@@ -377,14 +404,18 @@ const Reply = ({
             <ReplyText citations={reply.citations} text={reply.text} />
           )}
           {reply.code.map((code) => (
-            <CodeStep
-              code={code}
-              key={code.callId}
-              output={output?.callId === code.callId ? output.text : undefined}
-              result={results.get(code.callId)}
-              running={running}
-              writing={writing}
-            />
+            <Fragment key={code.callId}>
+              <CodeStep
+                code={code}
+                output={
+                  output?.callId === code.callId ? output.text : undefined
+                }
+                result={results.get(code.callId)}
+                running={running}
+                writing={writing}
+              />
+              <WidgetLines callId={code.callId} />
+            </Fragment>
           ))}
           {reply.end === "cancelled" ? (
             <p className="text-muted-foreground">
@@ -480,6 +511,9 @@ const progressOf = (
   };
 };
 
+/** Where the page passes no calls of the chat's code. */
+const noTools: readonly ChatToolEvent[] = [];
+
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
   chatId,
@@ -488,6 +522,7 @@ export const ChatThread = ({
   output,
   partial,
   running,
+  tools = noTools,
   onRetry,
   children,
 }: {
@@ -501,6 +536,8 @@ export const ChatThread = ({
   partial: ChatPartial | null;
   /** Whether the agent is working on the chat now. */
   running: boolean;
+  /** The calls the chat's code made: what it did to the dashboard, under its step. */
+  tools?: readonly ChatToolEvent[];
   /** Asks the last question again. */
   onRetry: () => void;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
@@ -534,93 +571,95 @@ export const ChatThread = ({
     return seconds === undefined ? undefined : <WorkedFor seconds={seconds} />;
   };
   return (
-    <Conversation>
-      <ConversationContent label={t`Messages`}>
-        <ol
-          aria-label={t`Messages`}
-          className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
-        >
-          {loaded ? null : (
-            <li className="flex justify-center py-8">
-              <Spinner aria-label={t`Loading…`} />
-            </li>
-          )}
-          {messages.map((message) => {
-            if (message.role === "user") {
-              return (
-                <li key={message.id}>
-                  <Message from="user">
-                    <MessageContent>{message.text}</MessageContent>
-                  </Message>
-                </li>
-              );
-            }
-            if (message.role === "assistant") {
-              return (
-                <li key={message.id}>
-                  <Reply
-                    onRetry={
-                      !running && message === lastAnswer && answersLast
-                        ? onRetry
-                        : undefined
-                    }
-                    output={output}
-                    reply={message}
-                    results={results}
-                    running={running}
-                    sign={
-                      shown === null && message === replies.at(-1)
-                        ? doing
-                        : undefined
-                    }
-                    cited={
-                      message.citations.length === 0
+    <ChatTools value={tools}>
+      <Conversation>
+        <ConversationContent label={t`Messages`}>
+          <ol
+            aria-label={t`Messages`}
+            className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
+          >
+            {loaded ? null : (
+              <li className="flex justify-center py-8">
+                <Spinner aria-label={t`Loading…`} />
+              </li>
+            )}
+            {messages.map((message) => {
+              if (message.role === "user") {
+                return (
+                  <li key={message.id}>
+                    <Message from="user">
+                      <MessageContent>{message.text}</MessageContent>
+                    </Message>
+                  </li>
+                );
+              }
+              if (message.role === "assistant") {
+                return (
+                  <li key={message.id}>
+                    <Reply
+                      onRetry={
+                        !running && message === lastAnswer && answersLast
+                          ? onRetry
+                          : undefined
+                      }
+                      output={output}
+                      reply={message}
+                      results={results}
+                      running={running}
+                      sign={
+                        shown === null && message === replies.at(-1)
+                          ? doing
+                          : undefined
+                      }
+                      cited={
+                        message.citations.length === 0
+                          ? undefined
+                          : { chatId, messageId: message.id }
+                      }
+                      top={topOf(message.id)}
+                      writing={false}
+                    />
+                    {message.asked === undefined ? null : (
+                      <AskedLine asked={message.asked} />
+                    )}
+                  </li>
+                );
+              }
+              return null;
+            })}
+            {shown === null ? null : (
+              <li aria-busy="true">
+                <Reply
+                  output={output}
+                  reply={{
+                    ...shown,
+                    reasoning:
+                      shown.reasoning === ""
                         ? undefined
-                        : { chatId, messageId: message.id }
-                    }
-                    top={topOf(message.id)}
-                    writing={false}
-                  />
-                  {message.asked === undefined ? null : (
-                    <AskedLine asked={message.asked} />
-                  )}
-                </li>
-              );
-            }
-            return null;
-          })}
-          {shown === null ? null : (
-            <li aria-busy="true">
-              <Reply
-                output={output}
-                reply={{
-                  ...shown,
-                  reasoning:
-                    shown.reasoning === ""
-                      ? undefined
-                      : { text: shown.reasoning, ms: null },
-                }}
-                results={results}
-                running={running}
-                sign={doing}
-                top={
-                  doing !== undefined && replies.length === 0 ? (
-                    <Working doing={doing} />
-                  ) : undefined
-                }
-                writing
-              />
-            </li>
-          )}
-          {doing === "reading" ? (
-            <li aria-busy="true">
-              <Reading />
-            </li>
-          ) : null}
-          {children === undefined ? null : <li>{children}</li>}
-        </ol>
-      </ConversationContent>
-      <ConversationScrollButton label={t`Jump to the newest message`} />
-    </Conversation>
+                        : { text: shown.reasoning, ms: null },
+                  }}
+                  results={results}
+                  running={running}
+                  sign={doing}
+                  top={
+                    doing !== undefined && replies.length === 0 ? (
+                      <Working doing={doing} />
+                    ) : undefined
+                  }
+                  writing
+                />
+              </li>
+            )}
+            {doing === "reading" ? (
+              <li aria-busy="true">
+                <Reading />
+              </li>
+            ) : null}
+            {children === undefined ? null : <li>{children}</li>}
+          </ol>
+        </ConversationContent>
+        <ConversationScrollButton label={t`Jump to the newest message`} />
+      </Conversation>
+    </ChatTools>
   );
 };
