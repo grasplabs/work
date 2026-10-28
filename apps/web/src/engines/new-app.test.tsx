@@ -37,8 +37,10 @@ const fakeChats = () => {
           id: "chat-1",
           title,
           createdAt: "2026-10-22T08:00:00.000Z",
+          lastAt: "2026-10-22T08:00:00.000Z",
           running: false,
           projectId: null,
+          appId: null,
         };
       },
       send: async (chatId: string, question: ChatQuestion) => {
