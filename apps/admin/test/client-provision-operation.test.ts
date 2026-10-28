@@ -1167,10 +1167,43 @@ describe("provisioning a placed client", () => {
       },
       after: {
         core: currentKeys(rotating.core),
-        connect: currentKeys(rotating.connect),
+        // Its previous vault key stays: tokens may still be sealed under it.
+        connect: [
+          ...currentKeys(rotating.connect),
+          "TOKEN_ENCRYPTION_KEY_PREVIOUS",
+        ].toSorted((a, b) => a.localeCompare(b)),
       },
       putsThenDeletes: [true, true],
     });
+
+    // The step names what it removed, never a value.
+    const steps = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.secrets")
+        )
+      );
+    const removed = steps
+      .map(({ detail }) =>
+        z
+          .object({ revokedNames: z.string().optional() })
+          .loose()
+          .safeParse(JSON.parse(detail ?? "{}"))
+      )
+      .flatMap((parsed) =>
+        parsed.success
+          ? (parsed.data.revokedNames ?? "").split(",").filter(Boolean)
+          : []
+      )
+      .toSorted((a, b) => a.localeCompare(b));
+    expect(removed).toStrictEqual([
+      "CAPABILITY_SIGNING_KEY_PREVIOUS",
+      "ROUTER_SECRET_PREVIOUS",
+      "STRAY_KEY",
+    ]);
 
     // No value the scripts ran with is in what the admin recorded.
     const values = [
@@ -1187,6 +1220,61 @@ describe("provisioning a placed client", () => {
     expect(values.filter((value) => recorded.includes(value))).toStrictEqual(
       []
     );
+  });
+
+  it("keeps every secret it gives when a removal fails partway, and a retry finishes the removal", async () => {
+    const manifest = await importRelease("workers_for_platforms");
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest
+    );
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    const { core } = await scriptsOf(clientId);
+    const onCore = (): Map<string, string> =>
+      account.namespaces.get(namespace)?.get(core)?.versions.at(-1)?.secrets ??
+      new Map<string, string>();
+    const given = [...onCore().keys()];
+    onCore().set("STRAY_ONE", "one");
+    onCore().set("STRAY_TWO", "two");
+    // Removing the second keeps failing, as an API error would, its
+    // retries too, until the run gives up.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (
+        request.method === "DELETE" &&
+        request.url.endsWith("/secrets/STRAY_TWO")
+      ) {
+        return Response.json(
+          {
+            success: false,
+            errors: [{ code: 10_013, message: "An unknown error" }],
+            messages: [],
+            result: null,
+          },
+          { status: 500 }
+        );
+      }
+      return await cloudflare.fetch(input, init);
+    });
+
+    await expect(failing(held)).resolves.toBeDefined();
+    const afterFailure = new Set(onCore().keys());
+    vi.mocked(globalThis.fetch).mockImplementation(cloudflare.fetch);
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+
+    expect({
+      keptGiven: given.every((name) => afterFailure.has(name)),
+      strayLeftAfterFailure: afterFailure.has("STRAY_TWO"),
+      afterRetry: [...onCore().keys()].toSorted((a, b) => a.localeCompare(b)),
+    }).toStrictEqual({
+      keptGiven: true,
+      strayLeftAfterFailure: true,
+      afterRetry: given.toSorted((a, b) => a.localeCompare(b)),
+    });
   });
 
   it("marks a rotated client's generation live once its hostname is published, and audits it", async () => {

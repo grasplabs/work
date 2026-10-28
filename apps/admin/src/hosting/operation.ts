@@ -124,7 +124,11 @@ import {
 } from "../deploy/router.ts";
 import type { RouterHosts, SmokeOptions } from "../deploy/router.ts";
 import { sealedWorkerSecrets } from "../deploy/sealed-secrets.ts";
-import { clientAuthSecret, workerSecrets } from "../deploy/secrets.ts";
+import {
+  clientAuthSecret,
+  retainedPreviousKeys,
+  workerSecrets,
+} from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import {
   checkBindingNames,
@@ -931,9 +935,10 @@ const upload = async (
  * Removes from `target`'s script every secret `present` names that isn't
  * among `given` (a previous generation's key past its window, a sealed or
  * shared secret no longer given), once `given` is observed there: the
- * replacement before the revocation. Then observes them gone; returns how
- * many it removed. The admin is the only writer of a client script's
- * secrets, so whatever else it holds is retired.
+ * replacement before the revocation. Then observes them gone; returns the
+ * names it removed, for the step's record. The admin is the only writer of
+ * a client script's secrets, so whatever else it holds is retired, but for
+ * connect's previous vault key (`retainedPreviousKeys`).
  */
 const revokeRetired = async (
   context: ProvisionContext,
@@ -941,9 +946,11 @@ const revokeRetired = async (
   target: ScriptTarget,
   given: ReadonlySet<string>,
   present: ReadonlySet<string>
-): Promise<number> => {
+): Promise<string[]> => {
   const { api, db } = context;
-  const retired = [...present].filter((name) => !given.has(name));
+  const retired = [...present].filter(
+    (name) => !given.has(name) && !retainedPreviousKeys.has(name)
+  );
   for (const name of retired) {
     // oxlint-disable-next-line no-await-in-loop -- one secret at a time
     await assertHolds(db, loaded.held);
@@ -951,7 +958,7 @@ const revokeRetired = async (
     await deleteTargetSecret(api, target, name);
   }
   if (retired.length === 0) {
-    return 0;
+    return [];
   }
   const after = await observed(
     context,
@@ -965,7 +972,7 @@ const revokeRetired = async (
       `${target.scriptName} still has ${left} after its removal`
     );
   }
-  return retired.length;
+  return retired;
 };
 
 /**
@@ -982,7 +989,7 @@ const deliverSecrets = async (
 ): Promise<void> => {
   const { api, db } = context;
   let delivered = 0;
-  let revoked = 0;
+  const revoked: string[] = [];
   for (const app of appsOf(loaded.manifest)) {
     const target = targetOf(loaded, inventory, app);
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
@@ -997,8 +1004,11 @@ const deliverSecrets = async (
       // another set, since: skip only when the script holds exactly them.
       // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
       const present = new Set(await targetSecretNames(api, target));
+      const held = [...present].filter(
+        (name) => !retainedPreviousKeys.has(name)
+      );
       if (
-        present.size === given.size &&
+        held.length === given.size &&
         [...given].every((name) => present.has(name))
       ) {
         continue;
@@ -1025,14 +1035,21 @@ const deliverSecrets = async (
       );
     }
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    revoked += await revokeRetired(context, loaded, target, given, names);
+    const removed = await revokeRetired(context, loaded, target, given, names);
+    revoked.push(...removed);
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
     await recordProgress(db, loaded, {
       ...progress,
       secrets: { ...progress.secrets, [app]: print },
     });
   }
-  await recordStep(db, loaded, "secrets", { delivered, revoked });
+  // The names removed, never a value: what an operator set by hand and
+  // lost here can be read back from the step.
+  await recordStep(db, loaded, "secrets", {
+    delivered,
+    revoked: revoked.length,
+    revokedNames: revoked.join(","),
+  });
 };
 
 /** How long core's signed probe may take, its body included. */
