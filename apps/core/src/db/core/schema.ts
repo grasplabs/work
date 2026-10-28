@@ -233,6 +233,64 @@ export const memberRemovals = sqliteTable(
 );
 
 /**
+ * People an admin erased (GRA-903): someone removed, whose email, sign-ins
+ * and personal content went, their name and ID kept on the company's
+ * records (`users` keeps both, and nothing else). `name` is the name the
+ * admin confirmed, frozen. `emailHash` is a keyed hash of the email they
+ * had (erased-people.ts), never the email: what keeps them out when they
+ * sign in or are invited again under it, until an admin releases it.
+ * Each area of the erasure is a row of `personErasureAreas`; it is done
+ * once every one of them is (`completedAt`).
+ */
+export const personErasures = sqliteTable("person_erasures", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  name: text().notNull(),
+  /** Null once an admin released the address (`releaseAddress`). */
+  emailHash: text("email_hash").unique(),
+  /** The version of the key `emailHash` was made with (erased-people.ts). */
+  emailKeyVersion: integer("email_key_version").notNull(),
+  requestedBy: text("requested_by").notNull(),
+  requestedAt: timestamp("requested_at").notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+/**
+ * The sign-in identities of people an admin erased (GRA-903), each a keyed
+ * hash of the subject an IdP or the directory named them by
+ * (erased-people.ts), never the subject: what keeps them from coming back
+ * through Teams, the directory or a sign-in once their accounts are gone.
+ */
+export const erasedSubjects = sqliteTable("erased_subjects", {
+  subjectHash: text("subject_hash").primaryKey(),
+  /** The version of the key `subjectHash` was made with (erased-people.ts). */
+  keyVersion: integer("key_version").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => personErasures.userId),
+});
+
+/**
+ * Where one area of a person's erasure stands: `pending` until its step
+ * erased everything of theirs in it, retried by the clock until then
+ * (person-erasure.ts), then `complete`.
+ */
+export const personErasureAreas = sqliteTable(
+  "person_erasure_areas",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => personErasures.userId),
+    area: text().notNull(),
+    state: text({ enum: ["pending", "complete"] }).notNull(),
+    attempts: integer().notNull().default(0),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.area] })]
+);
+
+/**
  * A person's account on a chat platform that carries no Entra object id
  * (Slack, WhatsApp, Telegram...), linked to them (`channels/accounts.ts`):
  * one person per platform account, by the platform's own verified sender
