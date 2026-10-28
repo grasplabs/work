@@ -7365,7 +7365,7 @@ msgstr "Limiet voor {name}"
 msgid "Limits per person"
 msgstr "Limieten per persoon"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 #: src/engines/app-page.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/chat-accounts.tsx
@@ -7396,7 +7396,7 @@ msgid "Link out on {date}"
 msgstr "Link verstuurd op {date}"
 
 #. placeholder {0}: app.name
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Link to {0}"
 msgstr "Link naar {0}"
 
@@ -7531,7 +7531,7 @@ msgstr "Laag"
 msgid "Low confidence"
 msgstr "Lage betrouwbaarheid"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Lower-case letters and digits, with single dashes between them; not the name of one of the workspace's pages."
 msgstr "Kleine letters en cijfers, met enkele streepjes ertussen; niet de naam van een van de pagina's van de workspace."
 
@@ -9349,7 +9349,7 @@ msgstr "Alleen in kaart"
 msgid "Only people who may approve packages see what is approved across the workspace."
 msgstr "Alleen wie pakketten mag goedkeuren, ziet wat in de hele werkruimte is goedgekeurd."
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Only someone signed in to the workspace opens it."
 msgstr "Alleen wie in de workspace is ingelogd, opent hem."
 
@@ -9591,7 +9591,7 @@ msgstr "Je gesprek wordt geopend…"
 msgid "Opens at {threshold}%"
 msgstr "Gaat open bij {threshold}%"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Opens the App for the workspace's members who may use it, while it is published."
 msgstr "Opent de App voor de leden van de workspace die hem mogen gebruiken, zolang hij gepubliceerd is."
 
@@ -10622,7 +10622,7 @@ msgstr "{file} verwijderen"
 msgid "Remove {name}?"
 msgstr "{name} verwijderen?"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Remove link"
 msgstr "Link verwijderen"
 
@@ -11174,7 +11174,7 @@ msgstr "Gezegd dat het is gebeurd: {who}."
 msgid "Said yes"
 msgstr "Heeft ja gezegd"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "sales-pipeline"
 msgstr "verkooppijplijn"
 
@@ -11204,7 +11204,7 @@ msgstr "Opslaan als pdf"
 msgid "Save first"
 msgstr "Eerst opslaan"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Save link"
 msgstr "Link opslaan"
 
