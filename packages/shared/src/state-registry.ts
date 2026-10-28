@@ -296,6 +296,10 @@ const coreDb: D1State = {
       `${core}brain-capture.ts`,
       "Settled runs' outcomes still owed to the Brain, and those it gave up on."
     ),
+    run_brain_evidence: transient(
+      `${core}workflows/host.ts`,
+      "What each run's latest recall cites, checked before its next calls."
+    ),
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
     workflow_admission_queue: transient(`${core}workflows/admission.ts`),

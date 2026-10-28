@@ -2218,6 +2218,45 @@ export const brainCaptureIntents = sqliteTable(
 );
 
 /**
+ * Every document version a run's recalls cited (GRA-299; workflows/
+ * run-evidence.ts), with the Brain binding's permission each came through:
+ * identifiers and a stand-in for each text only. It only grows while
+ * the run lives, so no recall can narrow it, and before the run's next
+ * model, connection or App call, decision or output, the host checks the
+ * run may still read them all, under those permissions, as they were
+ * recalled. A run that may no longer, or whose recalled text a purge
+ * rewrote, is refused from then on. Goes with the run's details.
+ */
+export const runBrainEvidence = sqliteTable(
+  "run_brain_evidence",
+  {
+    runId: text("run_id").notNull(),
+    documentId: text("document_id").notNull(),
+    collectionId: text("collection_id").notNull(),
+    /** The document's version it recalled. */
+    version: integer().notNull(),
+    /**
+     * What stood for that version's text as it was recalled (`PinnedVersion`
+     * in @grasp-os/brain/recall-store): changed by a purge.
+     */
+    pinned: text().notNull(),
+    /** The `brain` permission of the binding that recalled it. */
+    permissionId: text("permission_id").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.runId,
+        table.documentId,
+        table.version,
+        table.permissionId,
+      ],
+    }),
+  ]
+);
+
+/**
  * Each pause, resume or cancel of a run that the host admitted
  * (src/workflows/controls.ts): its durable receipt. `admitted` until the
  * engine confirms it (`applied`), or a cancel supersedes a pause or resume
