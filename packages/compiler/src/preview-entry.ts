@@ -9,9 +9,14 @@ import Babel from "@babel/standalone";
  * React, one SDK client, one Refresh runtime for the whole session.
  *
  * Each App module, already compiled and instrumented for Refresh, becomes
- * a function in the entry's own module table, with its imports and
+ * an async function in the entry's own module table, with its imports and
  * exports made calls and properties (Babel's CommonJS transform) and its
- * dynamic imports resolved in the same table. Nothing is recompiled:
+ * dynamic imports resolved in the same table. Async, as a module may
+ * await at its top level as any ES module may: the modules it imports
+ * are evaluated first, in the order it imports them, each awaited, so
+ * its `require`s find them done, as an ES module's imports would be. One
+ * already started and not done is one importing it, a cycle, and is not
+ * awaited, as ES modules don't await a cycle either. Nothing is recompiled:
  * assembly only rewrites how modules reach each other, so it is measured
  * on its own, never claimed as a compile of unchanged source.
  */
@@ -22,18 +27,70 @@ const names = {
   table: "__graspModules",
   cache: "__graspLoaded",
   load: "__graspLoad",
+  require: "__graspRequire",
+  dynamicImport: "__graspImport",
 } as const;
 
-/** One App module as CommonJS: its body, reaching others through `require`. */
-const asCommonJs = (code: string, name: string): string =>
-  Babel.transform(code, {
-    filename: name,
-    babelrc: false,
-    configFile: false,
-    sourceType: "module",
-    compact: true,
-    plugins: ["transform-dynamic-import", "transform-modules-commonjs"],
-  }).code ?? "";
+/** The parts of a Babel node the entry's own plugin reads. */
+interface Node {
+  readonly type: string;
+  readonly source?: { readonly value: unknown } | null;
+}
+
+/** The parts of Babel's plugin API the entry's own plugin uses. */
+interface PluginApi {
+  readonly types: { identifier: (name: string) => unknown };
+}
+
+/** One App module as CommonJS, and the modules it imports statically, in order. */
+interface CommonJsModule {
+  readonly code: string;
+  readonly imports: readonly string[];
+}
+
+/**
+ * One App module as CommonJS: its body, reaching others through
+ * `require`, and its dynamic imports made calls of the entry's own.
+ */
+const asCommonJs = (code: string, name: string): CommonJsModule => {
+  const imports: string[] = [];
+  const entryPlugin = ({ types }: PluginApi) => ({
+    visitor: {
+      Program: {
+        enter: (path: { node: { body: readonly Node[] } }) => {
+          for (const statement of path.node.body) {
+            const source = statement.source?.value;
+            const imported =
+              statement.type === "ImportDeclaration" ||
+              statement.type === "ExportAllDeclaration" ||
+              statement.type === "ExportNamedDeclaration";
+            if (imported && typeof source === "string") {
+              imports.push(source);
+            }
+          }
+        },
+      },
+      CallExpression: (path: {
+        node: { callee: unknown };
+        get: (key: "callee") => { isImport: () => boolean };
+      }) => {
+        if (path.get("callee").isImport()) {
+          path.node.callee = types.identifier(names.dynamicImport);
+        }
+      },
+    },
+  });
+  const transformed =
+    Babel.transform(code, {
+      filename: name,
+      babelrc: false,
+      configFile: false,
+      sourceType: "module",
+      compact: true,
+      plugins: [entryPlugin, "transform-modules-commonjs"],
+    }).code ?? "";
+  return { code: transformed, imports: [...new Set(imports)] };
+};
 
 /**
  * The entry for screen module `entry`: the App's `modules` in its closure
@@ -77,7 +134,8 @@ export const previewEntry = ({
           `The preview's closure names ${name}, which is missing.`
         );
       }
-      return `${JSON.stringify(name)}: (module, exports, require) => {${asCommonJs(code, name)}\n}`;
+      const module = asCommonJs(code, name);
+      return `${JSON.stringify(name)}: [${JSON.stringify(module.imports)}, async (module, exports, require, ${names.dynamicImport}) => {${module.code}\n}]`;
     })
     .join(",\n");
   return `${imports}
@@ -88,17 +146,31 @@ const ${names.table} = {
 ${table}
 };
 const ${names.cache} = Object.create(null);
-const ${names.load} = (name) => {
+const ${names.require} = (name) => {
   if (Object.hasOwn(${names.kit}, name)) return ${names.kit}[name];
   const loaded = ${names.cache}[name];
-  if (loaded !== undefined) return loaded.exports;
-  const define = ${names.table}[name];
-  if (define === undefined) throw new Error("The preview has no module " + name + ".");
-  const module = { exports: {} };
-  ${names.cache}[name] = module;
-  define(module, module.exports, ${names.load});
-  return module.exports;
+  if (loaded === undefined) throw new Error("The preview has no module " + name + ".");
+  return loaded.module.exports;
 };
-export default ${names.load}(${JSON.stringify(entry)}).default;
+const ${names.load} = async (name) => {
+  if (Object.hasOwn(${names.kit}, name) || Object.hasOwn(${names.cache}, name)) return;
+  const defined = ${names.table}[name];
+  if (defined === undefined) throw new Error("The preview has no module " + name + ".");
+  const [needs, define] = defined;
+  const loaded = { module: { exports: {} } };
+  ${names.cache}[name] = loaded;
+  loaded.done = (async () => {
+    for (const need of needs) await ${names.load}(need);
+    await define(loaded.module, loaded.module.exports, ${names.require}, ${names.dynamicImport});
+  })();
+  await loaded.done;
+};
+const ${names.dynamicImport} = async (name) => {
+  const loaded = ${names.cache}[name];
+  await (loaded === undefined ? ${names.load}(name) : loaded.done);
+  return ${names.require}(name);
+};
+await ${names.load}(${JSON.stringify(entry)});
+export default ${names.require}(${JSON.stringify(entry)}).default;
 `;
 };

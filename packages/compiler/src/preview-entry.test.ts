@@ -87,6 +87,29 @@ describe("a preview's entry", () => {
     });
   });
 
+  it("runs modules that await at their top level, each done before the module importing it runs", async () => {
+    const awaiting = {
+      "app~screens~desk.js": `import { ready } from "app~components~config.js";
+export default async () => ready;`,
+      "app~components~config.js": `const later = await import("app~components~later.js");
+await new Promise((settle) => setTimeout(settle, 5));
+export const ready = "Ready " + later.default;`,
+      "app~components~later.js": `export default await Promise.resolve("now");`,
+    };
+    const entry = previewEntry({
+      entry: "app~screens~desk.js",
+      closure: Object.keys(awaiting),
+      modules: awaiting,
+      kitModules: [],
+    });
+
+    const screen = await evaluated(entry);
+
+    await expect(isScreen(screen) ? screen() : screen).resolves.toBe(
+      "Ready now"
+    );
+  });
+
   it("refuses a closure without its entry, or naming a module it doesn't have", () => {
     expect({
       noEntry: refused(() =>
