@@ -36,6 +36,8 @@ import {
   brainGapStates,
   brainRecords,
   notifications,
+  triggerResources,
+  workflowResources,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -45,8 +47,11 @@ import type { SessionCheck } from "./session-check.ts";
 // What core tells a person in the product: that a workflow failed while
 // acting for them, or that an admin asked them one of the brain's open
 // questions (`gap_asked`, written by brain-gaps.ts in the batch that
-// records the ask). A question is listed while it is open: once anyone
-// answers or closes it, it goes from the list by itself.
+// records the ask), or that a schedule trigger they own stopped
+// (`trigger_stopped`, written by workflows/schedule-triggers.ts in the
+// batch that stops it). A question is listed while it is open: once anyone
+// answers or closes it, it goes from the list by itself; a stopped trigger
+// while it is still theirs and not deleted.
 //
 // A workflow's failure tells who it acted for (who started the run, or,
 // for a run a trigger started, the App's owner when it failed), while
@@ -101,7 +106,7 @@ export const failureNoticed = (
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'run_failed', ${run.appId}, ${run.workflowId}, ${run.id}, 1, NULL, ${now}, ${now}, NULL WHERE ${told}`
+        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'run_failed', ${run.appId}, ${run.workflowId}, ${run.id}, 1, NULL, ${now}, ${now}, NULL, NULL WHERE ${told}`
       )
       .onConflictDoUpdate({
         target: [
@@ -121,9 +126,34 @@ export const failureNoticed = (
   ] as const;
 };
 
+/** A schedule trigger that stopped, and whom it tells: its owner. */
+export interface StopNotice {
+  triggerId: string;
+  workflowId: string;
+  personId: string;
+  /** That the stop is recorded, as SQL on what the batch wrote before. */
+  recorded: SQL;
+}
+
 /**
- * `person`'s notifications: of Apps they can still open, and of gaps
- * still open. Read with `apps`, `brain_records` and `brain_gap_states`
+ * The statement that tells `personId` their trigger stopped, in the batch
+ * that stops it, only while they are a member of the organization.
+ */
+export const stopNoticed = (
+  db: DrizzleD1Database,
+  { triggerId, workflowId, personId, recorded }: StopNotice
+) => {
+  const now = Date.now();
+  return db
+    .insert(notifications)
+    .select(
+      sql`SELECT ${crypto.randomUUID()}, ${personId}, 'trigger_stopped', NULL, ${workflowId}, NULL, NULL, NULL, ${now}, ${now}, NULL, ${triggerId} WHERE ${recorded} AND ${activeMember(personId)}`
+    );
+};
+
+/**
+ * `person`'s notifications: of Apps they can still open, of gaps still
+ * open, and of triggers still theirs. Read with `apps`, `brain_records` and `brain_gap_states`
  * joined on the row (`appOn`, `gapOn`, `gapStateOn`).
  */
 const visibleTo = (env: Env, person: Identity): SQL | undefined =>
@@ -139,6 +169,11 @@ const visibleTo = (env: Env, person: Identity): SQL | undefined =>
         eq(notifications.type, "gap_asked"),
         isNotNull(brainRecords.id),
         isNull(brainGapStates.closedAt)
+      ),
+      and(
+        eq(notifications.type, "trigger_stopped"),
+        eq(triggerResources.ownerId, person.userId),
+        isNull(triggerResources.deletedAt)
       )
     )
   );
@@ -152,11 +187,18 @@ const gapOn = and(
 );
 /** Joins `brain_gap_states` to a notification: what became of its gap. */
 const gapStateOn = eq(brainGapStates.gapId, notifications.gapId);
+/** Joins `trigger_resources` to a notification: a stopped trigger. */
+const triggerOn = eq(triggerResources.id, notifications.triggerId);
+/** Joins `workflow_resources` to a notification: a stopped trigger's workflow. */
+const workflowOn = and(
+  eq(notifications.type, "trigger_stopped"),
+  eq(workflowResources.id, notifications.workflowId)
+);
 
 /** A notification as `listNotifications` reads its row. */
 interface ListedRow {
   id: string;
-  type: "run_failed" | "gap_asked";
+  type: "run_failed" | "gap_asked" | "trigger_stopped";
   app: string | null;
   appName: string | null;
   workflow: string | null;
@@ -164,6 +206,8 @@ interface ListedRow {
   failures: number | null;
   gap: string | null;
   gapBody: string | null;
+  trigger: string | null;
+  workflowName: string | null;
   updatedAt: Date;
   readAt: Date | null;
 }
@@ -194,6 +238,23 @@ const notificationOf = (row: ListedRow): Notification[] => {
             gap: row.gap,
             question: gap.question,
             owner: gap.owner,
+            at,
+            read,
+          },
+        ];
+  }
+  if (row.type === "trigger_stopped") {
+    return row.trigger === null ||
+      row.workflow === null ||
+      row.workflowName === null
+      ? []
+      : [
+          {
+            id: row.id,
+            type: "trigger_stopped",
+            trigger: row.trigger,
+            workflow: row.workflow,
+            workflowName: row.workflowName,
             at,
             read,
           },
@@ -258,6 +319,12 @@ export const listNotifications = async (
         failures: notifications.failures,
         gap: notifications.gapId,
         gapBody: brainRecords.body,
+        trigger: notifications.triggerId,
+        // Named, so it doesn't share `name` with the App's in the batch's
+        // rows, which D1 keys by column name.
+        workflowName: sql<string | null>`${workflowResources.name}`.as(
+          "workflow_name"
+        ),
         updatedAt: notifications.updatedAt,
         readAt: notifications.readAt,
       })
@@ -265,6 +332,8 @@ export const listNotifications = async (
       .leftJoin(apps, appOn)
       .leftJoin(brainRecords, gapOn)
       .leftJoin(brainGapStates, gapStateOn)
+      .leftJoin(triggerResources, triggerOn)
+      .leftJoin(workflowResources, workflowOn)
       .where(and(visibleTo(env, person), after))
       .orderBy(desc(notifications.updatedAt), desc(notifications.id))
       // One past the page: whether more follow.
@@ -275,6 +344,7 @@ export const listNotifications = async (
       .leftJoin(apps, appOn)
       .leftJoin(brainRecords, gapOn)
       .leftJoin(brainGapStates, gapStateOn)
+      .leftJoin(triggerResources, triggerOn)
       .where(and(visibleTo(env, person), isNull(notifications.readAt))),
   ]);
   return {

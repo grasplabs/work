@@ -363,6 +363,10 @@ const coreDb: D1State = {
     workflow_resource_members: exported(`${core}workflow-resources.ts`),
     trigger_resources: exported(`${core}trigger-resources.ts`),
     trigger_resource_versions: exported(`${core}trigger-resources.ts`),
+    trigger_schedules: exported(
+      `${core}trigger-resources.ts`,
+      "Schedule triggers' next ticks and failed starts: deadlines a move keeps (46.2 step 9)."
+    ),
     workflow_start_receipts: exported(`${core}workflow-starts.ts`),
     workflow_resource_runs: exported(`${core}workflows/resource-runs.ts`),
     workflow_emitted_events: exported(

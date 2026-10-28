@@ -7052,6 +7052,10 @@ msgstr "Die Personen bekommen ihre Links ohne Wartezeit, und Stephen fragt jede,
 msgid "its retries"
 msgstr "die Wiederholungen"
 
+#: src/inbox/items.ts
+msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then enable the trigger again: it goes on from its next time."
+msgstr "Seine Läufe ließen sich immer wieder nicht starten, darum startet er nichts mehr. Beheben Sie, was sie verhindert hat, und aktivieren Sie den Trigger wieder: Er macht mit seinem nächsten Termin weiter."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
 msgstr "Sein Zeitplan wurde gestoppt: Sein Lauf konnte {maxFailedStarts}-mal hintereinander nicht starten. Er startet wieder, wenn der Zeitplan unter Parameter gesetzt wird oder eine neue Version der Domäne aktuell wird."
@@ -12148,6 +12152,7 @@ msgid "Stop for now"
 msgstr "Vorerst aufhören"
 
 #: src/chat/thread.tsx
+#: src/inbox/items.ts
 msgid "Stopped"
 msgstr "Gestoppt"
 
@@ -12181,6 +12186,11 @@ msgstr "Mittendrin abgebrochen"
 #: src/onboarding/interview-words.ts
 msgid "Stopped on {date}"
 msgstr "Abgebrochen am {date}"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Stopped schedule"
+msgstr "Gestoppter Zeitplan"
 
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
@@ -13222,6 +13232,10 @@ msgstr "Der Lauf startet."
 #: src/workflows/test-run.tsx
 msgid "The run was stopped."
 msgstr "Der Lauf wurde gestoppt."
+
+#: src/inbox/items.ts
+msgid "The schedule of {workflowName} stopped"
+msgstr "Der Zeitplan von {workflowName} wurde gestoppt"
 
 #: src/landscape/overview-tab.tsx
 msgid "The signals that weigh most on this app."
