@@ -182,11 +182,28 @@ const inEngine = async (run: string): Promise<boolean> =>
   (await runEngine(env).status(run)) !== undefined;
 
 /** A run of `workflow` reading the transcript, once it has ended. */
+/**
+ * Once the run has ended, as the engine says (`finished`), and as core's
+ * row records it: the engine's notification of the end reaches core on
+ * its own, so a sweep run as soon as the engine says it ended can find
+ * the row not ended yet, and rightly leave it.
+ */
+const endedInCore = async (run: string): Promise<void> => {
+  await finished(run);
+  await vi.waitFor(
+    async () => {
+      const row = await rowOf(run);
+      expect(row?.ended_at ?? null).not.toBeNull();
+    },
+    { timeout: 20_000, interval: 100 }
+  );
+};
+
 const endedRun = async (person: Person, app: string, workflow: string) => {
   const run = await person.api.workflows.start(app, workflow, {
     notes: transcript,
   });
-  await finished(run.id);
+  await endedInCore(run.id);
   return run;
 };
 
@@ -374,7 +391,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, hangs);
     const run = await builder.api.workflows.start(app, "hangs");
-    await finished(run.id);
+    await endedInCore(run.id);
     const lineage = async () =>
       await env.DB.prepare(
         "SELECT active_used_ms AS used, active_held_ms AS held FROM run_lineages WHERE root_run_id = ?"
@@ -419,7 +436,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, hangs);
     const run = await builder.api.workflows.start(app, "hangs");
-    await finished(run.id);
+    await endedInCore(run.id);
     // The database fails at the sweep's second batch, once: the one after
     // its receipts' (no other run is due).
     let batches = 0;
@@ -541,7 +558,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     );
     await Promise.all(
       [byDefault, shorter, unset].map(async ({ id }) => {
-        await finished(id);
+        await endedInCore(id);
       })
     );
     expect(asked).toStrictEqual([
@@ -628,7 +645,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     };
     // Resumed, it replays the step it did from the engine's record.
     await woken(run.id);
-    await finished(run.id);
+    await endedInCore(run.id);
     const ended = await builder.api.workflows.status(run.id);
 
     expect({
@@ -685,7 +702,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       approved: true,
       payload: { comment: transcript },
     });
-    await finished(run.id);
+    await endedInCore(run.id);
     const answered = await builder.api.workflows.status(run.id);
     await runQuarterHourTasks({}, daysOn(31));
     const after = await decider.api.decisions.get(decision);
@@ -767,7 +784,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       trigger: { type: "schedule", key, version: 1 },
     } as const;
     const run = await startRun(env, delivery);
-    await finished(run.id);
+    await endedInCore(run.id);
     await runQuarterHourTasks({}, daysOn(31));
     // The engine's record went as its retention ended.
     await runObject(run.id).deleteRun();
