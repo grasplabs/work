@@ -7,6 +7,7 @@ import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, PermissionId, RunId } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -68,19 +69,23 @@ export const citedVersions = (pack: MemoryPack): VersionRef[] => {
 };
 
 /**
- * Adds `pins`, the versions a recall through the binding of `permissionId`
- * cited, pinned as their texts were (`pinsOf`, recall-store.ts), to the
- * run's evidence: never replacing, never narrowing. No pins add nothing
- * and clear nothing. Refuses, as `brain.budget_exceeded` and adding
- * nothing, pins that would take the run past `runEvidenceMaxRows`:
- * counted and added in one statement, so recalls running side by side
- * can't each fit under it and together pass it.
+ * Adds `pins`, the versions handed to the run through the binding of
+ * `permissionId`, pinned as their texts were (`pinsOf`, recall-store.ts),
+ * to the run's evidence: never replacing, never narrowing. `recalled`
+ * when a recall cited them, so the Brain must still admit the run; a JSON
+ * workflow's knowledge search or read hands them over without, and never
+ * undoes a recall's. No pins add nothing and clear nothing. Refuses, as
+ * `brain.budget_exceeded` and adding nothing, pins that would take the
+ * run past `runEvidenceMaxRows`: counted and added in one statement, so
+ * reads running side by side can't each fit under it and together pass
+ * it.
  */
 export const recordRunEvidence = async (
   env: Env,
-  run: EvidenceRun,
+  run: { readonly runId: string },
   permissionId: PermissionId,
-  pins: readonly PinnedVersion[]
+  pins: readonly PinnedVersion[],
+  { recalled }: { recalled: boolean }
 ): Promise<void> => {
   if (pins.length === 0) {
     return;
@@ -97,9 +102,20 @@ export const recordRunEvidence = async (
   await db
     .insert(runBrainEvidence)
     .select(
-      sql`SELECT ${run.runId}, json_extract(cited.value, '$[0]'), json_extract(cited.value, '$[1]'), json_extract(cited.value, '$[2]'), json_extract(cited.value, '$[3]'), ${permissionId}, ${Date.now()} FROM json_each(${refs}) AS cited WHERE (SELECT count(*) FROM ${runBrainEvidence} WHERE ${runBrainEvidence.runId} = ${run.runId}) + (SELECT count(*) FROM json_each(${refs}) AS fresh WHERE NOT EXISTS (SELECT 1 FROM ${runBrainEvidence} AS kept WHERE kept.run_id = ${run.runId} AND kept.document_id = json_extract(fresh.value, '$[0]') AND kept.version = json_extract(fresh.value, '$[2]') AND kept.permission_id = ${permissionId})) <= ${runEvidenceMaxRows}`
+      sql`SELECT ${run.runId}, json_extract(cited.value, '$[0]'), json_extract(cited.value, '$[1]'), json_extract(cited.value, '$[2]'), json_extract(cited.value, '$[3]'), ${permissionId}, ${recalled ? 1 : 0}, ${Date.now()} FROM json_each(${refs}) AS cited WHERE (SELECT count(*) FROM ${runBrainEvidence} WHERE ${runBrainEvidence.runId} = ${run.runId}) + (SELECT count(*) FROM json_each(${refs}) AS fresh WHERE NOT EXISTS (SELECT 1 FROM ${runBrainEvidence} AS kept WHERE kept.run_id = ${run.runId} AND kept.document_id = json_extract(fresh.value, '$[0]') AND kept.version = json_extract(fresh.value, '$[2]') AND kept.permission_id = ${permissionId})) <= ${runEvidenceMaxRows}`
     )
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [
+        runBrainEvidence.runId,
+        runBrainEvidence.documentId,
+        runBrainEvidence.version,
+        runBrainEvidence.permissionId,
+      ],
+      // Recalled once, recalled for good; its pin stays as first kept.
+      set: {
+        recalled: sql`max(${runBrainEvidence.recalled}, excluded.recalled)`,
+      },
+    });
   // Every pin kept, now or before: otherwise the cap held it back.
   const [kept] = await db
     .select({ count: sql<number>`count(*)` })
@@ -116,11 +132,26 @@ export const recordRunEvidence = async (
   }
 };
 
+/** What run `runId` was handed, as its evidence keeps it. */
+export const evidenceOf = async (env: Env, runId: string) =>
+  await drizzle(env.DB)
+    .select({
+      documentId: runBrainEvidence.documentId,
+      collectionId: runBrainEvidence.collectionId,
+      version: runBrainEvidence.version,
+      text: runBrainEvidence.pinned,
+      permissionId: runBrainEvidence.permissionId,
+      recalled: runBrainEvidence.recalled,
+    })
+    .from(runBrainEvidence)
+    .where(eq(runBrainEvidence.runId, runId));
+
 /** Whether `error` is a refusal of access, rather than a passing failure. */
-const isAccessRefusal = (error: unknown): boolean => {
+export const isAccessRefusal = (error: unknown): boolean => {
   const brain = brainErrors.codeOf(error);
   const knowledge = knowledgeErrors.codeOf(error);
   return (
+    workflowResourceErrors.codeOf(error) === "workflow.call_denied" ||
     brain === "brain.denied" ||
     brain === "brain.not_found" ||
     knowledge === "knowledge.not_found" ||
@@ -139,16 +170,7 @@ export const requireRunEvidenceReadable = async (
   env: Env,
   run: EvidenceRun
 ): Promise<void> => {
-  const rows = await drizzle(env.DB)
-    .select({
-      documentId: runBrainEvidence.documentId,
-      collectionId: runBrainEvidence.collectionId,
-      version: runBrainEvidence.version,
-      text: runBrainEvidence.pinned,
-      permissionId: runBrainEvidence.permissionId,
-    })
-    .from(runBrainEvidence)
-    .where(eq(runBrainEvidence.runId, run.runId));
+  const rows = await evidenceOf(env, run.runId);
   if (rows.length === 0) {
     return;
   }

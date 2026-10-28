@@ -2240,8 +2240,17 @@ export const runBrainEvidence = sqliteTable(
      * in @grasp-os/brain/recall-store): changed by a purge.
      */
     pinned: text().notNull(),
-    /** The `brain` permission of the binding that recalled it. */
+    /**
+     * The permission of the binding it came through: an App's `brain`
+     * permission, or a JSON workflow's knowledge binding's.
+     */
     permissionId: text("permission_id").notNull(),
+    /**
+     * Whether a recall cited it, so the Brain must still admit the run:
+     * a JSON workflow's knowledge search or read pins it without (GRA-299).
+     * Only ever set, never cleared, as the rest only grows.
+     */
+    recalled: integer({ mode: "boolean" }).notNull().default(true),
     recordedAt: timestamp("recorded_at").notNull(),
   },
   (table) => [

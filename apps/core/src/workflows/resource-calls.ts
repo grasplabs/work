@@ -39,6 +39,7 @@ import {
   callKnowledge,
   callTemplate,
   requireKnowledgeRequest,
+  requireResourceRunEvidenceReadable,
 } from "./resource-reads.ts";
 import type { KnowledgeCall } from "./resource-reads.ts";
 import { callFiles, requireFilesArguments } from "./run-files.ts";
@@ -808,6 +809,16 @@ export const makeCall = async (
       fileDetail = filesCallDetail(call.operation, call.arguments);
     }
     await requireCallAuthority(env, run, binding);
+    // What the run recalled leaves with a connector call, a store
+    // operation or a model call: not once the run may no longer read it
+    // (resource-reads.ts), refused with its receipt kept as `brain.revoked`.
+    if (
+      call.name === "grasp.connector" ||
+      call.name === "grasp.operation" ||
+      call.name === "grasp.model"
+    ) {
+      await requireResourceRunEvidenceReadable(env, run);
+    }
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
     await audited(env, receipt("started"));
