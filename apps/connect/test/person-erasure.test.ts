@@ -1,14 +1,18 @@
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
+import { connectionIdSchema } from "@grasp-os/shared/ids";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { keptChange } from "../src/changes.ts";
 import {
+  callChanges,
   composioCleanups,
   connections,
   connectionTokens,
   connectorEvents,
+  erasedPeople,
   eventSources,
   idempotentCalls,
 } from "../src/db/schema.ts";
@@ -136,6 +140,15 @@ const readOf = async (id: string) => {
       .where(eq(connectorEvents.connectionId, id)),
   ]);
   return { sources: sources.length, events: events.length };
+};
+
+/** How many changes calls through connection `id` kept. */
+const changesOf = async (id: string): Promise<number> => {
+  const kept = await drizzle(env.DB)
+    .select({ id: callChanges.id })
+    .from(callChanges)
+    .where(eq(callChanges.connectionId, id));
+  return kept.length;
 };
 
 describe("erasing a person in connect", () => {
@@ -307,5 +320,99 @@ describe("erasing a person in connect", () => {
       finished: { connections: 1 },
       late: { status: "disconnected", named: false, tokens: 0, calls: [] },
     });
+  });
+
+  it("connects nothing of theirs once their erasure began, even from a sign-in already under way, and drops its grant", async () => {
+    const person = someone();
+    const account = apps.account("sample-oauth", person.email);
+    // Their erasure began as the sign-in came back: the mark it makes first.
+    await drizzle(env.DB)
+      .insert(erasedPeople)
+      .values({ userId: person.userId, beganAt: new Date() });
+
+    const refused = await outcome(connectApp(apps, person, account));
+
+    const theirs = await drizzle(env.DB)
+      .select({ id: connections.id })
+      .from(connections)
+      .where(eq(connections.ownerUserId, person.userId));
+    const minted = apps.issued.findLast((token) =>
+      token.startsWith("app-refresh-")
+    );
+    expect({
+      refused,
+      connections: theirs.length,
+      held: minted === undefined ? false : apps.holds(minted),
+    }).toStrictEqual({
+      refused: "connection.flow_invalid",
+      connections: 0,
+      held: false,
+    });
+  });
+
+  it("keeps no change a call through their connection made, once their erasure began, and keeps everyone else's", async () => {
+    const person = someone();
+    const other = someone();
+    const { connectionId } = await liveConnection(person);
+    const { connectionId: others } = await liveConnection(other);
+    await erase(person);
+    // Calls through each still under way as it ran, finishing after it.
+    const change = { before: { amount: 1 }, after: { amount: 2 } };
+    const finished = async (id: string, userId: string) => {
+      const { writes } = await keptChange(
+        env,
+        { jti: crypto.randomUUID(), authority: { onBehalfOf: userId } },
+        {
+          connectionId: connectionIdSchema.parse(id),
+          action: "items.update",
+          resource: "item-1",
+        },
+        change
+      );
+      const [first, ...rest] = writes;
+      if (first !== undefined) {
+        await drizzle(env.DB).batch([first, ...rest]);
+      }
+    };
+    await finished(connectionId, person.userId);
+    await finished(others, other.userId);
+
+    expect({
+      theirs: await changesOf(connectionId),
+      others: await changesOf(others),
+    }).toStrictEqual({ theirs: 0, others: 1 });
+  });
+
+  it("empties every connection of theirs, however many they had", async () => {
+    const person = someone();
+    const now = new Date();
+    const ids = Array.from({ length: 150 }, () => crypto.randomUUID());
+    // One statement each: one inserting them all would pass D1's limit
+    // on bound values itself.
+    await env.DB.batch(
+      ids.map((id) =>
+        env.DB.prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, account_id, account_email, created_at, updated_at) VALUES (?, 'sample-oauth', 'personal', ?, 'disconnected', 'native', 'sample-oauth', ?, 'theirs@acme.test', ?, ?)"
+        ).bind(id, person.userId, `account-${id}`, now.getTime(), now.getTime())
+      )
+    );
+    await Promise.all(
+      ids.map(async (id) => {
+        await madeCall(id, person.userId);
+      })
+    );
+
+    const erased = await erase(person);
+
+    const named = await drizzle(env.DB)
+      .select({ id: connections.id })
+      .from(connections)
+      .where(eq(connections.accountEmail, "theirs@acme.test"));
+    const calls = await Promise.all(ids.map(async (id) => await keptOf(id)));
+    expect({
+      erased,
+      named: named.length,
+      calls: calls.flatMap(({ calls: made }) => made).length,
+    }).toStrictEqual({ erased: { connections: 150 }, named: 0, calls: 0 });
   });
 });

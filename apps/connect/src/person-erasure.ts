@@ -2,7 +2,7 @@ import {
   connectionErrors,
   erasePersonalSchema,
 } from "@grasp-os/shared/connect";
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents } from "./audit.ts";
@@ -13,6 +13,7 @@ import {
   connectionTokens,
   connections,
   connectorEvents,
+  erasedPeople,
   eventSources,
   idempotentCalls,
   oauthFlows,
@@ -40,6 +41,13 @@ import { providerFor } from "./providers.ts";
 //   CN14), so there is nothing to revoke with any more, and nothing knows
 //   it failed. Until GRA-1191 keeps a token until its revoke succeeds,
 //   such a grant stays live at its provider until it lapses.
+//
+// First of all, connect marks that their erasure began (`erased_people`),
+// and from then makes nothing of theirs again: no connection a flow of
+// theirs still under way finishes (oauth.ts), no change a call through one
+// of their connections still under way made (changes.ts). Each checks the
+// mark in the statement that writes, so nothing lands after the batch
+// below emptied what was theirs.
 //
 // Then, in one batch, everything of theirs left in connect: who their
 // accounts were at each provider, on their disconnected connections only,
@@ -135,6 +143,11 @@ export const erasePersonal = async (
     erasePersonalSchema,
     request
   );
+  // Before anything else: from here on, connect makes nothing of theirs.
+  await drizzle(env.DB)
+    .insert(erasedPeople)
+    .values({ userId: ownerUserId, beganAt: new Date() })
+    .onConflictDoNothing();
   await revokeLive(env, ownerUserId);
   // Stopped, its tokens gone, their flows spent and what waited for them
   // dropped, as for anyone removed.
@@ -146,13 +159,20 @@ export const erasePersonal = async (
     throw pending();
   }
   const db = drizzle(env.DB);
-  const owned = await db
-    .select({ id: connections.id })
+  const [owned] = await db
+    .select({ count: sql<number>`count(*)` })
     .from(connections)
     .where(
       and(theirConnections(ownerUserId), eq(connections.status, "disconnected"))
     );
-  const ids = owned.map(({ id }) => id);
+  const count = owned?.count ?? 0;
+  // Their disconnected connections, as SQL, however many they had: by
+  // their owner, never a list of IDs.
+  const theirs = sql`(
+    SELECT ${connections.id} FROM ${connections}
+    WHERE ${theirConnections(ownerUserId)}
+      AND ${connections.status} = 'disconnected'
+  )`;
   await recordEvents(
     env,
     [
@@ -160,7 +180,7 @@ export const erasePersonal = async (
         actor: { type: "system" },
         action: "connection.person_erased",
         target: { type: "person", id: ownerUserId },
-        detail: { ownerUserId, connections: ids.length },
+        detail: { ownerUserId, connections: count },
       },
     ],
     [
@@ -176,20 +196,24 @@ export const erasePersonal = async (
         })
         .where(
           and(
-            inArray(connections.id, ids),
+            theirConnections(ownerUserId),
             eq(connections.status, "disconnected")
           )
         ),
       db
         .delete(idempotentCalls)
-        .where(inArray(idempotentCalls.connectionId, ids)),
-      db.delete(callChanges).where(inArray(callChanges.connectionId, ids)),
+        .where(sql`${idempotentCalls.connectionId} IN ${theirs}`),
+      db
+        .delete(callChanges)
+        .where(sql`${callChanges.connectionId} IN ${theirs}`),
       // What their connections read for workflows: the mailboxes and items
       // still to deliver, which name them and hold their provider's data.
       db
         .delete(connectorEvents)
-        .where(inArray(connectorEvents.connectionId, ids)),
-      db.delete(eventSources).where(inArray(eventSources.connectionId, ids)),
+        .where(sql`${connectorEvents.connectionId} IN ${theirs}`),
+      db
+        .delete(eventSources)
+        .where(sql`${eventSources.connectionId} IN ${theirs}`),
       db
         .delete(pendingActions)
         .where(eq(pendingActions.onBehalfOf, ownerUserId)),
@@ -201,5 +225,5 @@ export const erasePersonal = async (
   if (await anyLive(env, ownerUserId)) {
     throw pending();
   }
-  return { connections: ids.length };
+  return { connections: count };
 };

@@ -585,3 +585,14 @@ export const connectorEvents = sqliteTable(
     index("connector_events_connection_idx").on(table.connectionId),
   ]
 );
+
+/**
+ * People whose erasure has begun (person-erasure.ts), by their user ID:
+ * connect makes nothing new of theirs once it has, so nothing a flow or a
+ * call still under way finishes after the erasure emptied what was theirs
+ * comes back. Never removed: an erasure is final.
+ */
+export const erasedPeople = sqliteTable("erased_people", {
+  userId: text("user_id").primaryKey(),
+  beganAt: timestamp("began_at").notNull(),
+});
