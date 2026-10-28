@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit.ts";
@@ -228,6 +228,14 @@ export const suiteVersion = async <C>(
   };
 };
 
+/** `a` before `b` by UTF-16 code units: -1, 0 or 1. */
+const codeUnitOrder = (a: string, b: string): number => {
+  if (a === b) {
+    return 0;
+  }
+  return a < b ? -1 : 1;
+};
+
 /**
  * Proposes the next version of suite `input.suiteId`, as `by`, its
  * designer: recorded `proposed`, with its digests, and audited. A version
@@ -253,6 +261,7 @@ export const proposeSuiteVersion = async <C>(
   const [latest] = await db
     .select({
       version: brainEvalSuiteVersions.version,
+      revision: brainEvalSuiteVersions.revision,
       ownerId: brainEvalSuiteVersions.ownerId,
       nextOwnerId: brainEvalSuiteVersions.nextOwnerId,
     })
@@ -267,8 +276,9 @@ export const proposeSuiteVersion = async <C>(
     throw knowledgeErrors.create("knowledge.forbidden");
   }
   const version = (latest?.version ?? 0) + 1;
+  // By code units, as `canonicalJson` orders keys: distinct IDs never tie.
   const ordered = proposal.cases.toSorted((a, b) =>
-    a.caseId.localeCompare(b.caseId)
+    codeUnitOrder(a.caseId, b.caseId)
   );
   const digestOfSplit = async (split: EvalSplit) =>
     await casesDigestOf(
@@ -281,26 +291,42 @@ export const proposeSuiteVersion = async <C>(
     requiredChecks: proposal.grader.requiredChecks,
     spec: proposal.grader.spec,
   };
+  // The suite as read, checked as it is written: a version proposed or a
+  // handoff made meanwhile fails the batch (`knowledge.conflict`).
+  const latestChanged =
+    latest === undefined
+      ? sql`EXISTS (SELECT 1 FROM ${brainEvalSuiteVersions} WHERE ${brainEvalSuiteVersions.suiteId} = ${proposal.suiteId})`
+      : sql`NOT EXISTS (SELECT 1 FROM ${brainEvalSuiteVersions} WHERE ${brainEvalSuiteVersions.suiteId} = ${proposal.suiteId} AND ${brainEvalSuiteVersions.version} = ${latest.version} AND ${brainEvalSuiteVersions.revision} = ${latest.revision}) OR EXISTS (SELECT 1 FROM ${brainEvalSuiteVersions} WHERE ${brainEvalSuiteVersions.suiteId} = ${proposal.suiteId} AND ${brainEvalSuiteVersions.version} > ${latest.version})`;
+  const versionRow = {
+    suiteId: proposal.suiteId,
+    version,
+    revision: 1,
+    ownerId: proposal.ownerId,
+    name: proposal.name,
+    developmentDigest: await digestOfSplit("development"),
+    validationDigest: await digestOfSplit("validation"),
+    finalDigest: await digestOfSplit("final"),
+    grader: canonicalJson(grader),
+    // Keyed too: a grader's spec may hold expected patterns or
+    // thresholds a guess could be checked against.
+    graderDigest: await casesDigestOf(brain, grader),
+    pins: canonicalJson(proposal.pins),
+    proposedBy: by.userId,
+    createdAt: now,
+    updatedAt: now,
+  };
   try {
     await auditedBatch(brain.ports, db, [
-      db.insert(brainEvalSuiteVersions).values({
-        suiteId: proposal.suiteId,
-        version,
-        revision: 1,
-        ownerId: proposal.ownerId,
-        name: proposal.name,
-        developmentDigest: await digestOfSplit("development"),
-        validationDigest: await digestOfSplit("validation"),
-        finalDigest: await digestOfSplit("final"),
-        grader: canonicalJson(grader),
-        // Keyed too: a grader's spec may hold expected patterns or
-        // thresholds a guess could be checked against.
-        graderDigest: await casesDigestOf(brain, grader),
-        pins: canonicalJson(proposal.pins),
-        proposedBy: by.userId,
-        createdAt: now,
-        updatedAt: now,
-      }),
+      // Fails the batch when the suite changed since it was read: a case
+      // without its keys, which NOT NULL refuses; D1 has no other way to
+      // abort a batch on a condition.
+      db
+        .insert(brainEvalCases)
+        .select(
+          sql`SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${latestChanged}`
+        ),
+      // Its cases first: once the version is written, no case is added to
+      // it or taken from it (the migration's triggers).
       ...inChunks(
         ordered.map((each) => ({
           suiteId: proposal.suiteId,
@@ -314,6 +340,7 @@ export const proposeSuiteVersion = async <C>(
           expected: canonicalJson(each.expected),
         }))
       ).map((chunk) => db.insert(brainEvalCases).values(chunk)),
+      db.insert(brainEvalSuiteVersions).values(versionRow),
       outboxed(brain, {
         actor: by.actor,
         action: "knowledge.eval_suite.proposed",
@@ -322,8 +349,11 @@ export const proposeSuiteVersion = async <C>(
       }),
     ]);
   } catch (error) {
-    // Another version proposed at the same time took this number.
-    if (String(error).includes("UNIQUE")) {
+    // Another version proposed, or the suite handed on, meanwhile.
+    if (
+      String(error).includes("UNIQUE") ||
+      String(error).includes("NOT NULL")
+    ) {
       throw knowledgeErrors.create("knowledge.conflict");
     }
     throw error;
@@ -444,7 +474,10 @@ export const changeSuiteOwner = async <C>(
         and(
           eq(brainEvalSuiteVersions.suiteId, suiteId),
           eq(brainEvalSuiteVersions.version, latest.version),
-          eq(brainEvalSuiteVersions.revision, expectedRevision)
+          eq(brainEvalSuiteVersions.revision, expectedRevision),
+          // Still the latest: a version proposed meanwhile would keep the
+          // old owner, the handoff left on the one before it.
+          sql`NOT EXISTS (SELECT 1 FROM ${brainEvalSuiteVersions} AS newer WHERE newer.suite_id = ${suiteId} AND newer.version > ${latest.version})`
         )
       )
       .returning({ version: brainEvalSuiteVersions.version }),

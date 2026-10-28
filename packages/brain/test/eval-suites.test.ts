@@ -363,4 +363,161 @@ describe("a learning suite version", () => {
       editDigest: true,
     });
   });
+
+  it("keeps a version's case set: no case added to it or taken from it after it is written", async () => {
+    const { brain } = testHost();
+    const suiteId = `suite-${crypto.randomUUID()}`;
+    await proposeSuiteVersion(
+      brain,
+      designer,
+      proposalOf(suiteId, threeSplits)
+    );
+    const extra = caseOf("d", "final");
+    const added = await failureOf(
+      brain.db.insert(brainEvalCases).values({
+        suiteId,
+        version: 1,
+        caseId: extra.caseId,
+        split: extra.split,
+        family: extra.family,
+        group: extra.group,
+        source: extra.source,
+        input: canonicalJson(extra.input),
+        expected: canonicalJson(extra.expected),
+      })
+    );
+    const taken = await failureOf(
+      brain.db.delete(brainEvalCases).where(eq(brainEvalCases.suiteId, suiteId))
+    );
+    const left = await brain.db
+      .select({ caseId: brainEvalCases.caseId })
+      .from(brainEvalCases)
+      .where(eq(brainEvalCases.suiteId, suiteId));
+
+    expect({
+      added: added.includes("never added to"),
+      taken: taken.includes("never deleted"),
+      left: left.map(({ caseId }) => caseId).toSorted(),
+    }).toStrictEqual({
+      added: true,
+      taken: true,
+      left: ["a", "b", "c"],
+    });
+  });
+
+  it("digests a split's cases in one order however they were given, IDs equal only as text alike", async () => {
+    const { brain } = testHost();
+    // Distinct IDs a locale's comparison takes as equal.
+    const composed = caseOf("\u00E9", "final");
+    const decomposed = caseOf(
+      "e\u0301",
+      "final",
+      "other-group",
+      "other-source"
+    );
+    const given = [...threeSplits, composed, decomposed];
+    const one = await proposeSuiteVersion(
+      brain,
+      designer,
+      proposalOf(`suite-${crypto.randomUUID()}`, given)
+    );
+    const other = await proposeSuiteVersion(
+      brain,
+      designer,
+      proposalOf(`suite-${crypto.randomUUID()}`, given.toReversed())
+    );
+
+    expect(other.digests.final).toBe(one.digests.final);
+  });
+
+  it("refuses a version proposed as the suite is handed on, and a handoff as a version is proposed: neither lost", async () => {
+    const { brain } = testHost();
+    const suiteId = `suite-${crypto.randomUUID()}`;
+    const first = await proposeSuiteVersion(
+      brain,
+      designer,
+      proposalOf(suiteId, threeSplits)
+    );
+    // The owner hands it on while the next proposal computes its digests.
+    let handedOn = false;
+    const handingOn = {
+      ...brain,
+      ports: {
+        ...brain.ports,
+        keys: {
+          ...brain.ports.keys,
+          hmac: async (...args: Parameters<typeof brain.ports.keys.hmac>) => {
+            if (!handedOn) {
+              handedOn = true;
+              await changeSuiteOwner(
+                brain,
+                owner,
+                suiteId,
+                "owner2",
+                first.revision
+              );
+            }
+            return await brain.ports.keys.hmac(...args);
+          },
+        },
+      },
+    };
+    const proposed = await codeOf(
+      proposeSuiteVersion(handingOn, designer, proposalOf(suiteId, threeSplits))
+    );
+    const handed = await brain.db
+      .select({ nextOwnerId: brainEvalSuiteVersions.nextOwnerId })
+      .from(brainEvalSuiteVersions)
+      .where(eq(brainEvalSuiteVersions.suiteId, suiteId));
+    // A version proposed while a handoff reads the latest.
+    const second = await proposeSuiteVersion(brain, designer, {
+      ...proposalOf(suiteId, threeSplits),
+      ownerId: "owner2",
+    });
+    let proposedMeanwhile = false;
+    const proposing = {
+      ...brain,
+      db: new Proxy(brain.db, {
+        get: (target, property): unknown => {
+          const value: unknown = Reflect.get(target, property);
+          if (property === "batch" && typeof value === "function") {
+            return async (...args: unknown[]): Promise<unknown> => {
+              if (!proposedMeanwhile) {
+                proposedMeanwhile = true;
+                await proposeSuiteVersion(brain, designer, {
+                  ...proposalOf(suiteId, threeSplits),
+                  ownerId: "owner2",
+                });
+              }
+              return await Reflect.apply(value, target, args);
+            };
+          }
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      }),
+    };
+    const handoff = await codeOf(
+      changeSuiteOwner(
+        proposing,
+        { ...owner, userId: "owner2" },
+        suiteId,
+        "owner3",
+        second.revision
+      )
+    );
+
+    expect({
+      proposed,
+      handed: handed.map(({ nextOwnerId }) => nextOwnerId),
+      handoff,
+    }).toStrictEqual({
+      proposed: "knowledge.conflict",
+      // The handoff stands, on the latest version.
+      handed: ["owner2"],
+      handoff: "knowledge.conflict",
+    });
+  });
 });
