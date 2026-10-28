@@ -946,7 +946,7 @@ msgstr "{name}: {shown} de su límite"
 
 #: src/dashboard/report.ts
 msgid "{name}: {started} started, {completed} completed, {failed} failed"
-msgstr ""
+msgstr "{name}: {started} iniciados, {completed} completados, {failed} fallidos"
 
 #: src/chat/builds.tsx
 msgid "{name}: version {version} waiting for review"
@@ -6731,11 +6731,11 @@ msgstr "Bandeja de entrada"
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Independent"
-msgstr ""
+msgstr "Independiente"
 
 #: src/workflows/workflows-table.tsx
 msgid "Independent workflow"
-msgstr ""
+msgstr "Flujo independiente"
 
 #: src/workflows/independent-workflows.tsx
 msgid "Independent workflows"

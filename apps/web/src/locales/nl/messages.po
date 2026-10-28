@@ -946,7 +946,7 @@ msgstr "{name}: {shown} van hun limiet"
 
 #: src/dashboard/report.ts
 msgid "{name}: {started} started, {completed} completed, {failed} failed"
-msgstr ""
+msgstr "{name}: {started} gestart, {completed} voltooid, {failed} mislukt"
 
 #: src/chat/builds.tsx
 msgid "{name}: version {version} waiting for review"
@@ -6731,11 +6731,11 @@ msgstr "Inbox"
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Independent"
-msgstr ""
+msgstr "Zelfstandig"
 
 #: src/workflows/workflows-table.tsx
 msgid "Independent workflow"
-msgstr ""
+msgstr "Zelfstandige workflow"
 
 #: src/workflows/independent-workflows.tsx
 msgid "Independent workflows"

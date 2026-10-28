@@ -946,7 +946,7 @@ msgstr "{name}: {shown} der eigenen Grenze"
 
 #: src/dashboard/report.ts
 msgid "{name}: {started} started, {completed} completed, {failed} failed"
-msgstr ""
+msgstr "{name}: {started} gestartet, {completed} abgeschlossen, {failed} fehlgeschlagen"
 
 #: src/chat/builds.tsx
 msgid "{name}: version {version} waiting for review"
@@ -6731,11 +6731,11 @@ msgstr "Posteingang"
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Independent"
-msgstr ""
+msgstr "Eigenständig"
 
 #: src/workflows/workflows-table.tsx
 msgid "Independent workflow"
-msgstr ""
+msgstr "Eigenständiger Workflow"
 
 #: src/workflows/independent-workflows.tsx
 msgid "Independent workflows"
