@@ -88,6 +88,7 @@ import { z } from "zod";
 import type { StaffAlert } from "../alerts.ts";
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
 import { findD1Database } from "../cloudflare/accounts.ts";
+import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
 import {
@@ -387,18 +388,20 @@ export const provisionOf = async (db: AdminDatabase, clientId: string) =>
     .get();
 
 /**
- * Records the operation that provisions client `clientId` with release
- * `releaseId`, as `actor`, and returns its id: the one it has already
- * when it has one, so starting again resumes it (spec 40.1). An operation
- * of another release is refused (`operation_release_changed`): it isn't
- * replaced.
+ * Records the operation that provisions client `held.clientId` with
+ * release `releaseId`, as `actor`, and returns its id: the one it has
+ * already when it has one, so starting again resumes it (spec 40.1). An
+ * operation of another release is refused (`operation_release_changed`):
+ * it isn't replaced. Only while runner `held` holds the client, in the
+ * same statement: a start that lost the client writes nothing.
  */
 export const startClientProvision = async (
   db: AdminDatabase,
   actor: Actor,
-  clientId: string,
+  held: HeldClient,
   releaseId: string
 ): Promise<string> => {
+  const { clientId } = held;
   const now = new Date();
   const id = crypto.randomUUID();
   await actIfChanged(
@@ -406,15 +409,9 @@ export const startClientProvision = async (
     actor,
     db
       .insert(clientProvisions)
-      .values({
-        id,
-        clientId,
-        releaseId,
-        status: "running",
-        startedBy: actorName(actor),
-        createdAt: now,
-        updatedAt: now,
-      })
+      .select(
+        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
+      )
       .onConflictDoNothing(),
     {
       action: "provision.start",
@@ -512,39 +509,67 @@ const assertCanGo = async (
 };
 
 /**
- * Takes active client `clientId`'s one operation to release `releaseId`,
- * as `actor`, and returns its id (spec 40.3): a later release, or with
- * `rollback` the one it ran before (spec 40.4). Every step of the
- * operation then runs again for that release, onto the same stable
- * scripts and the client's own resources, each finding what an earlier
- * run did: an interrupted release is resumed by starting it again.
+ * The one release every Worker of client `clientId` was seen running
+ * (`client_workers`, written once an upload is observed), or null when
+ * they run different releases or none: what a release started now goes
+ * on from, and so what a rollback of it goes back to.
+ */
+const observedRelease = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<string | null> => {
+  const rows = await db
+    .select({ releaseId: clientWorkers.releaseId })
+    .from(clientWorkers)
+    .where(eq(clientWorkers.clientId, clientId));
+  const ids = new Set(rows.map(({ releaseId }) => releaseId));
+  const [only = null] = ids.size === 1 ? ids : [];
+  return only;
+};
+
+/**
+ * Takes active client `held.clientId`'s one operation to release
+ * `releaseId`, as `actor`, and returns its id (spec 40.3): a later
+ * release, or with `rollback` the one it ran before (spec 40.4). Every
+ * step of the operation then runs again for that release, onto the same
+ * stable scripts and the client's own resources, each finding what an
+ * earlier run did: an interrupted release is resumed by starting it
+ * again.
  *
- * Refused for a client that isn't active (`client_not_active`), while the
- * operation runs another release (`operation_running`), for a rollback
- * with no release before (`nothing_to_roll_back`), and when the release
- * it runs isn't imported (`release_not_imported`: what it would go back
- * past can't be read). Every target is checked against the Durable
- * Object migrations of what runs before anything is uploaded: one lacking
- * a migration a script ran is refused (`rollback_past_migration`, or
- * `release_behind_migration` for a release). Whether the code of either
- * release works with the other and with the client's databases is the
- * operation's first step's (`incompatibility`, as provisioning and
- * deploys check it). Starting the release its operation already has
- * resumes it: one that failed, or one still `running` whose runner has
- * ended (the attempt is refused while that runner still goes,
- * src/hosting/workflow.ts). `cause` goes in the audit event, as when a
+ * Only by the runner holding the client (`held`), which a start claims
+ * first (src/hosting/workflow.ts): every write is conditional on that
+ * claim in the same statement, so a start that lost the client changes
+ * nothing, and the operation is never changed under the runner that
+ * runs it. Holding the client, an operation left `running` by a runner
+ * that ended is the holder's to resume or take elsewhere.
+ *
+ * What it goes back to is observed, never inferred from how the last run
+ * ended: a new release records the release every Worker was seen running
+ * as the one before it (`observedRelease`), and every target is checked
+ * against the Durable Object migrations each script was seen at
+ * (`assertCanGo`), before anything is uploaded.
+ *
+ * Refused for a client that isn't active (`client_not_active`), for a
+ * rollback with nothing before (`nothing_to_roll_back`), when the release
+ * it runs isn't imported (`release_not_imported`), past a migration a
+ * script ran (`rollback_past_migration`, `release_behind_migration`), and
+ * when the claim or the operation changed as it started
+ * (`operation_running`). Whether the code of either release works with
+ * the other and with the client's databases is the operation's first
+ * step's (`incompatibility`). `cause` goes in the audit event, as when a
  * release is rolled back on its own.
  */
 export const startClientRelease = async (
   db: AdminDatabase,
   actor: Actor,
-  clientId: string,
+  held: HeldClient,
   {
     releaseId,
     rollback,
     cause,
   }: { releaseId?: string; rollback?: boolean; cause?: string }
 ): Promise<{ operationId: string; releaseId: string }> => {
+  const { clientId } = held;
   const client = await db
     .select({ status: clients.status })
     .from(clients)
@@ -563,15 +588,14 @@ export const startClientRelease = async (
       `${clientId} has no operation: it wasn't provisioned as a placement`
     );
   }
-  const target =
-    rollback === true ? operation.previousReleaseId : (releaseId ?? null);
-  const resumes = rollback !== true && operation.releaseId === target;
-  if (operation.status === "running" && !resumes) {
+  if (!(await holdsClient(db, clientId, held.runId))) {
     throw new ProvisionOperationError(
       "operation_running",
-      `${clientId}'s operation is running ${operation.releaseId}`
+      `${held.runId} doesn't hold ${clientId}`
     );
   }
+  const target =
+    rollback === true ? operation.previousReleaseId : (releaseId ?? null);
   if (target === null) {
     throw new ProvisionOperationError(
       "nothing_to_roll_back",
@@ -585,14 +609,15 @@ export const startClientRelease = async (
         `${clientId} runs ${target} already`
       );
     }
-    // Done: it runs it already. Failed, or running with its runner gone:
-    // starting it again resumes it.
+    // Done: it runs it already. Failed, or left running by a runner that
+    // ended: the holder runs it again, which resumes it.
     return { operationId: operation.id, releaseId: target };
   }
   await assertCanGo(db, operation, target, rollback === true);
+  const before = await observedRelease(db, clientId);
   const now = new Date();
-  // Conditional on the operation as read: of two starts at once, one
-  // takes it; the other is refused, and starts nothing.
+  // Conditional on the claim, and the operation as read: a start that lost
+  // either starts nothing.
   const started = await actIfChanged(
     db,
     actor,
@@ -600,10 +625,7 @@ export const startClientRelease = async (
       .update(clientProvisions)
       .set({
         releaseId: target,
-        previousReleaseId:
-          operation.status === "done"
-            ? operation.releaseId
-            : operation.previousReleaseId,
+        previousReleaseId: before === target ? null : before,
         status: "running",
         step: null,
         error: null,
@@ -615,7 +637,8 @@ export const startClientRelease = async (
         and(
           eq(clientProvisions.id, operation.id),
           eq(clientProvisions.status, operation.status),
-          eq(clientProvisions.releaseId, operation.releaseId)
+          eq(clientProvisions.releaseId, operation.releaseId),
+          stillHolds(held)
         )
       ),
     {
@@ -632,7 +655,7 @@ export const startClientRelease = async (
   if (!started) {
     throw new ProvisionOperationError(
       "operation_running",
-      `${clientId}'s operation changed as the release started`
+      `${clientId}'s operation or its claim changed as the release started`
     );
   }
   return { operationId: operation.id, releaseId: target };
@@ -1074,6 +1097,53 @@ const recordMigrated = async (
   await recordProgress(db, loaded, progress);
 };
 
+/**
+ * Sends Worker `app`'s upload (`send`) with its migrations counted as run
+ * from just before: an upload whose answer is lost may have run them, so
+ * what's recorded moves forward to the release's last (`laterMigration`)
+ * and is trusted lower again only once observed. An upload the API
+ * refused outright (a 4xx: nothing of it ran) puts back what was
+ * recorded before, its error code in the answer, so a refusal never
+ * blocks a rollback it couldn't have made unsafe.
+ */
+const uploadCountedAsRun = async (
+  db: AdminDatabase,
+  loaded: Loaded,
+  progress: Progress,
+  {
+    app,
+    history,
+  }: { app: App; history: WorkerEntry["durableObjectMigrations"] },
+  send: () => Promise<void>
+): Promise<void> => {
+  const { [app]: recorded, ...others } = progress.migrated;
+  progress.migrated = {
+    ...others,
+    [app]: laterMigration(recorded, history.at(-1)?.tag ?? null, history),
+  };
+  await recordProgress(db, loaded, progress);
+  try {
+    await send();
+  } catch (error) {
+    // Only Cloudflare's own refusal, its error code in the answer: a 4xx
+    // with no answer it wrote, or a timeout or rate limit a proxy may send
+    // after passing the upload on, keeps the worst case.
+    const refused =
+      error instanceof CloudflareApiError &&
+      error.status >= 400 &&
+      error.status < 500 &&
+      error.status !== 408 &&
+      error.status !== 429 &&
+      error.codes.length > 0;
+    if (refused) {
+      progress.migrated =
+        recorded === undefined ? others : { ...others, [app]: recorded };
+      await recordProgress(db, loaded, progress);
+    }
+    throw error;
+  }
+};
+
 /** Step 4: the release's D1 migrations, on the client's own databases. */
 const migrate = async (
   context: ProvisionContext,
@@ -1188,19 +1258,25 @@ const upload = async (
       vars
     );
     // Delivered secrets go with the next delivery, whatever this upload
-    // keeps. Its migrations count as run from here: an upload whose answer
-    // is lost may have run them, and is observed again before it's trusted.
+    // keeps.
     const { [app]: _delivered, ...secrets } = progress.secrets;
-    progress.migrated = { ...progress.migrated, [app]: lastTag ?? null };
-    await recordProgress(db, loaded, { ...progress, secrets });
-    await assertHolds(db, held);
-    await uploadTargetScript(api, target, {
-      ...prepared,
-      metadata: {
-        ...prepared.metadata,
-        ...(migrations === undefined ? {} : { migrations }),
-      },
-    });
+    progress.secrets = secrets;
+    await uploadCountedAsRun(
+      db,
+      loaded,
+      progress,
+      { app, history: worker.durableObjectMigrations },
+      async () => {
+        await assertHolds(db, held);
+        await uploadTargetScript(api, target, {
+          ...prepared,
+          metadata: {
+            ...prepared.metadata,
+            ...(migrations === undefined ? {} : { migrations }),
+          },
+        });
+      }
+    );
     const after = await observed(
       context,
       async () => await targetMigrationState(api, target),
@@ -1214,7 +1290,6 @@ const upload = async (
     }
     await recordProgress(db, loaded, {
       ...progress,
-      secrets,
       uploads: { ...progress.uploads, [app]: fingerprint },
       migrated: { ...progress.migrated, [app]: after.migrationTag ?? null },
     });
@@ -1821,7 +1896,7 @@ const rollBackAfterProbe = async (
 ): Promise<void> => {
   const subject = failed.releaseId;
   try {
-    await startClientRelease(context.db, "system", held.clientId, {
+    await startClientRelease(context.db, "system", held, {
       rollback: true,
       cause: code,
     });

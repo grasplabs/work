@@ -136,12 +136,7 @@ const placedOperation = async (
   manifest: ReleaseManifest
 ) => {
   const { clientId } = await placedClient(destinationId);
-  const operationId = await startClientProvision(
-    db,
-    staff,
-    clientId,
-    manifest.releaseId
-  );
+  // Claimed first: only the holder starts the operation.
   const runId = await claimRun(
     db,
     staff,
@@ -154,6 +149,12 @@ const placedOperation = async (
     throw new Error("The run wasn't claimed");
   }
   const held: HeldClient = { clientId, runId };
+  const operationId = await startClientProvision(
+    db,
+    staff,
+    held,
+    manifest.releaseId
+  );
   return { clientId, operationId, held };
 };
 
@@ -858,13 +859,13 @@ describe("provisioning a placed client", () => {
 
   it("starting it again resumes the client's one operation, and refuses another release", async () => {
     const manifest = await importRelease("dedicated");
-    const { clientId, operationId } = await setUp("dedicated", manifest);
+    const { clientId, operationId, held } = await setUp("dedicated", manifest);
     await expect(
-      startClientProvision(db, staff, clientId, manifest.releaseId)
+      startClientProvision(db, staff, held, manifest.releaseId)
     ).resolves.toBe(operationId);
     const other = await importRelease("dedicated");
     await expect(
-      startClientProvision(db, staff, clientId, other.releaseId)
+      startClientProvision(db, staff, held, other.releaseId)
     ).rejects.toMatchObject({ code: "operation_release_changed" });
     await expect(
       db
@@ -1657,7 +1658,7 @@ describe("provisioning a placed client", () => {
       },
     });
 
-    await startClientRelease(db, staff, clientId, {
+    await startClientRelease(db, staff, await attempt(clientId), {
       releaseId: later.releaseId,
     });
     await runClientProvision(context, await attempt(clientId));
@@ -1693,17 +1694,19 @@ describe("provisioning a placed client", () => {
     const first = await importRelease("dedicated");
     const { account, clientId } = await liveClient(first);
     const nothing = await codeOf(
-      startClientRelease(db, staff, clientId, { rollback: true })
+      startClientRelease(db, staff, await attempt(clientId), { rollback: true })
     );
     const second = await importRelease("dedicated", {
       notes: "feat(core): second",
     });
-    await startClientRelease(db, staff, clientId, {
+    await startClientRelease(db, staff, await attempt(clientId), {
       releaseId: second.releaseId,
     });
     await runClientProvision(context, await attempt(clientId));
 
-    await startClientRelease(db, staff, clientId, { rollback: true });
+    await startClientRelease(db, staff, await attempt(clientId), {
+      rollback: true,
+    });
     await runClientProvision(context, await attempt(clientId));
     const back = {
       operation: await operationOf(clientId),
@@ -1722,17 +1725,19 @@ describe("provisioning a placed client", () => {
         ],
       })
     );
-    await startClientRelease(db, staff, clientId, {
+    await startClientRelease(db, staff, await attempt(clientId), {
       releaseId: third.releaseId,
     });
     await runClientProvision(context, await attempt(clientId));
     const past = await codeOf(
-      startClientRelease(db, staff, clientId, { rollback: true })
+      startClientRelease(db, staff, await attempt(clientId), { rollback: true })
     );
     // Nor released to an older one without it, before anything uploads.
     const uploads = account.scriptUploads.length;
     const behind = await codeOf(
-      startClientRelease(db, staff, clientId, { releaseId: second.releaseId })
+      startClientRelease(db, staff, await attempt(clientId), {
+        releaseId: second.releaseId,
+      })
     );
 
     expect({
@@ -1781,14 +1786,14 @@ describe("provisioning a placed client", () => {
         ],
       })
     );
-    await startClientRelease(db, staff, clientId, {
+    await startClientRelease(db, staff, await attempt(clientId), {
       releaseId: later.releaseId,
     });
     cloudflare.failNext(isUpload(connect), 400);
     await failing(await attempt(clientId));
 
     const back = await codeOf(
-      startClientRelease(db, staff, clientId, { rollback: true })
+      startClientRelease(db, staff, await attempt(clientId), { rollback: true })
     );
     const schema = await appliedSchema(db, clientId);
 
@@ -1814,7 +1819,7 @@ describe("provisioning a placed client", () => {
         ],
       })
     );
-    await startClientRelease(db, staff, clientId, {
+    await startClientRelease(db, staff, await attempt(clientId), {
       releaseId: later.releaseId,
     });
     // Core's upload runs its migration, and the answer never arrives.
@@ -1833,13 +1838,13 @@ describe("provisioning a placed client", () => {
     script.migrationTag = "v2";
 
     const back = await codeOf(
-      startClientRelease(db, staff, clientId, { rollback: true })
+      startClientRelease(db, staff, await attempt(clientId), { rollback: true })
     );
 
     expect(back).toBe("rollback_past_migration");
   });
 
-  it("refuses a release of a client not live yet, or while its operation runs, and one of two at once", async () => {
+  it("refuses a release of a client not live yet, and a start by a runner that lost the client, changing nothing; the holder takes an operation left running", async () => {
     const first = await importRelease("dedicated");
     const pending = await setUp("dedicated", first);
     const later = await importRelease("dedicated", {
@@ -1847,38 +1852,51 @@ describe("provisioning a placed client", () => {
     });
 
     const notLive = await codeOf(
-      startClientRelease(db, staff, pending.clientId, {
+      startClientRelease(db, staff, await attempt(pending.clientId), {
         releaseId: later.releaseId,
       })
     );
     const { clientId } = await liveClient(first);
-    const both = await Promise.all([
-      codeOf(
-        startClientRelease(db, staff, clientId, { releaseId: later.releaseId })
-      ),
-      codeOf(startClientRelease(db, staff, clientId, { rollback: true })),
-    ]);
-    const running = await codeOf(
-      startClientRelease(db, staff, clientId, { releaseId: first.releaseId })
+    // Two starts: the first claims, the second claims in its place; the
+    // first, no longer holding the client, writes nothing.
+    const lost = await attempt(clientId);
+    const holder = await attempt(clientId);
+    const lostStart = await codeOf(
+      startClientRelease(db, staff, lost, { releaseId: later.releaseId })
     );
-    // The release itself, still running with no runner going: resumed.
+    const untouched = await operationOf(clientId);
+    const started = await codeOf(
+      startClientRelease(db, staff, holder, { releaseId: later.releaseId })
+    );
+    // Its runner ended, the release still running: the next holder takes
+    // the client back to the release it ran, or resumes it.
+    const takenBack = await codeOf(
+      startClientRelease(db, staff, await attempt(clientId), {
+        releaseId: first.releaseId,
+      })
+    );
     const resumed = await codeOf(
-      startClientRelease(db, staff, clientId, { releaseId: later.releaseId })
+      startClientRelease(db, staff, await attempt(clientId), {
+        releaseId: first.releaseId,
+      })
     );
 
     expect({
       notLive,
-      both: both.toSorted(),
-      running,
+      lostStart,
+      untouched,
+      started,
+      takenBack,
       resumed,
       operation: await operationOf(clientId),
     }).toMatchObject({
       notLive: "client_not_active",
-      // The rollback has nothing before; the release takes the operation.
-      both: ["nothing_to_roll_back", "started"],
-      running: "operation_running",
+      lostStart: "operation_running",
+      untouched: { releaseId: first.releaseId, status: "done" },
+      started: "started",
+      takenBack: "started",
       resumed: "started",
-      operation: { releaseId: later.releaseId, status: "running" },
+      operation: { releaseId: first.releaseId, status: "running" },
     });
   });
 
@@ -1888,7 +1906,7 @@ describe("provisioning a placed client", () => {
     const later = await importRelease("dedicated", {
       notes: "feat(core): later",
     });
-    await startClientRelease(db, staff, clientId, {
+    await startClientRelease(db, staff, await attempt(clientId), {
       releaseId: later.releaseId,
     });
     // Core's upload is refused: connect runs the later release already.
@@ -1905,7 +1923,7 @@ describe("provisioning a placed client", () => {
     };
 
     // Started again, it resumes: connect isn't uploaded twice.
-    await startClientRelease(db, staff, clientId, {
+    await startClientRelease(db, staff, await attempt(clientId), {
       releaseId: later.releaseId,
     });
     const uploadsBefore = account.scriptUploads.length;
@@ -1956,7 +1974,7 @@ describe("provisioning a placed client", () => {
     });
     // oxlint-enable require-await
 
-    await startClientRelease(db, staff, clientId, {
+    await startClientRelease(db, staff, await attempt(clientId), {
       releaseId: later.releaseId,
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -1981,7 +1999,7 @@ describe("provisioning a placed client", () => {
       .fn<(alert: StaffAlert) => Promise<void>>()
       .mockRejectedValue(new Error("channel down"));
     const stuck = await liveClient(first);
-    await startClientRelease(db, staff, stuck.clientId, {
+    await startClientRelease(db, staff, await attempt(stuck.clientId), {
       releaseId: later.releaseId,
     });
     stuck.account.coreProbe = { asClient: "someone-else" };
@@ -2029,7 +2047,7 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("releases a live client through its Workflow, as staff start it", async () => {
+  it("releases a live client through its Workflow, as staff start it, and a start at the same moment that loses the claim changes nothing", async () => {
     const first = await importRelease("dedicated");
     const { clientId } = await liveClient(first);
     const later = await importRelease("dedicated", {
@@ -2040,17 +2058,301 @@ describe("provisioning a placed client", () => {
       await attempts.modifyAll(async (modifier) => {
         await modifier.disableRetryDelays();
       });
-      await releasePlacedClient(env, staff, clientId, {
-        releaseId: later.releaseId,
+      // Another release asked for at once: it claims nothing, so it never
+      // changes the operation the winning attempt runs.
+      const other = await importRelease("dedicated", {
+        notes: "feat(core): other",
       });
+      const [won, lost] = await Promise.all([
+        codeOf(
+          releasePlacedClient(env, staff, clientId, {
+            releaseId: later.releaseId,
+          })
+        ),
+        codeOf(
+          releasePlacedClient(env, staff, clientId, {
+            releaseId: other.releaseId,
+          })
+        ),
+      ]);
       const [only] = await attempts.get();
       await only?.waitForStatus("complete");
-      await expect(runs(clientId)).resolves.toStrictEqual({
-        core: later.releaseId,
-        connect: later.releaseId,
+      const operation = await operationOf(clientId);
+      const answers = [won, lost].toSorted();
+      const started = await attempts.get();
+      expect({
+        answers,
+        attempts: started.length,
+        runs: await runs(clientId),
+        operation,
+      }).toMatchObject({
+        answers: ["already_running", "started"],
+        attempts: 1,
+        runs: { core: operation?.releaseId, connect: operation?.releaseId },
+        operation: { status: "done" },
       });
     } finally {
       await attempts.dispose();
     }
   });
+});
+
+/** Where a release B's runner stops for good, as a crash leaves it. */
+interface CrashPoint {
+  at: string;
+  /** Whether B started: claimed, and its operation taken to B. */
+  started: boolean;
+  /** Whether a runner claimed the client and died without starting. */
+  claimed: boolean;
+  /**
+   * What fails B's run where it stops, and what puts it back after; none
+   * when it doesn't run.
+   */
+  plan?: (scripts: {
+    core: string;
+    connect: string;
+  }) => (() => void) | undefined;
+  /** Whether both Workers ran B, its core's new migration included. */
+  bothRanB: boolean;
+  /** Whether only connect ran B. */
+  connectRanB: boolean;
+}
+
+const crashPoints: CrashPoint[] = [
+  {
+    at: "before the claim",
+    started: false,
+    claimed: false,
+    bothRanB: false,
+    connectRanB: false,
+  },
+  {
+    at: "after the claim",
+    started: false,
+    claimed: true,
+    bothRanB: false,
+    connectRanB: false,
+  },
+  {
+    at: "mid-migrate",
+    started: true,
+    claimed: true,
+    plan: () => {
+      cloudflare.failNext(
+        (call) =>
+          call.path.endsWith("/query") &&
+          JSON.stringify(call.body).includes("CREATE TABLE b"),
+        400
+      );
+    },
+    bothRanB: false,
+    connectRanB: false,
+  },
+  {
+    at: "after connect's upload",
+    started: true,
+    claimed: true,
+    plan: ({ core }) => {
+      cloudflare.failNext(isUpload(core), 400);
+    },
+    bothRanB: false,
+    connectRanB: true,
+  },
+  {
+    at: "after core's upload",
+    started: true,
+    claimed: true,
+    plan: () => {
+      cloudflare.failNext(
+        (call) => call.method === "PUT" && call.path.endsWith("/secrets"),
+        400
+      );
+    },
+    bothRanB: true,
+    connectRanB: true,
+  },
+  {
+    at: "after the probe",
+    started: true,
+    claimed: true,
+    plan: () => {
+      const put = vi
+        .spyOn(env.ROUTER_HOSTS, "put")
+        .mockRejectedValueOnce(new Error("the runner died"));
+      return () => {
+        put.mockRestore();
+      };
+    },
+    bothRanB: true,
+    connectRanB: true,
+  },
+];
+
+type Competing = "resume" | "another" | "rollback";
+const competing: Competing[] = ["resume", "another", "rollback"];
+
+const walk = crashPoints.flatMap((point) =>
+  competing.map((action) => ({ ...point, action }))
+);
+
+/** Core with a class of its own added, by a Durable Object migration. */
+const withExtraClass = (core: WorkerEntry): WorkerEntry => ({
+  ...core,
+  durableObjectMigrations: [
+    ...core.durableObjectMigrations,
+    { tag: "v2", new_sqlite_classes: ["Extra"] },
+  ],
+});
+
+/** What the walk expects of an action after a crash point. */
+interface Expected {
+  startedAs: string;
+  releaseId?: string;
+  previousReleaseId?: string | null;
+}
+
+/**
+ * What an action after `point` should come to: a rollback goes back to
+ * what every Worker ran when B started (A), refused once a script ran B's
+ * new migration, nothing when B never started; a release records as the
+ * one before what every Worker was seen running as it started, never how
+ * B's run ended.
+ */
+const expectedOf = (
+  point: CrashPoint,
+  action: Competing,
+  ids: { a: string; b: string; c: string }
+): Expected => {
+  if (action === "rollback") {
+    if (!point.started) {
+      return { startedAs: "nothing_to_roll_back" };
+    }
+    return point.bothRanB
+      ? { startedAs: "rollback_past_migration" }
+      : { startedAs: "started", releaseId: ids.a };
+  }
+  let previous: string | null = ids.a;
+  if (action === "another" && point.bothRanB) {
+    previous = ids.b;
+  } else if (action === "another" && point.connectRanB) {
+    previous = null;
+  }
+  return {
+    startedAs: "started",
+    releaseId: action === "resume" ? ids.b : ids.c,
+    previousReleaseId: previous,
+  };
+};
+
+describe("a release's runner crashing, and another action on the client after", () => {
+  useStoreSecrets({ deployer: token, tenant: `${token}-tenant-admin` });
+
+  it.each(walk)(
+    "$at, then $action: ends coherent, by what its Workers ran, and the dead runner writes nothing",
+    async ({ action, ...point }) => {
+      const { started, claimed, plan } = point;
+      const a = await importRelease("dedicated");
+      const { clientId } = await liveClient(a);
+      const scripts = await scriptsOf(clientId);
+      // B adds a class (a Durable Object migration) and a table; C keeps
+      // both and adds a table of its own.
+      const b = await importRelease(
+        "dedicated",
+        {
+          notes: "feat(core): b",
+          core: "export default { core: 'b' };",
+          migrations: {
+            "0000_init.sql": "CREATE TABLE a (id TEXT);",
+            "0001_more.sql": "CREATE TABLE b (id TEXT);",
+          },
+        },
+        withExtraClass
+      );
+      const c = await importRelease(
+        "dedicated",
+        {
+          notes: "feat(core): c",
+          core: "export default { core: 'c' };",
+          migrations: {
+            "0000_init.sql": "CREATE TABLE a (id TEXT);",
+            "0001_more.sql": "CREATE TABLE b (id TEXT);",
+            "0002_most.sql": "CREATE TABLE c (id TEXT);",
+          },
+        },
+        withExtraClass
+      );
+
+      // B's runner, to where it stops: then it dies, its run left running.
+      let dead: HeldClient | undefined;
+      if (claimed) {
+        dead = await attempt(clientId);
+      }
+      if (started && dead !== undefined) {
+        await startClientRelease(db, staff, dead, { releaseId: b.releaseId });
+        const restore = plan?.(scripts);
+        await failing(dead);
+        restore?.();
+        await db
+          .update(clientProvisions)
+          .set({ status: "running", error: null })
+          .where(eq(clientProvisions.clientId, clientId));
+      }
+
+      // The next action, as a new holder.
+      const holder = await attempt(clientId);
+      const to =
+        action === "rollback"
+          ? { rollback: true as const }
+          : { releaseId: action === "resume" ? b.releaseId : c.releaseId };
+      const startedAs = await codeOf(startClientRelease(db, staff, holder, to));
+      if (startedAs === "started") {
+        await runClientProvision(context, holder);
+      }
+      const settled = await operationOf(clientId);
+      // The dead runner, waking: writes nothing.
+      const staleWrote =
+        dead === undefined
+          ? false
+          : await failing(dead).then(
+              async () =>
+                JSON.stringify(await operationOf(clientId)) !==
+                JSON.stringify(settled)
+            );
+
+      const expected = expectedOf(point, action, {
+        a: a.releaseId,
+        b: b.releaseId,
+        c: c.releaseId,
+      });
+      const schema = await appliedSchema(db, clientId);
+
+      expect({
+        startedAs,
+        operation: settled,
+        runs: await runs(clientId),
+        staleWrote,
+        // Never behind what any run migrated its databases to.
+        schemaAtLeastB:
+          started && action !== "rollback"
+            ? schema?.releaseId === (action === "resume" ? b : c).releaseId
+            : true,
+      }).toMatchObject({
+        startedAs: expected.startedAs,
+        ...(expected.releaseId === undefined
+          ? {}
+          : {
+              operation: {
+                releaseId: expected.releaseId,
+                status: "done",
+                ...(expected.previousReleaseId === undefined
+                  ? {}
+                  : { previousReleaseId: expected.previousReleaseId }),
+              },
+              runs: { core: expected.releaseId, connect: expected.releaseId },
+            }),
+        staleWrote: false,
+        schemaAtLeastB: true,
+      });
+    }
+  );
 });

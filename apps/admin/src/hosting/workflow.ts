@@ -18,7 +18,8 @@ import { sendStaffAlert } from "../alerts.ts";
 import { adminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
 import { ProvisionError } from "../provision/errors.ts";
-import { claimRun, currentRun, hasEnded } from "../runners.ts";
+import { claimRun, currentRun, hasEnded, releaseRun } from "../runners.ts";
+import type { HeldClient } from "../runners.ts";
 import { asStepError, deployStepConfig, stop } from "../workflow-steps.ts";
 import { InventoryError } from "./inventory.ts";
 import {
@@ -77,20 +78,20 @@ const newAttemptId = (clientId: string): string =>
 
 /**
  * Claims client `clientId` for a new attempt in place of its current
- * runner once that has ended, recording `event`, and starts the attempt,
- * which runs the client's one operation. Refused (`already_running`)
- * while another runner is still going, and when another claim got there
- * first. Returns the attempt's id.
+ * runner once that has ended, recording `event`, then, holding it, starts
+ * the operation (`start`, every write of which is conditional on the
+ * claim) and the attempt that runs it. The claim comes first: a start
+ * that doesn't win it changes nothing, so it never rewrites the operation
+ * another attempt runs. A start refused once claimed gives the claim
+ * back. Refused (`already_running`) while another runner is still going,
+ * and when another claim got there first. Returns the attempt's id.
  */
 const startAttempt = async (
   env: Env,
   staff: Staff,
   clientId: string,
-  record: (replaces: string | null) => Promise<{
-    action: string;
-    target: string;
-    detail: Record<string, string>;
-  }>
+  event: { action: string; target: string },
+  start: (held: HeldClient) => Promise<void>
 ): Promise<string> => {
   const db = adminDatabase(env.DB);
   const running = new ProvisionError(
@@ -101,7 +102,6 @@ const startAttempt = async (
   if (run !== null && !hasEnded(run.status)) {
     throw running;
   }
-  const event = await record(run?.runId ?? null);
   const runId = await claimRun(
     db,
     staff,
@@ -110,20 +110,24 @@ const startAttempt = async (
     {
       ...event,
       clientId,
-      detail: {
-        ...event.detail,
-        ...(run === null ? {} : { replaces: run.runId }),
-      },
+      ...(run === null ? {} : { detail: { replaces: run.runId } }),
     },
     { kind: "provision_placed", runId: newAttemptId(clientId) }
   );
   if (runId === undefined) {
     throw running;
   }
-  await env.PROVISION_PLACED_CLIENT.create({
-    id: runId,
-    params: { clientId } satisfies ProvisionPlacedParams,
-  });
+  try {
+    await start({ clientId, runId });
+    await env.PROVISION_PLACED_CLIENT.create({
+      id: runId,
+      params: { clientId } satisfies ProvisionPlacedParams,
+    });
+  } catch (error) {
+    // Nothing runs for it: the client is free for the next start.
+    await releaseRun(db, clientId, runId);
+    throw error;
+  }
   return runId;
 };
 
@@ -142,19 +146,15 @@ export const provisionPlacedClient = async (
   clientId: string,
   releaseId: string
 ): Promise<string> =>
-  await startAttempt(env, staff, clientId, async () => {
-    const operation = await startClientProvision(
-      adminDatabase(env.DB),
-      staff,
-      clientId,
-      releaseId
-    );
-    return {
-      action: "client.provision_placed",
-      target: releaseId,
-      detail: { operation },
-    };
-  });
+  await startAttempt(
+    env,
+    staff,
+    clientId,
+    { action: "client.provision_placed", target: releaseId },
+    async (held) => {
+      await startClientProvision(adminDatabase(env.DB), staff, held, releaseId);
+    }
+  );
 
 /**
  * Takes active placed client `clientId` to release `releaseId`, or with
@@ -169,17 +169,14 @@ export const releasePlacedClient = async (
   clientId: string,
   to: { releaseId: string } | { rollback: true }
 ): Promise<string> =>
-  await startAttempt(env, staff, clientId, async () => {
-    const { operationId, releaseId } = await startClientRelease(
-      adminDatabase(env.DB),
-      staff,
-      clientId,
-      to
-    );
-    return {
-      action:
-        "rollback" in to ? "client.rollback_placed" : "client.release_placed",
-      target: releaseId,
-      detail: { operation: operationId },
-    };
-  });
+  await startAttempt(
+    env,
+    staff,
+    clientId,
+    "rollback" in to
+      ? { action: "client.rollback_placed", target: "previous" }
+      : { action: "client.release_placed", target: to.releaseId },
+    async (held) => {
+      await startClientRelease(adminDatabase(env.DB), staff, held, to);
+    }
+  );
