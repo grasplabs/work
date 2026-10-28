@@ -42,9 +42,11 @@ import {
 import { memoriesLineage } from "@grasp-os/brain/memory-lineage";
 import { preparePurge, purge } from "@grasp-os/brain/purge";
 import type { OnErase } from "@grasp-os/brain/purge";
+import { purgeStatus } from "@grasp-os/brain/purge-ledger";
 import { recall } from "@grasp-os/brain/recall";
 import { search } from "@grasp-os/brain/search";
 import { follow, read } from "@grasp-os/brain/tools";
+import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type {
   BacklinkPage,
   Collection,
@@ -63,6 +65,7 @@ import type {
   PurgeInput,
   PurgePlan,
   PurgeResult,
+  PurgeStatus,
   ReadOptions,
   RestoreInput,
   SaveInput,
@@ -72,6 +75,7 @@ import type {
 } from "@grasp-os/shared/knowledge";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { z } from "zod";
 
 import { gapAnswerErasure } from "../brain-gaps.ts";
 import { brainRecordErasure } from "../brain-records.ts";
@@ -143,6 +147,9 @@ const coreErasure = (env: Env): OnErase => {
     forgetDocuments: readings.forgetDocuments,
   };
 };
+
+/** A purge's ID, as a purge answers it. */
+const purgeIdSchema = z.uuid();
 
 /**
  * Refuses a purge to anyone but an admin (not Grasp staff, who reach a
@@ -395,7 +402,21 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     );
   }
 
-  async purge(input: PurgeInput, token: string): Promise<PurgeResult> {
+  async purgeStatus(purgeId: string): Promise<PurgeStatus> {
+    return await withPerson(this.#check, async (person) => {
+      purgerOf(person);
+      return await purgeStatus(
+        brainOf(this.#env),
+        knowledgeErrors.parse("knowledge.invalid", purgeIdSchema, purgeId)
+      );
+    });
+  }
+
+  async purge(
+    input: PurgeInput,
+    token: string,
+    options?: { fresh?: boolean }
+  ): Promise<PurgeResult> {
     return await withPerson(
       this.#check,
       async (person) =>
@@ -404,7 +425,10 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
           purgerOf(person),
           input,
           token,
-          coreErasure(this.#env)
+          coreErasure(this.#env),
+          // Only a boolean: a client's value is checked here, as Cap'n
+          // Web checks no types.
+          { fresh: options?.fresh === true }
         )
     );
   }
