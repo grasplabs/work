@@ -19,7 +19,7 @@ import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, asc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -1074,9 +1074,42 @@ const reconciled = async (
 };
 
 /**
- * Reconciles connection `connectionId` (`reconciled`), and marks it out of
- * sync when that didn't finish, for connect's clock to try again
- * (`reconcileUnsyncedTools`); clears the mark once it did. Whether it did.
+ * Marks connection `connectionId` as maybe out of sync with Composio, as
+ * of `at`, before a send to Composio: a send cut short (a crash, say)
+ * stays marked for connect's clock. Only ever moved later, so a reconcile
+ * that started before another's send leaves that send's mark.
+ */
+const markUnsynced = async (
+  db: ReturnType<typeof drizzle>,
+  connectionId: string,
+  at: Date
+): Promise<void> => {
+  await db
+    .update(connections)
+    .set({ toolsUnsyncedAt: at })
+    .where(
+      and(
+        eq(connections.id, connectionId),
+        or(
+          isNull(connections.toolsUnsyncedAt),
+          lt(connections.toolsUnsyncedAt, at)
+        )
+      )
+    );
+};
+
+/** How long the clock waits after a reconcile's first failure. */
+const unsyncedRetryBaseMs = 60_000;
+/** Most doublings of that wait: about an hour at most. */
+const unsyncedRetryDoublings = 6;
+
+/**
+ * Reconciles connection `connectionId` (`reconciled`), marked out of sync
+ * while it runs (`markUnsynced`), for connect's clock to try again
+ * (`reconcileUnsyncedTools`) should it not finish; the mark cleared once
+ * it did, unless a send after it started set it again. A failure puts
+ * the next try off, twice as long each time, so ones that keep failing
+ * leave the clock to others. Whether it did.
  */
 const reconcileOrMark = async (
   db: ReturnType<typeof drizzle>,
@@ -1085,11 +1118,16 @@ const reconcileOrMark = async (
   connectionId: string
 ): Promise<boolean> => {
   const startedAt = new Date();
+  await markUnsynced(db, connectionId, startedAt);
   const done = await reconciled(db, key, serverId, connectionId);
   await (done
     ? db
         .update(connections)
-        .set({ toolsUnsyncedAt: null })
+        .set({
+          toolsUnsyncedAt: null,
+          toolsSyncFailures: 0,
+          toolsSyncRetryAt: null,
+        })
         .where(
           and(
             eq(connections.id, connectionId),
@@ -1099,13 +1137,12 @@ const reconcileOrMark = async (
         )
     : db
         .update(connections)
-        .set({ toolsUnsyncedAt: startedAt })
-        .where(
-          and(
-            eq(connections.id, connectionId),
-            isNull(connections.toolsUnsyncedAt)
-          )
-        ));
+        .set({
+          toolsSyncFailures: sql`${connections.toolsSyncFailures} + 1`,
+          // SQLite reads the failures before this update's.
+          toolsSyncRetryAt: sql`${startedAt.getTime()} + (${unsyncedRetryBaseMs} << min(${connections.toolsSyncFailures}, ${unsyncedRetryDoublings}))`,
+        })
+        .where(eq(connections.id, connectionId)));
   return done;
 };
 
@@ -1113,9 +1150,11 @@ const reconcileOrMark = async (
 const unsyncedPerRun = 20;
 
 /**
- * Reconciles Composio for the connections marked out of sync, oldest
- * first, a few each run: what a change's reconcile left unfinished
- * (Composio away, or refusing for a while). Connect's clock runs it.
+ * Reconciles Composio for the connections marked out of sync, a few each
+ * run: what a change's reconcile left unfinished (Composio away, or
+ * refusing for a while), or a send a crash cut short. Ones never tried
+ * first, then the longest due, and none before its retry time, so ones
+ * that keep failing never hold back the rest. Connect's clock runs it.
  */
 export const reconcileUnsyncedTools = async (env: Env): Promise<void> => {
   const key = composioKey(env);
@@ -1131,10 +1170,18 @@ export const reconcileUnsyncedTools = async (env: Env): Promise<void> => {
         isNotNull(connections.toolsUnsyncedAt),
         eq(connections.status, "active"),
         eq(connections.serverKind, "composio"),
-        isNotNull(connections.composioServerId)
+        isNotNull(connections.composioServerId),
+        or(
+          isNull(connections.toolsSyncRetryAt),
+          lte(connections.toolsSyncRetryAt, new Date())
+        )
       )
     )
-    .orderBy(asc(connections.toolsUnsyncedAt))
+    // SQLite sorts nulls first: never tried before tried.
+    .orderBy(
+      asc(connections.toolsSyncRetryAt),
+      asc(connections.toolsUnsyncedAt)
+    )
     .limit(unsyncedPerRun);
   for (const { id, serverId } of marked) {
     if (serverId === null) {
@@ -1251,6 +1298,7 @@ export const changeToolkitTools = async (
   const kept = new Set(previous.map(composioToolName));
   const narrowed = tools.filter((tool) => kept.has(composioToolName(tool)));
   try {
+    await markUnsynced(db, row.id, new Date());
     await setServerTools(key, serverId, narrowed);
   } catch (error) {
     // Composio may have taken the narrowing all the same (an answer lost
