@@ -11,10 +11,12 @@ import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { deployVersion } from "../src/cloudflare/workers.ts";
 import {
   auditEvents,
+  clientPlacements,
   clientProvisions,
   clientRuns,
   clients,
   clientWorkers,
+  hostingDestinations,
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
@@ -37,6 +39,7 @@ import {
 import type { StartRolloutInput } from "../src/rollout/control.ts";
 import { driftOf } from "../src/rollout/drift.ts";
 import { rollbackClient, rollbackRing } from "../src/rollout/rollback.ts";
+import { checkRevocation } from "../src/rollout/shared-secrets.ts";
 import { isConfigPending } from "../src/rollout/targets.ts";
 import { clientEndedEvent, fleetConcurrency } from "../src/rollout/workflow.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
@@ -1620,6 +1623,185 @@ describe("a client's changes, counted", () => {
       releases: on(before),
       live: before,
       sentBeforeIt: false,
+    });
+  });
+
+  it("starts a rollout's change afresh once it holds the client, when another runner changed it after the rollout read it", async () => {
+    const release = await placedRelease("feat(core): runs");
+    const internal = await live(0, release);
+    const { clientId } = internal;
+    const rolloutId = crypto.randomUUID();
+    const at = longAgo();
+    await db.insert(rollouts).values({
+      id: rolloutId,
+      kind: "secrets",
+      releaseId: null,
+      status: "running",
+      ring: 0,
+      startedBy: staff.email,
+      createdAt: at,
+      updatedAt: at,
+    });
+    await db.insert(rolloutTargets).values({
+      rolloutId,
+      clientId,
+      ring: 0,
+      status: "pending",
+      updatedAt: at,
+    });
+    // An earlier run of it started its change, then lost the client.
+    await db.delete(clientRuns).where(eq(clientRuns.clientId, clientId));
+    await db
+      .insert(clientRuns)
+      .values({ clientId, runId: rolloutId, kind: "rollout", claimedAt: at });
+    const { operationId, change } = await startClientRelease(
+      db,
+      staff,
+      { clientId, runId: rolloutId },
+      { releaseId: release, again: true, what: "secrets" }
+    );
+    await db
+      .update(rolloutTargets)
+      .set({
+        status: "deploying",
+        deployId: operationId,
+        change,
+        previous: JSON.stringify({
+          release,
+          generation: 1,
+          versions: {},
+          shared: {},
+        }),
+      })
+      .where(eq(rolloutTargets.rolloutId, rolloutId));
+    await db.delete(clientRuns).where(eq(clientRuns.clientId, clientId));
+    // Its run reads the client, then claims it; an apply that ran start to
+    // finish lands just before the claim, as its operation leaves the
+    // record: a change after the rollout's, done.
+    const prepare = env.DB.prepare.bind(env.DB);
+    const batch = env.DB.batch.bind(env.DB);
+    let claiming = false;
+    let raced = false;
+    const preparing = vi
+      .spyOn(env.DB, "prepare")
+      .mockImplementation((query) => {
+        if (query.startsWith('insert into "client_runs"')) {
+          claiming = true;
+        }
+        return prepare(query);
+      });
+    const batching = vi
+      .spyOn(env.DB, "batch")
+      .mockImplementation(async (statements) => {
+        if (claiming && !raced) {
+          raced = true;
+          await prepare(
+            "update client_provisions set change = change + 1, status = 'done', what = 'settings' where client_id = ?"
+          )
+            .bind(clientId)
+            .run();
+        }
+        return await batch(statements);
+      });
+    await using run = await followRollouts();
+    try {
+      await env.ROLLOUT.create({
+        id: rolloutId,
+        params: {
+          rolloutId,
+          releaseId: null,
+          startedBy: { email: staff.email, sub: staff.sub },
+        },
+      });
+      await run.waitForStatus("complete");
+    } finally {
+      preparing.mockRestore();
+      batching.mockRestore();
+    }
+    const target = await db
+      .select({ status: rolloutTargets.status, change: rolloutTargets.change })
+      .from(rolloutTargets)
+      .where(eq(rolloutTargets.rolloutId, rolloutId))
+      .get();
+    const operation = await db
+      .select({ change: clientProvisions.change })
+      .from(clientProvisions)
+      .where(eq(clientProvisions.clientId, clientId))
+      .get();
+
+    expect({
+      raced,
+      status: target?.status,
+      // Done by a change of its own, the client's latest, not the one the
+      // apply moved on from.
+      ranItsOwn: target?.change === operation?.change,
+      afterTheApply: (target?.change ?? 0) > change + 1,
+    }).toStrictEqual({
+      raced: true,
+      status: "done",
+      ranItsOwn: true,
+      afterTheApply: true,
+    });
+  });
+
+  it("holds a shared secret's revocation while a Worker holding it isn't read, whatever its operation delivered", async () => {
+    const release = await placedRelease("feat(core): runs");
+    const internal = await live(0, release);
+    const { clientId } = internal;
+    const operation = await db
+      .select({ progress: clientProvisions.progress })
+      .from(clientProvisions)
+      .where(eq(clientProvisions.clientId, clientId))
+      .get();
+    const { shared } = z
+      .object({
+        shared: z.record(z.string(), z.record(z.string(), z.string())),
+      })
+      .parse(JSON.parse(operation?.progress ?? "{}"));
+    // Its connect in a namespace: drift reads only its core, through core's
+    // health, never connect's live version.
+    const placement = await db
+      .select({ destinationId: clientPlacements.destinationId })
+      .from(clientPlacements)
+      .where(eq(clientPlacements.clientId, clientId))
+      .get();
+    await db
+      .update(hostingDestinations)
+      .set({ kind: "workers_for_platforms", namespace: "production" })
+      .where(eq(hostingDestinations.id, placement?.destinationId ?? ""));
+    // A secrets rollout that rotated connect's Composio key: its operation
+    // delivered the store's value, as on record.
+    const rolloutId = crypto.randomUUID();
+    const at = longAgo();
+    await db.insert(rollouts).values({
+      id: rolloutId,
+      kind: "secrets",
+      releaseId: null,
+      status: "done",
+      ring: 0,
+      startedBy: staff.email,
+      sharedSecrets: JSON.stringify({ ...shared.core, ...shared.connect }),
+      createdAt: at,
+      updatedAt: at,
+    });
+    await db.insert(rolloutTargets).values({
+      rolloutId,
+      clientId,
+      ring: 0,
+      status: "done",
+      previous: JSON.stringify({
+        release,
+        generation: 1,
+        versions: {},
+        shared: { connect: { ...shared.connect, COMPOSIO_API_KEY: "before" } },
+      }),
+      updatedAt: at,
+    });
+
+    await expect(checkRevocation(env, rolloutId)).resolves.toMatchObject({
+      rotated: ["COMPOSIO_API_KEY"],
+      revocable: [],
+      behind: { COMPOSIO_API_KEY: [clientId] },
     });
   });
 

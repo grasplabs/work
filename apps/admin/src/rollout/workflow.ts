@@ -574,6 +574,25 @@ const startTarget = async (
 };
 
 /**
+ * The operation `target` started, if its change is still client
+ * `clientId`'s latest, read once the rollout holds the client; else null.
+ * What the rollout read before claiming it, another runner could have
+ * changed since (a release or an apply that finished in between); held,
+ * nothing else changes it.
+ */
+const stillResumed = async (
+  db: AdminDatabase,
+  clientId: string,
+  target: { deployId: string | null; change: number | null }
+): Promise<string | null> => {
+  if (target.deployId === null || target.change === null) {
+    return null;
+  }
+  const held = await targetClient(db, clientId);
+  return held?.operation?.change === target.change ? target.deployId : null;
+};
+
+/**
  * Claims client `clientId` for the rollout, unless it skips it, and
  * returns its operation, taken to the release the rollout runs. A client
  * it skips (`skipFor`) is skipped, audited, unless the rollout is
@@ -635,8 +654,9 @@ const claimTarget = async (
     return { state: "skipped" };
   }
   await claimClient(env, db, rolloutId, clientId);
-  if (resumes && target.deployId !== null) {
-    return { state: "claimed", operationId: target.deployId };
+  const resumed = resumes ? await stillResumed(db, clientId, target) : null;
+  if (resumed !== null) {
+    return { state: "claimed", operationId: resumed };
   }
   return await startTarget(db, params, clientId, {
     previous: target.previous,

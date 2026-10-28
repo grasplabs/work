@@ -102,7 +102,7 @@ export const recordedShared = async (
   db: AdminDatabase,
   clientId: string,
   app: string,
-  version: string | null
+  version: string
 ): Promise<SharedPrints | null> => {
   const worker = workerSchema.safeParse(app);
   if (!worker.success) {
@@ -129,7 +129,7 @@ export const recordedShared = async (
   if (row === undefined || row.status !== "done") {
     return null;
   }
-  if (version !== null && row.versionId !== version) {
+  if (row.versionId !== version) {
     return null;
   }
   return deliveredShared(row.progress)[app] ?? null;
@@ -139,8 +139,9 @@ export const recordedShared = async (
  * For each shared secret, whether the client whose drift is `drift` (read
  * live, `driftOf`) runs `expected`'s value on every Worker of its release
  * that holds it (`holders`), by name. A Worker that's unrecorded, split,
- * unreadable or live on a version without fingerprints runs none of the
- * secrets it holds; a client with no Worker read runs none at all.
+ * unreadable, not read at all, or live on a version without fingerprints
+ * runs none of the secrets it holds; a client with no Worker read runs
+ * none at all.
  */
 const liveMatches = async (
   db: AdminDatabase,
@@ -173,16 +174,13 @@ const liveMatches = async (
     })
   );
   // A Worker drift doesn't read (connect, in a namespace, whose versions
-  // only core's health tells): what its operation delivered, done.
+  // only core's health tells) runs none: what its operation delivered
+  // doesn't say what it runs now, and a secret it still runs must never
+  // read as revocable.
   const read = new Set(drift.workers.map(({ worker }) => worker));
-  const unread = await Promise.all(
-    Object.keys(holders)
-      .filter((app) => !read.has(app))
-      .map(async (app) => ({
-        held: holders[app] ?? [],
-        prints: await recordedShared(db, drift.clientId, app, null),
-      }))
-  );
+  const unread = Object.keys(holders)
+    .filter((app) => !read.has(app))
+    .map((app) => ({ held: holders[app] ?? [], prints: null }));
   for (const { held, prints } of [...workers, ...unread]) {
     for (const name of held) {
       const runs = prints !== null && prints[name] === expected[name];
@@ -215,17 +213,20 @@ export const storeCheck = async (
  * every shared secret in the store now (`check`), on every Worker holding
  * it; null when that can't be told: its drift is unknown (nothing
  * recorded, or its account didn't answer), or a Worker's live versions
- * weren't read. Only what was read and differs is behind.
+ * weren't read, or drift doesn't read a Worker holding one (connect, in a
+ * namespace). Only what was read and differs is behind.
  */
 export const sharedSecretsStatus = async (
   db: AdminDatabase,
   drift: ClientDrift | null,
   check: StoreCheck
 ): Promise<boolean | null> => {
+  const read = new Set(drift?.workers.map(({ worker }) => worker));
   if (
     drift === null ||
     drift.state === "unknown" ||
-    drift.workers.some(({ live }) => live === null)
+    drift.workers.some(({ live }) => live === null) ||
+    Object.keys(check.holders).some((app) => !read.has(app))
   ) {
     return null;
   }
