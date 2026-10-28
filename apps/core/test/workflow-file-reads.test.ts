@@ -1,5 +1,6 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
+import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
+import { canonicalJson } from "@grasp-os/shared/json";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -248,7 +249,14 @@ const definitionOf = (name: string, mail: string, files: string): string =>
  * 365 account's attachments, its mail and files bindings approved by an
  * admin: the builder, the workflow and the mailbox.
  */
-const readingWorkflow = async (module = readModule()) => {
+const readingWorkflow = async (
+  module = readModule(),
+  /**
+   * Its contract as one published before contracts recorded file answers:
+   * stored without `answersFile`, though the connector now offers one.
+   */
+  older = false
+) => {
   const adminPerson = await signedInApi(idp, "admin");
   const builderPerson = await signedInApi(idp, "builder");
   const admin = identityOf(adminPerson.userId, "admin");
@@ -287,6 +295,42 @@ const readingWorkflow = async (module = readModule()) => {
       },
     },
   });
+  // Contracts never change once published: one from before file answers
+  // is written as such under a key of its own, as it was stored then.
+  const contractKey = older ? `${mailKey}-older` : mailKey;
+  if (older) {
+    const stored = await env.DB.prepare(
+      "SELECT kind, contract, published_by AS publishedBy FROM workflow_catalog_contracts WHERE key = ?"
+    )
+      .bind(mailKey)
+      .first<{ kind: string; contract: string; publishedBy: string }>();
+    const contract = z
+      .object({
+        operations: z.record(z.string(), z.record(z.string(), z.json())),
+      })
+      .loose()
+      .parse(JSON.parse(stored?.contract ?? "{}"));
+    const { answersFile: _answersFile, ...readOperation } =
+      contract.operations["mail.readAttachment"] ?? {};
+    const text = canonicalJson(
+      z.json().parse({
+        ...contract,
+        operations: { "mail.readAttachment": readOperation },
+      })
+    );
+    await env.DB.prepare(
+      "INSERT INTO workflow_catalog_contracts (key, kind, contract, fingerprint, published_by, published_at) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+      .bind(
+        contractKey,
+        stored?.kind ?? "connector",
+        text,
+        await sha256Hex(text),
+        stored?.publishedBy ?? admin.userId,
+        Date.now()
+      )
+      .run();
+  }
   const filesKey = `files-${unique()}`;
   await publishCatalogContract(env, admin, { key: filesKey, kind: "files" });
   const workflow = await createWorkflowResource(
@@ -295,7 +339,7 @@ const readingWorkflow = async (module = readModule()) => {
     `reads-${unique()}`
   );
   await publishWorkflowVersion(env, builder, workflow.id, {
-    definition: definitionOf(workflow.name, mailKey, filesKey),
+    definition: definitionOf(workflow.name, contractKey, filesKey),
     basedOn: null,
     modules: { "code/read.ts": module },
   });
@@ -520,6 +564,39 @@ describe("a connector read kept as a file of the run", () => {
       kept: { type: "application/pdf", name: "attachment" },
       refused: { status: "failed", code: "file.run_type_unsupported" },
       rows: 0,
+    });
+  });
+
+  it("binds a contract published before file answers to a connector that now offers one, which still keeps no file", async () => {
+    const older = await readingWorkflow(readModule(), true);
+    await attach(older.mailbox, "m4", {
+      id: "t",
+      name: "hello.txt",
+      contentType: "text/plain",
+      bytes: new TextEncoder().encode("hello"),
+    });
+
+    const asBase64 = await ran(older.builder, older.workflow.id, {
+      mailbox: older.mailbox,
+      message: "m4",
+      attachment: "t",
+      into: "",
+    });
+    const intoFiles = await ran(older.builder, older.workflow.id, {
+      mailbox: older.mailbox,
+      message: "m4",
+      attachment: "t",
+      into: "files",
+    });
+
+    // Its binding was approved, and it runs: only the file it never
+    // recorded is refused.
+    expect({
+      base64: answerOf(asBase64.end).answer.content,
+      intoFiles: intoFiles.end,
+    }).toStrictEqual({
+      base64: btoa("hello"),
+      intoFiles: { status: "failed", code: "workflow.call_invalid" },
     });
   });
 
