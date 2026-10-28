@@ -19,7 +19,7 @@ import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients, hostingDestinations } from "../db/schema.ts";
 import { importedManifest } from "../deploy/release.ts";
-import { ProvisionError } from "../provision/control.ts";
+import { ProvisionError } from "../provision/errors.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 import type { RunStatus } from "../runners.ts";
 import { InventoryError, placeClient, placementOf } from "./inventory.ts";

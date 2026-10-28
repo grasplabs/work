@@ -111,7 +111,8 @@ const expectedWorkers = async (
 
 /**
  * Client `clientId`'s drift, read live from its account; null when the
- * admin has no such client, or it's placed in a hosting destination. Every Worker of the releases it runs or is
+ * admin has no such client, or it's placed in a hosting destination or
+ * has no account of its own. Every Worker of the releases it runs or is
  * pinned to is read, recorded or not: one the admin has no record of
  * (a deploy that stopped part way, or whose record was lost) is never in
  * sync, `drifted` when its account answers. A Worker whose deployments
@@ -138,6 +139,10 @@ export const driftOf = async (
   if (client === undefined || client.placed !== null) {
     return null;
   }
+  const { accountId } = client;
+  if (accountId === null) {
+    return null;
+  }
   const recorded = await db
     .select({
       worker: clientWorkers.worker,
@@ -158,11 +163,7 @@ export const driftOf = async (
     [...recorded, ...unrecorded].map(
       async ({ worker, scriptName, versionId }) => {
         try {
-          const [current] = await listDeployments(
-            api,
-            client.accountId,
-            scriptName
-          );
+          const [current] = await listDeployments(api, accountId, scriptName);
           const live = current?.versions ?? [];
           return {
             worker,

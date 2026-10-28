@@ -68,8 +68,12 @@ export const clients = sqliteTable(
     /** The client's slug: its subdomain, `<slug>.<domain>`. */
     id: text().primaryKey(),
     name: text().notNull(),
-    /** The Cloudflare account the admin adopted for it. */
-    accountId: text("account_id").notNull().unique(),
+    /**
+     * The Cloudflare account the admin adopted for it, under the
+     * account-per-client path; null for a client created as a placement in
+     * a hosting destination (src/hosting/), which every new client is.
+     */
+    accountId: text("account_id").unique(),
     /**
      * The generation of the client's derived secrets: each is
      * `HMAC(<master key>, "<purpose>:<id>:<generation>")`
@@ -95,7 +99,7 @@ export const clients = sqliteTable(
     status: text({ enum: ["provisioning", "active", "offboarded"] })
       .notNull()
       .default("provisioning"),
-    /** The staff member who started provisioning it (src/provision/). */
+    /** The staff member who added it (src/provision/). */
     createdBy: text("created_by"),
     /**
      * How its people sign in, as staff gave it when provisioning: JSON
@@ -179,10 +183,8 @@ export const clientRuns = sqliteTable("client_runs", {
    * (src/hosting/workflow.ts).
    */
   kind: text({
-    enum: ["provision", "rollout", "rollback", "apply", "provision_placed"],
-  })
-    .notNull()
-    .default("provision"),
+    enum: ["rollout", "rollback", "apply", "provision_placed"],
+  }).notNull(),
 });
 
 /**

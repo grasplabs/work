@@ -30,7 +30,6 @@ import { clientDomain, deployContext } from "../src/deploy/context.ts";
 import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import { placeClient } from "../src/hosting/inventory.ts";
-import { startProvisioning } from "../src/provision/control.ts";
 import { importReleases } from "../src/releases/import.ts";
 import {
   approveRollout,
@@ -1173,32 +1172,13 @@ describe("rolling a release out", () => {
     const internal = await activeClient(0, before);
     const release = await importedRelease("feat(core): wait your turn");
     const counts = deploymentCounts(internal.account);
-    // A provisioning run still going (waiting for Workers Paid), named as
-    // the client's runner: as its own provisioning run would be.
-    const provisioning = await introspectWorkflow(env.PROVISION_CLIENT);
-    const held = `held-${crypto.randomUUID().slice(0, 8)}`;
-    await startProvisioning(env, staff, {
-      clientId: held,
-      name: "Held",
-      releaseId: release,
-      ring: 1,
-      signIn: {
-        domains: ["acme.test"],
-        admins: ["ada@acme.test"],
-        googleHostedDomain: "acme.test",
-      },
-    });
-    const [heldRun] = await provisioning.get();
-    await heldRun?.waitForStepResult({ name: "client" });
-    const [heldClaim] = await db
-      .select({ runId: clientRuns.runId })
-      .from(clientRuns)
-      .where(eq(clientRuns.clientId, held));
-    const runId = heldClaim?.runId ?? "";
+    // Another runner, named as the client's: an attempt claimed a moment
+    // ago, still starting.
+    const runId = `${internal.clientId}-pheld`;
     await db.insert(clientRuns).values({
       clientId: internal.clientId,
       runId,
-      kind: "provision",
+      kind: "provision_placed",
       claimedAt: new Date(),
     });
 
@@ -1222,13 +1202,15 @@ describe("rolling a release out", () => {
           },
         },
         rollout: { status: "failed", ring: 0 },
-        runner: { runId, kind: "provision" },
+        runner: { runId, kind: "provision_placed" },
       });
     }
 
-    const heldInstance = await env.PROVISION_CLIENT.get(runId);
-    await heldInstance.terminate();
-    await heldRun?.waitForStatus("terminated");
+    // An hour on, the attempt never started: it has ended.
+    await db
+      .update(clientRuns)
+      .set({ claimedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(clientRuns.clientId, internal.clientId));
     {
       await using run = await followRollouts();
       const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
@@ -1247,7 +1229,6 @@ describe("rolling a release out", () => {
         runner: null,
       });
     }
-    await provisioning.dispose();
   });
 
   it("refuses a rollout whose run would pass the step budget, starting nothing", async () => {
