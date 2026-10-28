@@ -1,4 +1,11 @@
 import {
+  finishPurge,
+  openPurge,
+  purgeStatus,
+  runStep,
+} from "@grasp-os/brain/purge-ledger";
+import { documentIdSchema } from "@grasp-os/shared/ids";
+import {
   purgeMaxDocuments,
   purgeMaxTerms,
   purgeTermMaxLength,
@@ -10,6 +17,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-outbox.ts";
 import { forContext, saveUserMemory } from "../src/knowledge/memory.ts";
+import { brainOf } from "../src/knowledge/ports.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -962,6 +970,16 @@ describe("a purge whose index cleanup fails", setUpTime, () => {
 });
 
 /** Each step of a purge's status, as `step: state` or `step: state: reason`. */
+/** How many rebuilds purge `purgeId` owes: one, or none. */
+const owed = async (purgeId: string) => {
+  const row = await env.KNOWLEDGE.prepare(
+    "SELECT count(*) AS n FROM search_rebuilds WHERE id = ?"
+  )
+    .bind(purgeId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+};
+
 const stateOf = (status: {
   steps: readonly { step: string; state: string; reason: string | null }[];
 }) =>
@@ -1073,6 +1091,143 @@ describe("a purge's record", setUpTime, () => {
         },
       },
       ledgerHoldsTerm: false,
+    });
+  });
+
+  it("starts and finishes a purge naming as many documents as a purge may", async () => {
+    const admin = await personOf("admin");
+    const secret = `smit${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const documentIds: string[] = [];
+    for (let number = 1; number <= purgeMaxDocuments; number += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one document after another
+      const saved = await saveOver(
+        admin,
+        handbook.id,
+        `page-${number}.md`,
+        `# Page ${number}\nWrite to ${secret}.`
+      );
+      documentIds.push(saved.id);
+    }
+    const { result } = await purged(admin, {
+      type: "content",
+      documentIds,
+      terms: [secret],
+      reason: "other",
+    });
+    const status = await admin.api.knowledge.purgeStatus(result.purgeId);
+
+    expect({
+      documents: result.documents,
+      state: status.state,
+      steps: status.steps.length,
+    }).toStrictEqual({
+      documents: purgeMaxDocuments,
+      state: "complete",
+      // A step per document, and the purge's own five.
+      steps: purgeMaxDocuments + 5,
+    });
+  });
+
+  it("owes its own rebuild on every run, though another purge's rebuild cleared the run before's", async () => {
+    const admin = await personOf("admin");
+    const secret = `bos${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "people.md",
+      `# People\nWrite to ${secret}.`
+    );
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [secret],
+      reason: "other",
+    };
+    const failing = await rebuildFailingOnce(admin);
+    const first = await admin.api.knowledge.preparePurge(input);
+    const events = await auditedDuring(async () => {
+      await outcome(failing.knowledge.purge(input, first.token));
+    });
+    const purgeId = String(
+      events.find(({ action }) => action === "knowledge.purged")?.detail
+        ?.purgeId
+    );
+    // Another purge's rebuild: the first run's writes were done, so it
+    // clears what that run owed.
+    await payOwedRebuilds();
+    const cleared = await owed(purgeId);
+    // Run again, and its rebuild fails once more.
+    const failingAgain = await rebuildFailingOnce(admin);
+    const again = await admin.api.knowledge.preparePurge(input);
+    const second = await outcome(
+      failingAgain.knowledge.purge(input, again.token)
+    );
+
+    expect({ cleared, second, owedAgain: await owed(purgeId) }).toStrictEqual({
+      cleared: 0,
+      second: "knowledge.purge_index_pending",
+      // The next purge knows to rebuild for this run's writes.
+      owedAgain: 1,
+    });
+  });
+
+  it("lets one run at a time hold a purge, and a trailing run change nothing of one that finished", async () => {
+    const admin = await personOf("admin");
+    const brain = brainOf(env);
+    const by = {
+      actor: { type: "person", userId: admin.userId },
+      userId: admin.userId,
+    };
+    const input = {
+      type: "content" as const,
+      documentIds: [documentIdSchema.parse(crypto.randomUUID())],
+      terms: [`term${unique()}`],
+      reason: "other" as const,
+    };
+    const open = async () =>
+      await openPurge(
+        brain,
+        by,
+        input,
+        ["one"],
+        {},
+        () => [],
+        () => []
+      );
+    const first = await open();
+    // A second run while the first holds it, within its lease.
+    const whileHeld = await outcome(open());
+    await runStep(brain, first, "one", async () => {
+      await Promise.resolve();
+    });
+    await finishPurge(brain, first);
+    // The first run's handle, trailing after it finished, failing a step.
+    const trailing = await outcome(
+      runStep(brain, first, "one", async () => {
+        await Promise.resolve();
+        throw new Error("too late");
+      })
+    );
+    const status = await purgeStatus(brain, first.purgeId);
+
+    expect({
+      whileHeld,
+      trailing,
+      state: status.state,
+      steps: stateOf(status),
+    }).toStrictEqual({
+      whileHeld: "knowledge.conflict",
+      trailing: "knowledge.conflict",
+      state: "complete",
+      steps: { one: "complete" },
     });
   });
 

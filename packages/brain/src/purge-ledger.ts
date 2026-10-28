@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { z } from "zod";
 
@@ -19,22 +19,38 @@ import type { PurgeStatus, purgeInputSchema } from "./knowledge.ts";
 // been written since the last run (the GRA-1122 security review); what it
 // changed adds to what it stored. A step that fails is blocked with a
 // stable code, never an error's message, and the purge's error goes on to
-// its caller as before. An admin may start a purge fresh instead: the
+// its caller as before. Each run of a purge is an attempt: it takes the
+// purge under a token of its own, renews its hold with each step's own
+// writes, and only it changes the purge or its steps, so a trailing run
+// never changes one another finished or took over. Each attempt owes its
+// own rebuild. An admin may start a purge fresh instead: the
 // unfinished one is kept as it stood, superseded by the new one. The record holds who,
 // when, which documents (as its audit event does) and counts: never a
 // term, text or anything else the purge erased.
 
 type PurgeInput = z.output<typeof purgeInputSchema>;
 
-/** How long a run holds a step before another may take it over. */
-export const purgeStepLeaseMs = 10 * 60 * 1000;
+/** How long an attempt holds its purge, from its last step, before another may take it over. */
+export const purgeAttemptLeaseMs = 10 * 60 * 1000;
+
+/**
+ * Step rows one insert writes: D1 binds at most 100 values a statement,
+ * and drizzle binds every column of a row, defaults too (seven).
+ */
+const stepRowsPerStatement = 14;
 
 /** What a step changed: counts, by name. */
 export type StepCounts = Record<string, number>;
 
-/** A purge's record, as opened to run (`openPurge`). */
-export interface OpenPurge {
+/** A purge as one attempt holds it: what its steps run under. */
+export interface PurgeAttempt {
   purgeId: string;
+  /** The attempt's token (`brain_purges.attempt`). */
+  attempt: string;
+}
+
+/** A purge's record, as opened to run (`openPurge`). */
+export interface OpenPurge extends PurgeAttempt {
   /** Whether it was begun before, and is resumed. */
   resumed: boolean;
   /** What it counted as it began. */
@@ -75,22 +91,24 @@ const stepRows = <C>(
   steps: readonly string[],
   from: number,
   now: Date
-): BatchItem<"sqlite">[] =>
-  steps.length === 0
-    ? []
-    : [
-        db
-          .insert(brainPurgeSteps)
-          .values(
-            steps.map((step, index) => ({
-              purgeId,
-              step,
-              position: from + index,
-              updatedAt: now,
-            }))
-          )
-          .onConflictDoNothing(),
-      ];
+): BatchItem<"sqlite">[] => {
+  const rows = steps.map((step, index) => ({
+    purgeId,
+    step,
+    position: from + index,
+    updatedAt: now,
+  }));
+  const statements: BatchItem<"sqlite">[] = [];
+  for (let at = 0; at < rows.length; at += stepRowsPerStatement) {
+    statements.push(
+      db
+        .insert(brainPurgeSteps)
+        .values(rows.slice(at, at + stepRowsPerStatement))
+        .onConflictDoNothing()
+    );
+  }
+  return statements;
+};
 
 /** Queues those of `steps` purge `purgeId` doesn't have yet. */
 const queueSteps = async <C>(
@@ -127,6 +145,35 @@ const countsOf = (stored: string | null): StepCounts => {
 };
 
 /**
+ * Whether purge `purgeId` is held by attempt `attempt`, its hold renewed
+ * at `at` (in the same batch): open, not superseded.
+ */
+export const attemptHolds = ({ purgeId, attempt }: PurgeAttempt, at: Date) =>
+  sql`EXISTS (SELECT 1 FROM ${brainPurges} WHERE ${brainPurges.id} = ${purgeId} AND ${brainPurges.attempt} = ${attempt} AND ${brainPurges.attemptAt} = ${at.getTime()} AND ${brainPurges.completedAt} IS NULL AND ${brainPurges.supersededBy} IS NULL)`;
+
+/**
+ * Renews `held`'s hold on its purge to `now`, unless it lapsed, was taken
+ * over, or the purge finished: what a step's writes are conditional on
+ * (`attemptHolds`), in the same batch.
+ */
+const renewHold = <C>(brain: Brain<C>, held: PurgeAttempt, now: Date) =>
+  brain.db
+    .update(brainPurges)
+    .set({ attemptAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(brainPurges.id, held.purgeId),
+        eq(brainPurges.attempt, held.attempt),
+        gt(
+          brainPurges.attemptAt,
+          new Date(now.getTime() - purgeAttemptLeaseMs)
+        ),
+        isNull(brainPurges.completedAt),
+        isNull(brainPurges.supersededBy)
+      )
+    );
+
+/**
  * The record of the unfinished purge of `input`, resumed, or a new one,
  * with `steps` queued, written in one batch with what `begin` writes when
  * the purge begins (its audit event, the rebuild it owes): never twice.
@@ -138,6 +185,11 @@ export const openPurge = async <C>(
   steps: readonly string[],
   counts: StepCounts,
   begin: (purgeId: string) => BatchItem<"sqlite">[],
+  /**
+   * What each attempt writes as it takes the purge (the rebuild it owes),
+   * conditional on `held` (`attemptHolds`) holding it at `at`.
+   */
+  renew: (held: PurgeAttempt, at: Date) => BatchItem<"sqlite">[],
   /** Begins anew, the open one kept as it stood, superseded. */
   fresh = false
 ): Promise<OpenPurge> => {
@@ -155,12 +207,40 @@ export const openPurge = async <C>(
     )
     .limit(1);
   const now = brain.ports.clock();
+  const attempt = crypto.randomUUID();
   if (open !== undefined && !fresh) {
     // A step the purge names now that it didn't before (a document's
     // step is named by the document): queued after the rest.
     await queueSteps(brain, open.id, steps, now);
+    const held = { purgeId: open.id, attempt };
+    // Taken for this attempt, unless another holds it within its lease
+    // or it finished meanwhile; with the rebuild this attempt owes.
+    const [taken] = await db.batch([
+      db
+        .update(brainPurges)
+        .set({ attempt, attemptAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(brainPurges.id, open.id),
+            isNull(brainPurges.completedAt),
+            isNull(brainPurges.supersededBy),
+            or(
+              isNull(brainPurges.attemptAt),
+              lt(
+                brainPurges.attemptAt,
+                new Date(now.getTime() - purgeAttemptLeaseMs)
+              )
+            )
+          )
+        )
+        .returning({ id: brainPurges.id }),
+      ...renew(held, now),
+    ]);
+    if (taken.length === 0) {
+      throw knowledgeErrors.create("knowledge.conflict");
+    }
     return {
-      purgeId: open.id,
+      ...held,
       resumed: true,
       counts: countsOf(open.counts),
     };
@@ -187,6 +267,8 @@ export const openPurge = async <C>(
       key,
       by: by.userId,
       counts: JSON.stringify(counts),
+      attempt,
+      attemptAt: now,
       createdAt: now,
       updatedAt: now,
     });
@@ -197,6 +279,7 @@ export const openPurge = async <C>(
       begun,
       ...stepRows(brain, purgeId, steps, 0, now),
       ...begin(purgeId),
+      ...renew({ purgeId, attempt }, now),
     ];
     await db.batch([first ?? begun, ...rest]);
   } catch (error) {
@@ -207,7 +290,7 @@ export const openPurge = async <C>(
     throw error;
   }
   brain.ports.audit.drain();
-  return { purgeId, resumed: false, counts };
+  return { purgeId, attempt, resumed: false, counts };
 };
 
 /** Why a step failed, as a stable code: never a message. */
@@ -225,105 +308,104 @@ const added = (a: StepCounts, b: StepCounts): StepCounts => {
 };
 
 /**
- * Runs step `step` of purge `purgeId` with `run`, also when it ran before
- * (what holds a term may have been written since): what it changes adds
- * to what it stored, which is answered. Claimed first under a token of
- * its own, so two runs never run the same step, and only the run holding
- * the claim sets how it ended: one held by another run, within its lease,
- * refuses as `knowledge.conflict`.
+ * Runs step `step` of the purge `held` holds with `run`, also when it ran
+ * before (what holds a term may have been written since): what it changes
+ * adds to what it stored, which is answered. Each of its writes renews
+ * the attempt's hold in the same batch and is made only under it: an
+ * attempt whose lease lapsed, that was taken over, or whose purge
+ * finished refuses as `knowledge.conflict` and changes nothing.
  */
 export const runStep = async <C>(
   brain: Brain<C>,
-  purgeId: string,
+  held: PurgeAttempt,
   step: string,
   /** Answers what it changed, as counts, or nothing to count. */
   run: () => Promise<unknown>
 ): Promise<StepCounts> => {
   const { db } = brain;
-  const now = brain.ports.clock();
   const mine = and(
-    eq(brainPurgeSteps.purgeId, purgeId),
+    eq(brainPurgeSteps.purgeId, held.purgeId),
     eq(brainPurgeSteps.step, step)
   );
-  const claim = crypto.randomUUID();
-  const claimed = await db
-    .update(brainPurgeSteps)
-    .set({
-      state: "running",
-      claim,
-      claimedAt: now,
-      reason: null,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        mine,
-        or(
-          inArray(brainPurgeSteps.state, ["queued", "blocked", "complete"]),
-          and(
-            eq(brainPurgeSteps.state, "running"),
-            lt(
-              brainPurgeSteps.claimedAt,
-              new Date(now.getTime() - purgeStepLeaseMs)
-            )
-          )
-        )
-      )
-    )
-    .returning({ counts: brainPurgeSteps.counts });
-  const [held] = claimed;
-  if (held === undefined) {
+  /**
+   * Writes `set` to the step under the attempt's renewed hold, and lets
+   * the hold go after when `release`: whether it held.
+   */
+  const underHold = async (
+    set: Partial<typeof brainPurgeSteps.$inferInsert>,
+    release = false
+  ): Promise<{ counts: string | null } | undefined> => {
+    const now = brain.ports.clock();
+    const [, written] = await db.batch([
+      renewHold(brain, held, now),
+      db
+        .update(brainPurgeSteps)
+        .set({ ...set, updatedAt: now })
+        .where(and(mine, attemptHolds(held, now)))
+        .returning({ counts: brainPurgeSteps.counts }),
+      ...(release
+        ? [
+            db
+              .update(brainPurges)
+              .set({ attempt: null, attemptAt: null, updatedAt: now })
+              .where(
+                and(
+                  eq(brainPurges.id, held.purgeId),
+                  eq(brainPurges.attempt, held.attempt)
+                )
+              ),
+          ]
+        : []),
+    ]);
+    return written[0];
+  };
+  const started = await underHold({ state: "running", reason: null });
+  if (started === undefined) {
     throw knowledgeErrors.create("knowledge.conflict");
   }
-  const before = countsOf(held.counts);
-  const ours = and(mine, eq(brainPurgeSteps.claim, claim));
+  const before = countsOf(started.counts);
   let changed: StepCounts;
   try {
     changed = countsOf(JSON.stringify((await run()) ?? {}));
   } catch (error) {
-    await db
-      .update(brainPurgeSteps)
-      .set({
-        state: "blocked",
-        reason: reasonOf(error),
-        claim: null,
-        claimedAt: null,
-        updatedAt: brain.ports.clock(),
-      })
-      .where(ours);
+    // Blocked, and the purge let go: run again, it goes on at once.
+    await underHold({ state: "blocked", reason: reasonOf(error) }, true);
     throw error;
   }
   const counts = added(before, changed);
-  const ended = await db
-    .update(brainPurgeSteps)
-    .set({
-      state: "complete",
-      counts: JSON.stringify(counts),
-      claim: null,
-      claimedAt: null,
-      updatedAt: brain.ports.clock(),
-    })
-    .where(ours)
-    .returning({ step: brainPurgeSteps.step });
-  // Taken over past its lease: the run that took it says how it ended.
-  if (ended.length === 0) {
+  const ended = await underHold({
+    state: "complete",
+    counts: JSON.stringify(counts),
+  });
+  // Taken over, lapsed, or finished meanwhile: this attempt says nothing.
+  if (ended === undefined) {
     throw knowledgeErrors.create("knowledge.conflict");
   }
   return counts;
 };
 
-/** Marks purge `purgeId` finished once every step of it is complete. */
+/**
+ * Marks the purge `held` holds finished once every step of it is
+ * complete, its hold let go: only under that attempt's hold.
+ */
 export const finishPurge = async <C>(
   brain: Brain<C>,
-  purgeId: string
+  held: PurgeAttempt
 ): Promise<void> => {
   const now = brain.ports.clock();
+  const { purgeId } = held;
   await brain.db
     .update(brainPurges)
-    .set({ completedAt: now, updatedAt: now })
+    .set({ completedAt: now, attempt: null, attemptAt: null, updatedAt: now })
     .where(
       and(
         eq(brainPurges.id, purgeId),
+        eq(brainPurges.attempt, held.attempt),
+        gt(
+          brainPurges.attemptAt,
+          new Date(now.getTime() - purgeAttemptLeaseMs)
+        ),
+        isNull(brainPurges.supersededBy),
         sql`NOT EXISTS (SELECT 1 FROM ${brainPurgeSteps} WHERE ${brainPurgeSteps.purgeId} = ${purgeId} AND ${brainPurgeSteps.state} <> 'complete')`
       )
     );
