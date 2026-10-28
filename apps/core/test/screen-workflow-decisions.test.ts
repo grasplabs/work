@@ -813,6 +813,12 @@ describe(
           pagination: {},
         }),
       };
+      // A run as restricted as the App is now: its screen may answer it,
+      // until the App no longer binds the workflow.
+      const matching = await runAsking(app, opened + 4000, {
+        restricted: true,
+      });
+      const beforeUnbinding = await review(reviewer, matching);
       await unbindWorkflowFromApp(env, fixture.owner, binding);
 
       expect({
@@ -824,7 +830,8 @@ describe(
         stored,
         answeredBy: answeredEvent?.detail,
         afterRestricting,
-        unbound: await review(reviewer, later),
+        beforeUnbinding,
+        unbound: await review(reviewer, matching),
       }).toMatchObject({
         restricted: "decision.not_found",
         elsewhere: "decision.not_found",
@@ -848,6 +855,7 @@ describe(
             items: [{ wait: { id: later.decisionId, canRespond: false } }],
           },
         },
+        beforeUnbinding: "answered",
         unbound: "decision.not_found",
       });
     });
