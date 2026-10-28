@@ -2,7 +2,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit.ts";
-import type { Brain } from "./brain.ts";
+import type { Brain, EvalCapability } from "./brain.ts";
 import { brainEvalCases, brainEvalSuiteVersions } from "./db/schema.ts";
 import { inChunks } from "./documents.ts";
 import type { Writer } from "./documents.ts";
@@ -25,7 +25,29 @@ import { knowledgeErrors } from "./knowledge.ts";
 // source, stays in one split, so nothing leaks from one into another; a
 // version whose splits share a group or source is refused. Each split's
 // digest is kept with the version, so a run states exactly what it ran.
-// Who may read which split is the host's (L2); this keeps the record.
+// Who may do what is the host's to grant (`ports.evaluation`), and each
+// capability stays apart (GRA-311, L2; the Brain design's "Proposed
+// optimizer and test access"):
+//
+// - a designer proposes versions and reads their development and
+//   validation cases;
+// - an evaluator calibrates a version and reads every split, the sealed
+//   final one too, as the trusted grader: the final set is theirs alone;
+// - an optimizer reads the development cases of an accepted version, and
+//   nothing else: never a validation or final case, never an answer key
+//   outside development, and it can't propose, calibrate or accept;
+// - publication reads results, never a case.
+//
+// One who holds the optimizer's capability on a suite together with the
+// designer's or evaluator's is refused all of them there: the one
+// optimizing must never also shape or see what judges it, and the sealed
+// final set is the evaluator's alone. Reads of the held-out cases are
+// audited. Acceptance is the owner's alone, never its proposer's;
+// retirement the owner's or the evaluator's. A version's metadata is
+// shown to whoever holds a capability on it, or owns it. Whatever is
+// refused answers as missing (`knowledge.not_found`), alike for a suite
+// that isn't there. Cases live apart from everything recall, a skill's
+// context or memory reads, so no answer key reaches them.
 
 /** The splits of a suite's cases. */
 export const evalSplits = ["development", "validation", "final"] as const;
@@ -166,8 +188,8 @@ const pinsSchema = z.object({
   policy: z.string(),
 });
 
-/** Suite `suiteId`'s version `version`: never its cases. */
-export const suiteVersion = async <C>(
+/** Suite `suiteId`'s version `version`, ungated: never its cases. */
+const versionOf = async <C>(
   brain: Brain<C>,
   suiteId: string,
   version: number
@@ -237,12 +259,71 @@ const codeUnitOrder = (a: string, b: string): number => {
 };
 
 /**
+ * What `reader` may do with suite `suiteId`, the optimizer's never with
+ * the designer's or evaluator's: refused whole when held together.
+ */
+const capabilitiesOf = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  suiteId: string
+): Promise<ReadonlySet<EvalCapability>> => {
+  const capabilities = brain.ports.evaluation?.capabilities;
+  const granted = new Set<EvalCapability>(
+    capabilities === undefined ? undefined : await capabilities(reader, suiteId)
+  );
+  const mixed =
+    granted.has("optimizer") &&
+    (granted.has("designer") || granted.has("evaluator"));
+  return mixed ? new Set() : granted;
+};
+
+/** Refuses `by` unless it names the same person as `reader`. */
+const requireSame = <C>(brain: Brain<C>, reader: C, by: Writer): void => {
+  if (brain.ports.ownerOf(reader) !== by.userId) {
+    throw knowledgeErrors.create("knowledge.forbidden");
+  }
+};
+
+/**
+ * Suite `suiteId`'s version `version`, for `reader`: one who holds any
+ * capability on it, or its owner. `knowledge.not_found` otherwise. Never
+ * its cases.
+ */
+export const suiteVersion = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  suiteId: string,
+  version: number
+): Promise<EvalSuiteVersion> => {
+  const held = await capabilitiesOf(brain, reader, suiteId);
+  const found = await versionOf(brain, suiteId, version);
+  if (held.size === 0 && found.ownerId !== brain.ports.ownerOf(reader)) {
+    throw knowledgeErrors.create("knowledge.not_found");
+  }
+  return found;
+};
+
+/** Refuses, as missing, `reader` without `capability` on suite `suiteId`. */
+const requireCapability = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  suiteId: string,
+  capability: EvalCapability
+): Promise<void> => {
+  const held = await capabilitiesOf(brain, reader, suiteId);
+  if (!held.has(capability)) {
+    throw knowledgeErrors.create("knowledge.not_found");
+  }
+};
+
+/**
  * Proposes the next version of suite `input.suiteId`, as `by`, its
  * designer: recorded `proposed`, with its digests, and audited. A version
  * is never changed after: a correction is another one.
  */
 export const proposeSuiteVersion = async <C>(
   brain: Brain<C>,
+  reader: C,
   by: Writer,
   input: unknown
 ): Promise<EvalSuiteVersion> => {
@@ -251,6 +332,8 @@ export const proposeSuiteVersion = async <C>(
     proposalSchema,
     input
   );
+  requireSame(brain, reader, by);
+  await requireCapability(brain, reader, proposal.suiteId, "designer");
   requireApart(proposal.cases);
   // Its owner is never its designer, and stays the suite's owner from
   // version to version, unless they hand it on (`changeSuiteOwner`).
@@ -358,7 +441,7 @@ export const proposeSuiteVersion = async <C>(
     }
     throw error;
   }
-  return await suiteVersion(brain, proposal.suiteId, version);
+  return await versionOf(brain, proposal.suiteId, version);
 };
 
 /** Which states a version may move to, from which. */
@@ -376,21 +459,29 @@ const moves = {
  */
 export const moveSuiteVersion = async <C>(
   brain: Brain<C>,
+  reader: C,
   by: Writer,
   suiteId: string,
   version: number,
   to: keyof typeof moves,
   expectedRevision: number
 ): Promise<EvalSuiteVersion> => {
-  const current = await suiteVersion(brain, suiteId, version);
-  if (
-    to === "accepted" &&
-    (current.ownerId !== by.userId || current.proposedBy === by.userId)
-  ) {
-    throw knowledgeErrors.create("knowledge.forbidden");
+  requireSame(brain, reader, by);
+  // Calibration is the evaluator's; acceptance the owner's alone, never
+  // its proposer's; retirement the owner's or the evaluator's: anyone
+  // else finds nothing.
+  if (to === "calibrated") {
+    await requireCapability(brain, reader, suiteId, "evaluator");
   }
-  // Retiring is the owner's too: anyone else finds nothing.
-  if (to === "retired" && current.ownerId !== by.userId) {
+  const current = await versionOf(brain, suiteId, version);
+  const held = await capabilitiesOf(brain, reader, suiteId);
+  // Never one who optimizes against it, though they own it.
+  const owns =
+    current.ownerId === by.userId &&
+    current.proposedBy !== by.userId &&
+    !held.has("optimizer");
+  const evaluates = to === "retired" && held.has("evaluator");
+  if (to !== "calibrated" && !owns && !evaluates) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
   const from: readonly string[] = moves[to];
@@ -428,22 +519,26 @@ export const moveSuiteVersion = async <C>(
   if (moved.length === 0) {
     throw knowledgeErrors.create("knowledge.conflict");
   }
-  return await suiteVersion(brain, suiteId, version);
+  return await versionOf(brain, suiteId, version);
 };
 
 /**
  * Hands suite `suiteId` on to `ownerId`, as `by`, its owner now: the
  * versions proposed after its latest one, at `expectedRevision`, are
  * theirs. A version's own owner never changes. Never to the designer who
- * proposed it.
+ * proposed it. Until the next version is proposed, the hand-on is still
+ * the current owner's: they may redirect it, and the incoming owner can't
+ * act on it yet. That fails toward the owner who stands behind the suite.
  */
 export const changeSuiteOwner = async <C>(
   brain: Brain<C>,
+  reader: C,
   by: Writer,
   suiteId: string,
   ownerId: string,
   expectedRevision: number
 ): Promise<EvalSuiteVersion> => {
+  requireSame(brain, reader, by);
   const { db } = brain;
   const [latest] = await db
     .select()
@@ -491,5 +586,74 @@ export const changeSuiteOwner = async <C>(
   if (moved.length === 0) {
     throw knowledgeErrors.create("knowledge.conflict");
   }
-  return await suiteVersion(brain, suiteId, latest.version);
+  return await versionOf(brain, suiteId, latest.version);
+};
+
+/** One case, as a reader allowed its split reads it. */
+export interface EvalCase {
+  caseId: string;
+  split: EvalSplit;
+  family: string;
+  group: string;
+  input: Json;
+  expected: Json;
+}
+
+/**
+ * The cases of `split` of suite version `version`, for `reader`, as its
+ * capabilities allow: a designer and an evaluator read every split; an
+ * optimizer the development cases of an accepted version alone;
+ * publication none. `knowledge.not_found` otherwise.
+ */
+export const suiteCases = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  suiteId: string,
+  version: number,
+  split: EvalSplit
+): Promise<EvalCase[]> => {
+  const held = await capabilitiesOf(brain, reader, suiteId);
+  const current = await versionOf(brain, suiteId, version);
+  const allowed = {
+    development:
+      held.has("designer") ||
+      held.has("evaluator") ||
+      (held.has("optimizer") && current.state === "accepted"),
+    validation: held.has("designer") || held.has("evaluator"),
+    // The sealed set: the evaluator's alone.
+    final: held.has("evaluator"),
+  }[split];
+  if (!allowed) {
+    throw knowledgeErrors.create("knowledge.not_found");
+  }
+  // A held-out read is audited.
+  if (split !== "development") {
+    await auditedBatch(brain.ports, brain.db, [
+      outboxed(brain, {
+        actor: brain.ports.actorOf(reader),
+        action: "knowledge.eval_suite.cases_read",
+        target: { type: "eval_suite", id: suiteId },
+        detail: { version, split },
+      }),
+    ]);
+  }
+  const rows = await brain.db
+    .select()
+    .from(brainEvalCases)
+    .where(
+      and(
+        eq(brainEvalCases.suiteId, suiteId),
+        eq(brainEvalCases.version, version),
+        eq(brainEvalCases.split, split)
+      )
+    )
+    .orderBy(brainEvalCases.caseId);
+  return rows.map((row) => ({
+    caseId: row.caseId,
+    split: row.split,
+    family: row.family,
+    group: row.group,
+    input: z.json().parse(JSON.parse(row.input)),
+    expected: z.json().parse(JSON.parse(row.expected)),
+  }));
 };

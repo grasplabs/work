@@ -73,6 +73,20 @@ export interface RerankRequest {
  * job runner and clock only through these. `C` is the host's caller,
  * opaque to the Brain: it hands one to every port that asks who.
  */
+/**
+ * What one may do with a learning suite (eval-suites.ts, GRA-311), each
+ * apart: a designer proposes versions and reads their development and
+ * validation cases; an evaluator calibrates and reads every split, the
+ * sealed final one alone; an optimizer reads the development cases of an
+ * accepted version alone; publication reads results, never a case. Its
+ * owner accepts and retires it.
+ */
+export type EvalCapability =
+  | "designer"
+  | "evaluator"
+  | "optimizer"
+  | "publication";
+
 export interface BrainPorts<C> {
   /** What `reader` may read now (authorize.ts). */
   authorize: (reader: C) => Promise<Readable>;
@@ -191,6 +205,16 @@ export interface BrainPorts<C> {
    * Throws to refuse (`brain.budget_exceeded` when its budget is spent).
    */
   wordLesson: (facts: LessonFacts) => Promise<string>;
+  /**
+   * What `reader` may do with learning suite `suiteId` (eval-suites.ts,
+   * GRA-311), as the host grants it: none when the host grants none.
+   */
+  evaluation?: {
+    capabilities: (
+      reader: C,
+      suiteId: string
+    ) => Promise<readonly EvalCapability[]>;
+  };
   memories: {
     /**
      * Whom `reader`'s recall serves: the scopes it may read (none for a
