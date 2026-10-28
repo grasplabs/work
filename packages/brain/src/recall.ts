@@ -1,6 +1,8 @@
 import { z } from "zod";
 
+import { allowedFor } from "./authorize.ts";
 import type { Brain, BrainPorts } from "./brain.ts";
+import { readableCollection } from "./collections.ts";
 import {
   brainContractVersion,
   brainErrors,
@@ -21,10 +23,17 @@ import type { Lane, LaneRanking } from "./fusion.ts";
 import type { CollectionId } from "./ids.ts";
 import { knowledgeErrors, searchMaxLimit } from "./knowledge.ts";
 import type { Provenance } from "./knowledge.ts";
+import { log } from "./log.ts";
 import { searchMemories } from "./memories.ts";
 import type { MemoryAudience } from "./memories.ts";
+import {
+  recallCacheKey,
+  recallCacheOf,
+  recallGeneration,
+} from "./recall-cache.ts";
 import { d1BrainStore } from "./recall-store.ts";
 import type { BrainStore, EvidenceQuery } from "./recall-store.ts";
+import { termsOf } from "./search.ts";
 import type { FoundSection } from "./search.ts";
 import { tokensOf } from "./tokens.ts";
 
@@ -130,6 +139,9 @@ const itemOf = (
     citationLocator: [hit.title, ...hit.headings].slice(0, 16),
   };
 };
+
+/** A memory record as memory's search found it, before the host kept it. */
+type FoundMemory = Awaited<ReturnType<typeof searchMemories>>[number];
 
 /** A memory record the host kept, as the Brain hands it over. */
 type KeptMemory = Awaited<
@@ -390,9 +402,9 @@ const memoriesFound = async <C>(
   readers: MemoryReaders | undefined,
   query: string,
   limit: number
-): Promise<KeptMemory[]> => {
+): Promise<{ found: FoundMemory[]; kept: KeptMemory[] }> => {
   if (readers === undefined) {
-    return [];
+    return { found: [], kept: [] };
   }
   const found = await searchMemories(
     brain,
@@ -401,9 +413,13 @@ const memoriesFound = async <C>(
     limit,
     readers.readable
   );
-  return found.length === 0
-    ? []
-    : await brain.ports.memories.keep(reader, readers.people, found);
+  return {
+    found,
+    kept:
+      found.length === 0
+        ? []
+        : await brain.ports.memories.keep(reader, readers.people, found),
+  };
 };
 
 /** The reranking policy, its version added to the pack's policy when it reranked. */
@@ -537,6 +553,8 @@ type LaneRead =
       state: "read";
       sections: FoundSection[];
       memories: KeptMemory[];
+      /** The full-text lane's memory records as found, before the host kept them. */
+      memoryFound?: FoundMemory[];
       provenance: Provenance;
     }
   /** It had nothing to ask: no exact term in the question. */
@@ -617,7 +635,8 @@ const lanesWithin = async <C>(
         memoriesFound(brain, reader, readers, query.query, query.limit),
       ]).then(([{ sections, provenance }, memories]) => ({
         sections,
-        memories,
+        memories: memories.kept,
+        memoryFound: memories.found,
         provenance,
       })),
       remaining
@@ -725,6 +744,124 @@ const lanesProvenance = (read: LanesRead): Provenance => {
   return all;
 };
 
+/** What a recall keeps of itself (recall-cache.ts): its answer, and what checking it again needs. */
+interface KeptAnswer {
+  items: MemoryItem[];
+  tokenCount: number;
+  truncated: boolean;
+  coverage: Coverage;
+  gaps: MemoryPack["gaps"];
+  policy: string;
+  /** The memory records among the items, as found before the host kept them. */
+  memoryFound: FoundMemory[];
+}
+
+/** The isolate's kept recalls (recall-cache.ts). */
+const answers = recallCacheOf<KeptAnswer>();
+
+/** A memory record, by its ID at its revision. */
+const memoryKey = ({ id, revision }: { id: string; revision: number }) =>
+  `${id}@${revision}`;
+
+/** The document versions `items` cite. */
+const documentRefsOf = (items: readonly MemoryItem[]) =>
+  items.flatMap(({ sourceRefs }) =>
+    sourceRefs.flatMap((ref) =>
+      ref.kind === "document"
+        ? [
+            {
+              documentId: ref.documentId,
+              collectionId: ref.collectionId,
+              version: ref.version,
+            },
+          ]
+        : []
+    )
+  );
+
+/**
+ * A kept answer's current use, checked again for `reader`: every document
+ * version it cites still readable by them, every memory record it holds
+ * still kept for them by the host, at the same revision; and the read
+ * recorded and noted, as the read it stands for was (`searchRecord`,
+ * `memoriesRead`). Its provenance, or nothing when it no longer holds.
+ */
+const usedAgain = async <C>(
+  brain: Brain<C>,
+  store: BrainStore<C>,
+  reader: C,
+  readers: MemoryReaders | undefined,
+  question: string,
+  told: readonly CollectionId[],
+  answer: KeptAnswer
+): Promise<Provenance | undefined> => {
+  const documents = documentRefsOf(answer.items);
+  let memories: KeptMemory[] = [];
+  try {
+    await store.pinsOf(reader, documents);
+    if (answer.memoryFound.length > 0) {
+      if (readers === undefined) {
+        return undefined;
+      }
+      memories = await brain.ports.memories.keep(
+        reader,
+        readers.people,
+        answer.memoryFound
+      );
+    }
+  } catch {
+    return undefined;
+  }
+  const keptNow = memories.map(memoryKey).toSorted();
+  const keptThen = answer.items
+    .flatMap(({ sourceRefs }) =>
+      sourceRefs.flatMap((ref) =>
+        ref.kind === "memory"
+          ? [memoryKey({ id: ref.memoryId, revision: ref.revision })]
+          : []
+      )
+    )
+    .toSorted();
+  if (JSON.stringify(keptNow) !== JSON.stringify(keptThen)) {
+    return undefined;
+  }
+  const allowed = await allowedFor(brain.ports, reader);
+  let sources: Awaited<ReturnType<typeof readableCollection>>[];
+  try {
+    sources = await Promise.all(
+      [
+        ...new Set([
+          ...told,
+          ...documents.map(({ collectionId }) => collectionId),
+        ]),
+      ].map(
+        async (id) =>
+          await readableCollection(brain.db, allowed.collections, id)
+      )
+    );
+  } catch {
+    return undefined;
+  }
+  const documentIds = [
+    ...new Set(documents.map(({ documentId }) => documentId)),
+  ];
+  const sections = await brain.ports.onRead(
+    reader,
+    {
+      action: "knowledge.search",
+      documentIds,
+      detail: {
+        terms: termsOf(question).length,
+        hits: documentIds.length,
+        via: "recall",
+        cache: "hit",
+      },
+    },
+    ...sources
+  );
+  return joined(sections, await memoriesRead(brain, reader, memories), told);
+};
+
 /**
  * `recall`, with every collection it read from: those its search reported
  * (a search records the collections it searched, found or not) and every
@@ -779,6 +916,58 @@ export const recallWithSources = async <C>(
       brain,
       JSON.stringify([await store.accessKey(reader), readers ?? null])
     );
+    // A recall kept a moment ago, under everything its answer rests on,
+    // is used again once its use is checked again (recall-cache.ts).
+    const cacheKey = await recallCacheKey(brain, [
+      recallPolicyVersion,
+      rerankPolicyVersion,
+      indexGeneration,
+      accessRevision,
+      await recallGeneration(brain),
+      query,
+      collectionIds?.toSorted() ?? null,
+      limits,
+    ]);
+    const cached = answers.lookUp(cacheKey, brain.ports.clock().getTime());
+    if (cached !== undefined) {
+      const provenance = await usedAgain(
+        brain,
+        store,
+        reader,
+        readers,
+        query,
+        collectionIds ?? [],
+        cached
+      );
+      if (provenance !== undefined) {
+        log.info("brain.recall", {
+          cache: "hit",
+          policy: cached.policy,
+          ms: brain.ports.clock().getTime() - startedAt,
+        });
+        return {
+          pack: {
+            id: crypto.randomUUID(),
+            contractVersion: brainContractVersion,
+            retrievalPolicyVersion: cached.policy,
+            items: cached.items,
+            sourceVersions: sourcesOf(cached.items),
+            conflicts: [],
+            gaps: cached.gaps,
+            coverage: cached.coverage,
+            truncated: cached.truncated,
+            warnings: [],
+            tokenCount: cached.tokenCount,
+            accessRevision,
+            indexGeneration,
+            createdAt: brain.ports.clock().toISOString(),
+          },
+          sources: provenance.collectionIds,
+          provenance,
+        };
+      }
+      answers.forget(cacheKey);
+    }
     const remaining =
       limits.deadlineMs - (brain.ports.clock().getTime() - startedAt);
     // One more than asked, to tell a full pack from a cut one.
@@ -834,6 +1023,32 @@ export const recallWithSources = async <C>(
       indexGeneration,
       createdAt: brain.ports.clock().toISOString(),
     };
+    // A degraded read isn't kept: the next recall reads again.
+    if (coverage.state !== "degraded") {
+      const inPack = new Set(memories.map(memoryKey));
+      answers.keep(
+        cacheKey,
+        {
+          items,
+          tokenCount,
+          truncated,
+          coverage,
+          gaps: pack.gaps,
+          policy: pack.retrievalPolicyVersion,
+          memoryFound: (read.fulltext.state === "read"
+            ? (read.fulltext.memoryFound ?? [])
+            : []
+          ).filter((each) => inPack.has(memoryKey(each))),
+        } satisfies KeptAnswer,
+        items.reduce((sum, { statement }) => sum + statement.length, 0),
+        brain.ports.clock().getTime()
+      );
+    }
+    log.info("brain.recall", {
+      cache: "miss",
+      policy: pack.retrievalPolicyVersion,
+      ms: brain.ports.clock().getTime() - startedAt,
+    });
     return { pack, sources: provenance.collectionIds, provenance };
   } catch (error) {
     throw asBrainError(brain, error);
