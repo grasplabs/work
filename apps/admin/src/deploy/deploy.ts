@@ -181,6 +181,17 @@ export const redeployKind = (changes: {
   return changes.settings ? "settings" : "secrets";
 };
 
+/** Whether client `clientId` is placed in a hosting destination (src/hosting/). */
+export const isPlaced = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<boolean> =>
+  (await db
+    .select({ clientId: clientPlacements.clientId })
+    .from(clientPlacements)
+    .where(eq(clientPlacements.clientId, clientId))
+    .get()) !== undefined;
+
 /**
  * Throws `client_placed` when client `clientId` is placed in a hosting
  * destination. A placed client's Workers and resources are its
@@ -192,12 +203,7 @@ export const assertNotPlaced = async (
   db: AdminDatabase,
   clientId: string
 ): Promise<void> => {
-  const placed = await db
-    .select({ clientId: clientPlacements.clientId })
-    .from(clientPlacements)
-    .where(eq(clientPlacements.clientId, clientId))
-    .get();
-  if (placed !== undefined) {
+  if (await isPlaced(db, clientId)) {
     throw new DeployError(
       "client_placed",
       `${clientId} is placed in a hosting destination, which this path doesn't deploy`

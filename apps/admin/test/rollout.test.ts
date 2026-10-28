@@ -1119,7 +1119,7 @@ describe("rolling a release out", () => {
     });
   });
 
-  it("leaves a client placed in a hosting destination to its own path: no rollout, deploy, rollback or drift reaches it", async () => {
+  it("leaves a client placed in a hosting destination to its own path: no rollout, deploy, settings, rollback or drift reaches it", async () => {
     // A placed client's Workers and resources are its inventory's, under
     // names this path doesn't know: deploying it here would make a second
     // core in its account, with empty databases, and point its hostname
@@ -1146,10 +1146,12 @@ describe("rolling a release out", () => {
     const next = await rollOut(third, { scope: "ring", ring: 0 });
     await run.waitForStatus("complete");
     const deploy = await codeOf(startDeploy(db, staff, acme.clientId, third));
+    const apply = await codeOf(applySettings(env, staff, acme.clientId));
     const api = cloudflareApi({ token, retryDelayMs: 0 });
 
     expect({
       rollback,
+      apply,
       targets: Object.keys(await targetsOf(next)),
       deploy,
       drift: await driftOf(api, db, acme.clientId),
@@ -1157,6 +1159,7 @@ describe("rolling a release out", () => {
       runner: await runnerOf(acme.clientId),
     }).toStrictEqual({
       rollback: "client_placed",
+      apply: "client_placed",
       targets: [internal.clientId],
       deploy: "client_placed",
       drift: null,
