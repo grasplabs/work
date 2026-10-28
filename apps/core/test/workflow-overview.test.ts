@@ -14,7 +14,13 @@ import type {
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
 import { release, requestGranted } from "./apps.ts";
+import {
+  connectHubspot,
+  connectingAdmin,
+  crmWorkflow,
+} from "./hubspot-workflow.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { fullScan, recordedQueries } from "./query-plans.ts";
@@ -154,13 +160,21 @@ const appOf = async (
   return id;
 };
 
-/** The workflows `person` is told use `connection`, as App and workflow. */
+/**
+ * The workflows `person` is told use `connection`: an App's as its App and
+ * workflow, an independent one as its ID.
+ */
 const workflowsUsing = async (
-  person: Person,
+  person: {
+    api: { workflows: Pick<Person["api"]["workflows"], "byConnection"> };
+  },
   connection: string
 ): Promise<string[][]> => {
-  const summaries = await person.api.workflows.ofConnection(connection);
-  return summaries.map(({ app, workflow }) => [app, workflow]);
+  const uses = await person.api.workflows.byConnection();
+  const using = uses.find(({ connectionId }) => connectionId === connection);
+  return (using?.workflows ?? []).map((workflow) =>
+    workflow.kind === "app" ? [workflow.app, workflow.workflow] : [workflow.id]
+  );
 };
 
 /** Why `hidden`'s steps can't be listed, as the SDK's describer says. */
@@ -1135,7 +1149,7 @@ export default workflowTests(definition, [
     ).resolves.toBe("role.forbidden");
   });
 
-  it("lists the workflows that use a connection: those calling the binding of their App's active permission on it, of Apps the person can open", async () => {
+  it("lists the App workflows that use a connection: those calling the binding of their App's active permission on it, of Apps the person can open", async () => {
     const [owner, other, user] = await Promise.all([
       personApi("builder"),
       personApi("builder"),
@@ -1167,12 +1181,35 @@ export default workflowTests(definition, [
         workflowsUsing(owner, otherMail.id),
       ])
     ).resolves.toStrictEqual([[[invoices, "mailer"]], [], [], []]);
-    await expect(outcome(owner.api.workflows.ofConnection(""))).resolves.toBe(
-      "workflow.invalid"
-    );
 
     const admin = await personApi("admin");
     await admin.api.permissions.revoke(granted);
     await expect(workflowsUsing(owner, mail.id)).resolves.toStrictEqual([]);
+  });
+
+  it("lists an independent workflow that uses a connection through its approved binding, for those who can open it, until the approval goes", async () => {
+    const by = await connectingAdmin(idp);
+    const [hubspot, builder] = await Promise.all([
+      connectHubspot(by),
+      personApi("builder"),
+    ]);
+    const workflow = await crmWorkflow(by, hubspot);
+    const asAdmin = { api: { workflows: by.workflows } };
+
+    await expect(
+      Promise.all([
+        workflowsUsing(asAdmin, hubspot),
+        // Not shared with them, so not theirs to see.
+        workflowsUsing(builder, hubspot),
+      ])
+    ).resolves.toStrictEqual([[[workflow.id]], []]);
+
+    await revokeWorkflowBinding(
+      env,
+      by.identity,
+      workflow.id,
+      workflow.approval
+    );
+    await expect(workflowsUsing(asAdmin, hubspot)).resolves.toStrictEqual([]);
   });
 });

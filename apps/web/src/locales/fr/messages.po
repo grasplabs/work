@@ -418,6 +418,10 @@ msgstr "{count, plural, one {une fois} other {# fois}}"
 msgid "{count, plural, one {The board set # goal for the sprint.} other {The board set # goals for the sprint.}}"
 msgstr "{count, plural, one {La direction a fixé # objectif pour le sprint.} other {La direction a fixé # objectifs pour le sprint.}}"
 
+#: src/connections/workflows-using.tsx
+msgid "{count, plural, one {Used by # workflow} other {Used by # workflows}}"
+msgstr "{count, plural, one {Utilisée par # workflow} other {Utilisée par # workflows}}"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "{count} of {finished} said how it was, at the end of their interview."
 msgstr "Ont dit comment cela s’est passé, à la fin de leur entretien : {count} sur {finished}."
@@ -8502,6 +8506,10 @@ msgstr "Aucun workflow ne demande d’attention : rien n’attend de décision, 
 msgid "No workflow ran in this time."
 msgstr "Aucun workflow n’a été exécuté pendant cette période."
 
+#: src/connections/workflows-using.tsx
+msgid "No workflow uses {app} yet."
+msgstr "Aucun workflow n’utilise encore {app}."
+
 #: src/dashboard/standard-widgets.tsx
 msgid "No workflow with counted hours here yet."
 msgstr "Pas encore de workflow avec des heures comptées ici."
@@ -15423,6 +15431,7 @@ msgstr "workflow.json"
 #: src/frame/app-sidebar.tsx
 #: src/onboarding/work-list.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
+#: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
