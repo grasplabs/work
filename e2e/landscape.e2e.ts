@@ -103,7 +103,7 @@ test("an admin finds a connected app in the landscape, with the engine that uses
   ).toBeVisible();
 });
 
-test("a member sees the landscape but not an app's audit trail, and the policy manager's empty states, then an admin's policy and rule", async ({
+test("a member sees the landscape but not an app's audit trail, and the policy manager's empty states; an admin uploads a policy, makes a rule from it and grants an exception, which the member reads but can't change", async ({
   pageOf,
 }) => {
   const { admin, user } = peopleIn("landscape");
@@ -146,40 +146,119 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
     })
   ).toBeVisible();
 
-  // A policy and a rule an admin keeps in core, which every member reads.
-  const { core, api } = apiOf(admin);
+  // An admin uploads and publishes a policy, makes a rule from it, turns
+  // it on and lets an app break it, all from the pages. One test keeps
+  // the company's whole policy book, so the empty states above hold.
   const title = `Acceptable use of AI ${crypto.randomUUID()}`;
   const name = `Customer data stays in the EU ${crypto.randomUUID()}`;
+  const reason = `Pilot with the sales team ${crypto.randomUUID()}`;
+  const { core, api } = apiOf(admin);
   try {
-    const policy = await api.policies.upload({
-      title,
-      fileName: "ai-policy.pdf",
-      text: "Staff may not paste customer data into AI tools hosted outside the EU.",
-    });
-    const rule = await api.policies.createRule({
-      name,
-      description: "No customer data in AI tools hosted outside the EU.",
-      conditions: [{ field: "data", values: ["customer"] }],
-      effect: "block",
-      status: "watching",
-      policyId: policy.id,
-    });
-    try {
-      await page.goto("/policies");
-      await expect(page.getByText(name)).toBeVisible();
-      await page.getByRole("tab", { name: "Your policies" }).click();
-      await expect(page.getByText(title)).toBeVisible();
-      await page.goto(`/policies/rules/${rule.id}`);
-      await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-      await page.goto(`/policies/documents/${policy.id}`);
-      await expect(
-        page.getByRole("heading", { level: 1, name: title })
-      ).toBeVisible();
-    } finally {
-      await api.policies.removeRule(rule.id);
-      await api.policies.removePolicy(policy.id);
-    }
+    const adminPage = await pageOf(admin);
+    await adminPage.goto("/policies");
+    await adminPage.getByRole("button", { name: "Upload a policy" }).click();
+    await adminPage.getByLabel("Title").fill(title);
+    await adminPage
+      .getByLabel("The policy's text")
+      .fill(
+        "Staff may not paste customer data into AI tools hosted outside the EU."
+      );
+    await adminPage.getByRole("button", { name: "Upload" }).click();
+    await expect(
+      adminPage.getByRole("heading", { level: 1, name: title })
+    ).toBeVisible();
+    const policyUrl = adminPage.url();
+    await adminPage.getByRole("button", { name: "Publish" }).click();
+    await expect(adminPage.getByText("Rules from this policy")).toBeVisible();
+
+    await adminPage
+      .getByRole("button", { name: "Make a rule from it" })
+      .click();
+    await adminPage.getByLabel("Name").fill(name);
+    await adminPage.getByRole("checkbox", { name: "Customer data" }).click();
+    await adminPage
+      .getByLabel("The passage it says")
+      .fill("Staff may not paste customer data into AI tools");
+    await adminPage.getByRole("button", { name: "Save" }).click();
+    await expect(
+      adminPage.getByRole("heading", { level: 1, name })
+    ).toBeVisible();
+    await expect(
+      adminPage.getByText("Watching", { exact: true })
+    ).toBeVisible();
+    await adminPage.getByRole("button", { name: "Edit" }).click();
+    await adminPage.getByLabel("Status").selectOption("active");
+    await adminPage.getByRole("button", { name: "Save" }).click();
+    await expect(adminPage.getByText("Active", { exact: true })).toBeVisible();
+
+    await adminPage.getByRole("button", { name: "Grant an exception" }).click();
+    await adminPage.getByLabel("Why").fill(reason);
+    await adminPage.getByLabel("Until").fill("2099-01-31");
+    await adminPage.getByRole("button", { name: "Grant" }).click();
+    await expect(adminPage.getByText(reason)).toBeVisible();
+    const ruleUrl = adminPage.url();
+
+    // The member reads all of it, and is offered none of the changes.
+    await page.goto("/policies");
+    await expect(page.getByText(name)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Upload a policy" })
+    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "New rule" })).toHaveCount(0);
+    await page.goto(ruleUrl);
+    await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+    await expect(page.getByText(reason)).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: /^(?:Edit|Delete|Grant an exception|Revoke.*)$/u,
+      })
+    ).toHaveCount(0);
+    await page.goto(policyUrl);
+    await expect(
+      page.getByRole("heading", { level: 1, name: title })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: /^(?:Remove|Make a rule from it|Publish)$/u,
+      })
+    ).toHaveCount(0);
+
+    // The admin ends the exception, deletes the rule, then removes the policy.
+    await adminPage.getByRole("button", { name: /^Revoke/u }).click();
+    await expect(
+      adminPage.getByText("No app is allowed to break this rule.")
+    ).toBeVisible();
+    await adminPage.getByRole("button", { name: "Delete" }).click();
+    await adminPage
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Remove" })
+      .click();
+    await expect(adminPage).toHaveURL(/\/policies$/u);
+    await expect(adminPage.getByText(name)).toHaveCount(0);
+    await adminPage.goto(policyUrl);
+    await adminPage.getByRole("button", { name: "Remove" }).click();
+    await adminPage
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Remove" })
+      .click();
+    await expect(adminPage).toHaveURL(/\/policies$/u);
   } finally {
+    // Whatever the journey left, so the empty states hold on a retry.
+    const book = await api.policies.book();
+    await Promise.all(
+      book.rules
+        .filter((each) => each.name === name)
+        .map(async ({ id }) => {
+          await api.policies.removeRule(id);
+        })
+    );
+    await Promise.all(
+      book.policies
+        .filter((each) => each.title === title)
+        .map(async ({ id }) => {
+          await api.policies.removePolicy(id);
+        })
+    );
     core[Symbol.dispose]();
   }
 });
