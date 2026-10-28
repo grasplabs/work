@@ -83,6 +83,7 @@
     "./hr": "./src/hr.ts",
     "./http": "./src/http.ts",
     "./identifier": "./src/identifier.ts",
+    "./held-starts": "./src/held-starts.ts",
     "./ids": "./src/ids.ts",
     "./json": "./src/json.ts",
     "./landscape": "./src/landscape.ts",

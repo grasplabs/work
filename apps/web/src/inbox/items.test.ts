@@ -213,6 +213,22 @@ const waiting = (ranOut = true) =>
       state: "ready",
       data: [{ app, name: "Invoices", version: 3, screens: ["Overview"] }],
     },
+    heldStarts: {
+      state: "ready",
+      data: [
+        {
+          id: "held-start-1",
+          workflow: "greet",
+          workflowName: "Greet",
+          version: 1,
+          input: { who: "Ada" },
+          inputHash: "hash-1",
+          chatId: "chat-1",
+          requestedAt: "2026-10-12T07:00:00.000Z",
+          expiresAt: "2026-10-13T07:00:00.000Z",
+        },
+      ],
+    },
     decisions: {
       state: "ready",
       data: [
@@ -246,6 +262,7 @@ describe(inboxItems, () => {
         "decision:decision-1",
         "failed:failure-1",
         "goLive:app-invoices:4",
+        "heldStart:held-start-1",
         "held:held-new",
         "held:held-old",
         `outcome:${JSON.stringify([outcome("mail-1", readAt).key, 1])}`,
@@ -310,7 +327,13 @@ describe(listed, () => {
   it("shows one group of kinds when asked", () => {
     expect(
       listed(items, "workflows", "urgent").map(({ kind }) => kind)
-    ).toStrictEqual(["decision", "goLive", "failedRun", "stoppedSchedule"]);
+    ).toStrictEqual([
+      "decision",
+      "heldStart",
+      "goLive",
+      "failedRun",
+      "stoppedSchedule",
+    ]);
     expect(
       listed(items, "brain", "urgent").map(({ kind, title, about }) => ({
         kind,

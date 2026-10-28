@@ -12,6 +12,7 @@ import type { DecisionView } from "./decisions.ts";
 import { dependencyDecisionSchema } from "./dependencies.ts";
 import type { DependencyRequest } from "./dependencies.ts";
 import { defineErrorFamily } from "./errors.ts";
+import type { HeldStart } from "./held-starts.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId } from "./ids.ts";
 import type {
@@ -62,6 +63,13 @@ export interface HeldWriteItem extends ItemBase {
   kind: "heldWrite";
   verdicts: ("approve" | "decline")[];
   action: PendingAction;
+}
+
+/** A start of a workflow a chat's agent asked for, held until the person confirms it. */
+export interface HeldStartItem extends ItemBase {
+  kind: "heldStart";
+  verdicts: ("confirm" | "decline")[];
+  start: HeldStart;
 }
 
 /** A change sent for the person whose answer was lost: they say whether it happened. */
@@ -157,7 +165,8 @@ export type WaitingItem =
   | OpenQuestionItem
   | StoppedScheduleItem
   | SignInAgainItem
-  | DecisionItem;
+  | DecisionItem
+  | HeldStartItem;
 
 export type WaitingKind = WaitingItem["kind"];
 
@@ -175,6 +184,7 @@ export const waitingParts = [
   "notifications",
   "connections",
   "decisions",
+  "heldStarts",
 ] as const;
 export type WaitingPart = (typeof waitingParts)[number];
 
@@ -205,6 +215,18 @@ export const waitingVerdictSchema = z.union([
   }),
   z.strictObject({
     kind: z.literal("heldWrite"),
+    id: identifierSchema,
+    verdict: z.literal("decline"),
+  }),
+  z.strictObject({
+    kind: z.literal("heldStart"),
+    id: identifierSchema,
+    verdict: z.literal("confirm"),
+    /** The hash of exactly the input the person was shown. */
+    inputHash: identifierSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("heldStart"),
     id: identifierSchema,
     verdict: z.literal("decline"),
   }),
