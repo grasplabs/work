@@ -946,7 +946,7 @@ msgstr "{name} : {shown} de sa limite"
 
 #: src/dashboard/report.ts
 msgid "{name}: {started} started, {completed} completed, {failed} failed"
-msgstr ""
+msgstr "{name} : {started} lancées, {completed} terminées, {failed} en échec"
 
 #: src/chat/builds.tsx
 msgid "{name}: version {version} waiting for review"
@@ -6731,11 +6731,11 @@ msgstr "Boîte de réception"
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Independent"
-msgstr ""
+msgstr "Indépendant"
 
 #: src/workflows/workflows-table.tsx
 msgid "Independent workflow"
-msgstr ""
+msgstr "Workflow indépendant"
 
 #: src/workflows/independent-workflows.tsx
 msgid "Independent workflows"
