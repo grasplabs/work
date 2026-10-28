@@ -47,6 +47,20 @@ export const releaseImportFailures = sqliteTable("release_import_failures", {
   nextAttemptAt: timestamp("next_attempt_at").notNull(),
 });
 
+/**
+ * How far the import has checked a published release whose blobs don't fit
+ * in one run's reads (src/releases/import.ts): the first `verifiedBlobs`
+ * of them, in its manifest's order, for the manifest with that sha256.
+ * Gone once it's imported, or once an attempt fails.
+ */
+export const releaseImportProgress = sqliteTable("release_import_progress", {
+  releaseId: text("release_id").primaryKey(),
+  /** The manifest the checked blobs are its: another starts again. */
+  manifestSha256: text("manifest_sha256").notNull(),
+  verifiedBlobs: integer("verified_blobs").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
 /** A client: one deployment of Grasp OS in its own Cloudflare account. */
 export const clients = sqliteTable(
   "clients",
