@@ -45,6 +45,9 @@ export const adminSecrets = (tokens: {
   [env.GOOGLE_CLIENT_SECRET, "google-secret"],
   [env.COMPOSIO_API_KEY, "composio-key"],
   [env.APP_OAUTH_CLIENTS, "{}"],
+  // Empty, as a store nobody put the key in reads: the plan signing tests
+  // set it (test/plan-signing.test.ts).
+  [env.PLAN_SIGNING_KEY, ""],
   // Empty, as a store nobody put Stripe's key in reads: a test that
   // reads Stripe sets it (test/admin-billing.test.ts).
   [env.STRIPE_RESTRICTED_KEY, ""],

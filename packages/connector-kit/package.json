@@ -9,6 +9,7 @@
     "./connector": "./src/connector.ts",
     "./content": "./src/content.ts",
     "./manifest": "./src/manifest.ts",
+    "./plan-signature": "./src/plan-signature.ts",
     "./provider": "./src/provider.ts",
     "./sign-in": "./src/sign-in.ts"
   },

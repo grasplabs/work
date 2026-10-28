@@ -199,6 +199,17 @@
       "store_id": "account-secrets-store",
       "secret_name": "APP_OAUTH_CLIENTS",
     },
+    // The Ed25519 private key the admin signs an approved build plan with
+    // (src/builds/plan-signing.ts), PKCS #8 in base64. The admin's alone:
+    // never given to Grasp's agent, never sent to the browser. Its public
+    // half is the repository variable CONNECTOR_PLAN_KEY, which CI checks
+    // an agent's branch with. Put in the store by hand; until it is, no
+    // plan is signed.
+    {
+      "binding": "PLAN_SIGNING_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "PLAN_SIGNING_KEY",
+    },
     // A restricted Stripe key that can only read customers, subscriptions
     // and invoices, for the admin's Billing under Contract
     // (src/billing/stripe.ts). The admin's alone: never copied to a
