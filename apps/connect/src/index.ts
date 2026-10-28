@@ -151,6 +151,7 @@ import {
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
+import { probeBindings } from "./probe.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
 export { ConnectorEgress } from "./egress.ts";
@@ -298,6 +299,14 @@ export default class Connect
    */
   async ensureClock(): Promise<ClockRegistration> {
     return await clock(this.env).ensureRegistered();
+  }
+
+  /**
+   * Whether each of connect's private bindings answers a no-op, for the
+   * admin's provisioning probe, which core makes (src/probe.ts).
+   */
+  async probeBindings(): Promise<Record<string, boolean>> {
+    return await probeBindings(this.env);
   }
 
   // The audit outbox (src/audit.ts). Core's cron trigger takes the events
