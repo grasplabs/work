@@ -95,6 +95,7 @@ const workflowRowSchema = z.object({
   app: z.string(),
   workflow: z.string(),
   bucket: z.enum(runBuckets),
+  asked: z.number(),
   count: z.number(),
 });
 
@@ -127,6 +128,43 @@ const noActivity = (first: number, last: number): RunActivity => ({
   decisions: { approved: 0, rejected: 0, timedOut: 0, open: 0 },
   workflows: [],
 });
+
+/**
+ * Each workflow's runs, from `rows` (by workflow, how each stands, and
+ * whether it asked a person): those of an App `order` doesn't hold are
+ * left out.
+ */
+const workflowsOf = (
+  order: ReadonlyMap<string, { app: ListedApp }>,
+  rows: readonly z.infer<typeof workflowRowSchema>[]
+): RunActivityWorkflow[] => {
+  const workflows = new Map<string, RunActivityWorkflow>();
+  for (const row of rows) {
+    const key = JSON.stringify([row.app, row.workflow]);
+    const app = order.get(row.app)?.app;
+    if (app !== undefined) {
+      const entry = workflows.get(key) ?? {
+        app: app.id,
+        appName: app.name,
+        workflow: workflowIdSchema.parse(row.workflow),
+        current: app.workflows.includes(row.workflow),
+        started: 0,
+        completed: 0,
+        failed: 0,
+        completedAlone: 0,
+      };
+      entry.started += row.count;
+      if (row.bucket === "completed" || row.bucket === "failed") {
+        entry[row.bucket] += row.count;
+      }
+      if (row.bucket === "completed" && row.asked !== 1) {
+        entry.completedAlone += row.count;
+      }
+      workflows.set(key, entry);
+    }
+  }
+  return [...workflows.values()];
+};
 
 /**
  * The runs of the Apps `by` can open started over `days` UTC days up to
@@ -177,11 +215,12 @@ export const runActivity = async (
         app: workflowRuns.appId,
         workflow: workflowRuns.workflowId,
         bucket,
+        asked: asked(db),
         count: count(),
       })
       .from(workflowRuns)
       .where(inWindow)
-      .groupBy(workflowRuns.appId, workflowRuns.workflowId, bucket),
+      .groupBy(workflowRuns.appId, workflowRuns.workflowId, bucket, asked(db)),
     db
       .select({ bucket: decisionBucket, count: count() })
       .from(workflowRuns)
@@ -213,28 +252,11 @@ export const runActivity = async (
   const order = new Map<string, { app: ListedApp; index: number }>(
     apps.map((app, index) => [app.id, { app, index }])
   );
-  const workflows = new Map<string, RunActivityWorkflow>();
-  for (const row of z.array(workflowRowSchema).parse(workflowRows)) {
-    const key = JSON.stringify([row.app, row.workflow]);
-    const app = order.get(row.app)?.app;
-    if (app !== undefined) {
-      const entry = workflows.get(key) ?? {
-        app: app.id,
-        appName: app.name,
-        workflow: workflowIdSchema.parse(row.workflow),
-        current: app.workflows.includes(row.workflow),
-        started: 0,
-        completed: 0,
-        failed: 0,
-      };
-      entry.started += row.count;
-      if (row.bucket === "completed" || row.bucket === "failed") {
-        entry[row.bucket] += row.count;
-      }
-      workflows.set(key, entry);
-    }
-  }
-  activity.workflows = [...workflows.values()].toSorted(
+  const workflows = workflowsOf(
+    order,
+    z.array(workflowRowSchema).parse(workflowRows)
+  );
+  activity.workflows = workflows.toSorted(
     (a, b) =>
       (order.get(a.app)?.index ?? 0) - (order.get(b.app)?.index ?? 0) ||
       a.workflow.localeCompare(b.workflow)

@@ -516,16 +516,27 @@ describe("Grasp staff's views, audited", () => {
   it("write an entry for a call of every method of every namespace", async () => {
     const session = await signedIn(idp, "grasp-staff", staffPerson());
     const staff = await whoami(session);
-    const api = new SessionRpc(
-      env,
-      async () => await Promise.resolve(staff),
-      crypto.randomUUID()
-    );
-    const calls = targetMethods(api, "session");
+    // Each call on a connection of its own: a namespace that reads
+    // through others (`waiting.list`) records their views too, so on one
+    // connection a later call of theirs would be a repeat, written once.
+    const connection = () =>
+      targetMethods(
+        new SessionRpc(
+          env,
+          async () => await Promise.resolve(staff),
+          crypto.randomUUID()
+        ),
+        "session"
+      );
+    const calls = connection();
     const unaudited: string[] = [];
     const naming: string[] = [];
     let onboarding = 0;
-    for (const { name, call, arity } of calls) {
+    for (const { name, arity } of calls) {
+      const call = connection().find((method) => method.name === name)?.call;
+      if (call === undefined) {
+        throw new Error(`${name} isn't on a new connection`);
+      }
       // The onboarding's methods take the roster's people by ID: each is
       // called with an ID in every place, which its entry must never name.
       const id = crypto.randomUUID();

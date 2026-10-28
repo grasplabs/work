@@ -1,4 +1,8 @@
 import type { CatalogSource } from "@grasp-os/shared/connect";
+import type {
+  DataExposureType,
+  HostingRegion,
+} from "@grasp-os/shared/policies";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, t } from "@lingui/core/macro";
@@ -15,18 +19,10 @@ import { formatList } from "../format.ts";
 /** Whether AI is what the app does, a feature in it, absent, or not known. */
 export type AiType = "Core" | "Embed" | "None" | "Unknown";
 
-/** The kinds of data an app can touch. */
-export type DataExposureType =
-  | "customer"
-  | "employee"
-  | "code"
-  | "financial"
-  | "health"
-  | "credentials"
-  | "legal";
-
-/** Where a vendor stores and processes the data put into its tool. */
-export type HostingRegion = "eu" | "uk" | "us" | "china";
+export type {
+  DataExposureType,
+  HostingRegion,
+} from "@grasp-os/shared/policies";
 
 /** An engine (an App) that uses an app through one of its connections. */
 export interface AppEngine {

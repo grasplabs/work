@@ -5,7 +5,9 @@
  * the right evidence; local dev and the on-prem smoke run on plain workerd
  * must say `workerd`; and core's wrangler.jsonc, which dev and tests read
  * too, must say nothing, so no unvouched run claims a limit. The admin's
- * client deploys are covered by its deploy test (apps/admin/test).
+ * client deploys are covered by its deploy test (apps/admin/test). An
+ * App's v1 server keeps its tail, its error log's server lines, only where
+ * it says `cloudflare` too (apps/core/src/app.ts, GRA-919).
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";

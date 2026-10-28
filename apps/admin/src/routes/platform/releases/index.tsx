@@ -17,6 +17,11 @@ import { Quiet } from "../../../admin/release-parts.tsx";
 import { formatTime } from "../../../releases/format.ts";
 import { fetchReleases } from "../../../releases/functions.ts";
 import type { ReleaseSummary } from "../../../releases/queries.ts";
+import {
+  releaseName,
+  releaseTitle,
+  versionWords,
+} from "../../../releases/version.ts";
 
 /** Any two releases, compared: a plain GET form, so it needs no script. */
 const Compare = ({ releases }: { releases: ReleaseSummary[] }) => (
@@ -48,7 +53,7 @@ const Compare = ({ releases }: { releases: ReleaseSummary[] }) => (
       <datalist id="release-ids">
         {releases.map((release) => (
           <option key={release.id} value={release.id}>
-            {release.notes}
+            {releaseName(release)}
           </option>
         ))}
       </datalist>
@@ -85,8 +90,8 @@ const EveryRelease = ({
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead variant="card">Version</TableHead>
               <TableHead variant="card">Release</TableHead>
-              <TableHead variant="card">Note</TableHead>
               <TableHead className="hidden @2xl:table-cell" variant="card">
                 Commit
               </TableHead>
@@ -104,16 +109,23 @@ const EveryRelease = ({
               return (
                 <TableRow key={release.id}>
                   <TableCell variant="card">
-                    <Link
-                      className="font-mono text-xs underline-offset-4 hover:underline"
-                      params={{ releaseId: release.id }}
-                      to="/platform/releases/$releaseId"
-                    >
-                      {release.id}
-                    </Link>
+                    <span className="font-medium tabular-nums">
+                      {versionWords(release) ?? "–"}
+                    </span>
                   </TableCell>
                   <TableCell className="whitespace-normal" variant="card">
-                    {release.notes}
+                    <div className="flex flex-col gap-0.5">
+                      <Link
+                        className="underline-offset-4 hover:underline"
+                        params={{ releaseId: release.id }}
+                        to="/platform/releases/$releaseId"
+                      >
+                        {releaseTitle(release.notes) || release.id}
+                      </Link>
+                      <span className="text-muted-foreground font-mono text-xs">
+                        {release.id}
+                      </span>
+                    </div>
                   </TableCell>
                   <TableCell className="hidden @2xl:table-cell" variant="card">
                     <span className="font-mono text-xs">
@@ -132,7 +144,7 @@ const EveryRelease = ({
                         search={{ from: previous.id, to: release.id }}
                         to="/platform/releases/diff"
                       >
-                        {`Since ${previous.id}`}
+                        {`Since ${versionWords(previous) ?? previous.id}`}
                       </Link>
                     )}
                   </TableCell>

@@ -56,6 +56,8 @@ export interface ChatSummary {
   running: boolean;
   /** The project it is in (`ChatsApi.projects`), or null for none. */
   projectId: string | null;
+  /** The App it is for (`ChatsApi.forApp`), or null for none. */
+  appId: string | null;
 }
 
 // Projects: a person groups their chats, and tells each chat's agent what
@@ -278,11 +280,32 @@ export interface ChatCitation {
 export const chatCitationsMax = 50;
 
 /**
+ * A span of an answer that cites a document: one of its links to the
+ * note, `[text](grasp:note/<documentId> "quote")`, as stored. `at` is where
+ * the link starts in the answer's text (the offset of its `[`), so a page
+ * finds it as it renders the Markdown; `text` is the words it links, as
+ * Markdown. `quote` is the words of the document it rests on, which the
+ * answer wrote as the link's title, only when the document says them now
+ * (whitespace aside), and never longer than {@link citedQuoteMax}; else
+ * null, and the span cites the document alone.
+ */
+export interface ChatCitedSpan {
+  at: number;
+  text: string;
+  quote: string | null;
+}
+
+/** Longest quote a cited span keeps (`ChatCitedSpan`). */
+export const citedQuoteMax = 300;
+
+/**
  * A document an answer cites (`ChatCitation`), as the chat's agent may
  * read it for the chat's person now: where it is, what it is called, and
  * the start of what it says (its description, or else its first section),
- * cut to {@link citedSnippetMax} characters. A document either of them can
- * no longer read, or that is gone, is never one.
+ * cut to {@link citedSnippetMax} characters; and the spans of the answer
+ * that cite it, in order, each with its quote. A document either of them
+ * can no longer read, or that is gone, is never one, so neither are its
+ * spans nor their quotes.
  */
 export interface ChatCitedDocument {
   documentId: string;
@@ -290,6 +313,7 @@ export interface ChatCitedDocument {
   title: string;
   path: string;
   snippet: string;
+  spans: ChatCitedSpan[];
 }
 
 /** Longest snippet of a cited document (`ChatCitedDocument`). */
@@ -696,6 +720,12 @@ export interface ChatsApi {
   list: () => Promise<ChatSummary[]>;
   /** Makes a chat, in project `projectId` when one is named. */
   create: (title: string, projectId?: string | null) => Promise<ChatSummary>;
+  /**
+   * The person's chat for App `app`, where its agent changes the App with
+   * them: the one they last used, or a new one named after the App. Only
+   * for someone who builds the App, and not while it is archived.
+   */
+  forApp: (app: string) => Promise<ChatSummary>;
   /** Renames one of the person's chats. */
   rename: (chatId: string, title: string) => Promise<void>;
   /**

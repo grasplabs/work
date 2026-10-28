@@ -1,4 +1,5 @@
-import type { App, AppStatus } from "@grasp-os/shared/apps";
+import type { App, AppStatus, ViewedApp } from "@grasp-os/shared/apps";
+import type { Identity } from "@grasp-os/shared/rpc";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +23,7 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { buildsApp } from "./app-role.ts";
 
 // Where a domain (core's App) is in its life, and its builders moving it,
 // as in the prototype (`components/apps/app-settings.tsx`,
@@ -215,3 +217,15 @@ export const StatusNote = ({ status }: { status: AppStatus }) => {
   }
   return null;
 };
+
+/**
+ * The domain's status controls for `identity`: only for one who builds it
+ * (`buildsApp`), by their role in this App; nothing for anyone else.
+ */
+export const AppStatusControls = ({
+  app,
+  identity,
+}: {
+  app: ViewedApp;
+  identity: Pick<Identity, "staff">;
+}) => (buildsApp(app, identity) ? <StatusActions app={app} /> : null);

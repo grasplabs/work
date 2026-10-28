@@ -35,6 +35,10 @@ import type {
   IntegrationState,
 } from "../connections/integrations.ts";
 import { OfferSwitch } from "../connections/offer-switch.tsx";
+import {
+  WorkflowsCount,
+  WorkflowsUsing,
+} from "../connections/workflows-using.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatDayMonth } from "../format.ts";
 import { IntegrationsIcon } from "../frame/integrations-icon.tsx";
@@ -51,13 +55,13 @@ import type { Loaded } from "../load-from-core.tsx";
 
 // One integration, as in the prototype (`routes/integrations/$integrationId.tsx`):
 // its tile, name and what it is for, then Overview (where it stands, what
-// its tools can do, and, for admins, whether it is offered) and Account
-// (each connection made to it: who connected it, when, signing in again
-// and disconnecting). The prototype's Workflows tab is left out: core
-// can't tell yet which workflows use a connection. A flow comes back here
-// from the provider, through core's callback, with `connection=<id>`.
+// its tools can do, and, for admins, whether it is offered), Workflows
+// (those the person can open that use it) and Account (each connection
+// made to it: who connected it, when, signing in again and
+// disconnecting). A flow comes back here from the provider, through
+// core's callback, with `connection=<id>`.
 
-type Tab = "overview" | "account";
+type Tab = "overview" | "workflows" | "account";
 
 interface IntegrationSearch {
   tab?: Tab;
@@ -513,7 +517,7 @@ const WhyNoConnect = ({
 };
 
 const IntegrationPage = ({ integration }: { integration: Integration }) => {
-  const { held, tools, catalog } = Route.useLoaderData();
+  const { held, tools, catalog, uses } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { tab = "overview", connection } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
@@ -590,6 +594,10 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             <TabsTrigger value="overview">
               <Trans>Overview</Trans>
             </TabsTrigger>
+            <TabsTrigger value="workflows">
+              <Trans>Workflows</Trans>
+              <WorkflowsCount integration={integration} uses={uses} />
+            </TabsTrigger>
             <TabsTrigger value="account">
               <Trans>Account</Trans>
               <span className="text-muted-foreground tabular-nums">
@@ -606,6 +614,11 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
                 integration={integration}
                 tools={integration.listed ? tools : undefined}
               />
+            </div>
+          </TabsContent>
+          <TabsContent value="workflows">
+            <div className="pt-4">
+              <WorkflowsUsing integration={integration} uses={uses} />
             </div>
           </TabsContent>
           <TabsContent value="account">
@@ -686,7 +699,10 @@ const IntegrationRoute = () => {
 
 export const Route = createFileRoute("/_shell/integrations/$integration")({
   validateSearch: (search: Record<string, unknown>): IntegrationSearch => ({
-    tab: search.tab === "account" ? "account" : undefined,
+    tab:
+      search.tab === "account" || search.tab === "workflows"
+        ? search.tab
+        : undefined,
     connection:
       typeof search.connection === "string" ? search.connection : undefined,
   }),

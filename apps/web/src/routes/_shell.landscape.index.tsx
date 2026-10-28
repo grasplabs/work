@@ -54,7 +54,7 @@ import type {
 } from "../landscape/landscape.ts";
 import { hoverDelay, Toolbar, ToolbarLabel } from "../landscape/toolbar.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
-import { policyBook, policyToday } from "../policies/policies-data.ts";
+import { bookOf, policyToday } from "../policies/policies-data.ts";
 import { applyPolicy, findings } from "../policies/policy.ts";
 
 // The Landscape, as in the prototype (`routes/landscape/index.tsx`): every
@@ -69,7 +69,8 @@ type ToolbarMenu = "filter" | "layout" | "columns";
 
 const LandscapePage = () => {
   const { t } = useLingui();
-  const { apps: loaded } = Route.useLoaderData();
+  const { apps: loaded, book: read } = Route.useLoaderData();
+  const book = bookOf(read);
   const navigate = useNavigate();
   const view = Route.useSearch().view ?? "table";
   const [query, setQuery] = useState("");
@@ -94,7 +95,7 @@ const LandscapePage = () => {
   const raw: LandscapeApp[] = loaded.state === "ready" ? loaded.data : [];
   const apps = applyPolicy(
     raw,
-    findings(policyBook.rules, raw, policyBook.exceptions, policyToday())
+    findings(book.rules, raw, book.exceptions, policyToday())
   );
   const shown = sortApps(
     apps.filter((app) => matchesLandscape(app, filters, query)),

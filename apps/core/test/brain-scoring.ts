@@ -301,9 +301,11 @@ const sourceLabel = /^source:\s*/iu;
 
 /**
  * A link to a Knowledge document as the product's agent is told to cite
- * one (src/agent.ts): `[its title](grasp:note/<documentId>)`.
+ * one (src/agent.ts): `[its words](grasp:note/<documentId> "a quote")`,
+ * the quote its title, or none.
  */
-const noteLink = /\[[^\]\n]*\]\(\s*<?grasp:note\/(?<id>[\w-]{1,128})>?\s*\)/gu;
+const noteLink =
+  /\[[^\]\n]*\]\(\s*<?grasp:note\/(?<id>[\w-]{1,128})>?(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?\s*\)/gu;
 
 /**
  * The sources an answer cites, as `[path#heading]`, `[memory]` or
