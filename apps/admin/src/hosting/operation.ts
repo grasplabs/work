@@ -242,7 +242,43 @@ export interface ProvisionContext {
     domain: string;
     smoke?: SmokeOptions;
   };
+  /** Reading back what a step wrote (`observed`); tests pass a wait of 0. */
+  observe?: { retryDelayMs?: number };
 }
+
+/**
+ * Tries of reading back what a step just wrote. Cloudflare's API can
+ * answer from before a write for a moment after it (read-after-write lag),
+ * so a script just uploaded, or a secret just put, can read as missing.
+ */
+const observeAttempts = 6;
+/** The first wait between tries, doubling after: about 31 s in all. */
+const defaultObserveDelayMs = 1000;
+
+/**
+ * What `read` answers once `holds` accepts it, tried again with a
+ * doubling wait while it doesn't, up to `observeAttempts` tries; then the
+ * last answer, for the caller to refuse.
+ */
+const observed = async <T>(
+  context: ProvisionContext,
+  read: () => Promise<T>,
+  holds: (value: T) => boolean
+): Promise<T> => {
+  const delayMs = context.observe?.retryDelayMs ?? defaultObserveDelayMs;
+  let value = await read();
+  for (
+    let attempt = 1;
+    attempt < observeAttempts && !holds(value);
+    attempt += 1
+  ) {
+    // oxlint-disable-next-line no-await-in-loop -- waits between tries
+    await scheduler.wait(delayMs * 2 ** (attempt - 1));
+    // oxlint-disable-next-line no-await-in-loop -- tries in turn
+    value = await read();
+  }
+  return value;
+};
 
 /** What the operation's steps observed, as its row keeps it. */
 const progressSchema = z.object({
@@ -829,7 +865,11 @@ const upload = async (
         ...(migrations === undefined ? {} : { migrations }),
       },
     });
-    const after = await targetMigrationState(api, target);
+    const after = await observed(
+      context,
+      async () => await targetMigrationState(api, target),
+      (state) => state.exists && state.migrationTag === lastTag
+    );
     if (!after.exists || after.migrationTag !== lastTag) {
       throw new ProvisionOperationError(
         "upload_unobserved",
@@ -921,7 +961,11 @@ const deliverSecrets = async (
       delivered += 1;
     }
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    const names = new Set(await targetSecretNames(api, target));
+    const names = await observed(
+      context,
+      async () => new Set(await targetSecretNames(api, target)),
+      (present) => secrets.every(({ name }) => present.has(name))
+    );
     const missing = secrets.find(({ name }) => !names.has(name));
     if (missing !== undefined) {
       throw new ProvisionOperationError(
@@ -967,7 +1011,11 @@ const probe = async (
     held.clientId
   );
   const origin = coreOrigin(target.scriptName, subdomain);
-  const version = await liveVersion(api, target.accountId, target.scriptName);
+  const version = await observed(
+    context,
+    async () => await liveVersion(api, target.accountId, target.scriptName),
+    (live) => live !== undefined
+  );
   if (version === undefined) {
     throw new ProvisionOperationError(
       "upload_unobserved",
