@@ -44,7 +44,7 @@ import {
   provisionPlacedClient,
   releasePlacedClient,
 } from "../src/hosting/workflow.ts";
-import { claimRun, startingMs } from "../src/runners.ts";
+import { claimRun, currentRun, startingMs } from "../src/runners.ts";
 import type { HeldClient } from "../src/runners.ts";
 import { envelope, notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
@@ -2652,6 +2652,137 @@ describe("a release's runner crashing, and another action on the client after", 
       });
     }
   );
+
+  it("offboards or releases a client asked for both at once, never both: the loser changes nothing", async () => {
+    const first = await importRelease("dedicated");
+    const { clientId } = await liveClient(first);
+    const later = await importRelease("dedicated", {
+      notes: "feat(core): later",
+    });
+    const hostname = `${clientId}.${domain}`;
+    const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
+    try {
+      await attempts.modifyAll(async (modifier) => {
+        await modifier.disableRetryDelays();
+      });
+      const [offboarded, released] = await Promise.all([
+        codeOf(offboardPlacedClient(env, staff, clientId)),
+        codeOf(
+          releasePlacedClient(env, staff, clientId, {
+            releaseId: later.releaseId,
+          })
+        ),
+      ]);
+      const started = await attempts.get();
+      await Promise.all(
+        started.map(async (instance) => {
+          await instance.waitForStatus("complete").catch(() => {
+            /* a run the offboarding refused ends errored */
+          });
+        })
+      );
+      const client = await db
+        .select({ status: clients.status })
+        .from(clients)
+        .where(eq(clients.id, clientId))
+        .get();
+      const route = await mappedRoute(env.ROUTER_HOSTS, hostname);
+      const offboardWon = offboarded === "started";
+
+      expect({
+        oneWon: offboardWon !== (released === "started"),
+        status: client?.status,
+        routed: route !== null,
+      }).toStrictEqual({
+        oneWon: true,
+        status: offboardWon ? "offboarded" : "active",
+        // Offboarded: never routed again; released: still served.
+        routed: !offboardWon,
+      });
+    } finally {
+      await attempts.dispose();
+    }
+  });
+
+  it("holds the client while it offboards: a release asked for as its hostname is deleted can't claim it, and starts nothing", async () => {
+    const first = await importRelease("dedicated");
+    const { clientId } = await liveClient(first);
+    const later = await importRelease("dedicated", {
+      notes: "feat(core): later",
+    });
+    const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
+    try {
+      let meanwhile = "not asked";
+      const remove = env.ROUTER_HOSTS.delete.bind(env.ROUTER_HOSTS);
+      const deleting = vi
+        .spyOn(env.ROUTER_HOSTS, "delete")
+        .mockImplementationOnce(async (key: string) => {
+          // A release asked for while offboarding deletes the route.
+          meanwhile = await codeOf(
+            releasePlacedClient(env, staff, clientId, {
+              releaseId: later.releaseId,
+            })
+          );
+          await remove(key);
+        });
+
+      const offboarded = await codeOf(
+        offboardPlacedClient(env, staff, clientId)
+      );
+      deleting.mockRestore();
+      const started = await attempts.get();
+
+      expect({
+        offboarded,
+        meanwhile,
+        started: started.length,
+        route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
+      }).toStrictEqual({
+        offboarded: "started",
+        meanwhile: "already_running",
+        started: 0,
+        route: null,
+      });
+    } finally {
+      await attempts.dispose();
+    }
+  });
+
+  it("keeps a client it couldn't unroute as it was, the route and its claim given back, and offboards it when tried again", async () => {
+    const first = await importRelease("dedicated");
+    const { clientId } = await liveClient(first);
+    const hostname = `${clientId}.${domain}`;
+    const deleting = vi
+      .spyOn(env.ROUTER_HOSTS, "delete")
+      .mockRejectedValueOnce(new Error("KV unavailable"));
+
+    const failed = await codeOf(offboardPlacedClient(env, staff, clientId));
+    deleting.mockRestore();
+    const row = await db
+      .select({ status: clients.status })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get();
+    const stillRouted = await mappedRoute(env.ROUTER_HOSTS, hostname);
+    const afterFailure = {
+      status: row?.status,
+      routed: stillRouted !== null,
+      claimed: await currentRun(env, clientId),
+    };
+    const retried = await codeOf(offboardPlacedClient(env, staff, clientId));
+
+    expect({
+      failed,
+      afterFailure,
+      retried,
+      route: await mappedRoute(env.ROUTER_HOSTS, hostname),
+    }).toMatchObject({
+      failed: "thrown",
+      afterFailure: { status: "active", routed: true, claimed: null },
+      retried: "started",
+      route: null,
+    });
+  });
 
   it.each(crashPoints)(
     "$at, then offboarding: unrouted at once, and neither the dead runner nor a later start serves it again",

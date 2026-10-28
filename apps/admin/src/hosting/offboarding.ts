@@ -46,7 +46,14 @@ import { clientPlacements, clientResources, clients } from "../db/schema.ts";
 import { clientDomain, deployerApi } from "../deploy/context.ts";
 import { DeployError } from "../deploy/errors.ts";
 import { unregisterHostname } from "../deploy/router.ts";
-import { currentRun, hasEnded, releaseRun } from "../runners.ts";
+import {
+  claimRun,
+  currentRun,
+  hasEnded,
+  holdsClient,
+  releaseRun,
+  stillHolds,
+} from "../runners.ts";
 import { clientInventory, destinationOf, placementOf } from "./inventory.ts";
 import type { ClientPlacement, ClientResource } from "./inventory.ts";
 
@@ -135,10 +142,52 @@ const assertIdle = async (
 };
 
 /**
- * Offboards placed client `clientId`, as `staff`: records it offboarded,
- * then takes its hostname out of the router's map. Offboarding one that is
- * already takes its hostname out again, as a first try that stopped before
- * it did leaves it. Refused while a runner still works on it.
+ * Takes `hostname` out of the router's map while `held` still holds the
+ * client, right before the delete: refused (`hostname_not_ours`) when the
+ * map gives it another client.
+ */
+const unrouted = async (
+  env: Env,
+  db: AdminDatabase,
+  held: { clientId: string; runId: string },
+  hostname: string
+): Promise<void> => {
+  try {
+    await unregisterHostname(
+      env.ROUTER_HOSTS,
+      hostname,
+      held.clientId,
+      async () => {
+        if (!(await holdsClient(db, held.clientId, held.runId))) {
+          throw new OffboardingError(
+            "client_busy",
+            `${held.clientId} was claimed by another runner`
+          );
+        }
+      }
+    );
+  } catch (error) {
+    if (error instanceof DeployError && error.code === "hostname_taken") {
+      throw new OffboardingError(
+        "hostname_not_ours",
+        `${held.clientId}'s hostname routes to another client`
+      );
+    }
+    throw error;
+  }
+};
+
+/**
+ * Offboards placed client `clientId`, as `staff`, claim-first, as a
+ * release starts: it claims the client in place of a runner that ended
+ * (refused, `client_busy`, while one still goes), so no release starts or
+ * writes while it works, and a runner that ended holds nothing after.
+ * Holding it, it takes the client's hostname out of the router's map
+ * first; only once that delete went through does it record the client
+ * offboarded, conditional on its claim. A delete that fails leaves the
+ * client as it was, and offboarding it again tries again. It gives the
+ * claim back either way. Offboarding one that is offboarded already
+ * takes its hostname out again, as a first try that stopped may leave it.
  */
 export const offboardPlacedClient = async (
   env: Env,
@@ -154,58 +203,64 @@ export const offboardPlacedClient = async (
       `No client domain is set, so ${clientId}'s hostname can't be unrouted`
     );
   }
-  if (client.status !== "offboarded") {
-    const ended = await assertIdle(env, clientId);
-    const now = new Date();
-    const offboarded = await actIfChanged(
-      db,
-      staff,
-      db
-        .update(clients)
-        .set({ status: "offboarded", offboardedAt: now, updatedAt: now })
-        .where(
-          and(eq(clients.id, clientId), eq(clients.status, client.status))
-        ),
-      {
-        action: "client.offboard",
-        clientId,
-        target: client.placement.destinationId,
-      },
-      // A runner that ended loses its claim with it: waking, it holds
-      // nothing, so it writes nothing to the operation of a client gone.
-      ended === null ? [] : [releaseRun(db, clientId, ended)]
-    );
-    if (!offboarded) {
-      throw new OffboardingError(
-        "client_busy",
-        `${clientId} changed as it was offboarded`
-      );
-    }
-  }
-  try {
-    await unregisterHostname(
-      env.ROUTER_HOSTS,
-      `${clientId}.${domain}`,
+  const ended = await assertIdle(env, clientId);
+  const runId = await claimRun(
+    db,
+    staff,
+    clientId,
+    ended,
+    {
+      action: "client.offboarding",
       clientId,
-      // Still offboarded right before the delete: nothing took it back.
-      async () => {
-        const now = await placedClientOf(db, clientId);
-        if (now.status !== "offboarded") {
-          throw new OffboardingError(
-            "client_busy",
-            `${clientId} isn't offboarded any more`
-          );
-        }
-      }
-    );
-  } catch (error) {
-    if (error instanceof DeployError && error.code === "hostname_taken") {
-      throw new OffboardingError(
-        "hostname_not_ours",
-        `${clientId}'s hostname routes to another client`
-      );
+      target: client.placement.destinationId,
+      ...(ended === null ? {} : { detail: { replaces: ended } }),
+    },
+    // No Workflow runs for it: Workflows has no such instance, so its
+    // claim reads as starting, and as gone should it never be given back.
+    {
+      kind: "provision_placed",
+      runId: `${clientId}-offboard-${crypto.randomUUID().slice(0, 8)}`,
     }
-    throw error;
+  );
+  if (runId === undefined) {
+    throw new OffboardingError(
+      "client_busy",
+      `Another runner claimed ${clientId} as it was offboarded`
+    );
+  }
+  const held = { clientId, runId };
+  try {
+    await unrouted(env, db, held, `${clientId}.${domain}`);
+    if (client.status !== "offboarded") {
+      const now = new Date();
+      const offboarded = await actIfChanged(
+        db,
+        staff,
+        db
+          .update(clients)
+          .set({ status: "offboarded", offboardedAt: now, updatedAt: now })
+          .where(
+            and(
+              eq(clients.id, clientId),
+              eq(clients.status, client.status),
+              stillHolds(held)
+            )
+          ),
+        {
+          action: "client.offboard",
+          clientId,
+          target: client.placement.destinationId,
+        }
+      );
+      if (!offboarded) {
+        throw new OffboardingError(
+          "client_busy",
+          `${clientId} changed as it was offboarded`
+        );
+      }
+    }
+  } finally {
+    await releaseRun(db, clientId, runId);
   }
 };
 
