@@ -1,4 +1,4 @@
-import { eq, lte, ne, or, sql } from "drizzle-orm";
+import { and, eq, lte, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
@@ -143,6 +143,21 @@ export const owedWritesDone = async (
     .set({ writesDoneAt: Date.now() })
     .where(eq(searchRebuilds.id, id));
 };
+
+/**
+ * Marks owed rebuild `id`'s purge's writes done as `owedWritesDone`, only
+ * while `holds` (purge-ledger.ts `attemptHolds`): an attempt that lost its
+ * purge never marks the writes of the one that took it over done.
+ */
+export const owedWritesDoneWhile = (
+  db: DrizzleD1Database,
+  id: string,
+  holds: SQL
+) =>
+  db
+    .update(searchRebuilds)
+    .set({ writesDoneAt: Date.now() })
+    .where(and(eq(searchRebuilds.id, id), holds));
 
 /**
  * Whether a purge recorded a rebuild that hasn't run since, other than
