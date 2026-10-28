@@ -47,6 +47,7 @@ import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
 
+import type { ClientDispatcher } from "../clients/core-address.ts";
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
@@ -55,11 +56,13 @@ import { act, actIfChanged, audit } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
 import {
   clientDeploys,
+  clientPlacements,
   clients,
   clientWorkers,
   settings,
 } from "../db/schema.ts";
 import type { ReleaseStore } from "../releases/import.ts";
+import { uncoveredLimitRaise } from "../releases/limits.ts";
 import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import {
@@ -70,6 +73,7 @@ import {
 import {
   checkDeployedConfig,
   clientMailDomain,
+  clientRuntimeProfile,
   derivedCoreConfig,
   onboardingSender,
 } from "./core-config.ts";
@@ -127,6 +131,11 @@ export interface DeployContext {
     domain: string;
     /** How the smoke check reaches core. */
     smoke?: SmokeOptions;
+    /**
+     * The clients' dispatch namespace, as the router binds it: how a core
+     * placed on Workers for Platforms is reached (hosting/operation.ts).
+     */
+    dispatcher?: ClientDispatcher;
   };
 }
 
@@ -180,6 +189,66 @@ export const redeployKind = (changes: {
   return changes.settings ? "settings" : "secrets";
 };
 
+/** Whether client `clientId` is placed in a hosting destination (src/hosting/). */
+export const isPlaced = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<boolean> =>
+  (await db
+    .select({ clientId: clientPlacements.clientId })
+    .from(clientPlacements)
+    .where(eq(clientPlacements.clientId, clientId))
+    .get()) !== undefined;
+
+/**
+ * Throws `client_placed` when client `clientId` is placed in a hosting
+ * destination, or has no account of its own, as every client created
+ * since placements replaced account adoption. A placed client's Workers and resources are its
+ * inventory's (src/hosting/inventory.ts), under names this path doesn't
+ * know: deploying it here would make a second core in its account, with
+ * empty databases, and point its hostname at that.
+ */
+export const assertNotPlaced = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<void> => {
+  const [client] = await db
+    .select({ accountId: clients.accountId })
+    .from(clients)
+    .where(eq(clients.id, clientId));
+  if (client?.accountId === null || (await isPlaced(db, clientId))) {
+    throw new DeployError(
+      "client_placed",
+      `${clientId} is placed in a hosting destination, which this path doesn't deploy`
+    );
+  }
+};
+
+/**
+ * Throws `limit_evidence_missing` when release `releaseId` raises a
+ * platform limit over what client `clientId` runs that no evidence covers
+ * on the client's profile; `release_not_imported` when it isn't imported,
+ * or records no limits (src/releases/limits.ts).
+ */
+export const assertLimitEvidence = async (
+  db: AdminDatabase,
+  clientId: string,
+  releaseId: string
+): Promise<void> => {
+  const raise = await uncoveredLimitRaise(
+    db,
+    clientId,
+    releaseId,
+    clientRuntimeProfile
+  );
+  if (raise !== undefined) {
+    throw new DeployError(
+      "limit_evidence_missing",
+      `Release ${releaseId} raises ${raise.limit} to ${raise.raisedTo ?? "unbounded"} over what ${clientId} runs, without capacity and security evidence for ${clientRuntimeProfile}`
+    );
+  }
+};
+
 /**
  * Starts deploying release `releaseId` to client `clientId`, and returns
  * the deploy's id for `runDeploy`. The client's older deploys that hadn't
@@ -188,7 +257,11 @@ export const redeployKind = (changes: {
  * `settings` deploy runs the same steps; core records it as new secrets
  * or settings rather than a release. `recording` gives what else records
  * the deploy (a rollout's target naming it), written in the same batch:
- * no deploy starts that its starter has no record of.
+ * no deploy starts that its starter has no record of. A `release` deploy
+ * of a release that raises a platform limit over what the client runs,
+ * without evidence for its profile, is refused before it starts
+ * (`limit_evidence_missing`, src/releases/limits.ts), and checked again
+ * as it runs.
  */
 export const startDeploy = async (
   db: AdminDatabase,
@@ -203,6 +276,10 @@ export const startDeploy = async (
       "invalid_client_id",
       `${clientId} can't be a client's hostname`
     );
+  }
+  await assertNotPlaced(db, clientId);
+  if (kind === "release") {
+    await assertLimitEvidence(db, clientId, releaseId);
   }
   const id = crypto.randomUUID();
   const now = new Date();
@@ -265,7 +342,14 @@ const deployOf = async (db: AdminDatabase, id: string) => {
   if (row === undefined) {
     throw new Error(`No deploy ${id}`);
   }
-  return row;
+  const { accountId } = row;
+  if (accountId === null) {
+    throw new DeployError(
+      "client_placed",
+      `${row.clientId} has no account of its own: it's provisioned as a placement`
+    );
+  }
+  return { ...row, accountId };
 };
 
 /** Client `clientId`'s latest deploy: what it deploys, and how far it got. */
@@ -537,13 +621,31 @@ interface LoadedDeploy {
  */
 const loadDeploy = async (
   db: AdminDatabase,
-  id: string
+  id: string,
+  first: DeployStep
 ): Promise<LoadedDeploy | null> => {
   const deploy = await deployOf(db, id);
   if (deploy.status === "done") {
     return null;
   }
   const { clientId, releaseId } = deploy;
+  // Placed after this deploy started: it stops before it changes anything,
+  // recorded failed at the step it would have run, so it doesn't stay
+  // `running` with no reason.
+  try {
+    await assertNotPlaced(db, clientId);
+  } catch (error) {
+    if (error instanceof DeployError) {
+      await recordFailure(db, {
+        id,
+        clientId,
+        releaseId,
+        step: first,
+        code: error.code,
+      });
+    }
+    throw error;
+  }
   if (
     deploy.status === "superseded" ||
     (await latestDeployId(db, clientId)) !== id
@@ -634,7 +736,7 @@ const runPhase = async <T>(
   ) => Promise<T>
 ): Promise<{ loaded: LoadedDeploy; result: T } | null> => {
   const { db } = context;
-  const loaded = await loadDeploy(db, id);
+  const loaded = await loadDeploy(db, id, first);
   if (loaded === null) {
     return null;
   }
@@ -663,7 +765,9 @@ const runPhase = async <T>(
  * Refuses (`release_undeclared`, `release_incompatible`,
  * `schema_incompatible`) a release the client can't go to from what its
  * Workers run, switched in the order a deploy makes them live, and the
- * schemas its databases are at (src/deploy/compatibility.ts).
+ * schemas its databases are at (src/deploy/compatibility.ts); and
+ * (`limit_evidence_missing`) one that raises a platform limit over what
+ * the client runs without evidence for its profile.
  */
 const assertCompatible = async (
   db: AdminDatabase,
@@ -677,6 +781,10 @@ const assertCompatible = async (
   );
   if (refused !== null) {
     throw new DeployError(refused.code, refused.message);
+  }
+  // A release, not new settings or secrets on the one it runs.
+  if (deploy.kind === "release") {
+    await assertLimitEvidence(db, deploy.clientId, deploy.releaseId);
   }
 };
 

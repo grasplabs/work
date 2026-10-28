@@ -1,8 +1,7 @@
 /**
  * What someone at Grasp does to a company's own Grasp, in its Setup
  * (src/admin/setup.tsx), as the admin's own client page did before the
- * admin took it in: follow and steer setting it up (confirm Workers Paid,
- * resume), pin it to a release, move it to another ring, change how its
+ * admin took it in: pin it to a release, move it to another ring, change how its
  * people sign in, apply its settings now, rotate its secrets, roll it
  * back from the rollout that last reached it. Each is the same server
  * function, audited as the staff member Access vouches for, and each
@@ -59,12 +58,6 @@ import type { TeamsBot } from "../clients/teams-bot.ts";
 import { useSettingsAction } from "../clients/use-action.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
-import {
-  confirmClientWorkersPaid,
-  retryClient,
-} from "../provision/functions.ts";
-import type { ProvisioningView } from "../provision/queries.ts";
-import { useProvisionAction } from "../provision/use-action.ts";
 import { formatTime } from "../releases/format.ts";
 import { releaseName } from "../releases/version.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
@@ -89,185 +82,6 @@ export const useRefreshSetup = (): Refresh => {
       sync: true,
     });
   };
-};
-
-const dashboard = (accountId: string): string =>
-  `https://dash.cloudflare.com/${accountId}`;
-
-// Setting it up.
-
-/** What someone at Grasp does while the run waits for Workers Paid. */
-const WorkersPaid = ({
-  view,
-  refresh,
-}: {
-  view: ProvisioningView;
-  refresh: Refresh;
-}) => {
-  const { busy, failure, run } = useProvisionAction();
-  const confirm = () => {
-    void run(
-      async () =>
-        await thenRefresh(
-          async () =>
-            await confirmClientWorkersPaid({
-              data: { clientId: view.clientId },
-            }),
-          refresh
-        )
-    );
-  };
-  return (
-    <>
-      <ol className="flex list-decimal flex-col gap-2 pl-5">
-        <li>
-          <a
-            className="underline underline-offset-4"
-            href={dashboard(view.client?.accountId ?? "")}
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            Open the account in the Cloudflare dashboard
-          </a>{" "}
-          and upgrade it to Workers Paid.
-        </li>
-        <li>Turn on R2 in the same account: the deploy creates buckets.</li>
-        <li>Confirm below; the deploy starts at once.</li>
-      </ol>
-      {view.workersPaidConfirmed ? (
-        // Confirmed already: the run goes on by itself, and the page follows.
-        <p>Confirmed, waiting for the run.</p>
-      ) : (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button disabled={busy} onClick={confirm} size="sm">
-            Workers Paid is on
-          </Button>
-          <Failure failure={failure} />
-        </div>
-      )}
-    </>
-  );
-};
-
-/** Why the run stopped, and resuming it. */
-const Stopped = ({
-  view,
-  refresh,
-}: {
-  view: ProvisioningView;
-  refresh: Refresh;
-}) => {
-  const { busy, failure, run } = useProvisionAction();
-  const resume = () => {
-    void run(
-      async () =>
-        await thenRefresh(
-          async () => await retryClient({ data: { clientId: view.clientId } }),
-          refresh
-        )
-    );
-  };
-  if (view.client === null) {
-    // It stopped before it recorded the company: nothing to resume.
-    return (
-      <>
-        <p>{`The run stopped: ${view.stopped?.error ?? "before it recorded the company"}.`}</p>
-        <p className="text-muted-foreground">
-          Fix what it says, or pick another account, and{" "}
-          <Link
-            className="hover:text-foreground underline underline-offset-4"
-            to="/new-organization"
-          >
-            add it again
-          </Link>{" "}
-          with the same address.
-        </p>
-      </>
-    );
-  }
-  let reason = "its run is gone (Workflows keeps a run for a while only)";
-  if (view.stopped !== null) {
-    reason = `${view.stopped.step} step: ${view.stopped.error}`;
-  } else if (view.run === "terminated") {
-    reason = "it was ended outside the admin";
-  } else if (view.run !== null && view.run !== "gone") {
-    reason = `it failed after its retries${
-      view.deploy === null || view.deploy.error === null
-        ? ""
-        : ` (${view.deploy.error})`
-    }`;
-  }
-  return (
-    <>
-      <p>{`The run stopped: ${reason}.`}</p>
-      <p className="text-muted-foreground">
-        Fix what it says, then resume: it picks up from the deploy if it got
-        that far, and makes nothing twice.
-      </p>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button disabled={busy} onClick={resume} size="sm">
-          Resume
-        </Button>
-        <Failure failure={failure} />
-      </div>
-    </>
-  );
-};
-
-/** Where setting a company up is now, and what someone at Grasp does there. */
-export const SettingUpNow = ({
-  view,
-  refresh,
-}: {
-  view: ProvisioningView;
-  refresh: Refresh;
-}) => {
-  switch (view.phase) {
-    case "account": {
-      return (
-        <Body>
-          <p>Setting up: its Cloudflare account, then its record.</p>
-        </Body>
-      );
-    }
-    case "workers_paid": {
-      return (
-        <Body>
-          <WorkersPaid refresh={refresh} view={view} />
-        </Body>
-      );
-    }
-    case "deploying": {
-      return (
-        <Body>
-          <p>
-            {`Deploying ${view.deploy?.releaseId ?? "the release"}: ${
-              view.deploy?.step === null || view.deploy === null
-                ? "starting"
-                : `${view.deploy.step} done`
-            }.`}
-          </p>
-        </Body>
-      );
-    }
-    case "failed": {
-      return (
-        <Body>
-          <Stopped refresh={refresh} view={view} />
-        </Body>
-      );
-    }
-    case "active": {
-      return (
-        <Body>
-          <p>{`Live at https://${view.hostname ?? ""}, and passed its smoke check.`}</p>
-        </Body>
-      );
-    }
-    default: {
-      return null;
-    }
-  }
 };
 
 // Its releases.

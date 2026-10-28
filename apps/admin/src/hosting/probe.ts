@@ -2,7 +2,8 @@
  * The second half of provisioning's probe (spec 40.2 step 7): after core
  * answers its health check, the admin asks it, signed, whether it runs
  * as the client it was deployed for, whether each private binding the
- * release gives it answers, and arms core's and connect's durable clocks
+ * release gives it and connect answers, and arms core's and connect's
+ * durable clocks
  * (core's src/provision-probe.ts). What it finds either checks out or
  * names the first thing that doesn't, as a code; the hostname stays
  * unpublished until it checks out.
@@ -84,18 +85,36 @@ export const probeCore = async ({
   }
 };
 
-/** The binding kinds that are the client's own resources, which the probe asks. */
+/**
+ * The binding kinds that are the client's own, which the probe asks: its
+ * databases, buckets and Durable Object namespaces, the sandbox it runs
+ * App code in (the Worker Loader), and connect, its other Worker.
+ */
 const privateBindingKinds: ReadonlySet<string> = new Set([
   "d1",
   "r2_bucket",
+  "durable_object_namespace",
+  "worker_loader",
   "service",
 ]);
 
-/** The private bindings of `core`, by name: each must answer the probe. */
-export const privateBindings = (core: WorkerEntry): string[] =>
-  core.bindings
+const privateOf = (worker: WorkerEntry): string[] =>
+  worker.bindings
     .filter(({ type }) => privateBindingKinds.has(type))
     .map(({ name }) => name);
+
+/**
+ * The private bindings of `core` and of `connect`, by name, connect's as
+ * `connect.<name>`: each must answer the probe, core asking connect for
+ * its own (core's src/provision-probe.ts).
+ */
+export const privateBindings = (
+  core: WorkerEntry,
+  connect: WorkerEntry
+): string[] => [
+  ...privateOf(core),
+  ...privateOf(connect).map((name) => `connect.${name}`),
+];
 
 /** Why a probe's answer doesn't check out, as a code and identifiers. */
 export interface ProbeFault {

@@ -21,7 +21,7 @@ import type { SignalTotals } from "./signals.ts";
 
 // What is computed once a UTC day from the audit log: the improvement
 // signals (signals.ts) and Knowledge's usage signals (knowledge/signals.ts).
-// The 15-minute cron trigger claims each one's day (daily-claims.ts), and
+// The 15-minute clock claims each one's day (daily-claims.ts), and
 // whatever it claimed is computed from one pass over the audit log, the
 // object tallying a stretch at a time for each of them
 // (`AuditLog.tallyStretch`). One failing to be claimed or stored doesn't
@@ -105,7 +105,7 @@ const firstFailure = (
 
 /**
  * Computes the day's improvement signals and Knowledge usage signals of
- * `now`'s UTC day, those that are due. Its cron trigger
+ * `now`'s UTC day, those that are due. Its clock
  * calls it every 15 minutes. Throws the first failure once both are done.
  */
 export const refreshDailySignals = async (

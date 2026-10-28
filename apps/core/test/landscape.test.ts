@@ -105,10 +105,10 @@ const grantOf = (
   scope,
 });
 
-/** Runs the cron's sync until `connectionId`'s ends, at most `runs` times. */
+/** Runs the clock's sync until `connectionId`'s ends, at most `runs` times. */
 const syncedOut = async (now: Date, runs = 10): Promise<void> => {
   for (let run = 0; run < runs; run += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- one cron run after another
+    // oxlint-disable-next-line no-await-in-loop -- one clock run after another
     await syncLandscapes(env, now);
   }
 };
@@ -471,7 +471,7 @@ describe("the application landscape", () => {
     ).toStrictEqual([{ ada: true, scopes: ["Mail.ReadWrite", "User.Read"] }]);
   });
 
-  it("lets only the cron run whose claim wins stage and publish a sync's last page", async () => {
+  it("lets only the clock run whose claim wins stage and publish a sync's last page", async () => {
     const app = appOf("app-raced", "Raced");
     const filler = appOf("app-raced-filler", "Filler");
     const ada = guid();
@@ -499,7 +499,7 @@ describe("the application landscape", () => {
     )
       .bind(connectionId)
       .run();
-    // Two cron runs read the last page at once.
+    // Two clock runs read the last page at once.
     await Promise.all([syncLandscapes(env, now), syncLandscapes(env, now)]);
     const people = await admin.api.landscape.people(connectionId, "app-raced");
     expect({
@@ -602,7 +602,7 @@ describe("the application landscape", () => {
     expect(people.map(({ scopes }) => scopes)).toStrictEqual([["User.Read"]]);
   });
 
-  it("bounds a sync however many grants a tenant has, spreads it over cron runs, and goes on from its last page after a throttle", async () => {
+  it("bounds a sync however many grants a tenant has, spreads it over clock runs, and goes on from its last page after a throttle", async () => {
     const app = appOf("app-flood", "Flood");
     const person = guid();
     const pages = landscapeLimits.readsPerSync + 5;
@@ -665,7 +665,7 @@ describe("the application landscape", () => {
     });
   }, 480_000);
 
-  it("goes on with a sync past fifty pages over later cron runs, counting it whole once it is, and ends one stuck under way", async () => {
+  it("goes on with a sync past fifty pages over later clock runs, counting it whole once it is, and ends one stuck under way", async () => {
     const app = appOf("app-wide", "Wide");
     const pages = 55;
     const people = Array.from({ length: pages }, () => ({
@@ -752,7 +752,7 @@ describe("the application landscape", () => {
     // Mid-morning, UTC: "later that day" stays within the day.
     const now = new Date();
     now.setUTCHours(10, 0, 0, 0);
-    // A sync under way, which two cron runs at once go on with: both read
+    // A sync under way, which two clock runs at once go on with: both read
     // its page and write it, the same, and its end is recorded once.
     await env.DB.prepare(
       "INSERT INTO landscape_syncs (connection_id, day, started_at, reads, state) VALUES (?, ?, ?, 0, 'running')"

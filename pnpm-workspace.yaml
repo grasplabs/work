@@ -161,6 +161,9 @@ catalog:
   react-is: 19.3.0
   # Knowledge documents, rendered in the frontend: no raw HTML.
   react-markdown: 10.1.0
+  # Fast Refresh in a chat's preview frame (spec 19.2.1): the runtime the
+  # preview kit carries and the Babel plugin preview builds instrument with.
+  react-refresh: 0.19.0
   # The kit's resizable panels.
   react-resizable-panels: 4.14.2
   # The kit's charts.

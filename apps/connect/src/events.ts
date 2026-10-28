@@ -51,7 +51,7 @@ import { accessTokenFor } from "./tokens.ts";
 
 // Events connections report, which start workflows (core's
 // workflows/connector-events.ts). Connect can't reach core, so core drives
-// it, as it drains connect's audit outbox: every minute its cron trigger
+// it, as it drains connect's audit outbox: every minute its clock
 // sends the listeners, every App whose current version has an event
 // trigger and a permission that lets it hear it (`syncEventSources`);
 // connect listens exactly there, reads what changed at the sources that

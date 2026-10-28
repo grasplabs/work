@@ -30,6 +30,7 @@ import {
 } from "./overview.ts";
 import { WorkflowParamsRpc } from "./params-rpc.ts";
 import { listRuns, runStatus, startWorkflow } from "./runs.ts";
+import { teamChoices } from "./teams.ts";
 
 /**
  * A signed-in person's `workflows`. Like AppsRpc, every call checks the
@@ -149,6 +150,13 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await setTeam(this.#env, by, app, workflow, team)
+    );
+  }
+
+  async teams(): Promise<{ id: string; name: string }[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await teamChoices(this.#env, by)
     );
   }
 

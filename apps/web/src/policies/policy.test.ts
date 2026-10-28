@@ -1,24 +1,23 @@
+import type { PolicyApp, PolicyFinding } from "@grasp-os/shared/policies";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { LandscapeApp } from "../landscape/landscape.ts";
 import {
-  appFacts,
   applyPolicy,
   caughtText,
-  conditionMatches,
   conditionText,
-  findings,
+  findingsWith,
   inForce,
-  matchingApps,
   peopleAffected,
-  ruleMatches,
 } from "./policy.ts";
 import type { PolicyException, PolicyRule, RuleCondition } from "./policy.ts";
 
-// The policy engine, as the prototype tests it (lib/policy.test.ts), over
-// apps and rules made for the test: Grasp keeps none of either yet.
+// The policies as the pages show them (policy.ts): core's findings joined
+// to their rules, the landscape they mark, the people they affect, and
+// rules and conditions in words. Which apps a rule catches is core's, and
+// the engine's own tests (packages/shared/test/policy-engine.test.ts).
 
-const app = (
+const landscapeApp = (
   patch: Partial<LandscapeApp> & { name: string }
 ): LandscapeApp => ({
   id: patch.name.toLocaleLowerCase(),
@@ -29,7 +28,7 @@ const app = (
   dataExposure: null,
   dataExposureReason: "",
   hosting: [],
-  users: 0,
+  users: null,
   owner: null,
   firstSeen: "2026-09-01T10:00:00.000Z",
   connectionIds: [],
@@ -40,40 +39,13 @@ const app = (
   ...patch,
 });
 
-const apps = [
-  app({
-    name: "ChatGPT",
-    vendor: "OpenAI",
-    aiType: "Core",
-    hosting: ["us"],
-    dataExposure: ["customer", "credentials"],
-    users: 47,
-    owner: "Eva Bakker",
-  }),
-  app({
-    name: "Kimi",
-    vendor: "Moonshot",
-    aiType: "Core",
-    hosting: ["china"],
-    users: 6,
-  }),
-  app({
-    name: "DeepSeek",
-    vendor: "DeepSeek",
-    aiType: "Core",
-    hosting: ["china"],
-    users: 3,
-  }),
-  app({ name: "Lender portals" }),
-];
-
-const byName = (name: string): LandscapeApp => {
-  const found = apps.find((each) => each.name === name);
-  if (found === undefined) {
-    throw new Error(`No app ${name}`);
-  }
-  return found;
-};
+const policyApp = (name: string, people: number | null): PolicyApp => ({
+  id: name.toLocaleLowerCase(),
+  name,
+  kind: "integration",
+  vendor: null,
+  people,
+});
 
 const rule = (
   conditions: RuleCondition[],
@@ -91,187 +63,125 @@ const rule = (
   ...patch,
 });
 
-const names = (list: readonly { name: string }[]) =>
-  list.map(({ name }) => name).toSorted();
-const today = "2026-09-28";
+const china = rule([{ field: "hosting", op: "in", values: ["china"] }], {
+  id: "china",
+  name: "No tools hosted in China",
+  effect: "block",
+});
+const eu = rule([{ field: "hosting", op: "outside", values: ["eu"] }], {
+  id: "eu",
+  name: "Client data stays in the EU",
+});
+const exception: PolicyException = {
+  ruleId: "eu",
+  appId: "chatgpt",
+  reason: "Approved",
+  until: "2026-09-28",
+  grantedBy: "Test",
+  grantedAt: "2026-09-01T10:00",
+};
+
+/** What core found, as it sends it. */
+const core: PolicyFinding[] = [
+  {
+    ruleId: "china",
+    app: policyApp("Kimi", 6),
+    state: "blocked",
+    exception: null,
+  },
+  {
+    ruleId: "china",
+    app: policyApp("DeepSeek", 3),
+    state: "blocked",
+    exception: null,
+  },
+  {
+    ruleId: "eu",
+    app: policyApp("Kimi", 6),
+    state: "flagged",
+    exception: null,
+  },
+  {
+    ruleId: "eu",
+    app: policyApp("DeepSeek", 3),
+    state: "flagged",
+    exception: null,
+  },
+  { ruleId: "eu", app: policyApp("ChatGPT", 47), state: "excepted", exception },
+];
+
+const book = { rules: [china, eu] };
+
+describe("findings", () => {
+  it("are joined to their rules, in core's order, leaving out one whose rule the book doesn't have", () => {
+    const found = findingsWith({ rules: [china] }, core);
+    expect(
+      found.map(({ rule: { name }, app, state }) => [name, app.name, state])
+    ).toStrictEqual([
+      ["No tools hosted in China", "Kimi", "blocked"],
+      ["No tools hosted in China", "DeepSeek", "blocked"],
+    ]);
+    expect(findingsWith(book, core).at(-1)?.exception).toStrictEqual(exception);
+  });
+
+  it("mark the landscape with the strongest rule, and only through rules", () => {
+    const marked = applyPolicy(
+      ["Kimi", "ChatGPT", "Lender portals"].map((name) =>
+        landscapeApp({ name })
+      ),
+      findingsWith(book, core)
+    );
+    expect(
+      marked.map(({ name, blocked, flagged, policySource }) => [
+        name,
+        blocked,
+        flagged,
+        policySource,
+      ])
+    ).toStrictEqual([
+      ["Kimi", true, false, "No tools hosted in China"],
+      // ChatGPT has an exception to the EU rule.
+      ["ChatGPT", false, false, null],
+      ["Lender portals", false, false, null],
+    ]);
+  });
+
+  it("count the people using affected apps once per app, and know no total when nothing measures one", () => {
+    const acting = inForce(findingsWith(book, core));
+    const unmeasured = inForce(
+      findingsWith(book, [
+        ...core,
+        {
+          ruleId: "eu",
+          app: policyApp("Lender portals", null),
+          state: "flagged",
+          exception: null,
+        },
+      ])
+    );
+    expect([peopleAffected(acting), peopleAffected(unmeasured)]).toStrictEqual([
+      6 + 3,
+      null,
+    ]);
+  });
+
+  it("say how many apps a rule catches in the words of what it does", () => {
+    const found = findingsWith(book, core);
+    expect([
+      caughtText(china, found),
+      caughtText(eu, found),
+      caughtText({ ...eu, status: "paused" }, found),
+      caughtText({ ...eu, id: "none" }, found),
+    ]).toStrictEqual([
+      "2 apps blocked",
+      "2 apps flagged · 1 exception",
+      "—",
+      "No apps",
+    ]);
+  });
+});
 
 describe("conditions", () => {
-  it("reads hosting as inside or outside a set of regions", () => {
-    const kimi = appFacts(byName("Kimi"));
-    expect(
-      conditionMatches({ field: "hosting", op: "in", values: ["china"] }, kimi)
-    ).toBeTruthy();
-    expect(
-      conditionMatches(
-        { field: "hosting", op: "outside", values: ["eu"] },
-        kimi
-      )
-    ).toBeTruthy();
-    expect(
-      conditionMatches(
-        { field: "hosting", op: "outside", values: ["eu", "china"] },
-        kimi
-      )
-    ).toBeFalsy();
-  });
-
-  it("never matches hosting the vendor does not state", () => {
-    const lenders = appFacts(byName("Lender portals"));
-    expect(lenders.hosting).toStrictEqual([]);
-    expect(
-      conditionMatches({ field: "hosting", op: "in", values: ["us"] }, lenders)
-    ).toBeFalsy();
-    expect(
-      conditionMatches(
-        { field: "hosting", op: "outside", values: ["eu"] },
-        lenders
-      )
-    ).toBeFalsy();
-  });
-
-  it("compares vendors without minding case or spaces, and never matches one nothing names", () => {
-    const chatGpt = appFacts(byName("ChatGPT"));
-    expect(
-      conditionMatches(
-        { field: "vendor", op: "is", values: [" openai "] },
-        chatGpt
-      )
-    ).toBeTruthy();
-    expect(
-      conditionMatches(
-        { field: "vendor", op: "isNot", values: ["OpenAI"] },
-        chatGpt
-      )
-    ).toBeFalsy();
-    const lenders = appFacts(byName("Lender portals"));
-    expect(
-      conditionMatches(
-        { field: "vendor", op: "isNot", values: ["OpenAI"] },
-        lenders
-      )
-    ).toBeFalsy();
-  });
-
-  it("matches data, people, owner and certificates", () => {
-    const chatGpt = appFacts(byName("ChatGPT"));
-    expect(
-      conditionMatches(
-        { field: "data", values: ["health", "credentials"] },
-        chatGpt
-      )
-    ).toBeTruthy();
-    expect(
-      conditionMatches({ field: "people", moreThan: 47 }, chatGpt)
-    ).toBeFalsy();
-    expect(
-      conditionMatches({ field: "people", moreThan: 46 }, chatGpt)
-    ).toBeTruthy();
-    expect(conditionMatches({ field: "owner" }, chatGpt)).toBeFalsy();
-    expect(
-      conditionMatches({ field: "owner" }, appFacts(byName("Lender portals")))
-    ).toBeTruthy();
-  });
-
-  it("never counts more people than any number when nothing measures how many use an app", () => {
-    expect(
-      conditionMatches(
-        { field: "people", moreThan: 0 },
-        appFacts({ ...byName("ChatGPT"), users: null })
-      )
-    ).toBeFalsy();
-  });
-
-  it("tells lacking any certificate from lacking all, counting an undeclared one as lacking", () => {
-    const chatGpt = appFacts(byName("ChatGPT"));
-    expect(
-      conditionMatches(
-        { field: "certificate", op: "lacksAny", values: ["iso27001"] },
-        chatGpt
-      )
-    ).toBeTruthy();
-    const onlySoc2 = { ...chatGpt, certificates: ["soc2" as const] };
-    // "ISO 27001 or SOC 2 is enough": SOC 2 alone keeps the app out; lacking every one catches it.
-    expect(
-      conditionMatches(
-        { field: "certificate", op: "lacksAll", values: ["iso27001", "soc2"] },
-        onlySoc2
-      )
-    ).toBeFalsy();
-    expect(
-      conditionMatches(
-        { field: "certificate", op: "lacksAny", values: ["iso27001", "soc2"] },
-        onlySoc2
-      )
-    ).toBeTruthy();
-  });
-
-  it("reads the processing agreement, access and extension, never matching what isn't known", () => {
-    const chatGpt = appFacts(byName("ChatGPT"));
-    expect([
-      conditionMatches(
-        { field: "dpa", values: ["signed", "pending", "notFound"] },
-        chatGpt
-      ),
-      conditionMatches(
-        { field: "dpa", values: ["pending"] },
-        { ...chatGpt, dpa: "pending" }
-      ),
-    ]).toStrictEqual([false, true]);
-    expect([
-      conditionMatches(
-        { field: "access", values: ["write", "admin"] },
-        { ...chatGpt, access: ["read"] }
-      ),
-      conditionMatches(
-        { field: "access", values: ["write", "admin"] },
-        { ...chatGpt, access: ["read", "write"] }
-      ),
-    ]).toStrictEqual([false, true]);
-    expect([
-      conditionMatches(
-        { field: "extension", values: ["inUse"] },
-        { ...chatGpt, extension: "available" }
-      ),
-      conditionMatches(
-        { field: "extension", values: ["inUse", "available"] },
-        { ...chatGpt, extension: null }
-      ),
-    ]).toStrictEqual([false, false]);
-  });
-
-  it("knows nothing about the AI or training of an app whose use of AI is unknown", () => {
-    const unknown = appFacts(byName("Lender portals"));
-    expect(unknown.ai).toBeNull();
-    expect(unknown.training).toBe("unknown");
-    expect(
-      conditionMatches(
-        { field: "ai", values: ["tool", "builtIn", "none"] },
-        unknown
-      )
-    ).toBeFalsy();
-    expect(
-      conditionMatches({ field: "training", values: ["unknown"] }, unknown)
-    ).toBeTruthy();
-  });
-
-  it("needs every condition of a rule, and catches nothing without one", () => {
-    const china = rule([{ field: "hosting", op: "in", values: ["china"] }]);
-    expect(names(matchingApps(china, apps))).toStrictEqual([
-      "DeepSeek",
-      "Kimi",
-    ]);
-    expect(
-      ruleMatches(
-        rule([
-          { field: "hosting", op: "in", values: ["china"] },
-          { field: "people", moreThan: 10 },
-        ]),
-        byName("DeepSeek")
-      )
-    ).toBeFalsy();
-    expect(matchingApps(rule([]), apps)).toStrictEqual([]);
-  });
-
   it("says each condition plainly", () => {
     const conditions: RuleCondition[] = [
       { field: "hosting", op: "outside", values: ["eu"] },
@@ -293,113 +203,5 @@ describe("conditions", () => {
       "Processing agreement waiting for signature or missing",
       "Can change or administer company data",
     ]);
-  });
-});
-
-describe(findings, () => {
-  const china = rule([{ field: "hosting", op: "in", values: ["china"] }], {
-    id: "china",
-    name: "No tools hosted in China",
-    effect: "block",
-  });
-  const eu = rule([{ field: "hosting", op: "outside", values: ["eu"] }], {
-    id: "eu",
-    name: "Client data stays in the EU",
-  });
-  const exception: PolicyException = {
-    ruleId: "eu",
-    appId: "chatgpt",
-    reason: "Approved",
-    until: "2026-09-28",
-    grantedBy: "Test",
-    grantedAt: "2026-09-01T10:00",
-  };
-
-  it("acts only for active rules, shows watching ones, and skips paused ones", () => {
-    const found = findings(
-      [
-        china,
-        rule([{ field: "ai", values: ["tool"] }], {
-          id: "watch",
-          status: "watching",
-        }),
-        rule([{ field: "people", moreThan: 0 }], {
-          id: "paused",
-          status: "paused",
-        }),
-      ],
-      apps,
-      [],
-      today
-    );
-    expect(
-      new Set(
-        found
-          .filter((each) => each.rule.id === "china")
-          .map(({ state }) => state)
-      )
-    ).toStrictEqual(new Set(["blocked"]));
-    expect(
-      new Set(
-        found
-          .filter((each) => each.rule.id === "watch")
-          .map(({ state }) => state)
-      )
-    ).toStrictEqual(new Set(["watching"]));
-    expect(found.some((each) => each.rule.id === "paused")).toBeFalsy();
-    expect(found[0]?.state).toBe("blocked");
-  });
-
-  it("lets an exception hold until its last day", () => {
-    const onTheDay = findings([eu], apps, [exception], "2026-09-28").find(
-      (each) => each.app.name === "ChatGPT"
-    );
-    const dayAfter = findings([eu], apps, [exception], "2026-09-29").find(
-      (each) => each.app.name === "ChatGPT"
-    );
-    expect(onTheDay?.state).toBe("excepted");
-    expect(dayAfter?.state).toBe("flagged");
-  });
-
-  it("marks the landscape with the strongest rule, and only through rules", () => {
-    const marked = applyPolicy(
-      apps,
-      findings([china, eu], apps, [exception], today)
-    );
-    expect(marked.find((each) => each.name === "Kimi")).toMatchObject({
-      blocked: true,
-      flagged: false,
-      policySource: "No tools hosted in China",
-    });
-    // ChatGPT has an exception to the EU rule.
-    expect(marked.find((each) => each.name === "ChatGPT")).toMatchObject({
-      flagged: false,
-      blocked: false,
-      policySource: null,
-    });
-    expect(marked.find((each) => each.name === "Lender portals")).toMatchObject(
-      { flagged: false, blocked: false }
-    );
-  });
-
-  it("counts the people using affected apps once per app", () => {
-    const found = inForce(findings([china, eu], apps, [], today));
-    expect(peopleAffected(found)).toBe(47 + 6 + 3);
-  });
-
-  it("knows no total of people when nothing measures an affected app's usage", () => {
-    const unmeasured = apps.map((each) =>
-      each.name === "Kimi" ? { ...each, users: null } : each
-    );
-    const found = inForce(findings([china, eu], unmeasured, [], today));
-    expect(peopleAffected(found)).toBeNull();
-  });
-
-  it("says how many apps a rule catches in the words of what it does", () => {
-    const found = findings([china, eu], apps, [exception], today);
-    expect(caughtText(china, found)).toBe("2 apps blocked");
-    expect(caughtText(eu, found)).toBe("2 apps flagged · 1 exception");
-    expect(caughtText({ ...eu, status: "paused" }, found)).toBe("—");
-    expect(caughtText({ ...eu, id: "none" }, found)).toBe("No apps");
   });
 });

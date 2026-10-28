@@ -1,3 +1,4 @@
+import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
 import { releaseManifestSchema } from "@grasp-os/shared/release";
 import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
@@ -822,6 +823,44 @@ describe("rendering a client's Worker", () => {
     expect(
       render({ type: "service", name: "OTHER", service: "grasp-os-router" })
     ).toThrow(expect.objectContaining({ code: "resource_missing" }));
+  });
+
+  it("binds a service through the connect gateway in a namespace, with props naming only the client's own script", async () => {
+    const { core, a, b } = await setUp();
+    const connectBinding = (inventory: typeof a.inventory) =>
+      renderClientWorker(core, a.placement, inventory, {
+        connectGateway: true,
+      }).bindings.find(({ name }) => name === "CONNECT");
+    const ownConnect = a.inventory.find(
+      ({ role }) => role === "worker:grasp-os-connect"
+    )?.physicalName;
+
+    expect(connectBinding(a.inventory)).toStrictEqual({
+      type: "service",
+      name: "CONNECT",
+      service: connectGatewayScript,
+      props: { script: ownConnect },
+    });
+    // Another client's inventory never names a script for a's core.
+    expect(() => connectBinding(b.inventory)).toThrow(
+      expect.objectContaining({ code: "foreign_resource" })
+    );
+    // The gateway forwards to a script's default entrypoint alone.
+    expect(() =>
+      renderClientWorker(
+        {
+          ...core,
+          bindings: core.bindings.map((binding) =>
+            binding.name === "CONNECT"
+              ? { ...binding, entrypoint: "Admin" }
+              : binding
+          ),
+        },
+        a.placement,
+        a.inventory,
+        { connectGateway: true }
+      )
+    ).toThrow(expect.objectContaining({ code: "unsupported_binding" }));
   });
 
   it("refuses any binding that would take the Durable Objects out of the EU", async () => {

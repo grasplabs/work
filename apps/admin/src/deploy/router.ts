@@ -9,6 +9,7 @@ import { deadline, whenAborted } from "@grasp-os/shared/deadline";
  * its core works.
  */
 import {
+  isCoreOrigin,
   routerHostKey,
   routerHostSchema,
   routerSecretHeader,
@@ -24,6 +25,7 @@ import { DeployError } from "./errors.ts";
 export interface RouterHosts {
   get: (key: string, type: "json") => Promise<unknown>;
   put: (key: string, value: string) => Promise<void>;
+  delete: (key: string) => Promise<void>;
 }
 
 const subdomainSchema = z.object({ subdomain: z.string() });
@@ -100,7 +102,7 @@ export const workersSubdomain = async (
  */
 export const coreOrigin = (coreScript: string, subdomain: string): string => {
   const origin = `https://${coreScript}.${subdomain}.workers.dev`;
-  if (!routerHostSchema.shape.coreUrl.safeParse(origin).success) {
+  if (!isCoreOrigin(origin)) {
     throw new DeployError(
       "invalid_core_origin",
       `${origin} isn't a workers.dev origin`
@@ -167,24 +169,23 @@ export const answeringVersion = async (
 };
 
 /**
- * Checks that core at `origin` answers its health check as version
- * `versionId`, to a request carrying the client's router secret as the
- * router sends it: so the version this deploy made live is the one
- * answering, and it has the secret the router will derive. Tries a few
- * times, each with its own deadline, waiting longer between them (a new
- * hostname, or the old version still answering, can take a moment);
- * returns how many tries it took.
+ * Tries core's health check at `origin` until it answers a version
+ * `accepts` takes, to a request carrying the client's router secret as
+ * the router sends it: a few tries, each with its own deadline, waiting
+ * longer between them (a new hostname, or the old version still
+ * answering, can take a moment). Its version and how many tries it took,
+ * or undefined after the last try.
  */
-export const smokeCheck = async (
+const smokeTries = async (
   origin: string,
   routerSecret: string,
-  versionId: string,
+  accepts: (version: string) => boolean,
   {
     fetch: fetchCore = fetch,
     retryDelayMs = defaultSmokeDelayMs,
     attemptTimeoutMs = defaultAttemptTimeoutMs,
-  }: SmokeOptions = {}
-): Promise<number> => {
+  }: SmokeOptions
+): Promise<{ version: string; attempts: number } | undefined> => {
   for (let attempt = 1; attempt <= smokeAttempts; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- tries in turn
     const answering = await answeringVersion(
@@ -193,18 +194,66 @@ export const smokeCheck = async (
       routerSecret,
       attemptTimeoutMs
     );
-    if (answering === versionId) {
-      return attempt;
+    if (answering !== undefined && accepts(answering)) {
+      return { version: answering, attempts: attempt };
     }
     if (attempt < smokeAttempts) {
       // oxlint-disable-next-line no-await-in-loop -- waits between tries
       await scheduler.wait(retryDelayMs * 2 ** (attempt - 1));
     }
   }
-  throw new DeployError(
-    "smoke_check_failed",
-    `Core at ${origin} didn't answer as version ${versionId}`
+  return undefined;
+};
+
+/**
+ * Checks that core at `origin` answers its health check as version
+ * `versionId`, to a request carrying the client's router secret as the
+ * router sends it: so the version this deploy made live is the one
+ * answering, and it has the secret the router will derive. Returns how
+ * many tries it took (`smokeTries`).
+ */
+export const smokeCheck = async (
+  origin: string,
+  routerSecret: string,
+  versionId: string,
+  options: SmokeOptions = {}
+): Promise<number> => {
+  const answered = await smokeTries(
+    origin,
+    routerSecret,
+    (version) => version === versionId,
+    options
   );
+  if (answered === undefined) {
+    throw new DeployError(
+      "smoke_check_failed",
+      `Core at ${origin} didn't answer as version ${versionId}`
+    );
+  }
+  return answered.attempts;
+};
+
+/**
+ * Checks that core at `origin` answers its health check at all, to a
+ * request carrying the client's router secret: for a core whose live
+ * version the admin can't read beforehand (a user Worker in a dispatch
+ * namespace, whose upload is live at once and whose versions the
+ * documented API doesn't list), so the version answering is the one to
+ * hold the rest of the probe to. Its version and how many tries it took.
+ */
+export const smokeAnswering = async (
+  origin: string,
+  routerSecret: string,
+  options: SmokeOptions = {}
+): Promise<{ version: string; attempts: number }> => {
+  const answered = await smokeTries(origin, routerSecret, () => true, options);
+  if (answered === undefined) {
+    throw new DeployError(
+      "smoke_check_failed",
+      `Core at ${origin} didn't answer its health check`
+    );
+  }
+  return answered;
 };
 
 /** The entry the map has for `key`: absent, or checked against the router's schema. */
@@ -302,4 +351,29 @@ export const registerHostname = async (
     );
   }
   checkReplaceable(key, written, entry);
+};
+
+/**
+ * Takes `hostname` out of the router's map, so the router sends nothing
+ * on to client `clientId`'s core: what offboarding does. An entry that's
+ * gone already counts as removed; one the map gives another client is
+ * refused (`hostname_taken`) and left. `beforeWrite` runs as the last
+ * thing before the delete, as for `registerHostname`.
+ */
+export const unregisterHostname = async (
+  hosts: RouterHosts,
+  hostname: string,
+  clientId: string,
+  beforeWrite: () => Promise<void>
+): Promise<void> => {
+  const key = routerHostKey(hostname);
+  const current = await storedEntry(hosts, key);
+  if (current === null) {
+    return;
+  }
+  if (current.clientId !== clientId) {
+    throw new DeployError("hostname_taken", `${key} routes to another client`);
+  }
+  await beforeWrite();
+  await hosts.delete(key);
 };

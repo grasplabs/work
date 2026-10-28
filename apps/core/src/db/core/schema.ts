@@ -227,11 +227,69 @@ export const memberRemovals = sqliteTable(
     removedAt: timestamp("removed_at").notNull(),
     /**
      * When connect completed disconnecting their personal connections;
-     * until then the cron trigger retries it (`retryDisconnects`).
+     * until then the clock retries it (`retryDisconnects`).
      */
     disconnectedAt: timestamp("disconnected_at"),
   },
   (table) => [primaryKey({ columns: [table.organizationId, table.userId] })]
+);
+
+/**
+ * People an admin erased (GRA-903): someone removed, whose email, sign-ins
+ * and personal content went, their name and ID kept on the company's
+ * records (`users` keeps both, and nothing else). `name` is the name the
+ * admin confirmed, frozen. `emailHash` is a keyed hash of the email they
+ * had (erased-people.ts), never the email: what keeps them out when they
+ * sign in or are invited again under it, until an admin releases it.
+ * Each area of the erasure is a row of `personErasureAreas`; it is done
+ * once every one of them is (`completedAt`).
+ */
+export const personErasures = sqliteTable("person_erasures", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  name: text().notNull(),
+  /** Null once an admin released the address (`releaseAddress`). */
+  emailHash: text("email_hash").unique(),
+  /** The version of the key `emailHash` was made with (erased-people.ts). */
+  emailKeyVersion: integer("email_key_version").notNull(),
+  requestedBy: text("requested_by").notNull(),
+  requestedAt: timestamp("requested_at").notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+/**
+ * The sign-in identities of people an admin erased (GRA-903), each a keyed
+ * hash of the subject an IdP or the directory named them by
+ * (erased-people.ts), never the subject: what keeps them from coming back
+ * through Teams, the directory or a sign-in once their accounts are gone.
+ */
+export const erasedSubjects = sqliteTable("erased_subjects", {
+  subjectHash: text("subject_hash").primaryKey(),
+  /** The version of the key `subjectHash` was made with (erased-people.ts). */
+  keyVersion: integer("key_version").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => personErasures.userId),
+});
+
+/**
+ * Where one area of a person's erasure stands: `pending` until its step
+ * erased everything of theirs in it, retried by the clock until then
+ * (person-erasure.ts), then `complete`.
+ */
+export const personErasureAreas = sqliteTable(
+  "person_erasure_areas",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => personErasures.userId),
+    area: text().notNull(),
+    state: text({ enum: ["pending", "complete"] }).notNull(),
+    attempts: integer().notNull().default(0),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.area] })]
 );
 
 /**
@@ -748,7 +806,7 @@ export const appWebhookDeliveries = sqliteTable(
 
 /**
  * Revocations an App's host couldn't be told of (src/access-revocations.ts):
- * told again by the cron trigger until it takes them, so a host away for
+ * told again by the clock until it takes them, so a host away for
  * longer than its retries still clears the screens of whoever lost a
  * role. `user_ids` is null for everyone the host knows of.
  */
@@ -763,7 +821,7 @@ export const accessRevocations = sqliteTable(
     attempts: integer().notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
   },
-  // The cron trigger tells the least tried first, oldest first among them,
+  // The clock tells the least tried first, oldest first among them,
   // once it dropped those a day old.
   (table) => [
     index("access_revocations_due").on(table.attempts, table.createdAt),
@@ -1473,8 +1531,70 @@ export const appTestRuns = sqliteTable(
      * sweep removes it once it is past.
      */
     deadline: timestamp("deadline").notNull(),
+    /**
+     * Who each decision binding covers in its test, by the binding's
+     * alias: its fixture's principals, by name, as JSON
+     * (workflows/fixture-decisions.ts).
+     */
+    deciders: text().notNull().default("{}"),
+    /**
+     * What each model binding answers in its test, by the binding's alias,
+     * as JSON: no model is ever asked (workflows/fixture-calls.ts).
+     */
+    models: text().notNull().default("{}"),
+    /**
+     * Which public operation of the release under test serves each
+     * operation binding in its test, by the binding's alias, as JSON
+     * (workflows/fixture-calls.ts).
+     */
+    operations: text().notNull().default("{}"),
+    /**
+     * Its test's own fixture store (`app_test_fixtures`), the only store
+     * its operation calls run on; null for an App with no store.
+     */
+    storeId: text("store_id"),
   },
   (table) => [index("app_test_runs_deadline").on(table.deadline)]
+);
+
+/**
+ * The decisions a run an App's test started waits for
+ * (workflows/fixture-decisions.ts): its test's own, answered only by the
+ * fixture principal it asks, and removed with the run's record.
+ */
+export const appTestDecisions = sqliteTable(
+  "app_test_decisions",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => appTestRuns.runId, { onDelete: "cascade" }),
+    /** The task that asks it, and its step in the task's scope. */
+    task: text().notNull(),
+    step: text().notNull(),
+    /** The fixture principals it asks, by name: any one of them answers. */
+    recipients: text({ mode: "json" }).$type<string[]>().notNull(),
+    description: text().notNull(),
+    input: text({ mode: "json" }).$type<Json>().notNull(),
+    /** The descriptor text of what an answer's payload must be. */
+    response: text().notNull(),
+    status: text({
+      enum: ["open", "approved", "rejected", "timed_out"],
+    }).notNull(),
+    openedAt: timestamp("opened_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at"),
+    payload: text({ mode: "json" }).$type<Json>(),
+  },
+  (table) => [
+    uniqueIndex("app_test_decisions_run_step_idx").on(table.runId, table.step),
+    index("app_test_decisions_run_task_idx").on(
+      table.runId,
+      table.task,
+      table.status
+    ),
+  ]
 );
 
 /**
@@ -2805,7 +2925,7 @@ export const dependencyLocks = sqliteTable(
  * recorded before they could be left behind (src/packages/cleanup.ts): a
  * tarball (`kind` `tarball`, `key` its integrity) as it is stored, and the
  * tarballs and pinned artifacts of a lock as it is deleted; an artifact
- * (`kind` `build`, `key` its hash) as a build writes its files. The cron
+ * (`kind` `build`, `key` its hash) as a build writes its files. The clock
  * deletes the files of one no lock names once it is an hour old, then the
  * row; one a lock names loses its row only. Recording one again moves its
  * time on.
@@ -2818,7 +2938,7 @@ export const packageCleanups = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [
-    // The cron's sweep: records an hour old, oldest first.
+    // The clock's sweep: records an hour old, oldest first.
     index("package_cleanups_created_at_idx").on(table.createdAt),
   ]
 );
@@ -2861,7 +2981,7 @@ export const buildReceipts = sqliteTable("build_receipts", {
  * (src/packages/build.ts): a build takes its lease before it builds, and
  * gives it back when it ends; another of the same App, graph and target
  * waits for it, then hands out what it pinned. A lease that outlived
- * `expiresAt` (a build that died) may be taken, and the cron deletes it
+ * `expiresAt` (a build that died) may be taken, and the clock deletes it
  * once nobody did (src/packages/cleanup.ts).
  */
 export const dependencyBuildLeases = sqliteTable(
@@ -2888,7 +3008,7 @@ export const dependencyBuildLeases = sqliteTable(
         table.target,
       ],
     }),
-    // The cron's sweep of leases that lapsed.
+    // The clock's sweep of leases that lapsed.
     index("dependency_build_leases_expires_at_idx").on(table.expiresAt),
   ]
 );
@@ -3269,7 +3389,7 @@ export const appStatisticSteps = sqliteTable(
 );
 
 /**
- * Every version of core the cron has seen running (src/platform-updates.ts),
+ * Every version of core the clock has seen running (src/platform-updates.ts),
  * each recorded once: the insert of a version not here is audited as
  * `platform.updated` in the same batch.
  */
@@ -3296,7 +3416,9 @@ export const notifications = sqliteTable(
   {
     id: text().primaryKey(),
     personId: text("person_id").notNull(),
-    type: text({ enum: ["run_failed", "gap_asked"] }).notNull(),
+    type: text({
+      enum: ["run_failed", "gap_asked", "trigger_stopped"],
+    }).notNull(),
     appId: text("app_id"),
     workflowId: text("workflow_id"),
     runId: text("run_id"),
@@ -3307,6 +3429,12 @@ export const notifications = sqliteTable(
     /** When it last changed: the latest failure it counts. */
     updatedAt: timestamp("updated_at").notNull(),
     readAt: timestamp("read_at"),
+    /**
+     * The schedule trigger a `trigger_stopped` row says stopped
+     * (workflows/schedule-triggers.ts); its `workflow_id` is the workflow
+     * resource the trigger starts.
+     */
+    triggerId: text("trigger_id"),
   },
   (table) => [
     // A person's list, latest first.
@@ -3724,6 +3852,27 @@ export const triggerResourceVersions = sqliteTable(
      */
     eventContract: text("event_contract"),
     eventType: text("event_type"),
+    /**
+     * For a schedule trigger: its five-field cron expression, the IANA time
+     * zone it is read in, and the input each of its runs starts with
+     * (canonical JSON, accepted by the workflow version it pins), all
+     * checked as the version was written (trigger-resources.ts). Null for
+     * any other kind.
+     */
+    scheduleCron: text("schedule_cron"),
+    scheduleTimeZone: text("schedule_time_zone"),
+    scheduleInput: text("schedule_input"),
+    /**
+     * For a connector trigger: the connection whose events start it, the
+     * part of it (a mailbox, a drive) or null for the account's own, and
+     * how each event becomes its run's input (canonical JSON: input fields
+     * to JSON Pointers into the event, and literal defaults), checked as
+     * the version was written (trigger-resources.ts). Its event type is
+     * `event_type`, with no `event_contract`. Null for any other kind.
+     */
+    connectionId: text("connection_id"),
+    connectionResource: text("connection_resource"),
+    inputMapping: text("input_mapping"),
   },
   (table) => [
     primaryKey({ columns: [table.triggerId, table.version] }),
@@ -3731,7 +3880,70 @@ export const triggerResourceVersions = sqliteTable(
     index("trigger_resource_versions_event")
       .on(table.eventContract, table.eventType)
       .where(sql`${table.eventContract} IS NOT NULL`),
+    // The connector triggers' versions that take a connection's events.
+    index("trigger_resource_versions_connection")
+      .on(table.connectionId, table.eventType)
+      .where(sql`${table.connectionId} IS NOT NULL`),
   ]
+);
+
+/**
+ * When each schedule trigger next starts its run (workflows/schedule-
+ * triggers.ts): the occurrence due next for the trigger version it was
+ * worked out for (`version`), none once it stopped. Only a live, enabled
+ * trigger whose current version is `version` starts anything; the rest
+ * wait here untouched until enabling or moving the trigger works out its
+ * next occurrence again, from then. `failed_starts` counts the starts in a
+ * row that were refused or failed in the workflow's own terms, toward
+ * stopping it; `attempts` counts every failed try of the occurrence due,
+ * core's own failures too, each try waiting twice as long as the one
+ * before, up to an hour.
+ */
+export const triggerSchedules = sqliteTable(
+  "trigger_schedules",
+  {
+    triggerId: text("trigger_id")
+      .primaryKey()
+      .references(() => triggerResources.id),
+    version: integer().notNull(),
+    nextAt: timestamp("next_at"),
+    failedStarts: integer("failed_starts").notNull().default(0),
+    attempts: integer().notNull().default(0),
+    /**
+     * When the last try of the occurrence failed: what the next try's
+     * wait counts from. Null while no try of it has failed.
+     */
+    lastAttemptAt: timestamp("last_attempt_at"),
+  },
+  (table) => [
+    // The schedules due by a time.
+    index("trigger_schedules_next_at")
+      .on(table.nextAt)
+      .where(sql`${table.nextAt} IS NOT NULL`),
+  ]
+);
+
+/**
+ * Where an event stands for a connector trigger that didn't start its run
+ * (src/workflows/connector-triggers.ts), by the trigger and the event's
+ * key: held back at its hourly limit since `held_since` (`settled` null),
+ * or settled for it for good: `dropped`, held past a day, or `refused`,
+ * refused for good. A settled row is a tombstone, so the same event
+ * delivered again for another trigger's sake is known and starts nothing
+ * here. The clock sweeps both past their retention.
+ */
+export const connectorTriggerHolds = sqliteTable(
+  "connector_trigger_holds",
+  {
+    triggerId: text("trigger_id")
+      .notNull()
+      .references(() => triggerResources.id),
+    eventKey: text("event_key").notNull(),
+    heldSince: timestamp("held_since").notNull(),
+    settled: text({ enum: ["dropped", "refused"] }),
+    settledAt: timestamp("settled_at"),
+  },
+  (table) => [primaryKey({ columns: [table.triggerId, table.eventKey] })]
 );
 
 /**
@@ -3944,6 +4156,34 @@ export const workflowResourceRuns = sqliteTable(
       table.createdAt,
       table.id
     ),
+  ]
+);
+
+/**
+ * What each mail call of an independent workflow's run sent, for a native
+ * mail connector's send or draft (src/workflows/mail-stamps.ts): the
+ * call's stamp, which its message carries as a header, with every
+ * recipient the call named and who sent it, as `run_mail_calls` keeps an
+ * App run's. A copy that reaches a mailbox a connector trigger watches
+ * starts the trigger's run under the run, in its lineage
+ * (src/workflows/connector-triggers.ts). Keyed as `run_mail_calls` is.
+ * Removed with its run's details (src/workflows/retention.ts).
+ */
+export const resourceRunMailCalls = sqliteTable(
+  "resource_run_mail_calls",
+  {
+    origin: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    createdAt: timestamp("created_at").notNull(),
+    stamp: text().notNull(),
+    recipients: text({ mode: "json" }).$type<string[]>().notNull(),
+    senders: text({ mode: "json" }).$type<string[]>().notNull(),
+  },
+  (table) => [
+    index("resource_run_mail_calls_run_idx").on(table.runId),
+    uniqueIndex("resource_run_mail_calls_stamp_idx").on(table.stamp),
   ]
 );
 
@@ -4741,7 +4981,7 @@ export const uploads = sqliteTable(
  * Originals to delete from R2 (knowledge/uploads.ts), by key: recorded
  * with the upload, before its original is stored, and cleared once it is
  * saved; recorded again by a purge. Deleted by the failure that makes one
- * unneeded, or by the cron trigger once its upload is gone or failed.
+ * unneeded, or by the clock once its upload is gone or failed.
  */
 export const uploadCleanups = sqliteTable("upload_cleanups", {
   /** The original's key in R2. */

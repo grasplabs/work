@@ -11,8 +11,8 @@ import { auditLog } from "../src/audit-log.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import { allEvents, logHead } from "./audit-events.ts";
-import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -232,9 +232,9 @@ const racingSignals = (
 };
 
 describe("Knowledge usage signals", () => {
-  it("are computed once a day by the cron trigger, in one pass with the improvement signals", async () => {
-    await runQuarterHourCron();
-    await runQuarterHourCron();
+  it("are computed once a day by the clock, in one pass with the improvement signals", async () => {
+    await runQuarterHourTasks();
+    await runQuarterHourTasks();
 
     // The second run finds both days computed.
     const today = new Date();

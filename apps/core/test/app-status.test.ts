@@ -17,8 +17,8 @@ import { cancelRunsOf } from "../src/workflows/controls.ts";
 import { repairStarts, startRun } from "../src/workflows/runs.ts";
 import { ordinaryData, racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { endLiveRuns, finished, sleeping, whileEngineRefuses } from "./runs.ts";
 import { person as acting } from "./sealed-apps.ts";
 import { firstVersion, outcome, signedInApi } from "./sign-in.ts";
@@ -323,7 +323,7 @@ describe("an App's status", () => {
       return listed.filter(({ workflow }) => workflow === "weekly").length;
     };
 
-    await runCron({}, due);
+    await runMinuteTasks({}, due);
     const asDraft = await runs();
     const deliveredToDraft = await outcome(
       startRun(env, {
@@ -340,11 +340,11 @@ describe("an App's status", () => {
       })
     );
     await builder.api.apps.publish(app);
-    await runCron({}, due);
+    await runMinuteTasks({}, due);
     const asPublished = await runs();
     const next = await nextRunOf(app);
     await builder.api.apps.archive(app);
-    await runCron({}, next);
+    await runMinuteTasks({}, next);
     const asArchived = await runs();
     // A trigger's delivery that raced past the schedule's query is refused
     // at the start too.
@@ -408,7 +408,7 @@ describe("an App's status", () => {
     await env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?")
       .bind(app)
       .run();
-    await runCron({}, new Date());
+    await runMinuteTasks({}, new Date());
     await finished(raced.id);
     const logged = await allEvents();
     const cancelled = logged
@@ -505,7 +505,7 @@ describe("an App's status", () => {
       .run();
 
     // While a cancel it owes fails, the restore is refused, and the App
-    // stays archived for the cron trigger to ask again.
+    // stays archived for the clock to ask again.
     const refused = await whileEngineRefuses(
       (method) => method === "markCancelled",
       async () => await outcome(builder.api.apps.restore(app))

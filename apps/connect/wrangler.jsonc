@@ -57,12 +57,10 @@
       "migrations_dir": "src/db/migrations",
     },
   ],
-  // Drops OAuth and Composio flows nobody finished, deletes at Composio
-  // what earlier tries couldn't, and seals what a rotated key sealed again
-  // (src/index.ts).
-  "triggers": { "crons": ["* * * * *"] },
   // The client's clock for connect: its cleanup and rotation on its own
-  // alarm (src/clock.ts).
+  // alarm (src/clock.ts), as no cron can run them: drops OAuth and Composio
+  // flows nobody finished, deletes at Composio what earlier tries couldn't,
+  // and seals what a rotated key sealed again.
   "durable_objects": {
     "bindings": [{ "name": "CLOCK", "class_name": "Clock" }],
   },

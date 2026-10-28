@@ -2,7 +2,10 @@ import { eventFingerprint } from "@grasp-os/sdk/host";
 import type { BoundWorkflow } from "@grasp-os/sdk/host";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { coreStepPrefix } from "@grasp-os/shared/workflows";
+import {
+  coreStepPrefix,
+  decisionPollStepPrefix,
+} from "@grasp-os/shared/workflows";
 import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -26,7 +29,8 @@ import { runObjectOf } from "./engine.ts";
 //   its checks), once a round; or a step waiting for a share of what runs
 //   at once (`quota`), as core's own steps of that are named
 //   (`$grasp:wait:<key>:busy:<round>…`, host.ts), once a step;
-// - a person's decision (`…:decision:wait:<round>`), by the decision's ID
+// - a person's decision (its wait, `$grasp:decision:<task step>:wait:<round>`,
+//   read as `<task step>:decision:wait:<round>`), by the decision's ID
 //   its event names (decisions.ts, `decisionEventType`), as its key the
 //   decision binding its task asks through, one the release sealed;
 // - an event a listen task waits for (`task:<task>` of a listen task):
@@ -329,6 +333,25 @@ const coreWaitsOf = (wait: Pending, holding: Set<string>): Json[] => {
     : [];
 };
 
+/** A decision task's wait or look, past `decisionPollStepPrefix`. */
+const decisionPoll = /^(?<step>.+):(?<part>wait|woken):(?<round>\d+)$/u;
+
+/**
+ * `name`, a decision task's wait or look as core names it (its own steps,
+ * under `decisionPollStepPrefix`), read as its task's step:
+ * `<task step>:decision:<wait|woken>:<round>`; any other name as it is.
+ */
+const taskStepName = (name: string): string => {
+  if (!name.startsWith(decisionPollStepPrefix)) {
+    return name;
+  }
+  const poll = decisionPoll.exec(name.slice(decisionPollStepPrefix.length));
+  const { step, part, round } = poll?.groups ?? {};
+  return step === undefined || part === undefined || round === undefined
+    ? name
+    : `${step}:decision:${part}:${round}`;
+};
+
 /**
  * The waits a screen is shown of `pending`, the engine's list of a run's
  * open waits, read against its build and release (`context`): each of a
@@ -342,7 +365,7 @@ export const shownWaits = (
   const waits: Json[] = [];
   const holding = new Set<string>();
   for (const wait of pending) {
-    const step = taskStep.exec(wait.name)?.groups;
+    const step = taskStep.exec(taskStepName(wait.name))?.groups;
     const shown =
       step?.id === undefined
         ? coreWaitsOf(wait, holding)

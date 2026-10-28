@@ -12,8 +12,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { personWriter } from "../src/knowledge/person-writes.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { signedInApi, unique, whoami } from "./sign-in.ts";
 
 // Each version's text is an immutable object in the Brain bucket, through
@@ -193,9 +193,9 @@ const beforeReleasingBatch = (before: () => Promise<void>): (() => void) => {
   };
 };
 
-/** The cron trigger, once a staged payload's grace is over. */
+/** The clock, once a staged payload's grace is over. */
 const afterGrace = async (): Promise<void> => {
-  await runCron({}, new Date(Date.now() + pendingGraceMs + 60_000));
+  await runMinuteTasks({}, new Date(Date.now() + pendingGraceMs + 60_000));
 };
 
 const purgeTerm = async (
@@ -451,7 +451,7 @@ describe("crashes and races", () => {
     }
     const beforeGrace = await objectCount(lost);
     // Within its grace, a staged payload's save may still be on its way.
-    await runCron();
+    await runMinuteTasks();
     const withinGrace = await objectCount(lost);
     await afterGrace();
 
@@ -637,7 +637,7 @@ describe("crashes and races", () => {
       lostPut.mockRestore();
     }
     const stuck = [await statesOf(text), await objectCount(text)];
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       stuck,
