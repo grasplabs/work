@@ -51,9 +51,12 @@ import {
 import type { PayloadRef, StagedPayload } from "./payloads.ts";
 import {
   attemptHolds,
+  attemptHoldsOrIdle,
   finishPurge,
+  keepHold,
   openPurge,
   runStep,
+  whileHeld,
 } from "./purge-ledger.ts";
 import type { StepCounts } from "./purge-ledger.ts";
 import {
@@ -61,7 +64,7 @@ import {
   eraseCollectionFromSearchIndex,
   eraseFromSearchIndex,
   errorNameOf,
-  owedWritesDone,
+  owedWritesDoneWhile,
   rebuildOwedWhile,
   rebuildOwedIfChanged,
   secureDeleteReady,
@@ -242,7 +245,12 @@ export interface OnErase {
    * Rewrites every copy with `rewrite` (a content purge's: its terms
    * replaced), as `person`; a copy it leaves as it is isn't written.
    */
-  rewrite: (by: Writer, rewrite: (text: string) => string) => Promise<void>;
+  rewrite: (
+    by: Writer,
+    rewrite: (text: string) => string,
+    /** Awaited between the tables it rewrites: the purge renews its hold. */
+    between?: () => Promise<void>
+  ) => Promise<void>;
   /** Forgets `userId` as the author of any copy (a personal purge). */
   forgetActor: (by: Writer, userId: string) => Promise<void>;
   /**
@@ -582,7 +590,9 @@ const purgePersonal = async <C>(
   } finally {
     // A rebuild from now on covers this purge's writes, also when they
     // failed: it writes no more.
-    await owedWritesDone(db, purgeId);
+    await whileHeld(brain, open, (at) => [
+      owedWritesDoneWhile(db, purgeId, attemptHoldsOrIdle(open, at)),
+    ]);
   }
   await runStep(brain, open, "payloads", async () => {
     await collectPayloads(brain, db);
@@ -1379,7 +1389,9 @@ const rewriteVersions = async <C>(
   upTo: number,
   matcher: Matcher,
   /** Who the purge is by, to write; only counted without. */
-  write?: Json
+  write?: Json,
+  /** Awaited before each page after the first: the purge renews its hold. */
+  keep?: () => Promise<void>
 ): Promise<{
   changed: number;
   removed: number;
@@ -1391,6 +1403,10 @@ const rewriteVersions = async <C>(
   let left = 0;
   let beside = false;
   for (let after = 0; ;) {
+    if (after > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- between pages
+      await keep?.();
+    }
     // oxlint-disable-next-line no-await-in-loop -- a page at a time, to bound memory
     const refs = await db
       .select({
@@ -1539,7 +1555,9 @@ const purgeDocument = async <C>(
   named: Named,
   matcher: Matcher,
   onErase: OnErase,
-  purgeId: string
+  purgeId: string,
+  /** Renews the purge's hold between pages of versions (`keepHold`). */
+  keep: () => Promise<void>
 ): Promise<Counts> => {
   const { document, collection } = named;
   // Before anything of it changes: one the host is saving now refuses, and
@@ -1553,7 +1571,8 @@ const purgeDocument = async <C>(
     document,
     at - 1,
     matcher,
-    actor
+    actor,
+    keep
   );
   const current = await versionOf(brain, db, document, at);
   const changed = current && purgeChangeOf(current, matcher);
@@ -1813,7 +1832,13 @@ const purgeContent = async <C>(
     // whatever documents the purge names. First, so a document whose
     // purge fails doesn't leave them holding a term.
     await runStep(brain, held, "host_copies", async () => {
-      await onErase.rewrite(by, (text) => without(text, matcher));
+      await onErase.rewrite(
+        by,
+        (text) => without(text, matcher),
+        async () => {
+          await keepHold(brain, held);
+        }
+      );
     });
     // A copy made of a document named goes whatever it holds, also when
     // the document's own purge then fails.
@@ -1842,7 +1867,10 @@ const purgeContent = async <C>(
             one,
             matcher,
             onErase,
-            purgeId
+            purgeId,
+            async () => {
+              await keepHold(brain, held);
+            }
           )),
         })
       );
@@ -1851,7 +1879,9 @@ const purgeContent = async <C>(
   } finally {
     // A rebuild from now on covers this purge's writes, also when one of
     // them failed: it writes no more.
-    await owedWritesDone(db, purgeId);
+    await whileHeld(brain, held, (at) => [
+      owedWritesDoneWhile(db, purgeId, attemptHoldsOrIdle(held, at)),
+    ]);
   }
   // What the rewrites let go of leaves R2 now; a failure fails the purge,
   // and running it again collects what's left (`collecting` rows).

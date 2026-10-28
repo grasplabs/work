@@ -106,8 +106,12 @@ const allOf = (copies: readonly Copies[]): Copies => ({
     }
     return total;
   },
-  rewrite: async (by, rewrite) => {
-    for (const each of copies) {
+  rewrite: async (by, rewrite, between) => {
+    for (const [index, each] of copies.entries()) {
+      if (index > 0) {
+        // oxlint-disable-next-line no-await-in-loop -- the purge's hold renewed between tables
+        await between?.();
+      }
       // oxlint-disable-next-line no-await-in-loop -- one table after another
       await each.rewrite(by, rewrite);
     }
