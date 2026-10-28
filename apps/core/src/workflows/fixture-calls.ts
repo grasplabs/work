@@ -21,6 +21,7 @@ import { consumerFailure, fenced, servedIn } from "../store-operations.ts";
 import { operationServesContract } from "../workflow-bindings.ts";
 import { bindingsOf } from "../workflow-resources.ts";
 import type { FixtureDecisionRun } from "./fixture-decisions.ts";
+import { fixtureRunSessionOf } from "./fixture-run-sessions.ts";
 import {
   contractOf,
   requireModelRequest,
@@ -225,31 +226,44 @@ const fixtureOperation = async (
     resourceId: release.manifest.resourceId,
     resourceVersion: release.manifest.resourceVersion,
   };
-  const result = await callOperation(
-    hostedRelease(env, release),
-    {
-      principal: run.principal,
-      consumer,
-      // The workflow's version, as a real workflow's store call names it.
-      writer: { resourceId: run.workflowId, resourceVersion: run.version },
-      store: fenced(store, effect.requireHolds),
-      requestId: crypto.randomUUID(),
-      deadline: effect.deadline,
-      runId: run.runId,
-      // A member of the App, never a builder, as a workflow's store call
-      // runs; once its record is gone (its test ended), nothing commits.
-      authorize: async () => {
-        await recordOf(env, run.runId);
-        effect.requireHolds();
-        return { appMember: true, appBuilder: false };
+  // On-prem, a child of its suite's session, in its turn among the
+  // suite's calls (fixture-run-sessions.ts): never a place of its own,
+  // which the suite waiting for this run may leave none of.
+  const suite = fixtureRunSessionOf(run.runId);
+  const parentSession = suite?.parent();
+  const operate = async () =>
+    await callOperation(
+      hostedRelease(env, release),
+      {
+        principal: run.principal,
+        consumer,
+        // The workflow's version, as a real workflow's store call names it.
+        writer: { resourceId: run.workflowId, resourceVersion: run.version },
+        store: fenced(store, effect.requireHolds),
+        requestId: crypto.randomUUID(),
+        deadline: effect.deadline,
+        runId: run.runId,
+        // A member of the App, never a builder, as a workflow's store call
+        // runs; once its record is gone (its test ended), nothing commits.
+        authorize: async () => {
+          await recordOf(env, run.runId);
+          effect.requireHolds();
+          return { appMember: true, appBuilder: false };
+        },
       },
-    },
-    { path, kind: served.operation.kind },
-    input,
-    // The step's own key, hashed to a submission key's length, as a
-    // workflow's real store call sends it.
-    { idempotencyKey: await sha256Hex(effect.key) }
-  );
+      { path, kind: served.operation.kind },
+      input,
+      // The step's own key, hashed to a submission key's length, as a
+      // workflow's real store call sends it.
+      {
+        idempotencyKey: await sha256Hex(effect.key),
+        ...(parentSession === undefined ? {} : { parentSession }),
+      }
+    );
+  const result =
+    suite === undefined || parentSession === undefined
+      ? await operate()
+      : await suite.inTurn(operate);
   if (!result.ok) {
     throw consumerFailure(result.error);
   }

@@ -70,6 +70,7 @@ import {
 import { buildAppTests } from "./screens.ts";
 import { codeSession, startFailure } from "./workflows/code.ts";
 import { answerFixtureDecision } from "./workflows/fixture-decisions.ts";
+import { holdFixtureRunSession } from "./workflows/fixture-run-sessions.ts";
 import {
   discardFixtureRuns,
   fixtureRunOutcome,
@@ -757,6 +758,8 @@ class FixtureSession extends TestTarget {
    * them.
    */
   readonly #runs: FixtureRunStarted[] = [];
+  /** What lets go of its runs' way into the suite's session, at `close`. */
+  readonly #letGo: (() => void)[] = [];
   /**
    * The starts admitted against `maxRunsPerTest`, under way or done: one
    * is counted before it awaits anything, so starts at once can't each
@@ -970,8 +973,19 @@ class FixtureSession extends TestTarget {
               return store.id;
             },
             deadline: this.#endsAt,
-            recorded: () => {
+            recorded: (runId) => {
               recorded = true;
+              // Its store calls run in this suite's session, in their turn
+              // among its calls, until the test ends (fixture-run-sessions.ts).
+              this.#letGo.push(
+                holdFixtureRunSession(runId, {
+                  parent: this.#parent,
+                  inTurn: async (work) =>
+                    this.#calls === undefined
+                      ? await work()
+                      : await this.#calls.run(this.#endsAt, work),
+                })
+              );
             },
           }
         );
@@ -1197,6 +1211,9 @@ class FixtureSession extends TestTarget {
    */
   async close(): Promise<void> {
     this.#closed = true;
+    for (const letGo of this.#letGo.splice(0)) {
+      letGo();
+    }
     // Its runs first: nothing of them runs on against a store discarded.
     const runs = this.#runs.splice(0).map(({ runId }) => runId);
     if (runs.length > 0) {

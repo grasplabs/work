@@ -158,7 +158,7 @@ export interface FixtureStart {
   /** When its test's time is up (ms since the epoch). */
   readonly deadline: number;
   /** Told once its record is written: from then on, it is a run to remove. */
-  readonly recorded: () => void;
+  readonly recorded: (runId: string) => void;
 }
 
 /** A test's run as its start answers it. */
@@ -232,7 +232,7 @@ export const startFixtureRun = async (
       createdAt: new Date(),
       deadline: new Date(test.deadline),
     });
-  test.recorded();
+  test.recorded(runId);
   try {
     await runEngine(env).createFixture({
       id: runId,
