@@ -18,6 +18,7 @@ import {
   RouterProvider,
   useRouterState,
 } from "@tanstack/react-router";
+import type { AnyRouter } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -147,7 +148,9 @@ const opened = async (
     loader: async () => await policies.book(),
   });
   const RulePage = () => {
-    const loaded: unknown = useRouterState({
+    // This test's own router, not the app's: inferring the app's route
+    // tree here is too deep for the type checker.
+    const loaded: unknown = useRouterState<AnyRouter>({
       select: ({ matches }) => matches.at(0)?.loaderData,
     });
     const rule = isBook(loaded) ? loaded.rules[0] : undefined;
