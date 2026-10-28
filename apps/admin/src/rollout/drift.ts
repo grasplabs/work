@@ -13,7 +13,7 @@ import type { CloudflareApi } from "../cloudflare/api.ts";
 import { listDeployments } from "../cloudflare/workers.ts";
 import type { WorkerDeployment } from "../cloudflare/workers.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clients, clientWorkers } from "../db/schema.ts";
+import { clientPlacements, clients, clientWorkers } from "../db/schema.ts";
 import { errorCode } from "../deploy/deploy.ts";
 import { importedManifest } from "../deploy/release.ts";
 
@@ -111,7 +111,7 @@ const expectedWorkers = async (
 
 /**
  * Client `clientId`'s drift, read live from its account; null when the
- * admin has no such client. Every Worker of the releases it runs or is
+ * admin has no such client, or it's placed in a hosting destination. Every Worker of the releases it runs or is
  * pinned to is read, recorded or not: one the admin has no record of
  * (a deploy that stopped part way, or whose record was lost) is never in
  * sync, `drifted` when its account answers. A Worker whose deployments
@@ -127,10 +127,15 @@ export const driftOf = async (
     .select({
       accountId: clients.accountId,
       pinnedReleaseId: clients.pinnedReleaseId,
+      placed: clientPlacements.clientId,
     })
     .from(clients)
+    .leftJoin(clientPlacements, eq(clientPlacements.clientId, clients.id))
     .where(eq(clients.id, clientId));
-  if (client === undefined) {
+  // A placed client's Workers are its inventory's, in its destination
+  // (src/hosting/): reading this path's script names in its account would
+  // report Workers it never had.
+  if (client === undefined || client.placed !== null) {
     return null;
   }
   const recorded = await db

@@ -29,13 +29,18 @@
  * Read on demand: it reads every active client's account, a few at a
  * time, each within a deadline (src/live-reads.ts).
  */
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { cloudflareApi } from "../cloudflare/api.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clients, rollouts, rolloutTargets } from "../db/schema.ts";
+import {
+  clientPlacements,
+  clients,
+  rollouts,
+  rolloutTargets,
+} from "../db/schema.ts";
 import {
   deployerToken,
   deploySecrets,
@@ -305,10 +310,15 @@ export const checkRevocation = async (
   const storeChanged = Object.keys({ ...started.data, ...now }).filter(
     (name) => started.data[name] !== now[name]
   );
+  // Placed clients' secrets are their operation's to deliver
+  // (src/hosting/operation.ts), not this path's: they aren't read here.
   const active = await db
     .select({ id: clients.id })
     .from(clients)
-    .where(eq(clients.status, "active"));
+    .leftJoin(clientPlacements, eq(clientPlacements.clientId, clients.id))
+    .where(
+      and(eq(clients.status, "active"), isNull(clientPlacements.clientId))
+    );
   // Read once: every client's reads make their API from it, each stopped
   // by its own deadline.
   const token = await deployerToken(env);

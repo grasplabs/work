@@ -20,6 +20,7 @@ import type { AdminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
 import {
   errorCode,
+  isPlaced,
   redeployKind,
   runDeploy,
   startDeploy,
@@ -88,6 +89,14 @@ export const applySettings = async (
     throw new SettingsError(
       "nothing_deployed",
       `${clientId}'s Workers don't run one release`
+    );
+  }
+  // Refused before it claims the client: its deploy would refuse anyway
+  // (`assertNotPlaced`), with the claim taken for nothing.
+  if (await isPlaced(db, clientId)) {
+    throw new SettingsError(
+      "client_placed",
+      `${clientId} is placed in a hosting destination`
     );
   }
   const busy = new SettingsError(
