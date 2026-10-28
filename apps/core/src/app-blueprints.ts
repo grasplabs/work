@@ -614,6 +614,7 @@ export const createFromBlueprint = async (
     responsibleId: null,
     audienceType: null,
     audienceId: null,
+    process: null,
     blueprint: blueprint.id,
     currentVersion: null,
     pendingVersion: null,

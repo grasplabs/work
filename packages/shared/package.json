@@ -48,6 +48,7 @@
     "./apps": "./src/apps.ts",
     "./audit": "./src/audit.ts",
     "./audit-log": "./src/audit-log.ts",
+    "./business-processes": "./src/business-processes.ts",
     "./brain": "./src/brain.ts",
     "./brain-records": "./src/brain-records.ts",
     "./capability": "./src/capability.ts",
