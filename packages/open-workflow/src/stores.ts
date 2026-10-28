@@ -2,6 +2,7 @@ import {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
+  ValueDefinitionError,
 } from "@grasp-os/sdk";
 import type {
   SchemaDefinition,
@@ -355,6 +356,33 @@ const contractOf = (
   });
 };
 
+/**
+ * The generated contract `build` makes, or undefined after reporting at
+ * the operation why the SDK refused it: a table within the limits may
+ * still be too deep once an operation wraps it (a list's page, a patch's
+ * `set`), and the SDK refuses a schema past its own (`definition.too_large`).
+ */
+const generatedContract = (
+  checker: Checker,
+  pointer: string,
+  build: () => OperationManifest
+): OperationManifest | undefined => {
+  try {
+    return build();
+  } catch (error) {
+    if (!(error instanceof ValueDefinitionError)) {
+      throw error;
+    }
+    checker.report.error(
+      "profile.invalid_value",
+      at(site, pointer),
+      "This operation's arguments or answer would nest too deep or declare too much for its table: nest the table's fields less.",
+      { expected: "a table this operation can wrap" }
+    );
+    return undefined;
+  }
+};
+
 /** One operation's declaration, checked against the store's schema. */
 const checkOperation = (
   checker: Checker,
@@ -487,13 +515,12 @@ const checkStore = (
         found.index === null
           ? null
           : [...(indexOf(read.manifest, found.table, found.index) ?? [])];
-      checked.set(
-        path,
-        Object.freeze({
-          ...found,
-          manifest: contractOf(path, read.schema, { ...found, index }),
-        })
+      const manifest = generatedContract(checker, operationPointer, () =>
+        contractOf(path, read.schema, { ...found, index })
       );
+      if (manifest !== undefined) {
+        checked.set(path, Object.freeze({ ...found, manifest }));
+      }
     }
   }
   if (checked.size !== paths.length) {
