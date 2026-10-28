@@ -411,9 +411,16 @@ const ancestorsMax = 64;
  * recalls nothing, so has nothing to check. A child run (run-children.ts,
  * GRA-1093) took its input from its parent's steps, so it is held to each
  * ancestor's evidence too, each under that ancestor's own authority and
- * bindings as they are now. An ancestor no longer going (a child lives
- * only while its parent does) is refused as `brain.revoked`, as is a
- * lineage past `ancestorsMax`.
+ * bindings as they are now. An ancestor no longer going is refused as
+ * `brain.revoked`, as is a lineage past `ancestorsMax`. That refuses no
+ * live child: a parent that ends stops its children, every call a child
+ * makes already asks that its parent is still going (run-children.ts),
+ * and retention removes only ended runs' records.
+ *
+ * The walk follows workflow parents alone. A JSON run an App's run
+ * started went through that run's App function call, which its own gate
+ * checked first (host.ts, `#callFunction`). It isn't held to the App
+ * run's evidence after it started: that gap is recorded on GRA-1093.
  *
  * What a running run shows needs no check: its details (`resourceRunFor`)
  * hold its output or failure only once it ended, which this checks first,
