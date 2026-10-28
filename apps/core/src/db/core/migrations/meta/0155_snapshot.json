@@ -10031,7 +10031,7 @@
             "created_at"
           ],
           "isUnique": false,
-          "where": "\"workflow_emitted_events\".\"delivered_at\" IS NULL"
+          "where": "delivered_at IS NULL"
         }
       },
       "foreignKeys": {
