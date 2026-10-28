@@ -1047,7 +1047,11 @@ const useLeaveAndReload = () => {
   };
 };
 
-/** A policy's actions: publish it while it waits for review, make a rule from it, remove it. */
+/**
+ * A policy's actions: publish it while it waits for review, or once Grasp
+ * couldn't read it (its rules are then made by hand); make a rule from
+ * it; remove it.
+ */
 export const PolicyActions = ({
   policy,
   policies,
@@ -1105,7 +1109,7 @@ export const PolicyActions = ({
           <PlusIcon data-icon="inline-start" />
           <Trans>Make a rule from it</Trans>
         </Button>
-        {policy.status === "review" ? (
+        {policy.status === "review" || policy.status === "failed" ? (
           <Button
             disabled={busy}
             onClick={() => {

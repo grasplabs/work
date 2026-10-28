@@ -6115,8 +6115,12 @@ msgid "Grasp checks what it takes to connect it. You find it under Requested."
 msgstr "Grasp checks what it takes to connect it. You find it under Requested."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Grasp could not be reached. Check the connection and upload the policy again."
-msgstr "Grasp could not be reached. Check the connection and upload the policy again."
+msgid "Grasp could not finish reading it. Read it again."
+msgstr "Grasp could not finish reading it. Read it again."
+
+#: src/routes/_shell.policies.documents.$policyId.tsx
+msgid "Grasp could not make rules of what it read. Read it again, or make its rules by hand."
+msgstr "Grasp could not make rules of what it read. Read it again, or make its rules by hand."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp could not read this policy"
@@ -6147,8 +6151,8 @@ msgid "Grasp in your language. Numbers, dates and amounts follow it too."
 msgstr "Grasp in your language. Numbers, dates and amounts follow it too."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Grasp is busy right now. Remove this policy and upload it again in a minute."
-msgstr "Grasp is busy right now. Remove this policy and upload it again in a minute."
+msgid "Grasp is busy right now. Read it again in a minute."
+msgstr "Grasp is busy right now. Read it again in a minute."
 
 #: src/dashboard/widget-ask.tsx
 msgid "Grasp is making it…"
@@ -7208,6 +7212,11 @@ msgstr "Jump to the newest message"
 msgid "Just for you"
 msgstr "Just for you"
 
+#: src/policies/policy-proposals.tsx
+msgctxt "keep a proposed rule"
+msgid "Keep"
+msgstr "Keep"
+
 #: src/onboarding/review-parts.tsx
 msgid "Keep “Require sender authentication” on, then save."
 msgstr "Keep “Require sender authentication” on, then save."
@@ -7239,6 +7248,11 @@ msgstr "Keep the rules that say what your policy means, edit them where needed, 
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
 msgstr "Keeps failing"
+
+#: src/policies/policy-proposals.tsx
+msgctxt "a proposed rule an admin kept"
+msgid "Kept"
+msgstr "Kept"
 
 #: src/activity/audit-words.ts
 msgid "Kept something the chat can no longer read from the model"
@@ -7428,6 +7442,11 @@ msgstr "Leave a field empty for no limit. A monthly limit can be at most {ceilin
 msgid "Leave it to the rules"
 msgstr "Leave it to the rules"
 
+#: src/policies/policy-proposals.tsx
+msgctxt "leave out a proposed rule"
+msgid "Leave out"
+msgstr "Leave out"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Leave out personnel files and anything about one person."
 msgstr "Leave out personnel files and anything about one person."
@@ -7443,6 +7462,11 @@ msgstr "Leaves this list"
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Left in"
 msgstr "Left in"
+
+#: src/policies/policy-proposals.tsx
+msgctxt "a proposed rule an admin left out"
+msgid "Left out"
+msgstr "Left out"
 
 #: src/onboarding/organization-words.ts
 msgctxt "filter: teams that don't take part in the interviews"
@@ -10598,6 +10622,10 @@ msgstr "Read everyone's calls of unknown outcome"
 msgid "Read how knowledge is used"
 msgstr "Read how knowledge is used"
 
+#: src/policies/policy-proposals.tsx
+msgid "Read it again"
+msgstr "Read it again"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read others' words"
 msgstr "Read others' words"
@@ -10658,8 +10686,8 @@ msgid "Reading it back"
 msgstr "Reading it back"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Reading policies is not set up yet. Add your own Anthropic key in Settings, under Models, and upload the policy again."
-msgstr "Reading policies is not set up yet. Add your own Anthropic key in Settings, under Models, and upload the policy again."
+msgid "Reading policies needs a model this deployment allows for sensitive data. Ask Grasp to set one up, then read it again. Meanwhile, make its rules by hand."
+msgstr "Reading policies needs a model this deployment allows for sensitive data. Ask Grasp to set one up, then read it again. Meanwhile, make its rules by hand."
 
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
@@ -10680,6 +10708,10 @@ msgstr "Reading who can own it…"
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Reading your staff list"
+
+#: src/policies/policy-proposals.tsx
+msgid "Reading…"
+msgstr "Reading…"
 
 #: src/policies/policies-table.tsx
 msgctxt "Grasp is reading an uploaded policy"
@@ -13125,10 +13157,6 @@ msgstr "the EU"
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "The export didn't work. Try again."
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "The file could not be read. Try a PDF or a text file."
-msgstr "The file could not be read. Try a PDF or a text file."
 
 #: src/settings/person-limits.tsx
 msgid "The first {listed} people, by name."
