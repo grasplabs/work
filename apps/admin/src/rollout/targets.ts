@@ -9,7 +9,7 @@
  * placed in a hosting destination, whose one operation a rollout runs for
  * its release (src/hosting/operation.ts).
  */
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
@@ -133,6 +133,8 @@ export interface TargetClient {
     releaseId: string;
     status: "running" | "failed" | "done";
     previousReleaseId: string | null;
+    /** How many changes it started: each release, run again and rollback. */
+    change: number;
     /** Each Worker's shared secrets as last delivered, by name with its fingerprint. */
     shared: Record<string, Record<string, string>>;
   } | null;
@@ -143,8 +145,8 @@ export interface TargetClient {
    */
   rotationPending: boolean;
   /**
-   * Whether staff changed its sign-in or a setting after its latest done
-   * deploy started (`clients.configChangedAt`): a deploy must still take
+   * Whether staff changed its sign-in or a setting after its core last
+   * went live with them (`clients.configChangedAt`): a run must still take
    * the change to its core.
    */
   configPending: boolean;
@@ -162,8 +164,9 @@ export interface TargetClient {
 
 /**
  * Whether client `clientId`'s config, changed at `configChangedAt`, waits
- * for a deploy: no deploy of it finished, or its latest done one started
- * no later than the change, and so may have read the config before it.
+ * for a run: its operation isn't done, or its core went live with the
+ * settings as read no later than the change (`configuredAt`, recorded
+ * once core's upload is observed), however often that run was resumed.
  */
 export const isConfigPending = async (
   db: AdminDatabase,
@@ -173,16 +176,20 @@ export const isConfigPending = async (
   if (configChangedAt === null) {
     return false;
   }
-  // Its operation's last run that finished: what it started with is live.
   const operation = await db
     .select({
       status: clientProvisions.status,
-      createdAt: clientProvisions.createdAt,
+      configuredAt: sql<
+        string | null
+      >`json_extract(${clientProvisions.progress}, '$.configuredAt')`,
     })
     .from(clientProvisions)
     .where(eq(clientProvisions.clientId, clientId))
     .get();
-  return operation?.status !== "done" || operation.createdAt <= configChangedAt;
+  if (operation?.status !== "done" || operation.configuredAt === null) {
+    return true;
+  }
+  return Date.parse(operation.configuredAt) <= configChangedAt.getTime();
 };
 
 const deliveredSchema = z
@@ -235,6 +242,7 @@ export const targetClient = async (
       releaseId: clientProvisions.releaseId,
       status: clientProvisions.status,
       previousReleaseId: clientProvisions.previousReleaseId,
+      change: clientProvisions.change,
       progress: clientProvisions.progress,
     })
     .from(clientProvisions)
@@ -307,26 +315,17 @@ export const runningRelease = (client: TargetClient): string | null => {
 
 /**
  * What `client` runs now, for a rollback to take it back to: the release
- * its operation last ran whole (the one it's on once done; the one before
- * a release that stopped part way), with each Worker's recorded version
- * and its secrets generation.
+ * every Worker was seen running (`runningRelease`), with its secrets
+ * generation and the shared secrets its operation last delivered.
  */
-export const previousRunOf = (client: TargetClient): PreviousRun => {
-  const { operation } = client;
-  let release: string | null = null;
-  if (operation !== null) {
-    release =
-      operation.status === "done"
-        ? operation.releaseId
-        : operation.previousReleaseId;
-  }
-  return {
-    release,
-    generation: client.generation,
-    versions: {},
-    shared: operation?.shared ?? {},
-  };
-};
+export const previousRunOf = (client: TargetClient): PreviousRun => ({
+  // What every Worker was seen running, never how its operation's last
+  // run ended: none when they run different releases.
+  release: runningRelease(client),
+  generation: client.generation,
+  versions: {},
+  shared: client.operation?.shared ?? {},
+});
 
 /** Parses a target's recorded `previous`; null when it has none. */
 export const parsePrevious = (previous: string | null): PreviousRun | null => {

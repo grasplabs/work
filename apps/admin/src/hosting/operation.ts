@@ -357,6 +357,11 @@ const progressSchema = z.object({
   /** The core origin the probe passed at. */
   origin: z.string().optional(),
   /**
+   * When the settings core last went live with were read (ISO): a change
+   * to them after it waits for the next run (src/rollout/targets.ts).
+   */
+  configuredAt: z.string().optional(),
+  /**
    * The newest-built release whose database migrations may have run,
    * recorded before they run (src/deploy/compatibility.ts `appliedSchema`):
    * kept across releases, so a release that migrated and then failed, and
@@ -413,6 +418,11 @@ const assertHolds = async (
 const actorName = (actor: Actor): string =>
   actor === "system" ? actor : actor.email;
 
+/** What a change takes live, as a client's core records it. */
+export type ChangeKind = NonNullable<
+  (typeof clientProvisions.$inferSelect)["what"]
+>;
+
 /** Client `clientId`'s operation, if it has one. */
 export const provisionOf = async (db: AdminDatabase, clientId: string) =>
   await db
@@ -444,7 +454,7 @@ export const startClientProvision = async (
     db
       .insert(clientProvisions)
       .select(
-        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
+        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
       )
       .onConflictDoNothing(),
     {
@@ -559,6 +569,47 @@ const releaseAction = ({
 type Operation = NonNullable<Awaited<ReturnType<typeof provisionOf>>>;
 
 /**
+ * Throws unless client `clientId` may go back to release `back`, as a
+ * rollback would: by the Durable Object migrations each of its scripts
+ * was seen at (`assertCanGo`), before anything of the rollback is claimed
+ * or uploaded.
+ */
+export const assertCanRollBack = async (
+  db: AdminDatabase,
+  clientId: string,
+  back: string
+): Promise<void> => {
+  const operation = await provisionOf(db, clientId);
+  if (operation !== undefined) {
+    await assertCanGo(db, operation, back, true);
+  }
+};
+
+/**
+ * Whether `operation` has `target` already, so starting it changes
+ * nothing: done on it, unless asked to run it `again` (its settings or
+ * secrets as they are now); failed on it, or left running by a runner
+ * that ended, which the holder runs again to resume it. A rollback onto
+ * what it runs done is refused (`nothing_to_roll_back`).
+ */
+const hasAlready = (
+  operation: { releaseId: string; status: string; clientId: string },
+  target: string,
+  { rollback, again }: { rollback?: boolean; again?: boolean }
+): boolean => {
+  if (operation.releaseId !== target) {
+    return false;
+  }
+  if (rollback === true && operation.status === "done") {
+    throw new ProvisionOperationError(
+      "nothing_to_roll_back",
+      `${operation.clientId} runs ${target} already`
+    );
+  }
+  return again !== true || operation.status !== "done";
+};
+
+/**
  * The one release every Worker of client `clientId` was seen running
  * (`client_workers`, written once an upload is observed), or null when
  * they run different releases or none: what a release started now goes
@@ -617,9 +668,17 @@ export const startClientRelease = async (
     releaseId,
     rollback,
     again,
+    what,
     cause,
-  }: { releaseId?: string; rollback?: boolean; again?: boolean; cause?: string }
-): Promise<{ operationId: string; releaseId: string }> => {
+  }: {
+    releaseId?: string;
+    rollback?: boolean;
+    again?: boolean;
+    /** What a run again takes live: its settings unless said. */
+    what?: ChangeKind;
+    cause?: string;
+  }
+): Promise<{ operationId: string; releaseId: string; change: number }> => {
   const { clientId } = held;
   const client = await db
     .select({ status: clients.status })
@@ -655,19 +714,12 @@ export const startClientRelease = async (
       `${clientId} has no release before ${operation.releaseId}`
     );
   }
-  if (operation.releaseId === target) {
-    if (rollback === true && operation.status === "done") {
-      throw new ProvisionOperationError(
-        "nothing_to_roll_back",
-        `${clientId} runs ${target} already`
-      );
-    }
-    // Done: it runs it already, unless asked to run it `again` (its
-    // settings or secrets as they are now). Failed, or left running by a
-    // runner that ended: the holder runs it again, which resumes it.
-    if (again !== true || operation.status !== "done") {
-      return { operationId: operation.id, releaseId: target };
-    }
+  if (hasAlready(operation, target, { rollback, again })) {
+    return {
+      operationId: operation.id,
+      releaseId: target,
+      change: operation.change,
+    };
   }
   await assertCanGo(db, operation, target, rollback === true);
   // Run again, it goes on from what it went on from; a new release, from
@@ -691,6 +743,9 @@ export const startClientRelease = async (
         status: "running",
         step: null,
         error: null,
+        // A change of its own, counted: what a rollout's rollback reads.
+        change: operation.change + 1,
+        what: target === operation.releaseId ? (what ?? "settings") : "release",
         startedBy: actorName(actor),
         createdAt: now,
         updatedAt: now,
@@ -700,6 +755,7 @@ export const startClientRelease = async (
           eq(clientProvisions.id, operation.id),
           eq(clientProvisions.status, operation.status),
           eq(clientProvisions.releaseId, operation.releaseId),
+          eq(clientProvisions.change, operation.change),
           stillHolds(held)
         )
       ),
@@ -720,7 +776,11 @@ export const startClientRelease = async (
       `${clientId}'s operation or its claim changed as the release started`
     );
   }
-  return { operationId: operation.id, releaseId: target };
+  return {
+    operationId: operation.id,
+    releaseId: target,
+    change: operation.change + 1,
+  };
 };
 
 /** What a run of the operation works on, loaded once. */
@@ -920,7 +980,9 @@ const coreVarsOf = async (
     derived,
     {
       by: loaded.operation.startedBy,
-      what: "release",
+      // What started it: a release, or new settings or secrets on the
+      // release it runs, as its core records it in its Activity.
+      what: loaded.operation.what ?? "release",
       release: loaded.operation.releaseId,
       // When the operation started: the same however often it's resumed.
       at: loaded.operation.createdAt.toISOString(),
@@ -1270,6 +1332,8 @@ const upload = async (
     lockMailSender(binding, mailSender);
   }
   const target = targetOf(loaded, inventory, app);
+  // Before the settings are read: one changed after it waits for the next.
+  const configuredAt = new Date().toISOString();
   const vars = varsOf(
     loaded,
     app,
@@ -1373,6 +1437,12 @@ const upload = async (
       enabled: worker.workersDev,
       previewsEnabled: false,
     });
+  }
+  if (app === "core") {
+    // Core live with the settings as read: what's pending is what changed
+    // after.
+    const now = await progressNow(db, loaded.operation.id);
+    await recordProgress(db, loaded, { ...now, configuredAt });
   }
   // What the client runs, as a deploy records it: only while the runner
   // holds the client, in the same statement.

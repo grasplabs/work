@@ -156,7 +156,14 @@ export class ApplyClient extends WorkflowEntrypoint<Env, ApplyParams> {
             db,
             startedBy,
             { clientId, runId: event.instanceId },
-            { releaseId, again: true }
+            {
+              releaseId,
+              again: true,
+              // New secrets go with it when a rotation waits too.
+              what: client.rotationPending
+                ? "settings_and_secrets"
+                : "settings",
+            }
           );
         })
       );

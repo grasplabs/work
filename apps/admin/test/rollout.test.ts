@@ -3,6 +3,7 @@ import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { applySettings } from "../src/clients/apply.ts";
 import { setSignIn } from "../src/clients/settings.ts";
@@ -17,7 +18,13 @@ import {
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
+import { deployContext } from "../src/deploy/context.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
+import {
+  runClientProvision,
+  startClientRelease,
+} from "../src/hosting/operation.ts";
+import { releasePlacedClient } from "../src/hosting/workflow.ts";
 import {
   approveRollout,
   cancelRollout,
@@ -30,6 +37,7 @@ import {
 import type { StartRolloutInput } from "../src/rollout/control.ts";
 import { driftOf } from "../src/rollout/drift.ts";
 import { rollbackClient, rollbackRing } from "../src/rollout/rollback.ts";
+import { isConfigPending } from "../src/rollout/targets.ts";
 import { clientEndedEvent, fleetConcurrency } from "../src/rollout/workflow.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, staff } from "./hosting.ts";
@@ -1065,4 +1073,473 @@ describe("rolling a release out to placed clients", () => {
       nobody: null,
     });
   });
+});
+
+/** Where a rollout's run on a client stops for good, as a crash leaves it. */
+interface RolloutCrash {
+  at: "claimed" | "started" | "mid-run" | "ran";
+  /** Whether it started its change on the client. */
+  started: boolean;
+}
+
+const rolloutCrashes: RolloutCrash[] = [
+  { at: "claimed", started: false },
+  { at: "started", started: true },
+  { at: "mid-run", started: true },
+  { at: "ran", started: true },
+];
+
+type StaffAction = "release" | "apply" | "rollback" | "another rollout";
+const staffActions: StaffAction[] = [
+  "release",
+  "apply",
+  "rollback",
+  "another rollout",
+];
+
+/**
+ * What staff's `action` after a rollout died at `crash` comes to: what
+ * the action answers; the releases the client runs then; whether the dead
+ * rollout's rollback goes after (only while its change is the client's
+ * latest); the releases it ends on; and its runner then.
+ */
+const rolloutWalkExpected = (
+  crash: RolloutCrash,
+  action: StaffAction,
+  ids: { before: string; release: string; later: string }
+) => {
+  const split = { connect: ids.release, core: ids.before };
+  if (action === "rollback") {
+    return crash.started
+      ? {
+          acted: "resolved",
+          releases: on(ids.before),
+          rollbackAfter: "taken",
+          endsOn: on(ids.before),
+          runner: null,
+        }
+      : {
+          acted: "nothing_to_roll_back",
+          releases: on(ids.before),
+          rollbackAfter: "taken",
+          endsOn: on(ids.before),
+          // Nothing replaced the dead rollout's claim, which has ended.
+          runner: "rollout",
+        };
+  }
+  const rollbackAfter = crash.started ? "superseded" : "nothing_to_roll_back";
+  if (action === "apply") {
+    if (crash.at === "mid-run") {
+      // Split between releases: nothing to apply settings on, so the
+      // rollout's change stays the latest, and its rollback mends it.
+      return {
+        acted: "nothing_deployed",
+        releases: split,
+        rollbackAfter: "resolved",
+        endsOn: on(ids.before),
+        runner: null,
+      };
+    }
+    const runs = on(crash.at === "ran" ? ids.release : ids.before);
+    return {
+      acted: "resolved",
+      releases: runs,
+      rollbackAfter,
+      endsOn: runs,
+      runner: null,
+    };
+  }
+  return {
+    acted: "resolved",
+    releases: on(ids.later),
+    rollbackAfter,
+    endsOn: on(ids.later),
+    runner: null,
+  };
+};
+
+/** A minute and more ago: past the window a claim or run counts as starting in. */
+const longAgo = (): Date => new Date(Date.now() - 2 * 60_000);
+
+/**
+ * A client live on `before` and a rollout of `release` to it whose run
+ * died at `crash.at`, as the run leaves the admin's records: the rollout
+ * running, the client claimed by it (claimed, started, mid-run) or
+ * released (ran, as the operation's end releases it), its target pending
+ * or deploying, and its operation as far as the run took it. The run's
+ * instance is gone, as long ago.
+ */
+const crashedRollout = async (
+  crash: RolloutCrash,
+  before: string,
+  release: string
+) => {
+  const client = await live(0, before);
+  const { clientId } = client;
+  const rolloutId = crypto.randomUUID();
+  const at = longAgo();
+  await db.insert(rollouts).values({
+    id: rolloutId,
+    kind: "release",
+    releaseId: release,
+    status: "running",
+    ring: 0,
+    startedBy: staff.email,
+    createdAt: at,
+    updatedAt: at,
+  });
+  await db.insert(rolloutTargets).values({
+    rolloutId,
+    clientId,
+    ring: 0,
+    status: "pending",
+    updatedAt: at,
+  });
+  const before_ = await db
+    .select({ runId: clientRuns.runId })
+    .from(clientRuns)
+    .where(eq(clientRuns.clientId, clientId))
+    .get();
+  if (before_ !== undefined) {
+    await db.delete(clientRuns).where(eq(clientRuns.clientId, clientId));
+  }
+  await db
+    .insert(clientRuns)
+    .values({ clientId, runId: rolloutId, kind: "rollout", claimedAt: at });
+  const holder = { clientId, runId: rolloutId };
+  if (crash.started) {
+    await db
+      .update(rolloutTargets)
+      .set({
+        previous: JSON.stringify({
+          release: before,
+          generation: 1,
+          versions: {},
+          shared: {},
+        }),
+        status: "deploying",
+      })
+      .where(eq(rolloutTargets.rolloutId, rolloutId));
+    const { operationId, change } = await startClientRelease(
+      db,
+      staff,
+      holder,
+      {
+        releaseId: release,
+      }
+    );
+    await db
+      .update(rolloutTargets)
+      .set({ deployId: operationId, change })
+      .where(eq(rolloutTargets.rolloutId, rolloutId));
+  }
+  if (crash.at === "mid-run") {
+    cloudflare.failNext(
+      (call) =>
+        call.method === "PUT" &&
+        call.path.startsWith(`/accounts/${client.account.id}/`) &&
+        call.path.endsWith("-grasp-os-core"),
+      400
+    );
+    await runClientProvision(await deployContext(env), holder).catch(() => {
+      /* the run's failure, as the crash left it */
+    });
+    await db
+      .update(clientProvisions)
+      .set({ status: "running", error: null })
+      .where(eq(clientProvisions.clientId, clientId));
+  }
+  if (crash.at === "ran") {
+    await runClientProvision(await deployContext(env), holder);
+  }
+  return { client, rolloutId };
+};
+
+/** Client `clientId`'s core script, as its operation recorded it. */
+const coreScriptOf = async (clientId: string): Promise<string> => {
+  const row = await db
+    .select({ scriptName: clientWorkers.scriptName })
+    .from(clientWorkers)
+    .where(
+      and(
+        eq(clientWorkers.clientId, clientId),
+        eq(clientWorkers.worker, "core")
+      )
+    )
+    .get();
+  return row?.scriptName ?? "";
+};
+
+/** The `PLATFORM_CHANGE` core's live version in `account` runs with. */
+const platformChangeOf = (account: PlacedClient["account"], script: string) => {
+  const state = account.scripts.get(script);
+  const [only] = state?.deployments[0]?.versions ?? [];
+  const version = state?.versions.find(({ id }) => id === only?.version_id);
+  const bindings = z
+    .array(z.looseObject({ name: z.string(), json: z.unknown().optional() }))
+    .parse(version?.metadata.bindings ?? []);
+  return bindings.find(({ name }) => name === "PLATFORM_CHANGE")?.json;
+};
+
+describe("a client's changes, counted", () => {
+  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  beforeEach(setAsideEarlierTests);
+
+  it("refuses a rollout's rollback once anything changed the client since, even back to the rollout's release", async () => {
+    const before = await placedRelease("feat(core): before");
+    const internal = await live(0, before);
+    const release = await placedRelease("feat(core): rolled out");
+    const later = await placedRelease("feat(core): later");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    // Staff take it to a later release, then back to the rollout's.
+    await deployPlaced(internal.clientId, later);
+    await deployPlaced(internal.clientId, release);
+
+    const refused = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+
+    expect({
+      refused,
+      releases: await releasesOf(internal.clientId),
+    }).toStrictEqual({
+      refused: "superseded",
+      releases: on(release),
+    });
+  });
+
+  it("starts a fleet client afresh on retry once its release rolled itself back, and takes it to the release", async () => {
+    const before = await placedRelease("feat(core): before");
+    await live(0, before);
+    const acme = await live(1, before);
+    const release = await placedRelease("feat(core): broken, then fixed");
+    const isConnectUpload = (call: { method: string; path: string }) =>
+      call.method === "PUT" &&
+      call.path.startsWith(`/accounts/${acme.account.id}/`) &&
+      call.path.endsWith("-grasp-os-connect");
+    // Its first try's core answers the probe as another client; the
+    // rollback's upload finds it answering as it should again.
+    acme.account.coreProbe = { asClient: "someone-else" };
+    // oxlint-disable require-await -- the fake waits on these; nothing to wait for
+    cloudflare.beforeAnswering(isConnectUpload, async () => {
+      cloudflare.beforeAnswering(isConnectUpload, async () => {
+        delete acme.account.coreProbe;
+      });
+    });
+    // oxlint-enable require-await
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    await approveRollout(env, staff, rolloutId, ringChecked);
+    await run.waitForStepResult({ name: "retry 1 asked" });
+    const failed = await targetOf(rolloutId, acme.clientId);
+
+    await retryRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+
+    expect({
+      failed,
+      retried: await targetOf(rolloutId, acme.clientId),
+      releases: await releasesOf(acme.clientId),
+    }).toMatchObject({
+      failed: { status: "failed", error: "release_rolled_back" },
+      retried: { status: "done" },
+      releases: on(release),
+    });
+  });
+
+  it("finishes a rollback whose run step ran already when it runs again, recording it, never refusing what it did", async () => {
+    const before = await placedRelease("feat(core): before");
+    const internal = await live(0, before);
+    const release = await placedRelease("feat(core): rolled out");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    // The rollback's run step did its work, and its result was lost: what
+    // it did is on record, and the step runs again.
+    const runId = `rollback-${crypto.randomUUID().slice(0, 8)}`;
+    const held = { clientId: internal.clientId, runId };
+    await db.insert(clientRuns).values({
+      clientId: internal.clientId,
+      runId,
+      kind: "rollback",
+      claimedAt: new Date(),
+    });
+    await startClientRelease(db, staff, held, {
+      releaseId: before,
+      rollback: true,
+    });
+    await runClientProvision(await deployContext(env), held);
+    const rollbacks = await introspectWorkflow(env.ROLLBACK_CLIENT);
+    try {
+      await rollbacks.modifyAll(async (modifier) => {
+        await modifier.disableRetryDelays();
+        await modifier.mockStepResult({ name: "plan" }, before);
+      });
+      await db.insert(clientRuns).values({
+        clientId: internal.clientId,
+        runId,
+        kind: "rollback",
+        claimedAt: new Date(),
+      });
+      await env.ROLLBACK_CLIENT.create({
+        id: runId,
+        params: {
+          rolloutId,
+          clientId: internal.clientId,
+          startedBy: staff,
+        },
+      });
+      const [again] = await rollbacks.get();
+      await again?.waitForStatus("complete");
+    } finally {
+      await rollbacks.dispose();
+    }
+
+    expect({
+      target: await targetOf(rolloutId, internal.clientId),
+      rollout: await rolloutRow(rolloutId),
+      releases: await releasesOf(internal.clientId),
+    }).toMatchObject({
+      target: { status: "rolled_back" },
+      // It had finished: a rollback stops only a rollout still going.
+      rollout: { status: "done" },
+      releases: on(before),
+    });
+  });
+
+  it("counts settings live once core runs them, however often their run was resumed, and tells core what changed", async () => {
+    const before = await placedRelease("feat(core): before");
+    const internal = await live(0, before);
+    const core = await coreScriptOf(internal.clientId);
+    const runId = `apply-${crypto.randomUUID().slice(0, 8)}`;
+    await db
+      .delete(clientRuns)
+      .where(eq(clientRuns.clientId, internal.clientId));
+    await db.insert(clientRuns).values({
+      clientId: internal.clientId,
+      runId,
+      kind: "apply",
+      claimedAt: new Date(),
+    });
+    const held = { clientId: internal.clientId, runId };
+    await startClientRelease(db, staff, held, {
+      releaseId: before,
+      again: true,
+      what: "settings",
+    });
+    // Its core upload refused once; a setting changes before it's resumed.
+    cloudflare.failNext(
+      (call) => call.method === "PUT" && call.path.endsWith(`/scripts/${core}`),
+      400
+    );
+    await runClientProvision(await deployContext(env), held).catch(() => {
+      /* stopped, to resume */
+    });
+    await db
+      .update(clients)
+      .set({ configChangedAt: new Date() })
+      .where(eq(clients.id, internal.clientId));
+    await startClientRelease(db, staff, held, { releaseId: before });
+    await runClientProvision(await deployContext(env), held);
+
+    const client = await db
+      .select({ configChangedAt: clients.configChangedAt })
+      .from(clients)
+      .where(eq(clients.id, internal.clientId))
+      .get();
+    expect({
+      pending: await isConfigPending(
+        db,
+        internal.clientId,
+        client?.configChangedAt ?? null
+      ),
+      what: z
+        .looseObject({ what: z.string() })
+        .safeParse(platformChangeOf(internal.account, core)).data?.what,
+    }).toStrictEqual({ pending: false, what: "settings" });
+  });
+});
+
+describe("a rollout's run dying on a client, and staff acting on the client after", () => {
+  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  beforeEach(setAsideEarlierTests);
+
+  it.each(
+    rolloutCrashes.flatMap((crash) =>
+      staffActions.map((action) => ({ ...crash, action }))
+    )
+  )(
+    "dies $at, then staff $action: the client ends on one release, and the dead rollout's rollback goes only while its change is the latest",
+    async ({ action, ...crash }) => {
+      const before = await placedRelease("feat(core): before");
+      const release = await placedRelease("feat(core): rolled out");
+      const later = await placedRelease("feat(core): later");
+      const { client, rolloutId } = await crashedRollout(
+        crash,
+        before,
+        release
+      );
+      const { clientId } = client;
+      await using rollouts_ = await followRollouts();
+      await using rollbacks = await followRollbacks();
+      const applies = await introspectWorkflow(env.APPLY_CLIENT);
+      const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
+      try {
+        for (const each of [applies, attempts]) {
+          // oxlint-disable-next-line no-await-in-loop -- set up before any run
+          await each.modifyAll(async (modifier) => {
+            await modifier.disableRetryDelays();
+          });
+        }
+        let acted: unknown;
+        if (action === "release") {
+          acted = await codeOf(
+            releasePlacedClient(env, staff, clientId, { releaseId: later })
+          );
+          const [only] = await attempts.get();
+          await only?.waitForStatus("complete");
+        } else if (action === "apply") {
+          acted = await codeOf(applySettings(env, staff, clientId));
+          const [only] = await applies.get();
+          await only?.waitForStatus("complete");
+        } else if (action === "rollback") {
+          acted = await codeOf(rollbackClient(env, staff, rolloutId, clientId));
+          await rollbacks.settle();
+        } else {
+          acted = await codeOf(rollOut(later, { scope: "ring", ring: 0 }));
+          await rollouts_.waitForStatus("complete");
+        }
+        const releases = await releasesOf(clientId);
+        // The dead rollout's rollback, after: only while its change is the
+        // client's latest.
+        const rollbackAfter =
+          action === "rollback"
+            ? "taken"
+            : await codeOf(rollbackClient(env, staff, rolloutId, clientId));
+        await rollbacks.settle();
+        const expected = rolloutWalkExpected(crash, action, {
+          before,
+          release,
+          later,
+        });
+
+        expect({
+          acted,
+          releases,
+          rollbackAfter,
+          endsOn: await releasesOf(clientId),
+          runner: await runnerOf(clientId),
+        }).toMatchObject({
+          ...expected,
+          runner: expected.runner === "rollout" ? { runId: rolloutId } : null,
+        });
+      } finally {
+        await applies.dispose();
+        await attempts.dispose();
+      }
+    }
+  );
 });

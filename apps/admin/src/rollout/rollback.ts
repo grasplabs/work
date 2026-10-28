@@ -57,6 +57,7 @@ import { importedManifest } from "../deploy/release.ts";
 import { deployOrder } from "../deploy/versions.ts";
 import { InventoryError } from "../hosting/inventory.ts";
 import {
+  assertCanRollBack,
   ProvisionOperationError,
   runClientProvision,
   startClientRelease,
@@ -96,23 +97,14 @@ const wasReached = (status: string): boolean =>
 const newRollbackId = (): string =>
   `rollback-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
 
-/** Each Worker's last Durable Object migration tag in a release, by Worker name. */
-const migrationTags = (
-  workers: Record<string, { durableObjectMigrations: { tag: string }[] }>
-): Record<string, string | null> =>
-  Object.fromEntries(
-    Object.entries(workers).map(([name, worker]) => [
-      name,
-      worker.durableObjectMigrations.at(-1)?.tag ?? null,
-    ])
-  );
-
 /**
  * Throws unless release `back`'s code works with client `clientId` as the
  * rollout's release `from` left it: with what it runs, its Workers taken
- * back one at a time, and on its databases' schemas
- * (src/deploy/compatibility.ts); and unless `from` added no Durable
- * Object migration since `back`.
+ * back one at a time in the order its operation uploads them (connect,
+ * then core, which binds it), and on its databases' schemas
+ * (src/deploy/compatibility.ts); and unless a script of it ran a Durable
+ * Object migration `back` doesn't have, as each was seen
+ * (`assertCanRollBack`).
  */
 const assertCanGoBack = async (
   db: AdminDatabase,
@@ -130,21 +122,19 @@ const assertCanGoBack = async (
       `Release ${back} isn't imported`
     );
   }
-  if (rolledOut !== null) {
-    const tags = migrationTags(rolledOut.workers);
-    const backTags = migrationTags(before.workers);
-    const past = Object.keys(tags).find(
-      (name) => tags[name] !== backTags[name]
-    );
-    if (past !== undefined) {
-      throw new RolloutError(
-        "rollback_past_migration",
-        `${past}'s Durable Object migrations changed after ${back}`
-      );
+  try {
+    await assertCanRollBack(db, clientId, back);
+  } catch (error) {
+    if (
+      error instanceof ProvisionOperationError &&
+      error.code === "rollback_past_migration"
+    ) {
+      throw new RolloutError("rollback_past_migration", error.message);
     }
+    throw error;
   }
   const current = await currentReleases(db, clientId);
-  const apps = deployOrder(before.workers).toReversed();
+  const apps = deployOrder(before.workers);
   for (const app of apps) {
     current.set(app, rolledOut);
   }
@@ -179,6 +169,7 @@ const check = async (
     .select({
       status: rolloutTargets.status,
       deployId: rolloutTargets.deployId,
+      change: rolloutTargets.change,
       previous: rolloutTargets.previous,
       releaseId: rollouts.releaseId,
     })
@@ -216,16 +207,13 @@ const check = async (
       `${clientId} ran ${back} before rollout ${rolloutId} too`
     );
   }
-  if (operation.releaseId !== rolledOut && operation.releaseId !== back) {
+  // Only while the change the rollout started is still the client's
+  // latest: any release, run again or rollback since raised it, whatever
+  // release it went to.
+  if (target.change === null || operation.change !== target.change) {
     throw new RolloutError(
       "superseded",
-      `${clientId} was taken to ${operation.releaseId} after rollout ${rolloutId}`
-    );
-  }
-  if (operation.releaseId === back && operation.status === "done") {
-    throw new RolloutError(
-      "nothing_to_roll_back",
-      `${clientId} runs ${back} already`
+      `${clientId} changed after rollout ${rolloutId}`
     );
   }
   await assertCanGoBack(db, clientId, rolledOut, back);
@@ -312,10 +300,15 @@ export const rollbackClient = async (
 
 /**
  * Takes client `held.clientId`'s operation back to release `back` as
- * rollback `held`, and runs it: an operation the rollout left running on
- * its release is superseded first, while the rollback holds the client,
- * as the rollout lost it and runs it no more. The operation's own
- * failures and the inventory's stop the step at once.
+ * rollback `held`, and runs it, by what its operation recorded first, so
+ * a retry after any part of it does the rest and nothing twice:
+ * - the rollout's change still the latest: the rollout's operation, if
+ *   still running, is stopped (the rollout lost the client), and the
+ *   rollback started, a change of its own;
+ * - its own change, the one right after the rollout's, on `back`: already
+ *   started, it's run (resumed, or nothing left to do once done);
+ * - anything else changed it since: refused (`superseded`).
+ * The operation's own failures and the inventory's stop the step at once.
  */
 const runBack = async (
   env: Env,
@@ -324,21 +317,52 @@ const runBack = async (
   back: string
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
-  await db
-    .update(clientProvisions)
-    .set({ status: "failed", error: "rolled_back", updatedAt: new Date() })
+  const [target] = await db
+    .select({ change: rolloutTargets.change })
+    .from(rolloutTargets)
     .where(
       and(
-        eq(clientProvisions.clientId, held.clientId),
-        eq(clientProvisions.status, "running"),
-        stillHolds(held)
+        eq(rolloutTargets.rolloutId, params.rolloutId),
+        eq(rolloutTargets.clientId, held.clientId)
       )
     );
+  const operation = await db
+    .select({
+      releaseId: clientProvisions.releaseId,
+      change: clientProvisions.change,
+    })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, held.clientId))
+    .get();
+  const rolloutsChange = target?.change ?? null;
+  const started =
+    rolloutsChange !== null &&
+    operation?.change === rolloutsChange + 1 &&
+    operation.releaseId === back;
+  if (!started && operation?.change !== rolloutsChange) {
+    throw stop(
+      "superseded",
+      `${held.clientId} changed after rollout ${params.rolloutId}`
+    );
+  }
   try {
-    await startClientRelease(db, params.startedBy, held, {
-      releaseId: back,
-      rollback: true,
-    });
+    if (!started) {
+      await db
+        .update(clientProvisions)
+        .set({ status: "failed", error: "rolled_back", updatedAt: new Date() })
+        .where(
+          and(
+            eq(clientProvisions.clientId, held.clientId),
+            eq(clientProvisions.status, "running"),
+            eq(clientProvisions.change, rolloutsChange ?? -1),
+            stillHolds(held)
+          )
+        );
+      await startClientRelease(db, params.startedBy, held, {
+        releaseId: back,
+        rollback: true,
+      });
+    }
     // A rollback isn't rolled back on its own: staff see it fail.
     await runClientProvision(await deployContext(env), held, {
       rollBackOnProbe: false,

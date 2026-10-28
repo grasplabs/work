@@ -333,6 +333,11 @@ export const rolloutTargets = sqliteTable(
     /** The client's deploy of the release, once the rollout started it. */
     deployId: text("deploy_id"),
     /**
+     * The client's change the rollout started (`client_provisions.change`):
+     * a rollback of it may go only while that is still the client's latest.
+     */
+    change: integer(),
+    /**
      * What the client ran before the rollout reached it, which a rollback
      * restores: JSON (`PreviousRun`, src/rollout/targets.ts). For a
      * retry of a rollout that never finished the client, or a client left
@@ -653,6 +658,21 @@ export const clientProvisions = sqliteTable("client_provisions", {
   progress: text(),
   /** The runner that last recorded a step: a Workflow instance (src/runners.ts). */
   runId: text("run_id"),
+  /**
+   * Counts every change started on the client: each release, run again
+   * and rollback raises it (src/hosting/operation.ts). What a rollout or
+   * rollback reads to know its change is still the client's latest,
+   * rather than comparing releases, which a later change can return to.
+   */
+  change: integer().notNull().default(0),
+  /**
+   * What the change started is, as the client's core records it
+   * (`platform.updated`): a release, or new settings or secrets, or both,
+   * on the release it runs. Null before its first change.
+   */
+  what: text({
+    enum: ["release", "secrets", "settings", "settings_and_secrets"],
+  }),
   /** The staff member who started it. */
   startedBy: text("started_by").notNull(),
   createdAt: timestamp("created_at").notNull(),
