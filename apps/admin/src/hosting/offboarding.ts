@@ -9,16 +9,19 @@
  *   of a client exists (GRA-413), staff confirm that none was made; once it
  *   does, a fresh export is required instead.
  * - Every resource deleted is one its inventory records for its own
- *   deployment, in its own destination, checked against the provider
- *   first. Nothing here runs by itself: no retry, clock or rollout ever
- *   deletes.
+ *   deployment, named for it, in its own destination; every database is
+ *   checked against the provider before anything is deleted. Nothing here
+ *   runs by itself: no retry, clock or rollout ever deletes.
+ * - Each resource deleted is audited as it's recorded deleted, so a
+ *   deletion that stops part way leaves a record of what it did.
  *
- * Threat model, each tried in test/client-offboarding.test.ts:
+ * Threat model, each tried in test/client-provision-operation.test.ts:
  * - Deleting a live client's data: refused unless offboarded, and the
  *   retention window over.
  * - Deleting what isn't the client's: only inventory rows its deployment
- *   owns, in its destination; a database whose name the provider gives
- *   another id is refused and kept.
+ *   owns, named for its deployment, in its destination. A database whose
+ *   name the provider gives another id, or one whose id was never
+ *   recorded, refuses the whole deletion before anything goes.
  * - An offboarded client served again: its operation refuses to run for an
  *   offboarded client, so no release or provisioning attempt puts its
  *   hostname back.
@@ -41,6 +44,7 @@ import { actIfChanged, adminDatabase, audit } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clientPlacements, clientResources, clients } from "../db/schema.ts";
 import { clientDomain, deployerApi } from "../deploy/context.ts";
+import { DeployError } from "../deploy/errors.ts";
 import { unregisterHostname } from "../deploy/router.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 import { clientInventory, destinationOf, placementOf } from "./inventory.ts";
@@ -66,6 +70,10 @@ export const offboardingErrorCodes = [
   "resource_not_owned",
   /** Its destination isn't one the admin deletes in. */
   "destination_unsupported",
+  /** No client domain is set, so its hostname can't be taken out of the router's map. */
+  "routing_unconfigured",
+  /** The router's map gives its hostname another client: left as it is. */
+  "hostname_not_ours",
 ] as const;
 export type OffboardingErrorCode = (typeof offboardingErrorCodes)[number];
 
@@ -131,6 +139,13 @@ export const offboardPlacedClient = async (
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
   const client = await placedClientOf(db, clientId);
+  const domain = clientDomain(env);
+  if (domain === null) {
+    throw new OffboardingError(
+      "routing_unconfigured",
+      `No client domain is set, so ${clientId}'s hostname can't be unrouted`
+    );
+  }
   if (client.status !== "offboarded") {
     await assertIdle(env, clientId);
     const now = new Date();
@@ -156,8 +171,7 @@ export const offboardPlacedClient = async (
       );
     }
   }
-  const domain = clientDomain(env);
-  if (domain !== null) {
+  try {
     await unregisterHostname(
       env.ROUTER_HOSTS,
       `${clientId}.${domain}`,
@@ -173,6 +187,14 @@ export const offboardPlacedClient = async (
         }
       }
     );
+  } catch (error) {
+    if (error instanceof DeployError && error.code === "hostname_taken") {
+      throw new OffboardingError(
+        "hostname_not_ours",
+        `${clientId}'s hostname routes to another client`
+      );
+    }
+    throw error;
   }
 };
 
@@ -191,11 +213,17 @@ const kindOrder: Readonly<Record<ClientResource["kind"], number>> = {
   r2_bucket: 3,
 };
 
-/** Throws `resource_not_owned` unless `row` is a resource of `placement`'s own. */
+/**
+ * Throws `resource_not_owned` unless `row` is a resource of `placement`'s
+ * own: its deployment's, in its destination, and named for its deployment
+ * (src/hosting/inventory.ts `physicalName`; a Durable Object class within
+ * its script's name).
+ */
 const assertOwned = (row: ClientResource, placement: ClientPlacement): void => {
   if (
     row.owner !== placement.deploymentId ||
-    row.destinationId !== placement.destinationId
+    row.destinationId !== placement.destinationId ||
+    !row.physicalName.startsWith(`g${placement.deploymentId}-`)
   ) {
     throw new OffboardingError(
       "resource_not_owned",
@@ -204,21 +232,66 @@ const assertOwned = (row: ClientResource, placement: ClientPlacement): void => {
   }
 };
 
-/** Records `row` deleted, as it is now gone from its destination. */
+/**
+ * Records `row` deleted, as it is now gone from its destination, audited
+ * in the same batch: a deletion that stops later still leaves what it did.
+ */
 const recordDeleted = async (
   db: AdminDatabase,
+  staff: Staff,
   row: ClientResource
 ): Promise<void> => {
-  await db
-    .update(clientResources)
-    .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(
-      and(
-        eq(clientResources.clientId, row.clientId),
-        eq(clientResources.role, row.role),
-        isNull(clientResources.deletedAt)
-      )
-    );
+  await actIfChanged(
+    db,
+    staff,
+    db
+      .update(clientResources)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(clientResources.clientId, row.clientId),
+          eq(clientResources.role, row.role),
+          isNull(clientResources.deletedAt)
+        )
+      ),
+    {
+      action: "client.delete_resource",
+      clientId: row.clientId,
+      target: row.destinationId,
+      detail: {
+        role: row.role,
+        kind: row.kind,
+        physicalName: row.physicalName,
+      },
+    }
+  );
+};
+
+/**
+ * What the provider has under each recorded database's name, checked
+ * before anything is deleted: the id to delete, or null when it's gone.
+ * Refuses the whole deletion (`resource_not_owned`) when one is another
+ * database than the one recorded, or exists with no id ever recorded.
+ */
+const resolveDatabases = async (
+  { api, accountId }: Where,
+  rows: readonly ClientResource[]
+): Promise<Map<string, string | null>> => {
+  const resolved = new Map<string, string | null>();
+  for (const row of rows.filter(({ kind }) => kind === "d1_database")) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, before any delete
+    const found = await findD1Database(api, accountId, row.physicalName);
+    if (found !== undefined && found.uuid !== row.providerId) {
+      throw new OffboardingError(
+        "resource_not_owned",
+        row.providerId === null
+          ? `${row.physicalName} exists, but its id was never recorded`
+          : `${row.physicalName} is another database than the one recorded`
+      );
+    }
+    resolved.set(row.role, found?.uuid ?? null);
+  }
+  return resolved;
 };
 
 /** Where the destination's resources are: its account, and its namespace for scripts. */
@@ -231,11 +304,11 @@ interface Where {
 /**
  * Deletes `row` from its destination: `deleted`, or `emptying` for a
  * bucket that still holds objects, which now expires them. A database is
- * deleted only by the id the provider gives its recorded name, and only
- * when that's the id recorded.
+ * deleted by the id `databases` resolved for it beforehand.
  */
 const deleteResource = async (
   { api, accountId, namespace }: Where,
+  databases: ReadonlyMap<string, string | null>,
   row: ClientResource
 ): Promise<"deleted" | "emptying"> => {
   switch (row.kind) {
@@ -252,20 +325,10 @@ const deleteResource = async (
       return "deleted";
     }
     case "d1_database": {
-      if (row.providerId === null) {
-        return "deleted";
+      const uuid = databases.get(row.role) ?? null;
+      if (uuid !== null) {
+        await deleteD1Database(api, accountId, uuid);
       }
-      const found = await findD1Database(api, accountId, row.physicalName);
-      if (found === undefined) {
-        return "deleted";
-      }
-      if (found.uuid !== row.providerId) {
-        throw new OffboardingError(
-          "resource_not_owned",
-          `${row.physicalName} is another database than the one recorded`
-        );
-      }
-      await deleteD1Database(api, accountId, found.uuid);
       return "deleted";
     }
     case "r2_bucket": {
@@ -351,19 +414,21 @@ export const deletePlacedClient = async (
   const inventory = recorded
     .filter((row) => row.deletedAt === null)
     .toSorted((a, b) => kindOrder[a.kind] - kindOrder[b.kind]);
-  // Every row checked before anything is deleted.
+  // Every row checked, and every database against the provider, before
+  // anything is deleted.
   for (const row of inventory) {
     assertOwned(row, placement);
   }
+  const databases = await resolveDatabases(where, inventory);
   const deletion: Deletion = { deleted: 0, emptying: [] };
   for (const row of inventory) {
     // oxlint-disable-next-line no-await-in-loop -- in order: scripts first
-    const outcome = await deleteResource(where, row);
+    const outcome = await deleteResource(where, databases, row);
     if (outcome === "emptying") {
       deletion.emptying.push(row.physicalName);
     } else {
       // oxlint-disable-next-line no-await-in-loop -- each recorded as it goes
-      await recordDeleted(db, row);
+      await recordDeleted(db, staff, row);
       deletion.deleted += 1;
     }
   }
@@ -374,6 +439,9 @@ export const deletePlacedClient = async (
     detail: {
       deleted: deletion.deleted,
       emptying: deletion.emptying.length,
+      // What staff confirmed, and the retention it waited out.
+      exportConfirmed,
+      deletableFrom: new Date(allowedFrom).toISOString(),
     },
   });
   return deletion;

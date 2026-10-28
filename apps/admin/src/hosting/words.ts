@@ -180,4 +180,8 @@ export const offboardRefusals: Readonly<Record<OffboardingErrorCode, string>> =
     resource_not_owned:
       "A resource recorded for it, or what its destination has under that name, isn't its own, so it was left: look at its inventory.",
     destination_unsupported: "Its destination isn't one the admin deletes in.",
+    routing_unconfigured:
+      "The admin has no client domain set, so it can't take the client's hostname out of the router: set CLIENT_DOMAIN first.",
+    hostname_not_ours:
+      "Its hostname routes to another client in the router's map, so it was left: find out why before offboarding it.",
   };

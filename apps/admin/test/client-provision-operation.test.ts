@@ -1,6 +1,6 @@
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { moduleKey } from "@grasp-os/shared/release";
-import { deriveRouterSecret } from "@grasp-os/shared/router";
+import { deriveRouterSecret, routerHostKey } from "@grasp-os/shared/router";
 import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -2168,6 +2168,16 @@ describe("provisioning a placed client", () => {
       exportConfirmed: true,
     });
     const inventory = await clientInventory(db, clientId);
+    const events = await db
+      .select({ action: auditEvents.action, detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(eq(auditEvents.clientId, clientId));
+    const deletedEvents = events.filter(
+      ({ action }) => action === "client.delete_resource"
+    );
+    const summary = events.find(
+      ({ action }) => action === "client.delete_resources"
+    );
 
     expect({
       early,
@@ -2177,8 +2187,12 @@ describe("provisioning a placed client", () => {
       deletion: deletion.emptying,
       gone: holdings(account),
       recorded: inventory.every((row) => row.deletedAt !== null),
+      // Each resource audited as it went, then the whole, with what staff
+      // confirmed.
+      audited: deletedEvents.length,
+      summary: z.unknown().parse(JSON.parse(summary?.detail ?? "null")),
       others: holdings(other.account),
-    }).toStrictEqual({
+    }).toMatchObject({
       early: "retention_running",
       unconfirmed: "export_unconfirmed",
       live: "not_offboarded",
@@ -2186,6 +2200,8 @@ describe("provisioning a placed client", () => {
       deletion: [],
       gone: { d1: [], buckets: [], scripts: [] },
       recorded: true,
+      audited: inventory.length,
+      summary: { deleted: inventory.length, exportConfirmed: true },
       others,
     });
   });
@@ -2223,6 +2239,7 @@ describe("provisioning a placed client", () => {
     if (swapped !== undefined) {
       swapped.uuid = crypto.randomUUID();
     }
+    const before = holdings(next.account);
     const notOwned = await codeOf(
       deletePlacedClient(env, staff, next.clientId, { exportConfirmed: true })
     );
@@ -2232,15 +2249,110 @@ describe("provisioning a placed client", () => {
       second: secondRun.emptying,
       bucketGone: account.buckets.length,
       notOwned,
-      databaseKept: next.account.d1.some(
-        ({ name }) => name === database.physicalName
-      ),
+      // Refused before anything went: its scripts and their objects too.
+      untouched: holdings(next.account),
     }).toStrictEqual({
       emptying: { emptying: [files.physicalName], rule: true, kept: true },
       second: [],
       bucketGone: 0,
       notOwned: "resource_not_owned",
-      databaseKept: true,
+      untouched: before,
+    });
+  });
+
+  it("refuses deleting a row not named for its deployment, or a database whose id was never recorded, before anything goes", async () => {
+    const first = await importRelease("dedicated");
+    const misnamed = await liveClient(first);
+    const unrecorded = await liveClient(first);
+    for (const { clientId } of [misnamed, unrecorded]) {
+      // oxlint-disable-next-line no-await-in-loop -- two, in order
+      await offboardPlacedClient(env, staff, clientId);
+      // oxlint-disable-next-line no-await-in-loop -- two, in order
+      await offboardedDaysAgo(clientId, 31);
+    }
+    const files = await resourceOf(misnamed.clientId, "r2:grasp-os-files");
+    await db
+      .update(clientResources)
+      .set({ physicalName: "gsomeone-else-files" })
+      .where(
+        and(
+          eq(clientResources.clientId, misnamed.clientId),
+          eq(clientResources.role, files.role)
+        )
+      );
+    await db
+      .update(clientResources)
+      .set({ providerId: null })
+      .where(
+        and(
+          eq(clientResources.clientId, unrecorded.clientId),
+          eq(clientResources.role, "d1:grasp-os-core")
+        )
+      );
+    const before = {
+      misnamed: holdings(misnamed.account),
+      unrecorded: holdings(unrecorded.account),
+    };
+
+    const refused = {
+      misnamed: await codeOf(
+        deletePlacedClient(env, staff, misnamed.clientId, {
+          exportConfirmed: true,
+        })
+      ),
+      unrecorded: await codeOf(
+        deletePlacedClient(env, staff, unrecorded.clientId, {
+          exportConfirmed: true,
+        })
+      ),
+    };
+
+    expect({
+      refused,
+      untouched: {
+        misnamed: holdings(misnamed.account),
+        unrecorded: holdings(unrecorded.account),
+      },
+    }).toStrictEqual({
+      refused: {
+        misnamed: "resource_not_owned",
+        unrecorded: "resource_not_owned",
+      },
+      untouched: before,
+    });
+  });
+
+  it("refuses offboarding with no client domain set, or a hostname the router gives another client, and leaves the route", async () => {
+    const first = await importRelease("dedicated");
+    const { clientId } = await liveClient(first);
+    const other = await liveClient(first);
+    const hostname = `${clientId}.${domain}`;
+
+    const unconfigured = await codeOf(
+      offboardPlacedClient({ ...env, CLIENT_DOMAIN: "" }, staff, clientId)
+    );
+    const status = await db
+      .select({ status: clients.status })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get();
+    // The map gives its hostname the other client's entry.
+    const otherEntry = await env.ROUTER_HOSTS.get(
+      routerHostKey(`${other.clientId}.${domain}`)
+    );
+    await env.ROUTER_HOSTS.put(routerHostKey(hostname), otherEntry ?? "");
+    const notOurs = await codeOf(offboardPlacedClient(env, staff, clientId));
+
+    expect({
+      unconfigured,
+      status: status?.status,
+      notOurs,
+      route: await mappedRoute(env.ROUTER_HOSTS, hostname),
+    }).toMatchObject({
+      unconfigured: "routing_unconfigured",
+      status: "active",
+      notOurs: "hostname_not_ours",
+      route: { clientId: other.clientId },
     });
   });
 });
