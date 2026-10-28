@@ -146,6 +146,24 @@ export default {
         const answer = await peer.fetch("http://peer/list?run=probe");
         return Response.json({ status: answer.status, through: env.PEER === undefined ? "dispatch-namespace" : "service" });
       }
+      if (url.pathname === "/gateway") {
+        // Through the gateway's fetch, then through the stub its RPC hands
+        // back, then asking it for another client's connect by name.
+        const tried = async (work) => {
+          try {
+            return await work();
+          } catch (error) {
+            return "error: " + String(error?.message ?? error);
+          }
+        };
+        const other = url.searchParams.get("other") ?? "";
+        return Response.json({
+          fetched: await tried(async () => await (await env.CONNECT.fetch("http://connect/name")).text()),
+          rpc: await tried(async () => await env.CONNECT.call("name", [])),
+          asked: await tried(async () => await env.CONNECT.call("name", [other])),
+          stub: await tried(async () => await (await env.CONNECT.target(other)).name()),
+        });
+      }
       if (url.pathname === "/reach" && request.method === "POST") {
         const { url: target, headers } = await request.json();
         const answer = await fetch(target, { headers, redirect: "manual" });
@@ -542,3 +560,43 @@ export const outputOf = (
     ...(Object.keys(settings).length === 0 ? {} : { assets: settings }),
   };
 };
+
+/**
+ * The connect gateway (the candidate for core's binding to its own
+ * connect, GRA-430): an ordinary account Worker every client's core binds
+ * by a service binding whose props the admin sets as it uploads core,
+ * naming that client's connect. It reaches the namespace itself, and only
+ * ever the script its binding's props name: never one its caller names.
+ */
+export const gatewaySource = `
+import { WorkerEntrypoint } from "cloudflare:workers";
+export default class Gateway extends WorkerEntrypoint {
+  #connect() {
+    return this.env.CLIENTS.get(this.ctx.props.script);
+  }
+  // What its caller passes is ignored: the script is the binding's.
+  target(_asked) {
+    return this.#connect();
+  }
+  // One RPC method of the client's connect, called with \`args\`.
+  call(method, args) {
+    return this.#connect()[method](...args);
+  }
+  fetch(request) {
+    return this.#connect().fetch(request);
+  }
+}
+`;
+
+/** A stand-in for one client's connect: it answers its own name, over fetch and RPC. */
+export const connectStandInSource = (name: string): string => `
+import { WorkerEntrypoint } from "cloudflare:workers";
+export default class Connect extends WorkerEntrypoint {
+  name() {
+    return ${JSON.stringify(name)};
+  }
+  fetch() {
+    return new Response(${JSON.stringify(name)});
+  }
+}
+`;
