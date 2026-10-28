@@ -109,6 +109,8 @@ import {
   clientName,
   dispatcherSource,
   dispatchKeyHeader,
+  connectStandInSource,
+  gatewaySource,
   mailSource,
   outputOf,
   ownObject,
@@ -135,6 +137,7 @@ const steps = [
   "durability",
   "attack",
   "email",
+  "gateway",
   "inventory",
   "cleanup",
 ] as const;
@@ -1371,6 +1374,160 @@ const emptyBucket = (name: string): void => {
   }
 };
 
+/**
+ * The connect gateway (workers.ts): an ordinary Worker reaching the
+ * namespace, bound by each client's probe through a service binding whose
+ * props name that client's connect stand-in. Each probe must reach its own
+ * connect, over fetch and RPC, and get its own even when it asks for the
+ * other client's by name.
+ */
+const gatewayName = `${prefix}-gateway`;
+const standInOf = (client: Client): string =>
+  clientName({ prefix, client }, "connect-stand-in");
+const gatewayProbeOf = (client: Client): string =>
+  clientName({ prefix, client }, "gateway-probe");
+
+/**
+ * Uploads the gateway, each client's connect stand-in and each client's
+ * probe bound to the gateway with props naming its stand-in. True when
+ * all are live; false when planned or refused (recorded).
+ */
+const deployGateway = (): boolean => {
+  let live = !deploy(
+    {
+      name: gatewayName,
+      compatibilityDate: probeCompatibilityDate,
+      env: { CLIENTS: { type: "dispatch-namespace", namespace: prefix } },
+    },
+    "index.js",
+    oneModule(gatewaySource),
+    { ordinary: true }
+  ).planned;
+  for (const client of clients) {
+    const standIn = standInOf(client);
+    live =
+      !deploy(
+        { name: standIn, compatibilityDate: probeCompatibilityDate },
+        "index.js",
+        oneModule(connectStandInSource(standIn))
+      ).planned && live;
+    const name = `${client}: a user Worker may bind the gateway with props naming its connect`;
+    try {
+      live =
+        !deploy(
+          {
+            name: gatewayProbeOf(client),
+            compatibilityDate: probeCompatibilityDate,
+            env: {
+              CONNECT: {
+                type: "worker",
+                worker: gatewayName,
+                props: { script: standIn },
+              },
+            },
+          },
+          "index.js",
+          oneModule(probeSource)
+        ).planned && live;
+      check(name, live ? "pass" : "skipped");
+    } catch (error) {
+      if (!(error instanceof CfError)) {
+        throw error;
+      }
+      check(name, "fail", { error: lastLines(error.output) });
+      return false;
+    }
+  }
+  return live;
+};
+
+const gatewayAnswerSchema = z
+  .object({
+    fetched: z.string(),
+    rpc: z.string(),
+    asked: z.string(),
+    stub: z.string(),
+  })
+  .loose();
+
+/** What client `client`'s probe gets through the gateway, asking for the other's connect by name. */
+const throughGateway = async (client: Client): Promise<unknown> => {
+  const other = clients.find((name) => name !== client) ?? client;
+  // A new binding takes a few seconds to reach every location: asked
+  // again until it answers, for at most half a minute.
+  let answer: unknown;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- tries in turn
+    const response = await dispatch(
+      gatewayProbeOf(client),
+      `/gateway?other=${encodeURIComponent(standInOf(other))}`
+    );
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    answer = await jsonOf(response);
+    const parsed = gatewayAnswerSchema.safeParse(answer);
+    if (parsed.success && parsed.data.rpc === standInOf(client)) {
+      return answer;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- waits between tries
+    await sleep(5000);
+  }
+  return answer;
+};
+
+/**
+ * The connect gateway (workers.ts): an ordinary Worker reaching the
+ * namespace, bound by each client's probe through a service binding whose
+ * props name that client's connect stand-in. Each probe must reach its own
+ * connect, over fetch and forwarded RPC, and get its own even when it asks
+ * for the other client's by name.
+ */
+const gatewayStep = async (): Promise<void> => {
+  if (!deployGateway()) {
+    return;
+  }
+  for (const client of clients) {
+    const ownConnect = standInOf(client);
+    // oxlint-disable-next-line no-await-in-loop -- one client at a time
+    const answer = await throughGateway(client);
+    const reached = gatewayAnswerSchema.safeParse(answer);
+    check(
+      `${client}: reaches only its own connect through the gateway, by fetch and forwarded RPC, whatever it asks`,
+      reached.success &&
+        reached.data.fetched === ownConnect &&
+        reached.data.rpc === ownConnect &&
+        reached.data.asked === ownConnect
+        ? "pass"
+        : "fail",
+      { answer }
+    );
+    check(
+      `${client}: the gateway can hand back its connect's stub over RPC`,
+      reached.success && reached.data.stub === ownConnect ? "pass" : "observed",
+      { stub: reached.success ? reached.data.stub : null }
+    );
+    let settings: unknown;
+    try {
+      settings = cf.read([
+        "workers-for-platforms",
+        "dispatch-namespaces",
+        "scripts",
+        "settings",
+        "get",
+        gatewayProbeOf(client),
+        "--dispatch-namespace",
+        prefix,
+      ]);
+    } catch (error) {
+      settings = { error: errorText(error) };
+    }
+    // The binding's props aren't in what Cloudflare reports: core's code
+    // gets the binding, never the props.
+    check(`${client}: the gateway binding as Cloudflare keeps it`, "observed", {
+      settings,
+    });
+  }
+};
+
 /** Deletes every user Worker in the run's namespace. */
 const deleteUserWorkers = (): void => {
   const scripts = namesIn(
@@ -1479,6 +1636,7 @@ const run: Record<Step, () => Promise<void> | void> = {
   durability: durabilityStep,
   attack: attackStep,
   email: emailStep,
+  gateway: gatewayStep,
   inventory: () => {
     recordInventory("after");
   },
