@@ -8,7 +8,6 @@ import type { ModelMonthSpend } from "@grasp-os/shared/models";
 import type { CustomWidget } from "@grasp-os/shared/widgets";
 import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import {
   Popover,
   PopoverContent,
@@ -16,8 +15,6 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@grasp-os/ui/components/popover";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -29,7 +26,7 @@ import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Await, Link } from "@tanstack/react-router";
 import { GripVerticalIcon, PlusIcon, XIcon } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 
@@ -51,6 +48,7 @@ import {
   slotAt,
 } from "./layout.ts";
 import type { GridShape } from "./layout.ts";
+import { MakingDots } from "./making-dots.tsx";
 import type { GoalProgress, TeamsRead, WorkReturns } from "./returns.ts";
 import { RunsWidget } from "./runs-widget.tsx";
 import { CouldBeBetter } from "./signals.tsx";
@@ -62,6 +60,7 @@ import {
   TeamListView,
   fills,
 } from "./standard-widgets.tsx";
+import { ChangeWidget, WidgetAsk } from "./widget-ask.tsx";
 import {
   BlockButton,
   WidgetBlock,
@@ -87,14 +86,15 @@ import {
 //
 // Grasp makes a widget from what someone asks, from the empty card
 // (custom-widget.tsx draws it): core has the model write it, checks it
-// against what the person may see, and keeps it on their board. What the
-// prototype's board has besides: changing a widget from a block's sparkle
-// (core can: `changeWidget`), drawing it in dots meanwhile, and the
-// blocks gliding out of each other's way. The goals widget reads the
-// board's goals from core, each with the workflows linked to it, and the
-// teams widget the teams that own workflows; the return widget counts
-// hours core doesn't keep yet: it shows what the prototype shows with
-// nothing to count (`returns.ts`).
+// against what the person may see, and keeps it on their board. A widget
+// Grasp made is changed from its block's sparkle (`changeWidget`,
+// widget-ask.tsx), and while Grasp makes or changes one, its place is
+// drawn in dots (making-dots.tsx). What the prototype's board has
+// besides: the blocks gliding out of each other's way. The goals widget
+// reads the board's goals from core, each with the workflows linked to
+// it, and the teams widget the teams that own workflows; the return
+// widget counts hours core doesn't keep yet: it shows what the prototype
+// shows with nothing to count (`returns.ts`).
 
 /** The engines the person can open, with the workflows. */
 export interface EnginesRead {
@@ -733,40 +733,17 @@ const AddTile = ({
   onMade: (widget: CustomWidget) => void;
 }) => {
   const { t } = useLingui();
-  const { busy, failure, run } = useCoreAction();
   const [open, setOpen] = useState(false);
-  const [request, setRequest] = useState("");
-  const [note, setNote] = useState<string | null>(null);
-  const requestId = useId();
+  // Drawn in dots while Grasp makes the widget, in the place it takes.
+  const [making, setMaking] = useState(false);
   const back: readonly DashboardWidgetId[] = [
     ...missing,
     ...takenOff.map(({ id }) => id),
   ];
-  const ask = async () => {
-    const asked = request.trim();
-    if (asked === "" || busy) {
-      return;
-    }
-    setNote(null);
-    const result = await run(
-      async (session) => await session.dashboard.makeWidget(asked)
-    );
-    if (result === undefined) {
-      return;
-    }
-    setRequest("");
-    onMade(result.widget);
-    // What Grasp says of the nearest thing it made stays to be read; else
-    // the card closes on the widget it made.
-    if (result.note === null) {
-      setOpen(false);
-    } else {
-      setNote(result.note);
-    }
-  };
   return (
     <div className="relative h-80 min-w-0">
-      <div className="relative h-full">
+      <div aria-busy={making} className="relative h-full">
+        {making ? <MakingDots /> : null}
         <Popover onOpenChange={setOpen} open={open}>
           <PopoverTrigger
             render={
@@ -783,41 +760,18 @@ const AddTile = ({
                 <Trans>Add a widget</Trans>
               </PopoverTitle>
             </PopoverHeader>
-            <form
-              className="flex flex-col gap-3"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void ask();
+            <WidgetAsk
+              ask={async (session, asked) =>
+                await session.dashboard.makeWidget(asked)
+              }
+              label={t`Ask Grasp for a widget`}
+              onBusy={setMaking}
+              onDone={() => {
+                setOpen(false);
               }}
-            >
-              <Field>
-                <FieldLabel htmlFor={requestId}>
-                  <Trans>Ask Grasp for a widget</Trans>
-                </FieldLabel>
-                <Textarea
-                  disabled={busy}
-                  id={requestId}
-                  maxLength={500}
-                  onChange={(event) => {
-                    setRequest(event.target.value);
-                  }}
-                  placeholder={t`Which workflows failed most this month?`}
-                  value={request}
-                />
-              </Field>
-              <ErrorText>{failure}</ErrorText>
-              {note === null ? null : (
-                <output className="text-muted-foreground">{note}</output>
-              )}
-              <Button disabled={busy || request.trim() === ""} type="submit">
-                {busy ? <Spinner data-icon="inline-start" /> : null}
-                {busy ? (
-                  <Trans>Grasp is making it…</Trans>
-                ) : (
-                  <Trans>Ask Grasp</Trans>
-                )}
-              </Button>
-            </form>
+              onMade={onMade}
+              placeholder={t`Which workflows failed most this month?`}
+            />
             {back.length === 0 ? null : (
               <div className="flex flex-col gap-1 border-t pt-3">
                 <p className="text-muted-foreground text-xs">
@@ -916,6 +870,8 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
   const [widgets, setWidgets] = useState(board.layout);
   const [failure, setFailure] = useState<string>();
   const [announcement, setAnnouncement] = useState("");
+  // The widget Grasp is changing now, drawn in dots meanwhile.
+  const [changing, setChanging] = useState<DashboardWidgetId | null>(null);
   const [dragged, setDragged] = useState<DashboardWidgetId | null>(null);
   const grid = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
@@ -1046,6 +1002,13 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
     setAnnouncement(t`${title} added to the dashboard.`);
   };
 
+  /** A widget Grasp just changed: it keeps its place. */
+  const changedOne = (widget: CustomWidget) => {
+    setMade(new Map([...made, [widget.id, widget]]));
+    const { title } = widget.view;
+    setAnnouncement(t`${title} changed.`);
+  };
+
   const add = (id: DashboardWidgetId) => {
     const title = titleOf(id);
     void save(addWidget(widgets, id), t`${title} added to the dashboard.`);
@@ -1157,6 +1120,7 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
         {widgets.map((id) => {
           const title = titleOf(id);
           const dragging = dragged === id;
+          const changeable = made.get(id);
           return (
             <div
               className={cn(
@@ -1170,11 +1134,13 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
               }}
             >
               <div
+                aria-busy={changing === id}
                 className={cn(
                   "relative h-full rounded-xl transition duration-200",
                   dragging && "scale-102 shadow-lg"
                 )}
               >
+                {changing === id ? <MakingDots /> : null}
                 <WidgetControls
                   value={{
                     movable: true,
@@ -1187,6 +1153,15 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
                           }}
                           title={title}
                         />
+                        {changeable === undefined ? null : (
+                          <ChangeWidget
+                            onBusy={(busy) => {
+                              setChanging(busy ? id : null);
+                            }}
+                            onChanged={changedOne}
+                            widget={changeable}
+                          />
+                        )}
                         <BlockButton
                           label={t`Take off the dashboard`}
                           onClick={() => {
