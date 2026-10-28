@@ -242,6 +242,7 @@ export const buildRelease = async (
             class_name: "WorkflowDispatcher",
           },
           { type: "service", name: "CONNECT", service: "grasp-os-connect" },
+          { type: "worker_loader", name: "LOADER" },
           { type: "version_metadata", name: "CF_VERSION_METADATA" },
           { type: "assets", name: "ASSETS" },
           { type: "d1", name: "DB", id: "$D1_DB_ID" },
