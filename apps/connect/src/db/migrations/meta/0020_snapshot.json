@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "48441bac-1368-41bd-bf33-dd2a8c2f97f6",
+  "id": "9bedf2b9-2de2-4f91-81a1-c8658085b793",
   "prevId": "1cec9180-1bb8-46bc-bdee-d97fa38c9025",
   "tables": {
     "audit_outbox": {
@@ -339,6 +339,45 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "composio_tool_sends": {
+      "name": "composio_tool_sends",
+      "columns": {
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "composio_tool_sends_connection_id_seq_pk": {
+          "columns": [
+            "connection_id",
+            "seq"
+          ],
+          "name": "composio_tool_sends_connection_id_seq_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "connection_tokens": {
       "name": "connection_tokens",
       "columns": {
@@ -534,12 +573,21 @@
           "notNull": false,
           "autoincrement": false
         },
-        "tools_unsynced_at": {
-          "name": "tools_unsynced_at",
+        "tools_sent_seq": {
+          "name": "tools_sent_seq",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "tools_settled_seq": {
+          "name": "tools_settled_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "tools_sync_failures": {
           "name": "tools_sync_failures",
