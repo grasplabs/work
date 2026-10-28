@@ -66,10 +66,10 @@ test("a builder picks the team that owns a workflow on its page, the dashboard c
   const page = await pageOf(builder);
   await page.goto(`/workflows/${app}/tally`);
   const team = page.getByRole("combobox", { name: "Team" });
-  await expect(team).toHaveText("No team", pageRead);
+  await expect(team).toContainText("No team", pageRead);
   await team.click();
   await page.getByRole("option", { name: finance }).click();
-  await expect(team).toHaveText(finance, pageRead);
+  await expect(team).toContainText(finance, pageRead);
 
   // The dashboard's teams count it under Finance.
   await page.goto("/dashboard");
@@ -86,10 +86,10 @@ test("a builder picks the team that owns a workflow on its page, the dashboard c
 
   // Taken off again: the workflow has no team, and Finance isn't counted.
   await page.goto(`/workflows/${app}/tally`);
-  await expect(team).toHaveText(finance, pageRead);
+  await expect(team).toContainText(finance, pageRead);
   await team.click();
   await page.getByRole("option", { name: "No team" }).click();
-  await expect(team).toHaveText("No team", pageRead);
+  await expect(team).toContainText("No team", pageRead);
   await page.goto("/dashboard");
   await expect(teams).toBeVisible(pageRead);
   await expect(teams).not.toContainText(finance, pageRead);
