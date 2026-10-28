@@ -489,6 +489,64 @@ export const brainPurgeSteps = sqliteTable(
 );
 
 /**
+ * Each export of the company's Brain (GRA-335, ../exports.ts): who asked,
+ * where it stands, and until when its files may be downloaded. Its files
+ * are written one by one (`brain_export_files`), the manifest last: an
+ * export without one isn't complete, however far it got.
+ */
+export const brainExports = sqliteTable(
+  "brain_exports",
+  {
+    id: text().primaryKey(),
+    /** User ID of the admin who asked for it. */
+    by: text().notNull(),
+    state: text({ enum: ["running", "complete", "failed", "expired"] })
+      .notNull()
+      .default("running"),
+    /** Why it failed, as a stable code; null otherwise. */
+    reason: text(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    completedAt: timestamp("completed_at"),
+    /** Until when its files may be downloaded; null before it completed. */
+    expiresAt: timestamp("expires_at"),
+    /** The manifest's SHA-256 (hex); null before it is written. */
+    manifestSha256: text("manifest_sha256"),
+    /** A run's claim while it writes, and when: one writer at a time. */
+    claim: text(),
+    claimedAt: timestamp("claimed_at"),
+  },
+  (table) => [
+    index("brain_exports_state_idx").on(table.state),
+    // One export being written at a time.
+    uniqueIndex("brain_exports_running_idx")
+      .on(table.state)
+      .where(sql`${table.state} = 'running'`),
+  ]
+);
+
+/**
+ * The files an export wrote, in order (../exports.ts): each one's name,
+ * SHA-256 and size, and, for a part of a long list, where the next part
+ * goes on from (`cursor`).
+ */
+export const brainExportFiles = sqliteTable(
+  "brain_export_files",
+  {
+    exportId: text("export_id")
+      .notNull()
+      .references(() => brainExports.id, { onDelete: "cascade" }),
+    name: text().notNull(),
+    position: integer().notNull(),
+    sha256: text().notNull(),
+    bytes: integer().notNull(),
+    rows: integer().notNull(),
+    cursor: text(),
+  },
+  (table) => [primaryKey({ columns: [table.exportId, table.name] })]
+);
+
+/**
  * The Brain's memory records (../memories.ts): what a person, or
  * later an App or agent acting for one, asked the Brain to remember, as
  * they said it. A record starts `proposed`, never an accepted fact.

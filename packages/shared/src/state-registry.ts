@@ -538,6 +538,14 @@ const knowledgeDb: D1State = {
       `${brain}eval-suites.ts`,
       "The cases of each learning suite version, by split, with their answer keys."
     ),
+    brain_exports: exported(
+      `${brain}exports.ts`,
+      "Each export of the company's Brain: who asked, where it stands, and until when it may be downloaded."
+    ),
+    brain_export_files: exported(
+      `${brain}exports.ts`,
+      "The files each export wrote, with their checksums."
+    ),
     brain_purges: exported(
       `${brain}purge-ledger.ts`,
       "Each purge as a durable erasure: who ran it, when, and whether it finished; never what it erased."
