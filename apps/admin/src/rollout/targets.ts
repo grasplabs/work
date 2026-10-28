@@ -315,13 +315,16 @@ export const runningRelease = (client: TargetClient): string | null => {
 
 /**
  * What `client` runs now, for a rollback to take it back to: the release
- * every Worker was seen running (`runningRelease`), with its secrets
+ * every Worker was seen running (`runningRelease`), or when they're split
+ * the last whole release its operation carries forward, with its secrets
  * generation and the shared secrets its operation last delivered.
  */
 export const previousRunOf = (client: TargetClient): PreviousRun => ({
   // What every Worker was seen running, never how its operation's last
-  // run ended: none when they run different releases.
-  release: runningRelease(client),
+  // run ended. Split between releases (a change that stopped part way),
+  // the last whole release it ran is carried forward: the way back.
+  release:
+    runningRelease(client) ?? client.operation?.previousReleaseId ?? null,
   generation: client.generation,
   versions: {},
   shared: client.operation?.shared ?? {},

@@ -1350,6 +1350,46 @@ describe("a client's changes, counted", () => {
     });
   });
 
+  it("rolls a retried fleet client back to what staff took it to after its first try failed, never past it", async () => {
+    // Built in order: P, M, R; M isn't newer than the rollout's R.
+    const p = await placedRelease("feat(core): p");
+    const m = await placedRelease("feat(core): m");
+    const r = await placedRelease("feat(core): r");
+    await live(0, p);
+    const acme = await live(1, p);
+    // Its first try's core upload is refused.
+    cloudflare.failNext(
+      (call) =>
+        call.method === "PUT" &&
+        call.path.startsWith(`/accounts/${acme.account.id}/`) &&
+        call.path.endsWith("-grasp-os-core"),
+      400
+    );
+    await using run = await followRollouts();
+    await using rollbacks = await followRollbacks();
+    const rolloutId = await rollOut(r, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    await approveRollout(env, staff, rolloutId, ringChecked);
+    await run.waitForStepResult({ name: "retry 1 asked" });
+    // Staff take it to M, then the rollout retries it.
+    await deployPlaced(acme.clientId, m);
+    await retryRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+    const retried = await releasesOf(acme.clientId);
+
+    await rollbackClient(env, staff, rolloutId, acme.clientId);
+    await rollbacks.settle();
+
+    expect({
+      retried,
+      back: await releasesOf(acme.clientId),
+    }).toStrictEqual({
+      retried: on(r),
+      // Back to M, what it ran before the retry reached it: never P.
+      back: on(m),
+    });
+  });
+
   it("finishes a rollback whose run step ran already when it runs again, recording it, never refusing what it did", async () => {
     const before = await placedRelease("feat(core): before");
     const internal = await live(0, before);

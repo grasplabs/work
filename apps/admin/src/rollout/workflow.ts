@@ -68,7 +68,7 @@
 import { log } from "@grasp-os/shared/log";
 import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
-import { and, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, eq, inArray, lt } from "drizzle-orm";
 
 import type { Staff } from "../access.ts";
 import { sendStaffAlert } from "../alerts.ts";
@@ -521,7 +521,11 @@ const startTarget = async (
   db: AdminDatabase,
   params: RolloutParams,
   clientId: string,
-  { previous, client }: { previous: string | null; client: TargetClient }
+  {
+    previous,
+    change: recorded,
+    client,
+  }: { previous: string | null; change: number | null; client: TargetClient }
 ): Promise<Claimed> => {
   const { rolloutId } = params;
   // Read again now the rollout holds the client: no other runner changes
@@ -535,22 +539,19 @@ const startTarget = async (
   }
   const holder = { clientId, runId: rolloutId };
   // What a rollback goes back to, saved before the operation starts, while
-  // the rollout holds the client: a retry of this step after the start
-  // reuses it, rather than reading it again off an operation it moved on.
-  if (parsePrevious(previous) === null) {
+  // the rollout holds the client. A retry of this step that died between
+  // saving it and recording its change (none recorded) reuses it, rather
+  // than reading it off an operation it moved on. A restart after the
+  // client's change moved on (one recorded, not the latest) reads it again:
+  // what the client runs now, whatever staff took it to since.
+  if (parsePrevious(previous) === null || recorded !== null) {
     await db
       .update(rolloutTargets)
       .set({
         previous: JSON.stringify(previousRunOf(held)),
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          targetWhere(rolloutId, clientId),
-          isNull(rolloutTargets.previous),
-          stillHolds(holder)
-        )
-      );
+      .where(and(targetWhere(rolloutId, clientId), stillHolds(holder)));
   }
   // As the client's runner: the rollout claimed it above. Run again, it
   // takes live what waits: new secrets, its settings, or both.
@@ -639,6 +640,7 @@ const claimTarget = async (
   }
   return await startTarget(db, params, clientId, {
     previous: target.previous,
+    change: target.change,
     client,
   });
 };

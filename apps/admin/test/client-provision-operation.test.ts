@@ -2637,7 +2637,7 @@ interface Expected {
  * what every Worker ran when B started (A), refused once a script ran B's
  * new migration, nothing when B never started; a release records as the
  * one before what every Worker was seen running as it started, never how
- * B's run ended.
+ * B's run ended, and split between releases the last whole one (A).
  */
 const expectedOf = (
   point: CrashPoint,
@@ -2655,8 +2655,6 @@ const expectedOf = (
   let previous: string | null = ids.a;
   if (action === "another" && point.bothRanB) {
     previous = ids.b;
-  } else if (action === "another" && point.connectRanB) {
-    previous = null;
   }
   return {
     startedAs: "started",
@@ -2754,6 +2752,57 @@ describe("a release's runner crashing, and another action on the client after", 
     );
 
     expect(back).toBe("rollback_past_migration");
+  });
+
+  it("keeps the way back across two forward moves that each stop part way, so a rollback takes it back to the last whole release", async () => {
+    const a = await importRelease("dedicated");
+    const { clientId } = await liveClient(a);
+    const { core } = await scriptsOf(clientId);
+    const b = await importRelease("dedicated", {
+      notes: "feat(core): b",
+      core: "export default { core: 'b2' };",
+    });
+    const l = await importRelease("dedicated", {
+      notes: "feat(core): l",
+      core: "export default { core: 'l' };",
+    });
+    // B stops after connect's upload, core's refused: split, B and A.
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: b.releaseId,
+    });
+    cloudflare.failNext(isUpload(core), 400);
+    await failing(await attempt(clientId));
+    const afterB = await runs(clientId);
+    // L, from that split, stops the same way: split, L and A.
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: l.releaseId,
+    });
+    cloudflare.failNext(isUpload(core), 400);
+    await failing(await attempt(clientId));
+    const afterL = await runs(clientId);
+    const operation = await operationOf(clientId);
+    const carried = operation?.previousReleaseId;
+
+    const holder = await attempt(clientId);
+    const back = await codeOf(
+      startClientRelease(db, staff, holder, { rollback: true })
+    );
+    await runClientProvision(context, holder);
+
+    expect({
+      afterB,
+      afterL,
+      carried,
+      back,
+      endsOn: await runs(clientId),
+    }).toStrictEqual({
+      afterB: { connect: b.releaseId, core: a.releaseId },
+      afterL: { connect: l.releaseId, core: a.releaseId },
+      // A, the last whole release, carried forward across both.
+      carried: a.releaseId,
+      back: "started",
+      endsOn: { connect: a.releaseId, core: a.releaseId },
+    });
   });
 
   it.each(walk)(

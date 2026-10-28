@@ -723,8 +723,11 @@ export const startClientRelease = async (
   }
   await assertCanGo(db, operation, target, rollback === true);
   // Run again, it goes on from what it went on from; a new release, from
-  // what every Worker was seen running.
-  const before = await observedRelease(db, clientId);
+  // what every Worker was seen running, or, split between releases (a
+  // change that stopped part way), the last whole release carried forward,
+  // so a client never loses its way back.
+  const before =
+    (await observedRelease(db, clientId)) ?? operation.previousReleaseId;
   let previousReleaseId = before === target ? null : before;
   if (target === operation.releaseId) {
     ({ previousReleaseId } = operation);
