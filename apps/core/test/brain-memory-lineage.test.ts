@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { Reader } from "../src/knowledge/access.ts";
 import { portsOf } from "../src/knowledge/ports.ts";
+import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import { callAuth, signedInApi, unique } from "./sign-in.ts";
@@ -841,6 +842,78 @@ describe(
         byAdmin: "brain.not_found",
         byAda: "ok",
         retired: "retired",
+      });
+    });
+
+    it("withholds their own correction citing what they lost in the lineage of what it corrected, and records each lineage read", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const ada = await signedInApi(idp, "user");
+      const readers = await newTeam(admin, [ada]);
+      const cited = await documentIn(admin, {
+        name: `Readers ${unique()}`,
+        access: "teams",
+        teams: [readers],
+      });
+      const word = `quietdesk${unique().replaceAll("-", "")}`;
+      // Resting on nothing; its correction cites the team's document.
+      const first = idOf(
+        await ada.api.knowledge.remember(
+          { kind: "fact", text: `Desk ${word}` },
+          { idempotencyKey: key() }
+        )
+      );
+      const correction = idOf(
+        await ada.api.knowledge.memoriesProposeChange(
+          {
+            memoryId: first,
+            statement: `Desk ${word}, by the window.`,
+            sourceRefs: [cited],
+          },
+          { idempotencyKey: key(), expectedRevision: 1 }
+        )
+      );
+      await callAuth("/organization/remove-team-member", admin.session, {
+        teamId: readers,
+        userId: ada.userId,
+      });
+      const lineageReads = async () => {
+        const events = await allEvents();
+        return events.filter(
+          ({ action, actor, detail }) =>
+            action === "knowledge.read" &&
+            actor.type === "person" &&
+            actor.userId === ada.userId &&
+            detail?.read === "memory.lineage"
+        ).length;
+      };
+      const readsBefore = await lineageReads();
+      const ofFirst = await ada.api.knowledge.memoriesLineage({
+        memoryId: first,
+      });
+      const ofCorrection = await ada.api.knowledge.memoriesLineage({
+        memoryId: correction,
+      });
+
+      expect({
+        supersededBy:
+          ofFirst.supersededBy === null
+            ? null
+            : {
+                id: ofFirst.supersededBy.id,
+                ...withheld(ofFirst.supersededBy),
+              },
+        correction: withheld(ofCorrection.record),
+        reads: (await lineageReads()) - readsBefore,
+      }).toStrictEqual({
+        supersededBy: {
+          id: correction,
+          statement: "",
+          sourceRefs: 0,
+          withheld: true,
+        },
+        correction: { statement: "", sourceRefs: 0, withheld: true },
+        // The withheld one's read too, of nothing it cites.
+        reads: 2,
       });
     });
   }

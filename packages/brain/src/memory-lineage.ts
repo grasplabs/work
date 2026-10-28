@@ -356,13 +356,24 @@ export const memoriesLineage = async <C>(
   const [own] =
     found.ownerId === ownerId ? await withheldOwn(brain, reader, [record]) : [];
   if (own?.withheld === true) {
+    // Still a read, of nothing it cites.
+    await brain.ports.onRead(reader, {
+      action: "knowledge.read",
+      detail: { read: "memory.lineage", records: 1 },
+    });
     return { record: own, restsOn: [], supersededBy: null };
   }
   const superseding = await supersedingOf(brain, scope.where, found);
-  const supersededBy =
+  const shownSuperseding =
     superseding === undefined
       ? undefined
       : await shownOne(brain, reader, ownerId, scope.people, superseding);
+  // A correction of their own is withheld as it is read alone: one citing
+  // what they can't read now shows nothing of it here either.
+  const [supersededBy] =
+    shownSuperseding !== undefined && superseding?.ownerId === ownerId
+      ? await withheldOwn(brain, reader, [shownSuperseding])
+      : [shownSuperseding];
   const nodes = await restsOn(brain, reader, ownerId, scope, record);
   const sources = new Map<string, { id: string; sensitive: boolean }>();
   for (const node of nodes) {

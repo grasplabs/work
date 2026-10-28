@@ -216,7 +216,6 @@ export const withheldOwn = async <C, R extends MemoryRecord>(
 };
 
 /**
-/**
  * The statements that delete `userId`'s records and receipts, and the
  * task outcomes recorded as their experience (outcomes.ts), for a
  * personal purge's batch (purge.ts), which records the audit event.
