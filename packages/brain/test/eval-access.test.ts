@@ -71,6 +71,17 @@ const proposalOf = (suiteId: string) => ({
     environment: "sandbox@1",
     policy: "learning@1",
   },
+  decision: {
+    minimumGain: 0.05,
+    confidence: "0.95",
+    minimumSamples: 30,
+    regressionFloor: 0.1,
+    familyFloors: {},
+    costCeiling: 1,
+    latencyCeilingMs: 60_000,
+    securityGates: [],
+    minimumGraderAgreement: 0.8,
+  },
 });
 
 describe("who may do what with a learning suite", () => {

@@ -5,6 +5,7 @@ import { brainEvalCases, brainEvalSuiteVersions } from "../src/db/schema.ts";
 import { sha256Hex } from "../src/encoding.ts";
 import {
   changeSuiteOwner,
+  decideVersion,
   moveSuiteVersion,
   proposeSuiteVersion,
 } from "../src/eval-suites.ts";
@@ -94,6 +95,17 @@ const proposalOf = (
     model: "workers-ai/test",
     environment: "sandbox@1",
     policy: "learning@1",
+  },
+  decision: {
+    minimumGain: 0.05,
+    confidence: "0.95",
+    minimumSamples: 30,
+    regressionFloor: 0.1,
+    familyFloors: {},
+    costCeiling: 1,
+    latencyCeilingMs: 60_000,
+    securityGates: ["account created"],
+    minimumGraderAgreement: 0.8,
   },
 });
 
@@ -403,6 +415,12 @@ describe("a learning suite version", () => {
         .set({ expected: "{}" })
         .where(eq(brainEvalCases.suiteId, suiteId))
     );
+    const editDecision = await failureOf(
+      brain.db
+        .update(brainEvalSuiteVersions)
+        .set({ decision: "{}" })
+        .where(eq(brainEvalSuiteVersions.suiteId, suiteId))
+    );
     const editDigest = await failureOf(
       brain.db
         .update(brainEvalSuiteVersions)
@@ -415,12 +433,119 @@ describe("a learning suite version", () => {
       keyed: version.digests.final !== plain,
       editCase: editCase.includes("never updated"),
       editDigest: editDigest.includes("never updated"),
+      editDecision: editDecision.includes("never updated"),
+      decision: version.decision.minimumGain,
     }).toStrictEqual({
       folded: "knowledge.invalid",
       sameInput: "knowledge.invalid",
       keyed: true,
       editCase: true,
       editDigest: true,
+      editDecision: true,
+      decision: 0.05,
+    });
+  });
+
+  it("holds its grader's required checks and the platform's gates as gates, and decides on the families its own cases hold", async () => {
+    const { brain } = testHost();
+    const suiteId = `suite-${crypto.randomUUID()}`;
+    const withoutRequired = await codeOf(
+      proposeSuiteVersion(brain, asDesigner, designer, {
+        ...proposalOf(suiteId, threeSplits),
+        decision: {
+          ...proposalOf(suiteId, threeSplits).decision,
+          securityGates: [],
+        },
+      })
+    );
+    const mandating = {
+      ...brain,
+      ports: {
+        ...brain.ports,
+        evaluation: {
+          capabilities: async () =>
+            await Promise.resolve(["designer"] as const),
+          mandatedGates: ["no data leaves the sandbox"],
+        },
+      },
+    };
+    const withoutMandated = await codeOf(
+      proposeSuiteVersion(
+        mandating,
+        asDesigner,
+        designer,
+        proposalOf(suiteId, threeSplits)
+      )
+    );
+    const proposed = await proposeSuiteVersion(
+      brain,
+      asDesigner,
+      designer,
+      proposalOf(suiteId, threeSplits)
+    );
+    const comparison = {
+      families: {
+        "family-a": {
+          baseline: { successes: 10, trials: 100 },
+          candidate: { successes: 90, trials: 100 },
+        },
+      },
+      gates: { "account created": { successes: 100, trials: 100 } },
+      costPerTrial: 0,
+      latencyP95Ms: 0,
+      graderAgreement: 1,
+    };
+    const unaccepted = await codeOf(
+      decideVersion(brain, asEvaluator, suiteId, 1, comparison)
+    );
+    const calibrated = await moveSuiteVersion(
+      brain,
+      asEvaluator,
+      evaluator,
+      suiteId,
+      1,
+      "calibrated",
+      proposed.revision
+    );
+    await moveSuiteVersion(
+      brain,
+      asOwner,
+      owner,
+      suiteId,
+      1,
+      "accepted",
+      calibrated.revision
+    );
+    const byDesigner = await codeOf(
+      decideVersion(brain, asDesigner, suiteId, 1, comparison)
+    );
+    // Measured on one family of the three the cases hold.
+    const verdict = await decideVersion(brain, asEvaluator, suiteId, 1, {
+      families: {
+        "family-a": {
+          baseline: { successes: 10, trials: 100 },
+          candidate: { successes: 90, trials: 100 },
+        },
+      },
+      gates: { "account created": { successes: 100, trials: 100 } },
+      costPerTrial: 0,
+      latencyP95Ms: 0,
+      graderAgreement: 1,
+    });
+    expect({
+      withoutRequired,
+      withoutMandated,
+      unaccepted,
+      byDesigner,
+      reasons: verdict.reasons,
+      notCovered: verdict.notCovered.toSorted(),
+    }).toStrictEqual({
+      withoutRequired: "knowledge.invalid",
+      withoutMandated: "knowledge.invalid",
+      unaccepted: "knowledge.conflict",
+      byDesigner: "knowledge.not_found",
+      reasons: ["not_covered"],
+      notCovered: ["family-b", "family-c"],
     });
   });
 });
