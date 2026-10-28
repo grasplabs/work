@@ -136,7 +136,8 @@ const definitionOf = (name: string, contract: string): string =>
     ],
   });
 
-const context = v.object({ amount: v.number() });
+// Null too: a decision's context may be JSON `null` when its contract takes it.
+const context = v.object({ amount: v.number() }).nullable();
 const value = v.object({ comment: v.string() });
 
 /** An App bound to a workflow version with a decision binding, as `review`. */
@@ -319,7 +320,11 @@ const decisionInbox = async () => {
   const runAsking = async (
     app: string,
     at: number,
-    { step = "task:ask", restricted = false } = {}
+    {
+      step = "task:ask",
+      restricted = false,
+      input = { amount: 5 },
+    }: { step?: string; restricted?: boolean; input?: unknown } = {}
   ): Promise<{ runId: string; decisionId: string }> => {
     const runId = crypto.randomUUID();
     const decisionId = crypto.randomUUID();
@@ -353,7 +358,7 @@ const decisionInbox = async () => {
         step,
         at,
         at + 86_400_000,
-        JSON.stringify({ amount: 5 })
+        input === null ? null : JSON.stringify(input)
       ),
     ]);
     return { runId, decisionId };
@@ -572,6 +577,24 @@ describe(
           nextCursor: null,
           hasMore: false,
         },
+      });
+    });
+
+    it("show an open decision whose context is null, as its contract allows", async () => {
+      const { fixture, opened, reviewer, runAsking, ask } =
+        await decisionInbox();
+      const open = await runAsking(fixture.app, opened, { input: null });
+
+      await expect(
+        ask(reviewer, "decision", {
+          runId: open.runId,
+          decisionId: open.decisionId,
+        })
+      ).resolves.toMatchObject({
+        key: "approval",
+        prompt: "Approve this invoice?",
+        context: null,
+        canRespond: true,
       });
     });
 
