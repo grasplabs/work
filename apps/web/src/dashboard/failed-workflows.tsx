@@ -10,7 +10,6 @@ import { Link } from "@tanstack/react-router";
 import { TriangleAlertIcon } from "lucide-react";
 
 import type { Session } from "../core.ts";
-import { listedOrNone } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -33,35 +32,31 @@ export interface NotificationsPage {
 }
 
 /**
- * A page of the person's notifications (the latest, or those older than
- * `before`), marked read as shown: only its unread ones, only as they
- * were when listed.
+ * Marks read the unread ones of the notifications a page shows, only as
+ * they were when listed: one failed again since stays unread.
  */
-const readPage = async (
+export const markShownRead = async (
   session: Session,
-  before?: NotificationCursor
-): Promise<NotificationPage> => {
-  const page = await session.notifications.list(before);
-  const unread = page.notifications.filter(({ read }) => !read);
-  const [newest] = page.notifications;
+  shown: readonly Notification[]
+): Promise<void> => {
+  const unread = shown.filter(({ read }) => !read);
+  const [newest] = shown;
   if (unread.length > 0 && newest !== undefined) {
     await session.notifications.markRead(
       unread.map(({ id }) => id),
       newest.at
     );
   }
-  return page;
 };
 
-/** The latest page, and the model to ask a fix with. */
-export const readNotifications = async (
-  session: Session
-): Promise<NotificationsPage> => {
-  const [page, models] = await Promise.all([
-    readPage(session),
-    listedOrNone(session.chats.models()),
-  ]);
-  return { page, model: models[0] };
+/** A page of the person's notifications older than `before`, marked read as shown. */
+const readPage = async (
+  session: Session,
+  before: NotificationCursor
+): Promise<NotificationPage> => {
+  const page = await session.notifications.list(before);
+  await markShownRead(session, page.notifications);
+  return page;
 };
 
 /** One notification: which workflow failed, how often, and when last. */

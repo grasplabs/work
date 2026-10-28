@@ -388,7 +388,7 @@ const ReviewDetails = ({
                 {workflow.steps === null ? (
                   <span className="text-muted-foreground">
                     {workflow.calls.length === 0
-                      ? t`Its steps can't be read from its code, so any step may do anything its code does, calling none of the App's bindings.`
+                      ? t`Its steps can't be read from its code, so any step may do anything its code does, calling none of the domain's bindings.`
                       : t`Its steps can't be read from its code, so any step may do anything its code does, calling ${ph({ tools: formatList(workflow.calls) })}.`}
                   </span>
                 ) : (

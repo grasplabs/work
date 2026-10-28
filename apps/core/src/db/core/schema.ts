@@ -8,6 +8,7 @@ import type {
   BlueprintWorkflow,
   DeclaredPermission,
 } from "@grasp-os/shared/permissions";
+import type { RuleCondition } from "@grasp-os/shared/policies";
 import { artifactDecisions } from "@grasp-os/shared/screen-trust";
 import { signalKinds } from "@grasp-os/shared/signals";
 import type {
@@ -169,6 +170,17 @@ export const organizations = sqliteTable("organizations", {
   createdAt: timestamp("created_at").notNull(),
   /** The IANA time zone an admin set (organization.ts); `UTC` until then. */
   timeZone: text("time_zone"),
+});
+
+/**
+ * The organization's settings an admin keeps beside its name and time zone
+ * (org-settings.ts): one row per kind (`billing`, `pulse`), its value as
+ * JSON, checked again as it is read. None until an admin saves one.
+ */
+export const orgSettings = sqliteTable("org_settings", {
+  kind: text().primaryKey(),
+  value: text().notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
 });
 
 /** A person's place in the organization, with their role. */
@@ -2206,6 +2218,45 @@ export const brainCaptureIntents = sqliteTable(
 );
 
 /**
+ * Every document version a run's recalls cited (GRA-299; workflows/
+ * run-evidence.ts), with the Brain binding's permission each came through:
+ * identifiers and a stand-in for each text only. It only grows while
+ * the run lives, so no recall can narrow it, and before the run's next
+ * model, connection or App call, decision or output, the host checks the
+ * run may still read them all, under those permissions, as they were
+ * recalled. A run that may no longer, or whose recalled text a purge
+ * rewrote, is refused from then on. Goes with the run's details.
+ */
+export const runBrainEvidence = sqliteTable(
+  "run_brain_evidence",
+  {
+    runId: text("run_id").notNull(),
+    documentId: text("document_id").notNull(),
+    collectionId: text("collection_id").notNull(),
+    /** The document's version it recalled. */
+    version: integer().notNull(),
+    /**
+     * What stood for that version's text as it was recalled (`PinnedVersion`
+     * in @grasp-os/brain/recall-store): changed by a purge.
+     */
+    pinned: text().notNull(),
+    /** The `brain` permission of the binding that recalled it. */
+    permissionId: text("permission_id").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.runId,
+        table.documentId,
+        table.version,
+        table.permissionId,
+      ],
+    }),
+  ]
+);
+
+/**
  * Each pause, resume or cancel of a run that the host admitted
  * (src/workflows/controls.ts): its durable receipt. `admitted` until the
  * engine confirms it (`applied`), or a cancel supersedes a pause or resume
@@ -2852,6 +2903,31 @@ export const workflowOwners = sqliteTable(
     setAt: timestamp("set_at").notNull(),
   },
   (table) => [primaryKey({ columns: [table.appId, table.workflowId] })]
+);
+
+/**
+ * The team that owns a workflow (workflows/teams.ts): one of the
+ * organization's teams, set by an admin or a builder of its App, by App
+ * and workflow ID, so it holds across versions. A workflow without a row
+ * has no team; a team that goes takes its rows with it.
+ */
+export const workflowTeams = sqliteTable(
+  "workflow_teams",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    workflowId: text("workflow_id").notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.workflowId] }),
+    index("workflow_teams_team").on(table.teamId),
+  ]
 );
 
 /**
@@ -4472,6 +4548,9 @@ export const brainRecords = sqliteTable(
         "gap",
         "workflow",
         "workflowVersion",
+        "goal",
+        "goalVersion",
+        "goalLink",
       ],
     }).notNull(),
     id: text().notNull(),
@@ -4700,4 +4779,56 @@ export const knowledgeSignalDismissals = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.kind, table.collectionId, table.subject] }),
   ]
+);
+
+/**
+ * The company's policy documents (policies.ts): its own text, as uploaded,
+ * so its rules can be drawn from it.
+ */
+export const policyDocuments = sqliteTable("policy_documents", {
+  id: text().primaryKey(),
+  title: text().notNull(),
+  fileName: text("file_name").notNull(),
+  text: text().notNull(),
+  status: text({
+    enum: ["reading", "review", "published", "failed"],
+  }).notNull(),
+  uploadedBy: text("uploaded_by").notNull(),
+  uploadedAt: timestamp("uploaded_at").notNull(),
+  publishedAt: timestamp("published_at"),
+});
+
+/** The rules the company set for the apps its people use (policies.ts). */
+export const policyRules = sqliteTable(
+  "policy_rules",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    description: text().notNull(),
+    conditions: text({ mode: "json" }).$type<RuleCondition[]>().notNull(),
+    effect: text({ enum: ["flag", "block"] }).notNull(),
+    status: text({ enum: ["watching", "active", "paused"] }).notNull(),
+    /** The policy it comes from; null for a rule made by hand, or once its policy is removed. */
+    policyId: text("policy_id"),
+    excerpt: text(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [index("policy_rules_policy_idx").on(table.policyId)]
+);
+
+/** An app allowed to break one rule until a day (policies.ts): one per rule and app. */
+export const policyExceptions = sqliteTable(
+  "policy_exceptions",
+  {
+    ruleId: text("rule_id").notNull(),
+    appId: text("app_id").notNull(),
+    reason: text().notNull(),
+    /** Its last day, `YYYY-MM-DD`. */
+    until: text().notNull(),
+    grantedBy: text("granted_by").notNull(),
+    grantedAt: timestamp("granted_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ruleId, table.appId] })]
 );

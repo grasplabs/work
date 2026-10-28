@@ -18,7 +18,7 @@ import { landscapeProviderSchema } from "./landscape.ts";
 import type { PackageRegistryApi } from "./packages.ts";
 import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
 import type { CodeSubject, WorkContext } from "./permissions.ts";
-import { roleSchema } from "./roles.ts";
+import { isAdmin, roleSchema } from "./roles.ts";
 import type { StephenReachApi } from "./stephen-reach.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
@@ -378,6 +378,22 @@ export interface ListedConnection extends ConnectionSummary {
   /** `connectedBy`'s name, while core knows them. */
   connectedByName: string | null;
 }
+
+/**
+ * Whether a person can sign in again to `connection`: whoever may
+ * disconnect it (its owner, or an admin for a shared one), never Grasp
+ * staff, only a native one, and only while its catalog entry is offered.
+ */
+export const canSignInAgain = (
+  connection: Pick<ListedConnection, "source" | "provider" | "scope">,
+  offered: boolean,
+  person: { role: string; staff: boolean }
+): boolean =>
+  connection.source === "native" &&
+  oauthProviderSchema.safeParse(connection.provider).success &&
+  offered &&
+  (connection.scope === "personal" || isAdmin(person.role)) &&
+  !person.staff;
 
 /** Most connections one `connectionOwners` call takes. */
 export const connectionOwnersMax = 100;

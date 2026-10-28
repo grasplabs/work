@@ -2,9 +2,10 @@
 # tests it on top of the latest main and squash-merges it. Checks run on pull
 # requests and in the merge queue; a push to main only deploys what those
 # checks already tested: it builds the release once, deploys those bytes
-# to grasp-os-staging, and once staging accepts them publishes the same
-# bytes as a release for the admin. grasp-os-ops is deployed by hand
-# with the Deploy grasp-os-ops workflow. Jobs with secrets never run for pull
+# as staging's core and connect, and once staging accepts them publishes
+# the same bytes as a release for the admin. Staging, the admin and the
+# router share Grasp's one Cloudflare account; the admin and router are
+# deployed by hand with the Deploy grasp-os-ops workflow. Jobs with secrets never run for pull
 # requests from forks. CI never deploys to a client account: the admin
 # rolls releases out.
 name: CI
@@ -479,124 +480,18 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
 
-  # Stephen's eval with a real model (GRA-739), for a change that touches
-  # Stephen: his instructions and tools, the card path, the connectors'
-  # tools whose classes decide what he may do alone, or the eval itself
-  # (scripts/stephen-eval.ts names the files). A broken hard rule blocks the
-  # merge, and the run's numbers go on the pull request. The required
-  # `stephen` (below) always ends, as GitHub counts a skipped required
-  # check as passing: a change that touches no Stephen file passes it
-  # without a model call.
-  stephen-changes:
-    name: stephen-changes
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      stephen: ${{ steps.changed.outputs.stephen }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          # The diff is against the base commit.
-          fetch-depth: 0
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
-      - id: changed
-        run: node scripts/stephen-eval.ts changed "$BASE"
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-
-  # The model is reached with the real AI binding, through an AI Gateway of
-  # CI's own (`STEPHEN_EVAL_GATEWAY`) whose spend limit caps what CI can
-  # spend, and each run's budget (`STEPHEN_EVAL_BUDGET_USD`) is the
-  # ledger's limit too. Its Cloudflare token comes from the stephen-eval
-  # environment's 1Password service account, as staging's does.
-  stephen-eval:
-    name: stephen-eval
-    needs: stephen-changes
-    if: needs.stephen-changes.outputs.stephen == 'true'
-    runs-on: ubuntu-latest
-    # The whole suite with a real model: about 70 turns and their judging.
-    timeout-minutes: 60
-    environment: stephen-eval
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      # Secrets never reach a pull request from a fork; we don't accept those.
-      - if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-        run: |
-          echo "::error title=stephen::A pull request from a fork can't run Stephen's eval."
-          exit 1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
-      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
-        with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-stephen-eval/cloudflare/account-id
-          CLOUDFLARE_API_TOKEN: op://grasp-os-stephen-eval/cloudflare/api-token
-      # Fails on a broken hard rule (test/stephen-real-model.test.ts).
-      - name: Run Stephen's eval with the real model
-        run: |
-          set -o pipefail
-          vp -C apps/core test -c vite.stephen-model.config.ts 2>&1 | tee stephen-eval.log
-        env:
-          STEPHEN_MODEL: ${{ vars.STEPHEN_EVAL_MODEL }}
-          STEPHEN_MODEL_BUDGET_USD: ${{ vars.STEPHEN_EVAL_BUDGET_USD || '3' }}
-          STEPHEN_MODEL_GATEWAY: ${{ vars.STEPHEN_EVAL_GATEWAY || 'stephen-ci' }}
-      - name: Report the numbers
-        if: always()
-        run: node scripts/stephen-eval.ts report stephen-eval.log > stephen-eval.md
-      - name: Post the numbers on the pull request
-        if: always() && github.event_name == 'pull_request'
-        run: |
-          if [ -s stephen-eval.md ]; then
-            gh pr comment "$PR" --repo "$REPO" --body-file stephen-eval.md --edit-last --create-if-none
-          fi
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-
+  # Stephen's eval against a real model runs by hand only (stephen-eval.yml),
+  # and weekly on main (stephen-weekly.yml); every change is checked against
+  # the scripted model in `vp test`. This job only keeps the required
+  # `stephen` check passing: delete it once branch protection no longer
+  # requires it.
   stephen:
     name: stephen
-    needs: [stephen-changes, stephen-eval]
-    if: always() && github.event_name != 'push'
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - run: |
-          echo "Stephen's files changed: $CHANGED; the eval ended as $EVAL"
-          if [ "$CHANGES" != success ]; then
-            echo "::error title=stephen::Finding what changed ended as $CHANGES."
-            exit 1
-          fi
-          if [ "$CHANGED" != true ]; then
-            echo "No Stephen file changed: the gate passes without a model call."
-            exit 0
-          fi
-          if [ "$EVAL" != success ]; then
-            echo "::error title=stephen::Stephen's eval ended as $EVAL: a broken hard rule, or a run that didn't finish, blocks the merge."
-            exit 1
-          fi
-        env:
-          CHANGES: ${{ needs.stephen-changes.result }}
-          CHANGED: ${{ needs.stephen-changes.outputs.stephen }}
-          EVAL: ${{ needs.stephen-eval.result }}
+      - run: echo "Stephen's eval with a real model runs by hand, from the Actions tab."
 
   # Deploys core and connect from the release job's bundle, never from
   # source: each Worker's modules, static files, bindings, compatibility
@@ -604,8 +499,11 @@ jobs:
   # against it first (scripts/release/deploy-release.ts). Then staging
   # accepts the release, or refuses it: core must answer its health check
   # as the version just deployed (scripts/release/accept-release.ts).
-  # Secrets come from 1Password: one service account per environment, each
-  # limited to its own vault, its token stored as a GitHub environment secret.
+  # Secrets and settings come from 1Password, never from GitHub: each
+  # GitHub environment's from the 1Password Environment of the same name,
+  # read with that environment's read-only service account, whose token,
+  # OP_SERVICE_ACCOUNT_TOKEN, is the only value kept in GitHub
+  # (.github/actions/load-1password).
   deploy-staging:
     name: deploy-staging
     needs: release
@@ -626,13 +524,13 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+      - uses: ./.github/actions/load-1password
         with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-staging/cloudflare/account-id
-          CLOUDFLARE_API_TOKEN: op://grasp-os-staging/cloudflare/api-token
+          environment: staging
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secrets: CLOUDFLARE_API_TOKEN
+          settings: CLOUDFLARE_ACCOUNT_ID
+          required: CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
@@ -669,56 +567,23 @@ jobs:
       - run: vp run release:deploy --release release-out --worker connect
       - id: core
         run: vp run release:deploy --release release-out --worker core --var RUNTIME_PROFILE:cloudflare
-      # Core's router secret, loaded only for the acceptance check, as
-      # publish-release loads its R2 key.
-      - id: router
-        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+      # Core's router secret, loaded only for the acceptance check, the last
+      # step, as publish-release loads its R2 key right before the upload.
+      - uses: ./.github/actions/load-1password
         with:
-          export-env: false
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          ROUTER_SECRET: op://grasp-os-staging/core/ROUTER_SECRET
+          environment: staging
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secrets: ROUTER_SECRET
+          required: ROUTER_SECRET
       - run: vp run release:accept --release release-out --version "$CORE_VERSION"
         env:
           CORE_VERSION: ${{ steps.core.outputs.version }}
-          ROUTER_SECRET: ${{ steps.router.outputs.ROUTER_SECRET }}
-      # The admin is deliberately not deployed to staging: it has no route
-      # there and refuses every request without an Access application
-      # (apps/admin/src/access.ts). It deploys only to grasp-os-ops, with
-      # deploy-ops. A real staging admin would need a route and its own
-      # Access application first. The static job still proves it builds.
-
-  # The router on its own: its deploy needs the account's Secrets Store
-  # (scripts/wrangler-deploy.ts), and an account not set up for it yet
-  # mustn't hold back core and connect, nor publishing, which waits only
-  # for deploy-staging. It isn't part of a release.
-  deploy-staging-router:
-    name: deploy-staging-router
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: grasp-os-staging
-    concurrency:
-      group: deploy-grasp-os-staging-router
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
-      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
-        with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-staging/cloudflare/account-id
-          CLOUDFLARE_API_TOKEN: op://grasp-os-staging/cloudflare/api-token
-      - run: vp run --filter @grasp-os/router deploy
+      # Nor are the admin and router: they deploy by hand, with deploy-ops,
+      # to the same account. Staging needs no router of its own (the
+      # acceptance check calls core on workers.dev), and one would share the
+      # name grasp-os-router with Grasp's. Staging core's ROUTER_SECRET is a
+      # random value set on it by hand, the same as in the staging 1Password
+      # Environment. The static job still proves the admin builds.
 
   # Every merge to main is a release: built once (the release job), verified
   # against its manifest and published to R2 in grasp-os-ops, where the
@@ -729,46 +594,61 @@ jobs:
   # the admin can't roll it out to a client. When deploy-staging fails,
   # is cancelled or is skipped, this job is skipped too, and the commit's
   # changes ship in the next release that passes staging. The R2 key is
-  # loaded after the download and passed only to the upload step; all
-  # steps share one runner, so that isn't a security boundary. Skipped until
-  # the repository variable PUBLISH_RELEASES is `true`, set once the bucket,
-  # key and environment exist, and staging deploys. Pushes to main share the
-  # workflow's concurrency group, which keeps only the newest pending run: in
-  # a burst of merges a middle commit may never be published, and its
-  # changes ship in the next release.
+  # passed only to the upload step; all steps share one runner, so that
+  # isn't a security boundary. Publishes nothing until PUBLISH_RELEASES, a
+  # setting in the releases 1Password Environment, is `true`, set once the
+  # bucket, key and environment exist, and staging deploys. A job's `if`
+  # can't read 1Password, so the job runs and its steps check: first
+  # whether the environment has its service account token at all (without
+  # one, nothing is set up yet and the job passes doing nothing), then the
+  # switch.
+  # Pushes to main share the workflow's concurrency group, which keeps only
+  # the newest pending run: in a burst of merges a middle commit may never
+  # be published, and its changes ship in the next release.
   publish-release:
     name: publish-release
     needs: [release, deploy-staging]
-    if: github.event_name == 'push' && vars.PUBLISH_RELEASES == 'true'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: grasp-os-releases
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: setup
+        run: echo "ready=$READY" >> "$GITHUB_OUTPUT"
+        env:
+          READY: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN != '' }}
+      - if: steps.setup.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      # The switch first: with publishing off, the R2 key needn't be in the
+      # Environment yet.
+      - if: steps.setup.outputs.ready == 'true'
+        uses: ./.github/actions/load-1password
+        with:
+          environment: releases
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          settings: PUBLISH_RELEASES
+      - if: env.PUBLISH_RELEASES == 'true'
+        uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
         with:
           node-version-file: .node-version
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - if: env.PUBLISH_RELEASES == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
           path: release-out
-      - id: r2
-        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+      - if: env.PUBLISH_RELEASES == 'true'
+        uses: ./.github/actions/load-1password
         with:
-          export-env: false
+          environment: releases
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secrets: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+          required: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+      - if: env.PUBLISH_RELEASES == 'true'
+        run: vp run release:upload --release release-out
         env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          R2_ENDPOINT: op://grasp-os-releases/r2/endpoint
-          R2_ACCESS_KEY_ID: op://grasp-os-releases/r2/access-key-id
-          R2_SECRET_ACCESS_KEY: op://grasp-os-releases/r2/secret-access-key
-      - run: vp run release:upload --release release-out
-        env:
-          R2_ENDPOINT: ${{ steps.r2.outputs.R2_ENDPOINT }}
           R2_BUCKET: grasp-os-releases
-          R2_ACCESS_KEY_ID: ${{ steps.r2.outputs.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ steps.r2.outputs.R2_SECRET_ACCESS_KEY }}

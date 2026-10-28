@@ -42,7 +42,7 @@ import {
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
 import { documentSources, sourcesFor } from "./setup.ts";
-import type { DocumentSource, SetupStep } from "./setup.ts";
+import type { Named, DocumentSource, SetupStep } from "./setup.ts";
 
 // The steps where the admin says what Grasp may connect (prototype
 // `Sources`, `RealPulse` and `Leads` in
@@ -66,6 +66,8 @@ export interface ConnectStepProps {
   choices: SetupChoices;
   /** The suites the company signs in with: their places come first, and only those connect. */
   signIn: readonly OAuthProvider[];
+  /** What the kickoff named of where the company works: those places first, and no other suite's. */
+  named: Named;
   identity: Identity;
   go: (step: SetupStep) => void;
 }
@@ -87,10 +89,13 @@ const useSaveChoices = () => {
   return { save, busy, failure };
 };
 
-/** The integrations Grasp offers here, with what is connected: none while they load, or if they can't be read. */
+/** The integrations last read while this page is open: coming back to the step, what is connected shows at once while they are read again. */
+let lastRead: Integration[] = [];
+
+/** The integrations Grasp offers here, with what is connected: the ones last read, or none, while they load or if they can't be read. */
 const useIntegrations = (): Integration[] => {
   const core = useCore();
-  const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [integrations, setIntegrations] = useState<Integration[]>(lastRead);
   useEffect(() => {
     const left = new AbortController();
     const read = async (): Promise<void> => {
@@ -105,7 +110,8 @@ const useIntegrations = (): Integration[] => {
       );
       if (!left.signal.aborted && loaded.state === "ready") {
         const [catalog, connections] = loaded.data;
-        setIntegrations(integrationsOf(catalog.entries, connections));
+        lastRead = integrationsOf(catalog.entries, connections);
+        setIntegrations(lastRead);
       }
     };
     void read();
@@ -230,6 +236,7 @@ export const Sources = ({
   lines,
   choices,
   signIn,
+  named,
   identity,
   go,
 }: ConnectStepProps) => {
@@ -242,8 +249,8 @@ export const Sources = ({
   const [asked, setAsked] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<Integration | null>(null);
   const [all, setAll] = useState(false);
-  const listed = sourcesFor(signIn);
   const noted = choices.sources;
+  const listed = sourcesFor(signIn, named, noted);
   const wanted = choices.sourcesWanted;
   const integrationOf = (source: DocumentSource) =>
     integrations.find(
@@ -553,7 +560,7 @@ export const HrPlatform = ({
   lines,
   choices,
   onDone,
-}: Omit<ConnectStepProps, "go" | "signIn" | "identity"> & {
+}: Omit<ConnectStepProps, "go" | "signIn" | "named" | "identity"> & {
   onDone: () => void;
 }) => {
   const { t } = useLingui();

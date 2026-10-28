@@ -478,7 +478,7 @@ test("a run waiting for a share of its App's runs reads as queued, with when it 
     const row = page.getByRole("row").nth(1);
     await expect(row).toContainText("Queued", pageRead);
     await expect(row).toContainText(
-      "Waiting for a share of this App's runs; tries again by"
+      "Waiting for a share of this domain's runs; tries again by"
     );
     await expect(row).not.toContainText("Failed");
     await expect(row).not.toContainText("Running");
@@ -490,7 +490,7 @@ test("a run waiting for a share of its App's runs reads as queued, with when it 
       .locator("xpath=..");
     await expect(header).toContainText("Queued", pageRead);
     await expect(header).toContainText(
-      "Waiting for a share of this App's runs; tries again by"
+      "Waiting for a share of this domain's runs; tries again by"
     );
     await expect(header).not.toContainText("Waiting for a decision");
     await expect(header).not.toContainText("Failed");
