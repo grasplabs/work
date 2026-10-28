@@ -80,7 +80,7 @@ import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { log } from "@grasp-os/shared/log";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
@@ -90,6 +90,7 @@ import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
 import {
   liveVersion,
   putSchedules,
+  deleteTargetSecret,
   putTargetSecret,
   setScriptSubdomain,
   targetMigrationState,
@@ -123,7 +124,11 @@ import {
 } from "../deploy/router.ts";
 import type { RouterHosts, SmokeOptions } from "../deploy/router.ts";
 import { sealedWorkerSecrets } from "../deploy/sealed-secrets.ts";
-import { clientAuthSecret, workerSecrets } from "../deploy/secrets.ts";
+import {
+  clientAuthSecret,
+  retainedPreviousKeys,
+  workerSecrets,
+} from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import {
   checkBindingNames,
@@ -175,6 +180,8 @@ export const provisionOperationErrorCodes = [
   "upload_unobserved",
   /** A script lacks a secret after it was delivered. */
   "secrets_unobserved",
+  /** A script still has a secret it's no longer given after it was removed. */
+  "secret_unrevoked",
   /** No qualified way to probe core in this destination (Workers for Platforms, until GRA-430). */
   "probe_unqualified",
   /** Core didn't answer the admin's signed probe, as a core from before it doesn't. */
@@ -925,9 +932,93 @@ const upload = async (
 };
 
 /**
+ * Records that secret `name` was removed from `target`'s script, by name
+ * only, while `held` holds the client (`provision.secret_revoked`).
+ */
+const recordRevoked = async (
+  db: AdminDatabase,
+  { operation, held }: Loaded,
+  target: ScriptTarget,
+  name: string
+): Promise<void> => {
+  const recorded = await actIfChanged(
+    db,
+    "system",
+    db
+      .update(clientProvisions)
+      .set({ updatedAt: new Date() })
+      .where(and(eq(clientProvisions.id, operation.id), stillHolds(held))),
+    {
+      action: "provision.secret_revoked",
+      clientId: held.clientId,
+      target: operation.releaseId,
+      detail: {
+        operation: operation.id,
+        run: held.runId,
+        script: target.scriptName,
+        name,
+      },
+    }
+  );
+  if (!recorded) {
+    await assertHolds(db, held);
+  }
+};
+
+/**
+ * Removes from `target`'s script every secret `present` names that isn't
+ * among `given` (a previous generation's key past its window, a sealed or
+ * shared secret no longer given), once `given` is observed there: the
+ * replacement before the revocation. Then observes them gone; returns the
+ * names it removed, for the step's record. The admin is the only writer of
+ * a client script's secrets, so whatever else it holds is retired, but for
+ * connect's previous vault key (`retainedPreviousKeys`).
+ */
+const revokeRetired = async (
+  context: ProvisionContext,
+  loaded: Loaded,
+  target: ScriptTarget,
+  given: ReadonlySet<string>,
+  present: ReadonlySet<string>
+): Promise<string[]> => {
+  const { api, db } = context;
+  const retired = [...present].filter(
+    (name) => !given.has(name) && !retainedPreviousKeys.has(name)
+  );
+  for (const name of retired) {
+    // oxlint-disable-next-line no-await-in-loop -- one secret at a time
+    await assertHolds(db, loaded.held);
+    // oxlint-disable-next-line no-await-in-loop -- one secret at a time
+    await deleteTargetSecret(api, target, name);
+    // Recorded as it goes, by name: a run that fails after it still
+    // leaves what it removed in the audit log.
+    // oxlint-disable-next-line no-await-in-loop -- one secret at a time
+    await recordRevoked(db, loaded, target, name);
+  }
+  if (retired.length === 0) {
+    return [];
+  }
+  const after = await observed(
+    context,
+    async () => new Set(await targetSecretNames(api, target)),
+    (names) => retired.every((name) => !names.has(name))
+  );
+  const left = retired.find((name) => after.has(name));
+  if (left !== undefined) {
+    throw new ProvisionOperationError(
+      "secret_unrevoked",
+      `${target.scriptName} still has ${left} after its removal`
+    );
+  }
+  return retired;
+};
+
+/**
  * Step 5: each Worker's secrets delivered by name to its script, unless
- * the same secrets are recorded as delivered since its last upload; then
- * observed by name. Only their keyed fingerprint is recorded.
+ * the same secrets are recorded as delivered since its last upload and
+ * the script holds exactly them by name; then observed by name, and any
+ * other secret the script holds removed (`revokeRetired`). Only their
+ * keyed fingerprint is recorded.
  */
 const deliverSecrets = async (
   context: ProvisionContext,
@@ -936,6 +1027,7 @@ const deliverSecrets = async (
 ): Promise<void> => {
   const { api, db } = context;
   let delivered = 0;
+  const revoked: string[] = [];
   for (const app of appsOf(loaded.manifest)) {
     const target = targetOf(loaded, inventory, app);
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
@@ -944,12 +1036,21 @@ const deliverSecrets = async (
     const print = await secretsFingerprint(context.secrets.clientKey, secrets);
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
     const progress = await progressNow(db, loaded.operation.id);
+    const given = new Set(secrets.map(({ name }) => name));
     if (progress.secrets[app] === print) {
-      // Delivered since the last upload, but a secret can be deleted
-      // since: skip only when every one is still there by name.
+      // Delivered since the last upload, but a secret can be deleted, or
+      // another set, since: skip only when the script holds exactly them.
       // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
       const present = new Set(await targetSecretNames(api, target));
-      if (secrets.every(({ name }) => present.has(name))) {
+      // By name both ways: every one given is there, and nothing else is
+      // but connect's previous vault key. Never by count, which another
+      // secret can make up for one given also being a retained key.
+      const exactly =
+        [...given].every((name) => present.has(name)) &&
+        [...present].every(
+          (name) => given.has(name) || retainedPreviousKeys.has(name)
+        );
+      if (exactly) {
         continue;
       }
     }
@@ -974,12 +1075,21 @@ const deliverSecrets = async (
       );
     }
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
+    const removed = await revokeRetired(context, loaded, target, given, names);
+    revoked.push(...removed);
+    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
     await recordProgress(db, loaded, {
       ...progress,
       secrets: { ...progress.secrets, [app]: print },
     });
   }
-  await recordStep(db, loaded, "secrets", { delivered });
+  // The names removed, never a value: what an operator set by hand and
+  // lost here can be read back from the step.
+  await recordStep(db, loaded, "secrets", {
+    delivered,
+    revoked: revoked.length,
+    revokedNames: revoked.join(","),
+  });
 };
 
 /** How long core's signed probe may take, its body included. */
@@ -1118,6 +1228,34 @@ const route = async (
     // The last thing before the write: KV can't make it conditional.
     async () => {
       await assertHolds(context.db, held);
+    }
+  );
+  // The map now has this generation, so the router sends its secret: a
+  // raised generation is live from here, and its previous keys are kept
+  // for a window from now (src/deploy/secrets.ts), as a deploy marks it.
+  const liveAt = context.now?.() ?? new Date();
+  await actIfChanged(
+    context.db,
+    "system",
+    context.db
+      .update(clients)
+      .set({ rotationLiveAt: liveAt, updatedAt: liveAt })
+      .where(
+        and(
+          eq(clients.id, held.clientId),
+          eq(clients.generation, loaded.client.generation),
+          gt(clients.generation, 1),
+          isNull(clients.rotationLiveAt),
+          stillHolds(held)
+        )
+      ),
+    {
+      action: "client.rotation_live",
+      clientId: held.clientId,
+      detail: {
+        generation: loaded.client.generation,
+        operation: loaded.operation.id,
+      },
     }
   );
   await recordStep(context.db, loaded, "route", {
