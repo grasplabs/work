@@ -10,7 +10,7 @@ import type {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { ModelBindingBudget } from "@grasp-os/shared/resource-bindings";
-import { and, asc, count, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -593,7 +593,14 @@ const workflowNamesOf = async (
       : db
           .select({ id: workflowResources.id, name: workflowResources.name })
           .from(workflowResources)
-          .where(inArray(workflowResources.id, workflowIds)),
+          // A deleted workflow is gone: its spend stays, by its ID, with
+          // no name, so nothing links to it.
+          .where(
+            and(
+              inArray(workflowResources.id, workflowIds),
+              isNull(workflowResources.deletedAt)
+            )
+          ),
   ]);
   return {
     apps: new Map(appRows.map(({ id, name }) => [id, name])),

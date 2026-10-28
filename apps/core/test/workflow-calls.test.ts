@@ -1658,6 +1658,41 @@ describe("an independent workflow's model spend", () => {
     });
   });
 
+  it("keeps a deleted workflow's spend for admins, by its ID, with no name to link it by", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await greetingWorkflow(ada, admin);
+    gatewayAnswering(answer('{"line":"Hello Ada"}'));
+    const read = await withBudgets(
+      { workflow: { limit: 5 } },
+      async () => {
+        await ended(ada, workflow.id, await started(ada, workflow.id));
+        // Deleted since: its row stays, marked.
+        await env.DB.prepare(
+          "UPDATE workflow_resources SET deleted_at = ? WHERE id = ?"
+        )
+          .bind(Date.now(), workflow.id)
+          .run();
+        const { session } = await signedInWithRole(idp, "admin");
+        const { core } = await openRpc(session, { coreEnv: env });
+        const { models } = core.authenticate();
+        const spend = await models.spend();
+        return spend.workflows.filter(
+          ({ workflowId }) => workflowId === workflow.id
+        );
+      },
+      new Date().toISOString().slice(0, "yyyy-mm".length)
+    );
+
+    expect(
+      read.map(({ name, amount, runs }) => ({
+        name,
+        spent: amount > 0,
+        runs,
+      }))
+    ).toStrictEqual([{ name: null, spent: true, runs: 1 }]);
+  });
+
   it("is refused once its workflow's budget is spent, sending nothing, while another workflow's runs go on", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
