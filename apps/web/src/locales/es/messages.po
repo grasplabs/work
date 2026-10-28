@@ -4506,10 +4506,6 @@ msgstr "CRM"
 msgid "Current plan"
 msgstr "Plan actual"
 
-#: src/workflows/independent-workflows.tsx
-msgid "Current version"
-msgstr "Versión actual"
-
 #: src/landscape/landscape.ts
 msgid "Customer data"
 msgstr "Datos de clientes"
@@ -6737,10 +6733,6 @@ msgstr "Independiente"
 msgid "Independent workflow"
 msgstr "Flujo independiente"
 
-#: src/workflows/independent-workflows.tsx
-msgid "Independent workflows"
-msgstr "Flujos de trabajo independientes"
-
 #: src/workflows/test-run.tsx
 msgid "Input"
 msgstr "Entrada"
@@ -8034,7 +8026,6 @@ msgstr "En silencio"
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
-#: src/workflows/independent-workflows.tsx
 msgid "Name"
 msgstr "Nombre"
 
@@ -8429,10 +8420,6 @@ msgstr "Todavía no hay archivos."
 #: src/dashboard/standard-widgets.tsx
 msgid "No goals yet."
 msgstr "Aún no hay objetivos."
-
-#: src/workflows/independent-workflows.tsx
-msgid "No independent workflow is shared with you yet."
-msgstr "Todavía no se ha compartido contigo ningún flujo de trabajo independiente."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "No integrations match your search."
@@ -9066,7 +9053,6 @@ msgid "Not planned yet"
 msgstr "Aún sin planificar"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-#: src/workflows/independent-workflows.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Not published"
 msgstr "No publicado"
