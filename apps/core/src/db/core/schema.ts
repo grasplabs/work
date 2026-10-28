@@ -1,3 +1,5 @@
+import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
+import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
 import { candidateStates } from "@grasp-os/shared/apps";
 import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
@@ -674,6 +676,73 @@ export const appIntegrations = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.appId, table.source, table.connectorId] }),
+  ]
+);
+
+/**
+ * A company's webhooks for an App (src/app-webhooks.ts): the https URL
+ * Grasp POSTs the App's `events` to. Its secret is derived from its ID,
+ * never kept. `approved_by` and `approved_at` say which admin let the
+ * App's data go to the URL, and when; null until one did. A URL never
+ * changes, so an approval is always of the URL it was given for.
+ */
+export const appWebhooks = sqliteTable(
+  "app_webhooks",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    url: text().notNull(),
+    events: text({ mode: "json" }).notNull().$type<AppWebhookEvent[]>(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    approvedBy: text("approved_by"),
+    approvedAt: timestamp("approved_at"),
+  },
+  (table) => [index("app_webhooks_app").on(table.appId)]
+);
+
+/**
+ * The deliveries waiting for, or made to, a webhook (src/app-webhooks.ts):
+ * core's outbox, drained every minute through connect. Each is one event,
+ * once per webhook (`dedupe`); its ID is its idempotency key. `values`
+ * holds what a form sent only when the webhook was approved as it was
+ * sent, and is cleared once the delivery settles. `delivery_at` is when
+ * it is next due, or the lease of the drain sending it.
+ */
+export const appWebhookDeliveries = sqliteTable(
+  "app_webhook_deliveries",
+  {
+    id: text().primaryKey(),
+    webhookId: text("webhook_id")
+      .notNull()
+      .references(() => appWebhooks.id, { onDelete: "cascade" }),
+    appId: text("app_id").notNull(),
+    event: text({ enum: appWebhookEvents }).notNull(),
+    dedupe: text().notNull(),
+    occurredAt: timestamp("occurred_at").notNull(),
+    version: integer(),
+    submission: text(),
+    operation: text(),
+    values: text({ mode: "json" }).$type<Json>(),
+    valuesLeftOut: integer("values_left_out", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    attempts: integer().notNull().default(0),
+    deliveryAt: timestamp("delivery_at"),
+    deliveredAt: timestamp("delivered_at"),
+    /** `delivered`, or why it was given up on: a refusal or the last failure. */
+    outcome: text(),
+  },
+  (table) => [
+    uniqueIndex("app_webhook_deliveries_dedupe").on(
+      table.webhookId,
+      table.dedupe
+    ),
+    index("app_webhook_deliveries_due")
+      .on(table.deliveryAt)
+      .where(sql`delivered_at IS NULL`),
   ]
 );
 
@@ -4007,7 +4076,7 @@ export const workflowEmittedEvents = sqliteTable(
     // The events still to deliver, oldest first.
     index("workflow_emitted_events_undelivered")
       .on(table.createdAt)
-      .where(sql`${table.deliveredAt} IS NULL`),
+      .where(sql`delivered_at IS NULL`),
   ]
 );
 

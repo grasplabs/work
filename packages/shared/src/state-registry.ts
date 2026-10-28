@@ -262,6 +262,11 @@ const coreDb: D1State = {
     access_revocations: exported(`${core}access-revocations.ts`),
     app_members: exported(`${core}app-access.ts`),
     app_integrations: exported(`${core}app-integrations.ts`),
+    app_webhooks: exported(`${core}app-webhooks.ts`),
+    app_webhook_deliveries: exported(
+      `${core}app-webhooks.ts`,
+      "An outbox: its unsent deliveries still owed; form values kept only until each settles."
+    ),
     screen_artifacts: exported(`${core}screen-trust.ts`),
     screen_builds: cache(`${core}screen-builds.ts`),
     build_receipts: cache(

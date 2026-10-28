@@ -16,6 +16,7 @@ import type {
 
 import { retryAccessRevocations } from "./access-revocations.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
+import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
@@ -165,6 +166,15 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: async (env) => {
       await drainEmittedEvents(env);
+    },
+  },
+  // Apps' events sent to company webhooks, through connect
+  // (src/app-webhooks.ts).
+  {
+    name: "apps.webhooks",
+    period: "minute",
+    run: async (env) => {
+      await drainWebhookDeliveries(env);
     },
   },
   // Connect's own clock armed, if nothing has (connect's src/clock.ts).

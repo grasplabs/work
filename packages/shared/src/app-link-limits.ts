@@ -353,3 +353,23 @@ export const linkTargetOf = (
   }
   return { ok: true, url: parsed.href, origin: parsed.origin };
 };
+
+/**
+ * Whether Grasp may send an App's events to `url`, a company's webhook
+ * (core's app-webhooks.ts, connect's webhooks.ts), and the URL to send to
+ * when it may: any URL a link could open, under its own origin. So the
+ * same rules hold: `https:` only, no userinfo, no IP address, no private
+ * network name, nothing the parser would quietly rewrite.
+ */
+export const webhookTargetOf = (url: unknown): LinkTarget => {
+  if (typeof url !== "string") {
+    return { ok: false, reason: "invalid" };
+  }
+  let origin: string;
+  try {
+    ({ origin } = new URL(url));
+  } catch {
+    return { ok: false, reason: "invalid" };
+  }
+  return linkTargetOf(url, [origin]);
+};
