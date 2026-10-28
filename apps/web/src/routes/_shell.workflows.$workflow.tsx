@@ -172,6 +172,7 @@ const WorkflowResourceView = ({
   runs,
   askable,
   me,
+  tab,
 }: {
   resource: WorkflowResource;
   draft: Loaded<WorkflowDraft> | undefined;
@@ -180,12 +181,14 @@ const WorkflowResourceView = ({
   runs: Loaded<WorkflowResourceRun[]>;
   askable: Loaded<boolean>;
   me: string;
+  /** The tab it opens on, if a link asked for one (a run count's: `runs`). */
+  tab: WorkflowSearch["tab"];
 }) => {
   const router = useRouter();
   const { currentVersion } = resource;
   return (
     <Tabs
-      defaultValue={draft === undefined ? "versions" : "definition"}
+      defaultValue={tab ?? (draft === undefined ? "versions" : "definition")}
       spacing="none"
     >
       <div className="flex flex-col gap-3 border-b px-6 pt-5">
@@ -301,6 +304,7 @@ const WorkflowResourcePage = () => {
   const { resource, draft, versions, params, runs, askable } =
     Route.useLoaderData();
   const { identity } = Route.useRouteContext();
+  const { tab } = Route.useSearch();
   const { t } = useLingui();
   const name = resource.state === "ready" ? resource.data.name : undefined;
   const crumbs = [
@@ -331,6 +335,7 @@ const WorkflowResourcePage = () => {
           params={params}
           resource={resource.data}
           runs={runs}
+          tab={tab}
           versions={versions}
         />
       </div>
@@ -338,7 +343,14 @@ const WorkflowResourcePage = () => {
   );
 };
 
+/** What a link to a workflow's page may ask of it: the tab it opens on. */
+interface WorkflowSearch {
+  tab?: "runs";
+}
+
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
+  validateSearch: (search: Record<string, unknown>): WorkflowSearch =>
+    search.tab === "runs" ? { tab: "runs" } : {},
   pendingComponent: PageLoading,
   loader: async ({ context: { core }, params: { workflow } }) => {
     const [resource, versions, params, runs, askable] = await Promise.all([
