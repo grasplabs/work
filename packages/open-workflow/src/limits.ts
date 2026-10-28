@@ -37,6 +37,9 @@ export const profileLimits = {
   maxBindings: 64,
   maxFunctions: 64,
   maxReusable: 64,
+  /** Stores a workflow declares (stores.ts), and operations on each. */
+  maxStores: 8,
+  maxStoreOperations: 32,
   maxSwitchCases: 64,
   maxForkBranches: 64,
   /** Items of an inline `for.in` array. */
