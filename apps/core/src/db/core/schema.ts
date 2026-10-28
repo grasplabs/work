@@ -8,7 +8,11 @@ import type {
   BlueprintWorkflow,
   DeclaredPermission,
 } from "@grasp-os/shared/permissions";
-import type { RuleCondition } from "@grasp-os/shared/policies";
+import type {
+  RuleCondition,
+  RuleProposal,
+  UncheckedRequirement,
+} from "@grasp-os/shared/policies";
 import { artifactDecisions } from "@grasp-os/shared/screen-trust";
 import { signalKinds } from "@grasp-os/shared/signals";
 import type {
@@ -5067,6 +5071,24 @@ export const policyDocuments = sqliteTable("policy_documents", {
   uploadedBy: text("uploaded_by").notNull(),
   uploadedAt: timestamp("uploaded_at").notNull(),
   publishedAt: timestamp("published_at"),
+  /** When Grasp last started reading it (policy-reading.ts); null before. */
+  readAt: timestamp("read_at"),
+  /** Why reading it failed. */
+  error: text({
+    enum: ["notSetUp", "busy", "badKey", "unreadable", "offline"],
+  }),
+  /** What it covers, as Grasp read it. */
+  summary: text(),
+  /** The rules Grasp proposed from it, each with its decision. */
+  proposals: text({ mode: "json" })
+    .$type<RuleProposal[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  /** Its requirements no rule can check. */
+  unchecked: text({ mode: "json" })
+    .$type<UncheckedRequirement[]>()
+    .notNull()
+    .default(sql`'[]'`),
 });
 
 /** The rules the company set for the apps its people use (policies.ts). */
