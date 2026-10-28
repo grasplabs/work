@@ -165,6 +165,12 @@ const typeRules: readonly {
   // host access, and its calls, recorded once a window, act on the App.
   { action: "app.token.issued", type: "permission" },
   { action: "app.portable.called", type: "action" },
+  // An App's webhooks (core's src/app-webhooks.ts): an admin letting its
+  // data go to one's URL, a delivery given up, and connect sending one
+  // (`webhook.call`); adding and removing one are the App's configuration.
+  { action: "app.webhook.approved", type: "decision" },
+  { action: "app.webhook.undeliverable", type: "action" },
+  { action: "webhook.call", type: "action" },
   { action: "app", type: "config" },
   // A person linking a chat platform account to themselves, so the agent
   // knows them there, or unlinking it: who they are on that door.

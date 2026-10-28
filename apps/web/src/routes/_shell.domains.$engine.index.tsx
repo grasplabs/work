@@ -41,6 +41,7 @@ import {
   StatusBadge,
   StatusNote,
 } from "../engines/app-status.tsx";
+import { AppWebhooks } from "../engines/app-webhooks.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
@@ -499,6 +500,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     integrations,
     approval,
     resources,
+    webhooks,
     storeChanges,
     packages,
     surfaces,
@@ -577,6 +579,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
               <Trans>Resources</Trans>
             </TabsTrigger>
           )}
+          {webhooks === undefined ? null : (
+            <TabsTrigger value="webhooks">
+              <Trans>Webhooks</Trans>
+            </TabsTrigger>
+          )}
           <PackagesTab packages={packages} />
           <SettingsTab surfaces={surfaces} />
           <TabsTrigger value="members">
@@ -613,6 +620,21 @@ const EngineView = ({ page }: { page: EnginePage }) => {
                   <ResourceBindings
                     decides={decidesRequests(identity)}
                     page={declared}
+                  />
+                )}
+              </Later>
+            </div>
+          </TabsContent>
+        )}
+        {webhooks === undefined ? null : (
+          <TabsContent value="webhooks">
+            <div className="pt-4">
+              <Later promise={webhooks}>
+                {(listed) => (
+                  <AppWebhooks
+                    app={app.id}
+                    identity={identity}
+                    webhooks={listed}
                   />
                 )}
               </Later>
@@ -796,6 +818,13 @@ export const Route = createFileRoute("/_shell/domains/$engine/")({
       ? loadFromCore(
           core,
           async (session) => await loadIntegrations(session, params.engine)
+        )
+      : undefined,
+    // For who adds and removes them: its builders and admins, who approve.
+    webhooks: canBuild(identity.role)
+      ? loadFromCore(
+          core,
+          async (session) => await session.apps.webhooks.list(params.engine)
         )
       : undefined,
     // Last, so the reads above start first. The engine, and its packages

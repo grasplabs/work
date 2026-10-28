@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
+import type { AppWebhooksApi } from "./app-webhooks.ts";
 import type { CatalogEntryRef } from "./connect.ts";
 import type { DefinitionPackage } from "./definition-packages.ts";
 import type { DiagnosticCategory } from "./diagnostics.ts";
@@ -728,6 +729,7 @@ export interface AppsApi {
   readonly members: AppMembersApi;
   readonly blueprints: AppBlueprintsApi;
   readonly integrations: AppIntegrationsApi;
+  readonly webhooks: AppWebhooksApi;
 }
 
 /**

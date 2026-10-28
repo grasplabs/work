@@ -1,3 +1,4 @@
+import type { WebhookOutcome } from "@grasp-os/shared/app-webhooks";
 import type { OutboxedAuditEvent } from "@grasp-os/shared/audit";
 import {
   capabilityErrors,
@@ -151,6 +152,7 @@ import {
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
+import { webhookPost } from "./webhooks.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
 export { ConnectorEgress } from "./egress.ts";
@@ -434,6 +436,13 @@ export default class Connect
 
   async channelFetch(platform: unknown, request: unknown): Promise<Response> {
     return await channelFetch(this.env, platform, request);
+  }
+
+  // A company's webhooks (src/webhooks.ts): core signs an App's event,
+  // connect sends it to the URL, checked again.
+
+  async webhookPost(post: unknown): Promise<WebhookOutcome> {
+    return await webhookPost(this.env, post);
   }
 
   // The catalog (src/catalog.ts): what can be connected.
