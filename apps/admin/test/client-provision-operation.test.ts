@@ -6,6 +6,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import type { StaffAlert } from "../src/alerts.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { queryD1 } from "../src/cloudflare/workers.ts";
 import {
@@ -1631,11 +1632,15 @@ describe("provisioning a placed client", () => {
   // operation, run again for the release, onto the same stable scripts
   // and the client's own resources. How they can fail, each tried below:
   // - a release of a client not live yet, or over an operation still
-  //   running, or two at once;
-  // - a script taken back past a Durable Object migration it ran;
+  //   running another release, or two at once;
+  // - a script taken back past a Durable Object migration it ran, by a
+  //   rollback or a release to an older one, refused before any upload;
   // - a rollback with nothing before to go back to;
   // - a release that stops part way, resumed: nothing made twice, and its
-  //   hostname not moved until it passes its probe.
+  //   hostname not moved until it passes its probe;
+  // - a release whose code, live on the stable scripts, fails its probe:
+  //   rolled back on its own, audited, and staff told, also when the
+  //   rollback doesn't finish.
 
   it("releases a live client to a later release on its stable scripts, migrating its databases and probing it before it's done", async () => {
     const first = await importRelease("dedicated");
@@ -1684,7 +1689,7 @@ describe("provisioning a placed client", () => {
 
   it("rolls a live client back to the release it ran before, and refuses past a Durable Object migration or with nothing before", async () => {
     const first = await importRelease("dedicated");
-    const { clientId } = await liveClient(first);
+    const { account, clientId } = await liveClient(first);
     const nothing = await codeOf(
       startClientRelease(db, staff, clientId, { rollback: true })
     );
@@ -1722,8 +1727,19 @@ describe("provisioning a placed client", () => {
     const past = await codeOf(
       startClientRelease(db, staff, clientId, { rollback: true })
     );
+    // Nor released to an older one without it, before anything uploads.
+    const uploads = account.scriptUploads.length;
+    const behind = await codeOf(
+      startClientRelease(db, staff, clientId, { releaseId: second.releaseId })
+    );
 
-    expect({ nothing, back, past }).toMatchObject({
+    expect({
+      nothing,
+      back,
+      past,
+      behind,
+      uploaded: account.scriptUploads.length - uploads,
+    }).toMatchObject({
       nothing: "nothing_to_roll_back",
       back: {
         operation: {
@@ -1734,6 +1750,8 @@ describe("provisioning a placed client", () => {
         runs: { core: first.releaseId, connect: first.releaseId },
       },
       past: "rollback_past_migration",
+      behind: "release_behind_migration",
+      uploaded: 0,
     });
   });
 
@@ -1759,17 +1777,23 @@ describe("provisioning a placed client", () => {
     const running = await codeOf(
       startClientRelease(db, staff, clientId, { releaseId: first.releaseId })
     );
+    // The release itself, still running with no runner going: resumed.
+    const resumed = await codeOf(
+      startClientRelease(db, staff, clientId, { releaseId: later.releaseId })
+    );
 
     expect({
       notLive,
       both: both.toSorted(),
       running,
+      resumed,
       operation: await operationOf(clientId),
     }).toMatchObject({
       notLive: "client_not_active",
       // The rollback has nothing before; the release takes the operation.
       both: ["nothing_to_roll_back", "started"],
       running: "operation_running",
+      resumed: "started",
       operation: { releaseId: later.releaseId, status: "running" },
     });
   });
@@ -1821,6 +1845,99 @@ describe("provisioning a placed client", () => {
       },
       resumed: [core],
       operation: { releaseId: later.releaseId, status: "done" },
+    });
+  });
+
+  it("rolls a release that fails its probe once live back to the release before on its own, audited, and tells staff", async () => {
+    const first = await importRelease("dedicated");
+    const { account, clientId } = await liveClient(first);
+    const later = await importRelease("dedicated", {
+      notes: "feat(core): broken once live",
+    });
+    // What staff are told, as the Workflow sends it (src/alerts.ts).
+    const alert = vi
+      .fn<(alert: StaffAlert) => Promise<void>>()
+      .mockResolvedValue();
+    const alerting = { ...context, alert };
+    const { connect } = await scriptsOf(clientId);
+    // The release's core answers as another client; once the release's
+    // connect went, the next upload of connect (the rollback's) finds core
+    // answering as it should again.
+    account.coreProbe = { asClient: "someone-else" };
+    // oxlint-disable require-await -- the fake waits on these; nothing to wait for
+    cloudflare.beforeAnswering(isUpload(connect), async () => {
+      cloudflare.beforeAnswering(isUpload(connect), async () => {
+        delete account.coreProbe;
+      });
+    });
+    // oxlint-enable require-await
+
+    await startClientRelease(db, staff, clientId, {
+      releaseId: later.releaseId,
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await runClientProvision(alerting, await attempt(clientId));
+    } finally {
+      errors.mockRestore();
+    }
+    const [rolledBack] = await db
+      .select({ actor: auditEvents.actor, detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "release.rollback")
+        )
+      );
+
+    // A rollback that fails its probe too: thrown, and staff told so.
+    const stuck = await liveClient(first);
+    await startClientRelease(db, staff, stuck.clientId, {
+      releaseId: later.releaseId,
+    });
+    stuck.account.coreProbe = { asClient: "someone-else" };
+    const stuckErrors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const stuckError = await runClientProvision(
+      alerting,
+      await attempt(stuck.clientId)
+    ).then(
+      () => null,
+      (error: unknown) => error
+    );
+    stuckErrors.mockRestore();
+
+    expect({
+      operation: await operationOf(clientId),
+      runs: await runs(clientId),
+      rolledBack: {
+        actor: rolledBack?.actor,
+        detail: z.unknown().parse(JSON.parse(rolledBack?.detail ?? "null")),
+      },
+      stuck: {
+        error: stuckError,
+        operation: await operationOf(stuck.clientId),
+      },
+      alerts: alert.mock.calls.map(([sent]) => sent),
+    }).toMatchObject({
+      operation: { releaseId: first.releaseId, status: "done" },
+      runs: { core: first.releaseId, connect: first.releaseId },
+      rolledBack: {
+        actor: "system",
+        detail: { from: later.releaseId, cause: "probe_identity_mismatch" },
+      },
+      stuck: {
+        error: { code: "probe_identity_mismatch" },
+        operation: { releaseId: first.releaseId, status: "failed" },
+      },
+      alerts: [
+        { clientId, kind: "release_rolled_back", subject: later.releaseId },
+        {
+          clientId: stuck.clientId,
+          kind: "release_rollback_failed",
+          subject: later.releaseId,
+        },
+      ],
     });
   });
 

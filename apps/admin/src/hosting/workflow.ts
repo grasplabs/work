@@ -14,6 +14,7 @@ import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 
 import type { Staff } from "../access.ts";
+import { sendStaffAlert } from "../alerts.ts";
 import { adminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
 import { ProvisionError } from "../provision/errors.ts";
@@ -54,10 +55,15 @@ export class ProvisionPlacedClient extends WorkflowEntrypoint<
     const { clientId } = event.payload;
     await step.do("provision", deployStepConfig, async () => {
       try {
-        await runClientProvision(await deployContext(this.env), {
-          clientId,
-          runId: event.instanceId,
-        });
+        await runClientProvision(
+          {
+            ...(await deployContext(this.env)),
+            alert: async (alert) => {
+              await sendStaffAlert(this.env, alert);
+            },
+          },
+          { clientId, runId: event.instanceId }
+        );
       } catch (error) {
         throw asOperationStepError(error);
       }
