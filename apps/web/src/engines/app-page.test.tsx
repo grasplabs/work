@@ -7,6 +7,7 @@ import { I18nProvider } from "@lingui/react";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
@@ -103,6 +104,61 @@ const shown = async (screens: string[], answer: () => Promise<ChatSummary>) => {
   return { asked };
 };
 
+/** Another App its builder may also rename. */
+const other: ViewedApp = {
+  ...app,
+  id: appIdSchema.parse(crypto.randomUUID()),
+  name: "Expenses",
+};
+
+/** `app`'s page, then `other`'s, in the history, as visiting both leaves it. */
+const shownOneAfterAnother = async () => {
+  const core = {
+    withSession: async (): Promise<never> => {
+      await Promise.resolve();
+      throw new Error("Nothing is saved in this test");
+    },
+  };
+  const rootRoute = createRootRoute();
+  const page = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/apps/$which",
+    component: () => {
+      const { which } = page.useParams();
+      return (
+        <AppPage
+          app={which === "other" ? other : app}
+          contents={{ version: 1, screens: [], workflows: [] }}
+          identity={{ staff: false }}
+          open={undefined}
+        >
+          {null}
+        </AppPage>
+      );
+    },
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([page]),
+    history: createMemoryHistory({
+      initialEntries: ["/apps/first", "/apps/other"],
+      initialIndex: 1,
+    }),
+    context: { core },
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  await act(async () => {
+    root = createRoot(host);
+    root.render(
+      <I18nProvider i18n={i18n}>
+        <RouterProvider router={router} />
+      </I18nProvider>
+    );
+    await router.load();
+  });
+  return router;
+};
+
 /** Presses the button named `name`, and lets core answer. */
 const press = async (name: string): Promise<void> => {
   const button = [...document.querySelectorAll("button")].find(
@@ -132,6 +188,30 @@ describe(AppPage, () => {
     document.body.replaceChildren();
     setActiveChat(undefined);
     setDockMode("bar");
+  });
+
+  it("drops an unfinished rename when history opens another App's page in its place", async () => {
+    const router = await shownOneAfterAnother();
+    const title = document.querySelector("h1 button");
+    act(() => {
+      title?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    });
+    const renaming = document.querySelector("input") !== null;
+    // Back, the field still focused: the App before.
+    await act(async () => {
+      router.history.back();
+      await router.load();
+    });
+
+    expect({
+      renaming,
+      stillRenaming: document.querySelector("input") !== null,
+      shown: document.querySelector("h1")?.textContent,
+    }).toStrictEqual({
+      renaming: true,
+      stillRenaming: false,
+      shown: "Invoices",
+    });
   });
 
   it("opens the App's own chat beside the page from Edit", async () => {
