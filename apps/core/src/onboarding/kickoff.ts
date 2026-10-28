@@ -1,4 +1,6 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
+import { oauthProviderSchema } from "@grasp-os/shared/connect";
+import type { OAuthProvider } from "@grasp-os/shared/connect";
 import {
   kickoffErrors,
   kickoffTeamNameMaxLength,
@@ -15,7 +17,16 @@ import type {
   TranscriptFileKind,
   VisionField,
 } from "@grasp-os/shared/kickoff";
+import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
+import { documentSourceIds } from "@grasp-os/shared/onboarding-choices";
+import type { DocumentSourceId } from "@grasp-os/shared/onboarding-choices";
+import { contextDocumentsMax } from "@grasp-os/shared/onboarding-context";
+import type {
+  ContextExample,
+  ContextWords,
+  OnboardingContext,
+} from "@grasp-os/shared/onboarding-context";
 import { uploadTypes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
@@ -34,7 +45,23 @@ import { NAMED } from "./stephen.ts";
 // and never as instructions; it doesn't get the last word: a field whose
 // quote isn't in the transcript counts as not said, and goes on the list
 // to ask the sponsor. What it brought feeds Stephen's context
-// (`kickoffBrief`).
+// (`kickoffBrief`), and the admin's onboarding (`contextOf`): the suites
+// and places the company works in, and a few words about it in every
+// language the onboarding speaks.
+
+/** Stephen's words about the company in one language, as the store keeps them. */
+const storedWordsSchema = z.object({
+  business: z.string(),
+  documents: z.array(z.string()),
+  example: z
+    .object({
+      role: z.string(),
+      question: z.string(),
+      answer: z.string(),
+      time: z.string(),
+    })
+    .nullable(),
+});
 
 /** A reading as the store keeps it: what `readingOf` made. */
 export const storedReadingSchema = z.object({
@@ -51,6 +78,10 @@ export const storedReadingSchema = z.object({
     })
   ),
   sponsor: z.string().optional(),
+  // Added later: a reading from before has none, and the onboarding speaks as for anyone.
+  words: z
+    .partialRecord(z.enum(interviewLocales), storedWordsSchema)
+    .optional(),
 });
 
 /** The sponsor's answers as the store keeps them. */
@@ -93,7 +124,13 @@ How to read it:
 - When it does say it, leave "ask" empty.
 - "teams": the teams or departments the company named, as they called them, with what each does in a few words when that was said, otherwise empty, and how many people when that was said, otherwise 0.
 - "sponsor": the first name of the sponsor, the person who speaks for the company in this conversation, as the transcript writes it. Empty when the transcript does not name them.
-- Write "text", "ask" and what each team does in ${NAMED[locale]}. Keep quotes and team names as they were said.`;
+- Write "text", "ask" and what each team does in ${NAMED[locale]}. Keep quotes and team names as they were said.
+
+Then, for the company's own onboarding, where you talk its admin through connecting what you need, write "onboarding": one entry for each of these languages, by its code: ${interviewLocales.map((each) => `${each} (${NAMED[each]})`).join(", ")}. Each in its own language, and only from what was said:
+- "business": what the company does, in one short sentence addressed to its admin, such as "You build and renovate homes for housing associations." Empty when the conversation doesn't say.
+- "documents": the kinds of documents its work runs on that the conversation names, as plural nouns, at most ${contextDocumentsMax}, such as "calculations" or "supplier invoices". None when it names none.
+- "example": one turn of an interview with someone at this company about the work the conversation says costs time: "role" is their team or role in a few words, "question" what you ask them in one short sentence, "answer" their answer in one or two short sentences as said on a call, and "time" how long it takes them as they would say it. Leave all four empty when the conversation names no such work. Roles, never names of people.
+- The company's admin reads all of this: never anything from what Stephen must leave alone or what is sensitive right now, nor anything about one person.`;
 
 /** What the model answers: loose, as the check that follows is strict. */
 const answerSchema = z.object({
@@ -109,6 +146,21 @@ const answerSchema = z.object({
     z.object({ name: z.string(), does: z.string(), people: z.number() })
   ),
   sponsor: z.string().optional(),
+  onboarding: z
+    .array(
+      z.object({
+        locale: z.string(),
+        business: z.string(),
+        documents: z.array(z.string()),
+        example: z.object({
+          role: z.string(),
+          question: z.string(),
+          answer: z.string(),
+          time: z.string(),
+        }),
+      })
+    )
+    .optional(),
 });
 type Answer = z.infer<typeof answerSchema>;
 
@@ -172,6 +224,67 @@ const sponsorOf = (given: string | undefined, said: string): string | null => {
 };
 
 /**
+ * One interview turn as the model wrote it, kept only whole and only when
+ * the kickoff said what costs time, which it is about.
+ */
+const exampleOf = (
+  given: ContextExample,
+  painSaid: boolean
+): ContextExample | null => {
+  const example = {
+    role: tidy(given.role, 40),
+    question: tidy(given.question, 160),
+    answer: tidy(given.answer, 240),
+    time: tidy(given.time, 120),
+  };
+  const whole = Object.values(example).every((each) => each !== "");
+  return painSaid && whole ? example : null;
+};
+
+/**
+ * Stephen's words about the company, by language, as the model wrote them
+ * for the onboarding: the business only when the kickoff said it, the
+ * kinds of documents only when it said anything at all, and the interview
+ * turn only when it said what costs time. A language with none of them
+ * isn't kept.
+ */
+const wordsOf = (
+  given: NonNullable<Answer["onboarding"]>,
+  reading: KickoffReading
+): Partial<Record<InterviewLocale, ContextWords>> => {
+  const said = (field: VisionField) => reading.fields[field] !== undefined;
+  const anything = Object.keys(reading.fields).length > 0;
+  const words: Partial<Record<InterviewLocale, ContextWords>> = {};
+  for (const locale of interviewLocales) {
+    const entry = given.find((each) => each.locale === locale);
+    if (entry === undefined) {
+      continue;
+    }
+    const kept: ContextWords = {
+      business: said("business") ? tidy(entry.business, 160) : "",
+      documents: anything
+        ? [
+            ...new Set(
+              entry.documents
+                .map((each) => tidy(each, 60))
+                .filter((each) => each !== "")
+            ),
+          ].slice(0, contextDocumentsMax)
+        : [],
+      example: exampleOf(entry.example, said("pain")),
+    };
+    if (
+      kept.business !== "" ||
+      kept.documents.length > 0 ||
+      kept.example !== null
+    ) {
+      words[locale] = kept;
+    }
+  }
+  return words;
+};
+
+/**
  * What the model gave back, checked against `transcript`: a field counts
  * only when the words it rests on were really said, and a team or the
  * sponsor's name only when it was named. Whatever is left over is what to
@@ -199,7 +312,83 @@ export const readingOf = (
   if (sponsor !== null) {
     reading.sponsor = sponsor;
   }
+  const words = wordsOf(answer.onboarding ?? [], reading);
+  if (Object.keys(words).length > 0) {
+    reading.words = words;
+  }
   return reading;
+};
+
+/**
+ * How the company names each suite, apart from its places, lower case as
+ * `plain` makes it. Only the suite's own products: "google" alone is no
+ * sign of Google Workspace ("Google Analytics", "we google it").
+ */
+const suiteNames: Record<OAuthProvider, readonly string[]> = {
+  microsoft: [
+    "microsoft",
+    "office 365",
+    "microsoft 365",
+    "m365",
+    "o365",
+    "outlook",
+    "entra",
+    "azure ad",
+  ],
+  google: [
+    "gmail",
+    "g suite",
+    "gsuite",
+    "google workspace",
+    "google docs",
+    "google sheets",
+    "google calendar",
+    "google meet",
+  ],
+};
+
+/** How the company names each place for documents, and the suite it comes with, if any: a place named is its suite named too. */
+const sources: Record<
+  DocumentSourceId,
+  { names: readonly string[]; suite: OAuthProvider | null }
+> = {
+  sharepoint: { names: ["sharepoint"], suite: "microsoft" },
+  onedrive: { names: ["onedrive", "one drive"], suite: "microsoft" },
+  teams: { names: ["ms teams", "microsoft teams"], suite: "microsoft" },
+  drive: { names: ["google drive", "gdrive"], suite: "google" },
+  confluence: { names: ["confluence"], suite: null },
+  notion: { names: ["notion"], suite: null },
+};
+
+/**
+ * What the admin's onboarding knows of the company from the kickoff:
+ * the suites and places named where it says which tools they use (or in
+ * the sponsor's answer to that), and Stephen's words about it. A place
+ * named counts for its suite too, so a company on Microsoft 365 and Google
+ * Drive is offered both. Before the kickoff is in, nothing.
+ */
+export const contextOf = (
+  reading: KickoffReading | null,
+  answers: Partial<Record<VisionField, string>>
+): OnboardingContext => {
+  const systems = plain(
+    [
+      reading?.fields.systems?.text,
+      reading?.fields.systems?.quote,
+      answers.systems,
+    ].join(" ")
+  );
+  const names = (each: readonly string[]) =>
+    each.some((name) => ` ${systems} `.includes(` ${name} `));
+  const named = documentSourceIds.filter((source) =>
+    names(sources[source].names)
+  );
+  const suites = oauthProviderSchema.options.filter(
+    (suite) =>
+      names(suiteNames[suite]) ||
+      named.some((source) => sources[source].suite === suite)
+  );
+  return { suites, sources: named, words: reading?.words ?? {} };
 };
 
 /** A header or note line, or a cue's timing line, in a `.vtt` or `.srt` file. */

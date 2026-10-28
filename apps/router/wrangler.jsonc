@@ -1,4 +1,4 @@
-// Deployed to grasp-os-staging on every merge and to grasp-os-ops by hand. Serves
+// Deployed by hand, with deploy-ops, to Grasp's account; staging has none. Serves
 // *.<domain> and stores nothing.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",

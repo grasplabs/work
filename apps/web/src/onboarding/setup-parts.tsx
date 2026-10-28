@@ -72,6 +72,40 @@ export const Explained = createContext<{
 });
 
 /**
+ * Whether the admin has been through this step before and Stephen finished
+ * it: coming back to it, back or forward, his message is there in full at
+ * once and its way on with it. He says nothing again, and nothing lights
+ * up; only what is done on this visit he answers as ever.
+ */
+export const Seen = createContext(false);
+
+/**
+ * Whether a step finished before is still opening: so for what is drawn
+ * as it arrives, which is there as it was left, at once; it stops once the
+ * step is on screen, so what turns up after that, done on this visit,
+ * comes in as ever. Read only as something is first drawn.
+ */
+export const Opening = createContext<{ readonly current: boolean }>({
+  current: false,
+});
+
+/**
+ * The classes that bring something in (`motion`: a fade, a slide), or
+ * none for what is there as a step finished before opens: it shows as it
+ * was left. `key` is what it shows; once that changes on this visit, it
+ * comes in as ever.
+ */
+export const useEntrance = (key: string, motion: string): string => {
+  const opening = useContext(Opening);
+  // What it showed as the step opened, while that has not changed.
+  const [asLeft, setAsLeft] = useState(() => (opening.current ? key : null));
+  if (asLeft !== null && asLeft !== key) {
+    setAsLeft(null);
+  }
+  return asLeft === null ? motion : "";
+};
+
+/**
  * Whether, on a phone, the step does not fit beside even the smallest
  * brain: its sentence then makes way once read and tells how much room that
  * frees, so the brain can make way too where that is not enough.
@@ -137,6 +171,7 @@ const useMadeWay = (
   const { cramped, onMadeWay } = useContext(Cramped);
   const { explained } = useContext(Explained);
   const { on } = useVoice();
+  const seen = useContext(Seen);
   const arrived = useRef(0);
   const [away, setAway] = useState(false);
   useEffect(() => {
@@ -144,8 +179,8 @@ const useMadeWay = (
   }, []);
   useEffect(() => {
     const due = !away && when && cramped && explained;
-    // Said, it was explained once it ended; read, it waits for the time to read it all.
-    const reading = on ? 0 : readingSeconds(line) * 1000 * 0.7;
+    // Said, it was explained once it ended; read, it waits for the time to read it all; read before, it makes way at once.
+    const reading = on || seen ? 0 : readingSeconds(line) * 1000 * 0.7;
     const id = due
       ? window.setTimeout(
           () => {
@@ -159,7 +194,7 @@ const useMadeWay = (
     return () => {
       window.clearTimeout(id);
     };
-  }, [away, when, cramped, explained, on, line, onMadeWay, sentence]);
+  }, [away, when, cramped, explained, on, seen, line, onMadeWay, sentence]);
   return away;
 };
 
@@ -257,12 +292,14 @@ const useHeadingSaid = ({
   const { line, from } = stepLine(title, arrivingWith?.text ?? sentence);
   // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
   const [arrived] = useState(line);
+  const seen = useContext(Seen);
   // Done again on this visit: his answer is said on its own, not his line again.
   const announced = answer?.announce === true;
   const alone = !answeredOnArrival || announced;
   useSay(line, {
     delay: 120,
     when:
+      !seen &&
       (answer === undefined || answeredOnArrival || arrived === line) &&
       !(announced && arrived !== line),
     tone: arrivingWith?.tone ?? voice.tone,
@@ -297,6 +334,10 @@ export const Heading = ({
   }, []);
   useExplainedAfter(line);
   const away = useMadeWay(line, answer === undefined, paragraph);
+  const answerEntrance = useEntrance(
+    answer?.text ?? "",
+    "animate-in fade-in slide-in-from-bottom-1 duration-500"
+  );
   return (
     <div className="flex flex-col gap-2">
       {/* A title that takes two lines breaks them evenly, never leaving one word alone on the second. */}
@@ -330,7 +371,10 @@ export const Heading = ({
           </span>
           {answer === undefined ? null : (
             <span
-              className="animate-in fade-in slide-in-from-bottom-1 col-start-1 row-start-1 self-center duration-500"
+              className={cn(
+                "col-start-1 row-start-1 self-center",
+                answerEntrance
+              )}
               key={answer.text}
             >
               {/* Said on its own, or as the end of the line he arrived with. */}
@@ -487,9 +531,14 @@ export const Callout = ({
   text: string;
   tone?: Tone;
 }) => {
-  useSay(text, { after: true, tone });
+  const seen = useContext(Seen);
+  // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
+  const [arrived] = useState(text);
+  // On a step seen before, only a line that changed on this visit is said.
+  useSay(text, { after: true, tone, when: !seen || text !== arrived });
+  const entrance = useEntrance(text, "animate-in fade-in duration-500");
   return (
-    <p className="animate-in fade-in duration-500">
+    <p className={entrance}>
       <SpokenText from={0} line={text} text={text} />
     </p>
   );
@@ -509,20 +558,27 @@ export const useSayFollowing = (
   { tone = tones.even, quick = false }: StepVoice = {}
 ): void => {
   const shown = useRef(text);
+  const seen = useContext(Seen);
+  // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
+  const [arrived] = useState(text);
+  // On a step seen before, it is said only once a choice changes it.
+  const quiet = seen && text === arrived;
   useEffect(() => {
     shown.current = text;
-    const id = window.setTimeout(() => {
-      speak(text, {
-        after: true,
-        tone,
-        quick,
-        still: () => shown.current === text,
-      });
-    }, followsMs);
+    const id = quiet
+      ? undefined
+      : window.setTimeout(() => {
+          speak(text, {
+            after: true,
+            tone,
+            quick,
+            still: () => shown.current === text,
+          });
+        }, followsMs);
     return () => {
       window.clearTimeout(id);
     };
-  }, [text, tone, quick]);
+  }, [text, tone, quick, quiet]);
 };
 
 /** A number with what it counts. */

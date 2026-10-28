@@ -10,6 +10,8 @@ import { AppLogo } from "./app-logo.tsx";
 import { canConnect, canReconnect, ConnectDialog } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
 import { kindOf, stateOf } from "./integrations.ts";
+import { UsedBy } from "./workflows-using.tsx";
+import type { ConnectionUses } from "./workflows-using.tsx";
 
 // One app in the Integrations list, as the prototype's row
 // (`components/integration-row.tsx`, `integration-button.tsx`): its tile,
@@ -196,16 +198,20 @@ const IntegrationButton = ({
 
 /**
  * One app, as the prototype's row: its logo, its name to open it, what kind
- * of app it is, and its button. What it does, in a sentence, shows when it
+ * of app it is, how many of the workflows the person can open use it, and
+ * its button. What it does, in a sentence, shows when it
  * is pointed at. No frame. An app the organization doesn't offer says so to
  * the admins who see it.
  */
 export const IntegrationRow = ({
   integration,
   identity,
+  uses,
 }: {
   integration: Integration;
   identity: Identity;
+  /** Which workflows use each connection; left out where the page doesn't say. */
+  uses?: ConnectionUses;
 }) => (
   <li className="flex h-14 min-w-0 items-center gap-3">
     <AppLogo logo={integration.logo} name={integration.name} />
@@ -222,6 +228,9 @@ export const IntegrationRow = ({
       </Link>
       <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
         <span className="truncate">{kindOf(integration)}</span>
+        {uses === undefined ? null : (
+          <UsedBy integration={integration} uses={uses} />
+        )}
         {integration.listed && !integration.offered ? (
           <Badge variant="outline">
             <Trans>Not offered</Trans>

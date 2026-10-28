@@ -106,6 +106,17 @@ const kindOrder: readonly SignalKind[] = [
   "overdue_review",
 ];
 
+/** Counts of kinds, the most first, those with as many in the board's order. */
+export const byKindOrder = (
+  counts: readonly { kind: SignalKind; count: number }[]
+): { kind: SignalKind; count: number }[] => {
+  const of = new Map(counts.map(({ kind, count }) => [kind, count]));
+  return kindOrder
+    .filter((kind) => of.has(kind))
+    .map((kind) => ({ kind, count: of.get(kind) ?? 0 }))
+    .toSorted((a, b) => b.count - a.count);
+};
+
 /** How many signals there are of each kind there is one of, the most first. */
 export const signalKinds = (
   signals: readonly { kind: SignalKind }[]
@@ -114,8 +125,5 @@ export const signalKinds = (
   for (const { kind } of signals) {
     counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
-  return kindOrder
-    .filter((kind) => counts.has(kind))
-    .map((kind) => ({ kind, count: counts.get(kind) ?? 0 }))
-    .toSorted((a, b) => b.count - a.count);
+  return byKindOrder([...counts].map(([kind, count]) => ({ kind, count })));
 };

@@ -772,8 +772,14 @@ export const loadServer = async (
       mainModule: build.mainModule,
       modules: build.modules,
       env: bindings,
-      // What its code writes with `console` goes to its error log.
-      tails: [exports.AppTail({ props: { app, version } })],
+      // What its code writes with `console` goes to its error log, on
+      // Cloudflare. Plain workerd would print it to the process's logs as
+      // well, so there it has no tail and prints nothing
+      // (@grasp-os/shared/quiet-loader, GRA-919): this facet goes with the
+      // v1 server (GRA-789), so it isn't captured as a sealed call is.
+      ...(env.RUNTIME_PROFILE === "cloudflare"
+        ? { tails: [exports.AppTail({ props: { app, version } })] }
+        : {}),
     }))
     .getDurableObjectClass("App");
 };

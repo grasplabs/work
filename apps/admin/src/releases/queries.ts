@@ -19,6 +19,9 @@ export interface ReleaseSummary {
   notes: string;
   builtAt: Date;
   importedAt: Date;
+  /** Its version (src/releases/version.ts); null for one imported before versions. */
+  versionMajor: number | null;
+  versionMinor: number | null;
 }
 
 /** A release with its whole manifest. */
@@ -64,6 +67,74 @@ const summaryColumns = {
   importedAt: releases.importedAt,
 };
 
+/** A release's version (src/releases/version.ts). */
+export interface ReleaseVersion {
+  versionMajor: number;
+  versionMinor: number;
+}
+
+/**
+ * The versions of releases `ids`, by id, counted over every imported
+ * release in the order they were built (src/releases/version.ts): each
+ * feature starts the next major at .0, anything else is the next minor,
+ * and those before the first feature are v0.1 onwards. Only each
+ * release's flag is read, never a manifest. A release missing from the
+ * answer isn't imported.
+ */
+export const versionsOf = async (
+  db: AdminDatabase,
+  ids: readonly string[]
+): Promise<Map<string, ReleaseVersion>> => {
+  const wanted = [...new Set(ids)];
+  if (wanted.length === 0) {
+    return new Map();
+  }
+  const rows = await db.all<{ id: string; major: number; minor: number }>(sql`
+    WITH ordered AS (
+      -- A release an older admin imported has no flag: its note says.
+      SELECT id, coalesce(
+          feature,
+          CASE WHEN coalesce(json_extract(manifest, '$.notes'), '') GLOB 'feat[(:!]*' THEN 1 ELSE 0 END
+        ) AS feature,
+        row_number() OVER (ORDER BY built_at, id) AS n
+      FROM releases
+    ), majored AS (
+      SELECT id, n, sum(feature) OVER (ORDER BY n) AS major FROM ordered
+    ), versioned AS (
+      SELECT id, major,
+        n - min(n) OVER (PARTITION BY major) + CASE WHEN major = 0 THEN 1 ELSE 0 END AS minor
+      FROM majored
+    )
+    -- Filtered only once every release is counted, and the ids as one
+    -- JSON parameter: D1 binds at most 100.
+    SELECT id, major, minor FROM versioned
+    WHERE id IN (SELECT value FROM json_each(${JSON.stringify(wanted)}))`);
+  return new Map(
+    rows.map(({ id, major, minor }) => [
+      id,
+      { versionMajor: major, versionMinor: minor },
+    ])
+  );
+};
+
+/** `rows`, each with its version; null for one not imported. */
+const withVersions = async <T extends { id: string }>(
+  db: AdminDatabase,
+  rows: readonly T[]
+): Promise<
+  (T & { versionMajor: number | null; versionMinor: number | null })[]
+> => {
+  const versions = await versionsOf(
+    db,
+    rows.map(({ id }) => id)
+  );
+  return rows.map((row) => ({
+    ...row,
+    versionMajor: versions.get(row.id)?.versionMajor ?? null,
+    versionMinor: versions.get(row.id)?.versionMinor ?? null,
+  }));
+};
+
 /**
  * The newest releases, newest first, and the release before the oldest of
  * them, if there is one: the list's last "since" link, and the sign that
@@ -72,11 +143,14 @@ const summaryColumns = {
 export const listReleases = async (
   db: AdminDatabase
 ): Promise<{ releases: ReleaseSummary[]; older: ReleaseSummary | null }> => {
-  const rows = await db
-    .select(summaryColumns)
-    .from(releases)
-    .orderBy(desc(releases.builtAt), desc(releases.id))
-    .limit(RELEASE_LIST_LIMIT + 1);
+  const rows = await withVersions(
+    db,
+    await db
+      .select(summaryColumns)
+      .from(releases)
+      .orderBy(desc(releases.builtAt), desc(releases.id))
+      .limit(RELEASE_LIST_LIMIT + 1)
+  );
   return {
     releases: rows.slice(0, RELEASE_LIST_LIMIT),
     older: rows[RELEASE_LIST_LIMIT] ?? null,
@@ -99,8 +173,10 @@ const getStoredRelease = async (
   if (row === undefined) {
     return null;
   }
+  const [versioned = { ...row, versionMajor: null, versionMinor: null }] =
+    await withVersions(db, [row]);
   return {
-    ...row,
+    ...versioned,
     manifest: releaseManifestSchema.parse(JSON.parse(row.manifest)),
   };
 };
@@ -190,12 +266,16 @@ export const compareReleases = async (
     lte(releases.builtAt, newer.builtAt)
   );
   const [between, [counted]] = await Promise.all([
-    db
-      .select(summaryColumns)
-      .from(releases)
-      .where(inBetween)
-      .orderBy(desc(releases.builtAt), desc(releases.id))
-      .limit(RELEASE_LIST_LIMIT),
+    (async () =>
+      await withVersions(
+        db,
+        await db
+          .select(summaryColumns)
+          .from(releases)
+          .where(inBetween)
+          .orderBy(desc(releases.builtAt), desc(releases.id))
+          .limit(RELEASE_LIST_LIMIT)
+      ))(),
     db.select({ total: count() }).from(releases).where(inBetween),
   ]);
   return {

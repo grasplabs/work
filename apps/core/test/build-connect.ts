@@ -28,14 +28,11 @@ export const bundleConnect = async (): Promise<string> => {
   await buildConnectors(connectorEntries(), connectorsFile);
   const out = mkdtempSync(path.join(tmpdir(), "grasp-os-connect-"));
   try {
-    // Its output is only shown if bundling fails, in the error. Wrangler's
-    // launcher passes Node's flags on to the CLI it spawns: without
-    // Sparkplug, Node 24's GC segfault (vite.config.ts) can't kill it.
-    // The fake Composio's tools are classed as in connect's own tests.
+    // Its output is only shown if bundling fails, in the error. The fake
+    // Composio's tools are classed as in connect's own tests.
     execFileSync(
       process.execPath,
       [
-        "--no-sparkplug",
         wrangler,
         "deploy",
         "--dry-run",

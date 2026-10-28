@@ -65,6 +65,7 @@ import { formatTime } from "../releases/format.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { fetchDrift } from "../rollout/functions.ts";
 import type { DriftCheck } from "../rollout/functions.ts";
+import { ringWords } from "./platform-parts.tsx";
 import { sectionTo } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
 import {
@@ -84,14 +85,7 @@ import {
   useRefreshSetup,
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
-import {
-  Body,
-  ErrorCode,
-  Facts,
-  Quiet,
-  ringWords,
-  SetupSection,
-} from "./setup-parts.tsx";
+import { Body, ErrorCode, Facts, Quiet, SetupSection } from "./setup-parts.tsx";
 import { formatDate } from "./words.ts";
 
 /** The section's tabs, in order: how it stands first. */
@@ -1191,7 +1185,7 @@ const eventWords = ({
         ?.ring;
       return ring === undefined
         ? "Moved it to another ring."
-        : `Moved it to ${ringWords(ring).toLowerCase()}.`;
+        : `Moved it to ${ringWords(ring)}.`;
     }
     case "client.pin": {
       return `Pinned it to ${target ?? "a release"}.`;

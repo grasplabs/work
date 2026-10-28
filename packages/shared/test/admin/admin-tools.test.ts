@@ -402,11 +402,12 @@ describe("every company’s platform, in a chat", () => {
   it("says how each company’s platform stands, what needs a look, and the release going out", () => {
     const answer = callAdminTool("platforms", {}, views, today, [], fleet);
     expect(answer.failed).toBeUndefined();
-    expect(answer.text).toContain("hartog: attention");
+    // Each ring by the name staff use for it.
+    expect(answer.text).toContain("hartog: attention; in Alpha;");
     expect(answer.text).toContain("needs a look: failed, errors, secrets");
     expect(answer.text).toContain("vanrijn: not set up yet.");
     expect(answer.text).toContain(
-      "waiting for someone at Grasp to approve ring 2"
+      "waiting for someone at Grasp to approve Production"
     );
   });
 

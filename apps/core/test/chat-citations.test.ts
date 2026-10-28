@@ -1,4 +1,4 @@
-import { chatCitationsMax } from "@grasp-os/shared/chat";
+import { chatCitationsMax, citedQuoteMax } from "@grasp-os/shared/chat";
 import { describe, expect, it } from "vite-plus/test";
 
 import { citedIn } from "../src/chat-messages.ts";
@@ -12,10 +12,19 @@ const given =
   (id: string): boolean =>
     ids.includes(id);
 
+/** What an answer shows: its text and citations, not where its links are. */
+const shown = (
+  text: string,
+  cites: (id: string) => boolean
+): Omit<ReturnType<typeof citedIn>, "links"> => {
+  const { links: _links, ...rest } = citedIn(text, cites);
+  return rest;
+};
+
 describe(citedIn, () => {
   it("keeps a link to a given note, in one form, whatever its title or brackets", () => {
     expect(
-      citedIn(
+      shown(
         'See [A](grasp:note/a "title"), [A again](<grasp:note/a>) and [B]( grasp:note/b (b) ).',
         given("a", "b")
       )
@@ -30,7 +39,7 @@ describe(citedIn, () => {
 
   it("leaves no link to a note that isn't given, inline, by reference or as an autolink", () => {
     expect(
-      citedIn(
+      shown(
         'See [X](grasp:note/x "t"), [Y][1], <grasp:note/z> and [A](grasp:note/a).\n\n[1]: grasp:note/y',
         given("a")
       )
@@ -42,7 +51,7 @@ describe(citedIn, () => {
 
   it("leaves no note scheme spelled another way: nested, escaped, as a character reference or in capitals", () => {
     expect(
-      citedIn(
+      shown(
         [
           "[N](grasp:grasp:note/note/x)",
           "[E](grasp:note\\/x)",
@@ -63,7 +72,7 @@ describe(citedIn, () => {
   it("leaves code as it is written, and cites nothing in it", () => {
     const code =
       "```js\nconst a = '&#65; grasp:note/a \\/';\n```\nUse `[A](grasp:note/a)`, or:\n~~~\n[B](grasp:note/b)\n~~~";
-    expect(citedIn(code, given("a", "b"))).toStrictEqual({
+    expect(shown(code, given("a", "b"))).toStrictEqual({
       text: code,
       citations: [],
     });
@@ -71,7 +80,7 @@ describe(citedIn, () => {
 
   it("cleans what only looks like code: an unclosed span, one across a paragraph, a fence with a backtick after it", () => {
     expect(
-      citedIn(
+      shown(
         "`[X](grasp:note/x)\n\n[Y](grasp:note/y)`\n``` a`b\n[Z](grasp:note/z)",
         given()
       )
@@ -107,10 +116,44 @@ describe(citedIn, () => {
   it("keeps an answer's own private-use marks from standing for a link", () => {
     const mark = String.fromCodePoint(0xe0_00);
     expect(
-      citedIn(`${mark}0${mark} [A](grasp:note/a)`, given("a"))
+      shown(`${mark}0${mark} [A](grasp:note/a)`, given("a"))
     ).toStrictEqual({
       text: "0 [A](grasp:note/a)",
       citations: [{ kind: "document", documentId: "a" }],
+    });
+  });
+
+  it("knows where each kept link starts, the words it links and the quote its title holds", () => {
+    const longQuote = "x".repeat(citedQuoteMax + 1);
+    const answer = [
+      "`[C](grasp:note/a)` &#58; [X](grasp:note/x) then",
+      "[sixteen weeks](grasp:note/a 'Leave lasts \t sixteen \"weeks\".')",
+      String.raw`[paid](<grasp:note/b> "Leave is \*paid\*.")`,
+      "[again](grasp:note/a ( ))",
+      `[long](grasp:note/b "${longQuote}").`,
+    ].join(" ");
+    const { text, links } = citedIn(answer, given("a", "b"));
+    expect({
+      links: links.map(({ documentId, text: words, quote }) => ({
+        documentId,
+        words,
+        quote,
+      })),
+      inPlace: links.every(({ at, documentId, text: words }) =>
+        text.startsWith(`[${words}](grasp:note/${documentId})`, at)
+      ),
+    }).toStrictEqual({
+      links: [
+        {
+          documentId: "a",
+          words: "sixteen weeks",
+          quote: 'Leave lasts sixteen "weeks".',
+        },
+        { documentId: "b", words: "paid", quote: "Leave is *paid*." },
+        { documentId: "a", words: "again", quote: null },
+        { documentId: "b", words: "long", quote: null },
+      ],
+      inPlace: true,
     });
   });
 });

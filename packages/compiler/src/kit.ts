@@ -140,6 +140,9 @@ export const kitModuleName = (specifier: string): string =>
 
 const typescriptExtension = /\.tsx?$/u;
 
+/** The prefix of every approved package's module (`packageModuleName`). */
+export const packageModulePrefix = "pkg~";
+
 /**
  * The flat name an approved package's entry is loaded under in a JSON
  * workflow's compute isolate, e.g. `pkg~date-fns~format.js`: a namespace
@@ -152,7 +155,7 @@ export const packageModuleName = (entry: string): string =>
   // path takes. An entry (`packageEntrySchema`) has `@` only as its first
   // character, a scope's, and never starts with `~`, so an `@` after the
   // first is always a `~`.
-  `pkg~${entry.replaceAll("~", "@").replaceAll("/", "~")}.js`;
+  `${packageModulePrefix}${entry.replaceAll("~", "@").replaceAll("/", "~")}.js`;
 
 /**
  * Where core names, among a compute build's files, the approved package

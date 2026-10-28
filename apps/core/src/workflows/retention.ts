@@ -11,6 +11,7 @@ import {
   workflowEmittedEvents,
   workflowStartReceipts,
   runLineageChildren,
+  runBrainEvidence,
   runMailCalls,
   runMailStampClaims,
   runMailStampRefusals,
@@ -262,6 +263,8 @@ const receiptsPruned = (
       )
     ),
     db.delete(runMailCalls).where(inArray(runMailCalls.runId, runs)),
+    // What their recalls cited (host.ts): no new call of theirs to gate.
+    db.delete(runBrainEvidence).where(inArray(runBrainEvidence.runId, runs)),
     // The children their keys admitted (quotas.ts): what a delivery this
     // late starts is admitted afresh, if its lineage has room.
     db.delete(runLineageChildren).where(
