@@ -62,6 +62,7 @@ import {
   settings,
 } from "../db/schema.ts";
 import type { ReleaseStore } from "../releases/import.ts";
+import { uncoveredLimitRaise } from "../releases/limits.ts";
 import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import {
@@ -72,6 +73,7 @@ import {
 import {
   checkDeployedConfig,
   clientMailDomain,
+  clientRuntimeProfile,
   derivedCoreConfig,
   onboardingSender,
 } from "./core-config.ts";
@@ -223,6 +225,31 @@ export const assertNotPlaced = async (
 };
 
 /**
+ * Throws `limit_evidence_missing` when release `releaseId` raises a
+ * platform limit over what client `clientId` runs that no evidence covers
+ * on the client's profile; `release_not_imported` when it isn't imported,
+ * or records no limits (src/releases/limits.ts).
+ */
+export const assertLimitEvidence = async (
+  db: AdminDatabase,
+  clientId: string,
+  releaseId: string
+): Promise<void> => {
+  const raise = await uncoveredLimitRaise(
+    db,
+    clientId,
+    releaseId,
+    clientRuntimeProfile
+  );
+  if (raise !== undefined) {
+    throw new DeployError(
+      "limit_evidence_missing",
+      `Release ${releaseId} raises ${raise.limit} to ${raise.raisedTo ?? "unbounded"} over what ${clientId} runs, without capacity and security evidence for ${clientRuntimeProfile}`
+    );
+  }
+};
+
+/**
  * Starts deploying release `releaseId` to client `clientId`, and returns
  * the deploy's id for `runDeploy`. The client's older deploys that hadn't
  * finished are superseded in the same batch. A client whose id can't be
@@ -230,7 +257,11 @@ export const assertNotPlaced = async (
  * `settings` deploy runs the same steps; core records it as new secrets
  * or settings rather than a release. `recording` gives what else records
  * the deploy (a rollout's target naming it), written in the same batch:
- * no deploy starts that its starter has no record of.
+ * no deploy starts that its starter has no record of. A `release` deploy
+ * of a release that raises a platform limit over what the client runs,
+ * without evidence for its profile, is refused before it starts
+ * (`limit_evidence_missing`, src/releases/limits.ts), and checked again
+ * as it runs.
  */
 export const startDeploy = async (
   db: AdminDatabase,
@@ -247,6 +278,9 @@ export const startDeploy = async (
     );
   }
   await assertNotPlaced(db, clientId);
+  if (kind === "release") {
+    await assertLimitEvidence(db, clientId, releaseId);
+  }
   const id = crypto.randomUUID();
   const now = new Date();
   await act(
@@ -731,7 +765,9 @@ const runPhase = async <T>(
  * Refuses (`release_undeclared`, `release_incompatible`,
  * `schema_incompatible`) a release the client can't go to from what its
  * Workers run, switched in the order a deploy makes them live, and the
- * schemas its databases are at (src/deploy/compatibility.ts).
+ * schemas its databases are at (src/deploy/compatibility.ts); and
+ * (`limit_evidence_missing`) one that raises a platform limit over what
+ * the client runs without evidence for its profile.
  */
 const assertCompatible = async (
   db: AdminDatabase,
@@ -745,6 +781,10 @@ const assertCompatible = async (
   );
   if (refused !== null) {
     throw new DeployError(refused.code, refused.message);
+  }
+  // A release, not new settings or secrets on the one it runs.
+  if (deploy.kind === "release") {
+    await assertLimitEvidence(db, deploy.clientId, deploy.releaseId);
   }
 };
 

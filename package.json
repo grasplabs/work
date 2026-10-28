@@ -30,6 +30,8 @@
     "release:upload": "node scripts/release/upload-release.ts",
     "release:deploy": "node scripts/release/deploy-release.ts",
     "release:accept": "node scripts/release/accept-release.ts",
+    "release:evidence": "node scripts/release/evidence-release.ts",
+    "release:previous": "node scripts/release/previous-release.ts",
     "package:definition": "node scripts/package-definition.ts",
     "parity": "node scripts/parity/run.ts",
     "discord:commands": "node scripts/discord-commands.ts",

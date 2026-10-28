@@ -52,7 +52,8 @@ import {
   clientDomain,
   deployContext,
 } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { assertLimitEvidence, errorCode } from "../deploy/deploy.ts";
+import { DeployError } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { deployOrder } from "../deploy/versions.ts";
 import { InventoryError } from "../hosting/inventory.ts";
@@ -106,7 +107,10 @@ const newRollbackId = (): string =>
  * then core, which binds it), and on its databases' schemas
  * (src/deploy/compatibility.ts); and unless a script of it ran a Durable
  * Object migration `back` doesn't have, as each was seen
- * (`assertCanRollBack`).
+ * (`assertCanRollBack`). Refused too as a deploy refuses `back`: recording
+ * no limits (`release_without_limits`), raising one without evidence
+ * (`limit_evidence_missing`), or past a release not imported
+ * (`release_history_incomplete`, src/releases/limits.ts).
  */
 const assertCanGoBack = async (
   db: AdminDatabase,
@@ -153,6 +157,21 @@ const assertCanGoBack = async (
         : "incompatible",
       `${clientId} can't go back to ${back}: ${refused.message}`
     );
+  }
+  // Made live again as any release is: not one from before limits were
+  // recorded, nor one raising a limit without evidence.
+  try {
+    await assertLimitEvidence(db, clientId, back);
+  } catch (error) {
+    if (
+      error instanceof DeployError &&
+      (error.code === "limit_evidence_missing" ||
+        error.code === "release_without_limits" ||
+        error.code === "release_history_incomplete")
+    ) {
+      throw new RolloutError(error.code, error.message);
+    }
+    throw error;
   }
 };
 

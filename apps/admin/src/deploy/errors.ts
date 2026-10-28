@@ -8,6 +8,23 @@ export const deployErrorCodes = [
   /** The release declares nothing of what its code works with. */
   "release_undeclared",
   /**
+   * The release raises a platform limit over what the client runs without
+   * capacity and security evidence for the client's runtime profile
+   * (src/releases/limits.ts).
+   */
+  "limit_evidence_missing",
+  /**
+   * The release records no platform limits: it was built before they
+   * were, and isn't made live (src/releases/limits.ts).
+   */
+  "release_without_limits",
+  /**
+   * A release on the way to the one deployed, named by the next as the one
+   * before it, isn't imported: its evidence can't be read
+   * (src/releases/limits.ts).
+   */
+  "release_history_incomplete",
+  /**
    * The release doesn't work with what the client runs: a Worker would
    * call one of its Workers, or one of its Workers another, at a version
    * that one doesn't serve, or it doesn't read a workflow journal or run

@@ -81,7 +81,11 @@
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { log } from "@grasp-os/shared/log";
-import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
+import type {
+  LimitRaise,
+  ReleaseManifest,
+  WorkerEntry,
+} from "@grasp-os/shared/release";
 import {
   clientDispatchNamespace,
   deriveRouterSecret,
@@ -133,13 +137,18 @@ import {
   currentReleases,
   incompatibility,
 } from "../deploy/compatibility.ts";
-import { clientMailDomain, derivedCoreConfig } from "../deploy/core-config.ts";
+import {
+  clientMailDomain,
+  clientRuntimeProfile,
+  derivedCoreConfig,
+} from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
 import {
   configuredCoreVars,
   errorCode,
   mailSenderOf,
 } from "../deploy/deploy.ts";
+import { DeployError } from "../deploy/errors.ts";
 import { migrateDatabases } from "../deploy/migrations.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { sendsMail } from "../deploy/resources.ts";
@@ -168,6 +177,7 @@ import {
 } from "../deploy/upload.ts";
 import { deployOrder, pendingMigrations } from "../deploy/versions.ts";
 import type { ReleaseStore } from "../releases/import.ts";
+import { uncoveredLimitRaise } from "../releases/limits.ts";
 import { holdsClient, releaseRun, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import {
@@ -196,6 +206,16 @@ export const provisionOperationErrorCodes = [
   "release_incompatible",
   /** The release's code doesn't run on a database's schema as the client's migrations left it. */
   "schema_incompatible",
+  /**
+   * The release raises a platform limit, over the oldest release the admin
+   * holds that records limits, without evidence for the client's profile
+   * (src/releases/limits.ts).
+   */
+  "limit_evidence_missing",
+  /** The release was built before platform limits were recorded, and isn't made live. */
+  "release_without_limits",
+  /** A release on the way to it isn't imported, so its evidence can't be read. */
+  "release_history_incomplete",
   /** The operation provisions another release: it's fixed for the operation. */
   "operation_release_changed",
   /** The release has a Worker other than core and connect. */
@@ -310,6 +330,8 @@ export interface ProvisionContext {
   };
   /** Reading back what a step wrote (`observed`); tests pass a wait of 0. */
   observe?: { retryDelayMs?: number };
+  /** How long a call that changes a client's Workers may wait (`sendHolding`). */
+  sendTimeoutMs?: number;
   /** Tells staff when a release was rolled back on its own (src/alerts.ts). */
   alert?: (alert: StaffAlert) => Promise<void>;
 }
@@ -768,7 +790,9 @@ export const startClientRelease = async (
   // Run again, it goes on from what it went on from; a new release, from
   // what every Worker was seen running, or, split between releases (a
   // change that stopped part way), the last whole release carried forward,
-  // so a client never loses its way back.
+  // so a client never loses its way back. A client split mid-rollback
+  // carries R, the release it was being rolled away from: the last it ran
+  // whole, so going back from there takes it to R, not further.
   const before =
     (await observedRelease(db, clientId)) ?? operation.previousReleaseId;
   let previousReleaseId = before === target ? null : before;
@@ -949,23 +973,33 @@ const recordProgress = async (
 const sendSettleMs = 5 * 60_000;
 
 /**
+ * How long a call that changes a client's Workers may wait for its answer
+ * before it's aborted: well inside `sendSettleMs`, so no run's call is
+ * still open, waited for, when a runner that took the client over goes on.
+ */
+const defaultSendTimeoutMs = 150_000;
+
+/**
  * Sends `send`, a call that changes client `loaded.held.clientId`'s
  * Workers, while `loaded.held` holds the client, marked on its operation
  * (`progress.sending`, outside `progressSchema`, so any later progress
- * write drops it) from before it's sent until it answers.
+ * write drops it) from before it's sent until Cloudflare answers it.
+ * `send` is given the signal that aborts it after `sendTimeoutMs`.
  *
  * A runner that takes the client over can't stop a call already sent: a
  * rollback waits for the mark to clear (`settledSends`), so the call lands
  * before the rollback's own and never after. Marked in the same statement
  * that checks the claim, so a call is sent only marked; cleared by the
  * change, not the claim, so a call answered after its runner lost the
- * client still clears it.
+ * client still clears it. A call with no answer (aborted, or the
+ * connection lost) may still land, so its mark stays until it ages out.
  */
 const sendHolding = async (
-  db: AdminDatabase,
+  context: ProvisionContext,
   { operation, held }: Loaded,
-  send: () => Promise<void>
+  send: (signal: AbortSignal) => Promise<void>
 ): Promise<void> => {
+  const { db } = context;
   const marked = await db
     .update(clientProvisions)
     .set({
@@ -979,9 +1013,7 @@ const sendHolding = async (
       `${held.runId} no longer holds ${held.clientId}`
     );
   }
-  try {
-    await send();
-  } finally {
+  const clear = async (): Promise<void> => {
     await db
       .update(clientProvisions)
       .set({
@@ -993,7 +1025,19 @@ const sendHolding = async (
           eq(clientProvisions.change, operation.change)
         )
       );
+  };
+  try {
+    await send(
+      AbortSignal.timeout(context.sendTimeoutMs ?? defaultSendTimeoutMs)
+    );
+  } catch (error) {
+    // Answered, refused or not: it won't land later.
+    if (error instanceof CloudflareApiError && error.status > 0) {
+      await clear();
+    }
+    throw error;
   }
+  await clear();
 };
 
 /**
@@ -1287,6 +1331,35 @@ const validate = async (
   if (refused !== null) {
     throw new ProvisionOperationError(refused.code, refused.message);
   }
+  // A new client runs nothing yet: a raise from before it needs evidence
+  // for its profile too.
+  let raise: LimitRaise | undefined;
+  try {
+    raise = await uncoveredLimitRaise(
+      db,
+      held.clientId,
+      manifest.releaseId,
+      clientRuntimeProfile
+    );
+  } catch (error) {
+    // A release that records no limits isn't made live.
+    if (error instanceof DeployError) {
+      throw new ProvisionOperationError(
+        error.code === "release_without_limits" ||
+          error.code === "release_history_incomplete"
+          ? error.code
+          : "release_not_imported",
+        error.message
+      );
+    }
+    throw error;
+  }
+  if (raise !== undefined) {
+    throw new ProvisionOperationError(
+      "limit_evidence_missing",
+      `Release ${manifest.releaseId} raises ${raise.limit} to ${raise.raisedTo ?? "unbounded"} without capacity and security evidence for ${clientRuntimeProfile}`
+    );
+  }
   const vars = await coreVarsOf(context, loaded);
   for (const app of order) {
     const worker = workerOf(manifest, app);
@@ -1576,14 +1649,19 @@ const upload = async (
       progress,
       { app, history: worker.durableObjectMigrations },
       async () => {
-        await sendHolding(db, loaded, async () => {
-          await uploadTargetScript(api, target, {
-            ...prepared,
-            metadata: {
-              ...prepared.metadata,
-              ...(migrations === undefined ? {} : { migrations }),
+        await sendHolding(context, loaded, async (signal) => {
+          await uploadTargetScript(
+            api,
+            target,
+            {
+              ...prepared,
+              metadata: {
+                ...prepared.metadata,
+                ...(migrations === undefined ? {} : { migrations }),
+              },
             },
-          });
+            { signal }
+          );
         });
       }
     );
@@ -1711,8 +1789,8 @@ const revokeRetired = async (
   );
   for (const name of retired) {
     // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-    await sendHolding(db, loaded, async () => {
-      await deleteTargetSecret(api, target, name);
+    await sendHolding(context, loaded, async (signal) => {
+      await deleteTargetSecret(api, target, name, { signal });
     });
     // Recorded as it goes, by name: a run that fails after it still
     // leaves what it removed in the audit log.
@@ -1780,8 +1858,8 @@ const deliverSecrets = async (
     }
     for (const secret of secrets) {
       // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-      await sendHolding(db, loaded, async () => {
-        await putTargetSecret(api, target, secret);
+      await sendHolding(context, loaded, async (signal) => {
+        await putTargetSecret(api, target, secret, { signal });
       });
       delivered += 1;
     }

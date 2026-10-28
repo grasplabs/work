@@ -13,6 +13,15 @@ export const rolloutErrorCodes = [
   "ring_zero_only",
   /** It would take its run past the step budget: roll out to fewer clients at a time. */
   "too_large",
+  /**
+   * The release raises a platform limit, over what a client it would reach
+   * runs, without capacity and security evidence for that client's profile.
+   */
+  "limit_evidence_missing",
+  /** The release was built before platform limits were recorded, and isn't made live. */
+  "release_without_limits",
+  /** A release on the way to it isn't imported, so its evidence can't be read. */
+  "release_history_incomplete",
   /** Another rollout is running or waiting for approval. */
   "rollout_running",
   /** The rollout isn't waiting for approval. */

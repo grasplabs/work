@@ -56,7 +56,7 @@ import { envelope, notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, placedClient, staff } from "./hosting.ts";
-import { buildRelease, putBlobs } from "./releases.ts";
+import { buildRelease, evidenceFor, putBlobs, testLimits } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
@@ -143,6 +143,7 @@ const importRelease = async (
     commitSha: manifest.commit,
     manifest: JSON.stringify(manifest),
     manifestSha256: "0".repeat(64),
+    limitEvidence: built.limitEvidenceText ?? null,
     builtAt: now,
     importedAt: now,
   });
@@ -604,6 +605,8 @@ interface Refusal {
   kind: Kind;
   spec?: Partial<ReleaseSpec>;
   adjust?: (core: WorkerEntry) => WorkerEntry;
+  /** Its `previousRelease` names a release imported just before it. */
+  follows?: true;
   code: string;
 }
 
@@ -613,6 +616,28 @@ const refusals: Refusal[] = [
     kind: "dedicated",
     spec: { compatibility: null },
     code: "release_undeclared",
+  },
+  {
+    name: "a release built before platform limits were recorded",
+    kind: "dedicated",
+    spec: { platformLimits: null },
+    code: "release_without_limits",
+  },
+  {
+    name: "a release raising a platform limit with evidence for on-premises only",
+    kind: "dedicated",
+    spec: {
+      platformLimits: { ...testLimits, workflowSteps: 2000 },
+      previousRelease: {
+        releaseId: "r000000001-0000000",
+        platformLimits: testLimits,
+      },
+      limitEvidence: (release) => [
+        evidenceFor(release, "workflowSteps", 2000, "workerd"),
+      ],
+    },
+    follows: true,
+    code: "limit_evidence_missing",
   },
   {
     name: "a release whose core calls a connect it doesn't ship",
@@ -1071,8 +1096,17 @@ describe("provisioning a placed client", () => {
 
   it.each(refusals)(
     "refuses $name before anything is created or uploaded",
-    async ({ kind, spec, adjust, code }) => {
-      const manifest = await importRelease(kind, spec, adjust);
+    async ({ kind, spec, adjust, follows, code }) => {
+      const before = follows === true ? await importRelease(kind) : null;
+      const previous =
+        before !== null && spec?.previousRelease
+          ? { ...spec.previousRelease, releaseId: before.releaseId }
+          : spec?.previousRelease;
+      const manifest = await importRelease(
+        kind,
+        spec === undefined ? spec : { ...spec, previousRelease: previous },
+        adjust
+      );
       const { account, clientId, held } = await setUp(kind, manifest);
 
       await expect(failing(held)).resolves.toMatchObject({ code });
@@ -1300,6 +1334,58 @@ describe("provisioning a placed client", () => {
         )
         .map(({ path }) => path)
     ).toStrictEqual([]);
+  });
+
+  it("aborts an upload left unanswered past its limit, and keeps it marked sent, as it may still land", async () => {
+    const manifest = await importRelease("dedicated");
+    const { clientId, held } = await setUp("dedicated", manifest);
+    // Connect's upload goes unanswered until the test ends.
+    const answered = Promise.withResolvers<boolean>();
+    cloudflare.beforeAnswering(
+      (call) =>
+        call.method === "PUT" && call.path.endsWith("-grasp-os-connect"),
+      async () => {
+        await answered.promise;
+      }
+    );
+    const abortedBefore = cloudflare.abortedCalls();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    let outcome: string;
+    try {
+      outcome = await runClientProvision(
+        { ...context, sendTimeoutMs: 50 },
+        held
+      ).then(
+        () => "done",
+        (error: unknown) => (error instanceof Error ? error.name : "thrown")
+      );
+    } finally {
+      errors.mockRestore();
+      answered.resolve(true);
+    }
+    const row = await db
+      .select({
+        status: clientProvisions.status,
+        sending: sql<
+          number | null
+        >`json_extract(${clientProvisions.progress}, '$.sending')`,
+      })
+      .from(clientProvisions)
+      .where(eq(clientProvisions.clientId, clientId))
+      .get();
+
+    expect({
+      outcome,
+      aborted: cloudflare.abortedCalls() - abortedBefore,
+      status: row?.status,
+      // Marked still: a rollback waits it out (`settledSends`).
+      marked: row?.sending !== null && row?.sending !== undefined,
+    }).toStrictEqual({
+      outcome: "TimeoutError",
+      aborted: 1,
+      status: "failed",
+      marked: true,
+    });
   });
 
   it("reads an upload back through Cloudflare's lag, and goes on", async () => {

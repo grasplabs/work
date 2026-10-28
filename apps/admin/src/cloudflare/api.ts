@@ -109,6 +109,11 @@ export interface ApiCall {
    * that mustn't.
    */
   idempotent?: boolean;
+  /**
+   * Stops this call alone, as the client's `signal` stops all of them: its
+   * request aborted, and no retry made or waited for after.
+   */
+  signal?: AbortSignal;
 }
 
 /** A result, with the page of a list it is. */
@@ -196,19 +201,26 @@ export const cloudflareApi = ({
   waitBudgetMs = Number.POSITIVE_INFINITY,
   signal,
 }: CloudflareApiOptions): CloudflareApi => {
-  /** Throws the client's abort reason once its signal has aborted. */
-  const stopIfAborted = (): void => {
-    signal?.throwIfAborted();
+  /** What stops `call`: the client's signal, its own, or both. */
+  const stopOf = (call: ApiCall): AbortSignal | undefined => {
+    if (call.signal === undefined) {
+      return signal;
+    }
+    return signal === undefined
+      ? call.signal
+      : AbortSignal.any([signal, call.signal]);
   };
 
-  /** Waits `ms` between attempts, or less, throwing, if the client is stopped. */
-  const pause = async (ms: number): Promise<void> => {
-    await (signal === undefined
+  /** Waits `ms` between attempts of `call`, or less, throwing, if it's stopped. */
+  const pause = async (call: ApiCall, ms: number): Promise<void> => {
+    const stop = stopOf(call);
+    await (stop === undefined
       ? scheduler.wait(ms)
-      : Promise.race([scheduler.wait(ms), whenAborted(signal)]));
+      : Promise.race([scheduler.wait(ms), whenAborted(stop)]));
   };
 
   const send = async (call: ApiCall): Promise<Response | null> => {
+    const stop = stopOf(call);
     const url = new URL(`${cloudflareApiBase}${call.path}`);
     for (const [name, value] of Object.entries(call.query ?? {})) {
       url.searchParams.set(name, value);
@@ -221,10 +233,15 @@ export const cloudflareApi = ({
       body = JSON.stringify(call.json);
     }
     try {
-      return await fetch(url, { method: call.method, headers, body, signal });
+      return await fetch(url, {
+        method: call.method,
+        headers,
+        body,
+        signal: stop,
+      });
     } catch {
-      // Stopped by the client's signal: not a lost answer to retry.
-      stopIfAborted();
+      // Stopped by a signal: not a lost answer to retry.
+      stop?.throwIfAborted();
       // A network error: no answer, and nothing of it is kept, since its
       // message could echo the request.
       return null;
@@ -286,7 +303,7 @@ export const cloudflareApi = ({
         envelope?.errors ?? []
       );
     }
-    await pause(wait);
+    await pause(call, wait);
     return await page(call, schema, attempt + 1, waited + wait);
   };
 
@@ -325,7 +342,7 @@ export const cloudflareApi = ({
     if (wait === undefined) {
       throw new CloudflareApiError(call.method, call.path, status, []);
     }
-    await pause(wait);
+    await pause(call, wait);
     return await graphql(query, variables, schema, attempt + 1, waited + wait);
   };
 
