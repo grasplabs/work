@@ -376,6 +376,79 @@ describe("the kickoff", { timeout: 60_000 }, () => {
     });
   });
 
+  it("gives the company's admin the suites and places the company named, and Stephen's words about its work, only as far as the kickoff said it", async () => {
+    const staff = await asStaff();
+    const { api: admin } = await signedInApi(idp, "admin");
+    const example = {
+      role: "Mortgage advice",
+      question: "Where does the time go on a mortgage file?",
+      answer: "Retyping client details from the CRM into the bank portals.",
+      time: "About an hour per file.",
+    };
+    await answering(
+      [
+        answer({
+          ...reading,
+          onboarding: [
+            {
+              locale: "en",
+              // The kickoff's business counts as not said: no business.
+              business: "mortgage adviser",
+              documents: ["mortgage files", "bank forms", "mortgage files"],
+              example,
+            },
+            {
+              locale: "nl",
+              business: "",
+              documents: [],
+              example: { role: "", question: "", answer: "", time: "" },
+            },
+            // Not a language the onboarding speaks.
+            { locale: "xx", business: "x", documents: ["x"], example },
+          ],
+        }),
+      ],
+      async () => await staff.onboardingStaff.saveKickoff(pasted(dutch))
+    );
+    const { context: before } = await admin.onboarding.view();
+    // The sponsor's answer about their tools names the suite and the place.
+    await staff.onboardingStaff.answerKickoff(
+      "systems",
+      "Google Workspace, with our procedures in Notion."
+    );
+    const { context } = await admin.onboarding.view();
+    /** The suites and places named once the sponsor's answer about their tools is `said`. */
+    const namedBy = async (said: string) => {
+      await staff.onboardingStaff.answerKickoff("systems", said);
+      const { context: named } = await admin.onboarding.view();
+      return [named.suites, named.sources];
+    };
+    expect({
+      before: [before.suites, before.sources],
+      context,
+      // A place named counts for its suite: both suites, Drive kept.
+      mixed: await namedBy("Microsoft 365 for mail, our files in gdrive."),
+      // "Google" alone names no suite.
+      analytics: await namedBy("Google Analytics and Microsoft 365."),
+    }).toStrictEqual({
+      // Salesforce and Excel name no suite and no place.
+      before: [[], []],
+      mixed: [["microsoft", "google"], ["drive"]],
+      analytics: [["microsoft"], []],
+      context: {
+        suites: ["google"],
+        sources: ["notion"],
+        words: {
+          en: {
+            business: "",
+            documents: ["mortgage files", "bank forms"],
+            example,
+          },
+        },
+      },
+    });
+  });
+
   it.each([
     { given: "Anna", named: "Anna" },
     { given: "anna", named: "Anna" },

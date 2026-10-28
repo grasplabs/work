@@ -900,3 +900,55 @@ export const brainMentions = sqliteTable(
     ),
   ]
 );
+
+/**
+ * Typed relations the Brain's sources state between their entities
+ * (../relations.ts): what a source says (`observed`), never an accepted
+ * fact, with the passage that says it (`evidence`) and when it holds
+ * (`valid_from`, `valid_to`, ISO dates, either open). Each version's
+ * commit supersedes the source's relations before it (`superseded_at`),
+ * so what was known when stays answerable; an erasure deletes them all.
+ * Removing the source removes its rows.
+ */
+export const brainAssertions = sqliteTable(
+  "brain_assertions",
+  {
+    id: text().primaryKey(),
+    source: text()
+      .notNull()
+      .references(() => brainLinkJobs.source, { onDelete: "cascade" }),
+    documentId: text("document_id"),
+    memoryId: text("memory_id"),
+    /** The source's version (a memory's revision) it was read from. */
+    version: integer().notNull(),
+    partition: text().notNull(),
+    subjectEntityId: text("subject_entity_id")
+      .notNull()
+      .references(() => brainEntities.id, { onDelete: "cascade" }),
+    /** The subject's name as the source wrote it. */
+    subjectName: text("subject_name").notNull(),
+    /** The relation, in the extractor's words, folded (`owns`). */
+    predicate: text().notNull(),
+    objectEntityId: text("object_entity_id")
+      .notNull()
+      .references(() => brainEntities.id, { onDelete: "cascade" }),
+    objectName: text("object_name").notNull(),
+    validFrom: text("valid_from"),
+    validTo: text("valid_to"),
+    /** The passage that states it, as the source wrote it. */
+    evidence: text().notNull(),
+    state: text({ enum: ["observed"] }).notNull(),
+    /** When the Brain read it. */
+    recordedAt: timestamp("recorded_at").notNull(),
+    /** When a later version of its source replaced it. */
+    supersededAt: timestamp("superseded_at"),
+  },
+  (table) => [
+    index("brain_assertions_subject_idx").on(
+      table.subjectEntityId,
+      table.predicate
+    ),
+    index("brain_assertions_object_idx").on(table.objectEntityId),
+    index("brain_assertions_source_idx").on(table.source),
+  ]
+);

@@ -230,6 +230,10 @@ const coreDb: D1State = {
       "App token signing keys, private keys encrypted with BETTER_AUTH_SECRET."
     ),
     organizations: exported(auth),
+    org_settings: exported(`${core}org-settings.ts`),
+    policy_documents: exported(`${core}policies.ts`),
+    policy_rules: exported(`${core}policies.ts`),
+    policy_exceptions: exported(`${core}policies.ts`),
     members: exported(auth),
     member_removals: exported(`${core}organization.ts`),
     channel_accounts: exported(`${core}channels/accounts.ts`),
@@ -292,6 +296,10 @@ const coreDb: D1State = {
       `${core}brain-capture.ts`,
       "Settled runs' outcomes still owed to the Brain, and those it gave up on."
     ),
+    run_brain_evidence: transient(
+      `${core}workflows/host.ts`,
+      "What each run's latest recall cites, checked before its next calls."
+    ),
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
     workflow_admission_queue: transient(`${core}workflows/admission.ts`),
@@ -329,6 +337,7 @@ const coreDb: D1State = {
     dependency_admission_refusals: exported(`${core}dependencies/requests.ts`),
     workflow_param_values: exported(`${core}workflows/params.ts`),
     workflow_owners: exported(`${core}workflows/owners.ts`),
+    workflow_teams: exported(`${core}workflows/teams.ts`),
     hidden_connectors: exported(`${core}connections.ts`),
     tool_class_settings: exported(`${core}tool-classes.ts`),
     stephen_reach: exported(`${core}stephen-reach.ts`),
@@ -448,6 +457,10 @@ const knowledgeDb: D1State = {
     brain_entity_keys: exported(
       `${brain}entities.ts`,
       `The exact evidence each entity is known by, as deployment-keyed HMACs. ${brainPending}`
+    ),
+    brain_assertions: exported(
+      `${brain}entities.ts`,
+      `Relations the Brain's sources state between their entities, with their passages: derived, but only by model calls again. ${brainPending}`
     ),
     brain_mentions: exported(
       `${brain}entities.ts`,
@@ -574,6 +587,7 @@ const workspaces: DurableObjectState = {
     chat_build_jobs: exported(`${core}build-jobs.ts`),
     dashboards: exported(`${core}workspace.ts`),
     dashboard_widgets: exported(`${core}workspace.ts`),
+    custom_widgets: exported(`${core}workspace.ts`),
     email_preferences: exported(`${core}workspace.ts`),
     preview_releases: cache(`${core}sealed-previews.ts`),
     preview_release_artifacts: cache(`${core}sealed-previews.ts`),

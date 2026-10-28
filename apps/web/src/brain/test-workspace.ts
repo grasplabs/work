@@ -644,6 +644,7 @@ export const testWorkspace = (): Workspace => ({
   goals: [
     {
       id: "goal-answer",
+      workflows: [],
       versions: [
         {
           title: "Every client gets an answer within a working day",
@@ -655,6 +656,7 @@ export const testWorkspace = (): Workspace => ({
     },
     {
       id: "goal-numbers",
+      workflows: [],
       versions: [
         {
           title: "The board sees this week’s numbers on Monday morning",
@@ -672,6 +674,7 @@ export const testWorkspace = (): Workspace => ({
     },
     {
       id: "goal-advice",
+      workflows: [],
       versions: [
         {
           title: "Advisors spend most of their time on advice",

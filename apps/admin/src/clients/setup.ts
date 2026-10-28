@@ -122,7 +122,13 @@ export interface ClientSetup {
    */
   resources: { databases: string[]; buckets: string[]; gateway: string } | null;
   /** The newest imported releases, newest first: the latest `setupReleaseLimit`. */
-  releases: { id: string; notes: string; builtAt: Date }[];
+  releases: {
+    id: string;
+    notes: string;
+    builtAt: Date;
+    versionMajor: number | null;
+    versionMinor: number | null;
+  }[];
   /** The newest release of all, whether or not it is listed. */
   newestReleaseId: string | null;
   /** Whether the admin has older releases than those. */
@@ -337,7 +343,13 @@ export const getClientSetup = async (
     resources: await resourcesOf(db, runs),
     releases: listed.releases
       .slice(0, setupReleaseLimit)
-      .map(({ id, notes, builtAt }) => ({ id, notes, builtAt })),
+      .map(({ id, notes, builtAt, versionMajor, versionMinor }) => ({
+        id,
+        notes,
+        builtAt,
+        versionMajor,
+        versionMinor,
+      })),
     newestReleaseId: listed.releases[0]?.id ?? null,
     moreReleases:
       listed.releases.length > setupReleaseLimit || listed.older !== null,

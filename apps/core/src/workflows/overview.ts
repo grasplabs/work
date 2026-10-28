@@ -76,6 +76,7 @@ import {
   workflowInputSchema,
 } from "./runs.ts";
 import type { RunRow } from "./runs.ts";
+import { setWorkflowTeam, teamKey, teamsSet } from "./teams.ts";
 
 // Every workflow a person can see, across Apps, and their runs: the
 // Workflows page, its Runs tab and the workflow view. A person sees the
@@ -313,8 +314,9 @@ const latestRuns = async (
  * The summaries of `workflows`, for `by`: each one's owner (owners.ts),
  * latest run, its runs waiting now (counted from the open decisions),
  * those failed lately and those it handled this week (from the runs ended
- * since), whether a schedule of it stopped (triggers.ts), and whether `by`
- * may change its owner: seven queries, whatever the number of workflows.
+ * since), whether a schedule of it stopped (triggers.ts), the team that
+ * owns it (teams.ts), and whether `by` may change its owner: eight
+ * queries, whatever the number of workflows.
  */
 const summariesOf = async (
   env: Env,
@@ -333,7 +335,7 @@ const summariesOf = async (
   const now = new Date();
   const failedSince = new Date(now.getTime() - failedRunDays * dayMs);
   const handledSince = new Date(now.getTime() - handledRunDays * dayMs);
-  const [latest, waiting, failed, handled, stopped, owners, built] =
+  const [latest, waiting, failed, handled, stopped, owners, built, teamsOf] =
     await Promise.all([
       latestRuns(db, workflows, now),
       db
@@ -387,6 +389,7 @@ const summariesOf = async (
       ownersSet(env, appIds),
       // Staff change no owner (owners.ts), so whether they build is moot.
       by.staff ? new Set<string>() : appsBuiltBy(env, by, appIds),
+      teamsSet(env, appIds),
     ]);
   const waitingOf = countsByKey(waiting);
   const failedOf = countsByKey(failed);
@@ -404,6 +407,7 @@ const summariesOf = async (
       name: app.ownerName,
     },
     changesOwner: built.has(app.id),
+    team: teamsOf.get(teamKey(app.id, workflow)) ?? null,
     lastRun: latest.get(keyOf(app.id, workflow)) ?? null,
     waiting: waitingOf.get(keyOf(app.id, workflow)) ?? 0,
     failed: failedOf.get(keyOf(app.id, workflow)) ?? 0,
@@ -972,6 +976,29 @@ export const dryRunWorkflow = async (
  * or a builder of the App, and returns the workflow's summary as it is
  * now.
  */
+/**
+ * Makes `team` the team that owns an App's workflow (teams.ts), and
+ * returns its summary as it is now.
+ */
+export const setTeam = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  workflow: unknown,
+  team: unknown
+): Promise<WorkflowSummary> => {
+  const set = await setWorkflowTeam(env, by, app, workflow, team);
+  const [summary] = await workflowOverview(
+    env,
+    by,
+    (id, workflowId) => id === set.app && workflowId === set.workflow
+  );
+  if (summary === undefined) {
+    throw workflowErrors.create("workflow.not_found");
+  }
+  return summary;
+};
+
 export const setOwner = async (
   env: Env,
   by: Identity,

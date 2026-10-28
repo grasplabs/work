@@ -710,7 +710,6 @@ const computePackagesOf = (
     ? value.filter(
         (entry): entry is string =>
           typeof entry === "string" &&
-          entry.length > 0 &&
           packageEntrySchema.safeParse(entry).success
       )
     : [];

@@ -6,6 +6,10 @@ import type {
   AdminAskAnswer,
   AdminAskRequest,
 } from "@grasp-os/shared/admin-ask";
+import type {
+  AdminKickoffRequest,
+  AdminKickoffView,
+} from "@grasp-os/shared/admin-kickoff";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
 
@@ -164,6 +168,15 @@ export interface AccountState {
   ask?: AdminAskAnswer | "no_model";
   /** The questions its core took, as each signed request sent them. */
   asked: AdminAskRequest[];
+  /**
+   * What its core answers the admin's signed kickoff request with
+   * (@grasp-os/shared/admin-kickoff): the kickoff as the admin shows it,
+   * or `shut_out` for a company that keeps Grasp's staff out (403). Unset,
+   * a kickoff with nothing brought in.
+   */
+  kickoff?: AdminKickoffView | "shut_out";
+  /** The kickoff requests its core took, as each signed request sent them. */
+  kickoffAsks: AdminKickoffRequest[];
   /**
    * What the analytics API reports for it (`/graphql`): its Workers'
    * requests and CPU time this month, its AI Gateway's spend, and its

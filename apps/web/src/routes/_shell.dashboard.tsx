@@ -3,7 +3,6 @@ import { Await, createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Activity } from "../dashboard/activity.tsx";
-import { nextReport } from "../dashboard/programme.ts";
 import { readDashboard } from "../dashboard/read-dashboard.ts";
 import { ReportBar } from "../dashboard/report-bar.tsx";
 import { ReportDialog } from "../dashboard/report-dialog.tsx";
@@ -27,17 +26,16 @@ import { NotLoaded } from "../load-from-core.tsx";
 // lead here.
 
 const DashboardPage = () => {
-  const { waiting, board, programme, today, report, activity } =
-    Route.useLoaderData();
+  const { waiting, board, programme, report, activity } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { i18n, t } = useLingui();
   const router = useRouter();
   const [exporting, setExporting] = useState(false);
   // A programme only with a plan; none read, no line and no report.
   const planned = programme.state === "ready" ? programme.data : null;
-  const line =
-    planned === null ? undefined : programmeLine(planned, today, i18n);
-  const next = planned === null ? undefined : nextReport(planned.start, today);
+  const line = planned === null ? undefined : programmeLine(planned, i18n);
+  const next = planned?.nextReport;
+  const today = planned?.today;
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Dashboard` }]} />
@@ -58,7 +56,9 @@ const DashboardPage = () => {
           </div>
         </div>
         <ToDo identity={identity} waiting={waiting} />
-        {next === undefined || line === undefined ? null : (
+        {next === undefined ||
+        line === undefined ||
+        today === undefined ? null : (
           <>
             <ReportBar
               next={next}

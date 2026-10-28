@@ -14,7 +14,6 @@ import { Route as AskRouteImport } from './routes/ask'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LabRouteImport } from './routes/lab'
 import { Route as NewOrganizationRouteImport } from './routes/new-organization'
-import { Route as SourcesRouteImport } from './routes/sources'
 import { Route as OrganizationsClientIdRouteImport } from './routes/organizations/$clientId'
 import { Route as PlatformIndexRouteImport } from './routes/platform/index'
 import { Route as OrganizationsClientIdIndexRouteImport } from './routes/organizations/$clientId/index'
@@ -61,11 +60,6 @@ const LabRoute = LabRouteImport.update({
 const NewOrganizationRoute = NewOrganizationRouteImport.update({
   id: '/new-organization',
   path: '/new-organization',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SourcesRoute = SourcesRouteImport.update({
-  id: '/sources',
-  path: '/sources',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrganizationsClientIdRoute = OrganizationsClientIdRouteImport.update({
@@ -202,7 +196,6 @@ export interface FileRoutesByFullPath {
   '/integrations': typeof IntegrationsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
-  '/sources': typeof SourcesRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
@@ -232,7 +225,6 @@ export interface FileRoutesByTo {
   '/integrations': typeof IntegrationsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
-  '/sources': typeof SourcesRoute
   '/platform': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
   '/organizations/$clientId/brain': typeof OrganizationsClientIdBrainRoute
@@ -262,7 +254,6 @@ export interface FileRoutesById {
   '/integrations': typeof IntegrationsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
-  '/sources': typeof SourcesRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
@@ -294,7 +285,6 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/lab'
     | '/new-organization'
-    | '/sources'
     | '/organizations/$clientId'
     | '/platform/'
     | '/organizations/$clientId/ai-use'
@@ -324,7 +314,6 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/lab'
     | '/new-organization'
-    | '/sources'
     | '/platform'
     | '/organizations/$clientId/ai-use'
     | '/organizations/$clientId/brain'
@@ -353,7 +342,6 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/lab'
     | '/new-organization'
-    | '/sources'
     | '/organizations/$clientId'
     | '/platform/'
     | '/organizations/$clientId/ai-use'
@@ -384,7 +372,6 @@ export interface RootRouteChildren {
   IntegrationsRoute: typeof IntegrationsRoute
   LabRoute: typeof LabRoute
   NewOrganizationRoute: typeof NewOrganizationRoute
-  SourcesRoute: typeof SourcesRoute
   OrganizationsClientIdRoute: typeof OrganizationsClientIdRouteWithChildren
   PlatformIndexRoute: typeof PlatformIndexRoute
   PlatformReleasesReleaseIdRoute: typeof PlatformReleasesReleaseIdRoute
@@ -429,13 +416,6 @@ declare module '@tanstack/react-router' {
       path: '/new-organization'
       fullPath: '/new-organization'
       preLoaderRoute: typeof NewOrganizationRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sources': {
-      id: '/sources'
-      path: '/sources'
-      fullPath: '/sources'
-      preLoaderRoute: typeof SourcesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/organizations/$clientId': {
@@ -644,7 +624,6 @@ const rootRouteChildren: RootRouteChildren = {
   IntegrationsRoute: IntegrationsRoute,
   LabRoute: LabRoute,
   NewOrganizationRoute: NewOrganizationRoute,
-  SourcesRoute: SourcesRoute,
   OrganizationsClientIdRoute: OrganizationsClientIdRouteWithChildren,
   PlatformIndexRoute: PlatformIndexRoute,
   PlatformReleasesReleaseIdRoute: PlatformReleasesReleaseIdRoute,

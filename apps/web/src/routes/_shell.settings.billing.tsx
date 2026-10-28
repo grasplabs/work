@@ -1,3 +1,4 @@
+import { noBilling } from "@grasp-os/shared/org-settings";
 import {
   Alert,
   AlertDescription,
@@ -9,18 +10,25 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { ExternalLinkIcon, InfoIcon } from "lucide-react";
 
+import { ErrorText } from "../error-text.tsx";
+import { NotLoadedState } from "../frame/page-states.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
+import { useQueuedSave } from "../settings/queued-save.ts";
+import { SavedField } from "../settings/saved-field.tsx";
 import {
   SettingsError,
+  SettingsLoading,
   SettingsRow,
   SettingsSection,
 } from "../settings/settings-parts.tsx";
 
 // Settings → Billing, for admins, as in the prototype
 // (`routes/settings/billing.tsx`): the plan, the card, the billing details
-// and the invoices, as Stripe keeps them, every change made in Stripe's
-// billing portal. Core has no link to Stripe yet, so this is the
-// prototype's page before Stripe is linked: what can be seen, with nothing
-// in it, and every way into Stripe shown but not usable.
+// and the invoices. Core keeps the billing details and which billing
+// emails go out (`orgSettings.billing()`), which the organization's own
+// admins change here, each field saved as it is left. No payment provider
+// is linked yet, so there is no plan, card or invoice, and every way into
+// Stripe is shown but not usable.
 
 /** A way into Stripe's billing portal; shown but not usable without the link. */
 const StripeButton = ({ label }: { label: string }) => (
@@ -37,8 +45,24 @@ const Nothing = () => (
   </span>
 );
 
-const Billing = () => {
+const BillingPage = () => {
   const { t } = useLingui();
+  const page = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
+  const billing = page.state === "ready" ? page.data : noBilling;
+  const { failure, save } = useQueuedSave(
+    billing,
+    async (session, next) => await session.orgSettings.updateBilling(next)
+  );
+  if (page.state !== "ready") {
+    return (
+      <SettingsSection title={t`Billing`}>
+        <NotLoadedState heading="h3" page={page} />
+      </SettingsSection>
+    );
+  }
+  // Only the organization's own admins change them; Grasp staff read them.
+  const disabled = identity.staff;
   return (
     <>
       <Alert>
@@ -47,9 +71,13 @@ const Billing = () => {
           <Trans>Stripe is not linked yet</Trans>
         </AlertTitle>
         <AlertDescription>
-          <Trans>Until it is, billing can be seen here but not changed.</Trans>
+          <Trans>
+            Until it is, there is no plan, card or invoice. The billing details
+            and emails below are kept for when it is.
+          </Trans>
         </AlertDescription>
       </Alert>
+      <ErrorText>{failure}</ErrorText>
 
       <SettingsSection
         action={<StripeButton label={t`Change plan`} />}
@@ -86,27 +114,62 @@ const Billing = () => {
       </SettingsSection>
 
       <SettingsSection
-        action={<StripeButton label={t`Edit details`} />}
         description={t`What appears on every invoice.`}
         title={t`Billing details`}
       >
         <SettingsRow
           description={t`Invoices and receipts go here.`}
+          htmlFor="billing-email"
           label={t`Billing email`}
         >
-          <Nothing />
+          <SavedField
+            disabled={disabled}
+            id="billing-email"
+            maxLength={254}
+            onSave={(email) => {
+              save({ email });
+            }}
+            type="email"
+            value={billing.email}
+          />
         </SettingsRow>
-        <SettingsRow label={t`Company`}>
-          <Nothing />
+        <SettingsRow htmlFor="billing-company" label={t`Company`}>
+          <SavedField
+            disabled={disabled}
+            id="billing-company"
+            maxLength={120}
+            onSave={(company) => {
+              save({ company });
+            }}
+            value={billing.company}
+          />
         </SettingsRow>
-        <SettingsRow label={t`Address`}>
-          <Nothing />
+        <SettingsRow htmlFor="billing-address" label={t`Address`}>
+          <SavedField
+            disabled={disabled}
+            id="billing-address"
+            maxLength={500}
+            multiline
+            onSave={(address) => {
+              save({ address });
+            }}
+            value={billing.address}
+          />
         </SettingsRow>
         <SettingsRow
           description={t`Your company’s VAT number, as invoices show it.`}
+          htmlFor="billing-vat"
           label={t`VAT number`}
         >
-          <Nothing />
+          <SavedField
+            disabled={disabled}
+            id="billing-vat"
+            maxLength={14}
+            onSave={(vatNumber) => {
+              save({ vatNumber });
+            }}
+            value={billing.vatNumber}
+          />
         </SettingsRow>
       </SettingsSection>
 
@@ -119,14 +182,28 @@ const Billing = () => {
           htmlFor="billing-email-invoices"
           label={t`Invoices`}
         >
-          <Switch checked={false} disabled id="billing-email-invoices" />
+          <Switch
+            checked={billing.emailInvoices}
+            disabled={disabled}
+            id="billing-email-invoices"
+            onCheckedChange={(emailInvoices) => {
+              save({ emailInvoices });
+            }}
+          />
         </SettingsRow>
         <SettingsRow
           description={t`A receipt each time a payment goes through.`}
           htmlFor="billing-email-receipts"
           label={t`Payment receipts`}
         >
-          <Switch checked={false} disabled id="billing-email-receipts" />
+          <Switch
+            checked={billing.emailReceipts}
+            disabled={disabled}
+            id="billing-email-receipts"
+            onCheckedChange={(emailReceipts) => {
+              save({ emailReceipts });
+            }}
+          />
         </SettingsRow>
       </SettingsSection>
 
@@ -140,6 +217,12 @@ const Billing = () => {
 };
 
 export const Route = createFileRoute("/_shell/settings/billing")({
+  pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
-  component: Billing,
+  component: BillingPage,
+  loader: async ({ context: { core } }) =>
+    await loadFromCore(
+      core,
+      async (session) => await session.orgSettings.billing()
+    ),
 });

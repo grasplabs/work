@@ -279,7 +279,7 @@ const packageItems = (
   requests.map((request) => {
     // An App or a workflow, in one queue: only an App has a page to go to.
     const engine = request.subject.name;
-    const kind = request.subject.type === "workflow" ? t`Workflow` : t`App`;
+    const kind = request.subject.type === "workflow" ? t`Workflow` : t`Domain`;
     const targets = formatList(
       request.targets.map((target) => i18n._(targetNames[target]))
     );

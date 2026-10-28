@@ -19,8 +19,13 @@ import type { ScreenTarget } from "@grasp-os/shared/screens";
 //   as it mounts could open the next start that does the same, filling the
 //   history, and send the person forward again each time they went Back.
 //   A navigation while the person acts gives the tab its go back. Acting
-//   means in the frame that asks (screen-frame.tsx), so the screens a click
-//   opens can't each go on its activation. Beside the page, never without
+//   means a click or key of theirs in the frame that asks, which its own
+//   document reported and no navigation spent yet (`acted`, frame-acts.ts),
+//   with the browser's activation and the frame holding the page's focus
+//   (screen-frame.tsx). So a screen that focuses itself while the
+//   activation of a click elsewhere lasts (the one that opened it, or one
+//   on the page) can't go on it as the person's, nor can the screens it
+//   opens; and one act is one navigation. Beside the page, never without
 //   it: there only the person's act in the frame itself counts.
 
 /** How the page goes to a target, pushing or replacing its entry. */
@@ -33,7 +38,11 @@ export type PageNavigate = (
 export interface PageState {
   /** Where the page is, and where it is going (the same when settled). */
   location: () => { here: string; going: string };
-  /** Whether the person just acted, in the frame that asks. */
+  /**
+   * Whether the browser has the person's activation now, with the frame
+   * that asks holding the page's focus: never enough on its own (see
+   * the header).
+   */
   activated: () => boolean;
   now: () => number;
 }
@@ -43,7 +52,15 @@ export const stayCooldownMs = 10_000;
 
 /** One frame start's navigations, and what its leave guard says. */
 export interface NavigationPolicy {
-  navigate: PageNavigate;
+  /**
+   * Goes to `target` on the screen's word; `acted` says the person acted
+   * in its frame for it (frame-acts.ts).
+   */
+  navigate: (
+    target: ScreenTarget,
+    replace: boolean,
+    acted: boolean
+  ) => Promise<void>;
   guardChanged: (guarded: boolean) => void;
   /**
    * The person chose to stay in the leave dialog: the navigation waiting
@@ -99,7 +116,7 @@ export const navigationPolicy = (
   /** What refuses each navigation waiting on the leave dialog. */
   const waiting = new Set<(error: Error) => void>();
   return {
-    navigate: async (target, replace) => {
+    navigate: async (target, replace, acted) => {
       const { here, going } = page.location();
       const left = placement === "page" && here !== start;
       if (left || going !== here) {
@@ -108,7 +125,7 @@ export const navigationPolicy = (
       if (stayedAt !== undefined && page.now() - stayedAt < stayCooldownMs) {
         throw cancelled();
       }
-      if (page.activated()) {
+      if (acted && page.activated()) {
         tab.restore();
       } else if (placement === "beside" || !tab.take()) {
         // Beside the page, never, and without taking the tab's go: only

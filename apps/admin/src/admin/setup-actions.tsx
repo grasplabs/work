@@ -66,10 +66,12 @@ import {
 import type { ProvisioningView } from "../provision/queries.ts";
 import { useProvisionAction } from "../provision/use-action.ts";
 import { formatTime } from "../releases/format.ts";
+import { releaseName } from "../releases/version.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { pinClientFn, rollbackClientFn } from "../rollout/functions.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
+import { ringChoices, ringWords } from "./platform-parts.tsx";
 import { Body, Facts, Failure, Quiet } from "./setup-parts.tsx";
 
 /** Reads the page again after a change: whatever it shows, read anew. */
@@ -270,10 +272,6 @@ export const SettingUpNow = ({
 
 // Its releases.
 
-/** A release in a line, for a list to choose from: its id, and its notes. */
-const releaseLine = ({ id, notes }: { id: string; notes: string }): string =>
-  notes === "" ? id : `${id} · ${notes}`;
-
 /** Pinning it to a release, and letting it follow the rollouts again. */
 export const PinRelease = ({
   clientId,
@@ -284,7 +282,12 @@ export const PinRelease = ({
   clientId: string;
   pinned: string | null;
   /** The imported releases, newest first. */
-  releases: readonly { id: string; notes: string }[];
+  releases: readonly {
+    id: string;
+    notes: string;
+    versionMajor?: number | null;
+    versionMinor?: number | null;
+  }[];
   refresh: Refresh;
 }) => {
   const { busy, failure, run } = useRolloutAction();
@@ -317,7 +320,7 @@ export const PinRelease = ({
         >
           {releases.map((release) => (
             <NativeSelectOption key={release.id} value={release.id}>
-              {releaseLine(release)}
+              {releaseName(release)}
             </NativeSelectOption>
           ))}
         </NativeSelect>
@@ -382,20 +385,24 @@ export const RingChange = ({
     >
       <Field>
         <FieldLabel htmlFor="setup-ring">Ring</FieldLabel>
-        <Input
-          className="max-w-32"
-          defaultValue={ring}
+        <NativeSelect
+          className="max-w-48"
+          defaultValue={String(ring)}
           id="setup-ring"
           // Keyed by the ring: it starts again from the one read after each change.
           key={ring}
-          min={0}
           name="ring"
-          required
-          type="number"
-        />
+        >
+          {ringChoices(ring).map((choice) => (
+            <NativeSelectOption key={choice} value={String(choice)}>
+              {ringWords(choice)}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
         <FieldDescription>
-          When rollouts reach it: ring 0 first. Rollouts started from now on use
-          it.
+          When rollouts reach it: Alpha (our own deployments) first, then Beta
+          (organisations that want the latest changes), then Production.
+          Rollouts started from now on use it.
         </FieldDescription>
       </Field>
       <div className="flex flex-wrap items-center gap-3">

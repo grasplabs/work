@@ -14,7 +14,6 @@ import {
   FileSignatureIcon,
   HistoryIcon,
   LayoutDashboardIcon,
-  MessagesSquareIcon,
   NotebookPenIcon,
   RocketIcon,
   SparklesIcon,
@@ -43,7 +42,6 @@ import { SiteHeader } from "../frame/site-header.tsx";
 
 type AreaPath =
   | "/onboarding"
-  | "/onboarding/kickoff"
   | "/onboarding/agreements"
   | "/onboarding/stephen"
   | "/onboarding/organization"
@@ -69,11 +67,6 @@ const overview: AreaSection = {
 
 const sections: readonly AreaSection[] = [
   overview,
-  {
-    to: "/onboarding/kickoff",
-    label: msg({ message: "Kickoff", context: "onboarding area section" }),
-    icon: MessagesSquareIcon,
-  },
   {
     to: "/onboarding/agreements",
     label: msg({ message: "Agreements", context: "onboarding area section" }),
