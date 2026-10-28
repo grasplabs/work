@@ -43,6 +43,9 @@ const placeHash = async ({
 }: DocumentPlace): Promise<string> =>
   await sha256Hex(`${collectionId}\n${path}`);
 
+/** Erasure records one insert writes: four bound values each, 100 at most. */
+const erasedRowsPerStatement = 25;
+
 /** The statements that record `documents` as erased by purge `purgeId`. */
 export const erasedDocumentsWrite = async (
   db: DrizzleD1Database,
@@ -61,7 +64,14 @@ export const erasedDocumentsWrite = async (
       erasedAt: now,
     }))
   );
-  return [db.insert(brainErasedDocuments).values(values).onConflictDoNothing()];
+  // D1 binds at most 100 values a statement: four a row.
+  const rows: (typeof values)[] = [];
+  for (let at = 0; at < values.length; at += erasedRowsPerStatement) {
+    rows.push(values.slice(at, at + erasedRowsPerStatement));
+  }
+  return rows.map((chunk) =>
+    db.insert(brainErasedDocuments).values(chunk).onConflictDoNothing()
+  );
 };
 
 /** The rowid of an erasure record: its place in the order they were written. */
