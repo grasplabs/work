@@ -569,15 +569,31 @@ interface LoadedDeploy {
  */
 const loadDeploy = async (
   db: AdminDatabase,
-  id: string
+  id: string,
+  first: DeployStep
 ): Promise<LoadedDeploy | null> => {
   const deploy = await deployOf(db, id);
   if (deploy.status === "done") {
     return null;
   }
   const { clientId, releaseId } = deploy;
-  // Placed after this deploy started: it stops before it changes anything.
-  await assertNotPlaced(db, clientId);
+  // Placed after this deploy started: it stops before it changes anything,
+  // recorded failed at the step it would have run, so it doesn't stay
+  // `running` with no reason.
+  try {
+    await assertNotPlaced(db, clientId);
+  } catch (error) {
+    if (error instanceof DeployError) {
+      await recordFailure(db, {
+        id,
+        clientId,
+        releaseId,
+        step: first,
+        code: error.code,
+      });
+    }
+    throw error;
+  }
   if (
     deploy.status === "superseded" ||
     (await latestDeployId(db, clientId)) !== id
@@ -668,7 +684,7 @@ const runPhase = async <T>(
   ) => Promise<T>
 ): Promise<{ loaded: LoadedDeploy; result: T } | null> => {
   const { db } = context;
-  const loaded = await loadDeploy(db, id);
+  const loaded = await loadDeploy(db, id, first);
   if (loaded === null) {
     return null;
   }

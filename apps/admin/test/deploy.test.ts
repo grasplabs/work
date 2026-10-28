@@ -196,10 +196,19 @@ describe("deploying a release to a client's account", () => {
     await expect(runDeploy(context, deployId)).rejects.toMatchObject({
       code: "client_placed",
     });
+    // Recorded failed, with why: never left `running`.
+    const row = await deployRow(deployId);
     expect({
       scripts: account.scripts.size,
       databases: account.d1.length,
-    }).toStrictEqual({ scripts: 0, databases: 0 });
+      status: row?.status,
+      error: row?.error,
+    }).toStrictEqual({
+      scripts: 0,
+      databases: 0,
+      status: "failed",
+      error: "client_placed",
+    });
   });
 
   it("resumes after a resource was made but its answer lost, creating nothing twice", async () => {
