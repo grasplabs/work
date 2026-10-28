@@ -41,7 +41,7 @@ import { deliveryRoom, startRun } from "./runs.ts";
 
 // Events connections report, to workflows' event triggers
 // (trigger-registry.ts). Connect can't reach core, so core drives it, as
-// it drains connect's audit outbox: every minute, the cron trigger
+// it drains connect's audit outbox: every minute, the clock
 // tells connect who listens for events where (`listenersOf`), which is
 // where connect listens and nowhere else, then takes the events connect
 // read, delivers each here, and settles them (`pumpConnectorEvents`).
@@ -367,10 +367,10 @@ export const listenersOf = async (env: Env): Promise<EventListener[]> => {
   return all.slice(0, eventListenersMax);
 };
 
-/** Events one cron run delivers, at most: one take's worth. */
+/** Events one clock run delivers, at most: one take's worth. */
 const defaultEventsPerRun = 100;
 
-/** Events one cron run delivers: fewer in tests (`CONNECTOR_EVENTS_PER_RUN`). */
+/** Events one clock run delivers: fewer in tests (`CONNECTOR_EVENTS_PER_RUN`). */
 const eventsPerRun = (env: Env): number => {
   const configured = Number(env.CONNECTOR_EVENTS_PER_RUN);
   return Number.isInteger(configured) && configured > 0
@@ -407,7 +407,7 @@ const deliverOne = async (
 };
 
 /**
- * Every minute, from the cron trigger: tells connect who listens for
+ * Every minute, from the clock: tells connect who listens for
  * events where, then delivers at most `eventsPerRun` of the events it
  * read and settles them; the rest wait for the next run. Those read
  * before are delivered even when telling connect fails.

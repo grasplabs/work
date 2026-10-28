@@ -268,7 +268,7 @@ const recordRemoval = async (
 };
 
 /**
- * Records that connect completed disconnecting `userIds`, so the cron
+ * Records that connect completed disconnecting `userIds`, so the clock
  * trigger stops retrying them once a flow can no longer finish
  * (`retryDisconnects`).
  */
@@ -295,7 +295,7 @@ const markDisconnected = async (
  * calls for them anyway (they are no longer a member); this takes the
  * tokens out of the vault. First, what their chats' agent was granted or
  * asked for in their chats is revoked, audited (chat-connections.ts):
- * none of it holds for them anyway. What fails here, the cron trigger
+ * none of it holds for them anyway. What fails here, the clock
  * retries (`retryDisconnects`), both parts: they are done only once both
  * are.
  */
@@ -481,7 +481,7 @@ const setMemberRole = async (
   throw refusal(by, memberErrors.create("member.last_admin"));
 };
 
-/** Most `disconnectPersonal` batches the cron trigger has in flight at once. */
+/** Most `disconnectPersonal` batches the clock has in flight at once. */
 const disconnectBatchesAtOnce = 4;
 
 /**
@@ -494,7 +494,7 @@ const disconnectBatchesAtOnce = 4;
  * that with room to spare. First it revokes what their chats' agent was
  * granted or asked for (as the system), as `disconnectPersonal` does, so
  * a removal whose revoke failed ends revoked too. When nobody is pending,
- * it doesn't call connect at all. The cron trigger calls it.
+ * it doesn't call connect at all. The clock calls it.
  */
 export const retryDisconnects = async (env: Env): Promise<void> => {
   const pending = await drizzle(env.DB)

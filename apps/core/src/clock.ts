@@ -6,13 +6,8 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   ClockObject,
   clockStarter as starter,
-  tickClock as tick,
 } from "@grasp-os/workerflow/clock";
-import type {
-  ClockPeriod,
-  ClockReport,
-  ClockTask,
-} from "@grasp-os/workerflow/clock";
+import type { ClockReport, ClockTask } from "@grasp-os/workerflow/clock";
 
 import { retryAccessRevocations } from "./access-revocations.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
@@ -60,8 +55,8 @@ import { repairWakes } from "./workflows/wakes.ts";
 
 // The client's clock for core (spec 43.5, @grasp-os/workerflow/clock):
 // core's maintenance, repair and schedule-admission tasks, each run once
-// per slot of its period with its own durable state, on the clock's alarm
-// and on core's crons while they last.
+// per slot of its period with its own durable state, on the clock's alarm.
+// Core has no cron: a Workers for Platforms user Worker can't.
 
 /**
  * Every task, in the order each period starts them. Each runs concurrently
@@ -297,7 +292,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
 ];
 
 /** How core logs a task that failed: its name and the error, nothing it worked on. */
-const report: ClockReport = (event, task, error) => {
+export const report: ClockReport = (event, task, error) => {
   log.error(event, { task, ...errorFields(error) });
 };
 
@@ -312,16 +307,6 @@ export const clock = (
   env: Pick<Env, "CLOCK" | "DURABLE_OBJECT_JURISDICTION">
 ): DurableObjectStub<Clock> =>
   inJurisdiction(env, env.CLOCK).getByName("clock");
-
-/** A cron's explicit tick of `period` for time `at` (`tickClock`). */
-export const tickClock = async (
-  env: Env,
-  ctx: Pick<ExecutionContext, "waitUntil">,
-  period: ClockPeriod,
-  at: number
-): Promise<void> => {
-  await tick(clock(env), clockTasks, report, env, ctx, period, at);
-};
 
 /** How core logs a clock it couldn't arm. */
 const ensureFailed = (error: unknown): void => {

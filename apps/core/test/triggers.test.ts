@@ -13,8 +13,8 @@ import {
   verifiedCandidateStatements,
 } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { racingDb } from "./racing-db.ts";
 import {
   endLiveRuns,
@@ -26,8 +26,8 @@ import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, workflowsApp } from "./workflow-apps.ts";
 
 // Triggers start workflows on their own. A schedule is a cron expression
-// in a schedule parameter, read in the trigger's time zone; core's cron
-// trigger starts what is due by the minute it runs for, so the tests
+// in a schedule parameter, read in the trigger's time zone; core's clock
+// starts what is due by the minute it runs for, so the tests
 // drive the clock through the minute they run it for.
 
 const idp = mockIdp();
@@ -201,12 +201,12 @@ describe("schedule triggers", () => {
       true,
     ]);
 
-    await runCron({}, new Date(due.getTime() - minute));
+    await runMinuteTasks({}, new Date(due.getTime() - minute));
 
     await expect(runCount(builder, app)).resolves.toBe(0);
 
-    await runCron({}, due);
-    await runCron({}, new Date(due.getTime() + minute));
+    await runMinuteTasks({}, due);
+    await runMinuteTasks({}, new Date(due.getTime() + minute));
 
     await expect(runCount(builder, app)).resolves.toBe(1);
     // Then the Monday after, at 8:00 there too.
@@ -221,7 +221,7 @@ describe("schedule triggers", () => {
   it("start a run for the App's owner, audited as the system's", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, weekly());
-    await runCron({}, await nextRunOf(app));
+    await runMinuteTasks({}, await nextRunOf(app));
     const [run] = await builder.api.workflows.list(app);
 
     expect(run).toMatchObject({
@@ -257,7 +257,7 @@ describe("schedule triggers", () => {
     expect(inAmsterdam(due)).toMatch(/ 09:30$/u);
     expect(due.getTime() - Date.now()).toBeLessThanOrEqual(day);
 
-    await runCron({}, due);
+    await runMinuteTasks({}, due);
 
     await expect(runCount(builder, app)).resolves.toBe(1);
   });
@@ -315,7 +315,7 @@ describe("schedule triggers", () => {
     // The same workflow, started only by hand.
     await release(builder, app, weekly(`[{ type: "manual" }]`));
 
-    await runCron({}, due);
+    await runMinuteTasks({}, due);
 
     await expect(runCount(builder, app)).resolves.toBe(0);
     await expect(nextRunOf(app)).rejects.toThrow("has no schedule");
@@ -393,7 +393,7 @@ describe("schedule triggers", () => {
       .run();
 
     await builder.api.apps.versions.setCurrent(app, 1);
-    await runCron();
+    await runMinuteTasks();
 
     await expect(runCount(builder, app)).resolves.toBe(0);
     await expect(nextRunOf(app)).resolves.toSatisfy(
@@ -401,13 +401,13 @@ describe("schedule triggers", () => {
     );
   });
 
-  it("start a time missed while the cron trigger didn't run once, late", async () => {
+  it("start a time missed while the clock didn't run once, late", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, weekly());
     const due = await nextRunOf(app);
 
-    await runCron({}, new Date(due.getTime() + day));
-    await runCron({}, new Date(due.getTime() + day + minute));
+    await runMinuteTasks({}, new Date(due.getTime() + day));
+    await runMinuteTasks({}, new Date(due.getTime() + day + minute));
 
     await expect(runCount(builder, app)).resolves.toBe(1);
   });
@@ -421,7 +421,7 @@ const whileEngineDown = async <T>(run: () => Promise<T>): Promise<T> =>
   await whileEngineRefuses((method) => method === "start", run);
 
 /**
- * Runs the cron trigger for each of `minutes` after `due`, in order; how
+ * Runs the clock for each of `minutes` after `due`, in order; how
  * many runs the App has after each: one more wherever a start was tried.
  */
 const triedAt = async (
@@ -433,7 +433,7 @@ const triedAt = async (
   const counts: number[] = [];
   for (const after of minutes) {
     // oxlint-disable-next-line no-await-in-loop -- one minute after another
-    await runCron({}, new Date(due.getTime() + after * minute));
+    await runMinuteTasks({}, new Date(due.getTime() + after * minute));
     // oxlint-disable-next-line no-await-in-loop -- as above
     counts.push(await runCount(builder, app));
   }
@@ -840,7 +840,7 @@ describe("trigger deliveries", () => {
       )
       .run();
 
-    await runCron({}, due);
+    await runMinuteTasks({}, due);
     await finished(orphan);
 
     await expect(runCount(builder, app)).resolves.toBe(1);

@@ -41,7 +41,7 @@ export const verifiedTarball = async (
     const bytes = new Uint8Array(await stored.arrayBuffer());
     if ((await sha512Integrity(bytes)) === request.integrity) {
       // In use: one waiting for cleanup gets its full hour again, so the
-      // cron never deletes a tarball a resolve or build just read.
+      // clock never deletes a tarball a resolve or build just read.
       await touchCleanup(env, request.integrity);
       return bytes;
     }

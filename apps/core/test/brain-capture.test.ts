@@ -17,8 +17,8 @@ import { projectStatus } from "../src/workflows/runs.ts";
 import { model, pointAtGateway, says } from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { finished } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 import { workflowFiles, workflowsApp } from "./workflow-apps.ts";
@@ -257,7 +257,7 @@ describe("a workflow run's outcome", () => {
     await failedOnce(run);
     const lost = await eventsOf(run);
     // The clock's catch-up, with the Brain back.
-    await runCron();
+    await runMinuteTasks();
     const seq = await runCursor();
 
     expect({
@@ -290,7 +290,7 @@ describe("a workflow run's outcome", () => {
     )
       .bind(`workflow.run:${run}`, run, Date.now())
       .run();
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       events: await executionsOf(run),
@@ -307,7 +307,7 @@ describe("a workflow run's outcome", () => {
     const run = await runningRun(app, builder.userId);
 
     await completed(run);
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       events: await eventsOf(run),
@@ -323,7 +323,7 @@ describe("a workflow run's outcome", () => {
     await completed(run, { ...env, KNOWLEDGE: unreachable });
     await failedOnce(run);
     await admin.api.members.remove(builder.userId);
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       events: await eventsOf(run),
@@ -367,7 +367,7 @@ describe("a workflow run's outcome", () => {
     await failedOnce(run);
     const recordedBefore = await executionsOf(run);
     await admin.api.members.remove(builder.userId);
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       recordedBefore,
@@ -393,7 +393,7 @@ describe("a workflow run's outcome", () => {
     const racing = lostReply(
       async () => {
         await admin.api.members.remove(builder.userId);
-        await runCron();
+        await runMinuteTasks();
       },
       () => {
         lost = true;
@@ -407,7 +407,7 @@ describe("a workflow run's outcome", () => {
       },
       { timeout: 10_000, interval: 100 }
     );
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       events: await eventsOf(run),
@@ -437,7 +437,7 @@ describe("a workflow run's outcome", () => {
     const plan = await admin.api.knowledge.preparePurge(input);
     await admin.api.knowledge.purge(input, plan.token);
     // Still a member: the delivery made again finds the run eligible.
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       recordedBefore,
@@ -477,7 +477,7 @@ describe("a workflow run's outcome", () => {
       },
       { timeout: 10_000, interval: 100 }
     );
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       events: await eventsOf(run),

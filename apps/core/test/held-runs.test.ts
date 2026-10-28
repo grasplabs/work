@@ -6,13 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { appHost } from "../src/durable-objects.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import {
   mailConnection,
   mailForApps,
   mailWithSearch,
 } from "./mail-connection.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
 import { endLiveRuns, finished, liveStatus, runInstance } from "./runs.ts";
 import { openRpc, outcome as codeOf, signedInWithRole } from "./sign-in.ts";
 import {
@@ -440,9 +440,9 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     await admin.api.workflows.cancel(run.id);
     const day = 24 * 60 * 60 * 1000;
 
-    await runQuarterHourCron({}, new Date(Date.now() + 29 * day));
+    await runQuarterHourTasks({}, new Date(Date.now() + 29 * day));
     const within = await admin.api.pendingActions.list();
-    await runQuarterHourCron({}, new Date(Date.now() + 31 * day));
+    await runQuarterHourTasks({}, new Date(Date.now() + 31 * day));
     const after = await admin.api.pendingActions.list();
     const events = await allEvents();
     const dropped = events

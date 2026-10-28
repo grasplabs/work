@@ -163,7 +163,7 @@ interface __BaseEnv_Env {
    */
   MODEL_BUDGET_DAY?: string;
   /**
-   * Tests only: fewer connector events one cron run delivers
+   * Tests only: fewer connector events one clock run delivers
    * (src/workflows/connector-events.ts).
    */
   CONNECTOR_EVENTS_PER_RUN?: string;

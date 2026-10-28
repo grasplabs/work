@@ -858,7 +858,7 @@ const removed = async (env: Env, id: string): Promise<boolean> => {
  * first, batch after batch for as long as the sweep's time allows: each
  * with its engine record and lineage, and its row, whose build's
  * reservation goes with it (the release sweep takes the bytes nothing else
- * names, release-retention.ts). From the cron, for the time `at`.
+ * names, release-retention.ts). From the clock, for the time `at`.
  */
 export const sweepCandidateRuns = async (
   env: Env,
