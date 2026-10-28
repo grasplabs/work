@@ -12,9 +12,6 @@ import {
 } from "../src/clients/functions.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients, rollouts } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { pauseRollout, startRollout } from "../src/rollout/control.ts";
 import {
   approveRolloutFn,
@@ -28,7 +25,7 @@ import {
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-functions-6a2f90";
@@ -51,12 +48,9 @@ const signIn = {
   googleHostedDomain: "acme.test",
 };
 
-/** A release, published and imported. */
-const importedRelease = async (notes: string): Promise<string> => {
-  const release = await publishRelease({ notes });
-  await importReleases(env.RELEASES, db);
-  return release.id;
-};
+/** A release a placed client runs, imported. */
+const importedRelease = async (notes: string): Promise<string> =>
+  await placedRelease(notes);
 
 /** An active client in `ring`, recorded on a new account in the fake. */
 const recordClient = async (ring: number): Promise<string> => {
@@ -82,16 +76,12 @@ const recordClient = async (ring: number): Promise<string> => {
   return clientId;
 };
 
-/** An active client in `ring` running `releaseId`, as a deploy made it. */
+/** An active client in `ring` running `releaseId`, placed and provisioned. */
 const activeClient = async (
   ring: number,
   releaseId: string
 ): Promise<string> => {
-  const clientId = await recordClient(ring);
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, setup, clientId, releaseId)
-  );
+  const { clientId } = await livePlacedClient(cloudflare, ring, releaseId);
   return clientId;
 };
 

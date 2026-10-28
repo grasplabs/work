@@ -861,6 +861,11 @@ const routeOf = (
 export type Failure =
   /** A refusal: the admin retries none. */
   | 400
+  /**
+   * A 400 with no answer Cloudflare wrote, as a proxy in front of it may
+   * send: no error code to read.
+   */
+  | "400-uncoded"
   | 408
   | 429
   | 500
@@ -896,6 +901,12 @@ const failed = (failure: Exclude<Failure, "lost">): Response => {
   }
   if (failure === 400) {
     return refusal(400, 10_000, "Bad request");
+  }
+  if (failure === "400-uncoded") {
+    return new Response("<html>Bad request</html>", {
+      status: 400,
+      headers: { "content-type": "text/html" },
+    });
   }
   if (failure === 408) {
     return refusal(408, 10_000, "Request timeout");
