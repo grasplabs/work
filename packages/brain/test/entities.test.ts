@@ -1384,4 +1384,169 @@ describe("entity linking", () => {
       after: 0,
     });
   });
+
+  /** Ada in Sales and in Support, linked; their match's two entity IDs. */
+  const adaTwice = async () => {
+    const person = `Ada ${word()}`;
+    const host = testHost(gazetteer([{ kind: "person", name: person }]));
+    const sales = await newCollection(host.brain, "Sales");
+    const support = await newCollection(host.brain, "Support");
+    const saved = [
+      await save(host, sales, "a.md", `${person} called.`),
+      await save(host, support, "b.md", `${person} called back.`),
+      await save(host, sales, "proof.md", "Both calls were from one person."),
+    ];
+    for (const { id } of saved) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, on purpose
+      await link(host, id, 1);
+    }
+    const admin: Caller = { userId: "admin", reads: [sales.id, support.id] };
+    const [proposal] = await entityMatchProposals(host.brain, admin);
+    const ids = proposal?.entities.map(({ id }) => id) ?? [];
+    const pair: [string, string] = [ids[0] ?? "", ids[1] ?? ""];
+    return { host, admin, pair, sales, proof: saved[2]?.id ?? "" };
+  };
+
+  it("refuses a replacement made from a decision replaced meanwhile, by the same person too", async () => {
+    const { host, admin, pair, proof } = await adaTwice();
+    await decideEntityMatch(host.brain, admin, {
+      entities: pair,
+      decision: "different",
+    });
+    let meanwhile = false;
+    // The same person's other request lands between this one's read and write.
+    const racing = {
+      ...host.brain,
+      db: new Proxy(host.brain.db, {
+        get: (target, property): unknown => {
+          const value: unknown = Reflect.get(target, property);
+          if (property === "batch" && typeof value === "function") {
+            return async (...args: unknown[]): Promise<unknown> => {
+              if (!meanwhile) {
+                meanwhile = true;
+                await decideEntityMatch(host.brain, admin, {
+                  entities: pair,
+                  decision: "same",
+                  evidence: { documentId: proof, version: 1 },
+                });
+              }
+              return await Reflect.apply(value, target, args);
+            };
+          }
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      }),
+    };
+    const late = await outcome(
+      decideEntityMatch(racing, admin, {
+        entities: pair,
+        decision: "different",
+      })
+    );
+
+    expect({
+      late,
+      same: await sameAsFor(host.brain, admin, pair[0]),
+    }).toStrictEqual({
+      late: "brain.revision_conflict",
+      // The decision made meanwhile stands.
+      same: [pair[1]],
+    });
+  });
+
+  it("forgets a `same` whose evidence a purge rewrites, though both entities stay", async () => {
+    const { host, admin, pair, proof } = await adaTwice();
+    await decideEntityMatch(host.brain, admin, {
+      entities: pair,
+      decision: "same",
+      evidence: { documentId: proof, version: 1 },
+    });
+    const before = await sameAsFor(host.brain, admin, pair[0]);
+    const writer = writerOf("admin");
+    // Only the evidence's words go: both people stay mentioned elsewhere.
+    const content = {
+      type: "content",
+      documentIds: [proof],
+      terms: ["calls"],
+      reason: "erasure_request",
+    };
+    const prepared = await preparePurge(host.brain, writer, content, noCopies);
+    await purge(host.brain, writer, content, prepared.token, noCopies);
+
+    const proposals = await entityMatchProposals(host.brain, admin);
+
+    expect({
+      before,
+      after: await sameAsFor(host.brain, admin, pair[0]),
+      // An open question again.
+      proposals: proposals.length,
+    }).toStrictEqual({ before: [pair[1]], after: [], proposals: 1 });
+  });
+
+  it("decides a pair though one side has more readable mentions than one read takes", async () => {
+    const { host, admin, pair } = await adaTwice();
+    // Thousands of newer mentions of one side, as many sources would give.
+    await env.BRAIN.prepare(
+      `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+       INSERT INTO brain_mentions SELECT m.source, m.position + 1000 + n.i, m.document_id, m.memory_id, m.version, m.partition, m.kind, m.name, m.alias, m.entity_id, m.state, m.resolution, m.candidates
+       FROM n, (SELECT * FROM brain_mentions WHERE entity_id = ? LIMIT 1) AS m`
+    )
+      .bind(pair[0])
+      .run();
+    const decided = await outcome(
+      decideEntityMatch(host.brain, admin, {
+        entities: pair,
+        decision: "different",
+      })
+    );
+
+    expect(decided).toBe("ok");
+  });
+
+  it("closes a proposal once every pair across collections is decided, a pair only one collection links aside", async () => {
+    const name = `Ana ${word()}`;
+    const first = email("ana");
+    const second = email("ana");
+    const host = testHost(async (text) => {
+      await Promise.resolve();
+      const identifiers = [first, second].filter((id) => text.includes(id));
+      return { entities: [{ kind: "person", name, identifiers }] };
+    });
+    const sales = await newCollection(host.brain, "Sales");
+    const support = await newCollection(host.brain, "Support");
+    // Two people of one name in Sales, one in Support.
+    const saved = [
+      await save(host, sales, "a.md", `${name} <${first}> runs payroll.`),
+      await save(host, sales, "b.md", `${name} <${second}> joined.`),
+      await save(host, support, "c.md", `${name} called.`),
+    ];
+    for (const { id } of saved) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, on purpose
+      await link(host, id, 1);
+    }
+    const admin: Caller = { userId: "admin", reads: [sales.id, support.id] };
+    const [proposal] = await entityMatchProposals(host.brain, admin);
+    const inSupport =
+      proposal?.entities.find(({ collectionIds }) =>
+        collectionIds.includes(support.id)
+      )?.id ?? "";
+    const inSales = (proposal?.entities ?? [])
+      .filter(({ id }) => id !== inSupport)
+      .map(({ id }) => id);
+    for (const id of inSales) {
+      // oxlint-disable-next-line no-await-in-loop -- one pair at a time
+      await decideEntityMatch(host.brain, admin, {
+        entities: [id, inSupport],
+        decision: "different",
+      });
+    }
+
+    expect({
+      salesPeople: inSales.length,
+      left: await entityMatchProposals(host.brain, admin),
+    }).toStrictEqual({ salesPeople: 2, left: [] });
+  });
 });

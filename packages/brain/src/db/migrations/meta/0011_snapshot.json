@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d3fab926-7558-4afa-9ae3-0a659c13db82",
+  "id": "0f6d0035-86ac-42c0-a87a-09977fdc680c",
   "prevId": "2a899558-5ce1-4356-bb32-e4ae94ed396e",
   "tables": {
     "audit_outbox": {
@@ -530,6 +530,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
         }
       },
       "indexes": {
@@ -537,6 +545,13 @@
           "name": "brain_entity_matches_b_idx",
           "columns": [
             "entity_b"
+          ],
+          "isUnique": false
+        },
+        "brain_entity_matches_evidence_idx": {
+          "name": "brain_entity_matches_evidence_idx",
+          "columns": [
+            "evidence_document_id"
           ],
           "isUnique": false
         }

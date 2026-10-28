@@ -884,10 +884,14 @@ export const brainEntityMatches = sqliteTable(
      */
     decidedBy: text("decided_by").notNull(),
     decidedAt: timestamp("decided_at").notNull(),
+    /** Moves on with every write: a replacement names the one it read. */
+    revision: integer().notNull().default(1),
   },
   (table) => [
     primaryKey({ columns: [table.entityA, table.entityB] }),
     index("brain_entity_matches_b_idx").on(table.entityB),
+    // A purge of the evidence finds its decisions (purge.ts).
+    index("brain_entity_matches_evidence_idx").on(table.evidenceDocumentId),
   ]
 );
 
