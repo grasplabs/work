@@ -15,6 +15,7 @@ import type {
 } from "@grasp-os/shared/audit-log";
 import { deploymentConfig, jsonVar } from "@grasp-os/shared/config";
 import {
+  auditArchiveRetentionDefaultDays,
   auditArchiveRetentionSchema,
   auditRetentionDefaultDays,
   auditRetentionSchema,
@@ -100,15 +101,22 @@ export const auditRetentionDays = (
 /**
  * Days an event is kept in all, archive included, counted from when the
  * log received it: the `AUDIT_ARCHIVE_RETENTION_DAYS` var the admin sets
- * per deployment, as the DPA states it (AU7). At least a year and at least
- * the retention, at most ten years. `undefined` while it's unset, or
- * invalid (logged as `config.invalid`), or while retention is invalid: then
- * nothing is purged. It's deployment config, so no session can shorten it.
+ * per deployment, as the DPA states it (AU7), at least a year and at least
+ * the retention, at most ten years. Unset, seven years
+ * (`auditArchiveRetentionDefaultDays`), or the retention if that is longer.
+ * `undefined` while it's invalid (logged as `config.invalid`), or while
+ * retention is invalid: then nothing is purged. It's deployment config, so
+ * no session can shorten it.
  */
 export const archiveRetentionDays = (
   env: Pick<Env, "AUDIT_ARCHIVE_RETENTION_DAYS" | "AUDIT_RETENTION_DAYS">
 ): number | undefined => {
   const retention = auditRetentionDays(env);
+  if (env.AUDIT_ARCHIVE_RETENTION_DAYS === undefined) {
+    return retention === undefined
+      ? undefined
+      : Math.max(auditArchiveRetentionDefaultDays, retention);
+  }
   const days = deploymentConfig(
     auditArchiveRetentionSchema,
     "AUDIT_ARCHIVE_RETENTION_DAYS",
