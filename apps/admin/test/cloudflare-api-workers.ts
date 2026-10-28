@@ -282,6 +282,19 @@ const putScript = async (
   return envelope({ id: name });
 };
 
+/**
+ * An upload session's answer as Cloudflare sends it: its errors, messages
+ * and result info null rather than empty (seen on a real account, GRA-430).
+ */
+const sessionEnvelope = (result: Json): Response =>
+  Response.json({
+    success: true,
+    errors: null,
+    messages: null,
+    result_info: null,
+    result,
+  });
+
 /** Opens an assets upload session for the files `json`'s manifest lists that the account lacks. */
 const openAssetsSession = (account: AccountState, json: Json): Response => {
   const { manifest } = z
@@ -302,7 +315,7 @@ const openAssetsSession = (account: AccountState, json: Json): Response => {
   const jwt = `assets-${crypto.randomUUID()}`;
   if (missing.length === 0) {
     account.completions.add(jwt);
-    return envelope({ jwt, buckets: [] });
+    return sessionEnvelope({ jwt, buckets: [] });
   }
   account.sessions.set(jwt, new Set(missing));
   // Two files a bucket, so an upload takes several.
@@ -310,7 +323,7 @@ const openAssetsSession = (account: AccountState, json: Json): Response => {
     { length: Math.ceil(missing.length / 2) },
     (_, index) => missing.slice(index * 2, index * 2 + 2)
   );
-  return envelope({ jwt, buckets });
+  return sessionEnvelope({ jwt, buckets });
 };
 
 /** Takes a bucket of an upload session's files; the last completes it. */
