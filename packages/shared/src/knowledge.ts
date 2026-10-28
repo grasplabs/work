@@ -17,8 +17,8 @@ import type {
   MemoryPage,
   MemoryRecord,
   ReceiptsGetInput,
+  RelationsAnswer,
   RelationsGetInput,
-  RelationView,
   RecallInput,
   RememberInput,
   LessonLineage,
@@ -332,7 +332,7 @@ export interface KnowledgeApi {
    * on a date and as known at a moment if asked, each with its passage
    * (GRA-306): what a source says, never an accepted fact.
    */
-  relations: (input: RelationsGetInput) => Promise<RelationView[]>;
+  relations: (input: RelationsGetInput) => Promise<RelationsAnswer>;
   /**
    * Asks the Brain to remember something of the person's own (brain-api.ts):
    * retry with the same key after a lost reply. Admitted, it is kept as a

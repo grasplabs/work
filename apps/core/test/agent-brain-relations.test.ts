@@ -122,17 +122,20 @@ describe("a chat's entity and relation reads", setUpTime, () => {
       // No list of every name for a caller that isn't a person.
       listed: listings.at(-1)?.text,
     }).toStrictEqual({ refused: true, listed: "Returned:\nbrain.invalid" });
-    expect(relations).toMatchObject([
-      {
-        subject: { name: "Anna" },
-        predicate: "owns",
-        object: { name: thing },
-        validFrom: "2026-10-01",
-        state: "observed",
-        evidence: said,
-        sourceRef: { kind: "document", collectionId },
-      },
-    ]);
+    expect(relations).toMatchObject({
+      relations: [
+        {
+          subject: { name: "Anna" },
+          predicate: "owns",
+          object: { name: thing },
+          validFrom: "2026-10-01",
+          state: "observed",
+          evidence: said,
+          sourceRef: { kind: "document", collectionId },
+        },
+      ],
+      truncated: false,
+    });
   });
 
   it("answer a person only from what they may read: a team's relation is none of another member's", async () => {
@@ -162,8 +165,11 @@ describe("a chat's entity and relation reads", setUpTime, () => {
     const memberSees = await member.api.knowledge.entities({ query: thing });
 
     expect({
-      admin: forAdmin.map(({ subject, evidence }) => [subject.name, evidence]),
-      member: forMember,
+      admin: forAdmin.relations.map(({ subject, evidence }) => [
+        subject.name,
+        evidence,
+      ]),
+      member: forMember.relations,
       memberSees,
     }).toStrictEqual({
       admin: [["Bram", said]],
