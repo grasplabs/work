@@ -1277,6 +1277,113 @@ describe("provisioning a placed client", () => {
     });
   });
 
+  it("removes a secret it doesn't give from a script it already delivered to, while a rotation keeps connect's previous vault key", async () => {
+    const manifest = await importRelease("workers_for_platforms");
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest
+    );
+    // Rotating: connect is given TOKEN_ENCRYPTION_KEY_PREVIOUS, the key
+    // it would keep anyway.
+    await db
+      .update(clients)
+      .set({ generation: 2, rotatedAt: new Date() })
+      .where(eq(clients.id, clientId));
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    const { connect } = await scriptsOf(clientId);
+    const secretsOn = (script: string): Map<string, string> =>
+      account.namespaces.get(namespace)?.get(script)?.versions.at(-1)
+        ?.secrets ?? new Map<string, string>();
+
+    // Delivered already, and recorded so: one secret more on connect.
+    secretsOn(connect).set("STRAY_KEY", "stray-value");
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+
+    expect(secretsOn(connect).has("STRAY_KEY")).toBeFalsy();
+  });
+
+  it("records each secret it removes as it removes it, so a run that fails after one keeps its name", async () => {
+    const manifest = await importRelease("workers_for_platforms");
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest
+    );
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    const { core } = await scriptsOf(clientId);
+    const strayed = account.namespaces
+      .get(namespace)
+      ?.get(core)
+      ?.versions.at(-1)?.secrets;
+    strayed?.set("STRAY_A", "a-value");
+    strayed?.set("STRAY_B", "b-value");
+    // The second removal is refused: the run stops there.
+    let deletes = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (
+        request.method === "DELETE" &&
+        new URL(request.url).pathname.includes("/secrets/")
+      ) {
+        deletes += 1;
+        if (deletes === 2) {
+          return Response.json(
+            {
+              success: false,
+              errors: [{ code: 10_000, message: "Refused" }],
+              messages: [],
+              result: null,
+            },
+            { status: 400 }
+          );
+        }
+      }
+      return await cloudflare.fetch(input, init);
+    });
+
+    const error = await failing(held);
+    const recorded = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.secret_revoked")
+        )
+      );
+    const names = recorded.map(
+      ({ detail }) =>
+        z
+          .object({ script: z.string(), name: z.string() })
+          .loose()
+          .parse(JSON.parse(detail ?? "{}")).name
+    );
+    const now = account.namespaces
+      .get(namespace)
+      ?.get(core)
+      ?.versions.at(-1)?.secrets;
+    const strays = ["STRAY_A", "STRAY_B"].filter(
+      (name) => now?.has(name) === true
+    );
+
+    expect({
+      failed: error !== null,
+      // One removed before the refusal, and recorded; the other still there.
+      recorded: names,
+      left: strays,
+    }).toStrictEqual({
+      failed: true,
+      recorded: ["STRAY_A", "STRAY_B"].filter((name) => !strays.includes(name)),
+      left: [strays[0]],
+    });
+    expect(strays).toHaveLength(1);
+  });
+
   it("marks a rotated client's generation live once its hostname is published, and audits it", async () => {
     const manifest = await importRelease("dedicated");
     const { clientId, held } = await setUp("dedicated", manifest);

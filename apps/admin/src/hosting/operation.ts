@@ -932,6 +932,40 @@ const upload = async (
 };
 
 /**
+ * Records that secret `name` was removed from `target`'s script, by name
+ * only, while `held` holds the client (`provision.secret_revoked`).
+ */
+const recordRevoked = async (
+  db: AdminDatabase,
+  { operation, held }: Loaded,
+  target: ScriptTarget,
+  name: string
+): Promise<void> => {
+  const recorded = await actIfChanged(
+    db,
+    "system",
+    db
+      .update(clientProvisions)
+      .set({ updatedAt: new Date() })
+      .where(and(eq(clientProvisions.id, operation.id), stillHolds(held))),
+    {
+      action: "provision.secret_revoked",
+      clientId: held.clientId,
+      target: operation.releaseId,
+      detail: {
+        operation: operation.id,
+        run: held.runId,
+        script: target.scriptName,
+        name,
+      },
+    }
+  );
+  if (!recorded) {
+    await assertHolds(db, held);
+  }
+};
+
+/**
  * Removes from `target`'s script every secret `present` names that isn't
  * among `given` (a previous generation's key past its window, a sealed or
  * shared secret no longer given), once `given` is observed there: the
@@ -956,6 +990,10 @@ const revokeRetired = async (
     await assertHolds(db, loaded.held);
     // oxlint-disable-next-line no-await-in-loop -- one secret at a time
     await deleteTargetSecret(api, target, name);
+    // Recorded as it goes, by name: a run that fails after it still
+    // leaves what it removed in the audit log.
+    // oxlint-disable-next-line no-await-in-loop -- one secret at a time
+    await recordRevoked(db, loaded, target, name);
   }
   if (retired.length === 0) {
     return [];
@@ -1004,13 +1042,15 @@ const deliverSecrets = async (
       // another set, since: skip only when the script holds exactly them.
       // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
       const present = new Set(await targetSecretNames(api, target));
-      const held = [...present].filter(
-        (name) => !retainedPreviousKeys.has(name)
-      );
-      if (
-        held.length === given.size &&
-        [...given].every((name) => present.has(name))
-      ) {
+      // By name both ways: every one given is there, and nothing else is
+      // but connect's previous vault key. Never by count, which another
+      // secret can make up for one given also being a retained key.
+      const exactly =
+        [...given].every((name) => present.has(name)) &&
+        [...present].every(
+          (name) => given.has(name) || retainedPreviousKeys.has(name)
+        );
+      if (exactly) {
         continue;
       }
     }
