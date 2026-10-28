@@ -545,10 +545,11 @@ const claimTarget = async (
     return { state: "skipped" };
   }
   const previous = previousRunOf(held);
+  // As the client's runner: the rollout claimed it above.
   const { operationId } = await startClientRelease(
     db,
     params.startedBy,
-    clientId,
+    { clientId, runId: rolloutId },
     { releaseId: release, again: release === running }
   );
   await db

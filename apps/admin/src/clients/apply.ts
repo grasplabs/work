@@ -151,10 +151,13 @@ export class ApplyClient extends WorkflowEntrypoint<Env, ApplyParams> {
               `${clientId}'s Workers don't run one release`
             );
           }
-          await startClientRelease(db, startedBy, clientId, {
-            releaseId,
-            again: true,
-          });
+          // As the client's runner, which claimed it before this run began.
+          await startClientRelease(
+            db,
+            startedBy,
+            { clientId, runId: event.instanceId },
+            { releaseId, again: true }
+          );
         })
       );
       await step.do(

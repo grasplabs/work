@@ -2733,6 +2733,29 @@ const crashedAt = async (point: CrashPoint) => {
 describe("a release's runner crashing, and another action on the client after", () => {
   useStoreSecrets({ deployer: token, tenant: `${token}-tenant-admin` });
 
+  it("keeps the worst case when core's upload gets a 4xx Cloudflare didn't write: a rollback past its new migration stays refused", async () => {
+    const point = crashPoints.find(({ at }) => at === "after connect's upload");
+    if (point === undefined) {
+      throw new Error("No such crash point");
+    }
+    const { clientId } = await crashedAt({
+      ...point,
+      plan: ({ core }) => {
+        // Refused, by its status, but by no answer of Cloudflare's: what
+        // reached it may have run.
+        cloudflare.failNext(isUpload(core), "400-uncoded");
+      },
+    });
+
+    const back = await codeOf(
+      startClientRelease(db, staff, await attempt(clientId), {
+        rollback: true,
+      })
+    );
+
+    expect(back).toBe("rollback_past_migration");
+  });
+
   it.each(walk)(
     "$at, then $action: ends coherent, by what its Workers ran, and the dead runner writes nothing",
     async ({ action, ...point }) => {

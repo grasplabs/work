@@ -558,8 +558,6 @@ const releaseAction = ({
 
 type Operation = NonNullable<Awaited<ReturnType<typeof provisionOf>>>;
 
-
-
 /**
  * The one release every Worker of client `clientId` was seen running
  * (`client_workers`, written once an upload is observed), or null when
@@ -677,7 +675,7 @@ export const startClientRelease = async (
   const before = await observedRelease(db, clientId);
   let previousReleaseId = before === target ? null : before;
   if (target === operation.releaseId) {
-    previousReleaseId = operation.previousReleaseId;
+    ({ previousReleaseId } = operation);
   }
   const now = new Date();
   // Conditional on the claim, and the operation as read: a start that lost

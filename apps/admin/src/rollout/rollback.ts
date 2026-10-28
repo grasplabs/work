@@ -335,7 +335,7 @@ const runBack = async (
       )
     );
   try {
-    await startClientRelease(db, params.startedBy, held.clientId, {
+    await startClientRelease(db, params.startedBy, held, {
       releaseId: back,
       rollback: true,
     });

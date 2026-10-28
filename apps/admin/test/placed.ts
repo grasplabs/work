@@ -134,13 +134,7 @@ export const deployPlaced = async (
   clientId: string,
   releaseId: string
 ): Promise<void> => {
-  const [client] = await db
-    .select({ status: clients.status })
-    .from(clients)
-    .where(eq(clients.id, clientId));
-  await (client?.status === "active"
-    ? startClientRelease(db, staff, clientId, { releaseId, again: true })
-    : startClientProvision(db, staff, clientId, releaseId));
+  // Claimed first: only the holder starts the operation.
   const before = await db
     .select({ runId: clientRuns.runId })
     .from(clientRuns)
@@ -160,7 +154,15 @@ export const deployPlaced = async (
   if (runId === undefined) {
     throw new Error(`${clientId} wasn't claimed`);
   }
-  await runClientProvision(await deployContext(env), { clientId, runId });
+  const held = { clientId, runId };
+  const [client] = await db
+    .select({ status: clients.status })
+    .from(clients)
+    .where(eq(clients.id, clientId));
+  await (client?.status === "active"
+    ? startClientRelease(db, staff, held, { releaseId, again: true })
+    : startClientProvision(db, staff, held, releaseId));
+  await runClientProvision(await deployContext(env), held);
 };
 
 /**
