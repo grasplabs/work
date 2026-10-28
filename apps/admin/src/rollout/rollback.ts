@@ -62,6 +62,7 @@ import {
   runClientProvision,
   settledSends,
   startClientRelease,
+  startedAs,
 } from "../hosting/operation.ts";
 import {
   claimRun,
@@ -171,6 +172,7 @@ const check = async (
       status: rolloutTargets.status,
       deployId: rolloutTargets.deployId,
       change: rolloutTargets.change,
+      rollbackChange: rolloutTargets.rollbackChange,
       previous: rolloutTargets.previous,
       releaseId: rollouts.releaseId,
     })
@@ -210,8 +212,15 @@ const check = async (
   }
   // Only while the change the rollout started is still the client's
   // latest: any release, run again or rollback since raised it, whatever
-  // release it went to.
-  if (target.change === null || operation.change !== target.change) {
+  // release it went to. Or the latest is this rollback's own, which
+  // failed: retried, it goes on with that change (`runBack`).
+  const rollbacksOwn =
+    target.rollbackChange !== null &&
+    operation.change === target.rollbackChange;
+  if (
+    !rollbacksOwn &&
+    (target.change === null || operation.change !== target.change)
+  ) {
     throw new RolloutError(
       "superseded",
       `${clientId} changed after rollout ${rolloutId}`
@@ -306,9 +315,11 @@ export const rollbackClient = async (
  * - the rollout's change still the latest: once any call the rollout's
  *   run sent to the client's Workers has landed (`settledSends`), the
  *   rollout's operation, if still running, is stopped (the rollout lost
- *   the client), and the rollback started, a change of its own;
- * - its own change, the one right after the rollout's, on `back`: already
- *   started, it's run (resumed, or nothing left to do once done);
+ *   the client), and the rollback started, a change of its own,
+ *   recorded on the target in the batch that starts it;
+ * - its own change, as recorded, still the latest on `back`: already
+ *   started, it's run (resumed, or nothing left to do once done), a
+ *   rollback that failed and is asked again included;
  * - anything else changed it since: refused (`superseded`).
  * The operation's own failures and the inventory's stop the step at once.
  */
@@ -320,7 +331,10 @@ const runBack = async (
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
   const [target] = await db
-    .select({ change: rolloutTargets.change })
+    .select({
+      change: rolloutTargets.change,
+      rollbackChange: rolloutTargets.rollbackChange,
+    })
     .from(rolloutTargets)
     .where(
       and(
@@ -337,9 +351,11 @@ const runBack = async (
     .where(eq(clientProvisions.clientId, held.clientId))
     .get();
   const rolloutsChange = target?.change ?? null;
+  // Its own change, recorded on the target in the batch that started it.
+  const rollbacksChange = target?.rollbackChange ?? null;
   const started =
-    rolloutsChange !== null &&
-    operation?.change === rolloutsChange + 1 &&
+    rollbacksChange !== null &&
+    operation?.change === rollbacksChange &&
     operation.releaseId === back;
   if (!started && operation?.change !== rolloutsChange) {
     throw stop(
@@ -368,6 +384,19 @@ const runBack = async (
       await startClientRelease(db, params.startedBy, held, {
         releaseId: back,
         rollback: true,
+        alongside: (begun) => [
+          db
+            .update(rolloutTargets)
+            .set({ rollbackChange: begun.change, updatedAt: new Date() })
+            .where(
+              and(
+                eq(rolloutTargets.rolloutId, params.rolloutId),
+                eq(rolloutTargets.clientId, held.clientId),
+                stillHolds(held),
+                startedAs(begun)
+              )
+            ),
+        ],
       });
     }
     // A rollback isn't rolled back on its own: staff see it fail.

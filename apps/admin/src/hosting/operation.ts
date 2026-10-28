@@ -97,6 +97,8 @@ import {
   isNull,
   sql,
 } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
 
 import type { StaffAlert } from "../alerts.ts";
@@ -629,6 +631,17 @@ const observedRelease = async (
 };
 
 /**
+ * Whether client operation `started.operationId` is at change
+ * `started.change`: the condition a record made alongside a start
+ * (`startClientRelease`) lands on, so it lands only with that start.
+ */
+export const startedAs = (started: {
+  operationId: string;
+  change: number;
+}): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${clientProvisions} WHERE ${clientProvisions.id} = ${started.operationId} AND ${clientProvisions.change} = ${started.change})`;
+
+/**
  * Takes active client `held.clientId`'s one operation to release
  * `releaseId`, as `actor`, and returns its id (spec 40.3): a later
  * release, or with `rollback` the one it ran before (spec 40.4). Every
@@ -670,6 +683,7 @@ export const startClientRelease = async (
     again,
     what,
     cause,
+    alongside,
   }: {
     releaseId?: string;
     rollback?: boolean;
@@ -677,6 +691,17 @@ export const startClientRelease = async (
     /** What a run again takes live: its settings unless said. */
     what?: ChangeKind;
     cause?: string;
+    /**
+     * What the starter records of the change in the same batch as its
+     * start, given the operation and the change it starts: never a start
+     * without its record, nor a record without its start, so the caller
+     * conditions each on the start having landed. Not run when the change
+     * started already (`hasAlready`).
+     */
+    alongside?: (started: {
+      operationId: string;
+      change: number;
+    }) => BatchItem<"sqlite">[];
   }
 ): Promise<{ operationId: string; releaseId: string; change: number }> => {
   const { clientId } = held;
@@ -771,7 +796,9 @@ export const startClientRelease = async (
         from: operation.releaseId,
         ...(cause === undefined ? {} : { cause }),
       },
-    }
+    },
+    alongside?.({ operationId: operation.id, change: operation.change + 1 }) ??
+      []
   );
   if (!started) {
     throw new ProvisionOperationError(

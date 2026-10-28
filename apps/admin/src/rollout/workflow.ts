@@ -68,7 +68,7 @@
 import { log } from "@grasp-os/shared/log";
 import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 
 import type { Staff } from "../access.ts";
 import { sendStaffAlert } from "../alerts.ts";
@@ -88,6 +88,7 @@ import {
   ProvisionOperationError,
   runClientProvision,
   startClientRelease,
+  startedAs,
 } from "../hosting/operation.ts";
 import type { ChangeKind } from "../hosting/operation.ts";
 import {
@@ -521,17 +522,7 @@ const startTarget = async (
   db: AdminDatabase,
   params: RolloutParams,
   clientId: string,
-  {
-    status,
-    previous,
-    change: recorded,
-    client,
-  }: {
-    status: string;
-    previous: string | null;
-    change: number | null;
-    client: TargetClient;
-  }
+  { status, client }: { status: string; client: TargetClient }
 ): Promise<Claimed> => {
   const { rolloutId } = params;
   // Read again now the rollout holds the client: no other runner changes
@@ -551,21 +542,12 @@ const startTarget = async (
     return { state: "skipped" };
   }
   const holder = { clientId, runId: rolloutId };
-  // What a rollback goes back to, saved before the operation starts, while
-  // the rollout holds the client. A retry of this step that died between
-  // saving it and recording its change (none recorded) reuses it, rather
-  // than reading it off an operation it moved on. A restart after the
-  // client's change moved on (one recorded, not the latest) reads it again:
-  // what the client runs now, whatever staff took it to since.
-  if (parsePrevious(previous) === null || recorded !== null) {
-    await db
-      .update(rolloutTargets)
-      .set({
-        previous: JSON.stringify(previousRunOf(held)),
-        updatedAt: new Date(),
-      })
-      .where(and(targetWhere(rolloutId, clientId), stillHolds(holder)));
-  }
+  // What a rollback goes back to, read now the rollout holds the client,
+  // and recorded with the change it starts and its operation in the batch
+  // that starts it: a step that dies before it started nothing and
+  // recorded nothing, so its retry reads it again, from whatever staff
+  // took the client to since. Each record lands only with that start.
+  const previousRun = JSON.stringify(previousRunOf(held));
   // As the client's runner: the rollout claimed it above. Run again, it
   // takes live what waits: new secrets, its settings, or both.
   const { operationId, change } = await startClientRelease(
@@ -576,12 +558,35 @@ const startTarget = async (
       releaseId: release,
       again: release === running,
       what: againKind(params, held),
+      alongside: (started) => [
+        db
+          .update(rolloutTargets)
+          .set({
+            previous: previousRun,
+            deployId: started.operationId,
+            change: started.change,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              targetWhere(rolloutId, clientId),
+              stillHolds(holder),
+              startedAs(started)
+            )
+          ),
+      ],
     }
   );
-  // The change it started: a resume reads it, and a rollback of it.
+  // Started already, as a retry finds it (`hasAlready`): recorded, the way
+  // back kept if it was saved.
   await db
     .update(rolloutTargets)
-    .set({ deployId: operationId, change, updatedAt: new Date() })
+    .set({
+      deployId: operationId,
+      change,
+      previous: sql`coalesce(${rolloutTargets.previous}, ${previousRun})`,
+      updatedAt: new Date(),
+    })
     .where(and(targetWhere(rolloutId, clientId), stillHolds(holder)));
   return { state: "claimed", operationId };
 };
@@ -673,8 +678,6 @@ const claimTarget = async (
   }
   return await startTarget(db, params, clientId, {
     status: target.status,
-    previous: target.previous,
-    change: target.change,
     client,
   });
 };

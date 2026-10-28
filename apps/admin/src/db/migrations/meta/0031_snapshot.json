@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9f21b81d-b547-445b-b8aa-a0b10a4e6167",
+  "id": "f9a22dca-f0f6-4c3b-bc44-203725928cef",
   "prevId": "ad0d06f3-56cb-4d66-8ede-276e468285fd",
   "tables": {
     "audit_events": {
@@ -1563,6 +1563,13 @@
         },
         "change": {
           "name": "change",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rollback_change": {
+          "name": "rollback_change",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

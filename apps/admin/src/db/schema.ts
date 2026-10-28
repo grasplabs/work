@@ -338,6 +338,11 @@ export const rolloutTargets = sqliteTable(
      */
     change: integer(),
     /**
+     * The client's change a rollback of the client from the rollout
+     * started: one that failed is retried while it's still the latest.
+     */
+    rollbackChange: integer("rollback_change"),
+    /**
      * What the client ran before the rollout reached it, which a rollback
      * restores: JSON (`PreviousRun`, src/rollout/targets.ts). For a
      * retry of a rollout that never finished the client, or a client left

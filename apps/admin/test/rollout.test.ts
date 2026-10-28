@@ -861,8 +861,9 @@ describe("rolling a release out to placed clients", () => {
       .update(clients)
       .set({ configChangedAt: new Date() })
       .where(eq(clients.id, internal.clientId));
-    // The claim step dies once, right after it started the operation and
-    // before it recorded it: its retry finds the operation running.
+    // The claim step dies once as it starts the operation: the start and
+    // what it records go in one batch, so neither landed, and its retry
+    // starts it.
     const prepare = env.DB.prepare.bind(env.DB);
     let died = false;
     const dying = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
@@ -1410,10 +1411,15 @@ describe("a client's changes, counted", () => {
       kind: "rollback",
       claimedAt: new Date(),
     });
-    await startClientRelease(db, staff, held, {
+    // Its change recorded on the target, as its start records it.
+    const { change } = await startClientRelease(db, staff, held, {
       releaseId: before,
       rollback: true,
     });
+    await db
+      .update(rolloutTargets)
+      .set({ rollbackChange: change })
+      .where(eq(rolloutTargets.rolloutId, rolloutId));
     await runClientProvision(await deployContext(env), held);
     const rollbacks = await introspectWorkflow(env.ROLLBACK_CLIENT);
     try {
@@ -1803,6 +1809,94 @@ describe("a client's changes, counted", () => {
       target: { ring: 1, status: "skipped", error: "newer" },
       releases: on(later),
       runner: null,
+    });
+  });
+
+  it("takes a retried client back to what staff took it to after its claim died, never what it ran before that", async () => {
+    const before = await placedRelease("feat(core): before");
+    const staffs = await placedRelease("feat(core): staff's");
+    const release = await placedRelease("feat(core): rolled out");
+    await live(0, before);
+    const acme = await live(1, before);
+    await using run = await followRollouts();
+    await using rollbacks = await followRollbacks();
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    // Its claim step dies on every try as it starts the client's change,
+    // after reading what the client runs: the client ends failed.
+    const prepare = env.DB.prepare.bind(env.DB);
+    let dying = true;
+    const starting = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
+      if (
+        dying &&
+        query.startsWith('update "client_provisions" set "release_id"')
+      ) {
+        throw new Error("the step died");
+      }
+      return prepare(query);
+    });
+    try {
+      await approveRollout(env, staff, rolloutId, ringChecked);
+      await run.waitForStepResult({ name: "retry 1 asked" });
+    } finally {
+      dying = false;
+      starting.mockRestore();
+    }
+    const failed = await targetOf(rolloutId, acme.clientId);
+    // Staff take it to another release, then retry it.
+    await deployPlaced(acme.clientId, staffs);
+    await retryRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+
+    await rollbackClient(env, staff, rolloutId, acme.clientId);
+    await rollbacks.settle();
+
+    expect({
+      failed: failed?.status,
+      target: await targetOf(rolloutId, acme.clientId),
+      releases: await releasesOf(acme.clientId),
+    }).toStrictEqual({
+      failed: "failed",
+      target: { ring: 1, status: "rolled_back", error: null },
+      releases: on(staffs),
+    });
+  });
+
+  it("retries a rollback that failed, going on with its own change", async () => {
+    const before = await placedRelease("feat(core): before");
+    const internal = await live(0, before);
+    const release = await placedRelease("feat(core): rolled out");
+    await using run = await followRollouts();
+    await using rollbacks = await followRollbacks();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    // The rollback's connect upload refused: it fails, its change started.
+    cloudflare.failNext(
+      (call) =>
+        call.method === "PUT" &&
+        call.path.startsWith(`/accounts/${internal.account.id}/`) &&
+        call.path.endsWith("-grasp-os-connect"),
+      400
+    );
+    await rollbackClient(env, staff, rolloutId, internal.clientId);
+    await rollbacks.settle();
+    const failed = await releasesOf(internal.clientId);
+
+    const again = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+    await rollbacks.settle();
+
+    expect({
+      failed,
+      again,
+      target: await targetOf(rolloutId, internal.clientId),
+      releases: await releasesOf(internal.clientId),
+    }).toStrictEqual({
+      failed: on(release),
+      again: "resolved",
+      target: { ring: 0, status: "rolled_back", error: null },
+      releases: on(before),
     });
   });
 

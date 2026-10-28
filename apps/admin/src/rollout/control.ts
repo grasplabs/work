@@ -258,7 +258,7 @@ export const startRollout = async (
       db
         .insert(rolloutTargets)
         .select(
-          sql`SELECT ${id}, ${clientId}, ${ring}, 'pending', NULL, NULL, NULL, NULL, ${now} WHERE EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.id} = ${id})`
+          sql`SELECT ${id}, ${clientId}, ${ring}, 'pending', NULL, NULL, NULL, NULL, NULL, ${now} WHERE EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.id} = ${id})`
         )
     )
   );
