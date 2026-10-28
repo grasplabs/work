@@ -1,46 +1,24 @@
 /**
- * The client pages' server functions, behind the Access check every request
- * passes (src/access.ts). The changes act as the verified staff member the
- * request comes from, and answer a refusal as its code
+ * Adding a client's server functions, behind the Access check every
+ * request passes (src/access.ts). Adding one acts as the verified staff
+ * member the request comes from, and answers a refusal as its code
  * (`ProvisionErrorCode`), which the page words; anything else fails.
  */
-import { newClientIdSchema } from "@grasp-os/shared/router";
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
-import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import { listReleases } from "../releases/queries.ts";
-import {
-  confirmWorkersPaid,
-  ProvisionError,
-  provisionInputSchema,
-  retryProvisioning,
-  startProvisioning,
-} from "./control.ts";
-import type { ProvisionErrorCode } from "./control.ts";
-import { getProvisioning } from "./queries.ts";
+import { createClient, provisionInputSchema } from "./control.ts";
+import { ProvisionError } from "./errors.ts";
+import type { ProvisionErrorCode } from "./errors.ts";
 
-const clientSchema = z.object({ clientId: newClientIdSchema });
-
-/** What a change answers: the client it was for, or why it was refused. */
+/** What adding a client answers: the client, or why it was refused. */
 export type ChangeResult =
   | { clientId: string; refused: null }
   | { clientId: null; refused: ProvisionErrorCode };
 
-/** Runs `task`, which answers the client it changed, a refusal as its code. */
-const change = async (task: () => Promise<string>): Promise<ChangeResult> => {
-  try {
-    return { clientId: await task(), refused: null };
-  } catch (error) {
-    if (error instanceof ProvisionError) {
-      return { clientId: null, refused: error.code };
-    }
-    throw error;
-  }
-};
-
-/** What the new-client form offers: the imported releases, newest first. */
+/** The imported releases, newest first: what a client's provisioning picks from. */
 export const fetchNewClientOptions = createServerFn({ method: "GET" }).handler(
   async () => {
     const { releases } = await listReleases(adminDatabase(env.DB));
@@ -55,35 +33,18 @@ export const fetchNewClientOptions = createServerFn({ method: "GET" }).handler(
   }
 );
 
-export const fetchProvisioning = createServerFn({ method: "GET" })
-  .validator(clientSchema)
-  .handler(async ({ data }) => await getProvisioning(env, data.clientId));
-
 export const startClient = createServerFn({ method: "POST" })
   .validator(provisionInputSchema)
-  .handler(
-    async ({ data, context }) =>
-      await change(
-        async () => await startProvisioning(env, context.staff, data)
-      )
-  );
-
-export const confirmClientWorkersPaid = createServerFn({ method: "POST" })
-  .validator(clientSchema)
-  .handler(
-    async ({ data, context }) =>
-      await change(async () => {
-        await confirmWorkersPaid(env, context.staff, data.clientId);
-        return data.clientId;
-      })
-  );
-
-export const retryClient = createServerFn({ method: "POST" })
-  .validator(clientSchema)
-  .handler(
-    async ({ data, context }) =>
-      await change(async () => {
-        await retryProvisioning(env, context.staff, data.clientId);
-        return data.clientId;
-      })
-  );
+  .handler(async ({ data, context }): Promise<ChangeResult> => {
+    try {
+      return {
+        clientId: await createClient(env, context.staff, data),
+        refused: null,
+      };
+    } catch (error) {
+      if (error instanceof ProvisionError) {
+        return { clientId: null, refused: error.code };
+      }
+      throw error;
+    }
+  });

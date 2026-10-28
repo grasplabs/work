@@ -11,6 +11,7 @@ import {
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
+import { placeClient } from "../src/hosting/inventory.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { fetchRolloutCost, startRolloutFn } from "../src/rollout/functions.ts";
 import { startRequestOf } from "../src/rollout/start-request.ts";
@@ -18,6 +19,7 @@ import type { StartChoices } from "../src/rollout/start-request.ts";
 import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { destination } from "./hosting.ts";
 import { callServerFn, page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
@@ -51,7 +53,8 @@ const accountOf = (clientId: string): AccountState => {
 };
 
 /**
- * An active client in `ring`, on a new account in the fake, pinned to
+ * An active client in `ring`, placed in a destination of its own on a new
+ * account in the fake, pinned to
  * `pinnedReleaseId` if given.
  */
 const recordClient = async (ring: number, pinnedReleaseId?: string) => {
@@ -76,6 +79,16 @@ const recordClient = async (ring: number, pinnedReleaseId?: string) => {
     ],
     { action: "client.create", clientId: id }
   );
+  // Rollouts reach only placed clients.
+  await placeClient(db, staff, {
+    clientId: id,
+    destinationId: await destination({
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+    }),
+    policyId: "eu-storage",
+  });
   return id;
 };
 

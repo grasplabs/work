@@ -32,6 +32,7 @@ import { routerSecretHeader } from "@grasp-os/shared/router";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
+import type { CoreAddress } from "../clients/core-address.ts";
 import { clientGrid, ifStored, routeOf } from "../clients/grid.ts";
 import { deploySecrets } from "../deploy/context.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
@@ -91,7 +92,7 @@ const encoder = new TextEncoder();
 const graspCore = async (
   env: Env
 ): Promise<{
-  coreUrl: string;
+  address: CoreAddress;
   routerSecret: string;
   authSecret: string;
 } | null> => {
@@ -113,13 +114,14 @@ const graspCore = async (
     env.ROUTER_HOSTS,
     secrets.routerKey,
     row.id,
-    row.hostname
+    row.hostname,
+    env.DISPATCHER
   );
   if (route === "no_route" || route === "unknown") {
     return null;
   }
   return {
-    coreUrl: route.coreUrl,
+    address: route.core,
     routerSecret: route.secret,
     authSecret: await clientAuthSecret(secrets, row.id, route.generation),
   };
@@ -169,20 +171,23 @@ export const askGrasp = async (
   try {
     return await Promise.race([
       (async (): Promise<AskAnswer> => {
-        const response = await fetch(`${core.coreUrl}${adminAskPath}`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            [routerSecretHeader]: core.routerSecret,
-            [platformUpdateSignatureHeader]: signature,
-          },
-          body,
-          // Never followed: a redirect would send the signed body and the router
-          // secret wherever it points, and take what answers there for the
-          // core's answer. A 3xx isn't ok, so it reads as not answered.
-          redirect: "manual",
-          signal: limit.signal,
-        });
+        const response = await core.address.fetch(
+          `${core.address.origin}${adminAskPath}`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              [routerSecretHeader]: core.routerSecret,
+              [platformUpdateSignatureHeader]: signature,
+            },
+            body,
+            // Never followed: a redirect would send the signed body and the router
+            // secret wherever it points, and take what answers there for the
+            // core's answer. A 3xx isn't ok, so it reads as not answered.
+            redirect: "manual",
+            signal: limit.signal,
+          }
+        );
         if (!response.ok) {
           const code = await codeOf(response);
           if (code === "admin_ask.no_model") {

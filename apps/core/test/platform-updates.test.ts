@@ -16,12 +16,12 @@ import { z } from "zod";
 
 import { recordPlatformUpdate } from "../src/platform-updates.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { routed } from "./sign-in.ts";
 
-// Platform updates: the every-minute cron records each version of core it
+// Platform updates: the clock records, every minute, each version of core it
 // hasn't seen running as `platform.updated`, with the change the admin
-// set on it, once per version ever, however many cron runs see it and
+// set on it, once per version ever, however many clock runs see it and
 // however often versions alternate.
 
 /** A version's metadata as the binding gives it, with an ID of its own. */
@@ -40,7 +40,7 @@ const change: PlatformChange = {
 
 /**
  * Core's database, with `first` run just before each batch lands: another
- * cron run's write landing between this run's start and its batch.
+ * clock run's write landing between this run's start and its batch.
  */
 const racingDb = (first: (db: D1Database) => unknown): D1Database =>
   new Proxy(env.DB, {
@@ -74,8 +74,14 @@ const updatesOf = async ({
 describe("platform updates", () => {
   it("are recorded once per new version, with the change that made it", async () => {
     const version = newVersion();
-    await runCron({ CF_VERSION_METADATA: version, PLATFORM_CHANGE: change });
-    await runCron({ CF_VERSION_METADATA: version, PLATFORM_CHANGE: change });
+    await runMinuteTasks({
+      CF_VERSION_METADATA: version,
+      PLATFORM_CHANGE: change,
+    });
+    await runMinuteTasks({
+      CF_VERSION_METADATA: version,
+      PLATFORM_CHANGE: change,
+    });
 
     const updates = await updatesOf(version);
     expect(updates).toHaveLength(1);
@@ -95,7 +101,7 @@ describe("platform updates", () => {
 
   it("take the change from a var set as text, as local dev sets it", async () => {
     const version = newVersion();
-    await runCron({
+    await runMinuteTasks({
       CF_VERSION_METADATA: version,
       PLATFORM_CHANGE: JSON.stringify(change),
     });
@@ -109,7 +115,10 @@ describe("platform updates", () => {
     ["invalid", { ...change, at: "yesterday" }],
   ])("name an unknown change when the var is %s", async (_case, value) => {
     const version = newVersion();
-    await runCron({ CF_VERSION_METADATA: version, PLATFORM_CHANGE: value });
+    await runMinuteTasks({
+      CF_VERSION_METADATA: version,
+      PLATFORM_CHANGE: value,
+    });
 
     const [update] = await updatesOf(version);
     expect(update?.detail).toStrictEqual({
@@ -125,18 +134,18 @@ describe("platform updates", () => {
   it("are recorded once per version while two versions alternate, as in a gradual rollout", async () => {
     const earlier = newVersion();
     const later = newVersion();
-    await runCron({ CF_VERSION_METADATA: earlier });
-    await runCron({ CF_VERSION_METADATA: later });
-    await runCron({ CF_VERSION_METADATA: earlier });
-    await runCron({ CF_VERSION_METADATA: later });
+    await runMinuteTasks({ CF_VERSION_METADATA: earlier });
+    await runMinuteTasks({ CF_VERSION_METADATA: later });
+    await runMinuteTasks({ CF_VERSION_METADATA: earlier });
+    await runMinuteTasks({ CF_VERSION_METADATA: later });
 
     await expect(updatesOf(earlier)).resolves.toHaveLength(1);
     await expect(updatesOf(later)).resolves.toHaveLength(1);
 
     const next = newVersion();
-    await runCron({ CF_VERSION_METADATA: next });
-    await runCron({ CF_VERSION_METADATA: next });
-    await runCron({ CF_VERSION_METADATA: earlier });
+    await runMinuteTasks({ CF_VERSION_METADATA: next });
+    await runMinuteTasks({ CF_VERSION_METADATA: next });
+    await runMinuteTasks({ CF_VERSION_METADATA: earlier });
 
     await expect(updatesOf(next)).resolves.toHaveLength(1);
     // A rollback to a version already recorded isn't recorded again here:
@@ -144,11 +153,11 @@ describe("platform updates", () => {
     await expect(updatesOf(earlier)).resolves.toHaveLength(1);
   });
 
-  it("are recorded once when cron runs see a new version at the same time", async () => {
+  it("are recorded once when clock runs see a new version at the same time", async () => {
     const version = newVersion();
     await Promise.all(
       Array.from({ length: 5 }, async () => {
-        await runCron({ CF_VERSION_METADATA: version });
+        await runMinuteTasks({ CF_VERSION_METADATA: version });
       })
     );
 
@@ -170,14 +179,14 @@ describe("platform updates", () => {
       CF_VERSION_METADATA: version,
     });
     // Drains both runs' outbox into the log.
-    await runCron({ CF_VERSION_METADATA: version });
+    await runMinuteTasks({ CF_VERSION_METADATA: version });
 
     await expect(updatesOf(version)).resolves.toHaveLength(1);
   });
 
   it("are not recorded without version metadata, as on plain workerd", async () => {
     const before = await allEvents();
-    await runCron({ CF_VERSION_METADATA: undefined });
+    await runMinuteTasks({ CF_VERSION_METADATA: undefined });
 
     const after = await allEvents();
     expect(
@@ -204,13 +213,13 @@ describe("platform updates", () => {
         return parsed.success ? [parsed.data.event] : [];
       });
     try {
-      await runCron({ CF_VERSION_METADATA: version });
-      await runCron({ CF_VERSION_METADATA: version });
+      await runMinuteTasks({ CF_VERSION_METADATA: version });
+      await runMinuteTasks({ CF_VERSION_METADATA: version });
       expect({
         warned: events(warn).filter(
           (event) => event === "platform.update.table_missing"
         ),
-        failed: events(error).filter((event) => event === "cron.failed"),
+        failed: events(error).filter((event) => event === "clock.task_failed"),
       }).toStrictEqual({
         warned: ["platform.update.table_missing"],
         failed: [],
@@ -224,7 +233,7 @@ describe("platform updates", () => {
     }
     await expect(updatesOf(version)).resolves.toHaveLength(0);
 
-    await runCron({ CF_VERSION_METADATA: version });
+    await runMinuteTasks({ CF_VERSION_METADATA: version });
 
     await expect(updatesOf(version)).resolves.toHaveLength(1);
   });

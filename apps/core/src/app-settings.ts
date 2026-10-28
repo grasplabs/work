@@ -233,7 +233,7 @@ export const updateApp = async (
     throw appErrors.create("app.conflict");
   }
   // Its entry in the Apps collection carries its name and description;
-  // a failed indexing is left to the cron trigger, which finds it stale.
+  // a failed indexing is left to the clock, which finds it stale.
   if (plan.set.name !== undefined || plan.set.description !== undefined) {
     await indexAppNow(env, after.id);
   }

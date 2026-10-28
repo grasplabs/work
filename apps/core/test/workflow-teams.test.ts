@@ -18,11 +18,11 @@ import { appWith, workflowFiles } from "./workflow-apps.ts";
 // The team that owns a workflow (GRA-517): one of the organization's
 // teams, whose work the workflow does, which the dashboard counts each
 // team's workflows and what they handled by. What could go wrong: someone
-// without the right sets it (a user of the App, a builder of another App,
-// Grasp staff); it's set to a team that isn't the organization's, or to a
-// workflow the App doesn't have; the change goes unrecorded; it's lost
-// with a new version; a team that goes leaves its workflows pointing at
-// nothing.
+// without the right sets it, or lists the teams to set it to (a user of
+// the App, a builder of another App, Grasp staff); it's set to a team
+// that isn't the organization's, or to a workflow the App doesn't have;
+// the change goes unrecorded; it's lost with a new version; a team that
+// goes leaves its workflows pointing at nothing.
 
 const idp = mockIdp();
 
@@ -86,6 +86,20 @@ describe("the team that owns a workflow", slow, () => {
       team("Elsewhere", `organization-${unique()}`),
     ]);
 
+    // The teams offered: the organization's, never another's.
+    const [byOwner, byAdmin] = await Promise.all([
+      owner.api.workflows.teams(),
+      admin.api.workflows.teams(),
+    ]);
+    const offered = new Set(byOwner.map(({ id }) => id));
+    const offeredAdmin = new Set(byAdmin.map(({ id }) => id));
+    const listing = {
+      owner: [finance, sales].every((id) => offered.has(id)),
+      admin: [finance, sales].every((id) => offeredAdmin.has(id)),
+      elsewhere: offered.has(elsewhere),
+      user: await outcome(user.api.workflows.teams()),
+      staff: await outcome(staff.workflows.teams()),
+    };
     const before = await teamsFor(user, app);
     const audited = await auditedDuring(async () => {
       await owner.api.workflows.setTeam(app, "chase", finance);
@@ -114,6 +128,7 @@ describe("the team that owns a workflow", slow, () => {
     const takenOff = await teamsFor(owner, app);
 
     expect({
+      listing,
       before,
       summary: summary.team?.id,
       refused,
@@ -126,6 +141,13 @@ describe("the team that owns a workflow", slow, () => {
           ...detail,
         })),
     }).toStrictEqual({
+      listing: {
+        owner: true,
+        admin: true,
+        elsewhere: false,
+        user: "role.forbidden",
+        staff: "role.forbidden",
+      },
       before: [
         ["chase", null],
         ["remind", null],

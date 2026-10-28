@@ -30,6 +30,10 @@ import {
 } from "@grasp-os/shared/admin-snapshot";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
+import {
+  connectGatewayScript,
+  gatewayScriptOf,
+} from "@grasp-os/shared/connect-gateway";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { toHex } from "@grasp-os/shared/encoding";
 import {
@@ -60,6 +64,7 @@ import {
   quotaPolicyReportRequestSchema,
 } from "@grasp-os/shared/quota-policy-report";
 import type { QuotaPolicyReport } from "@grasp-os/shared/quota-policy-report";
+import { clientDispatchNamespace } from "@grasp-os/shared/router";
 import { z } from "zod";
 
 import {
@@ -136,13 +141,52 @@ const frontendPage = (): Response =>
     headers: { "content-type": "text/html" },
   });
 
-/** The binding kinds core's probe asks (core's src/provision-probe.ts). */
-const probedKinds = new Set(["d1", "r2_bucket", "service"]);
+/** The binding kinds core's probe asks, of core and of connect (core's src/provision-probe.ts). */
+const probedKinds = new Set([
+  "d1",
+  "r2_bucket",
+  "durable_object_namespace",
+  "worker_loader",
+  "service",
+]);
+
+const bindingsSchema = z.array(
+  z
+    .object({
+      type: z.string(),
+      name: z.string(),
+      json: z.unknown().optional(),
+      service: z.string().optional(),
+    })
+    .loose()
+);
 
 /** A few of each clock's tasks, as core's and connect's src/clock.ts name them. */
 const clockTaskNames = {
   core: ["audit.drain", "workflows.schedules", "connect.clock"],
   connect: ["oauth.flows", "vault.tokens"],
+};
+
+/**
+ * The connect script core's `CONNECT` binding reaches: the script it names
+ * in the account's own Workers, or, bound to the connect gateway, the
+ * script its props name in the clients' dispatch namespace, as the gateway
+ * forwards to it (@grasp-os/shared/connect-gateway). A core with no
+ * `CONNECT` binding reaches no connect.
+ */
+const connectOf = (
+  account: AccountState,
+  binding: z.infer<typeof bindingsSchema>[number] | undefined
+): ScriptState | undefined => {
+  if (binding?.service !== connectGatewayScript) {
+    return binding?.service === undefined
+      ? undefined
+      : account.scripts.get(binding.service);
+  }
+  const script = gatewayScriptOf(binding.props);
+  return script === undefined
+    ? undefined
+    : account.namespaces.get(clientDispatchNamespace)?.get(script);
 };
 
 /**
@@ -180,17 +224,15 @@ const answerProbe = async (
   ) {
     return frontendPage();
   }
-  const bindings = z
-    .array(
-      z
-        .object({
-          type: z.string(),
-          name: z.string(),
-          json: z.unknown().optional(),
-        })
-        .loose()
-    )
-    .parse(live.metadata.bindings ?? []);
+  const bindings = bindingsSchema.parse(live.metadata.bindings ?? []);
+  // Connect's own, as core asks connect for them: the script its CONNECT
+  // binding names, at its latest version.
+  const connectBindings = bindingsSchema.parse(
+    connectOf(
+      account,
+      bindings.find(({ name }) => name === "CONNECT")
+    )?.versions.at(-1)?.metadata.bindings ?? []
+  );
   const clientId = bindings.find(({ name }) => name === "CLIENT_ID")?.json;
   const down = new Set(probe.down);
   const clock = (name: "core" | "connect") =>
@@ -202,9 +244,15 @@ const answerProbe = async (
     clientId:
       probe.asClient ?? (typeof clientId === "string" ? clientId : null),
     bindings: Object.fromEntries(
-      bindings
+      [
+        ...bindings.map((binding) => ({ ...binding, answers: binding.name })),
+        ...connectBindings.map((binding) => ({
+          ...binding,
+          answers: `connect.${binding.name}`,
+        })),
+      ]
         .filter(({ type }) => probedKinds.has(type))
-        .map(({ name }) => [name, !down.has(name)])
+        .map(({ answers }) => [answers, !down.has(answers)])
     ),
     clocks: { core: clock("core"), connect: clock("connect") },
   } satisfies ProvisionProbe);
@@ -641,6 +689,55 @@ const accountRoutes: Route[] = [
     },
   },
   {
+    method: "DELETE",
+    path: /^\/d1\/database\/(?<uuid>[^/]+)$/u,
+    answer: ({ account, params }) => {
+      const index = account.d1.findIndex(({ uuid }) => uuid === params.uuid);
+      if (index === -1) {
+        return notFound();
+      }
+      account.d1.splice(index, 1);
+      return envelope(null);
+    },
+  },
+  {
+    method: "DELETE",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)$/u,
+    answer: ({ account, call, params }) => {
+      const index = account.buckets.findIndex(
+        ({ name, jurisdiction }) =>
+          name === params.name && jurisdiction === jurisdictionOf(call)
+      );
+      if (index === -1) {
+        return notFound();
+      }
+      if (account.fullBuckets.has(params.name ?? "")) {
+        return refusal(
+          409,
+          10_008,
+          "The bucket you tried to delete is not empty"
+        );
+      }
+      account.buckets.splice(index, 1);
+      return envelope(null);
+    },
+  },
+  {
+    method: "PUT",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)\/lifecycle$/u,
+    answer: ({ account, call, params, json }) => {
+      const bucket = account.buckets.find(
+        ({ name, jurisdiction }) =>
+          name === params.name && jurisdiction === jurisdictionOf(call)
+      );
+      if (bucket === undefined) {
+        return notFound();
+      }
+      account.lifecycles.set(bucket.name, json);
+      return envelope(null);
+    },
+  },
+  {
     method: "GET",
     path: /^\/ai-gateway\/gateways\/(?<id>[^/]+)$/u,
     answer: ({ account, params }) => {
@@ -767,6 +864,11 @@ const routeOf = (
 export type Failure =
   /** A refusal: the admin retries none. */
   | 400
+  /**
+   * A 400 with no answer Cloudflare wrote, as a proxy in front of it may
+   * send: no error code to read.
+   */
+  | "400-uncoded"
   | 408
   | 429
   | 500
@@ -802,6 +904,12 @@ const failed = (failure: Exclude<Failure, "lost">): Response => {
   }
   if (failure === 400) {
     return refusal(400, 10_000, "Bad request");
+  }
+  if (failure === "400-uncoded") {
+    return new Response("<html>Bad request</html>", {
+      status: 400,
+      headers: { "content-type": "text/html" },
+    });
   }
   if (failure === 408) {
     return refusal(408, 10_000, "Request timeout");
@@ -914,6 +1022,8 @@ export const fakeCloudflareApi = (
       members: new Map([[member, "accepted"]]),
       d1: [],
       buckets: [],
+      fullBuckets: new Set(),
+      lifecycles: new Map(),
       gateways: [],
       zones: [],
       scripts: new Map(),
@@ -945,6 +1055,7 @@ export const fakeCloudflareApi = (
   const adminReads = { now: 0, peak: 0 };
   /** The requests a redirect sent elsewhere, with the router secret they carried. */
   const redirected: { url: string; routerSecret: string | null }[] = [];
+  const dispatched: { namespace: string; script: string; url: string }[] = [];
 
   /** Whose token a call carries: the deployer's or the tenant admin's. */
   const callers = new Map([
@@ -1314,6 +1425,41 @@ export const fakeCloudflareApi = (
     return await workerAnswer(request, url, worker);
   };
 
+  /**
+   * The dispatch namespace `name` in account `accountId`, as a Worker
+   * binding reaches it: only that account's namespace, as a real
+   * DISPATCHER binds one namespace in its own account. Each script's live
+   * version answers as a workers.dev Worker's does (`workerAnswer`); a
+   * script it doesn't have, or one only another account holds, throws, as
+   * Workers for Platforms does.
+   */
+  const dispatcher = (accountId: string, name: string) => ({
+    get: (scriptName: string) => {
+      const account = accounts.get(accountId);
+      const script = account?.namespaces.get(name)?.get(scriptName);
+      const [only] = script?.deployments[0]?.versions ?? [];
+      const live = script?.versions.find(({ id }) => id === only?.version_id);
+      const worker =
+        account === undefined || script === undefined || live === undefined
+          ? undefined
+          : { account, script, live };
+      if (worker === undefined) {
+        throw new Error(`Worker not found: ${scriptName}`);
+      }
+      return {
+        fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          dispatched.push({
+            namespace: name,
+            script: scriptName,
+            url: request.url,
+          });
+          return await workerAnswer(request, new URL(request.url), worker);
+        },
+      };
+    },
+  });
+
   /** What the API, or a Worker on workers.dev, answers `fetch(input, init)` with. */
   const answerFetch = async (
     input: RequestInfo | URL,
@@ -1402,11 +1548,20 @@ export const fakeCloudflareApi = (
     adminReads.now = 0;
     adminReads.peak = 0;
     redirected.length = 0;
+    dispatched.length = 0;
   };
 
   return {
     /** Answers in place of `fetch`. */
     fetch: answerFetch,
+    /** The dispatch namespace `name`, as the router and the admin bind it. */
+    dispatcher,
+    /** Every request a namespace's script got through `dispatcher`, in this test. */
+    dispatched: (): readonly {
+      namespace: string;
+      script: string;
+      url: string;
+    }[] => dispatched,
     /** Empties the fake. */
     reset,
     /** Every call the fake got in this test, in order. */

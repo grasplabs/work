@@ -58,7 +58,7 @@ import { auditTargetOf, ofSubject } from "../dependencies/subjects.ts";
 //   limit like any in use, so it still holds.
 // - Files no lock names any more. Each tarball and pinned artifact of a
 //   deleted lock is recorded for cleanup in the same batch
-//   (`package_cleanups`), and the cron deletes what no lock names by then
+//   (`package_cleanups`), and the clock deletes what no lock names by then
 //   (cleanup.ts).
 
 /**

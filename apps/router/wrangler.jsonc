@@ -22,6 +22,14 @@
   // holds routing only, no client content, so KV's lack of an EU
   // jurisdiction doesn't matter (threat model R18).
   "kv_namespaces": [{ "binding": "HOSTS" }],
+  // Every client's core, as a user Worker in this account's Workers for
+  // Platforms namespace (@grasp-os/shared/router, `clientDispatchNamespace`):
+  // reached only through this binding, by the script its map entry names
+  // (GRA-283). Core, connect and App code bind no namespace, so no client
+  // can reach another's.
+  "dispatch_namespaces": [
+    { "binding": "DISPATCHER", "namespace": "grasp-os-clients" },
+  ],
   // The key every client's router secret is derived from. The store id is
   // the account's own: `deploy` fills it in (scripts/wrangler-deploy.ts), so
   // this placeholder only reaches local runs and tests.

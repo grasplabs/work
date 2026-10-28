@@ -7,8 +7,8 @@ import { cancelRun } from "../src/workflows/controls.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { repairStarts, startRun } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { planOf, recordedQueries } from "./query-plans.ts";
 import {
   aroundEngine,
@@ -30,7 +30,7 @@ import {
 
 // A run's row keeps the start it is to send the engine until the engine
 // confirms it. A start that stopped in between (core stopped) leaves a
-// row starting with that start pending. Core's cron trigger sends it again
+// row starting with that start pending. Core's clock sends it again
 // once it's old enough, under the run's ID, so the engine creates the run
 // once, or finds the one it has; one it still can't send a quarter of an
 // hour on is marked failed. Live runs have no start pending, so the
@@ -384,7 +384,7 @@ describe("starts core stopped in the middle of", () => {
     // read of their App's build, held until the other asks for it too, and
     // each goes on to its step.
     await whileBuildReadsSlow(async () => {
-      await runCron();
+      await runMinuteTasks();
       await stepDone(orphan, "work");
       await stepDone(afterOutage, "work");
     });
@@ -392,7 +392,7 @@ describe("starts core stopped in the middle of", () => {
     await rowSays(afterOutage, "running");
     const youngShown = await builder.api.workflows.status(young);
     // Once more: each is the run it was, sent again or not.
-    await runCron();
+    await runMinuteTasks();
 
     const ongoing = new Set(["running", "waiting"]);
     expect({
@@ -425,7 +425,7 @@ describe("starts core stopped in the middle of", () => {
     ).all();
 
     const queries = await recordedQueries(async () => {
-      await runCron();
+      await runMinuteTasks();
     });
     const plans = await Promise.all(
       queries
@@ -456,7 +456,7 @@ describe("starts core stopped in the middle of", () => {
     await setAge(live.id, 20 * day);
 
     const queries = await recordedQueries(async () => {
-      await runCron();
+      await runMinuteTasks();
     });
 
     expect({
@@ -487,7 +487,7 @@ describe("starts core stopped in the middle of", () => {
       .bind(slow)
       .run();
 
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       pending: await pending(slow),
@@ -512,8 +512,8 @@ describe("starts core stopped in the middle of", () => {
     const recent = await orphanOf(builder, app, 5 * minute);
 
     await whileRefusingStarts([orphan, recent], async () => {
-      await runCron();
-      await runCron();
+      await runMinuteTasks();
+      await runMinuteTasks();
     });
     const { status, failure } = await builder.api.workflows.status(orphan);
 
@@ -544,7 +544,7 @@ describe("starts core stopped in the middle of", () => {
     const orphan = await orphanOf(builder, app, 20 * minute);
 
     await whileRefusingStarts([orphan], async () => {
-      await runCron();
+      await runMinuteTasks();
     });
     // The start that stopped goes on after all, and reaches the engine.
     await createInstance(app, orphan);
@@ -576,7 +576,7 @@ describe("starts core stopped in the middle of", () => {
     const orphan = await orphanOf(null, app, 20 * minute, key);
 
     await whileRefusingStarts([orphan], async () => {
-      await runCron();
+      await runMinuteTasks();
     });
     const again = await startRun(env, {
       app: appIdSchema.parse(app),
@@ -671,11 +671,11 @@ describe("starts core stopped in the middle of", () => {
     const orphan = await orphanOf(builder, app, 20 * minute);
 
     await whileUnreachable([orphan], async () => {
-      await runCron();
+      await runMinuteTasks();
     });
     const whileUnreachableRow = await rowStatus(orphan);
     // Reachable again, the repair sends it, and it runs.
-    await runCron();
+    await runMinuteTasks();
     await rowSays(orphan, "running");
 
     expect({

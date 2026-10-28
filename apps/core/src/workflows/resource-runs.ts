@@ -132,7 +132,7 @@ import { wakingOnSettle } from "./share-wakes.ts";
 //   must be the identity the run was admitted for.
 // - A start lost between its receipt and the engine. The run's row says
 //   `starting` until the engine's first notification; a start sent again
-//   under the same key, and the cron's repair, send it again, which the
+//   under the same key, and the clock's repair, send it again, which the
 //   engine takes once (its admission is keyed by the run's ID).
 // - Output the workflow doesn't declare. The run's result must match its
 //   version's output schema, by the SDK's own validator, or the run fails
@@ -653,7 +653,7 @@ const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
  * stopped between the receipt and the engine, or the engine refused),
  * those due first: each backs off on its own, so runs that can't start
  * don't keep newer ones from their turn, and end failed (`repairStart`).
- * From the cron, at `now`.
+ * From the clock, at `now`.
  */
 export const repairResourceStarts = async (
   env: Env,
@@ -1924,7 +1924,7 @@ const terminationsPerRepair = 50;
  * first, each backing off on its own as the engine refuses it (claimed by
  * its count, so two repairs never send one at once). Never given up: an
  * instance made before its cancel would otherwise keep its lease, or
- * sleep on to its alarm. From the cron, at `now`.
+ * sleep on to its alarm. From the clock, at `now`.
  */
 export const repairResourceTerminations = async (
   env: Env,

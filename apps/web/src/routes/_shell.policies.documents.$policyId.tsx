@@ -21,29 +21,34 @@ import { formatDate } from "../format.ts";
 import { PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading, SectionTitle } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadLandscape } from "../landscape/landscape-data.ts";
-import type { LandscapeApp } from "../landscape/landscape.ts";
-import { bookOf } from "../policies/policies-data.ts";
+import {
+  bookOf,
+  findingsOfLoaded,
+  loadPolicies,
+} from "../policies/policies-data.ts";
+import { editsPolicies, PolicyActions } from "../policies/policy-editing.tsx";
 import {
   ConditionChips,
   PolicyExcerpt,
   RuleStatusBadge,
 } from "../policies/policy-parts.tsx";
-import { effectLabel, matchingApps } from "../policies/policy.ts";
+import { effectLabel } from "../policies/policy.ts";
 import type {
   PolicyBook,
   PolicyDocument,
   PolicyReadingProblem,
+  ProposalCatch,
   RuleProposal,
 } from "../policies/policy.ts";
 
 // One of the company's policies, as in the prototype
 // (`routes/policies/documents/$policyId.tsx`): while Grasp reads it, the
 // page says so; then each proposed rule waits for a decision, and its
-// published rules are listed. The prototype keeps, edits and leaves out a
-// proposal, publishes and removes the policy here; Grasp keeps no
-// policies yet (policies/policies-data.ts), so every link to one finds the
-// prototype's state for a policy that isn't there.
+// published rules are listed. The organization's own admins publish and
+// remove the policy here, and make a rule from one of its passages
+// (policies/policy-editing.tsx). Grasp doesn't read policies yet, so
+// there are no proposals to keep or leave out. A link to a policy that
+// isn't there finds the prototype's state for one.
 
 const readingProblem: Record<PolicyReadingProblem, MessageDescriptor> = {
   notSetUp: msg`Reading policies is not set up yet. Add your own Anthropic key in Settings, under Models, and upload the policy again.`,
@@ -56,13 +61,13 @@ const readingProblem: Record<PolicyReadingProblem, MessageDescriptor> = {
 /** One proposed rule: what it checks, the passage it comes from, and what was decided. */
 const ProposalCard = ({
   proposal,
-  apps,
+  caught,
 }: {
   proposal: RuleProposal;
-  apps: readonly LandscapeApp[];
+  /** How many apps it would catch today, as core worked it out. */
+  caught: number;
 }) => {
   const { t, i18n } = useLingui();
-  const caught = matchingApps(proposal, apps).length;
   return (
     <article
       className={
@@ -99,12 +104,15 @@ const ProposalCard = ({
 
 const PolicyDetail = ({
   policy,
-  apps,
+  proposals,
   book,
+  edits,
 }: {
   policy: PolicyDocument;
-  apps: readonly LandscapeApp[];
+  proposals: readonly ProposalCatch[];
   book: PolicyBook;
+  /** Whether the reader may change it. */
+  edits: boolean;
 }) => {
   const { t, i18n } = useLingui();
   const uploadedOn = formatDate(policy.uploadedAt);
@@ -120,6 +128,11 @@ const PolicyDetail = ({
       />
       <Page>
         <PageHeading
+          action={
+            edits ? (
+              <PolicyActions policies={book.policies} policy={policy} />
+            ) : undefined
+          }
           description={policy.summary}
           meta={
             <span className="text-muted-foreground">
@@ -188,7 +201,12 @@ const PolicyDetail = ({
             ) : (
               policy.proposals.map((proposal) => (
                 <ProposalCard
-                  apps={apps}
+                  caught={
+                    proposals.find(
+                      ({ policyId, proposalId }) =>
+                        policyId === policy.id && proposalId === proposal.id
+                    )?.apps ?? 0
+                  }
                   key={proposal.id}
                   proposal={proposal}
                 />
@@ -267,7 +285,8 @@ const PolicyDetail = ({
 const PolicyPage = () => {
   const { t } = useLingui();
   const { policyId } = Route.useParams();
-  const { apps, book: loaded } = Route.useLoaderData();
+  const { found, book: loaded } = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   const book = bookOf(loaded);
   const policy = book.policies.find(({ id }) => id === policyId);
   if (policy === undefined) {
@@ -303,16 +322,16 @@ const PolicyPage = () => {
   }
   return (
     <PolicyDetail
-      apps={apps.state === "ready" ? apps.data : []}
       book={book}
+      edits={editsPolicies(identity)}
       policy={policy}
+      proposals={findingsOfLoaded(found).proposals}
     />
   );
 };
 
 export const Route = createFileRoute("/_shell/policies/documents/$policyId")({
-  loader: async ({ context: { core, identity } }) =>
-    await loadLandscape(core, identity),
+  loader: async ({ context: { core } }) => await loadPolicies(core),
   pendingComponent: PageLoading,
   component: PolicyPage,
 });

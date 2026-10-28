@@ -101,6 +101,17 @@ const tokenEncryptionKey: DerivedSecret = {
   previous: "TOKEN_ENCRYPTION_KEY_PREVIOUS",
 };
 
+/**
+ * Previous keys a placed client's delivery never removes once their window
+ * closes (src/hosting/operation.ts, `revokeRetired`): connect's vault
+ * key, which tokens, flows and owed revokes may still be sealed under if
+ * its cron's reseal fell behind; removing it would leave them unreadable
+ * for good. It goes once connect can confirm nothing is sealed under it.
+ */
+export const retainedPreviousKeys: ReadonlySet<string> = new Set([
+  "TOKEN_ENCRYPTION_KEY_PREVIOUS",
+]);
+
 /** Each app's derived secrets. */
 const derivedSecrets: Readonly<Record<string, readonly DerivedSecret[]>> = {
   core: [routerSecret, authSecret, capabilityKey()],

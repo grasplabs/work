@@ -152,7 +152,7 @@ const requestItems = async (
   };
 };
 
-/** The latest page of the person's notifications: failed runs, and questions they were asked. */
+/** The latest page of the person's notifications: failed runs, questions they were asked, and schedules of theirs that stopped. */
 const notificationItems = async (
   { notifications, chats }: WaitingSources,
   { forMe }: Reader
@@ -165,21 +165,38 @@ const notificationItems = async (
   return {
     items: page.notifications.map((notification): WaitingItem => {
       const base = { at: notification.at, urgent: false, waitsOn: forMe };
-      return notification.type === "run_failed"
-        ? {
+      switch (notification.type) {
+        case "run_failed": {
+          return {
             ...base,
             kind: "failedRun",
             id: `failedRun:${notification.id}`,
             verdicts: fixModel === null ? [] : ["askToFix"],
             notification,
-          }
-        : {
+          };
+        }
+        case "gap_asked": {
+          return {
             ...base,
             kind: "openQuestion",
             id: `openQuestion:${notification.id}`,
             verdicts: [],
             notification,
           };
+        }
+        case "trigger_stopped": {
+          return {
+            ...base,
+            kind: "stoppedSchedule",
+            id: `stoppedSchedule:${notification.id}`,
+            verdicts: [],
+            notification,
+          };
+        }
+        default: {
+          return notification satisfies never;
+        }
+      }
     }),
     notifications: {
       moreNotifications: page.more,

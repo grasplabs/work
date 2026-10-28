@@ -3,6 +3,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import {
+  CalendarOffIcon,
   CircleCheckIcon,
   CircleHelpIcon,
   EyeIcon,
@@ -65,6 +66,10 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
   packages: msg({ message: "Packages", context: "inbox item kind" }),
   appApproval: msg({ message: "App approval", context: "inbox item kind" }),
   failedRun: msg({ message: "Failed run", context: "inbox item kind" }),
+  stoppedSchedule: msg({
+    message: "Stopped schedule",
+    context: "inbox item kind",
+  }),
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
@@ -88,6 +93,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   packages: PackageIcon,
   appApproval: ShieldCheckIcon,
   failedRun: TriangleAlertIcon,
+  stoppedSchedule: CalendarOffIcon,
   decision: ScaleIcon,
 };
 

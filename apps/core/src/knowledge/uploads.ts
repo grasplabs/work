@@ -75,7 +75,7 @@ import { brainOf } from "./ports.ts";
 // (`upload_cleanups`) in the batch that records the upload, before the
 // original is stored, and cleared in the batch that makes the upload
 // ready. So an original is deleted whenever its upload doesn't end ready:
-// by the failure that fails it, or by the cron trigger once its upload is
+// by the failure that fails it, or by the clock once its upload is
 // gone (a purge forgot it, say, while its original was still being
 // stored) or failed, and old enough that nothing is still storing it.
 
@@ -332,7 +332,7 @@ export const uploadFile = async (
     });
   } catch (error) {
     // Failed at once, so its uploader sees why; if even that fails, the
-    // cron trigger finds it pending and starts its run (`sweepUploads`).
+    // clock finds it pending and starts its run (`sweepUploads`).
     try {
       await failUpload(env, row.id, "internal.unexpected");
     } catch (cleanupError) {
@@ -651,7 +651,7 @@ const sweepBatch = 20;
  * Deletes the originals recorded for deleting whose upload is gone or
  * failed, and that nothing can still be storing, a few at a time, and
  * clears each once done. Never throws: whoever recorded them has committed
- * already, and the cron trigger deletes what's left.
+ * already, and the clock deletes what's left.
  */
 export const cleanUpOriginals = async (env: Env): Promise<void> => {
   const db = drizzle(env.DB);
@@ -765,7 +765,7 @@ export const uploadErasure = (
   },
 });
 
-/** How long an upload may go unchanged before the cron trigger looks at it. */
+/** How long an upload may go unchanged before the clock looks at it. */
 const staleAfterMs = 10 * 60_000;
 
 /** Where the engine has a run that has ended. */

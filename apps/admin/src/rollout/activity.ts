@@ -40,12 +40,15 @@ import {
 } from "@grasp-os/shared/router";
 import { and, eq } from "drizzle-orm";
 
+import type { ClientDispatcher, CoreAddress } from "../clients/core-address.ts";
+import { routeOf } from "../clients/grid.ts";
 import { audit } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients, clientWorkers } from "../db/schema.ts";
 import { MissingStoreSecretError } from "../deploy/context.ts";
 import { errorCode } from "../deploy/deploy.ts";
 import { coreOrigin } from "../deploy/router.ts";
+import type { RouterHosts } from "../deploy/router.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 
@@ -62,6 +65,16 @@ const encoder = new TextEncoder();
 export interface ActivityContext {
   db: AdminDatabase;
   secrets: () => Promise<Pick<DeploySecrets, "routerKey" | "clientKey">>;
+  /**
+   * How a core placed on Workers for Platforms is reached: its hostname's
+   * entry in the router's map, through the dispatch namespace the router
+   * binds (GRA-283). A core on its account's workers.dev doesn't need it.
+   */
+  router?: {
+    hosts: RouterHosts;
+    domain: string | null;
+    dispatcher: ClientDispatcher | undefined;
+  };
 }
 
 /**
@@ -84,9 +97,41 @@ const coreOf = async (db: AdminDatabase, clientId: string) => {
       )
     )
     .where(eq(clients.id, clientId));
-  return row?.subdomain === null || row === undefined
+  return row ?? null;
+};
+
+/**
+ * Where client `clientId`'s core answers: its account's workers.dev
+ * origin, for a core with a recorded subdomain; else, for one placed on
+ * Workers for Platforms, its script through the dispatch namespace, as its
+ * hostname's map entry names it. Null when neither is known.
+ */
+const addressOf = async (
+  context: ActivityContext,
+  clientId: string,
+  core: { subdomain: string | null; scriptName: string; generation: number },
+  routerKey: string
+): Promise<CoreAddress | null> => {
+  if (core.subdomain !== null) {
+    return {
+      origin: coreOrigin(core.scriptName, core.subdomain),
+      fetch: async (input, init) => await fetch(input, init),
+    };
+  }
+  const { router } = context;
+  if (router === undefined || router.domain === null) {
+    return null;
+  }
+  const route = await routeOf(
+    router.hosts,
+    routerKey,
+    clientId,
+    `${clientId}.${router.domain}`,
+    router.dispatcher
+  );
+  return typeof route === "string" || route.generation !== core.generation
     ? null
-    : { ...row, subdomain: row.subdomain };
+    : route.core;
 };
 
 /** Whether `error` is `fetch` getting no answer: refused, cut off, or timed out. */
@@ -115,6 +160,10 @@ const send = async (
     return "core_unknown";
   }
   const secrets = await context.secrets();
+  const address = await addressOf(context, clientId, core, secrets.routerKey);
+  if (address === null) {
+    return "core_unknown";
+  }
   const body = JSON.stringify(notice);
   const key = await hkdfHmacKey(
     await clientAuthSecret(secrets, clientId, core.generation),
@@ -124,8 +173,8 @@ const send = async (
   const signature = toHex(
     new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(body)))
   );
-  const response = await fetch(
-    `${coreOrigin(core.scriptName, core.subdomain)}${platformUpdatePath}`,
+  const response = await address.fetch(
+    `${address.origin}${platformUpdatePath}`,
     {
       method: "POST",
       headers: {

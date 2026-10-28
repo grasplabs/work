@@ -8,8 +8,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { release } from "./apps.ts";
-import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The Brain's memory commands (GRA-297), as a signed-in person calls them
@@ -473,7 +473,7 @@ describe("the Brain's memory commands", setUpTime, () => {
       Date.now(),
       at.getTime() - 1
     );
-    await runQuarterHourCron({}, at);
+    await runQuarterHourTasks({}, at);
     const runawayLeft = await receiptsOf(runaway);
     const stored = await env.KNOWLEDGE.prepare(
       "SELECT id FROM brain_receipts WHERE id IN (?, ?)"

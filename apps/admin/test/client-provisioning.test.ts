@@ -31,10 +31,14 @@ const allocated = async (account: AccountState, manifest: ReleaseManifest) => {
     manifest,
     operationId: "op",
   });
-  const runId = await claimRun(db, staff, clientId, null, {
-    action: "client.provision",
+  const runId = await claimRun(
+    db,
+    staff,
     clientId,
-  });
+    null,
+    { action: "client.provision", clientId },
+    { kind: "provision_placed", runId: `${clientId}-p1` }
+  );
   if (runId === undefined) {
     throw new Error("The run wasn't claimed");
   }
@@ -96,10 +100,17 @@ describe("provisioning a client's resources", () => {
         operationId: "op",
       });
       // oxlint-disable-next-line no-await-in-loop -- two clients, in order
-      const runId = await claimRun(db, staff, clientId, null, {
-        action: "client.provision",
+      const runId = await claimRun(
+        db,
+        staff,
         clientId,
-      });
+        null,
+        { action: "client.provision", clientId },
+        {
+          kind: "provision_placed",
+          runId: `${clientId}-p${crypto.randomUUID().slice(0, 8)}`,
+        }
+      );
       runs.push({ placement, held: { clientId, runId: runId ?? "" } });
     }
     const inventories: ClientResource[][] = [];
@@ -185,10 +196,17 @@ describe("provisioning a client's resources", () => {
     // Another run takes the client over while the first one's create is in flight.
     cloudflare.beforeAnswering(isCreate, async () => {
       successor =
-        (await claimRun(db, staff, clientId, stale.runId, {
-          action: "client.provision",
+        (await claimRun(
+          db,
+          staff,
           clientId,
-        })) ?? "";
+          stale.runId,
+          { action: "client.provision", clientId },
+          {
+            kind: "provision_placed",
+            runId: `${clientId}-p${crypto.randomUUID().slice(0, 8)}`,
+          }
+        )) ?? "";
     });
     await expect(
       errorOf(ensureClientResources(api, db, staff, stale))
@@ -227,10 +245,17 @@ describe("provisioning a client's resources", () => {
       namespace: null,
     });
     const { clientId } = await placedClient(destinationId);
-    const runId = await claimRun(db, staff, clientId, null, {
-      action: "client.provision",
+    const runId = await claimRun(
+      db,
+      staff,
       clientId,
-    });
+      null,
+      { action: "client.provision", clientId },
+      {
+        kind: "provision_placed",
+        runId: `${clientId}-p${crypto.randomUUID().slice(0, 8)}`,
+      }
+    );
     const before = cloudflare.calls.length;
     await expect(
       errorOf(

@@ -8,10 +8,11 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
   bookOf,
-  policyToday,
+  findingsOfLoaded,
   readPolicyBook,
+  readPolicyFindings,
 } from "../policies/policies-data.ts";
-import { applyPolicy, findings } from "../policies/policy.ts";
+import { applyPolicy, findingsWith } from "../policies/policy.ts";
 import { readAppAudit } from "./landscape-audit.ts";
 import type { AppAuditTrail } from "./landscape-audit.ts";
 import { landscapeAppsOf } from "./landscape-data.ts";
@@ -40,9 +41,10 @@ export const loadAppPage = async (
   identity: Identity,
   appId: string
 ): Promise<AppPage> => {
-  const [{ catalog, connections, held }, loaded] = await Promise.all([
+  const [{ catalog, connections, held }, loaded, found] = await Promise.all([
     loadIntegrations(core, identity, { held: true }),
     readPolicyBook(core),
+    readPolicyFindings(core),
   ]);
   if (connections.state !== "ready") {
     return { app: connections, audit: Promise.resolve(connections) };
@@ -64,7 +66,7 @@ export const loadAppPage = async (
   );
   const [app] = applyPolicy(
     apps,
-    findings(book.rules, apps, book.exceptions, policyToday())
+    findingsWith(book, findingsOfLoaded(found).findings)
   );
   // Not awaited: a slow read of the log shouldn't hold up the app's tabs.
   const audit = isAdmin(identity.role)

@@ -76,7 +76,6 @@ import {
   RingChange,
   RollBack,
   RotateSecrets,
-  SettingUpNow,
   SignInChange,
   SealedSecretChange,
   TeamsBotChange,
@@ -111,9 +110,6 @@ const dayOf = (at: Date): string => formatDate(at.toISOString().slice(0, 10));
 
 /** A version's id, short. */
 const shortVersion = (id: string): string => id.slice(0, 8);
-
-const dashboard = (accountId: string): string =>
-  `https://dash.cloudflare.com/${accountId}`;
 
 // The words of the admin's own records, as staff read them.
 
@@ -153,24 +149,6 @@ const stepWords: Record<DeployStep, { label: string; about: string }> = {
     label: "Address",
     about: "Its address in the router’s map, so its people reach it.",
   },
-};
-
-/** Setting a company up, in order: its account, its record, Workers Paid, the first deploy, active. */
-const provisionSteps = [
-  "account",
-  "record",
-  "paid",
-  "deploy",
-  "active",
-] as const;
-type ProvisionStep = (typeof provisionSteps)[number];
-
-const provisionWords: Record<ProvisionStep, string> = {
-  account: "Its own Cloudflare account, in the EU",
-  record: "Recorded in the admin",
-  paid: "Workers Paid, confirmed by someone at Grasp",
-  deploy: "The first deploy",
-  active: "Active",
 };
 
 const kindWords: Record<SetupDeploy["kind"], string> = {
@@ -351,34 +329,6 @@ const Steps = ({
 
 // What the admin's records say, worked out.
 
-/** How far setting the company up got: every step done once it is active. */
-const provisionStepsOf = (
-  view: ProvisioningView
-): { step: ProvisionStep; state: StepState }[] => {
-  if (view.client !== null && view.client.status !== "provisioning") {
-    return provisionSteps.map((step) => ({ step, state: "done" }));
-  }
-  let at: ProvisionStep = "deploy";
-  if (view.client === null) {
-    at = "account";
-  } else if (!view.workersPaidConfirmed) {
-    at = "paid";
-  }
-  let now: StepState = "running";
-  if (view.phase === "failed") {
-    now = "failed";
-  } else if (view.phase === "workers_paid") {
-    now = "waiting";
-  }
-  const reached = provisionSteps.indexOf(at);
-  return provisionSteps.map((step, index) => {
-    if (index < reached) {
-      return { step, state: "done" };
-    }
-    return { step, state: index === reached ? now : "todo" };
-  });
-};
-
 /** How far a deploy got, step by step. */
 const deployStepsOf = (
   deploy: SetupDeploy
@@ -424,11 +374,7 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
   if (last?.status === "failed") {
     needs.push({ kind: "failed", deploy: last });
   }
-  if (
-    provisioning.phase === "failed" ||
-    (provisioning.phase === "workers_paid" &&
-      !provisioning.workersPaidConfirmed)
-  ) {
+  if (provisioning.phase === "failed") {
     needs.push({ kind: "provisioning", view: provisioning });
   }
   if (rollout?.target === "failed" || rollout?.target === "rolled_back") {
@@ -461,11 +407,8 @@ const needWords = (need: PlatformNeed): ReactNode => {
   }
   if (need.kind === "provisioning") {
     const { view } = need;
-    if (view.phase === "workers_paid") {
-      return `Setting it up waits on someone at Grasp: ${provisionWords.paid}.`;
-    }
     return view.stopped === null ? (
-      "Setting it up stopped, and waits to be resumed."
+      "Setting it up stopped, and waits to be started again from Hosting."
     ) : (
       <>
         {`Setting it up stopped at its ${view.stopped.step} step: `}
@@ -602,12 +545,6 @@ const Header = ({
               label="Its activity"
             />
           </>
-        )}
-        {client === null ? null : (
-          <OutLink
-            href={dashboard(client.accountId)}
-            label="Open in Cloudflare"
-          />
         )}
       </div>
     </section>
@@ -913,44 +850,6 @@ const placedOf = (hosting: ClientHostingView | null): boolean =>
   (hosting.placement !== null || hosting.operation !== null);
 
 /**
- * Setting it up, while it is: its steps, where it is now and what someone
- * at Grasp does there. A company placed in a hosting destination is
- * followed by its operation instead (`HostingSection`).
- */
-const SettingUp = ({
-  setup,
-  hosting,
-  refresh,
-}: {
-  setup: ClientSetup;
-  hosting: ClientHostingView | null;
-  refresh: Refresh;
-}) => {
-  const { provisioning } = setup;
-  if (provisioning.client?.status === "active" || placedOf(hosting)) {
-    return null;
-  }
-  return (
-    <SetupSection
-      description="One run in the admin makes its account, records it, waits for Workers Paid, deploys the release of its ring and marks it active. Every step can run again without making anything twice."
-      title="Setting it up"
-    >
-      <div className="border-t px-5 py-4">
-        <Steps
-          label="Setting it up"
-          steps={provisionStepsOf(provisioning).map(({ step, state }) => ({
-            id: step,
-            label: provisionWords[step],
-            state,
-          }))}
-        />
-      </div>
-      <SettingUpNow refresh={refresh} view={provisioning} />
-    </SetupSection>
-  );
-};
-
-/**
  * Where its Grasp is hosted: the destination it is placed in, or where it
  * would go, and provisioning it there. For a company being set up, or
  * one placed already.
@@ -1055,7 +954,6 @@ const Status = ({
   quotaPolicy,
   hosting,
   releases,
-  refresh,
 }: {
   clientId: string;
   setup: ClientSetup;
@@ -1066,7 +964,6 @@ const Status = ({
   quotaPolicy: Promise<ClientQuotaPolicy | null>;
   hosting: ClientHostingView | null;
   releases: readonly { id: string; notes: string }[];
-  refresh: Refresh;
 }) => (
   <>
     <Header clientId={clientId} needs={needs} setup={setup} />
@@ -1094,7 +991,6 @@ const Status = ({
         </ul>
       </SetupSection>
     ) : null}
-    <SettingUp hosting={hosting} refresh={refresh} setup={setup} />
     <HostingSection hosting={hosting} releases={releases} setup={setup} />
     <SetupSection
       description="Read from its account now, and kept a minute. The admin doesn’t keep these day by day yet. Cost is an estimate for the calendar month: its Workers Paid plan past what it includes, and AI Gateway spend; not storage or Durable Objects."
@@ -1159,6 +1055,7 @@ const isSealedSecretName = (
 /** What staff did by hand, in a sentence. */
 /** What staff did by hand that needs nothing of its event to say, in a sentence. */
 const plainEventWords: Readonly<Record<string, string>> = {
+  "client.create": "Added it.",
   "client.rotate_secrets": "Rotated its secrets.",
   "client.sign_in": "Changed how its people sign in.",
   "client.teams_bot": "Changed its Teams bot.",
@@ -1171,14 +1068,11 @@ const eventWords = ({
   detail,
 }: ClientSetup["done"][number]): string => {
   switch (action) {
-    case "client.provision_start": {
-      return "Started setting it up.";
+    case "client.place": {
+      return `Placed it in ${target ?? "a hosting destination"}.`;
     }
-    case "client.provision_retry": {
-      return "Resumed setting it up.";
-    }
-    case "client.workers_paid": {
-      return "Confirmed Workers Paid.";
+    case "client.provision_placed": {
+      return `Started provisioning it on ${target ?? "a release"}.`;
     }
     case "client.ring": {
       const ring = ringSchema.safeParse(JSON.parse(detail ?? "null")).data
@@ -1217,40 +1111,11 @@ const eventWords = ({
   }
 };
 
-const Deploys = ({
-  clientId,
-  setup,
-}: {
-  clientId: string;
-  setup: ClientSetup;
-}) => {
-  const { provisioning, deploys, done, history } = setup;
+const Deploys = ({ setup }: { setup: ClientSetup }) => {
+  const { deploys, done, history } = setup;
   const [latest] = deploys;
-  const settingUp = provisioning.client?.status !== "active";
   return (
     <>
-      {settingUp ? (
-        <SetupSection
-          action={
-            <TabLink clientId={clientId} tab="status">
-              Where it is now
-            </TabLink>
-          }
-          description="One run in the admin makes its account, records it, waits for Workers Paid, deploys the release of its ring and marks it active. Every step can run again without making anything twice."
-          title="Setting it up"
-        >
-          <div className="border-t px-5 py-4">
-            <Steps
-              label="Setting it up"
-              steps={provisionStepsOf(provisioning).map(({ step, state }) => ({
-                id: step,
-                label: provisionWords[step],
-                state,
-              }))}
-            />
-          </div>
-        </SetupSection>
-      ) : null}
       {latest === undefined ? (
         <SetupSection title="Its deploys">
           <Quiet>No deploy yet.</Quiet>
@@ -1501,33 +1366,17 @@ const Resources = ({
 }) => {
   const { provisioning, account, workers, resources } = setup;
   const { client } = provisioning;
-  if (client === null) {
-    return (
-      <SetupSection
-        description="Made when it is set up, in the EU."
-        title="Its Cloudflare account"
-      >
-        <Quiet>Nothing yet.</Quiet>
-      </SetupSection>
-    );
-  }
   const core = workers.find(({ worker }) => worker === "core");
   const subdomain = account?.workersSubdomain ?? null;
   return (
     <>
       <SetupSection
-        description="Its own, in the EU: Grasp deploys into it, and the company’s data stays in it."
-        title="Its Cloudflare account"
+        description="In the hosting destination it is placed in (Hosting, on its Status), in the EU: the company’s data stays in its own resources there."
+        title="Its deployment"
       >
         <Facts
           rows={[
-            { label: "Account", value: client.name },
-            {
-              label: "Account id",
-              value: (
-                <span className="font-mono text-xs">{client.accountId}</span>
-              ),
-            },
+            { label: "Company", value: client.name },
             {
               label: "Address",
               value: provisioning.hostname ?? "No domain set in the admin",
@@ -2123,14 +1972,9 @@ const Settings = ({
 /** How often the Setup is read again while setting it up moves on by itself. */
 const followMs = 5000;
 
-/**
- * Phases that move on without the page: the run works on its own, or
- * (Workers Paid) goes on once someone at Grasp confirms.
- */
+/** Phases that move on without the page: its operation works on its own. */
 const working: ReadonlySet<ProvisioningView["phase"]> = new Set([
-  "account",
-  "workers_paid",
-  "deploying",
+  "provisioning",
 ]);
 
 /**
@@ -2212,7 +2056,6 @@ export const OrgSetup = ({
             hosting={hosting}
             needs={needs}
             quotaPolicy={quotaPolicy}
-            refresh={refresh}
             releases={releases}
             setup={setup}
             view={view}
@@ -2221,7 +2064,7 @@ export const OrgSetup = ({
       </TabsContent>
       <TabsContent value="deploys">
         <div className="flex flex-col gap-6 pt-4">
-          <Deploys clientId={clientId} setup={setup} />
+          <Deploys setup={setup} />
         </div>
       </TabsContent>
       <TabsContent value="resources">

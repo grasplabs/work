@@ -6,8 +6,9 @@ export const notificationErrors = defineErrorFamily({
 });
 
 // What core tells a signed-in person in the product (core's
-// notifications.ts): that a workflow failed while acting for them, or
-// that an admin asked them one of the brain's open questions. Only they
+// notifications.ts): that a workflow failed while acting for them, that
+// an admin asked them one of the brain's open questions, or that a
+// schedule trigger of theirs stopped. Only they
 // see their own; nobody else is told.
 
 /**
@@ -47,7 +48,28 @@ export interface GapAskedNotification {
   read: boolean;
 }
 
-export type Notification = RunFailedNotification | GapAskedNotification;
+/**
+ * A schedule trigger the person owns stopped after its starts failed too
+ * many times in a row (core's workflows/schedule-triggers.ts): it starts
+ * nothing more until they enable it again. Listed while the trigger is
+ * still theirs and not deleted.
+ */
+export interface TriggerStoppedNotification {
+  id: string;
+  type: "trigger_stopped";
+  trigger: string;
+  /** The workflow the trigger starts: its ID and name. */
+  workflow: string;
+  workflowName: string;
+  /** When it stopped (ISO 8601). */
+  at: string;
+  read: boolean;
+}
+
+export type Notification =
+  | RunFailedNotification
+  | GapAskedNotification
+  | TriggerStoppedNotification;
 
 /** Most notifications `list` returns: the latest. */
 export const listedNotifications = 50;

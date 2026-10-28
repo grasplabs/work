@@ -101,10 +101,11 @@ export interface DecisionAnswer {
   value: Json;
 }
 
-const callInvalid = (issue: string) =>
+export const callInvalid = (issue: string) =>
   workflowResourceErrors.create("workflow.call_invalid", { issues: [issue] });
 
-const callDenied = () => workflowResourceErrors.create("workflow.call_denied");
+export const callDenied = () =>
+  workflowResourceErrors.create("workflow.call_denied");
 
 /** The decision run `run` is, as the decision service names it. */
 export const decisionRunOf = (run: CallingRun): ResourceDecisionRun => ({
@@ -144,7 +145,7 @@ const decidersOfRecipient = (recipient: Json): string => {
  * decision service names them, in the order given, each once: from one
  * to {@link maxRecipients}. `workflow.call_invalid` otherwise.
  */
-const recipientsOf = (recipients: Json): string[] => {
+export const recipientsOf = (recipients: Json): string[] => {
   const list: readonly Json[] = Array.isArray(recipients) ? recipients : [];
   if (list.length === 0 || list.length > maxRecipients) {
     throw callInvalid(
@@ -155,14 +156,14 @@ const recipientsOf = (recipients: Json): string[] => {
 };
 
 /** `recipients` in one order, to tell whether two sets are the same. */
-const sameRecipients = (
+export const sameRecipients = (
   left: readonly string[],
   right: readonly string[]
 ): boolean =>
   canonicalJson([...left].toSorted()) === canonicalJson([...right].toSorted());
 
 /** Deciders as their kind and ID: everything after the first `:`. */
-const partsOf = (deciders: string): { kind: string; id: string } => {
+export const partsOf = (deciders: string): { kind: string; id: string } => {
   const colon = deciders.indexOf(":");
   return { kind: deciders.slice(0, colon), id: deciders.slice(colon + 1) };
 };
@@ -251,7 +252,7 @@ const decisionBinding = (
  * decision page sends, could take no answer the run takes: refused before
  * any decision opens (`workflow.call_invalid`).
  */
-const responseOf = (contract: { response?: string }): string => {
+export const responseOf = (contract: { response?: string }): string => {
   if (contract.response === undefined) {
     throw callInvalid("binding: Its decision contract has no response schema.");
   }
@@ -267,7 +268,7 @@ const responseOf = (contract: { response?: string }): string => {
 };
 
 /** `prompt`, as a decision's description: text, at most `maxPrompt` long. */
-const promptOf = (prompt: Json): string => {
+export const promptOf = (prompt: Json): string => {
   if (
     typeof prompt !== "string" ||
     prompt.trim() === "" ||
@@ -281,7 +282,7 @@ const promptOf = (prompt: Json): string => {
 };
 
 /** `input`, held to the contract's input schema and a decision's size. */
-const inputOf = (descriptor: string | undefined, input: Json): Json => {
+export const inputOf = (descriptor: string | undefined, input: Json): Json => {
   const checked = requireShape(descriptor, input, "input");
   if (
     new TextEncoder().encode(JSON.stringify(checked)).length > maxInputBytes
@@ -360,7 +361,7 @@ const receipted = async <T>(
  * timeout, or what is left of the host's age limit for its runs (spec
  * 13.7), at most a year. One with no time left is refused.
  */
-const timeoutOf = (
+export const timeoutOf = (
   run: { createdAt: number },
   timeoutMs: number | undefined,
   now: number
