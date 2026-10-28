@@ -833,8 +833,11 @@ export const uploadTargetScript = async (
   );
 };
 
+// A script the namespace hasn't got answers 200 with a null `script` (the
+// namespace's own details), not a 404, as a real namespace showed
+// (GRA-430, 28 Oct).
 const dispatchScriptSchema = z.object({
-  script: z.object({ migration_tag: z.string().nullish() }),
+  script: z.object({ migration_tag: z.string().nullish() }).nullable(),
 });
 
 /**
@@ -854,6 +857,9 @@ export const targetMigrationState = async (
       { method: "GET", path: targetPath(target) },
       dispatchScriptSchema
     );
+    if (script === null) {
+      return { exists: false };
+    }
     const tag = script.migration_tag;
     return {
       exists: true,
