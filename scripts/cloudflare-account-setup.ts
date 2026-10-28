@@ -531,6 +531,18 @@ const zoneSteps = async (
         value.includes(router)
       );
     });
+  // A catch-all that already sends mail somewhere else is someone's:
+  // never repointed here, as a route or a custom domain isn't.
+  const elsewhere =
+    !toRouter &&
+    field(catchAll.result, "enabled") === true &&
+    isList(actions) &&
+    actions.some((action) => field(action, "type") !== "drop");
+  if (elsewhere) {
+    throw new Error(
+      `${domain}'s Email Routing catch-all sends mail somewhere other than ${router}: change it by hand`
+    );
+  }
   if (toRouter) {
     reports.push({ step: "Email Routing catch-all", outcome: "exists" });
   } else if (!deployed.has(router)) {
