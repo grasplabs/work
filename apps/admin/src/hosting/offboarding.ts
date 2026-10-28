@@ -217,6 +217,13 @@ export const offboardPlacedClient = async (
     },
     // No Workflow runs for it: Workflows has no such instance, so its
     // claim reads as starting, and as gone should it never be given back.
+    // Gone is `startingMs` after it's taken: an offboarding stalled longer
+    // than that, between its last check of the claim and the route's
+    // delete (KV can't make the delete conditional), can lose the client
+    // to a release that claims it then, and delete the route that release
+    // writes. Availability only, and recoverable: the client stays active
+    // (the offboarded write is conditional on this claim), and releasing
+    // it again routes it.
     {
       kind: "provision_placed",
       runId: `${clientId}-offboard-${crypto.randomUUID().slice(0, 8)}`,
