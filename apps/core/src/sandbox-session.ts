@@ -207,7 +207,7 @@ const consoleLinesSchema = z
  * lines, bounded as the sandbox host bounds them, and taken once. It comes
  * from the App's isolate, so anything else is dropped, never trusted.
  */
-const consoleSinkOf = (
+export const consoleSinkOf = (
   sink: (lines: ConsoleLine[]) => unknown
 ): ((given: unknown) => Promise<void>) => {
   let taken = false;

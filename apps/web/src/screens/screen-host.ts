@@ -34,6 +34,7 @@ import {
   stopDrafts,
 } from "./form-drafts.ts";
 import type { AppDrafts } from "./form-drafts.ts";
+import { frameActs } from "./frame-acts.ts";
 import {
   inTime,
   isMounted,
@@ -548,7 +549,15 @@ const seeingRefusals = (
  * which the page confirms once before leaving it.
  */
 export interface ScreenNavigator {
-  navigate: (target: ScreenTarget, replace: boolean) => Promise<void>;
+  /**
+   * Goes to `target`; `acted` says the person acted in the frame for it
+   * (frame-acts.ts), an act this navigation spent.
+   */
+  navigate: (
+    target: ScreenTarget,
+    replace: boolean,
+    acted: boolean
+  ) => Promise<void>;
   leaveGuard: (guarded: boolean) => void;
 }
 
@@ -625,7 +634,8 @@ const appTarget = (
   hold: FrameHold,
   confirm: ConfirmDecision,
   drafts: AppDrafts,
-  navigation: ScreenNavigator
+  navigation: ScreenNavigator,
+  acted: () => boolean
 ): FrameTarget => {
   const { app, version, screen, lease } = bundle;
   // Core's refusal pushed to what the screen follows, after it started:
@@ -818,9 +828,12 @@ const appTarget = (
       await hold.session();
       // Only a route replaces an entry; a surface the host places.
       const replace = "replace" in request && request.replace === true;
+      // Whether the person acted in the frame for it, read as it goes:
+      // their act reached the page before core answered.
       await navigation.navigate(
         target,
-        replace && target.surface === undefined
+        replace && target.surface === undefined,
+        acted()
       );
     },
     leaveGuard: navigation.leaveGuard,
@@ -1026,7 +1039,12 @@ interface FrameSource<Bundle extends FrameCode> {
     link: FrameLink,
     bundle: Bundle,
     refused: (reason: Refused) => void,
-    cleanups: (() => void)[]
+    cleanups: (() => void)[],
+    /**
+     * Spends the person's latest act in the frame, if one is unspent;
+     * none, never one.
+     */
+    acted?: () => boolean
   ) => Connected;
 }
 
@@ -1163,12 +1181,17 @@ const runFrame = <Bundle extends FrameCode>(
       artifact: bundle.artifact,
       generation,
     };
+    // The person's acts in the frame over a port of their own, which only
+    // the frame's bootstrap holds (frame-acts.ts).
+    const actPorts = new MessageChannel();
+    const acts = frameActs(actPorts.port1, () => performance.now());
+    cleanups.push(acts.close);
     const {
       target,
       running,
       files: channel,
       links,
-    } = source.connect(link, bundle, refused, cleanups);
+    } = source.connect(link, bundle, refused, cleanups, acts.take);
     const { port1, port2 } = new MessageChannel();
     cleanups.push(
       openBridge(port1, target, () => {
@@ -1209,7 +1232,7 @@ const runFrame = <Bundle extends FrameCode>(
     frame.contentWindow?.postMessage(
       { type: screenFrameMessage, ...expected },
       "*",
-      [port2, files.port2, linkPorts.port2]
+      [port2, files.port2, linkPorts.port2, actPorts.port2]
     );
     onOpened(bundle.name);
     // Running only once the screen has rendered, never because its frame
@@ -1281,7 +1304,7 @@ export const appScreen = (
       throw error;
     }
   },
-  connect: (link, bundle, refused, cleanups) => {
+  connect: (link, bundle, refused, cleanups, acted = () => false) => {
     const hold = holdFrame(link, bundle);
     const drafts = appDrafts(app, async () => {
       const session = await hold.session();
@@ -1334,7 +1357,8 @@ export const appScreen = (
         hold,
         confirm,
         drafts,
-        opening.navigation
+        opening.navigation,
+        acted
       ),
       // Core's file channel, under the screen's lease, with the person's
       // session: a plain request of the page's own origin, naming the

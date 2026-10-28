@@ -95,7 +95,7 @@ export const AppLinkDialog = ({
           </DialogTitle>
           <DialogDescription>
             <Trans>
-              Opens the App for the workspace&apos;s members who may use it,
+              Opens the domain for the workspace&apos;s members who may use it,
               while it is published.
             </Trans>
           </DialogDescription>

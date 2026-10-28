@@ -7,19 +7,16 @@ import type {
   CatalogSource,
   OrganizationConnection,
 } from "@grasp-os/shared/connect";
-import { workflowBindingTargetSchema } from "@grasp-os/shared/workflow-resources";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { connectionOwnersOf, entryKey, hiddenEntries } from "./connections.ts";
-import {
-  permissions,
-  sdkResourceBindings,
-  users,
-  workflowBindingApprovals,
-  workflowResources,
-} from "./db/core/schema.ts";
+import { permissions, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import {
+  connectionsOfPermissions,
+  connectorBindingsOf,
+} from "./workflows/connection-workflows.ts";
 
 // What the company connected, and what its workflows and chats still need,
 // for Grasp's admin (admin-snapshot.ts): staff read it to know whom to
@@ -89,134 +86,6 @@ const personalOf = (
     byApp.set(key, app);
   }
   return [...byApp.values()];
-};
-
-/** A binding the current version of a live workflow declares, with its approval's target, if any. */
-interface DeclaredBinding {
-  workflowId: string;
-  workflowName: string;
-  alias: string;
-  /** The approved target's permission; null while no approval serves it. */
-  permissionId: string | null;
-}
-
-/**
- * Every connector binding the current version of each live workflow
- * declares, with the permission its active approval names, where an
- * admin approved one for that very declaration (`approvalServing`).
- */
-const connectorBindingsOf = async (env: Env): Promise<DeclaredBinding[]> => {
-  const db = drizzle(env.DB);
-  const [declared, approvals] = await Promise.all([
-    db
-      .select({
-        workflowId: workflowResources.id,
-        workflowName: workflowResources.name,
-        alias: sdkResourceBindings.alias,
-        contractId: sdkResourceBindings.targetId,
-        fingerprint: sdkResourceBindings.schemaHash,
-      })
-      .from(sdkResourceBindings)
-      .innerJoin(
-        workflowResources,
-        and(
-          eq(sdkResourceBindings.resourceId, workflowResources.id),
-          eq(
-            sdkResourceBindings.resourceVersion,
-            workflowResources.currentVersion
-          )
-        )
-      )
-      .where(
-        and(
-          eq(sdkResourceBindings.kind, "connector"),
-          isNull(workflowResources.deletedAt)
-        )
-      ),
-    db
-      .select({
-        workflowId: workflowBindingApprovals.workflowResourceId,
-        alias: workflowBindingApprovals.alias,
-        contractId: workflowBindingApprovals.contractId,
-        fingerprint: workflowBindingApprovals.fingerprint,
-        target: workflowBindingApprovals.target,
-      })
-      .from(workflowBindingApprovals)
-      .innerJoin(
-        workflowResources,
-        and(
-          eq(workflowBindingApprovals.workflowResourceId, workflowResources.id),
-          eq(
-            workflowBindingApprovals.reviewedVersion,
-            workflowResources.currentVersion
-          )
-        )
-      )
-      .where(
-        and(
-          eq(workflowBindingApprovals.kind, "connector"),
-          eq(workflowBindingApprovals.status, "active")
-        )
-      ),
-  ]);
-  const served = new Map<string, string>();
-  for (const approval of approvals) {
-    const target = workflowBindingTargetSchema.safeParse(
-      JSON.parse(approval.target)
-    );
-    if (target.data?.kind !== "connector") {
-      continue;
-    }
-    served.set(
-      JSON.stringify([
-        approval.workflowId,
-        approval.alias,
-        approval.contractId,
-        approval.fingerprint,
-      ]),
-      target.data.permissionId
-    );
-  }
-  return declared.map((binding) => ({
-    workflowId: binding.workflowId,
-    workflowName: binding.workflowName,
-    alias: binding.alias,
-    permissionId:
-      served.get(
-        JSON.stringify([
-          binding.workflowId,
-          binding.alias,
-          binding.contractId,
-          binding.fingerprint,
-        ])
-      ) ?? null,
-  }));
-};
-
-/**
- * The connection each of the workflows' own active connection
- * permissions `ids` is on: a revoked one serves no start, so it serves
- * nothing here either.
- */
-const connectionsOfPermissions = async (
-  env: Env,
-  ids: readonly string[]
-): Promise<Map<string, string>> => {
-  if (ids.length === 0) {
-    return new Map();
-  }
-  const rows = await drizzle(env.DB)
-    .select({ id: permissions.id, connectionId: permissions.objectId })
-    .from(permissions)
-    .where(
-      and(
-        inList(permissions.id, ids),
-        eq(permissions.subjectType, "workflow"),
-        eq(permissions.objectType, "connection"),
-        eq(permissions.status, "active")
-      )
-    );
-  return new Map(rows.map(({ id, connectionId }) => [id, connectionId]));
 };
 
 /** Requests chats' agents made for connections, still waiting on a decision. */

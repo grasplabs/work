@@ -304,11 +304,11 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("2 in the preview");
 
-    // A phone: the chat and the App take turns, the App first. The
+    // A phone: the chat and the domain take turns, the domain first. The
     // preview keeps what it shows through the turns: it isn't loaded anew.
     await page.setViewportSize({ width: 390, height: 844 });
     const showChat = page.getByRole("button", { name: "Chat", exact: true });
-    const showApp = page.getByRole("button", { name: "App", exact: true });
+    const showApp = page.getByRole("button", { name: "Domain", exact: true });
     await expect(showApp).toHaveAttribute("aria-pressed", "true");
     await expect(studio).toBeVisible();
     await expect(thread).toBeHidden();

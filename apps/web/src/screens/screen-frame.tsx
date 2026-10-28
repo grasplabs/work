@@ -133,7 +133,11 @@ interface FrameSource {
 
 /** How a screen navigates the page, and holds it while a form is unsaved. */
 interface FrameNavigation {
-  navigate: (target: ScreenTarget, replace: boolean) => Promise<void>;
+  navigate: (
+    target: ScreenTarget,
+    replace: boolean,
+    acted: boolean
+  ) => Promise<void>;
   leaveGuard: (guarded: boolean) => void;
 }
 
@@ -260,10 +264,12 @@ const policedNavigation = (
 ): FrameNavigation => {
   // Read as each navigation is asked for. Where the page is: its history
   // entry, which differs for each, even at one address. Whether the person
-  // just acted: in this frame, which then holds the page's focus. The
-  // browser keeps a click's activation for a few seconds, whichever frame
-  // asks, so a screen that mounted after it, never clicked, can't spend it
-  // as its own; and a click anywhere else on the page is never a panel's.
+  // just acted: the browser has activation, this frame holds the page's
+  // focus, and (`acted`, which the host reads) the frame's own document
+  // reported a click or key of theirs in it that no navigation spent yet
+  // (frame-acts.ts). A screen can focus itself while the activation of a
+  // click elsewhere lasts, the one that opened it or one on the page, so
+  // activation and focus alone never count as the person's act in it.
   const page: PageState = {
     location: () => ({
       here: router.state.location.state.__TSR_key ?? router.state.location.href,
