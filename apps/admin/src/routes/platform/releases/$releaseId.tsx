@@ -22,6 +22,7 @@ import { Facts, listed, Quiet } from "../../../admin/release-parts.tsx";
 import { formatBytes, formatTime } from "../../../releases/format.ts";
 import { fetchRelease } from "../../../releases/functions.ts";
 import type { WorkerView } from "../../../releases/queries.ts";
+import { versionWords } from "../../../releases/version.ts";
 
 /** One of the release's Workers: how it runs, its modules and its databases' migrations. */
 const WorkerPanel = ({ worker }: { worker: WorkerView }) => (
@@ -130,13 +131,14 @@ const ReleasePage = () => {
       }
       description={release.notes}
       parents={[platformCrumb, releasesCrumb]}
-      title={release.id}
+      title={versionWords(release) ?? release.id}
     >
       <PlatformNav />
       <div className="flex flex-col gap-6 text-sm">
         <Panel title="The release">
           <Facts
             rows={[
+              { label: "Release", value: release.id, mono: true },
               { label: "Commit", value: release.commitSha, mono: true },
               { label: "Built (UTC)", value: formatTime(release.builtAt) },
               {

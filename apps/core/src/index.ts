@@ -15,6 +15,7 @@ export { AppsApi } from "./agent-apps.ts";
 export { BuildApi } from "./agent-builds.ts";
 export { ConnectionsApi } from "./agent-connections.ts";
 export { BrainAgentApi } from "./agent-brain.ts";
+export { DashboardApi } from "./agent-dashboard.ts";
 export { KnowledgeApi } from "./agent-knowledge.ts";
 export { MemoryApi } from "./agent-memory.ts";
 export { WorkflowsApi } from "./agent-workflows.ts";

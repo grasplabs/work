@@ -2,6 +2,7 @@ import type { Brain } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
 import { entitiesFor, entitySources } from "@grasp-os/brain/entities";
 import { recall } from "@grasp-os/brain/recall";
+import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import { relationsFor } from "@grasp-os/brain/relations";
 import { readSkill, selectSkill } from "@grasp-os/brain/skills";
 import { runActorOf } from "@grasp-os/shared/audit";
@@ -95,6 +96,11 @@ import { attachmentOf, keptMessage } from "./kept-email.ts";
 import { modelWaitRecorded } from "./model-waits.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
+import {
+  citedVersions,
+  recordRunEvidence,
+  requireRunEvidenceReadable,
+} from "./run-evidence.ts";
 import { shareWakeType } from "./share-wakes.ts";
 import { heldWakeType } from "./wakes.ts";
 
@@ -1118,6 +1124,36 @@ export const stepLimitOf = async (env: Env): Promise<number> => {
   } catch (error) {
     log.warn("workflow.quota_policy_unread", errorFields(error));
     return lastStepLimit ?? platformLimits.workflowSteps;
+  }
+};
+
+/** The model call limit this isolate last read from the quota policy. */
+let lastModelCallLimit: number | undefined;
+
+/**
+ * The model calls a run's lineage may make, as the deployment's quota
+ * policy has it now (`lineageModelRequests`): the ceiling a run's host
+ * holds its model calls to (`maxModelCalls`).
+ *
+ * Read as a run loads, before any of its steps, where a throw would end
+ * the run for good (GRA-1091), so a policy that can't be read for a moment
+ * is logged, and the limit this isolate last read applies, else the
+ * platform's own: never no limit at all. It admits nothing more: every
+ * model request of a run's lineage reads the policy again as it is sent
+ * (models.ts, `scopesNowOf`), and one that can't is held back, so a
+ * lowered limit holds through the moment.
+ */
+export const modelCallLimitOf = async (env: Env): Promise<number> => {
+  try {
+    const { limits } = await quotaPolicy(env);
+    lastModelCallLimit = limits.lineageModelRequests;
+    return lastModelCallLimit;
+  } catch (error) {
+    log.warn("workflow.quota_policy_unread", {
+      ...errorFields(error),
+      limit: "lineageModelRequests",
+    });
+    return lastModelCallLimit ?? platformLimits.lineageModelRequests;
   }
 };
 
@@ -2271,6 +2307,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "model");
       requireUnrefused(attempt);
+      await this.#requireEvidenceReadable();
       await this.#requireKindIn(attempt, "model", "model");
       await this.#requirePerson();
       const { binding, instructions, input, outputSchema } = checked(
@@ -2814,15 +2851,47 @@ export class RunHost extends RpcTarget {
         }
         throw error;
       }
-      return await readAsDelegate(
+      if (call !== "recall") {
+        return await readAsDelegate(
+          this.#env,
+          authority,
+          context,
+          undefined,
+          async (reader) =>
+            await brainCalls[call](brainOf(this.#env), reader, request)
+        );
+      }
+      const { pack, pins } = await readAsDelegate(
         this.#env,
         authority,
         context,
         undefined,
-        async (reader) =>
-          await brainCalls[call](brainOf(this.#env), reader, request)
+        async (reader) => {
+          const brain = brainOf(this.#env);
+          const recalled = await recall(brain, reader, request);
+          return {
+            pack: recalled,
+            pins: await d1BrainStore(brain).pinsOf(
+              reader,
+              citedVersions(recalled)
+            ),
+          };
+        }
       );
+      // What it cites, pinned as it was, added to the run's evidence
+      // (run-evidence.ts): checked before anything leaves the run from now
+      // on. A step replayed returns its recorded pack and records nothing.
+      await recordRunEvidence(this.#env, this.#run, permissionId, pins);
+      return pack;
     });
+  }
+
+  /**
+   * Refuses, as `brain.revoked`, anything leaving this run once it may no
+   * longer read what it recalled (run-evidence.ts).
+   */
+  async #requireEvidenceReadable(): Promise<void> {
+    await requireRunEvidenceReadable(this.#env, this.#run);
   }
 
   /**
@@ -2839,6 +2908,7 @@ export class RunHost extends RpcTarget {
     return await settle(async () => {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "connection");
+      await this.#requireEvidenceReadable();
       const stepKey = this.#stepKeyOf(attempt);
       const { connections, authority } = this.#run;
       const name = checked(z.string(), binding);
@@ -2910,6 +2980,7 @@ export class RunHost extends RpcTarget {
     return await settle(async () => {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "APP");
+      await this.#requireEvidenceReadable();
       await this.#requireReviewed(attempt, "APP");
       await this.#requirePerson();
       const stepKey = this.#stepKeyOf(attempt);
@@ -2967,6 +3038,8 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "decision");
       requireUnrefused(attempt);
+      // Its text goes to people other than the run's person.
+      await this.#requireEvidenceReadable();
       await this.#requireKindIn(attempt, "decision", "decision");
       const { step, from, description, timeout } = checked(
         decisionSchema,

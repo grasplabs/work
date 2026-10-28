@@ -352,6 +352,7 @@ const Chat = () => {
           lastAt: "",
           running: false,
           projectId: null,
+          appId: null,
         });
   return (
     <>

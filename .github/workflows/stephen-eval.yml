@@ -1,0 +1,91 @@
+# Stephen's eval against a real model (GRA-739), by hand only: from the
+# Actions tab, on the branch picked there. It costs money and takes a while,
+# so no push or pull request runs it; CI checks the hard rules on every
+# change against the scripted model (apps/core/test/stephen-eval.test.ts).
+# The model is reached through the stephen-eval 1Password Environment's
+# AI Gateway (`STEPHEN_EVAL_GATEWAY`), whose spend limit caps what a run
+# can spend, and the run's budget (`STEPHEN_EVAL_BUDGET_USD`) is the
+# ledger's limit too. Its numbers go to the run's summary and, when the
+# branch has an open pull request, on it; its report and every model
+# exchange go to the run's artifact. The weekly run on main is
+# stephen-weekly.yml.
+name: Stephen's eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: "Case IDs to run, comma-separated (R1,X2); empty for all"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stephen-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    name: eval
+    runs-on: ubuntu-latest
+    # The whole suite with a real model: about 70 turns and their judging.
+    timeout-minutes: 60
+    environment: stephen-eval
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      # The Cloudflare token and the eval's settings, from the stephen-eval
+      # 1Password Environment; a setting left out takes its default.
+      - uses: ./.github/actions/load-1password
+        with:
+          environment: stephen-eval
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secrets: CLOUDFLARE_API_TOKEN
+          settings: CLOUDFLARE_ACCOUNT_ID STEPHEN_EVAL_MODEL STEPHEN_EVAL_BUDGET_USD STEPHEN_EVAL_GATEWAY
+          required: CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN
+      # Fails on a broken hard rule (test/stephen-real-model.test.ts).
+      - name: Run Stephen's eval with the real model
+        run: |
+          set -o pipefail
+          vp -C apps/core test -c vite.stephen-model.config.ts 2>&1 | tee stephen-eval.log
+        env:
+          STEPHEN_MODEL: ${{ env.STEPHEN_EVAL_MODEL }}
+          STEPHEN_MODEL_BUDGET_USD: ${{ env.STEPHEN_EVAL_BUDGET_USD || '3' }}
+          STEPHEN_MODEL_GATEWAY: ${{ env.STEPHEN_EVAL_GATEWAY || 'stephen-ci' }}
+          STEPHEN_MODEL_CASES: ${{ inputs.cases }}
+      - name: Report the numbers
+        if: always()
+        run: node scripts/stephen-eval.ts report stephen-eval.log > stephen-eval.md
+      # On the branch's open pull request, if it has one.
+      - name: Post the numbers on the pull request
+        if: always()
+        run: |
+          pr=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$pr" ] && [ -s stephen-eval.md ]; then
+            gh pr comment "$pr" --repo "$REPO" --body-file stephen-eval.md --edit-last --create-if-none
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stephen-eval
+          path: |
+            stephen-eval.log
+            stephen-eval.md
+          if-no-files-found: ignore
+          retention-days: 30

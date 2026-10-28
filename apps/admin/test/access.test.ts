@@ -174,7 +174,7 @@ describe("cross-site requests", () => {
   it("lets the admin's own pages change state", async () => {
     const jwt = await accessJwt(staffEmail);
     const response = await worker.fetch(
-      asStaff("/sources", jwt, { method: "POST", headers: { origin } }),
+      asStaff("/ask", jwt, { method: "POST", headers: { origin } }),
       env
     );
     expect(response.status).toBe(200);
@@ -183,7 +183,7 @@ describe("cross-site requests", () => {
   it("lets a link from another site open a page", async () => {
     const jwt = await accessJwt(staffEmail);
     const response = await worker.fetch(
-      asStaff("/sources", jwt, {
+      asStaff("/ask", jwt, {
         headers: { origin: "https://elsewhere.test" },
       }),
       env

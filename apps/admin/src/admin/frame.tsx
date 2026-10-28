@@ -41,7 +41,6 @@ import {
 import { Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
   BuildingIcon,
-  CableIcon,
   FlaskConicalIcon,
   HourglassIcon,
   LayoutDashboardIcon,
@@ -62,7 +61,7 @@ import type { Organization } from "./views.ts";
 
 /** One of the admin's own places, down the top of its sidebar. */
 interface Place {
-  to: "/" | "/integrations" | "/platform" | "/ask" | "/sources" | "/lab";
+  to: "/" | "/integrations" | "/platform" | "/ask" | "/lab";
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   /** The pages under it, nested beneath its entry. */
@@ -92,7 +91,6 @@ const places: readonly Place[] = [
     ],
   },
   { to: "/ask", label: "Ask Grasp", icon: SparklesIcon },
-  { to: "/sources", label: "Sources", icon: CableIcon },
   { to: "/lab", label: "Stephen Lab", icon: FlaskConicalIcon },
 ];
 

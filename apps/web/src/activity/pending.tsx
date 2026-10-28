@@ -36,16 +36,16 @@ export interface PendingRequests {
 }
 
 /**
- * Every request waiting for an admin, oldest first as core lists them. The
- * Apps are read in full, not only for names: they say which version an
- * admin reviews, so the tab fails without them rather than offer the
- * wrong decisions.
+ * The requests waiting for an admin (as the feed of what waits lists
+ * them), with the names to show. The Apps are read in full, not only for
+ * names: they say which version an admin reviews, so the tab fails
+ * without them rather than offer the wrong decisions.
  */
-export const readPendingRequests = async (
-  session: Session
+export const readRequestNames = async (
+  session: Session,
+  requests: Permission[]
 ): Promise<PendingRequests> => {
-  const [requests, apps, people] = await Promise.all([
-    session.permissions.list(undefined, "requested"),
+  const [apps, people] = await Promise.all([
     session.apps.list(),
     readPeople(session),
   ]);

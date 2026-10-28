@@ -49,8 +49,8 @@ import { acceptedInput } from "../workflow-starts.ts";
 import { runDequeued } from "./admission.ts";
 import { runEngine, runRetentionDays } from "./engine.ts";
 import type { PinnedCandidateRun } from "./engine.ts";
+import { modelCallLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
-import { quotaPolicy } from "./quotas.ts";
 import type { HostedResourceRun } from "./resource-host.ts";
 import {
   engineResultOf,
@@ -479,7 +479,9 @@ const loadedCandidateRun = async (
   const fixtures = z
     .record(z.string(), z.object({ output: z.json() }))
     .parse(JSON.parse(row.fixtures));
-  const { limits } = await quotaPolicy(env);
+  // Never an end of the run when the policy can't be read for a moment
+  // (`modelCallLimitOf`): its last read, else the platform's limit.
+  const modelCalls = await modelCallLimitOf(env);
   return {
     run: {
       runId,
@@ -517,8 +519,8 @@ const loadedCandidateRun = async (
         ),
       },
       maxModelCalls: Math.min(
-        limits.lineageModelRequests,
-        build.limits.maxModelCalls ?? limits.lineageModelRequests
+        modelCalls,
+        build.limits.maxModelCalls ?? modelCalls
       ),
       // A test run waits only briefly: one waiting longer fails.
       maxSleepMs: maxCandidateWaitMs,

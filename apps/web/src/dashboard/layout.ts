@@ -1,23 +1,10 @@
-import { standardWidgetIds } from "@grasp-os/shared/dashboard";
-import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
+import type { DashboardWidgetId } from "@grasp-os/shared/dashboard";
 
 // The widget board's layout, as a person changes it (widget-board.tsx):
 // which widgets are on it, in what order, moved, taken off and added, as
 // the prototype's (`data/dashboard.ts`, `components/dashboard/
 // widget-board.tsx`). Each change is a new list; the board saves it whole.
-
-/** The widgets only admins are offered: what the models cost, which core reads only to them. */
-const adminWidgets: ReadonlySet<StandardWidgetId> = new Set(["spend"]);
-
-/**
- * The widgets Grasp offers this person, in the order the board begins
- * with: every one to admins. It is their board as it begins, and as it is
- * if they never changed it.
- */
-export const offeredWidgets = (admin: boolean): readonly StandardWidgetId[] =>
-  admin
-    ? standardWidgetIds
-    : standardWidgetIds.filter((widget) => !adminWidgets.has(widget));
+// Grasp's own widgets and those Grasp made for the person move alike.
 
 /**
  * Moves `id` to place `to`, as dragging it there does: the ones between
@@ -25,10 +12,10 @@ export const offeredWidgets = (admin: boolean): readonly StandardWidgetId[] =>
  * not on the board leaves it as it is.
  */
 export const placeWidget = (
-  widgets: readonly StandardWidgetId[],
-  id: StandardWidgetId,
+  widgets: readonly DashboardWidgetId[],
+  id: DashboardWidgetId,
   to: number
-): readonly StandardWidgetId[] => {
+): readonly DashboardWidgetId[] => {
   const from = widgets.indexOf(id);
   const at = Math.min(Math.max(to, 0), widgets.length - 1);
   if (from === -1 || from === at) {
@@ -40,40 +27,40 @@ export const placeWidget = (
 
 /** Moves `id` this many places earlier (negative) or later, and not past either end. */
 export const moveWidget = (
-  widgets: readonly StandardWidgetId[],
-  id: StandardWidgetId,
+  widgets: readonly DashboardWidgetId[],
+  id: DashboardWidgetId,
   by: number
-): readonly StandardWidgetId[] => {
+): readonly DashboardWidgetId[] => {
   const from = widgets.indexOf(id);
   return from === -1 ? widgets : placeWidget(widgets, id, from + by);
 };
 
 /** The board without `id`. */
 export const removeWidget = (
-  widgets: readonly StandardWidgetId[],
-  id: StandardWidgetId
-): readonly StandardWidgetId[] => widgets.filter((widget) => widget !== id);
+  widgets: readonly DashboardWidgetId[],
+  id: DashboardWidgetId
+): readonly DashboardWidgetId[] => widgets.filter((widget) => widget !== id);
 
 /** The board with `id` added last; never twice. */
 export const addWidget = (
-  widgets: readonly StandardWidgetId[],
-  id: StandardWidgetId
-): readonly StandardWidgetId[] =>
+  widgets: readonly DashboardWidgetId[],
+  id: DashboardWidgetId
+): readonly DashboardWidgetId[] =>
   widgets.includes(id) ? widgets : [...widgets, id];
 
 /** Whether the board is other than it began: other widgets, or in another order. */
 export const differsFromDefault = (
-  widgets: readonly StandardWidgetId[],
-  offered: readonly StandardWidgetId[]
+  widgets: readonly DashboardWidgetId[],
+  offered: readonly DashboardWidgetId[]
 ): boolean =>
   widgets.length !== offered.length ||
   widgets.some((widget, index) => widget !== offered[index]);
 
-/** The widgets offered that aren't on the board, in the order the board begins with. */
-export const missingWidgets = (
-  widgets: readonly StandardWidgetId[],
-  offered: readonly StandardWidgetId[]
-): StandardWidgetId[] => offered.filter((widget) => !widgets.includes(widget));
+/** The widgets of `offered` that aren't on the board, in their order. */
+export const missingWidgets = <Id extends DashboardWidgetId>(
+  widgets: readonly DashboardWidgetId[],
+  offered: readonly Id[]
+): Id[] => offered.filter((widget) => !widgets.includes(widget));
 
 /**
  * The grid of blocks as it stands on screen: where it is, its columns,
