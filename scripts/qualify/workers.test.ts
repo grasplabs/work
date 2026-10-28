@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { namesOwn } from "./cloudflare.ts";
+import { knownName, namesOwn } from "./cloudflare.ts";
 import { clientConfig, storageOf } from "./workers.ts";
 
 // A release's core, as deploy-lib.ts writes its wrangler.json: what each
@@ -133,5 +133,20 @@ describe("the run's writes", () => {
       nested: false,
       encoded: false,
     });
+  });
+});
+
+describe("the account a run starts in", () => {
+  it("may hold the platform's, placed clients' and qualification runs' resources, nothing else", () => {
+    expect(
+      [
+        "grasp-os-clients",
+        "grasp-os-admin",
+        "g7k2m9-grasp-os-core",
+        "qual-20261023-a-grasp-os-core",
+        "someone-elses-worker",
+        "g-grasp-os-core",
+      ].map((name) => knownName(name))
+    ).toStrictEqual([true, true, true, true, false, false]);
   });
 });
