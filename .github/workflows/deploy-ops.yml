@@ -1,6 +1,7 @@
-# Deploys the admin and router to grasp-os-ops: the account that holds a token
-# for every client, so it never changes on a merge. Run it by hand from main
-# once the change works in grasp-os-staging. Require a reviewer on the grasp-os-ops
+# Deploys the admin and router to Grasp's Cloudflare account, the one
+# staging's core and connect run in too: the admin holds a token for every
+# client, so it never changes on a merge. Run it by hand from main once
+# the change works in staging. Require a reviewer on the grasp-os-ops
 # environment in GitHub so a second person approves every run.
 #
 # Every run also copies the shared secrets (Grasp's OAuth app secrets and
@@ -43,28 +44,25 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+      # The Cloudflare credentials and store, from the ops 1Password
+      # Environment, as everything this workflow reads:
+      # OP_SERVICE_ACCOUNT_TOKEN, the environment's secret, is the only value
+      # kept in GitHub.
+      - uses: ./.github/actions/load-1password
         with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-ops/cloudflare/account-id
-          CLOUDFLARE_API_TOKEN: op://grasp-os-ops/cloudflare/api-token
-          SECRETS_STORE_ID: op://grasp-os-ops/cloudflare/secrets-store-id
-      # The shared secrets, as this step's outputs only (masked in logs):
-      # never exported to the job's env, so no other step, deploys included,
-      # sees them. Each is a field of the `shared` item, named as the Worker
-      # secret it becomes.
-      - id: shared
-        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+          environment: ops
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secrets: CLOUDFLARE_API_TOKEN
+          settings: CLOUDFLARE_ACCOUNT_ID SECRETS_STORE_ID
+          required: CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN SECRETS_STORE_ID
+      # The shared secrets, loaded right before the step that copies them
+      # and cleared from the job's env right after, so no deploy sees them.
+      # Each is named as the Worker secret it becomes.
+      - uses: ./.github/actions/load-1password
         with:
-          export-env: false
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          ENTRA_CLIENT_SECRET: op://grasp-os-ops/shared/ENTRA_CLIENT_SECRET
-          MICROSOFT_CLIENT_SECRET: op://grasp-os-ops/shared/MICROSOFT_CLIENT_SECRET
-          GOOGLE_CLIENT_SECRET: op://grasp-os-ops/shared/GOOGLE_CLIENT_SECRET
-          COMPOSIO_API_KEY: op://grasp-os-ops/shared/COMPOSIO_API_KEY
+          environment: ops
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secrets: ENTRA_CLIENT_SECRET MICROSOFT_CLIENT_SECRET GOOGLE_CLIENT_SECRET COMPOSIO_API_KEY
       # Secrets Store keeps each secret by an ID of its own: an existing one
       # is updated by that ID, a missing one created. Values go to wrangler
       # on stdin, never as an argument or in a log line, and are written
@@ -75,11 +73,6 @@ jobs:
       # normally covers it; the list is still read page by page up to
       # `total_pages`.
       - name: Copy the shared secrets to Secrets Store
-        env:
-          ENTRA_CLIENT_SECRET: ${{ steps.shared.outputs.ENTRA_CLIENT_SECRET }}
-          MICROSOFT_CLIENT_SECRET: ${{ steps.shared.outputs.MICROSOFT_CLIENT_SECRET }}
-          GOOGLE_CLIENT_SECRET: ${{ steps.shared.outputs.GOOGLE_CLIENT_SECRET }}
-          COMPOSIO_API_KEY: ${{ steps.shared.outputs.COMPOSIO_API_KEY }}
         run: |
           set -euo pipefail
           names=(ENTRA_CLIENT_SECRET MICROSOFT_CLIENT_SECRET GOOGLE_CLIENT_SECRET COMPOSIO_API_KEY)
@@ -88,11 +81,11 @@ jobs:
           empty=()
           for name in "${names[@]}"; do
             if [ -z "${!name}" ]; then
-              empty+=("shared/$name")
+              empty+=("$name")
             fi
           done
           if [ "${#empty[@]}" -gt 0 ]; then
-            echo "::error::Empty 1Password fields, nothing written: ${empty[*]}"
+            echo "::error::Empty in the ops 1Password Environment, nothing written: ${empty[*]}"
             exit 1
           fi
           existing='[]'
@@ -115,6 +108,12 @@ jobs:
             else
               printf '%s' "${!name}" | vp exec wrangler secrets-store secret update "$SECRETS_STORE_ID" --secret-id "$id" --remote
             fi
+          done
+      - name: Clear the shared secrets from the job's env
+        if: always()
+        run: |
+          for name in ENTRA_CLIENT_SECRET MICROSOFT_CLIENT_SECRET GOOGLE_CLIENT_SECRET COMPOSIO_API_KEY; do
+            echo "$name=" >> "$GITHUB_ENV"
           done
       # A D1 database's jurisdiction is set only when it is created, and deploy
       # would auto-provision a missing one outside the EU: create the
@@ -148,12 +147,12 @@ jobs:
       # The admin verifies every request's Access JWT against its Access
       # application (apps/admin/src/access.ts) and refuses everyone
       # without these, so a deploy without them would lock staff out: stop
-      # before deploying. They're the `grasp-os-ops` environment's variables,
-      # not secrets: the AUD tag and the team URL identify the app, they
-      # grant nothing. So is CLIENT_DOMAIN, the domain clients are served
-      # under: without it the admin provisions and deploys no client, but
-      # works otherwise, so it's passed only when set (keep_vars keeps the
-      # last one). So are ENTRA_CLIENT_ID and GOOGLE_CLIENT_ID, Grasp's
+      # before deploying. They're settings in the ops 1Password
+      # Environment, not secrets: the AUD tag and the team URL
+      # identify the app, they grant nothing. So is CLIENT_DOMAIN, the
+      # domain clients are served under: without it the admin provisions
+      # and deploys no client, but works otherwise, so it's passed only when
+      # set (keep_vars keeps the last one). So are ENTRA_CLIENT_ID and GOOGLE_CLIENT_ID, Grasp's
       # OAuth apps' client ids, which each client's core signs people in
       # with: a client whose sign-in names an IdP without one isn't deployed.
       # So is GRASP_CLIENT_ID, Grasp's own client, whose core answers Ask
@@ -167,24 +166,20 @@ jobs:
       # So are DISCORD_PUBLIC_KEY and DISCORD_STAFF_IDS, Grasp's Discord
       # application's public key and the staff's Discord user ids
       # (apps/admin/src/admin/discord.ts): without them the bot answers
-      # no one.
+      # no one. Settings, not secrets, so not masked; one left out of the
+      # Environment is empty.
+      - if: ${{ !inputs.secrets-only }}
+        uses: ./.github/actions/load-1password
+        with:
+          environment: ops
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          settings: CF_ACCESS_AUD CF_ACCESS_ISS CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID GRASP_CLIENT_ID ROOMS_ORIGIN ADMIN_HOST DISCORD_PUBLIC_KEY DISCORD_STAFF_IDS
       - name: Deploy the admin with its Access settings
         if: ${{ !inputs.secrets-only }}
-        env:
-          CF_ACCESS_AUD: ${{ vars.CF_ACCESS_AUD }}
-          CF_ACCESS_ISS: ${{ vars.CF_ACCESS_ISS }}
-          CLIENT_DOMAIN: ${{ vars.CLIENT_DOMAIN }}
-          ENTRA_CLIENT_ID: ${{ vars.ENTRA_CLIENT_ID }}
-          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-          GRASP_CLIENT_ID: ${{ vars.GRASP_CLIENT_ID }}
-          ROOMS_ORIGIN: ${{ vars.ROOMS_ORIGIN }}
-          ADMIN_HOST: ${{ vars.ADMIN_HOST }}
-          DISCORD_PUBLIC_KEY: ${{ vars.DISCORD_PUBLIC_KEY }}
-          DISCORD_STAFF_IDS: ${{ vars.DISCORD_STAFF_IDS }}
         run: |
           set -euo pipefail
           if [ -z "$CF_ACCESS_AUD" ] || [ -z "$CF_ACCESS_ISS" ]; then
-            echo "::error::Set CF_ACCESS_AUD and CF_ACCESS_ISS as variables of the grasp-os-ops environment; nothing deployed"
+            echo "::error::Set CF_ACCESS_AUD and CF_ACCESS_ISS in the ops 1Password Environment; nothing deployed"
             exit 1
           fi
           vars=(--var "CF_ACCESS_AUD:$CF_ACCESS_AUD" --var "CF_ACCESS_ISS:$CF_ACCESS_ISS")

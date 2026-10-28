@@ -51,6 +51,7 @@ import {
 } from "./access.ts";
 import {
   citedCollections,
+  readableByEveryoneOf,
   memoryAudienceOf,
   namesOf,
   noAudience,
@@ -479,10 +480,17 @@ export const forContext = async (
           work,
           context.type === "channel"
         );
+  // Held to what everyone reading may read in the query itself, so a
+  // record resting on anything else takes no place under the limit; then
+  // checked again as it is handed over.
   const permitted = await stillReadable(
     env,
     people,
-    await memoriesFor(brainOf(env), audience)
+    await memoriesFor(
+      brainOf(env),
+      audience,
+      await readableByEveryoneOf(env, people)
+    )
   );
   // Who wrote each one that isn't the person's own.
   const others = [

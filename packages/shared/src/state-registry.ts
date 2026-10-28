@@ -230,6 +230,7 @@ const coreDb: D1State = {
       "App token signing keys, private keys encrypted with BETTER_AUTH_SECRET."
     ),
     organizations: exported(auth),
+    org_settings: exported(`${core}org-settings.ts`),
     policy_documents: exported(`${core}policies.ts`),
     policy_rules: exported(`${core}policies.ts`),
     policy_exceptions: exported(`${core}policies.ts`),
@@ -336,6 +337,7 @@ const coreDb: D1State = {
     dependency_admission_refusals: exported(`${core}dependencies/requests.ts`),
     workflow_param_values: exported(`${core}workflows/params.ts`),
     workflow_owners: exported(`${core}workflows/owners.ts`),
+    workflow_teams: exported(`${core}workflows/teams.ts`),
     hidden_connectors: exported(`${core}connections.ts`),
     tool_class_settings: exported(`${core}tool-classes.ts`),
     stephen_reach: exported(`${core}stephen-reach.ts`),
@@ -585,6 +587,7 @@ const workspaces: DurableObjectState = {
     chat_build_jobs: exported(`${core}build-jobs.ts`),
     dashboards: exported(`${core}workspace.ts`),
     dashboard_widgets: exported(`${core}workspace.ts`),
+    custom_widgets: exported(`${core}workspace.ts`),
     email_preferences: exported(`${core}workspace.ts`),
     preview_releases: cache(`${core}sealed-previews.ts`),
     preview_release_artifacts: cache(`${core}sealed-previews.ts`),

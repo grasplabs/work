@@ -1,3 +1,4 @@
+import type { ContextWords } from "@grasp-os/shared/onboarding-context";
 import type { KnownPart } from "@grasp-os/shared/onboarding-gate";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
@@ -11,6 +12,7 @@ import {
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
 import type { ShapeKey, Teammate } from "../brain/dot-shapes.ts";
+import { isLocale } from "../i18n.ts";
 import { SpokenText } from "../voice/spoken-text.tsx";
 import {
   hold,
@@ -23,7 +25,13 @@ import {
 } from "../voice/voice.ts";
 import type { Tone } from "../voice/voice.ts";
 import { KnowledgeBar } from "./knowledge-bar.tsx";
-import { Explained, Primary, tones } from "./setup-parts.tsx";
+import {
+  Explained,
+  Primary,
+  Seen,
+  tones,
+  useEntrance,
+} from "./setup-parts.tsx";
 import type { StepProps } from "./setup-steps.tsx";
 import { readingSeconds } from "./setup.ts";
 
@@ -31,9 +39,10 @@ import { readingSeconds } from "./setup.ts";
 // `components/onboarding/onboarding-steps.tsx`): what the onboarding is
 // for, told as a story rather than read. Stephen lays out the plan a line
 // at a time, each line alone in the middle, and the brain above takes a
-// figure for each. After the fifth line, a taste of the interviews: he asks
-// Mark, and three of the team answer in their own voices; then he asks the
-// last one how long it takes. With the sound off, each line gets the time
+// figure for each. After the fifth line, a taste of the interviews: one
+// conversation, about the work the kickoff named where it named any: he
+// asks one of the team, who answers in their own voice, and how long it
+// takes. With the sound off, each line gets the time
 // it takes to say; paused, the story holds where it is. Last, the plan is
 // summed up, the bar settles back to what Grasp knows now, and the way on
 // fades in.
@@ -325,15 +334,17 @@ const Prepared = ({
  * The story's clock: a line at a time, said by Stephen, and after the
  * fifth line every turn of the conversation, in the team's own voices.
  * How far a line is comes from his voice as he says it; with the sound
- * off, from the time it takes to say. With less motion, it is told at
- * once.
+ * off, from the time it takes to say. With less motion, or coming back to
+ * it once it was told, it is told at once.
  */
 const useStory = (script: Script): Told => {
-  const reduce = useSyncExternalStore(
+  const lessMotionWanted = useSyncExternalStore(
     onMotionChange,
     () => window.matchMedia(lessMotion).matches,
     () => false
   );
+  const seen = useContext(Seen);
+  const reduce = lessMotionWanted || seen;
   const voice = useVoice();
   const beats = script.lines.length;
   const [beat, setBeat] = useState(0);
@@ -408,9 +419,83 @@ const Speaking = ({ turn }: { turn: Turn }) => (
   </div>
 );
 
+/**
+ * The taste of an interview: one of the team, asked by Stephen where the
+ * time goes, answers in their own voice, short and quick, as said on a
+ * call rather than read out; and Stephen asks how long it takes, as he
+ * does on every call, so the hours can be worked out. About the work the
+ * kickoff named, where it named any, in the company's own words; else
+ * Tim's invoices, which every company has.
+ */
+const useConversation = (words: ContextWords | undefined): Turn[] => {
+  const { t } = useLingui();
+  const example = words?.example ?? null;
+  const name = "Tim";
+  const who: Teammate = "tim";
+  const asking = { name: "Stephen", role: "" };
+  if (example !== null) {
+    return [
+      {
+        ...asking,
+        tone: "interested, a little lighter",
+        text: example.question,
+      },
+      {
+        name,
+        role: example.role,
+        who,
+        tone: "easy, light",
+        text: example.answer,
+      },
+      {
+        ...asking,
+        tone: "curious, gently",
+        text: t`How long does that take you, ${name}?`,
+      },
+      {
+        name,
+        role: example.role,
+        who,
+        tone: "easy, light",
+        text: example.time,
+      },
+    ];
+  }
+  const role = t`Finance`;
+  return [
+    {
+      ...asking,
+      tone: "interested, a little lighter",
+      text: t`${name}, where does the time go in your week?`,
+    },
+    {
+      name,
+      role,
+      who,
+      tone: "easy, light",
+      text: t`Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask.`,
+    },
+    {
+      ...asking,
+      tone: "curious, gently",
+      text: t`How long does one of those take you, ${name}?`,
+    },
+    {
+      name,
+      role,
+      who,
+      tone: "easy, light",
+      text: t`Twenty minutes each, easily. About fifteen a week.`,
+    },
+  ];
+};
+
 /** What the story says: seven lines, and the conversation after the fifth. */
 const useScript = (data: StepProps["data"]): Script => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
+  const words =
+    data.view.context.words[isLocale(i18n.locale) ? i18n.locale : "en"];
+  const conversation = useConversation(words);
   const { threshold } = data.gate;
   const { sponsor } = data.view;
   const { even } = tones;
@@ -446,52 +531,7 @@ const useScript = (data: StepProps["data"]): Script => {
         tone: even,
       },
     ],
-    // Stephen asks Mark, in his own voice; three of the team answer, each
-    // in their own, short and quick, as said on a call rather than read
-    // out; and Stephen asks the last one how long it takes, as he does on
-    // every call, so the hours can be worked out.
-    conversation: [
-      {
-        name: "Stephen",
-        role: "",
-        tone: "interested, a little lighter",
-        text: t`Mark, where does the time go on a mortgage file?`,
-      },
-      {
-        name: "Mark",
-        role: t`Mortgage advice`,
-        who: "mark",
-        tone: "easy, light",
-        text: t`Chasing paperwork. Half of every file is waiting for payslips.`,
-      },
-      {
-        name: "Lisa",
-        role: t`Customer service`,
-        who: "lisa",
-        tone: "neutral, light",
-        text: t`Every morning I copy new tickets into a spreadsheet. There goes my first hour.`,
-      },
-      {
-        name: "Tim",
-        role: t`Finance`,
-        who: "tim",
-        tone: "easy, light",
-        text: t`Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask.`,
-      },
-      {
-        name: "Stephen",
-        role: "",
-        tone: "curious, gently",
-        text: t`How long does one of those take you, Tim?`,
-      },
-      {
-        name: "Tim",
-        role: t`Finance`,
-        who: "tim",
-        tone: "easy, light",
-        text: t`Twenty minutes each, easily. About fifteen a week.`,
-      },
-    ],
+    conversation,
   };
 };
 
@@ -499,8 +539,8 @@ const useScript = (data: StepProps["data"]): Script => {
  * "How this works", told rather than read: Stephen says the plan a line
  * at a time, each alone in the middle with its words lighting up as he
  * says them, and the brain above takes a figure for each. After the fifth
- * line, a sample interview: Stephen asks, shown as himself, and Mark, Lisa
- * and Tim answer in their own voices, each drawn in dots from their photo.
+ * line, a sample interview: Stephen asks, shown as himself, and one of
+ * the team answers in their own voice, drawn in dots from their photo.
  * Last, the plan is summed up, the bar settles back to what is known now,
  * and the way on fades in.
  */
@@ -511,6 +551,7 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   const script = useScript(data);
   const { lines, conversation } = script;
   const story = useStory(script);
+  const seen = useContext(Seen);
   const { beat, turn, progress, told } = story;
 
   useEffect(() => {
@@ -546,6 +587,11 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   );
 
   const line = lines[beat]?.text ?? "";
+  // Told before, the plan is there summed up at once.
+  const toldEntrance = useEntrance(
+    told ? "told" : "",
+    "animate-in fade-in duration-800"
+  );
   let shownLine = (
     <div
       className="animate-in fade-in slide-in-from-bottom-2 flex w-full flex-col items-center gap-5 duration-600"
@@ -558,10 +604,7 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   );
   if (told) {
     shownLine = (
-      <div
-        className="animate-in fade-in flex flex-col gap-2 duration-800"
-        key="told"
-      >
+      <div className={cn("flex flex-col gap-2", toldEntrance)} key="told">
         <p className="text-2xl font-medium tracking-tight">{t`Here’s the plan`}</p>
         <p className="text-muted-foreground text-balance">
           {t`Your people, documents and tools first. Then two weeks of short conversations with your team. At ${threshold}%, your team can start.`}
@@ -574,9 +617,12 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   const gate = told || beat >= gateBeat;
   return (
     <>
-      {[...lines, ...conversation].map((each) => (
-        <Prepared key={each.text} {...each} />
-      ))}
+      {/* Told before, nothing of it is said again, so nothing is fetched. */}
+      {seen
+        ? null
+        : [...lines, ...conversation].map((each) => (
+            <Prepared key={each.text} {...each} />
+          ))}
       <h1 className="sr-only">{t`Here’s the plan`}</h1>
       <div
         aria-live="polite"

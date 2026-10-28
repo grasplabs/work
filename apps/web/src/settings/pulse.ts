@@ -1,3 +1,4 @@
+import type { WeekSchedule } from "@grasp-os/shared/org-settings";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
@@ -5,7 +6,8 @@ import { msg } from "@lingui/core/macro";
 // Pulse, as in the prototype (`lib/pulse.ts`): the device app that sees
 // which tools are used, never what is in them. Coverage over the whole
 // directory, and the weekly schedule in plain words, derived on read.
-// Core keeps none of it yet: Settings → Pulse shows it empty.
+// Core keeps the schedule (`orgSettings.pulse()`); no device reports to
+// it yet, so nobody is listed as having Pulse.
 
 /** A person's device with Pulse on it. */
 export interface PulseDevice {
@@ -27,14 +29,6 @@ export interface PulsePerson {
   team: string;
   device: PulseDevice | null;
 }
-
-/** Per weekday, Monday first, the 24 hours Pulse may report in. */
-export type WeekSchedule = boolean[][];
-
-/** A week in which Pulse never reports. */
-export const quietWeek: WeekSchedule = Array.from({ length: 7 }, () =>
-  Array.from({ length: 24 }, () => false)
-);
 
 /** A weekday in the reader's language, Monday first: "Monday", "Montag", "lundi". */
 export const dayName = (day: number): string =>

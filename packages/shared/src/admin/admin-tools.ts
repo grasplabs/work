@@ -12,6 +12,7 @@ import {
   errorRateOf,
   needsOf,
   releaseOf,
+  ringName,
   ringsOf,
   standingOf,
 } from "./admin-platform.ts";
@@ -164,7 +165,7 @@ export const ADMIN_TOOLS = [
     name: "platforms",
     title: "Every company’s platform",
     description:
-      "Every company’s own Grasp as the console runs it: how it stands, its ring and release, whether it runs what the console made live, yesterday’s requests and errors, and what needs a look; then the release going out now, ring by ring.",
+      "Every company’s own Grasp as the console runs it: how it stands, its ring (Alpha, Beta or Production) and release, whether it runs what the console made live, yesterday’s requests and errors, and what needs a look; then the release going out now, ring by ring.",
     inputSchema: NOTHING,
     annotations: READS,
   },
@@ -769,19 +770,19 @@ const platformLine = (
   const needs = needsOf(platform, fleet.releases).map((need) => need.kind);
   const look = needs.length > 0 ? `; needs a look: ${needs.join(", ")}` : "";
   const pinned = given(platform.pinned) ? " (pinned)" : "";
-  return `- ${name}: ${standingOf(platform, fleet.releases)}; ring ${platform.ring}; runs ${releaseOf(platform) ?? "nothing yet"}${pinned}; ${driftOf(platform).replace("_", " ")}; ${platform.usage.days.at(-1)?.requests ?? 0} requests yesterday, ${errors} errors${look}.`;
+  return `- ${name}: ${standingOf(platform, fleet.releases)}; in ${ringName(platform.ring)}; runs ${releaseOf(platform) ?? "nothing yet"}${pinned}; ${driftOf(platform).replace("_", " ")}; ${platform.usage.days.at(-1)?.requests ?? 0} requests yesterday, ${errors} errors${look}.`;
 };
 
 /** The release going out, ring by ring, in a line. */
 const rolloutLine = (rollout: Rollout): string => {
   const status =
     rollout.status === "waiting"
-      ? `waiting for someone at Grasp to approve ring ${Math.min(rollout.ring + 1, 2)}`
+      ? `waiting for someone at Grasp to approve ${ringName(Math.min(rollout.ring + 1, 2))}`
       : rollout.status;
   const rings = ringsOf(rollout)
     .map(
       (ring) =>
-        `Ring ${ring.ring}: ${ring.done} of ${ring.targets.length} on it`
+        `${ringName(ring.ring)}: ${ring.done} of ${ring.targets.length} on it`
     )
     .join("; ");
   return `Going out now: ${rollout.release}, ${status}. ${rings}.`;
@@ -1045,6 +1046,7 @@ const ANSWERS: Record<AdminToolName, (asked: Asked) => AdminToolAnswer> = {
           organization: org,
           standing: standingOf(platform, fleet.releases),
           ring: platform.ring,
+          ringName: ringName(platform.ring),
           release: releaseOf(platform),
           pinned: platform.pinned,
           drift: driftOf(platform),
