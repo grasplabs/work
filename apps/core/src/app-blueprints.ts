@@ -688,6 +688,7 @@ export const createFromBlueprint = async (
       statusChangedAt: sql<Date | null>`NULL`.as("status_changed_at"),
       statusChangedBy: sql<null>`NULL`.as("status_changed_by"),
       createdAt: sql<Date>`${appRow.createdAt.getTime()}`.as("created_at"),
+      link: sql<string | null>`NULL`.as("link"),
     })
     .from(blueprints)
     .where(
