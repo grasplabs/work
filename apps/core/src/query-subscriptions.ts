@@ -1760,6 +1760,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         evaluation,
         refusalResult(screenErrors.create("screen.access_changed"))
       );
+    } else if (evaluation.followsDecisions) {
+      // Who answers a decision is also by team, which an access notice
+      // may be about with the App role unchanged (leaving a decision's
+      // team, say): its decision queries are read again, so a decision
+      // the person may no longer answer goes from their inbox at once.
+      this.#changed(evaluation);
     }
   }
 
