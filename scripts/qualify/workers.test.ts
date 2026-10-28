@@ -113,6 +113,9 @@ describe("the run's writes", () => {
       hidden: owns(["qual-20261028/../grasp-os-core"]),
       flag: owns(["qual-20261028 --force"]),
       none: owns([]),
+      // Another run's, whose prefix only starts the same.
+      longer: owns(["qual-202610280-dispatcher"]),
+      prefixItself: owns(["qual-20261028"]),
     }).toStrictEqual({
       own: true,
       created: true,
@@ -121,6 +124,8 @@ describe("the run's writes", () => {
       hidden: false,
       flag: false,
       none: false,
+      longer: false,
+      prefixItself: true,
     });
   });
 });

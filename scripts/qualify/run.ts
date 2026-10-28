@@ -12,8 +12,8 @@
  * spike also reads `QUAL_MAIL_FROM`, `QUAL_MAIL_TO` and optionally
  * `QUAL_MAIL_FOREIGN_FROM`.
  *
- * Without `--live` every write runs as cf's own `--dry-run`, which sends
- * nothing; reads still go to the account. Every resource the run writes
+ * Without `--live` no write runs at all: each is recorded as planned;
+ * reads still go to the account. Every resource the run writes
  * is named after its prefix (`--prefix`, `qual-<yyyymmdd>` by default),
  * and a write naming anything else is refused (cf.ts), so a run only ever
  * touches its own qualification resources. `preflight` refuses an account
@@ -61,6 +61,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -96,6 +97,7 @@ import {
   cfCli,
   entriesOf,
   evidenceLog,
+  isOwnName,
   knownName,
   lastLines,
   textField,
@@ -198,7 +200,13 @@ const outDir = path.resolve(
   args.out ?? path.join(tmpdir(), "grasp-qualify", prefix)
 );
 mkdirSync(outDir, { recursive: true, mode: 0o700 });
-const record = evidenceLog(path.join(outDir, "evidence.jsonl"));
+// Owner only, whatever it was: it holds the run's keys and evidence.
+chmodSync(outDir, 0o700);
+const evidenceFile = path.join(outDir, "evidence.jsonl");
+const record = evidenceLog(evidenceFile);
+if (existsSync(evidenceFile)) {
+  chmodSync(evidenceFile, 0o600);
+}
 const cf = cfCli({ accountId, prefix, live: args.live, record });
 
 /** What one step leaves for the next, kept between invocations. */
@@ -225,6 +233,7 @@ for (const id of state.created) {
 }
 const saveState = (): void => {
   writeFileSync(stateFile, JSON.stringify(state, null, 2), { mode: 0o600 });
+  chmodSync(stateFile, 0o600);
 };
 const own = (id: string): void => {
   cf.own(id);
@@ -521,7 +530,10 @@ const ensureDatabase = (name: string): string => {
   );
   const made = textField(result, ["uuid"]);
   if (planned || made === undefined) {
-    return `planned-${name}`;
+    // A dry run's stand-in: the run's own, for the writes planned on it.
+    const standIn = `planned-${name}`;
+    cf.own(standIn);
+    return standIn;
   }
   own(made);
   return made;
@@ -1260,7 +1272,7 @@ const cleanupStep = (): void => {
   }
   const found = inventory();
   const ours = (names: readonly string[]) =>
-    names.filter((name) => name.startsWith(prefix));
+    names.filter((name) => isOwnName(name, prefix));
   if (found.namespaces.includes(prefix)) {
     deleteUserWorkers();
   }
@@ -1277,7 +1289,7 @@ const cleanupStep = (): void => {
   )) {
     const name = textField(database, ["name"]);
     const uuid = textField(database, ["uuid"]);
-    if (name?.startsWith(prefix) === true && uuid !== undefined) {
+    if (name !== undefined && isOwnName(name, prefix) && uuid !== undefined) {
       own(uuid);
       cf.write(["d1", "delete", uuid, "--force"], { names: [uuid] });
     }
@@ -1290,10 +1302,14 @@ const cleanupStep = (): void => {
   const after = recordInventory("after cleanup");
   const left = inventoryKinds
     .flatMap((kind) => after[kind])
-    .filter((name) => name.startsWith(prefix));
+    .filter((name) => isOwnName(name, prefix));
   check("nothing of the run is left", left.length === 0 ? "pass" : "fail", {
     left,
   });
+  // The run's generated keys go with what they keyed.
+  if (left.length === 0) {
+    rmSync(stateFile, { force: true });
+  }
 };
 
 const run: Record<Step, () => Promise<void> | void> = {
@@ -1319,7 +1335,7 @@ record({
   accountSha256: sha256(accountId),
 });
 console.info(
-  `Qualification run ${prefix}${args.live ? "" : " (dry run: writes run as cf --dry-run)"}; evidence in ${outDir}`
+  `Qualification run ${prefix}${args.live ? "" : " (dry run: writes are only planned)"}; evidence in ${outDir}`
 );
 // Preflight first, always: nothing writes to an account it refuses.
 const order = chosen.includes("preflight")

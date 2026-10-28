@@ -30,7 +30,7 @@ export default {
   async fetch(request, env) {
     const target = request.headers.get(${JSON.stringify(targetHeader)}) ?? "";
     const key = request.headers.get(${JSON.stringify(dispatchKeyHeader)}) ?? "";
-    if (key === "" || key !== env.DISPATCH_KEY || !target.startsWith(prefix)) {
+    if (key === "" || key !== env.DISPATCH_KEY || !target.startsWith(prefix + "-")) {
       return new Response("unknown", { status: 404 });
     }
     const headers = new Headers(request.headers);
