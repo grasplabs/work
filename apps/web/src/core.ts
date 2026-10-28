@@ -9,6 +9,8 @@ import { t } from "@lingui/core/macro";
 import { newWebSocketRpcSession } from "capnweb";
 import type { RpcStub } from "capnweb";
 
+import { noteSigningIn } from "./landing.ts";
+
 /**
  * Opens a Cap'n Web session with core, on the origin this page came from.
  * The browser sends the session cookie with it, which says who the
@@ -196,5 +198,7 @@ export const signIn = async (
   ) {
     throw new Error(`Sign-in did not start (${response.status})`);
   }
+  // Back from the IdP, the first page may be another (landing.ts).
+  noteSigningIn();
   window.location.assign(body.url);
 };

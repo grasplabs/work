@@ -3,8 +3,9 @@
  * dashboard and email preferences. Migrates itself on first wake-up after a release.
  */
 import type { ChatChannel } from "@grasp-os/shared/chat";
-import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
+import type { DashboardWidgetId } from "@grasp-os/shared/dashboard";
 import type { ChatId } from "@grasp-os/shared/ids";
+import type { CustomWidgetId } from "@grasp-os/shared/widgets";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -65,11 +66,19 @@ export const chats = sqliteTable(
      * (`chat_audiences` in core's database).
      */
     thread: text(),
+    /**
+     * The App the chat is for (`ChatsApi.forApp`): the one its person
+     * builds there, which its agent is told of; null for any other chat.
+     * Only a pointer: what the agent may do to the App is decided on
+     * every call, as for any chat.
+     */
+    appId: text("app_id"),
   },
   // A person's list, most recently active first.
   (table) => [
     index("chats_person").on(table.personId, table.lastAt),
     index("chats_project").on(table.projectId),
+    index("chats_app").on(table.personId, table.appId),
   ]
 );
 
@@ -596,9 +605,29 @@ export const dashboardWidgets = sqliteTable(
       .notNull()
       .references(() => dashboards.personId),
     position: integer().notNull(),
-    widgetId: text("widget_id").$type<StandardWidgetId>().notNull(),
+    widgetId: text("widget_id").$type<DashboardWidgetId>().notNull(),
   },
   (table) => [primaryKey({ columns: [table.personId, table.position] })]
+);
+
+/**
+ * The widgets Grasp made for a person from what they asked (the shared
+ * package's widgets.ts): its spec as JSON, checked as one when it was kept and
+ * again when it is read, and what they asked of it last. Its numbers are
+ * never kept: they are worked out each time it is shown. Kept in their own
+ * Workspace object, as their dashboard is.
+ */
+export const customWidgets = sqliteTable(
+  "custom_widgets",
+  {
+    personId: text("person_id").notNull(),
+    id: text().$type<CustomWidgetId>().notNull(),
+    spec: text().notNull(),
+    asked: text().notNull(),
+    madeAt: integer("made_at", { mode: "timestamp_ms" }).notNull(),
+    changedAt: integer("changed_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.personId, table.id] })]
 );
 
 /**

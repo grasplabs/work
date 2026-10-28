@@ -305,3 +305,74 @@ test("the screens a click opens can't each go on its activation: one click leave
   await expect(hop.getByRole("heading", { name: "Hop 2" })).toBeVisible();
   await expect(page).not.toHaveURL(/%5C%223%5C%22/u);
 });
+
+test("screens that focus themselves on one click's activation can't each go on it as the person's: the chain stops at one entry of the person's and one of the tab's own", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("screenNavigation");
+  const name = `Focus hops ${crypto.randomUUID().slice(0, 8)}`;
+  const { core, api } = apiOf(builder);
+  let app: string;
+  try {
+    ({ id: app } = await api.apps.create({ name }));
+    await release(api, app, hoppingFiles(), name);
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const page = await pageOf(builder);
+  await page.goto(`/domains/${app}/apps/launch/full`);
+  await page
+    .frameLocator('iframe[title="launch app"]')
+    .getByRole("button", { name: "Start focused hopping" })
+    .click({ timeout: 20_000 });
+  // The click goes to Focus hop 1, which focuses its own field and asks
+  // for Focus hop 2: the page sees activation (Playwright's Chromium keeps
+  // it for good, the worst case) in a focused frame, but the click was
+  // spent, so it goes as the tab's one go on its own. Focus hop 2, focused
+  // just the same, may not go on.
+  const hop = page.frameLocator('iframe[title="focus-hop app"]');
+  await expect(hop.getByRole("heading", { name: "Focus hop 2" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.waitForTimeout(3000);
+  await expect(hop.getByRole("heading", { name: "Focus hop 2" })).toBeVisible();
+});
+
+test("a screen's own code can't pass for the person acting, whatever it patches, dispatches or posts, and the person's own click still counts", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("screenNavigation");
+  const name = `Forges ${crypto.randomUUID().slice(0, 8)}`;
+  const { core, api } = apiOf(builder);
+  let app: string;
+  try {
+    ({ id: app } = await api.apps.create({ name }));
+    await release(api, app, hoppingFiles(), name);
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const page = await pageOf(builder);
+  await page.goto(`/domains/${app}/apps/launch/full`);
+  await page
+    .frameLocator('iframe[title="launch app"]')
+    .getByRole("button", { name: "Start forging" })
+    .click({ timeout: 20_000 });
+  // Forge 1 patches the frame's prototypes, dispatches input of its own,
+  // posts act-shaped messages to the page and focuses itself: none of it
+  // is the person's act, so its navigation goes as the tab's one go on
+  // its own, and Forge 2, doing the same, may not go on.
+  const forge = page.frameLocator('iframe[title="forge app"]');
+  await expect(forge.getByRole("heading", { name: "Forge 2" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.waitForTimeout(3000);
+  await expect(forge.getByRole("heading", { name: "Forge 2" })).toBeVisible();
+  // The person's own click in it, with its prototypes patched to drop
+  // what an act report looks like: still theirs, and it goes.
+  await forge.getByRole("button", { name: "Go back" }).click();
+  await expect(
+    page
+      .frameLocator('iframe[title="launch app"]')
+      .getByRole("heading", { name: "Launch" })
+  ).toBeVisible({ timeout: 20_000 });
+});

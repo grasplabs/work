@@ -1,3 +1,5 @@
+import type { BoardReport } from "@grasp-os/shared/dashboard";
+import type { NextReport } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
@@ -17,20 +19,20 @@ import { exportAs } from "../export/export-file.tsx";
 import type { ExportFile, ExportFormat } from "../export/export-file.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { PlainMarkdown } from "../knowledge/markdown.tsx";
-import type { NextReport } from "./programme.ts";
+import type { Loaded } from "../load-from-core.tsx";
 import {
+  readsOf,
   reportBody,
   reportFileName,
   reportMarkdown,
   reportTitle,
 } from "./report.ts";
-import type { ReportReads } from "./report.ts";
 
 // The weekly report, as the prototype's dialog (`components/metrics/
 // report-dialog.tsx`): the report itself, to read through before taking
 // it, as Markdown or as a PDF from the print window, the two ways every
-// export in Grasp offers (export/export-file.tsx). It is made from what
-// the dashboard read, as it stands when the dialog opens. The prototype's
+// export in Grasp offers (export/export-file.tsx). It is made from core's
+// read of it (`dashboard.report()`), as it stands when the dialog opens. The prototype's
 // printer and sheet of paper aren't here: the report shows as the page it
 // prints from.
 
@@ -43,7 +45,7 @@ const ReportSheet = ({
   today,
   onTaken,
 }: {
-  reads: ReportReads;
+  reads: Loaded<BoardReport>;
   title: string;
   line: string;
   week: number;
@@ -51,7 +53,7 @@ const ReportSheet = ({
   onTaken: () => void;
 }) => {
   const { i18n, t } = useLingui();
-  const body = reportBody(reads, { line, today }, i18n);
+  const body = reportBody(readsOf(reads), { line, today }, i18n);
   const file: ExportFile = {
     name: reportFileName(week, today),
     title,
@@ -115,7 +117,7 @@ export const ReportDialog = ({
   open,
   onOpenChange,
 }: {
-  reads: Promise<ReportReads>;
+  reads: Promise<Loaded<BoardReport>>;
   next: NextReport;
   /** The programme's line: "Week 3 of 8 · Under way". */
   line: string;

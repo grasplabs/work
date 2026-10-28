@@ -30,6 +30,10 @@ const ranSchema = z.object({
     nested: z.string(),
     carriage: z.string(),
     thrown: z.string(),
+    captured: z.string(),
+    capturedThrown: z.string(),
+    thrownMessage: z.string(),
+    forged: z.string(),
     control: z.string(),
   }),
 });
@@ -171,6 +175,86 @@ const core :Workerd.Worker = (
       });
     }
   );
+
+  // A tailed preview function, as core loads one here (GRA-919): what it
+  // writes reaches the sink core passes, bounded, and never workerd's
+  // output; what its code forges in place of its lines reaches neither.
+  it("hands a captured call's lines to core's sink alone, and takes nothing its code forged", async () => {
+    const capturedSchema = z.object({
+      answered: z.object({
+        answer: z.string(),
+        lines: z.array(z.object({ level: z.string(), message: z.string() })),
+      }),
+      values: ranSchema.shape.values,
+    });
+    const run = async (route: string) => {
+      const response = await fetch(new URL(route, served.url));
+      return capturedSchema.parse(await response.json());
+    };
+    const captured = await run("/captured");
+    const forged = await run("/forged");
+    const { values } = captured;
+    await sleep(SETTLE_MS);
+
+    expect({
+      answers: [captured.answered.answer, forged.answered.answer],
+      captured: captured.answered.lines.map(
+        ({ level, message }) => `${level} ${message}`
+      ),
+      forged: forged.answered.lines,
+      printed: [
+        served.logs().includes(values.captured),
+        served.logs().includes(values.forged),
+      ],
+    }).toStrictEqual({
+      answers: [values.captured, values.forged],
+      // The levels a tail keeps, `trace` left out; `node:console` and the
+      // console method the code put back write through them.
+      captured: [
+        `log ${values.captured}`,
+        `log ${values.captured}`,
+        `info ${values.captured}`,
+        `warn ${values.captured}`,
+        `error ${values.captured}`,
+        `debug ${values.captured}`,
+        `log ${values.captured}`,
+        `error ${values.captured}`,
+      ],
+      forged: [],
+      printed: [false, false],
+    });
+  });
+
+  // A captured call that throws after it wrote: its lines still reach the
+  // sink, and never workerd's output. What it threw is the call's answer,
+  // which workerd served `--verbose` reports as any call's throw (GRA-939):
+  // pinned, so a change is seen. Core's release runner never lets one
+  // through: its `Run` module answers what the function threw.
+  it("hands a captured call's lines to core's sink when it throws, printing none of them", async () => {
+    const response = await fetch(new URL("/captured-thrown", served.url));
+    const { answered, values } = z
+      .object({
+        answered: z.object({
+          answer: z.string(),
+          lines: z.array(z.object({ level: z.string(), message: z.string() })),
+        }),
+        values: ranSchema.shape.values,
+      })
+      .parse(await response.json());
+    await sleep(SETTLE_MS);
+
+    expect({
+      answer: answered.answer,
+      lines: answered.lines.map(({ level, message }) => `${level} ${message}`),
+      printed: served.logs().includes(values.capturedThrown),
+      thrownReported: served.logs().includes(values.thrownMessage),
+    }).toStrictEqual({
+      answer: "threw",
+      lines: [`log ${values.capturedThrown}`],
+      printed: false,
+      thrownReported: true,
+    });
+  });
 
   it("refuses to load a main module that can't be silenced first", async () => {
     const response = await fetch(new URL("/cjs", served.url));

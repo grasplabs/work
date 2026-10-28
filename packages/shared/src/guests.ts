@@ -118,9 +118,9 @@ export const guestErrors = defineErrorFamily({
   "guest.no_turns_left":
     "This chat has reached its length. Finish it to send what you wrote.",
   "guest.invalid": "That isn't something a guest chat takes.",
-  "guest.not_found": "There's no such guest chat for this App.",
+  "guest.not_found": "There's no such guest chat for this domain.",
   "guest.too_many_open":
-    "This App has too many open guest chats. Revoke some, or wait for them to end.",
+    "This domain has too many open guest chats. Revoke some, or wait for them to end.",
   "guest.no_model":
     "No model is set up for this deployment, so no guest can chat.",
   "guest.unavailable":

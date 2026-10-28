@@ -2523,6 +2523,29 @@ describe(
       });
     });
 
+    it("goes on with a run whose model call limit can't be read for a moment as it loads, and completes it", async () => {
+      const by = await builder();
+      const workflow = await published(by, (name) =>
+        definitionOf(name, [{ a: { set: { status: "a" } } }])
+      );
+      // Recorded first, so each read of it later is one query. The load's
+      // read of its model call limit fails (`modelCallLimitOf`), as D1 can
+      // for a moment: the run counts by the limit last read, and goes on.
+      await quotaPolicy(env);
+      const result = await withPolicyReadFailingOnce(
+        async () => {
+          const { runId } = await start(by, workflow.id);
+          return await ended(by, workflow.id, runId);
+        },
+        { by: "modelCallLimitOf" }
+      );
+      expect({
+        failed: result.failed,
+        status: result.value.status,
+        error: result.value.error ?? null,
+      }).toStrictEqual({ failed: true, status: "completed", error: null });
+    });
+
     it("checks what an attempt records while it still holds its admission, and settles it after", async () => {
       const by = await builder();
       const workflow = await published(by, greetThenCall);

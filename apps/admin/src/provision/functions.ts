@@ -44,7 +44,14 @@ const change = async (task: () => Promise<string>): Promise<ChangeResult> => {
 export const fetchNewClientOptions = createServerFn({ method: "GET" }).handler(
   async () => {
     const { releases } = await listReleases(adminDatabase(env.DB));
-    return { releases: releases.map(({ id, notes }) => ({ id, notes })) };
+    return {
+      releases: releases.map(({ id, notes, versionMajor, versionMinor }) => ({
+        id,
+        notes,
+        versionMajor,
+        versionMinor,
+      })),
+    };
   }
 );
 

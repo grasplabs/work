@@ -280,7 +280,7 @@ interface FairInput {
   work?:
     | { authority: Authority }
     | { onboarding: true }
-    | { platform: "brain_upkeep" };
+    | { platform: "brain_upkeep" | "dashboard_widgets" };
   binding?: { app: string };
   /** For a workflow run's call: whose share it takes (models.ts). */
   shareSubject?: string;

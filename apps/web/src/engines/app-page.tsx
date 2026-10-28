@@ -23,6 +23,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { setActiveChat } from "../chat/active-chat.ts";
 import { setDockMode } from "../chat/dock-mode.ts";
 import { ErrorText } from "../error-text.tsx";
 import { RenameField } from "../frame/rename-field.tsx";
@@ -37,15 +38,35 @@ import { StatusBadge, useStatusMove } from "./app-status.tsx";
 // to design it in the chat. The prototype's app is our App (a domain), its
 // tabs our App's screens.
 //
-// Editing is the chat's: Edit opens the chat beside the page (the shell's
-// dock, chat-dock.tsx), where Grasp changes the App with the person, as
-// the prototype's chat bottom right does. What the prototype's Publish
+// Editing is the chat's: Edit opens the App's own chat beside the page
+// (the shell's dock, chat-dock.tsx), the one core keeps for the person and
+// the App (`chats.forApp`), where Grasp changes the App with them, as the
+// prototype's chat bottom right does. What the prototype's Publish
 // menu adds, a link to publish at and saving as a blueprint, waits on
 // core (a published screen's address) and the blueprints page.
 
-/** Opens the chat beside the page, to change the App there. */
-const openChat = (): void => {
-  setDockMode("frame");
+/**
+ * Opens the App's own chat beside the page, to change the App there: the
+ * person's chat for it, which core makes the first time. Says why when
+ * core refuses (they no longer build it, say).
+ */
+const useAppChat = (app: string) => {
+  const { busy, failure, run } = useCoreAction();
+  const open = async (): Promise<void> => {
+    const chat = await run(async (session) => await session.chats.forApp(app));
+    if (chat === undefined) {
+      return;
+    }
+    setActiveChat(chat.id);
+    setDockMode("frame");
+  };
+  return {
+    busy,
+    failure,
+    handleOpen: () => {
+      void open();
+    },
+  };
 };
 
 /**
@@ -136,7 +157,13 @@ const ArchivedNotice = ({ app, builds }: { app: App; builds: boolean }) => {
 };
 
 /** An App with no screen yet: only described, and designed in the chat. */
-const OnlyDescribed = ({ editable }: { editable: boolean }) => (
+const OnlyDescribed = ({
+  editable,
+  onOpenChat,
+}: {
+  editable: boolean;
+  onOpenChat: () => void;
+}) => (
   <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed p-6">
     <div className="flex max-w-prose flex-col gap-1">
       <span className="font-medium">
@@ -149,7 +176,7 @@ const OnlyDescribed = ({ editable }: { editable: boolean }) => (
       </p>
     </div>
     {editable ? (
-      <Button onClick={openChat}>
+      <Button onClick={onOpenChat}>
         <MessageSquareIcon data-icon="inline-start" />
         <Trans>Design it in the chat</Trans>
       </Button>
@@ -293,6 +320,7 @@ export const AppPage = ({
   const builds = buildsApp(app, identity);
   const archived = app.status === "archived";
   const editable = builds && !archived;
+  const chat = useAppChat(app.id);
   return (
     <div className="flex min-h-0 flex-1 flex-col text-sm">
       <div className="bg-background flex flex-none flex-wrap items-center gap-x-6 gap-y-2 border-b px-4 py-3 md:px-6">
@@ -323,7 +351,12 @@ export const AppPage = ({
           </Link>
           {editable ? (
             <>
-              <Button onClick={openChat} size="sm" variant="outline">
+              <Button
+                disabled={chat.busy}
+                onClick={chat.handleOpen}
+                size="sm"
+                variant="outline"
+              >
                 <SquarePenIcon data-icon="inline-start" />
                 <Trans>Edit</Trans>
               </Button>
@@ -332,6 +365,11 @@ export const AppPage = ({
           ) : null}
         </span>
       </div>
+      {chat.failure === undefined ? null : (
+        <div className="px-4 pt-4 md:px-6">
+          <ErrorText>{chat.failure}</ErrorText>
+        </div>
+      )}
       {archived ? (
         <div className="px-4 pt-4 md:px-6">
           <ArchivedNotice app={app} builds={builds} />
@@ -339,7 +377,9 @@ export const AppPage = ({
       ) : null}
       {open === undefined ? (
         <div className="px-4 pt-4 md:px-6">
-          {archived ? null : <OnlyDescribed editable={editable} />}
+          {archived ? null : (
+            <OnlyDescribed editable={editable} onOpenChat={chat.handleOpen} />
+          )}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>

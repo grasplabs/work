@@ -15,7 +15,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { loadLandscape } from "../landscape/landscape-data.ts";
 import type { LandscapeApp } from "../landscape/landscape.ts";
 import { FindingsTable } from "../policies/findings-table.tsx";
-import { policyBook, policyToday } from "../policies/policies-data.ts";
+import { bookOf, policyToday } from "../policies/policies-data.ts";
 import {
   ConditionChips,
   PolicyExcerpt,
@@ -27,27 +27,30 @@ import {
   findings,
   ruleStatusDescription,
 } from "../policies/policy.ts";
-import type { PolicyRule } from "../policies/policy.ts";
+import type { PolicyBook, PolicyRule } from "../policies/policy.ts";
 
 // One rule, as in the prototype (`routes/policies/rules/$ruleId.tsx`):
 // what it checks and why, whether it is on, and the apps it catches now.
-// The prototype edits, deletes and turns a rule on or off here; Grasp
-// keeps no rules yet (policies/policies-data.ts), so every link to one
-// finds the prototype's state for a rule that isn't there.
+// Core keeps the rules (policies/policies-data.ts); editing, deleting and
+// turning a rule on or off here, as the prototype does, come with the
+// policy pages' port. A link to a rule that isn't there finds the
+// prototype's state for one.
 
 const RuleDetail = ({
   rule,
   apps,
+  book,
 }: {
   rule: PolicyRule;
   apps: readonly LandscapeApp[];
+  book: PolicyBook;
 }) => {
   const { t, i18n } = useLingui();
   const policy =
     rule.policyId === null
       ? undefined
-      : policyBook.policies.find(({ id }) => id === rule.policyId);
-  const found = findings([rule], apps, policyBook.exceptions, policyToday());
+      : book.policies.find(({ id }) => id === rule.policyId);
+  const found = findings([rule], apps, book.exceptions, policyToday());
   const madeOn = formatDate(rule.createdAt);
   const { createdBy } = rule;
   return (
@@ -141,8 +144,9 @@ const RuleDetail = ({
 const RulePage = () => {
   const { t } = useLingui();
   const { ruleId } = Route.useParams();
-  const { apps } = Route.useLoaderData();
-  const rule = policyBook.rules.find(({ id }) => id === ruleId);
+  const { apps, book: loaded } = Route.useLoaderData();
+  const book = bookOf(loaded);
+  const rule = book.rules.find(({ id }) => id === ruleId);
   if (rule === undefined) {
     return (
       <>
@@ -177,7 +181,11 @@ const RulePage = () => {
     );
   }
   return (
-    <RuleDetail apps={apps.state === "ready" ? apps.data : []} rule={rule} />
+    <RuleDetail
+      apps={apps.state === "ready" ? apps.data : []}
+      book={book}
+      rule={rule}
+    />
   );
 };
 

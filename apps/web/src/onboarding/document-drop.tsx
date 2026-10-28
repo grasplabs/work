@@ -16,6 +16,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { DragEvent, KeyboardEvent } from "react";
 
 import { extensionOf, filesToRead, readable } from "./document-files.ts";
+import { useEntrance } from "./setup-parts.tsx";
 
 // Where documents are dropped in the onboarding (prototype
 // `components/onboarding/document-drop.tsx`), modelled on uiarc's file
@@ -164,8 +165,8 @@ const TypeIcon = ({ name }: { name: string }) => {
   return <FileIcon {...props} />;
 };
 
-/** The circle closes, then the tick draws through it. */
-const DrawnCheck = () => (
+/** The circle closes, then the tick draws through it; or, `drawn` already, it is there. */
+const DrawnCheck = ({ drawn }: { drawn: boolean }) => (
   <svg
     aria-hidden="true"
     className="text-status-agreed size-3.5 flex-none"
@@ -177,12 +178,12 @@ const DrawnCheck = () => (
     viewBox="0 0 24 24"
   >
     <path
-      className="drawn-check"
+      className={drawn ? undefined : "drawn-check"}
       d="M12 2.5a9.5 9.5 0 1 1 0 19a9.5 9.5 0 1 1 0-19"
       pathLength={1}
     />
     <path
-      className="drawn-check drawn-check-late"
+      className={drawn ? undefined : "drawn-check drawn-check-late"}
       d="m8.2 12.4 2.6 2.6 5-5.2"
       pathLength={1}
     />
@@ -217,6 +218,12 @@ const Row = ({ row, onRemove }: { row: DocumentRow; onRemove: () => void }) => {
   const { t, i18n } = useLingui();
   const file = row.name;
   const percent = useReading(row);
+  // Read before, as the step opens again: in the list, read, at once.
+  const rowEntrance = useEntrance(
+    "row",
+    "animate-in fade-in slide-in-from-top-4 duration-400"
+  );
+  const stateEntrance = useEntrance(row.state, "animate-in fade-in");
   let size: string | null = null;
   if (row.size !== null) {
     size =
@@ -234,7 +241,7 @@ const Row = ({ row, onRemove }: { row: DocumentRow; onRemove: () => void }) => {
   }
   let status = (
     <>
-      <DrawnCheck />
+      <DrawnCheck drawn={stateEntrance === ""} />
       <span className="truncate" title={row.about}>
         {row.about ??
           t({ message: "Read", context: "a document, done reading" })}
@@ -259,7 +266,7 @@ const Row = ({ row, onRemove }: { row: DocumentRow; onRemove: () => void }) => {
     );
   }
   return (
-    <li className="animate-in fade-in slide-in-from-top-4 min-w-0 overflow-hidden duration-400">
+    <li className={cn("min-w-0 overflow-hidden", rowEntrance)}>
       <div className="bg-card document-row mt-2 grid min-h-14 items-center gap-x-3 rounded-lg border py-2 pr-2 pl-2.25">
         <span className="text-muted-foreground grid size-10 place-items-center">
           <TypeIcon name={row.name} />
@@ -278,7 +285,10 @@ const Row = ({ row, onRemove }: { row: DocumentRow; onRemove: () => void }) => {
               </>
             )}
             <span
-              className="animate-in fade-in relative flex min-w-0 flex-1 items-center gap-1.25"
+              className={cn(
+                "relative flex min-w-0 flex-1 items-center gap-1.25",
+                stateEntrance
+              )}
               key={row.state}
             >
               {status}
@@ -461,6 +471,12 @@ export const DocumentDrop = ({
   if (dragging) {
     prompt = t`Let go to add them`;
   }
+  const sheets = !compact || dragging;
+  const sheetsEntrance = useEntrance(String(sheets), "animate-in fade-in");
+  const promptEntrance = useEntrance(
+    prompt,
+    "animate-in fade-in slide-in-from-bottom-1 duration-300"
+  );
 
   return (
     <div
@@ -569,14 +585,19 @@ export const DocumentDrop = ({
           ref={trigger}
           type="button"
         >
-          {!compact || dragging ? (
-            <span className="animate-in fade-in flex flex-col overflow-hidden">
+          {sheets ? (
+            <span
+              className={cn("flex flex-col overflow-hidden", sheetsEntrance)}
+            >
               <Sheets pose={pose} />
             </span>
           ) : null}
           <span className="relative block font-medium">
             <span
-              className="animate-in fade-in slide-in-from-bottom-1 inline-block max-w-full truncate align-top duration-300"
+              className={cn(
+                "inline-block max-w-full truncate align-top",
+                promptEntrance
+              )}
               key={prompt}
             >
               {prompt}
@@ -618,14 +639,14 @@ export const DocumentDrop = ({
           <span className="min-w-0 flex-1">{error}</span>
         </p>
       )}
-      {/* Rows keep their own height and the list scrolls past four and a bit, rather than squeezing them. */}
+      {/* Rows keep their own height and the list scrolls past four and a bit, or fewer where the window is low, rather than squeezing them or the page scrolling. */}
       {/* The arrow keys move between its rows' buttons, and Delete takes one out. */}
       {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the keys act on the buttons inside it */}
       <ul
         aria-hidden={rows.length > 0 ? undefined : true}
         aria-label={t`Documents`}
         className={cn(
-          "grid max-h-70 min-w-0 auto-rows-max overflow-auto text-left transition-all",
+          "setup-document-list grid min-w-0 auto-rows-max overflow-auto text-left transition-all",
           rows.length > 0 && "pt-1"
         )}
         onKeyDown={onListKey}
