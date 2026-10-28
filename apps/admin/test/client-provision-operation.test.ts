@@ -21,6 +21,7 @@ import {
   onboardingSender,
 } from "../src/deploy/core-config.ts";
 import { mappedRoute } from "../src/deploy/router.ts";
+import { rotationWindowMs } from "../src/deploy/secrets.ts";
 import type { DeploySecrets } from "../src/deploy/secrets.ts";
 import {
   allocateClientResources,
@@ -169,6 +170,13 @@ const operationOf = async (clientId: string) =>
     .from(clientProvisions)
     .where(eq(clientProvisions.clientId, clientId))
     .get();
+
+/** The keys of `names` a rotation keeps the previous value of. */
+const previousKeys = (names: readonly string[]): string[] =>
+  names.filter((name) => name.endsWith("_PREVIOUS"));
+/** The rest: what a script runs with once the window has closed. */
+const currentKeys = (names: readonly string[]): string[] =>
+  names.filter((name) => !name.endsWith("_PREVIOUS"));
 
 /** A user Worker's script in a dispatch namespace: where it's put and read. */
 const userScriptPath =
@@ -1089,6 +1097,130 @@ describe("provisioning a placed client", () => {
       operation: await operationOf(clientId),
       staleReads: stale.get(core),
     }).toMatchObject({ operation: { status: "done" }, staleReads: 3 });
+  });
+
+  it("removes the secrets a placed client's scripts are no longer given, once the ones they are given are there", async () => {
+    const manifest = await importRelease("workers_for_platforms");
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest
+    );
+    // Rotated, and not live yet: each key that rotates goes with its
+    // previous value too.
+    await db
+      .update(clients)
+      .set({ generation: 2, rotatedAt: new Date() })
+      .where(eq(clients.id, clientId));
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    const { core, connect } = await scriptsOf(clientId);
+    const scripts = account.namespaces.get(namespace);
+    const secretsOn = (script: string): Map<string, string> =>
+      scripts?.get(script)?.versions.at(-1)?.secrets ??
+      new Map<string, string>();
+    const namesOn = (script: string): string[] =>
+      [...secretsOn(script).keys()].toSorted((a, b) => a.localeCompare(b));
+    const rotating = { core: namesOn(core), connect: namesOn(connect) };
+
+    // The window has closed since, and something set a secret the admin
+    // doesn't give.
+    await db
+      .update(clients)
+      .set({ rotationLiveAt: new Date(Date.now() - rotationWindowMs - 1000) })
+      .where(eq(clients.id, clientId));
+    secretsOn(core).set("STRAY_KEY", "stray-value");
+    const before = cloudflare.calls.length;
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    const writes = cloudflare.calls
+      .slice(before)
+      .filter(
+        ({ method, path }) => path.includes("/secrets") && method !== "GET"
+      );
+    // Each script's secrets: every one given put before any is removed.
+    const putsThenDeletes = (script: string): boolean => {
+      const methods = writes
+        .filter(({ path }) => path.includes(`/scripts/${script}/`))
+        .map(({ method }) => method);
+      return (
+        methods.includes("DELETE") &&
+        methods.lastIndexOf("PUT") < methods.indexOf("DELETE")
+      );
+    };
+
+    expect({
+      rotating: {
+        core: previousKeys(rotating.core),
+        connect: previousKeys(rotating.connect),
+      },
+      after: { core: namesOn(core), connect: namesOn(connect) },
+      putsThenDeletes: [putsThenDeletes(core), putsThenDeletes(connect)],
+    }).toStrictEqual({
+      rotating: {
+        core: ["ROUTER_SECRET_PREVIOUS"],
+        connect: [
+          "CAPABILITY_SIGNING_KEY_PREVIOUS",
+          "TOKEN_ENCRYPTION_KEY_PREVIOUS",
+        ],
+      },
+      after: {
+        core: currentKeys(rotating.core),
+        connect: currentKeys(rotating.connect),
+      },
+      putsThenDeletes: [true, true],
+    });
+
+    // No value the scripts ran with is in what the admin recorded.
+    const values = [
+      ...secretsOn(core).values(),
+      ...secretsOn(connect).values(),
+    ].filter((value): value is string => typeof value === "string");
+    const recorded = JSON.stringify({
+      audit: await db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.clientId, clientId)),
+      operation: await operationOf(clientId),
+    });
+    expect(values.filter((value) => recorded.includes(value))).toStrictEqual(
+      []
+    );
+  });
+
+  it("marks a rotated client's generation live once its hostname is published, and audits it", async () => {
+    const manifest = await importRelease("dedicated");
+    const { clientId, held } = await setUp("dedicated", manifest);
+    await db
+      .update(clients)
+      .set({ generation: 2, rotatedAt: new Date() })
+      .where(eq(clients.id, clientId));
+
+    await runClientProvision(context, held);
+
+    const client = await db
+      .select({ rotationLiveAt: clients.rotationLiveAt })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get();
+    const live = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "client.rotation_live")
+        )
+      );
+    expect({
+      live: client?.rotationLiveAt instanceof Date,
+      audited: live.map(
+        ({ detail }) =>
+          z.object({ generation: z.number() }).parse(JSON.parse(detail ?? "{}"))
+            .generation
+      ),
+    }).toStrictEqual({ live: true, audited: [2] });
   });
 
   it("keeps two clients in one destination to their own resources", async () => {
