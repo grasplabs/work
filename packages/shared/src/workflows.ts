@@ -174,23 +174,47 @@ export interface CronSchedule {
 }
 
 /**
+ * How a schedule treats a local time the spring change skips (2:30 on the
+ * night clocks go from 2:00 to 3:00): App schedules fire it an hour later,
+ * at the same minute of the hour after; independent schedule triggers skip
+ * it (platform specification 15.2), so no run starts for a time that
+ * never was.
+ */
+export type SkippedTime = "shift" | "skip";
+
+/** Most skipped times in a row one call steps past before giving up. */
+const maxSkippedTimes = 1000;
+
+/**
  * When `schedule` next fires strictly after `after`, to the minute;
  * undefined for an expression that isn't five cron fields, a time zone the
  * runtime doesn't know, or an expression that names no time to come (the
- * 30th of February).
+ * 30th of February). A time the autumn change repeats fires once, the
+ * first time; one the spring change skips as `skipped` says.
  */
 export const nextScheduledRun = (
   { cron, timeZone }: CronSchedule,
-  after: Date
+  after: Date,
+  skipped: SkippedTime = "shift"
 ): Date | undefined => {
   if (!isTimeZone(timeZone)) {
     return undefined;
   }
   try {
-    return (
-      new Cron(cron, { timezone: timeZone, mode: "5-part" }).nextRun(after) ??
-      undefined
-    );
+    const schedule = new Cron(cron, { timezone: timeZone, mode: "5-part" });
+    let next = schedule.nextRun(after) ?? undefined;
+    if (skipped === "shift") {
+      return next;
+    }
+    // croner moves a skipped local time to the hour after; that moved time
+    // doesn't match the expression itself, which is how it is told apart.
+    for (let step = 0; step < maxSkippedTimes; step += 1) {
+      if (next === undefined || schedule.match(next)) {
+        return next;
+      }
+      next = schedule.nextRun(next) ?? undefined;
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -415,6 +439,14 @@ export const triggerDeclarationsSchema = z
  * whose key is one core derived.
  */
 export const coreStepPrefix = "$grasp:";
+
+/**
+ * What a decision task's waits for its answer, and its looks after them,
+ * start with (core's workflows/resource-host.ts): core's steps, so they
+ * count against none of the run's steps however long it waits, each named
+ * `<prefix><its task's step>:wait:<round>` or `…:woken:<round>`.
+ */
+export const decisionPollStepPrefix = `${coreStepPrefix}decision:`;
 
 /**
  * The idempotency key of a run's step, as the SDK hands it to the step
@@ -1483,6 +1515,11 @@ export interface WorkflowsApi {
     workflow: string,
     team: string | null
   ) => Promise<WorkflowSummary>;
+  /**
+   * The organization's teams, by name, that a workflow's team may be set
+   * to (`setTeam`); for admins and builders, never Grasp staff.
+   */
+  teams: () => Promise<{ id: string; name: string }[]>;
   /**
    * Dry-runs a workflow's tests at the App's current version, with the
    * parameter values set now; for the App's builders.

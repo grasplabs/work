@@ -1,7 +1,7 @@
 /**
  * A client's runner: the one thing that may change what its account runs,
- * as `client_runs` names it. A provisioning run (a Workflow instance per
- * attempt, `<clientId>-<random>`, src/provision/workflow.ts), a rollout
+ * as `client_runs` names it. A provisioning attempt (a Workflow instance
+ * per attempt, `<clientId>-p<random>`, src/hosting/workflow.ts), a rollout
  * while it deploys the client (the rollout's instance, or for a fleet
  * client a child of it that claims it in the rollout's name,
  * src/rollout/workflow.ts), a rollback of the client (its instance,
@@ -89,7 +89,6 @@ const isMissingInstance = (error: unknown): boolean =>
 
 /** The Workflow a runner of `kind` is an instance of. */
 const workflows: Readonly<Record<RunKind, (env: Env) => Workflow>> = {
-  provision: (env) => env.PROVISION_CLIENT,
   rollout: (env) => env.ROLLOUT,
   rollback: (env) => env.ROLLBACK_CLIENT,
   apply: (env) => env.APPLY_CLIENT,
@@ -143,11 +142,7 @@ export const currentRun = async (
   return { ...claim, ...where };
 };
 
-/** A new provisioning run's instance id: the client's, and a random part of its own. */
-const newRunId = (clientId: string): string =>
-  `${clientId}-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
-
-/** The runner a claim is for: a new provisioning run unless it says otherwise. */
+/** The runner a claim is for: its kind and its instance's id. */
 export interface Runner {
   kind: RunKind;
   runId: string;
@@ -157,8 +152,7 @@ export interface Runner {
  * Claims client `clientId` for a runner in place of `replacing` (null
  * when it has none), recording `event` by `actor` in the same batch, and
  * returns the runner's id; undefined when another claim got there first,
- * so the caller runs nothing. The runner is a new provisioning run unless
- * `runner` names another.
+ * so the caller runs nothing.
  */
 export const claimRun = async (
   db: AdminDatabase,
@@ -166,12 +160,8 @@ export const claimRun = async (
   clientId: string,
   replacing: string | null,
   event: AdminEvent,
-  runner?: Runner
+  { kind, runId }: Runner
 ): Promise<string | undefined> => {
-  const { kind, runId } = runner ?? {
-    kind: "provision",
-    runId: newRunId(clientId),
-  };
   const claimedAt = new Date();
   const statement =
     replacing === null

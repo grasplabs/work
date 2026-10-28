@@ -219,6 +219,18 @@ const coreDb: D1State = {
   schema: `${core}db/core`,
   tables: {
     users: exported(auth),
+    person_erasures: exported(
+      `${core}person-erasure.ts`,
+      "Who was erased, and the keyed hash of their email that keeps them out until an admin releases it: a move must keep both."
+    ),
+    erased_subjects: exported(
+      `${core}person-erasure.ts`,
+      "Keyed hashes of an erased person's sign-in identities, which keep them out of Teams, the directory and sign-in: a move must keep them."
+    ),
+    person_erasure_areas: exported(
+      `${core}person-erasure.ts`,
+      "Each area of an erasure, pending until done: an obligation still owed, retried by the clock."
+    ),
     sessions: secret(
       auth,
       "Bearer tokens of signed-in browsers: people sign in again at the destination (46.2)."
@@ -286,6 +298,7 @@ const coreDb: D1State = {
     app_default_stores: exported(`${core}app-activation.ts`),
     app_test_fixtures: transient(`${core}app-tests.ts`),
     app_test_runs: transient(`${core}workflows/fixture-runs.ts`),
+    app_test_decisions: transient(`${core}workflows/fixture-decisions.ts`),
     screen_submissions: exported(`${core}screen-submissions.ts`),
     action_invocations: exported(`${core}action-invocation.ts`),
     preview_fixture_stores: transient(`${core}sealed-previews.ts`),
@@ -309,6 +322,10 @@ const coreDb: D1State = {
     workflow_model_waits: cache(`${core}workflows/model-waits.ts`),
     run_mail_stamps: exported(`${core}workflows/mail-stamps.ts`),
     run_mail_calls: exported(`${core}workflows/mail-stamps.ts`),
+    resource_run_mail_calls: exported(
+      `${core}workflows/mail-stamps.ts`,
+      "As run_mail_calls, for independent workflow runs: what keeps a connector trigger's mail loop in its run's lineage."
+    ),
     run_mail_stamp_claims: exported(`${core}workflows/mail-stamps.ts`),
     run_mail_stamp_refusals: exported(`${core}workflows/connector-events.ts`),
     run_lineage_accounts: exported(`${core}workflows/quotas.ts`),
@@ -363,6 +380,14 @@ const coreDb: D1State = {
     workflow_resource_members: exported(`${core}workflow-resources.ts`),
     trigger_resources: exported(`${core}trigger-resources.ts`),
     trigger_resource_versions: exported(`${core}trigger-resources.ts`),
+    connector_trigger_holds: exported(
+      `${core}workflows/connector-triggers.ts`,
+      "Events a connector trigger held back at its hourly limit: still owed a run, or dropped after a day."
+    ),
+    trigger_schedules: exported(
+      `${core}trigger-resources.ts`,
+      "Schedule triggers' next ticks and failed starts: deadlines a move keeps (46.2 step 9)."
+    ),
     workflow_start_receipts: exported(`${core}workflow-starts.ts`),
     workflow_resource_runs: exported(`${core}workflows/resource-runs.ts`),
     workflow_emitted_events: exported(
@@ -991,6 +1016,8 @@ export const clientStateRegistry: ClientStateRegistry = {
       "Grasp's admin runs once, in grasp-os-ops: its state is Grasp's, about clients.",
     "apps/router/wrangler.jsonc":
       "The router runs once, in grasp-os-ops, and holds only hostnames the admin writes.",
+    "apps/gateway/wrangler.jsonc":
+      "The connect gateway runs once, in Grasp's account, and holds nothing: it forwards each placed core's calls to its own connect.",
   },
   d1: [coreDb, knowledgeDb, connectDb],
   durableObjects: [

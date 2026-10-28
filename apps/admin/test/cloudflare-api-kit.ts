@@ -68,6 +68,13 @@ export interface AccountState {
   /** Buckets by jurisdiction: a name is unique only within one. */
   buckets: { name: string; jurisdiction: string }[];
   /**
+   * The buckets with objects in them, by name, which R2 refuses to delete
+   * (409) until a lifecycle rule has expired them.
+   */
+  fullBuckets: Set<string>;
+  /** Each bucket's lifecycle rules, by name, as the last PUT set them. */
+  lifecycles: Map<string, Json>;
+  /**
    * The jurisdiction R2 reports for every bucket, whatever it's in: a test
    * of an API that answers other than asked.
    */

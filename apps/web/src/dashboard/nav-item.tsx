@@ -14,16 +14,21 @@ import { useCore } from "../use-core.ts";
 
 // The nav's way to the dashboard, with how many things wait on the person
 // (as the prototype's badge, `app-sidebar.tsx`): everything core's feed of
-// what waits lists (`session.waiting`), the failed workflows and questions
-// among it only while unread. Read again on every other page the person
-// opens and after every change on one; nothing is marked read by counting.
+// what waits lists (`session.waiting`), the failed workflows, questions and
+// stopped schedules among it only while unread. Read again on every other
+// page the person opens and after every change on one; nothing is marked
+// read by counting.
 
 /** How many things wait on the person; `undefined` when core couldn't say. Outside the component, as the React Compiler can't compile `try`. */
 const readCount = async (core: CoreConnection): Promise<number | undefined> => {
   try {
     return await readWithin(core, async (session) => {
       const { items, unreadNotifications } = await session.waiting.list();
-      const notified = new Set(["failedRun", "openQuestion"]);
+      const notified = new Set([
+        "failedRun",
+        "openQuestion",
+        "stoppedSchedule",
+      ]);
       return (
         items.filter(({ kind }) => !notified.has(kind)).length +
         unreadNotifications

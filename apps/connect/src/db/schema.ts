@@ -401,7 +401,7 @@ export const composioFlows = sqliteTable(
  * What connect made at Composio and still has to delete there: a flow
  * that didn't finish, or a connection that was disconnected, while
  * Composio didn't take the deletion or connect had no Composio key. The
- * cron trigger tries again at `retry_at`, waiting longer after each failed
+ * clock tries again at `retry_at`, waiting longer after each failed
  * `attempts`, until everything is gone. An account left there may hold
  * tokens, so nothing is forgotten.
  */
@@ -459,7 +459,7 @@ export const connectionTokens = sqliteTable("connection_tokens", {
 /**
  * Audit events core hasn't appended to the audit log yet. Each call's
  * events are stored here, with the call's own result where it has one;
- * core's cron trigger takes them and acknowledges those it appended
+ * core's clock takes them and acknowledges those it appended
  * (src/audit.ts). `event` is the event as JSON.
  */
 export const auditOutbox = sqliteTable("audit_outbox", {

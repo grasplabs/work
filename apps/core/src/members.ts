@@ -8,7 +8,13 @@ import type { CodedError } from "@grasp-os/shared/errors";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
-import type { Invitation, Member, MembersApi } from "@grasp-os/shared/members";
+import type {
+  Erasure,
+  ErasurePreview,
+  Invitation,
+  Member,
+  MembersApi,
+} from "@grasp-os/shared/members";
 import {
   canBuild,
   isAdmin,
@@ -54,6 +60,12 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { isErasedEmail } from "./erased-people.ts";
+import {
+  erasePerson,
+  erasurePreview,
+  releaseAddress,
+} from "./person-erasure.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -268,7 +280,7 @@ const recordRemoval = async (
 };
 
 /**
- * Records that connect completed disconnecting `userIds`, so the cron
+ * Records that connect completed disconnecting `userIds`, so the clock
  * trigger stops retrying them once a flow can no longer finish
  * (`retryDisconnects`).
  */
@@ -295,7 +307,7 @@ const markDisconnected = async (
  * calls for them anyway (they are no longer a member); this takes the
  * tokens out of the vault. First, what their chats' agent was granted or
  * asked for in their chats is revoked, audited (chat-connections.ts):
- * none of it holds for them anyway. What fails here, the cron trigger
+ * none of it holds for them anyway. What fails here, the clock
  * retries (`retryDisconnects`), both parts: they are done only once both
  * are.
  */
@@ -481,7 +493,7 @@ const setMemberRole = async (
   throw refusal(by, memberErrors.create("member.last_admin"));
 };
 
-/** Most `disconnectPersonal` batches the cron trigger has in flight at once. */
+/** Most `disconnectPersonal` batches the clock has in flight at once. */
 const disconnectBatchesAtOnce = 4;
 
 /**
@@ -494,7 +506,7 @@ const disconnectBatchesAtOnce = 4;
  * that with room to spare. First it revokes what their chats' agent was
  * granted or asked for (as the system), as `disconnectPersonal` does, so
  * a removal whose revoke failed ends revoked too. When nobody is pending,
- * it doesn't call connect at all. The cron trigger calls it.
+ * it doesn't call connect at all. The clock calls it.
  */
 export const retryDisconnects = async (env: Env): Promise<void> => {
   const pending = await drizzle(env.DB)
@@ -692,6 +704,11 @@ const inviteMember = async (
   if (!(address.success && domains.includes(domainOf(address.data)))) {
     throw refusal(by, memberErrors.create("member.invite_email"));
   }
+  // Someone erased: their address is gone from `users`, but they were
+  // removed, and stay out (person-erasure.ts).
+  if (await isErasedEmail(env, address.data)) {
+    throw refusal(by, memberErrors.create("member.invite_removed"));
+  }
   const db = drizzle(env.DB);
   const id = crypto.randomUUID();
   const now = new Date();
@@ -849,5 +866,26 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     await withPerson(this.#check, async (person) => {
       await withdrawInvitation(this.#env, person, invitationId);
     });
+  }
+
+  async erasure(userId: string): Promise<ErasurePreview> {
+    return await withPerson(
+      this.#check,
+      async (person) => await erasurePreview(this.#env, person, userId)
+    );
+  }
+
+  async releaseAddress(email: string): Promise<{ released: boolean }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await releaseAddress(this.#env, person, email)
+    );
+  }
+
+  async erase(userId: string, name: string): Promise<Erasure> {
+    return await withPerson(
+      this.#check,
+      async (person) => await erasePerson(this.#env, person, userId, name)
+    );
   }
 }

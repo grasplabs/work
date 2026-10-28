@@ -104,7 +104,7 @@ export const forgetLines = async (
 };
 
 /**
- * Deletes lines kept longer than a month, from the cron: in code, not a
+ * Deletes lines kept longer than a month, from the clock: in code, not a
  * bucket rule, so it runs wherever core does. One page of the prefix a
  * run, from where the last run stopped. A line said again after it was
  * kept a month is said anew and kept again, so nothing is ever older.

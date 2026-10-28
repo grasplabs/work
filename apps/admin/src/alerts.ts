@@ -54,7 +54,9 @@ export type AlertKindName =
   | "stephen_busy"
   | "stephen_sends_failing"
   | "stephen_uninstalled"
-  | "stephen_connections_again";
+  | "stephen_connections_again"
+  | "release_rolled_back"
+  | "release_rollback_failed";
 
 /**
  * How long one of the watch's alerts holds back the next of its kind: as
@@ -141,6 +143,23 @@ export const alertKinds: Readonly<Record<AlertKindName, AlertKind>> = {
     words: ({ uninstalled = 0 }) =>
       `Teams refused ${uninstalled} of Stephen's answers in the last day as his app is no longer installed for those people.`,
     windowMs: untilClearedMs,
+  },
+  /**
+   * A release failed its probe once its code was live, and the client was
+   * rolled back to the release before on its own (src/hosting/operation.ts).
+   */
+  release_rolled_back: {
+    title: "Release rolled back",
+    words: () =>
+      "A release failed its probe once live, so the client was rolled back to the release before. Look at the release before releasing it again.",
+    windowMs: 60 * 1000,
+  },
+  /** As `release_rolled_back`, but the rollback didn't finish: it may serve broken. */
+  release_rollback_failed: {
+    title: "Release failed, rollback didn't finish",
+    words: () =>
+      "A release failed its probe once live, and rolling the client back didn't finish: it may be serving the broken release. Look at its Setup now.",
+    windowMs: 60 * 1000,
   },
   stephen_connections_again: {
     title: "Stephen: connections need a new sign-in",

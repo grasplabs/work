@@ -269,6 +269,55 @@ describe("EU resources", () => {
   });
 });
 
+describe("answers as Cloudflare sends them", () => {
+  it("takes a success whose errors, messages and result info are null", async () => {
+    const account = cloudflare.addAccount("Acme");
+    // An assets upload session answers this way on a real account (GRA-430).
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({
+        success: true,
+        errors: null,
+        messages: null,
+        result_info: null,
+        result: { id: account.id, name: "Acme" },
+      })
+    );
+    await expect(getAccount(api, account.id)).resolves.toMatchObject({
+      id: account.id,
+      name: "Acme",
+    });
+  });
+
+  it("still refuses a failure whose errors are null, saying only its status", async () => {
+    const account = cloudflare.addAccount("Acme");
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json(
+        { success: false, errors: null, messages: null, result: null },
+        { status: 400 }
+      )
+    );
+    const error = await errorOf(getAccount(api, account.id));
+    expect(
+      error instanceof CloudflareApiError
+        ? { status: error.status, codes: error.codes }
+        : error
+    ).toStrictEqual({ status: 400, codes: [] });
+  });
+
+  it("still refuses a success flag on a non-2xx answer", async () => {
+    const account = cloudflare.addAccount("Acme");
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json(
+        { success: true, errors: null, result: { id: account.id } },
+        { status: 403 }
+      )
+    );
+    await expect(errorOf(getAccount(api, account.id))).resolves.toBeInstanceOf(
+      CloudflareApiError
+    );
+  });
+});
+
 describe("retries", () => {
   it("retries a rate-limited call, creating once", async () => {
     const account = cloudflare.addAccount();

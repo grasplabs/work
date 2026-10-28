@@ -1098,7 +1098,7 @@ const buildUnderLease = async (
   // only ever read as the type stored here.
   //
   // Recorded for cleanup first: if this build fails before its pin holds,
-  // the cron deletes what it wrote once no lock names it (cleanup.ts).
+  // the clock deletes what it wrote once no lock names it (cleanup.ts).
   await recordCleanup(env, "build", hash);
   await Promise.all(
     Object.entries(files).map(

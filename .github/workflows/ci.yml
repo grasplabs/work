@@ -648,6 +648,17 @@ jobs:
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           secrets: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
           required: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+      # What the release's platform limits are raised over: the release
+      # published before it. Its limit evidence goes next to its manifest,
+      # and a raise without evidence (a capacity run per profile and the
+      # PR's CODEOWNERS approval, GRA-942) fails here, before anything is
+      # uploaded. The release itself is the bundle staging ran, unchanged.
+      - if: env.PUBLISH_RELEASES == 'true'
+        run: vp run release:previous --out previous-manifest.json
+        env:
+          R2_BUCKET: grasp-os-releases
+      - if: env.PUBLISH_RELEASES == 'true'
+        run: vp run release:evidence --release release-out --previous previous-manifest.json
       - if: env.PUBLISH_RELEASES == 'true'
         run: vp run release:upload --release release-out
         env:

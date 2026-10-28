@@ -10,7 +10,7 @@
  */
 import { z } from "zod";
 
-import { isNotFound, listAll } from "./api.ts";
+import { CloudflareApiError, isNotFound, listAll } from "./api.ts";
 import type { CloudflareApi } from "./api.ts";
 
 const eu = "eu";
@@ -354,5 +354,100 @@ export const ensureAiGateway = async (
       json: { ...settings, authentication: true },
     },
     gatewaySchema
+  );
+};
+
+/**
+ * Deletes the D1 database `uuid`. One that's gone already counts as
+ * deleted, so a deletion run again goes on.
+ */
+export const deleteD1Database = async (
+  api: CloudflareApi,
+  accountId: string,
+  uuid: string
+): Promise<void> => {
+  try {
+    await api.call(
+      { method: "DELETE", path: `/accounts/${accountId}/d1/database/${uuid}` },
+      z.unknown()
+    );
+  } catch (error) {
+    if (!isNotFound(error)) {
+      throw error;
+    }
+  }
+};
+
+/** R2's code for a bucket that isn't empty, which it won't delete. */
+const bucketNotEmpty = 10_008;
+
+/**
+ * Deletes the R2 bucket `name` in `jurisdiction`: `deleted` (or gone
+ * already), or `not_empty` while it holds objects, which R2 won't delete
+ * a bucket with.
+ */
+export const deleteR2Bucket = async (
+  api: CloudflareApi,
+  accountId: string,
+  name: string,
+  jurisdiction: string
+): Promise<"deleted" | "not_empty"> => {
+  try {
+    await api.call(
+      {
+        method: "DELETE",
+        path: `/accounts/${accountId}/r2/buckets/${name}`,
+        headers: { "cf-r2-jurisdiction": jurisdiction },
+      },
+      z.unknown()
+    );
+    return "deleted";
+  } catch (error) {
+    if (isNotFound(error)) {
+      return "deleted";
+    }
+    if (
+      error instanceof CloudflareApiError &&
+      error.codes.includes(bucketNotEmpty)
+    ) {
+      return "not_empty";
+    }
+    throw error;
+  }
+};
+
+/**
+ * Sets the R2 bucket `name`'s one lifecycle rule to delete every object a
+ * day old, and abort unfinished uploads a day on: how a bucket is emptied
+ * for deletion, as the API has no call that deletes its objects.
+ */
+export const expireAllObjects = async (
+  api: CloudflareApi,
+  accountId: string,
+  name: string,
+  jurisdiction: string
+): Promise<void> => {
+  await api.call(
+    {
+      method: "PUT",
+      path: `/accounts/${accountId}/r2/buckets/${name}/lifecycle`,
+      headers: { "cf-r2-jurisdiction": jurisdiction },
+      json: {
+        rules: [
+          {
+            id: "grasp-offboarding",
+            enabled: true,
+            conditions: { prefix: "" },
+            deleteObjectsTransition: {
+              condition: { type: "Age", maxAge: 86_400 },
+            },
+            abortMultipartUploadsTransition: {
+              condition: { type: "Age", maxAge: 86_400 },
+            },
+          },
+        ],
+      },
+    },
+    z.unknown()
   );
 };

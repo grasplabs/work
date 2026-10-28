@@ -23,10 +23,12 @@ import {
 import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import type { DeploySecrets } from "../src/deploy/secrets.ts";
+import { placeClient } from "../src/hosting/inventory.ts";
 import { importReleases } from "../src/releases/import.ts";
 import type { ReleaseStore } from "../src/releases/import.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { destination } from "./hosting.ts";
 import { declared, publishRelease } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
 
@@ -181,6 +183,32 @@ describe("deploying a release to a client's account", () => {
       "deploy.router",
       "deploy.done",
     ]);
+  });
+
+  it("stops a deploy started before its client was placed in a hosting destination, before anything reaches its account", async () => {
+    const { account, clientId, deployId } = await setUp();
+    await placeClient(db, staff, {
+      clientId,
+      destinationId: await destination(),
+      policyId: "eu-storage",
+    });
+
+    await expect(runDeploy(context, deployId)).rejects.toMatchObject({
+      code: "client_placed",
+    });
+    // Recorded failed, with why: never left `running`.
+    const row = await deployRow(deployId);
+    expect({
+      scripts: account.scripts.size,
+      databases: account.d1.length,
+      status: row?.status,
+      error: row?.error,
+    }).toStrictEqual({
+      scripts: 0,
+      databases: 0,
+      status: "failed",
+      error: "client_placed",
+    });
   });
 
   it("resumes after a resource was made but its answer lost, creating nothing twice", async () => {

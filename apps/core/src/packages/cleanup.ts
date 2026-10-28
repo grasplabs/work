@@ -7,13 +7,13 @@ import { dependencyBuildLeases, packageCleanups } from "../db/core/schema.ts";
 import { deleteArtifact } from "./build.ts";
 import { tarballKey } from "./tarballs.ts";
 
-// Deleting, from the cron, the build leases that lapsed with nobody to
+// Deleting, from the clock, the build leases that lapsed with nobody to
 // take them again (`sweepBuildLeases`), and the package store's files no
 // lock names any more: tarballs fetched for a resolve that failed or whose lock was
 // deleted, artifacts a build wrote and never pinned, and artifacts whose
 // pin or lock went. Each was recorded before it could be left behind
 // (`package_cleanups`, cleanup-records.ts and locks.ts); this deletes its
-// files only once no lock names it, then clears the record, so a cron
+// files only once no lock names it, then clears the record, so a clock
 // that dies between the two deletes them again next time.
 //
 // A record is acted on only an hour after it was last recorded, so a

@@ -80,13 +80,6 @@ export const storeSecret = async (
   return value;
 };
 
-/**
- * The Cloudflare API as a tenant admin: it only creates client accounts
- * and makes the deployer a member of them (src/provision/workflow.ts).
- */
-export const tenantAdminApi = async (env: Env): Promise<CloudflareApi> =>
-  cloudflareApi({ token: await storeSecret(env, "TENANT_ADMIN_TOKEN") });
-
 /** The deployer's API token, from Secrets Store. */
 export const deployerToken = async (env: Env): Promise<string> =>
   await storeSecret(env, "DEPLOYER_API_TOKEN");
@@ -235,6 +228,6 @@ export const deployContext = async (env: Env): Promise<DeployContext> => {
     store: env.RELEASES,
     secrets: await deploySecrets(env),
     signInApps: signInApps(env),
-    router: { hosts: env.ROUTER_HOSTS, domain },
+    router: { hosts: env.ROUTER_HOSTS, domain, dispatcher: env.DISPATCHER },
   };
 };

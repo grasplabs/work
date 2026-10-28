@@ -34,10 +34,11 @@ import { connectDb } from "./test-env.ts";
 // the engine, the same version as anyone's, but nothing of the
 // organization's. The threat model is in workflows/fixture-runs.ts; the
 // ways it can fail come first here: a test's run lands in the
-// organization's runs, receipts or audit; it reaches a model, an App or a
-// store; it outlives its test, or a test died before removing it; a test
-// asks about a run it didn't start; a test starts what the release
-// doesn't bind. Then what a test sees: the run's end, and how often each
+// organization's runs, receipts or audit; it reaches a model, a connection
+// or an action (its model and store calls are workflow-test-calls.test.ts's);
+// it outlives its test, or a test died before removing it; a test asks
+// about a run it didn't start; a test starts what the release doesn't
+// bind. Then what a test sees: the run's end, and how often each
 // task completed.
 
 const objectSchema = (properties: Record<string, unknown>) => ({
@@ -436,7 +437,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     });
   });
 
-  it("refuse every call that leaves the run's own code: a model is never asked", async () => {
+  it("fail a model call its fixture gives no answer: a model is never asked", async () => {
     const admin = await person("admin");
     const key = `summary-${unique()}`;
     await publishCatalogContract(env, admin, { key, kind: "model" });
@@ -477,7 +478,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     const completed = await session.completedCount(run, "greet");
     await session.close();
     expect({ ended, completed, asked: gateway.requests.length }).toMatchObject({
-      ended: { status: "failed", code: "resource.unavailable" },
+      ended: { status: "failed", code: "workflow.test_unfixtured" },
       completed: 0,
       asked: 0,
     });

@@ -30,7 +30,7 @@ export const landscapeLimits = {
   requestsPerRead: 20,
   /** Reads one sync makes at most: a sync that reaches it is partial. */
   readsPerSync: 200,
-  /** Reads one cron run makes, so a sync spreads over runs. */
+  /** Reads one clock run makes, so a sync spreads over runs. */
   readsPerRun: 10,
   /** Longest cursor connect hands back. */
   cursorLength: 4096,

@@ -532,7 +532,7 @@ export const revocableToken = async (
 
 /**
  * Seals tokens still under the previous key again with the current one, a
- * batch per cron run, so the previous key can be removed once none is left
+ * batch per clock run, so the previous key can be removed once none is left
  * under it. A row changed meanwhile keeps its newer value. One that
  * doesn't open (changed at rest) can never be used: its connection is
  * marked for reconnecting, so it doesn't hold up the rest.

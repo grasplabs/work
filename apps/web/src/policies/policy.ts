@@ -3,7 +3,11 @@ import type {
   DataAccessKind,
   DpaState,
   ExtensionKind,
+  FindingState,
+  PolicyApp,
+  PolicyBook,
   PolicyException,
+  PolicyFinding,
   PolicyRule,
   RequiredCertificate,
   RuleCondition,
@@ -11,6 +15,7 @@ import type {
   RuleStatus,
   TrainingKind,
 } from "@grasp-os/shared/policies";
+import { findingStateRank } from "@grasp-os/shared/policy-engine";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural, t } from "@lingui/core/macro";
@@ -23,25 +28,26 @@ import type {
   LandscapeApp,
 } from "../landscape/landscape.ts";
 
-// The policy engine, as the prototype runs it (`lib/policy.ts`). A rule
-// matches an app when every one of its conditions does, and each condition
-// reads one fact below. What a rule then does to the app follows from its
-// status: a watching rule only shows what it would do, an active one flags
-// or blocks, a paused one does nothing. An exception lets one app break one
-// rule until a date. Core keeps the rules, policies and exceptions
-// (`session.policies`, @grasp-os/shared/policies); which apps they catch
-// is worked out here, from the Landscape's facts.
+// The company's policies as the pages show them, as the prototype does
+// (`lib/policy.ts`). Core keeps the rules, policies and exceptions, and
+// works out which apps each rule catches from what it knows of them
+// (`session.policies.findings()`, through @grasp-os/shared/policy-engine);
+// here they are joined to their rules, counted and put in words.
 
 export type {
   AiKind,
+  FindingState,
+  PolicyApp,
   PolicyBook,
   DataAccessKind,
   DpaState,
   ExtensionKind,
   PolicyDocument,
   PolicyException,
+  PolicyFinding,
   PolicyReadingProblem,
   PolicyRule,
+  ProposalCatch,
   RequiredCertificate,
   RuleCondition,
   RuleEffect,
@@ -52,210 +58,36 @@ export type {
   UncheckedRequirement,
 } from "@grasp-os/shared/policies";
 
-/** What Grasp knows about an app that a rule can check. Null is a fact Grasp does not know. */
-export interface AppFacts {
-  hosting: HostingRegion[];
-  vendor: string | null;
-  ai: AiKind | null;
-  training: TrainingKind;
-  data: DataExposureType[];
-  /** How many use it; null while nothing measures it. */
-  people: number | null;
-  hasOwner: boolean;
-  certificates: RequiredCertificate[];
-  dpa: DpaState | null;
-  access: DataAccessKind[];
-  extension: ExtensionKind | null;
-}
-
-const aiKindOf = {
-  Core: "tool",
-  Embed: "builtIn",
-  None: "none",
-  Unknown: null,
-} as const;
-
-/**
- * The facts of an app. Grasp records no vendor documents yet, so it knows
- * of no certificate, processing agreement, permission or extension; and,
- * where it does not know an app's AI, nothing of its training either.
- */
-export const appFacts = (app: LandscapeApp): AppFacts => ({
-  hosting: app.hosting,
-  vendor: app.vendor,
-  ai: aiKindOf[app.aiType],
-  training: "unknown",
-  data: app.dataExposure ?? [],
-  people: app.users,
-  hasOwner: app.owner !== null,
-  certificates: [],
-  dpa: null,
-  access: [],
-  extension: null,
-});
-
-const sameVendor = (one: string, other: string) =>
-  one.trim().toLocaleLowerCase() === other.trim().toLocaleLowerCase();
-
-/** Whether more than `moreThan` use an app; never when nothing measures it. */
-const usedByMoreThan = (people: number | null, moreThan: number): boolean =>
-  people !== null && people > moreThan;
-
-/**
- * Whether one condition holds for an app. What Grasp does not know never
- * matches: an app whose hosting the vendor does not state is neither inside
- * nor outside a region, and one whose use of AI is unknown is no kind of
- * AI. Two absences are facts in their own right: an app without an owner,
- * and a certificate the vendor does not declare, which counts as one it
- * lacks.
- */
-export const conditionMatches = (
-  condition: RuleCondition,
-  facts: AppFacts
-): boolean => {
-  switch (condition.field) {
-    case "hosting": {
-      if (facts.hosting.length === 0) {
-        return false;
-      }
-      return condition.op === "in"
-        ? facts.hosting.some((region) => condition.values.includes(region))
-        : facts.hosting.some((region) => !condition.values.includes(region));
-    }
-    case "vendor": {
-      const { vendor } = facts;
-      if (vendor === null) {
-        return false;
-      }
-      const listed = condition.values.some((each) => sameVendor(each, vendor));
-      return condition.op === "is" ? listed : !listed;
-    }
-    case "ai": {
-      return facts.ai !== null && condition.values.includes(facts.ai);
-    }
-    case "training": {
-      return condition.values.includes(facts.training);
-    }
-    case "data": {
-      return facts.data.some((kind) => condition.values.includes(kind));
-    }
-    case "people": {
-      return usedByMoreThan(facts.people, condition.moreThan);
-    }
-    case "owner": {
-      return !facts.hasOwner;
-    }
-    case "certificate": {
-      const lacks = (certificate: RequiredCertificate) =>
-        !facts.certificates.includes(certificate);
-      return condition.op === "lacksAll"
-        ? condition.values.every(lacks)
-        : condition.values.some(lacks);
-    }
-    case "dpa": {
-      return facts.dpa !== null && condition.values.includes(facts.dpa);
-    }
-    case "access": {
-      return facts.access.some((kind) => condition.values.includes(kind));
-    }
-    case "extension": {
-      return (
-        facts.extension !== null && condition.values.includes(facts.extension)
-      );
-    }
-    default: {
-      return condition satisfies never;
-    }
-  }
-};
-
-/** A rule without conditions would catch every app, so it catches none. */
-export const ruleMatches = (
-  rule: Pick<PolicyRule, "conditions">,
-  app: LandscapeApp
-): boolean => {
-  if (rule.conditions.length === 0) {
-    return false;
-  }
-  const facts = appFacts(app);
-  return rule.conditions.every((condition) =>
-    conditionMatches(condition, facts)
-  );
-};
-
-export const matchingApps = (
-  rule: Pick<PolicyRule, "conditions">,
-  apps: readonly LandscapeApp[]
-): LandscapeApp[] => apps.filter((app) => ruleMatches(rule, app));
-
 /* ── Findings ────────────────────────────────────────────────────────── */
 
-/** What a rule does to an app it matches: blocks or flags it, would do so, or lets it be for now. */
-export type FindingState = "blocked" | "flagged" | "watching" | "excepted";
-
+/** One app one rule catches, with the rule: what core found, as the pages show it. */
 export interface Finding {
   rule: PolicyRule;
-  app: LandscapeApp;
+  app: PolicyApp;
   state: FindingState;
   /** The exception that lets the app be, when there is one. */
   exception?: PolicyException;
 }
 
-const stateRank: Record<FindingState, number> = {
-  blocked: 0,
-  flagged: 1,
-  watching: 2,
-  excepted: 3,
+/**
+ * Core's findings with their rules from `book`, in core's order. One whose
+ * rule the book doesn't have (read a moment apart) is left out.
+ */
+export const findingsWith = (
+  book: Pick<PolicyBook, "rules">,
+  found: readonly PolicyFinding[]
+): Finding[] => {
+  const rules = new Map(book.rules.map((rule) => [rule.id, rule]));
+  return found.flatMap(({ ruleId, app, state, exception }) => {
+    const rule = rules.get(ruleId);
+    if (rule === undefined) {
+      return [];
+    }
+    return exception === null
+      ? [{ rule, app, state }]
+      : [{ rule, app, state, exception }];
+  });
 };
-
-/** An exception counts up to and including its last day. */
-export const exceptionFor = (
-  exceptions: readonly PolicyException[],
-  ruleId: string,
-  appId: string,
-  today: string
-): PolicyException | undefined =>
-  exceptions.find(
-    (each) =>
-      each.ruleId === ruleId && each.appId === appId && each.until >= today
-  );
-
-const stateOf = (
-  rule: PolicyRule,
-  exception: PolicyException | undefined
-): FindingState => {
-  if (exception !== undefined) {
-    return "excepted";
-  }
-  if (rule.status === "watching") {
-    return "watching";
-  }
-  return rule.effect === "block" ? "blocked" : "flagged";
-};
-
-/** Every app each watching or active rule matches, the most serious first. */
-export const findings = (
-  rules: readonly PolicyRule[],
-  apps: readonly LandscapeApp[],
-  exceptions: readonly PolicyException[],
-  today: string
-): Finding[] =>
-  rules
-    .filter((rule) => rule.status !== "paused")
-    .flatMap((rule) =>
-      matchingApps(rule, apps).map((app) => {
-        const exception = exceptionFor(exceptions, rule.id, app.id, today);
-        return exception === undefined
-          ? { rule, app, state: stateOf(rule, exception) }
-          : { rule, app, state: stateOf(rule, exception), exception };
-      })
-    )
-    .toSorted(
-      (one, other) =>
-        stateRank[one.state] - stateRank[other.state] ||
-        (other.app.users ?? 0) - (one.app.users ?? 0) ||
-        one.app.name.localeCompare(other.app.name)
-    );
 
 /** The findings that act on apps now: blocked or flagged by an active rule. */
 export const inForce = (found: readonly Finding[]): Finding[] =>
@@ -275,7 +107,7 @@ export const applyPolicy = (
     const current = strongest.get(finding.app.id);
     if (
       current === undefined ||
-      stateRank[finding.state] < stateRank[current.state]
+      findingStateRank[finding.state] < findingStateRank[current.state]
     ) {
       strongest.set(finding.app.id, finding);
     }
@@ -296,13 +128,13 @@ export const applyPolicy = (
  * when nothing measures how many use one of them, so no total is known.
  */
 export const peopleAffected = (found: readonly Finding[]): number | null => {
-  const apps = new Map(found.map(({ app }) => [app.id, app.users]));
+  const apps = new Map(found.map(({ app }) => [app.id, app.people]));
   let sum = 0;
-  for (const users of apps.values()) {
-    if (users === null) {
+  for (const people of apps.values()) {
+    if (people === null) {
       return null;
     }
-    sum += users;
+    sum += people;
   }
   return sum;
 };

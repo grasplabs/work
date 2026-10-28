@@ -55,6 +55,10 @@
   "packages": {
     "zod": "0.0.0-fixture"
   },
+  "platformLimits": {
+    "authoringFiles": 200,
+    "workflowSteps": 1000
+  },
   "releaseId": "r000001-0000000",
   "workers": {
     "connect": {
@@ -78,9 +82,7 @@
         "nodejs_compat",
         "global_fetch_strictly_public"
       ],
-      "crons": [
-        "* * * * *"
-      ],
+      "crons": [],
       "d1Databases": [
         {
           "binding": "DB",
@@ -261,10 +263,7 @@
       "compatibilityFlags": [
         "nodejs_compat"
       ],
-      "crons": [
-        "* * * * *",
-        "*/15 * * * *"
-      ],
+      "crons": [],
       "d1Databases": [
         {
           "binding": "DB",
