@@ -1083,7 +1083,7 @@ describe("provisioning a placed client", () => {
 
   it("probes a core in the namespace the router binds through that binding, and routes its hostname to its script", async () => {
     const manifest = await importRelease("workers_for_platforms");
-    const { clientId, held } = await setUp(
+    const { account, clientId, held } = await setUp(
       "workers_for_platforms",
       manifest,
       clientDispatchNamespace
@@ -1095,7 +1095,10 @@ describe("provisioning a placed client", () => {
         ...context,
         router: {
           ...context.router,
-          dispatcher: cloudflare.dispatcher(clientDispatchNamespace),
+          dispatcher: cloudflare.dispatcher(
+            account.id,
+            clientDispatchNamespace
+          ),
         },
       },
       held
@@ -1144,9 +1147,53 @@ describe("provisioning a placed client", () => {
     });
   });
 
+  it("can't reach a core uploaded to the same namespace in another account, its hostname unpublished", async () => {
+    const manifest = await importRelease("workers_for_platforms");
+    const { clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest,
+      clientDispatchNamespace
+    );
+    // The router's own account, whose namespace of that name lacks the core.
+    const routers = cloudflare.addAccount("Router");
+    routers.namespaces.set(clientDispatchNamespace, new Map());
+
+    const outcome = await runClientProvision(
+      {
+        ...context,
+        router: {
+          ...context.router,
+          dispatcher: cloudflare.dispatcher(
+            routers.id,
+            clientDispatchNamespace
+          ),
+        },
+      },
+      held
+    ).then(
+      () => "done",
+      (error: unknown) => (error instanceof Error ? error.message : "")
+    );
+
+    expect({
+      outcome: outcome === "done" ? outcome : "stopped",
+      operation: await operationOf(clientId),
+      dispatched: cloudflare.dispatched().length,
+      routed: await routed(clientId),
+    }).toMatchObject({
+      outcome: "stopped",
+      operation: { status: "failed" },
+      dispatched: 0,
+      routed: false,
+    });
+  });
+
   it("stops at the probe for a core in a namespace the router doesn't bind, its hostname unpublished", async () => {
     const manifest = await importRelease("workers_for_platforms");
-    const { clientId, held } = await setUp("workers_for_platforms", manifest);
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest
+    );
 
     await expect(
       runClientProvision(
@@ -1154,7 +1201,7 @@ describe("provisioning a placed client", () => {
           ...context,
           router: {
             ...context.router,
-            dispatcher: cloudflare.dispatcher(namespace),
+            dispatcher: cloudflare.dispatcher(account.id, namespace),
           },
         },
         held

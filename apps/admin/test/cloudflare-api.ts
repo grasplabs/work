@@ -1389,22 +1389,23 @@ export const fakeCloudflareApi = (
   };
 
   /**
-   * The dispatch namespace `name`, as a Worker binding it reaches it: each
-   * script's live version answers as a workers.dev Worker's does
-   * (`workerAnswer`), in whichever account holds that namespace; a script
-   * it doesn't have throws, as Workers for Platforms does.
+   * The dispatch namespace `name` in account `accountId`, as a Worker
+   * binding reaches it: only that account's namespace, as a real
+   * DISPATCHER binds one namespace in its own account. Each script's live
+   * version answers as a workers.dev Worker's does (`workerAnswer`); a
+   * script it doesn't have, or one only another account holds, throws, as
+   * Workers for Platforms does.
    */
-  const dispatcher = (name: string) => ({
+  const dispatcher = (accountId: string, name: string) => ({
     get: (scriptName: string) => {
-      const found = [...accounts.values()].flatMap((account) => {
-        const script = account.namespaces.get(name)?.get(scriptName);
-        const [only] = script?.deployments[0]?.versions ?? [];
-        const live = script?.versions.find(({ id }) => id === only?.version_id);
-        return script === undefined || live === undefined
-          ? []
-          : [{ account, script, live }];
-      });
-      const [worker] = found;
+      const account = accounts.get(accountId);
+      const script = account?.namespaces.get(name)?.get(scriptName);
+      const [only] = script?.deployments[0]?.versions ?? [];
+      const live = script?.versions.find(({ id }) => id === only?.version_id);
+      const worker =
+        account === undefined || script === undefined || live === undefined
+          ? undefined
+          : { account, script, live };
       if (worker === undefined) {
         throw new Error(`Worker not found: ${scriptName}`);
       }

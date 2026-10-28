@@ -194,7 +194,10 @@ describe("the client grid", () => {
       host,
       JSON.stringify({ clientId: acme.clientId, script, generation })
     );
-    const namespace = cloudflare.dispatcher(clientDispatchNamespace);
+    const namespace = cloudflare.dispatcher(
+      acme.account.id,
+      clientDispatchNamespace
+    );
     vi.spyOn(env.DISPATCHER, "get").mockImplementation(
       (name) =>
         // SAFETY: a stand-in user Worker: only `fetch`, which the admin calls.
