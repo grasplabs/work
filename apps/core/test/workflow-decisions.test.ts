@@ -445,7 +445,8 @@ const seededDecisions = async (
  */
 const teamsChatOf = async (who: Identity, locale: string): Promise<string> => {
   const conversation = `a:${unique()}`;
-  const threadId = teamsAdapter(env).encodeThreadId({
+  const adapter = await teamsAdapter(env);
+  const threadId = adapter.encodeThreadId({
     conversationId: conversation,
     serviceUrl: "https://smba.trafficmanager.net/emea/",
     conversationType: "personal",

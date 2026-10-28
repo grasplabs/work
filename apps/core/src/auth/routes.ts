@@ -49,7 +49,7 @@ export const handleAuthRequest = async (
   requestId: string
 ): Promise<Response> => {
   const path = new URL(request.url).pathname.slice(authBasePath.length);
-  const auth = authFor(env, signInConfig(env));
+  const auth = await authFor(env, signInConfig(env));
   if (!(auth && isAllowed(request.method, path))) {
     return errorResponse(
       404,
