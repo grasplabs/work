@@ -29,6 +29,7 @@ import { sweepUploads } from "./knowledge/uploads.ts";
 import { syncLandscapes } from "./landscape.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
+import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
@@ -74,6 +75,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: reconcileConsolidation,
   },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
+  { name: "members.erasures", period: "minute", run: retryErasures },
   {
     name: "access.revocations",
     period: "minute",

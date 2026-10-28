@@ -219,6 +219,18 @@ const coreDb: D1State = {
   schema: `${core}db/core`,
   tables: {
     users: exported(auth),
+    person_erasures: exported(
+      `${core}person-erasure.ts`,
+      "Who was erased, and the keyed hash of their email that keeps them out until an admin releases it: a move must keep both."
+    ),
+    erased_subjects: exported(
+      `${core}person-erasure.ts`,
+      "Keyed hashes of an erased person's sign-in identities, which keep them out of Teams, the directory and sign-in: a move must keep them."
+    ),
+    person_erasure_areas: exported(
+      `${core}person-erasure.ts`,
+      "Each area of an erasure, pending until done: an obligation still owed, retried by the clock."
+    ),
     sessions: secret(
       auth,
       "Bearer tokens of signed-in browsers: people sign in again at the destination (46.2)."

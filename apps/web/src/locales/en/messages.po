@@ -3006,6 +3006,10 @@ msgid "Asked the agent to fix a run"
 msgstr "Asked the agent to fix a run"
 
 #: src/activity/audit-words.ts
+msgid "Asked to erase a removed member"
+msgstr "Asked to erase a removed member"
+
+#: src/activity/audit-words.ts
 msgid "Asked to send, edit or delete a chat app message as the company's bot"
 msgstr "Asked to send, edit or delete a chat app message as the company's bot"
 
@@ -5262,6 +5266,10 @@ msgstr "Entries"
 msgid "Entry {sequence} can't be read."
 msgstr "Entry {sequence} can't be read."
 
+#: src/activity/audit-words.ts
+msgid "Erased a removed member"
+msgstr "Erased a removed member"
+
 #: src/chat/thread.tsx
 msgid "Error"
 msgstr "Error"
@@ -7349,6 +7357,10 @@ msgstr "Lessons"
 #: src/routes/_shell.settings.security.tsx
 msgid "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it."
 msgstr "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it."
+
+#: src/activity/audit-words.ts
+msgid "Let an erased member's old address in again"
+msgstr "Let an erased member's old address in again"
 
 #: src/knowledge/uploads.tsx
 #: src/onboarding/document-drop.tsx

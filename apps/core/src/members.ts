@@ -8,7 +8,13 @@ import type { CodedError } from "@grasp-os/shared/errors";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
-import type { Invitation, Member, MembersApi } from "@grasp-os/shared/members";
+import type {
+  Erasure,
+  ErasurePreview,
+  Invitation,
+  Member,
+  MembersApi,
+} from "@grasp-os/shared/members";
 import {
   canBuild,
   isAdmin,
@@ -54,6 +60,12 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { isErasedEmail } from "./erased-people.ts";
+import {
+  erasePerson,
+  erasurePreview,
+  releaseAddress,
+} from "./person-erasure.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -692,6 +704,11 @@ const inviteMember = async (
   if (!(address.success && domains.includes(domainOf(address.data)))) {
     throw refusal(by, memberErrors.create("member.invite_email"));
   }
+  // Someone erased: their address is gone from `users`, but they were
+  // removed, and stay out (person-erasure.ts).
+  if (await isErasedEmail(env, address.data)) {
+    throw refusal(by, memberErrors.create("member.invite_removed"));
+  }
   const db = drizzle(env.DB);
   const id = crypto.randomUUID();
   const now = new Date();
@@ -849,5 +866,26 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     await withPerson(this.#check, async (person) => {
       await withdrawInvitation(this.#env, person, invitationId);
     });
+  }
+
+  async erasure(userId: string): Promise<ErasurePreview> {
+    return await withPerson(
+      this.#check,
+      async (person) => await erasurePreview(this.#env, person, userId)
+    );
+  }
+
+  async releaseAddress(email: string): Promise<{ released: boolean }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await releaseAddress(this.#env, person, email)
+    );
+  }
+
+  async erase(userId: string, name: string): Promise<Erasure> {
+    return await withPerson(
+      this.#check,
+      async (person) => await erasePerson(this.#env, person, userId, name)
+    );
   }
 }
