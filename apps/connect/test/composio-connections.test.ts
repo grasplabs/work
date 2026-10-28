@@ -13,6 +13,10 @@ import { log } from "@grasp-os/shared/log";
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import {
+  changeToolkitTools,
+  reconcileUnsyncedTools,
+} from "../src/composio-connections.ts";
 import { fakeComposioApi } from "./composio-api.ts";
 import {
   agentFor,
@@ -1310,6 +1314,119 @@ describe("changing what a connected Composio toolkit may do", () => {
     expect(
       listed.find(({ id }) => id === connectionId)?.toolResources
     ).toStrictEqual({ HUBSPOT_LIST_CONTACTS: "pipeline" });
+  });
+
+  it("tells Composio of the tools a change adds only once connect holds them", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    let beforeWrite: string[][] = [];
+    // What Composio allows after the first update, the one before connect's write.
+    composio.state.beforeUpdate = async () => {
+      composio.state.beforeUpdate = async () => {
+        beforeWrite = serverTools();
+        await Promise.resolve();
+      };
+      await Promise.resolve();
+    };
+    await change(admin, connectionId, [
+      "HUBSPOT_LIST_CONTACTS",
+      "HUBSPOT_UPDATE_CONTACT",
+    ]);
+
+    expect({ beforeWrite, after: serverTools() }).toStrictEqual({
+      beforeWrite: [["HUBSPOT_LIST_CONTACTS"]],
+      after: [["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"]],
+    });
+  });
+
+  it("marks a connection whose Composio couldn't be brought in line, and the clock does it later", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    // Composio takes the narrowed update, then none for a while.
+    composio.state.beforeUpdate = async () => {
+      composio.state.failing = "PATCH /mcp/";
+      await Promise.resolve();
+    };
+    await change(admin, connectionId, [
+      "HUBSPOT_LIST_CONTACTS",
+      "HUBSPOT_UPDATE_CONTACT",
+    ]);
+    const unsynced = async () =>
+      await env.DB.prepare(
+        "SELECT tools_unsynced_at AS at FROM connections WHERE id = ?"
+      )
+        .bind(connectionId)
+        .first<{ at: number | null }>();
+    const marked = await unsynced();
+    composio.state.failing = undefined;
+    await reconcileUnsyncedTools(env);
+    const cleared = await unsynced();
+
+    expect({
+      marked: marked?.at !== null,
+      composio: serverTools(),
+      cleared: cleared?.at,
+    }).toStrictEqual({
+      marked: true,
+      composio: [["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"]],
+      cleared: null,
+    });
+  });
+
+  it("takes a change whose write landed but whose answer was lost as made, and records no failure", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    let toolsWrite = false;
+    let lost = false;
+    const db = new Proxy(env.DB, {
+      get: (target, property): unknown => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "prepare") {
+          return (query: string): unknown => {
+            if (/^update "connections" set "tools"/iu.test(query)) {
+              toolsWrite = true;
+            }
+            return target.prepare(query);
+          };
+        }
+        if (property === "batch") {
+          return async (
+            statements: D1PreparedStatement[]
+          ): Promise<unknown> => {
+            const answer: unknown = await target.batch(statements);
+            if (toolsWrite && !lost) {
+              lost = true;
+              throw new Error("The answer was lost");
+            }
+            return answer;
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    const result = await changeToolkitTools(
+      { ...env, DB: db },
+      {
+        person: admin,
+        connectionId,
+        tools: ["HUBSPOT_UPDATE_CONTACT"],
+      }
+    );
+    const recorded = await events();
+
+    expect({
+      result,
+      lost,
+      outcomes: recorded
+        .filter(({ action }) => action === "connection.tools")
+        .map(({ detail }) => [detail.outcome, detail.reason ?? null]),
+    }).toStrictEqual({
+      result: { tools: ["HUBSPOT_UPDATE_CONTACT"] },
+      lost: true,
+      outcomes: [["ok", null]],
+    });
   });
 
   it("drops a held action of a tool taken away, so nobody is asked to confirm it", async () => {

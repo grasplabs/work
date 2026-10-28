@@ -100,6 +100,13 @@ export const connections = sqliteTable(
     composioServerId: text("composio_server_id"),
     composioAuthConfigId: text("composio_auth_config_id"),
     tools: text(),
+    /**
+     * Since when Composio may not allow what `tools` says: a reconcile
+     * after a change didn't finish. Connect's clock reconciles it again
+     * until it does (src/composio-connections.ts); null once Composio
+     * matches.
+     */
+    toolsUnsyncedAt: timestamp("tools_unsynced_at"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },

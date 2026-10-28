@@ -19,7 +19,16 @@ import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { eq, lte, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  isNotNull,
+  isNull,
+  lte,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -1074,6 +1083,80 @@ const reconciled = async (
 };
 
 /**
+ * Reconciles connection `connectionId` (`reconciled`), and marks it out of
+ * sync when that didn't finish, for connect's clock to try again
+ * (`reconcileUnsyncedTools`); clears the mark once it did. Whether it did.
+ */
+const reconcileOrMark = async (
+  db: ReturnType<typeof drizzle>,
+  key: string,
+  serverId: string,
+  connectionId: string
+): Promise<boolean> => {
+  const startedAt = new Date();
+  const done = await reconciled(db, key, serverId, connectionId);
+  await (done
+    ? db
+        .update(connections)
+        .set({ toolsUnsyncedAt: null })
+        .where(
+          and(
+            eq(connections.id, connectionId),
+            // A mark set after this reconcile started is another's.
+            lte(connections.toolsUnsyncedAt, startedAt)
+          )
+        )
+    : db
+        .update(connections)
+        .set({ toolsUnsyncedAt: startedAt })
+        .where(
+          and(
+            eq(connections.id, connectionId),
+            isNull(connections.toolsUnsyncedAt)
+          )
+        ));
+  return done;
+};
+
+/** Most connections out of sync one clock run reconciles. */
+const unsyncedPerRun = 20;
+
+/**
+ * Reconciles Composio for the connections marked out of sync, oldest
+ * first, a few each run: what a change's reconcile left unfinished
+ * (Composio away, or refusing for a while). Connect's clock runs it.
+ */
+export const reconcileUnsyncedTools = async (env: Env): Promise<void> => {
+  const key = composioKey(env);
+  if (key === undefined) {
+    return;
+  }
+  const db = drizzle(env.DB);
+  const marked = await db
+    .select({ id: connections.id, serverId: connections.composioServerId })
+    .from(connections)
+    .where(
+      and(
+        isNotNull(connections.toolsUnsyncedAt),
+        eq(connections.status, "active"),
+        eq(connections.serverKind, "composio"),
+        isNotNull(connections.composioServerId)
+      )
+    )
+    .orderBy(asc(connections.toolsUnsyncedAt))
+    .limit(unsyncedPerRun);
+  for (const { id, serverId } of marked) {
+    if (serverId === null) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+    if (!(await reconcileOrMark(db, key, serverId, id))) {
+      log.warn("composio.tools_still_unsynced", { connectionId: id });
+    }
+  }
+};
+
+/**
  * Changes which tools a shared Composio connection allows, and which of
  * them only read, for an admin (GRA-993; the threat model is on the
  * issue). Only tools its toolkit has, as connecting checks them.
@@ -1151,7 +1234,7 @@ export const changeToolkitTools = async (
   // Composio told what connect holds, recorded for whoever reconciles
   // should it not finish: connect, which every call goes by, stays as it is.
   const reconcile = async () => {
-    if (!(await reconciled(db, key, serverId, row.id))) {
+    if (!(await reconcileOrMark(db, key, serverId, row.id))) {
       await failed("connection.tools_restore_failed", "failed");
     }
   };
@@ -1164,8 +1247,14 @@ export const changeToolkitTools = async (
     return { tools: names };
   }
   const previous = composioToolsSchema.parse(JSON.parse(before));
+  // Narrowed first, widened after: before connect's write, Composio is told
+  // only the tools both lists allow; the ones this adds reach it only once
+  // connect holds them (the reconcile below). Composio may lag connect,
+  // never lead it.
+  const kept = new Set(previous.map(composioToolName));
+  const narrowed = tools.filter((tool) => kept.has(composioToolName(tool)));
   try {
-    await setServerTools(key, serverId, tools);
+    await setServerTools(key, serverId, narrowed);
   } catch (error) {
     // Recorded whatever went wrong: Composio refusing, or anything else
     // on the way, which goes on as it was.
@@ -1254,11 +1343,27 @@ export const changeToolkitTools = async (
       })),
     ]);
   } catch (error) {
-    // Composio was told this change, connect kept the list it had:
-    // Composio goes back to connect's.
-    await reconcile();
-    await failed("connection.change_failed", "failed");
-    throw error;
+    // The write may have landed and only its answer failed: read back,
+    // it is this change's, made with its events in one transaction.
+    let landed: { id: string } | undefined;
+    try {
+      landed = await db
+        .select({ id: connections.id })
+        .from(connections)
+        .where(madeHere)
+        .get();
+    } catch {
+      // Not read: taken as not made, the safe side for Composio.
+      landed = undefined;
+    }
+    if (landed === undefined) {
+      // Composio was told part of this change, connect kept the list it
+      // had: Composio goes back to connect's.
+      await reconcile();
+      await failed("connection.change_failed", "failed");
+      throw error;
+    }
+    changed = true;
   }
   if (!changed) {
     // Another change won: Composio goes to what connect holds now.
