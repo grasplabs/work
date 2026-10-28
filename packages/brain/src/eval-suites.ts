@@ -7,9 +7,19 @@ import { brainEvalCases, brainEvalSuiteVersions } from "./db/schema.ts";
 import { inChunks } from "./documents.ts";
 import type { Writer } from "./documents.ts";
 import { toHex } from "./encoding.ts";
+import { decide, decisionPolicySchema } from "./eval-decision.ts";
+import type { DecisionPolicy, Verdict } from "./eval-decision.ts";
 import { canonicalJson } from "./json.ts";
 import type { Json } from "./json.ts";
 import { knowledgeErrors } from "./knowledge.ts";
+
+export type {
+  Comparison,
+  DecisionPolicy,
+  DecisionPolicyInput,
+  HoldReason,
+  Verdict,
+} from "./eval-decision.ts";
 
 // Learning suites, as versions frozen by their digests (GRA-311, L1; the
 // Brain design's "Proposed evaluation service"): the cases, grader and
@@ -66,31 +76,41 @@ const caseSchema = z.strictObject({
   expected: z.json(),
 });
 
-const proposalSchema = z.strictObject({
-  suiteId: z.string().min(1).max(100),
-  name: z.string().min(1).max(200),
-  ownerId: z.string().min(1).max(100),
-  cases: z
-    .array(caseSchema)
-    .min(1)
-    .max(evalCasesMax)
-    .refine(
-      (cases) =>
-        new Set(cases.map(({ caseId }) => caseId)).size === cases.length,
-      "Each case once"
-    ),
-  grader: z.strictObject({
-    version: z.string().min(1).max(100),
-    requiredChecks: z.array(z.string().min(1).max(200)).max(100),
-    spec: z.json(),
-  }),
-  pins: z.strictObject({
-    baseline: z.string().min(1).max(200),
-    model: z.string().min(1).max(200),
-    environment: z.string().min(1).max(200),
-    policy: z.string().min(1).max(200),
-  }),
-});
+const proposalSchema = z
+  .strictObject({
+    suiteId: z.string().min(1).max(100),
+    name: z.string().min(1).max(200),
+    ownerId: z.string().min(1).max(100),
+    cases: z
+      .array(caseSchema)
+      .min(1)
+      .max(evalCasesMax)
+      .refine(
+        (cases) =>
+          new Set(cases.map(({ caseId }) => caseId)).size === cases.length,
+        "Each case once"
+      ),
+    grader: z.strictObject({
+      version: z.string().min(1).max(100),
+      requiredChecks: z.array(z.string().min(1).max(200)).max(100),
+      spec: z.json(),
+    }),
+    pins: z.strictObject({
+      baseline: z.string().min(1).max(200),
+      model: z.string().min(1).max(200),
+      environment: z.string().min(1).max(200),
+      policy: z.string().min(1).max(200),
+    }),
+    /** What a candidate must show to be published (eval-decision.ts). */
+    decision: decisionPolicySchema,
+  })
+  .refine(
+    ({ grader, decision }) =>
+      grader.requiredChecks.every((check) =>
+        decision.securityGates.includes(check)
+      ),
+    { message: "Every check the grader requires is a gate of the decision" }
+  );
 export type EvalSuiteProposal = z.input<typeof proposalSchema>;
 
 /** A suite version, as anyone allowed to see it reads it: never a case. */
@@ -111,6 +131,8 @@ export interface EvalSuiteVersion {
     environment: string;
     policy: string;
   };
+  /** What a candidate must show to be published, as proposed and accepted. */
+  decision: DecisionPolicy;
   proposedBy: string;
   acceptedBy: string | null;
   acceptedAt: string | null;
@@ -244,6 +266,7 @@ const versionOf = async <C>(
     },
     grader: { version: grader.version, requiredChecks: grader.requiredChecks },
     pins: pinsSchema.parse(JSON.parse(row.pins)),
+    decision: decisionPolicySchema.parse(JSON.parse(row.decision)),
     proposedBy: row.proposedBy,
     acceptedBy: row.acceptedBy,
     acceptedAt: row.acceptedAt?.toISOString() ?? null,
@@ -358,6 +381,17 @@ export const proposeSuiteVersion = async <C>(
   );
   requireSame(brain, reader, by);
   await requireCapability(brain, reader, proposal.suiteId, "designer");
+  // The gates the platform mandates are every suite's too.
+  const mandated = brain.ports.evaluation?.mandatedGates ?? [];
+  if (
+    mandated.some((gate) => !proposal.decision.securityGates.includes(gate))
+  ) {
+    throw knowledgeErrors.create("knowledge.invalid", {
+      issues: [
+        "decision.securityGates: a gate the platform mandates is missing",
+      ],
+    });
+  }
   requireApart(proposal.cases);
   // Its owner is never its designer, and stays the suite's owner from
   // version to version, unless they hand it on (`changeSuiteOwner`).
@@ -418,6 +452,7 @@ export const proposeSuiteVersion = async <C>(
     // thresholds a guess could be checked against.
     graderDigest: await casesDigestOf(brain, grader),
     pins: canonicalJson(proposal.pins),
+    decision: canonicalJson(proposal.decision),
     proposedBy: by.userId,
     createdAt: now,
     updatedAt: now,
@@ -681,4 +716,41 @@ export const suiteCases = async <C>(
     input: z.json().parse(JSON.parse(row.input)),
     expected: z.json().parse(JSON.parse(row.expected)),
   }));
+};
+
+/**
+ * The verdict of version `version`'s decision policy on `comparison`, for
+ * the families its cases hold, never fewer (eval-decision.ts `decide`):
+ * for the evaluator or publication, on an accepted version alone.
+ */
+export const decideVersion = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  suiteId: string,
+  version: number,
+  comparison: unknown
+): Promise<Verdict> => {
+  // The evaluator's or publication's, and only on an accepted version.
+  const held = await capabilitiesOf(brain, reader, suiteId);
+  if (!held.has("evaluator") && !held.has("publication")) {
+    throw knowledgeErrors.create("knowledge.not_found");
+  }
+  const current = await versionOf(brain, suiteId, version);
+  if (current.state !== "accepted") {
+    throw knowledgeErrors.create("knowledge.conflict");
+  }
+  const rows = await brain.db
+    .selectDistinct({ family: brainEvalCases.family })
+    .from(brainEvalCases)
+    .where(
+      and(
+        eq(brainEvalCases.suiteId, suiteId),
+        eq(brainEvalCases.version, version)
+      )
+    );
+  return decide(
+    current.decision,
+    comparison,
+    rows.map(({ family }) => family)
+  );
 };
