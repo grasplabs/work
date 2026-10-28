@@ -176,6 +176,13 @@
       "when": 1793126740416,
       "tag": "0024_custom_widgets",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1793143856788,
+      "tag": "0025_chat_app",
+      "breakpoints": true
     }
   ]
 }
