@@ -6,6 +6,7 @@ import { writeVersion } from "../src/documents.ts";
 import {
   entitiesFor,
   entitySources,
+  relationsPerSource,
   runLinking,
   settleMs,
   sweepLinking,
@@ -107,6 +108,10 @@ const entityOf = async (
   return found?.id ?? "";
 };
 
+/** The ISO date `index` days after 2025-01-01. */
+const day = (index: number): string =>
+  new Date(Date.UTC(2025, 0, 1 + index)).toISOString().slice(0, 10);
+
 /** Who `entityId` is related to by `owns`, as `reader` asks. */
 const owners = async (
   host: ReturnType<typeof testHost>,
@@ -114,7 +119,7 @@ const owners = async (
   entityId: string,
   asked: { at?: string; knownAt?: string } = {}
 ) => {
-  const found = await relationsFor(host.brain, reader, {
+  const { relations: found } = await relationsFor(host.brain, reader, {
     entityId,
     predicate: "owns",
     ...asked,
@@ -206,7 +211,7 @@ describe("typed relations", () => {
     await savedAndLinked(host, collection, "team.md", said);
     const anna = await entityOf(host, reader, "Anna");
     const asked = async (predicate: string) => {
-      const found = await relationsFor(host.brain, reader, {
+      const { relations: found } = await relationsFor(host.brain, reader, {
         entityId: anna,
         predicate,
       });
@@ -260,6 +265,89 @@ describe("typed relations", () => {
     expect(owned.map(({ owner }) => owner).toSorted()).toStrictEqual(
       people.toSorted()
     );
+  });
+
+  it("mark a relation conflicting with an older readable source past the answer's cap, and say the answer was cut", async () => {
+    const thing = `Rota ${word()}`;
+    // The oldest source: Ben owns it, open-ended.
+    const ben = `Ben owns ${thing}.`;
+    // Then as many newer relations as an answer holds, and one more: each
+    // a person owning it for one day of their own, so none of them
+    // disagree with another, only with Ben.
+    const files = Array.from({ length: 5 }, (_file, batch) =>
+      Array.from({ length: relationsPerSource }, (_line, index) => {
+        const at = day(batch * relationsPerSource + index);
+        return {
+          name: `Person ${batch}-${index}`,
+          at,
+          line: `Person ${batch}-${index} owns ${thing} on ${at}.`,
+        };
+      })
+    );
+    const host = testHost(
+      modelOf({
+        [ben]: {
+          entities: [
+            { kind: "person", name: "Ben" },
+            { kind: "thing", name: thing },
+          ],
+          relations: [
+            { subject: "Ben", predicate: "owns", object: thing, evidence: ben },
+          ],
+        },
+        ...Object.fromEntries(
+          files.map((lines) => [
+            lines.map(({ line }) => line).join("\n"),
+            {
+              entities: [
+                ...lines.map(({ name }) => ({ kind: "person", name })),
+                { kind: "thing", name: thing },
+              ],
+              relations: lines.map(({ name, at, line }) => ({
+                subject: name,
+                predicate: "owns",
+                object: thing,
+                validFrom: at,
+                validTo: at,
+                evidence: line,
+              })),
+            },
+          ])
+        ),
+      })
+    );
+    const collection = await newCollection(host.brain, "Rotas");
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    await savedAndLinked(host, collection, "ben.md", ben);
+    for (const [index, lines] of files.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- newer than Ben's, in order
+      await scheduler.wait(2);
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await savedAndLinked(
+        host,
+        collection,
+        `rota-${index}.md`,
+        lines.map(({ line }) => line).join("\n")
+      );
+    }
+    const answer = await relationsFor(host.brain, reader, {
+      entityId: await entityOf(host, reader, thing),
+      predicate: "owns",
+    });
+
+    expect({
+      answered: answer.relations.length,
+      benAnswered: answer.relations.some(
+        ({ subject }) => subject.name === "Ben"
+      ),
+      allConflicting: answer.relations.every(({ conflicting }) => conflicting),
+      truncated: answer.truncated,
+    }).toStrictEqual({
+      answered: 200,
+      benAnswered: false,
+      allConflicting: true,
+      truncated: true,
+    });
   });
 
   it("keep what was known before a correction, which supersedes it without rewriting it", async () => {
@@ -413,7 +501,7 @@ describe("typed relations", () => {
     const collection = await newCollection(host.brain, "People");
     const reader: Caller = { userId: "reader", reads: [collection.id] };
     await savedAndLinked(host, collection, "hiring.md", text);
-    const found = await relationsFor(host.brain, reader, {
+    const { relations: found } = await relationsFor(host.brain, reader, {
       entityId: await entityOf(host, reader, thing),
     });
 
@@ -507,7 +595,9 @@ describe("typed relations", () => {
     const collection = await newCollection(host.brain, "Operations");
     const reader: Caller = { userId: "reader", reads: [collection.id] };
     await savedAndLinked(host, collection, "owner.md", `# Owner\n${said}\n`);
-    const [found] = await relationsFor(host.brain, reader, {
+    const {
+      relations: [found],
+    } = await relationsFor(host.brain, reader, {
       entityId: await entityOf(host, reader, thing),
     });
 

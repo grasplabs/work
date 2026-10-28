@@ -30,8 +30,8 @@ import type {
   MemoryRecord,
   ReceiptsGetInput,
   RecallInput,
+  RelationsAnswer,
   RelationsGetInput,
-  RelationView,
   RememberInput,
   SkillRead,
   SkillSelection,
@@ -54,6 +54,7 @@ export type {
   MemoryPage,
   MemoryRecord,
   RecallInput,
+  RelationsAnswer,
   RelationsGetInput,
   RelationView,
   RememberInput,
@@ -94,7 +95,7 @@ export interface BrainBinding {
   skillsRead?: (input: SkillsReadInput) => Promise<SkillRead>;
   entitiesList?: (input: EntitiesListInput) => Promise<EntitySummary[]>;
   entitySources?: (input: EntitySourcesInput) => Promise<BrainSourceRef[]>;
-  relationsGet?: (input: RelationsGetInput) => Promise<RelationView[]>;
+  relationsGet?: (input: RelationsGetInput) => Promise<RelationsAnswer>;
 }
 
 /** The Brain, as a caller uses it. */
@@ -141,9 +142,10 @@ export interface Brain {
     /**
      * What readable sources say about one entity, each with its passage:
      * on a date (`at`), as known at a moment (`knownAt`). Observed, never
-     * an accepted fact; conflicting ones both come back.
+     * an accepted fact; conflicting ones both come back. `truncated`: a
+     * cap left some out, so what came back isn't all there is.
      */
-    get: (input: RelationsGetInput) => Promise<RelationView[]>;
+    get: (input: RelationsGetInput) => Promise<RelationsAnswer>;
   };
 }
 
