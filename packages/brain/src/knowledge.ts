@@ -674,7 +674,7 @@ export const knowledgeErrors = errorFamily({
   "knowledge.export_purged":
     "A purge ran while the export was written, so it was deleted. Ask for the export again.",
   "knowledge.export_purge_open":
-    "A purge is still running. Let it finish, then ask for the export again.",
+    "A purge is unfinished. Run it again to finish it, then ask for the export again.",
   "knowledge.not_found":
     "There's no such collection, document or version, or you can't see it.",
   "knowledge.forbidden": "You can't change this collection.",

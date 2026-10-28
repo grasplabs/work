@@ -144,18 +144,15 @@ const exportedCollections = async <C>(
     )
     .orderBy(asc(collections.id));
 
-/** The rowid of a purge record: its place in the order they were written. */
-const purgeSequence = sql<number>`${brainPurges}.rowid`;
-
 /**
- * The newest purge record now: what `purgedSince` is asked from. Purge
- * records are never deleted, so their rowids only grow.
+ * How many purge records there are now: what `purgedSince` is asked
+ * from. Purge records are never deleted (purge-ledger.ts: a finished one
+ * run again records a new one), so the count only grows, one for each
+ * purge begun; a count, not a rowid, as VACUUM may renumber those.
  */
 const purgeMarkOf = async <C>(brain: Brain<C>): Promise<number> => {
-  const [row] = await brain.db
-    .select({ mark: sql<number | null>`max(${purgeSequence})` })
-    .from(brainPurges);
-  return row?.mark ?? 0;
+  const [row] = await brain.db.select({ n: count() }).from(brainPurges);
+  return row?.n ?? 0;
 };
 
 /** A purge still unfinished: neither complete nor superseded. */
@@ -174,12 +171,13 @@ const purgedSince = async <C>(
   brain: Brain<C>,
   mark: number
 ): Promise<boolean> => {
-  const found = await brain.db
-    .select({ id: brainPurges.id })
-    .from(brainPurges)
-    .where(or(gt(purgeSequence, mark), purgeOpen))
-    .limit(1);
-  return found.length > 0;
+  const [row] = await brain.db
+    .select({
+      records: count(),
+      open: sql<number>`coalesce(sum(CASE WHEN ${purgeOpen} THEN 1 ELSE 0 END), 0)`,
+    })
+    .from(brainPurges);
+  return (row?.records ?? 0) > mark || (row?.open ?? 0) > 0;
 };
 
 /** How long a prepared export's confirmation holds. */
@@ -294,7 +292,11 @@ export const startExport = async <C>(
   if (open !== undefined) {
     throw knowledgeErrors.create("knowledge.export_purge_open");
   }
-  // What it holds, frozen now (`OnExport.excluded`, the host's as it is).
+  // What it holds, frozen now (`OnExport.excluded`, the host's as it is):
+  // what the admin confirmed, as company content then. A collection's
+  // access, or the host's exclusions, changing while it runs don't change
+  // it, so its files never disagree; one made personal meanwhile is in it
+  // as it was confirmed.
   const company = await exportedCollections(brain, onExport.excluded);
   // One being written at a time (`brain_exports_running_idx`).
   const [running] = await brain.db
@@ -441,7 +443,8 @@ const writeFile = async <C>(
     .select(
       sql`SELECT ${run.exportId}, ${name}, ${position}, ${sha256}, ${bytes}, ${rows}, ${cursor}, ${object}, 0 WHERE ${holding(run)}`
     )
-    .onConflictDoNothing()
+    // No conflict handling: a file recorded twice is a fault that fails
+    // the export, never mistaken for a lost claim.
     .returning({ name: brainExportFiles.name });
   if (recorded.length === 0) {
     throw new ClaimLostError();
