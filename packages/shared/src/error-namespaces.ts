@@ -73,6 +73,7 @@ export const familyNamespaces = [
   "upload",
   "version",
   "waiting",
+  "webhook",
   "workflow",
 ] as const;
 
