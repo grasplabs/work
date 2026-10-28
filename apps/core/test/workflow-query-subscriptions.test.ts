@@ -562,4 +562,133 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
     await inbox([]);
     await subscription.release();
   });
+
+  it("take a team's decision out of a reviewer's live inbox once they leave the team, their App role unchanged", async () => {
+    const admin = await signedIn("admin");
+    const builder = await signedIn("builder");
+    const key = `approval-${unique()}`;
+    await publishCatalogContract(env, admin.acting, {
+      key,
+      kind: "decision",
+      input: JSON.stringify(v.object({ who: v.string() }).descriptor),
+      response: JSON.stringify(v.object({ comment: v.string() }).descriptor),
+    });
+    const workflow = await createWorkflowResource(
+      env,
+      builder.acting,
+      `decide-${unique()}`
+    );
+    await publishWorkflowVersion(env, builder.acting, workflow.id, {
+      definition: decidingDefinitionOf(workflow.name, key),
+      basedOn: null,
+    });
+    const fixture = await appWith(files(), "Requests", builder.acting);
+    await bindWorkflowToApp(env, builder.acting, workflow.id, {
+      app: fixture.app,
+      alias: "followUp",
+      version: 1,
+    });
+    await seal(fixture);
+    await setCurrentVersion(env, builder.acting, fixture.app, 1);
+    await env.DB.prepare(
+      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+    )
+      .bind(fixture.app, admin.userId, builder.userId, Date.now())
+      .run();
+    // The admin is in the team the decision asks.
+    const team = crypto.randomUUID();
+    const membership = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Finance', 'organization', ?)"
+      ).bind(team, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+      ).bind(membership, team, admin.userId, Date.now()),
+    ]);
+    const review = await admin.api.screenTrust.review(fixture.app);
+    await admin.api.screenTrust.approve(fixture.app, {
+      version: review.version,
+      generation: review.generation,
+      artifacts: builtArtifacts(review.screens),
+    });
+    const { lease } = await admin.api.screens.open(fixture.app, "desk");
+    const release = await loadRelease(env, fixture.app, 1);
+    // The admin's screen follows their inbox: nothing in it yet.
+    const follower = pageFollower();
+    const subscription = await admin.api.screens
+      .frame(fixture.app, lease)
+      .watchQuery(
+        JSON.stringify({
+          reference: await queryReference(release, "followUp", "decisions"),
+          input: { pagination: {} },
+        }),
+        follower.callback
+      );
+    const inbox = async (ids: string[]) => {
+      await vi.waitFor(
+        () => {
+          expect(follower.received.length).toBeGreaterThan(0);
+          expect(latestDecisions(follower.received)).toStrictEqual(ids);
+        },
+        { timeout: 30_000, interval: 50 }
+      );
+    };
+    await inbox([]);
+    // A run the App started for the builder, which asks the admins: as
+    // the run's own call opens it, so does nothing the admin follows.
+    const manifest = await env.DB.prepare(
+      "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ hash: string }>();
+    const runId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'app', ?, ?, ?, 1, ?, ?, 1, 'h', ?)"
+      ).bind(
+        runId,
+        fixture.app,
+        `key-${runId}`,
+        workflow.id,
+        manifest?.hash ?? "",
+        builder.userId,
+        Date.now()
+      ),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, ?, 'b', ?, 'running', ?)"
+      ).bind(
+        runId,
+        workflow.id,
+        manifest?.hash ?? "",
+        builder.userId,
+        Date.now()
+      ),
+    ]);
+    const run = {
+      kind: "resource",
+      runId,
+      workflow: workflow.id,
+      version: 1,
+    } as const;
+    const { decision } = await openDecision(env, run, {
+      step: "task:ask",
+      from: `team:${team}`,
+      description: "Approve this request?",
+      timeout: 3_600_000,
+      starterExcluded: false,
+      input: { who: "Ada" },
+    });
+    await inbox([decision]);
+    // They leave the team, still a user of the App: the App is told, as
+    // a revocation tells it, and their inbox reads again.
+    await env.DB.prepare("DELETE FROM team_members WHERE id = ?")
+      .bind(membership)
+      .run();
+    await appHost(env, appIdSchema.parse(fixture.app)).accessRevoked([
+      admin.userId,
+    ]);
+    await inbox([]);
+    await subscription.release();
+  });
 });

@@ -1053,9 +1053,11 @@ const decisionDetail = async (
   if (row === undefined || named === undefined) {
     throw refused;
   }
-  // Closed, or gone with its run's details (workflows/retention.ts): an
-  // authorized decision that takes no answer.
-  if (row.pending !== 1 || row.description === "" || row.input === null) {
+  // Closed, or gone with its run's details (workflows/retention.ts), which
+  // empties its description (a decision is never opened with none): an
+  // authorized decision that takes no answer. Its context may be JSON
+  // `null`, a value its contract can take, so that says nothing.
+  if (row.pending !== 1 || row.description === "") {
     return null;
   }
   return {
