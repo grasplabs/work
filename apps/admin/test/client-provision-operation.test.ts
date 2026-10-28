@@ -1102,8 +1102,21 @@ describe("provisioning a placed client", () => {
     );
 
     const { core } = await scriptsOf(clientId);
+    const [probed] = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.probe")
+        )
+      );
     expect({
       operation: await operationOf(clientId),
+      // On record: the version it answered wasn't checked against its upload.
+      versionUnchecked: z
+        .object({ versionUnchecked: z.number().optional() })
+        .parse(JSON.parse(probed?.detail ?? "{}")).versionUnchecked,
       entry: await env.ROUTER_HOSTS.get(`${clientId}.${domain}`, "json"),
       // Its health and the admin's probe, through the namespace, at the
       // hostname the router will reach it at: never over workers.dev.
@@ -1117,6 +1130,7 @@ describe("provisioning a placed client", () => {
         .filter(({ path }) => path.includes("workers.dev")).length,
     }).toMatchObject({
       operation: { status: "done" },
+      versionUnchecked: 1,
       entry: { clientId, script: core, generation: 1 },
       dispatched: [
         { script: core, path: "/health", host: `${clientId}.${domain}` },

@@ -1643,7 +1643,17 @@ const probe = async (
     throw new ProvisionOperationError(fault.code, fault.message);
   }
   const progress = await progressNow(db, loaded.operation.id);
-  await recordStep(db, loaded, "probe", { attempts }, { ...progress, origin });
+  await recordStep(
+    db,
+    loaded,
+    "probe",
+    // On record: a namespace core's version was the one it answered, not
+    // checked against its upload (GRA-430 qualifies how to).
+    target.namespace === null
+      ? { attempts }
+      : { attempts, versionUnchecked: 1 },
+    { ...progress, origin }
+  );
   return entry;
 };
 
@@ -1692,6 +1702,17 @@ const route = async (
 ): Promise<void> => {
   const { held } = loaded;
   const { generation } = loaded.client;
+  // Only a script of this client's own placement (`g<deploymentId>-…`,
+  // inventory.ts): a mis-recorded inventory never publishes another's.
+  if (
+    target.kind === "dispatch" &&
+    !target.script.startsWith(`g${loaded.placement.deploymentId}-`)
+  ) {
+    throw new ProvisionOperationError(
+      "probe_unqualified",
+      `${target.script} isn't a script of ${held.clientId}'s placement`
+    );
+  }
   await registerHostname(
     context.router.hosts,
     `${held.clientId}.${context.router.domain}`,
