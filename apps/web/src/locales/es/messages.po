@@ -1386,6 +1386,10 @@ msgid "{title} added to the dashboard."
 msgstr "{title} se ha añadido al panel."
 
 #: src/dashboard/widget-board.tsx
+msgid "{title} changed."
+msgstr "{title} se ha cambiado."
+
+#: src/dashboard/widget-board.tsx
 msgid "{title} is now in place {place} of {count}."
 msgstr "{title} está ahora en el lugar {place} de {count}."
 
@@ -2900,7 +2904,7 @@ msgid "Ask for it"
 msgstr "Solicitar"
 
 #: src/chat/chat-dock.tsx
-#: src/dashboard/widget-board.tsx
+#: src/dashboard/widget-ask.tsx
 msgid "Ask Grasp"
 msgstr "Pregunta a Grasp"
 
@@ -3563,6 +3567,10 @@ msgstr "Cambia «{was}» por «{now}»."
 msgid "Change {first}'s details"
 msgstr "Cambiar los datos de {first}"
 
+#: src/dashboard/widget-ask.tsx
+msgid "Change {title}"
+msgstr "Cambiar {title}"
+
 #: src/onboarding/organization-dialogs.tsx
 msgctxt "button: change someone's name, email, job or team"
 msgid "Change details"
@@ -3591,6 +3599,10 @@ msgstr "Cambiar lo suyo"
 #: src/onboarding/organization-dialogs.tsx
 msgid "Change this team"
 msgstr "Cambiar este equipo"
+
+#: src/dashboard/widget-ask.tsx
+msgid "Change with Grasp"
+msgstr "Cambiar con Grasp"
 
 #: src/interview/read-back.tsx
 msgid "Change: {text}"
@@ -6006,6 +6018,10 @@ msgstr "Concedió un permiso"
 msgid "Grasp access"
 msgstr "Acceso de Grasp"
 
+#: src/chat/thread.tsx
+msgid "Grasp added a widget to your dashboard."
+msgstr "Grasp ha añadido un widget a tu panel."
+
 #: src/chat/chat-dock.tsx
 #: src/chat/cited-note.tsx
 #: src/core.ts
@@ -6017,6 +6033,10 @@ msgstr "Acceso de Grasp"
 #: src/routes/sign-in.tsx
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Ahora mismo no se puede acceder a Grasp. Vuelve a intentarlo en un momento."
+
+#: src/chat/thread.tsx
+msgid "Grasp changed a widget on your dashboard."
+msgstr "Grasp ha cambiado un widget de tu panel."
 
 #: src/connections/request-app-dialog.tsx
 msgctxt "“Requested” is the name of a section on the Integrations page."
@@ -6059,7 +6079,7 @@ msgstr "Grasp en tu idioma. Los números, las fechas y los importes también lo 
 msgid "Grasp is busy right now. Remove this policy and upload it again in a minute."
 msgstr "Grasp está ocupado ahora mismo. Quita esta política y vuelve a subirla dentro de un minuto."
 
-#: src/dashboard/widget-board.tsx
+#: src/dashboard/widget-ask.tsx
 msgid "Grasp is making it…"
 msgstr "Grasp lo está haciendo…"
 
@@ -9525,6 +9545,10 @@ msgstr "Abierta desde el visto bueno de Grasp el {since}."
 msgid "Open the chat"
 msgstr "Abrir el chat"
 
+#: src/chat/thread.tsx
+msgid "Open the dashboard"
+msgstr "Abrir el panel"
+
 #: src/workflows/workflows-table.tsx
 msgid "Open the domain {name}"
 msgstr "Abrir el dominio {name}"
@@ -11550,6 +11574,10 @@ msgstr "Mostrar anteriores"
 #: src/landscape/audit-trail.tsx
 msgid "Show older events to read further back."
 msgstr "Muestra eventos anteriores para leer más atrás."
+
+#: src/dashboard/widget-ask.tsx
+msgid "Show only the failed runs."
+msgstr "Mostrar solo las ejecuciones fallidas."
 
 #: src/frame/site-header.tsx
 msgid "Show or hide the sidebar"
@@ -14839,6 +14867,10 @@ msgstr "Qué se ejecutó"
 #: src/dashboard/report-dialog.tsx
 msgid "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
 msgstr "Qué se ejecutó, las decisiones que pidió, cada flujo de trabajo y qué podría ir mejor. Guárdalo como Markdown o como PDF desde la ventana de impresión."
+
+#: src/dashboard/widget-ask.tsx
+msgid "What should change?"
+msgstr "¿Qué debería cambiar?"
 
 #: src/connections/request-app-dialog.tsx
 msgid "What should Grasp do there?"

@@ -1,7 +1,17 @@
 // @vitest-environment happy-dom
-import type { ChatMessage, ChatPartial } from "@grasp-os/shared/chat";
+import type {
+  ChatMessage,
+  ChatPartial,
+  ChatToolEvent,
+} from "@grasp-os/shared/chat";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -11,7 +21,8 @@ import { ChatThread } from "./thread.tsx";
 
 // What the model thought before an answer, in the thread: while it thinks,
 // its words stream in, open under "Thinking"; once the answer is kept, a
-// quiet line says how long it thought, and unfolds what it thought.
+// quiet line says how long it thought, and unfolds what it thought. And
+// what an answer's code did to the dashboard, under the step that did it.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -24,31 +35,45 @@ const asked: ChatMessage = {
   at: "2026-10-27T09:00:00.000Z",
 };
 
-/** The thread of `messages`, with `partial` being written while it runs. */
+/**
+ * The thread of `messages`, with `partial` being written while it runs,
+ * and the calls its code made (`tools`), on a page of its own.
+ */
 const thread = async (
   messages: readonly ChatMessage[],
-  partial: ChatPartial | null = null
+  partial: ChatPartial | null = null,
+  tools: readonly ChatToolEvent[] = []
 ): Promise<void> => {
+  const page = createRootRoute({
+    component: () => (
+      <ChatThread
+        chatId="chat"
+        loaded
+        messages={messages}
+        onRetry={() => {
+          // Not asked again here.
+        }}
+        output={null}
+        partial={partial}
+        running={partial !== null}
+        tools={tools}
+      />
+    ),
+  });
+  const router = createRouter({
+    routeTree: page,
+    history: createMemoryHistory(),
+  });
   const host = document.createElement("div");
   document.body.append(host);
   await act(async () => {
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <ChatThread
-          chatId="chat"
-          loaded
-          messages={messages}
-          onRetry={() => {
-            // Not asked again here.
-          }}
-          output={null}
-          partial={partial}
-          running={partial !== null}
-        />
+        <RouterProvider router={router} />
       </I18nProvider>
     );
-    await Promise.resolve();
+    await router.load();
   });
 };
 
@@ -109,5 +134,55 @@ describe(ChatThread, () => {
       { line: "Thought for 3s", open: false, thought: "Add two to two." },
       { line: "Thought for 3s", open: true, thought: "Add two to two." },
     ]);
+  });
+
+  it("says under a code step each widget it made or changed on the dashboard, with the way there", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "",
+          citations: [],
+          code: [{ callId: "step", code: "await env.dashboard.makeWidget()" }],
+          end: "done",
+          at,
+        },
+        {
+          id: 3,
+          role: "result",
+          callId: "step",
+          text: "done",
+          failed: false,
+          at,
+        },
+      ],
+      null,
+      [
+        {
+          id: 1,
+          callId: "step",
+          method: "dashboard.makeWidget",
+          target: null,
+          summary: {},
+          outcome: "ok",
+          reason: null,
+          at,
+        },
+      ]
+    );
+    const line = [...document.querySelectorAll("p")].find((each) =>
+      each.textContent.includes("dashboard")
+    );
+
+    expect({
+      said: line?.textContent,
+      to: line?.querySelector("a")?.getAttribute("href"),
+    }).toStrictEqual({
+      said: "Grasp added a widget to your dashboard. Open the dashboard",
+      to: "/dashboard",
+    });
   });
 });

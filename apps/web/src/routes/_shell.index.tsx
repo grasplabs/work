@@ -259,6 +259,7 @@ const OpenChat = ({
             output={view.output}
             partial={view.partial}
             running={view.running}
+            tools={view.tools}
           >
             {failure === undefined && view.stopped === null ? null : (
               <div className="flex flex-col gap-2">
