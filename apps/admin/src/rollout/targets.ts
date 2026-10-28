@@ -7,7 +7,7 @@
  * started for: one ring, one client, or every client, ring by ring, with
  * no approval between them (src/rollout/workflow.ts).
  */
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
@@ -16,6 +16,7 @@ import { liveVersion } from "../cloudflare/workers.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
   clientDeploys,
+  clientPlacements,
   clients,
   clientWorkers,
   releases,
@@ -58,7 +59,10 @@ const byRing = (a: RolloutTarget, b: RolloutTarget): number =>
 
 /**
  * The active clients a rollout for `scope` reaches, each in the ring it's
- * in now: ring 0's, and the scope's. In the order it reaches them.
+ * in now: ring 0's, and the scope's. In the order it reaches them. A
+ * client placed in a hosting destination is never one: a rollout deploys
+ * account by account (src/deploy/deploy.ts), which a placed client's
+ * Workers and resources aren't (src/hosting/).
  */
 export const targetsOf = async (
   db: AdminDatabase,
@@ -67,7 +71,14 @@ export const targetsOf = async (
   const rows = await db
     .select({ clientId: clients.id, ring: clients.ring })
     .from(clients)
-    .where(and(eq(clients.status, "active"), scopeFilter(scope)));
+    .leftJoin(clientPlacements, eq(clientPlacements.clientId, clients.id))
+    .where(
+      and(
+        eq(clients.status, "active"),
+        isNull(clientPlacements.clientId),
+        scopeFilter(scope)
+      )
+    );
   return rows.toSorted(byRing);
 };
 

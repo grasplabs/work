@@ -81,6 +81,12 @@ export const deployErrorCodes = [
   "generation_behind",
   /** The router's map has an entry for the hostname the router can't read. */
   "router_entry_invalid",
+  /**
+   * The client is placed in a hosting destination (src/hosting/): its
+   * Workers and resources are its inventory's, which this account-per-
+   * client path doesn't deploy, so it never touches them.
+   */
+  "client_placed",
 ] as const;
 
 export type DeployErrorCode = (typeof deployErrorCodes)[number];

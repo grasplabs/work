@@ -21,6 +21,8 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
   unknown_client: "There's no such client.",
   nothing_to_roll_back:
     "The rollout didn't reach that client, so there's nothing to roll back.",
+  client_placed:
+    "That client is placed in a hosting destination, which rollouts and rollbacks don't reach.",
   superseded:
     "Something newer was deployed to that client since: roll out the release you want instead.",
   too_far_back:

@@ -25,6 +25,11 @@ export const rolloutErrorCodes = [
   "unknown_client",
   /** The rollout didn't reach the client, or recorded nothing to go back to. */
   "nothing_to_roll_back",
+  /**
+   * The client is placed in a hosting destination (src/hosting/): its
+   * Workers are its inventory's, which a rollback here doesn't touch.
+   */
+  "client_placed",
   /** Something newer was deployed to the client after the rollout. */
   "superseded",
   /**
