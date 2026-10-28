@@ -656,7 +656,7 @@ export const apps = sqliteTable(
     }>(),
     createdAt: timestamp("created_at").notNull(),
     /**
-     * The last part of its own address under the workspace's (app-links.ts),
+     * The last part of its own address under the workspace's (app-own-links.ts),
      * one App's at most; null while its builders gave it none. It opens the
      * App only while it is published.
      */
