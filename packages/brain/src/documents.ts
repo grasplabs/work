@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, lt, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, ne, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -10,14 +10,17 @@ import type { Allowed } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { readableCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
+import { brainErrors } from "./contract.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import {
+  brainDocumentCites,
   brainPayloads,
   collections,
   documents,
   links,
   versions,
 } from "./db/schema.ts";
+import { sha256Hex } from "./encoding.ts";
 import { documentLinkIntent } from "./entities.ts";
 import type { BrainEvent, DetailValue } from "./events.ts";
 import {
@@ -389,6 +392,13 @@ export interface Write {
    */
   lastCheck?: () => Promise<void>;
   /**
+   * What the version rests on, when its writer wrote it from what it read
+   * (`brain_document_cites`, GRA-1093): set by the host for a save from a
+   * pinned chat or run, never for a person's own. At most
+   * `documentCitesMax`.
+   */
+  cites?: readonly DocumentCite[];
+  /**
    * Set only by a purge (purge.ts): removing personal data comes first, so
    * its text is checked only for the fields every type has and a
    * document's limits (`parseBaseFields`).
@@ -466,6 +476,99 @@ const savedRow = (
   ...saved,
 });
 
+/** What a version rests on: a collection, or a document in it. */
+export interface DocumentCite {
+  collectionId: string;
+  documentId?: string;
+  /**
+   * With `documentId`: the version it was read at, and its pin
+   * (`PinnedVersion.text`, recall-store.ts): the version must still be
+   * stored as it was then, or the save is refused, and a purge of it
+   * later hides the copy.
+   */
+  version?: number;
+  pin?: string;
+}
+
+/**
+ * Most cites one version keeps: far above what a chat or run reads, so
+ * each read's check of them stays one bounded index range.
+ */
+export const documentCitesMax = 500;
+
+/**
+ * The payload a cited version is stored as, if its pin still says so:
+ * '' for a cite of no version. Refuses, as `brain.revoked`, a version
+ * gone or no longer stored as it was read (purged since).
+ */
+const citedPayloadKey = async (
+  db: DrizzleD1Database,
+  { documentId, version, pin }: DocumentCite
+): Promise<string> => {
+  if (documentId === undefined || version === undefined || pin === undefined) {
+    return "";
+  }
+  const row = await db
+    .select({ key: versions.payloadKey })
+    .from(versions)
+    .where(
+      and(eq(versions.documentId, documentId), eq(versions.number, version))
+    )
+    .get();
+  if (row === undefined || (await sha256Hex(row.key)) !== pin) {
+    throw brainErrors.create("brain.revoked");
+  }
+  return row.key;
+};
+
+/**
+ * The statements that write what a version of `write` rests on, once its
+ * document and number are known: its `cites`, and those of the version it
+ * was made from (one it restores, or one a purge rewrites), which a copy
+ * of it keeps. Refuses, as `brain.budget_exceeded`, more than
+ * `documentCitesMax` cites.
+ */
+const citesWrites = async (db: DrizzleD1Database, write: Write) => {
+  const cites = write.cites ?? [];
+  if (cites.length > documentCitesMax) {
+    throw brainErrors.create("brain.budget_exceeded");
+  }
+  const purged = write.purge === true && write.ifVersion > 0;
+  const from = write.restoredFrom ?? (purged ? write.ifVersion : null);
+  const rows = JSON.stringify(
+    await Promise.all(
+      cites.map(async (cite) => [
+        cite.collectionId,
+        cite.documentId ?? "",
+        cite.version ?? 0,
+        await citedPayloadKey(db, cite),
+      ])
+    )
+  );
+  return (documentId: string, number: number): BatchItem<"sqlite">[] => [
+    ...(cites.length === 0
+      ? []
+      : [
+          db
+            .insert(brainDocumentCites)
+            .select(
+              sql`SELECT ${documentId}, ${number}, json_extract(cite.value, '$[0]'), json_extract(cite.value, '$[1]'), json_extract(cite.value, '$[2]'), json_extract(cite.value, '$[3]') FROM json_each(${rows}) AS cite WHERE true`
+            )
+            .onConflictDoNothing(),
+        ]),
+    ...(from === null
+      ? []
+      : [
+          db
+            .insert(brainDocumentCites)
+            .select(
+              sql`SELECT document_id, ${number}, collection_id, cited_document_id, cited_version, cited_payload_key FROM ${brainDocumentCites} WHERE document_id = ${documentId} AND version = ${from}`
+            )
+            .onConflictDoNothing(),
+        ]),
+  ];
+};
+
 /**
  * Writes the next version, if the document is still at `ifVersion`
  * (0: it doesn't exist yet). Throws `knowledge.conflict`, with the version
@@ -478,6 +581,7 @@ export const writeVersion = async <C>(
 ): Promise<DocumentSummary> => {
   const { collection, path, text, ifVersion, message, restoredFrom } = write;
   const { also = [], sync = false } = write;
+  const rests = await citesWrites(brain.db, write);
   const { db } = brain;
   const existing = await findByPath(db, collection.id, path);
   const prepared = await checkedText(
@@ -585,6 +689,9 @@ export const writeVersion = async <C>(
       now,
       write.purge === true
     ),
+    // What it rests on, with it: its writer's reads, and those of the
+    // version it restores or a purge rewrites (GRA-1093).
+    ...rests(documentId, number),
     outboxed(brain, entry),
     ...also,
   ];
@@ -688,7 +795,17 @@ export const getDocument = async <C>(
           )
         )
         .leftJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
-        .where(and(eq(documents.id, id.data), allowed.documents()))
+        .where(
+          and(
+            eq(documents.id, id.data),
+            allowed.documents(),
+            // The version read too, an older one included (GRA-1093).
+            allowed.version(
+              documents.id,
+              number === undefined ? documents.currentVersion : sql`${number}`
+            )
+          )
+        )
         .get()
     : undefined;
   if (!found) {
@@ -794,6 +911,8 @@ export const history = async <C>(
       and(
         eq(versions.documentId, document.id),
         allowed.documents(),
+        // Each version listed rests on nothing the reader may not read.
+        allowed.version(versions.documentId, versions.number),
         before === undefined ? undefined : lt(versions.number, before)
       )
     )
@@ -844,7 +963,7 @@ export const backlinkRows = async (
         // What links are made of already keeps them in one collection; this
         // keeps the provenance true however links come to be written.
         eq(linking.collectionId, document.collectionId),
-        allowed.documents(linking.path),
+        allowed.documents(linking),
         after === undefined ? undefined : gt(linking.path, after)
       )
     )

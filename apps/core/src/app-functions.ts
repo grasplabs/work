@@ -1,3 +1,4 @@
+import type { AccessMode } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
@@ -24,6 +25,7 @@ import { waitUntil } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { chatAuthority } from "./agent-scope.ts";
 import { operationRoles } from "./app-access.ts";
 import {
   answerPreferences,
@@ -37,6 +39,7 @@ import { callTimeoutMs } from "./app.ts";
 import { usableApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
+import { requireCopyWithinAudience } from "./copy-audience.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { callOperation } from "./operations.ts";
@@ -284,6 +287,26 @@ export const invocationFor = async (
       requestId,
       runId: null,
     }),
+    // What an agent's chat read of the Brain, into the App's tables only
+    // for readers who may read it too (copy-audience.ts).
+    ...(agent === undefined
+      ? {}
+      : {
+          requireWithinAudience: async (modes: readonly AccessMode[]) => {
+            await requireCopyWithinAudience(
+              env,
+              {
+                actor: delegateActorOf(
+                  chatAuthority({ agentId: agent.agentId, personId: by.userId })
+                ),
+                app,
+                writer: { kind: "chat", agent },
+              },
+              by.userId,
+              modes
+            );
+          },
+        }),
     // The App's approved bindings, read again on every request, acting
     // for the App and the person calling, with the person there. The
     // operation host admits each request through `authorize` first, as it
@@ -504,6 +527,16 @@ export const runInvocationFor = async (
       requestId,
       runId,
     }),
+    // What the run recalled, into the App's tables only for readers who
+    // may read it too (copy-audience.ts).
+    requireWithinAudience: async (modes) => {
+      await requireCopyWithinAudience(
+        env,
+        { actor: runActorOf(run), app, writer: { kind: "run", runId } },
+        authority.onBehalfOf,
+        modes
+      );
+    },
     // No `workflows`: a run's call starts no workflow (operations.ts,
     // `Invocation.workflows`), so its step can't open a lineage of its own.
     resources: keyedUnderRun(bindings, runId, requireHolds),

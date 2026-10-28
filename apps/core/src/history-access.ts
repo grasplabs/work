@@ -1,4 +1,5 @@
 import { brainErrors } from "@grasp-os/brain/contract";
+import type { DocumentCite } from "@grasp-os/brain/documents";
 import { d1BrainStore, pinKey } from "@grasp-os/brain/recall-store";
 import type { BrainStore, PinnedVersion } from "@grasp-os/brain/recall-store";
 import { collections } from "@grasp-os/brain/schema";
@@ -146,6 +147,43 @@ const readableBrain = async (
       ];
     }
   );
+};
+
+/**
+ * What a copy written from `sources` (a chat's reads, `heldSourcesOf`)
+ * rests on in the Brain (GRA-1093): each document version it was handed,
+ * in its collection, pinned as its text was then, and each collection it
+ * read, as one is. Connection and App
+ * reads are the host's, not the Brain's, and are not carried.
+ */
+export const brainCitesOf = async (
+  env: Env,
+  sources: readonly string[]
+): Promise<DocumentCite[]> => {
+  const documentCites = sources.flatMap((source) => {
+    const pin = brainDocumentOf(source);
+    return pin === undefined
+      ? []
+      : [
+          {
+            collectionId: pin.collectionId,
+            documentId: pin.documentId,
+            version: pin.version,
+            pin: pin.text,
+          },
+        ];
+  });
+  const named = sources.filter(
+    (source) => !source.includes(":") && source !== brainGrantRead
+  );
+  const known =
+    named.length === 0
+      ? []
+      : await drizzle(env.KNOWLEDGE)
+          .select({ id: collections.id })
+          .from(collections)
+          .where(inList(collections.id, named));
+  return [...known.map(({ id }) => ({ collectionId: id })), ...documentCites];
 };
 
 /** How a run read an App, each checked as a read made now would be. */

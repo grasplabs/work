@@ -18,6 +18,8 @@ import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
+import { requireCopyWithinAudience } from "./copy-audience.ts";
+import type { CopyWriter } from "./copy-audience.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import {
@@ -30,6 +32,7 @@ import { callOperation } from "./operations.ts";
 import type { Invocation } from "./operations.ts";
 import { isApprovedVersion } from "./permissions.ts";
 import { hostedRelease, requireNotRevoked } from "./release-runner.ts";
+import type { StartingAgent } from "./workflow-starts.ts";
 
 // A business store's public operations, shared with other consumers (spec
 // 24, 40.8): another App, or an independent workflow, calls the public
@@ -502,6 +505,12 @@ export interface StoreOperationCaller {
   /** The workflow run the call is made in, whose life keeps its receipt. */
   readonly runId: string | null;
   /**
+   * The agent whose chat's call this is, through its App (agent-apps.ts):
+   * what it read of the Brain goes into the store only for an audience
+   * that may read it (copy-audience.ts).
+   */
+  readonly agent?: StartingAgent;
+  /**
    * What the consumer's side must still hold before each protected step
    * (its binding still active, its step's attempt still current): throws
    * once it doesn't.
@@ -516,6 +525,38 @@ export interface StoreOperationCaller {
    */
   readonly parentSession?: string;
 }
+
+/**
+ * The copy gate (`Invocation.requireWithinAudience`) of a call by
+ * `caller` into App `owner`'s store: its agent's chat, or its run, as the
+ * writer; none for a call with neither.
+ */
+const copyGate = (
+  env: Env,
+  owner: AppId,
+  caller: StoreOperationCaller
+): Pick<Invocation, "requireWithinAudience"> => {
+  let writer: CopyWriter | undefined;
+  if (caller.agent !== undefined) {
+    writer = { kind: "chat", agent: caller.agent };
+  } else if (caller.runId !== null) {
+    writer = { kind: "run", runId: caller.runId };
+  }
+  if (writer === undefined) {
+    return {};
+  }
+  const copying = writer;
+  return {
+    requireWithinAudience: async (modes) => {
+      await requireCopyWithinAudience(
+        env,
+        { actor: caller.actor, app: owner, writer: copying },
+        caller.principal,
+        modes
+      );
+    },
+  };
+};
 
 /** `store`, its commits made only while `requireHolds` passes. */
 const fenced = (store: OpenStore, requireHolds?: () => void): OpenStore =>
@@ -570,6 +611,9 @@ export const callStoreOperation = async (
     // Object, with no transaction across the two. The window is bounded to
     // a call an authorized consumer already had admitted (accepted on
     // GRA-506, as for an App's own mutations).
+    // What the call's chat or run read of the Brain, into the store's
+    // tables only for readers who may read it too (copy-audience.ts).
+    ...copyGate(env, owner, caller),
     authorize: async () => {
       await requireNotRevoked(env, owner, version);
       await requireStillCurrent(env, owner, version);

@@ -163,6 +163,7 @@ export const storeAdapter: ResourceAdapter<"store"> = {
           deadline: context.deadline,
           idempotencyKey: context.idempotencyKey,
           runId,
+          ...(caller.agent === undefined ? {} : { agent: caller.agent }),
           // On-prem, a child of the calling action's sandbox session: it
           // never waits for a process the action holds while it waits.
           ...(context.session === undefined

@@ -1,7 +1,9 @@
+import { allowedOf } from "@grasp-os/brain/authorize";
 import { ensureCollection } from "@grasp-os/brain/collections";
 import type { CollectionRow } from "@grasp-os/brain/collections";
 import type { MemoryRecord } from "@grasp-os/brain/contract";
 import { writeVersion } from "@grasp-os/brain/documents";
+import type { DocumentCite } from "@grasp-os/brain/documents";
 import { memoriesFor } from "@grasp-os/brain/memories";
 import { readPayload } from "@grasp-os/brain/payloads";
 import {
@@ -49,6 +51,7 @@ import {
   noteProvenance,
   readableForPerson,
 } from "./access.ts";
+import { readAsDelegate } from "./binding.ts";
 import {
   citedCollections,
   readableByEveryoneOf,
@@ -219,7 +222,12 @@ const findFiles = async (
   env: Env,
   userId: string,
   work: WorkContext,
-  wanted: Wanted[]
+  wanted: Wanted[],
+  /**
+   * What the agent reading them may read now, for a file a pinned chat
+   * saved: shown only while it may read all it rests on (GRA-1093).
+   */
+  readable: readonly string[]
 ): Promise<Found[]> => {
   const role = await memberRole(env.DB, userId);
   if (!role) {
@@ -251,7 +259,13 @@ const findFiles = async (
                 )
               ),
               await readableForPerson(env, db, userId),
-              await audienceCondition(env, work)
+              await audienceCondition(env, work),
+              // A version a pinned chat saved rests on what it read: the
+              // agent reading it must still be able to read all of it.
+              allowedOf({ collections: readable }).version(
+                documents.id,
+                documents.currentVersion
+              )
             )
           );
   const found: Found[] = [];
@@ -456,7 +470,23 @@ export const forContext = async (
   const found =
     wanted.length === 0
       ? []
-      : await findFiles(env, authority.onBehalfOf, work, wanted);
+      : await findFiles(
+          env,
+          authority.onBehalfOf,
+          work,
+          wanted,
+          await readAsDelegate(
+            env,
+            authority,
+            work,
+            undefined,
+            async (reader) => {
+              const { collections: ids } =
+                await brainOf(env).ports.authorize(reader);
+              return ids;
+            }
+          )
+        );
   const key = await sha256Hex(
     JSON.stringify(
       found.map(({ wanted: { source, name, at }, documentId, version }) => [
@@ -669,7 +699,12 @@ export const saveUserMemory = async (
   context: unknown,
   input: unknown,
   /** Admits the save, checked last, right before its batch: throws to refuse. */
-  admit?: () => Promise<void>
+  admit?: () => Promise<void>,
+  /**
+   * What the chat saving it had read, which the version then rests on
+   * (GRA-1093): a later chat reads it only while it may read all of it.
+   */
+  cites: readonly DocumentCite[] = []
 ): Promise<DocumentSummary> => {
   const { type } = knowledgeErrors.parse(
     "knowledge.invalid",
@@ -706,6 +741,7 @@ export const saveUserMemory = async (
       message: message === undefined || message === "" ? null : message,
       restoredFrom: null,
       ...(admit === undefined ? {} : { lastCheck: admit }),
+      ...(cites.length === 0 ? {} : { cites }),
     }
   );
 };
