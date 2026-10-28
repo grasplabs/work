@@ -24,6 +24,7 @@ import {
   ProvisionOperationError,
   runClientProvision,
   startClientProvision,
+  startClientRelease,
 } from "./operation.ts";
 
 /** What an attempt is started with. */
@@ -69,41 +70,42 @@ const newAttemptId = (clientId: string): string =>
   `${clientId}-p${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
 
 /**
- * Starts provisioning placed client `clientId` with release `releaseId`,
- * as `staff`, or resumes its operation: records the operation (or finds
- * it: one of another release is refused, `operation_release_changed`),
- * claims the client for a new attempt in place of its current runner once
- * that has ended, and starts the attempt. Refused (`already_running`)
+ * Claims client `clientId` for a new attempt in place of its current
+ * runner once that has ended, recording `event`, and starts the attempt,
+ * which runs the client's one operation. Refused (`already_running`)
  * while another runner is still going, and when another claim got there
  * first. Returns the attempt's id.
  */
-export const provisionPlacedClient = async (
+const startAttempt = async (
   env: Env,
   staff: Staff,
   clientId: string,
-  releaseId: string
+  record: (replaces: string | null) => Promise<{
+    action: string;
+    target: string;
+    detail: Record<string, string>;
+  }>
 ): Promise<string> => {
   const db = adminDatabase(env.DB);
   const running = new ProvisionError(
     "already_running",
-    `Client ${clientId} is being provisioned already`
+    `Client ${clientId} is being worked on already`
   );
   const run = await currentRun(env, clientId);
   if (run !== null && !hasEnded(run.status)) {
     throw running;
   }
-  const operation = await startClientProvision(db, staff, clientId, releaseId);
+  const event = await record(run?.runId ?? null);
   const runId = await claimRun(
     db,
     staff,
     clientId,
     run?.runId ?? null,
     {
-      action: "client.provision_placed",
+      ...event,
       clientId,
-      target: releaseId,
       detail: {
-        operation,
+        ...event.detail,
         ...(run === null ? {} : { replaces: run.runId }),
       },
     },
@@ -118,3 +120,60 @@ export const provisionPlacedClient = async (
   });
   return runId;
 };
+
+/**
+ * Starts provisioning placed client `clientId` with release `releaseId`,
+ * as `staff`, or resumes its operation: records the operation (or finds
+ * it: one of another release is refused, `operation_release_changed`),
+ * claims the client for a new attempt in place of its current runner once
+ * that has ended, and starts the attempt. Refused (`already_running`)
+ * while another runner is still going, and when another claim got there
+ * first. Returns the attempt's id.
+ */
+export const provisionPlacedClient = async (
+  env: Env,
+  staff: Staff,
+  clientId: string,
+  releaseId: string
+): Promise<string> =>
+  await startAttempt(env, staff, clientId, async () => {
+    const operation = await startClientProvision(
+      adminDatabase(env.DB),
+      staff,
+      clientId,
+      releaseId
+    );
+    return {
+      action: "client.provision_placed",
+      target: releaseId,
+      detail: { operation },
+    };
+  });
+
+/**
+ * Takes active placed client `clientId` to release `releaseId`, or with
+ * `rollback` back to the release it ran before, as `staff`
+ * (`startClientRelease`), and starts an attempt that runs its operation
+ * for it, as provisioning does. Starting it again after it stopped
+ * resumes it. Returns the attempt's id.
+ */
+export const releasePlacedClient = async (
+  env: Env,
+  staff: Staff,
+  clientId: string,
+  to: { releaseId: string } | { rollback: true }
+): Promise<string> =>
+  await startAttempt(env, staff, clientId, async () => {
+    const { operationId, releaseId } = await startClientRelease(
+      adminDatabase(env.DB),
+      staff,
+      clientId,
+      to
+    );
+    return {
+      action:
+        "rollback" in to ? "client.rollback_placed" : "client.release_placed",
+      target: releaseId,
+      detail: { operation: operationId },
+    };
+  });

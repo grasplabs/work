@@ -7,6 +7,7 @@ import {
   auditEvents,
   clientPlacements,
   clientProvisions,
+  clients,
   clientRuns,
   hostingDestinations,
   releases,
@@ -14,11 +15,21 @@ import {
 import {
   fetchClientHosting,
   placeAndProvisionFn,
+  releasePlacedClientFn,
+  rollbackPlacedClientFn,
 } from "../src/hosting/functions.ts";
+import { placeClient } from "../src/hosting/inventory.ts";
 import { getClientHosting } from "../src/hosting/placement.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { client, db, destination, release, verified } from "./hosting.ts";
+import {
+  client,
+  db,
+  destination,
+  release,
+  staff,
+  verified,
+} from "./hosting.ts";
 import { callServerFn, page } from "./pages.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
@@ -434,6 +445,65 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       placement: undefined,
       operation: undefined,
       audited: [],
+    });
+  });
+
+  it("offers staff a live placed client's later release, and the rollback to the one before, and refuses both to anyone Access doesn't vouch for", async () => {
+    const destinationId = await destination();
+    const clientId = await client();
+    const [before, current, later] = [
+      await importedRelease(),
+      await importedRelease(),
+      await importedRelease(),
+    ];
+    await placeClient(db, staff, { clientId, destinationId, policyId });
+    const now = new Date();
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId,
+      releaseId: current,
+      previousReleaseId: before,
+      status: "done",
+      step: "route",
+      startedBy: caller,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db
+      .update(clients)
+      .set({ status: "active" })
+      .where(eq(clients.id, clientId));
+
+    const { status, html } = await page(
+      `/organizations/${clientId}/setup`,
+      caller
+    );
+    const refused = await Promise.all([
+      callServerFn(
+        releasePlacedClientFn,
+        { clientId, releaseId: later },
+        { email: null }
+      ).then(() => "answered", String),
+      callServerFn(rollbackPlacedClientFn, { clientId }, { email: null }).then(
+        () => "answered",
+        String
+      ),
+    ]);
+
+    expect({
+      status,
+      release: html.includes("Release it"),
+      rollBack: html.includes(`Roll back to ${before}`),
+      place: html.includes("Place and start provisioning"),
+      refused: refused.map((answer) => answer.includes("answered 403")),
+      operation: await operationOf(clientId),
+    }).toMatchObject({
+      status: 200,
+      release: true,
+      rollBack: true,
+      place: false,
+      refused: [true, true],
+      operation: { releaseId: current, status: "done" },
     });
   });
 });

@@ -198,6 +198,17 @@ export const provisionOperationErrorCodes = [
   "runner_replaced",
   /** The operation's row is gone before it could be recorded done. */
   "operation_gone",
+  /** A release or rollback of a client that isn't active: it's provisioned first. */
+  "client_not_active",
+  /** A release or rollback while the client's operation still runs: it's resumed, or it ends, first. */
+  "operation_running",
+  /** A rollback of a client with no release before the one it runs. */
+  "nothing_to_roll_back",
+  /**
+   * A rollback past a Durable Object migration: the release since added
+   * one, and a script never goes back past a migration it ran.
+   */
+  "rollback_past_migration",
 ] as const;
 
 export type ProvisionOperationErrorCode =
@@ -397,6 +408,147 @@ export const startClientProvision = async (
     );
   }
   return operation.id;
+};
+
+/** Each Worker's last Durable Object migration tag in `manifest`, by Worker name. */
+const migrationTags = (
+  manifest: ReleaseManifest
+): Record<string, string | null> =>
+  Object.fromEntries(
+    Object.entries(manifest.workers).map(([name, worker]) => [
+      name,
+      worker.durableObjectMigrations.at(-1)?.tag ?? null,
+    ])
+  );
+
+/**
+ * Takes active client `clientId`'s one operation to release `releaseId`,
+ * as `actor`, and returns its id (spec 40.3): a later release, or with
+ * `rollback` the one it ran before (spec 40.4). Every step of the
+ * operation then runs again for that release, onto the same stable
+ * scripts and the client's own resources, each finding what an earlier
+ * run did: an interrupted release is resumed by starting it again.
+ *
+ * Refused for a client that isn't active (`client_not_active`), while the
+ * operation runs (`operation_running`), for a rollback with no release
+ * before (`nothing_to_roll_back`) or past a Durable Object migration the
+ * release since added (`rollback_past_migration`). Whether the code of
+ * either release works with the other and with the client's databases is
+ * the operation's first step's (`incompatibility`, as provisioning and
+ * deploys check it). Starting the release its operation already has, and
+ * that failed, resumes it.
+ */
+export const startClientRelease = async (
+  db: AdminDatabase,
+  actor: Actor,
+  clientId: string,
+  { releaseId, rollback }: { releaseId?: string; rollback?: boolean }
+): Promise<{ operationId: string; releaseId: string }> => {
+  const client = await db
+    .select({ status: clients.status })
+    .from(clients)
+    .where(eq(clients.id, clientId))
+    .get();
+  if (client?.status !== "active") {
+    throw new ProvisionOperationError(
+      "client_not_active",
+      `${clientId} isn't active`
+    );
+  }
+  const operation = await provisionOf(db, clientId);
+  if (operation === undefined) {
+    throw new ProvisionOperationError(
+      "client_not_active",
+      `${clientId} has no operation: it wasn't provisioned as a placement`
+    );
+  }
+  if (operation.status === "running") {
+    throw new ProvisionOperationError(
+      "operation_running",
+      `${clientId}'s operation is running ${operation.releaseId}`
+    );
+  }
+  const target =
+    rollback === true ? operation.previousReleaseId : (releaseId ?? null);
+  if (target === null) {
+    throw new ProvisionOperationError(
+      "nothing_to_roll_back",
+      `${clientId} has no release before ${operation.releaseId}`
+    );
+  }
+  if (operation.releaseId === target) {
+    if (rollback === true && operation.status === "done") {
+      throw new ProvisionOperationError(
+        "nothing_to_roll_back",
+        `${clientId} runs ${target} already`
+      );
+    }
+    // Done: it runs it already. Failed: starting it again resumes it.
+    return { operationId: operation.id, releaseId: target };
+  }
+  const [from, to] = await Promise.all([
+    importedManifest(db, operation.releaseId),
+    importedManifest(db, target),
+  ]);
+  if (to === null) {
+    throw new ProvisionOperationError(
+      "release_not_imported",
+      `Release ${target} isn't imported`
+    );
+  }
+  if (rollback === true && from !== null) {
+    const now = migrationTags(from);
+    const back = migrationTags(to);
+    const past = Object.keys(now).find((name) => now[name] !== back[name]);
+    if (past !== undefined) {
+      throw new ProvisionOperationError(
+        "rollback_past_migration",
+        `${past}'s Durable Object migrations changed after ${target}`
+      );
+    }
+  }
+  const now = new Date();
+  // Conditional on the operation as read: of two starts at once, one
+  // takes it; the other is refused, and starts nothing.
+  const started = await actIfChanged(
+    db,
+    actor,
+    db
+      .update(clientProvisions)
+      .set({
+        releaseId: target,
+        previousReleaseId:
+          operation.status === "done"
+            ? operation.releaseId
+            : operation.previousReleaseId,
+        status: "running",
+        step: null,
+        error: null,
+        startedBy: actorName(actor),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(clientProvisions.id, operation.id),
+          eq(clientProvisions.status, operation.status),
+          eq(clientProvisions.releaseId, operation.releaseId)
+        )
+      ),
+    {
+      action: rollback === true ? "release.rollback" : "release.start",
+      clientId,
+      target,
+      detail: { operation: operation.id, from: operation.releaseId },
+    }
+  );
+  if (!started) {
+    throw new ProvisionOperationError(
+      "operation_running",
+      `${clientId}'s operation changed as the release started`
+    );
+  }
+  return { operationId: operation.id, releaseId: target };
 };
 
 type Operation = NonNullable<Awaited<ReturnType<typeof provisionOf>>>;

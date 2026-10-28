@@ -10,6 +10,7 @@ import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { queryD1 } from "../src/cloudflare/workers.ts";
 import {
   auditEvents,
+  clientWorkers,
   clientProvisions,
   clientResources,
   clientRuns,
@@ -30,8 +31,12 @@ import {
 import {
   runClientProvision,
   startClientProvision,
+  startClientRelease,
 } from "../src/hosting/operation.ts";
-import { provisionPlacedClient } from "../src/hosting/workflow.ts";
+import {
+  provisionPlacedClient,
+  releasePlacedClient,
+} from "../src/hosting/workflow.ts";
 import { claimRun } from "../src/runners.ts";
 import type { HeldClient } from "../src/runners.ts";
 import { envelope, notFound } from "./cloudflare-api-kit.ts";
@@ -629,6 +634,66 @@ const refusals: Refusal[] = [
     code: "wfp_binding_unqualified",
   },
 ];
+
+/** A client provisioned in a dedicated destination with `first`, and its account. */
+const liveClient = async (first: ReleaseManifest) => {
+  const set = await setUp("dedicated", first);
+  await runClientProvision(context, set.held);
+  return set;
+};
+
+/**
+ * A new attempt holding client `clientId`, in place of the one before if
+ * it left its claim (one that stopped), as starting a release claims one.
+ */
+const attempt = async (clientId: string): Promise<HeldClient> => {
+  const before = await db
+    .select({ runId: clientRuns.runId })
+    .from(clientRuns)
+    .where(eq(clientRuns.clientId, clientId))
+    .get();
+  const runId = await claimRun(
+    db,
+    staff,
+    clientId,
+    before?.runId ?? null,
+    { action: "client.release_placed", clientId },
+    {
+      kind: "provision_placed",
+      runId: `${clientId}-p${crypto.randomUUID().slice(0, 8)}`,
+    }
+  );
+  if (runId === undefined) {
+    throw new Error("The attempt wasn't claimed");
+  }
+  return { clientId, runId };
+};
+
+/** What client `clientId` runs, by Worker, as the admin records it. */
+const runs = async (clientId: string) => {
+  const rows = await db
+    .select({
+      worker: clientWorkers.worker,
+      releaseId: clientWorkers.releaseId,
+    })
+    .from(clientWorkers)
+    .where(eq(clientWorkers.clientId, clientId));
+  return Object.fromEntries(
+    rows.map(({ worker, releaseId }) => [worker, releaseId])
+  );
+};
+
+/** What `promise` was refused with, as its code, or `started`. */
+const codeOf = async (promise: Promise<unknown>): Promise<string> => {
+  try {
+    await promise;
+  } catch (error) {
+    return error instanceof Error && "code" in error
+      ? String(error.code)
+      : "thrown";
+  }
+  return "started";
+};
 
 describe("provisioning a placed client", () => {
   useStoreSecrets({ deployer: token, tenant: `${token}-tenant-admin` });
@@ -1557,6 +1622,228 @@ describe("provisioning a placed client", () => {
       await expect(provisioned(account, clientId)).resolves.toMatchObject(
         once(clientId)
       );
+    } finally {
+      await attempts.dispose();
+    }
+  });
+
+  // Its later releases and rollbacks (spec 40.3, 40.4): the same
+  // operation, run again for the release, onto the same stable scripts
+  // and the client's own resources. How they can fail, each tried below:
+  // - a release of a client not live yet, or over an operation still
+  //   running, or two at once;
+  // - a script taken back past a Durable Object migration it ran;
+  // - a rollback with nothing before to go back to;
+  // - a release that stops part way, resumed: nothing made twice, and its
+  //   hostname not moved until it passes its probe.
+
+  it("releases a live client to a later release on its stable scripts, migrating its databases and probing it before it's done", async () => {
+    const first = await importRelease("dedicated");
+    const { account, clientId } = await liveClient(first);
+    const scripts = await scriptsOf(clientId);
+    const uploadsBefore = account.scriptUploads.length;
+    const later = await importRelease("dedicated", {
+      notes: "feat(core): later",
+      migrations: {
+        "0000_init.sql": "CREATE TABLE a (id TEXT);",
+        "0001_more.sql": "CREATE TABLE b (id TEXT);",
+      },
+    });
+
+    await startClientRelease(db, staff, clientId, {
+      releaseId: later.releaseId,
+    });
+    await runClientProvision(context, await attempt(clientId));
+
+    expect({
+      operation: await operationOf(clientId),
+      runs: await runs(clientId),
+      // The same two scripts, each uploaded once more: connect, then core.
+      uploads: account.scriptUploads
+        .slice(uploadsBefore)
+        .map(({ script }) => script),
+      scripts: holdings(account).scripts,
+      applied: Object.values(await appliedMigrations(account)).some(
+        (names) => names.join(",") === "0000_init.sql,0001_more.sql"
+      ),
+      route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
+    }).toMatchObject({
+      operation: {
+        releaseId: later.releaseId,
+        previousReleaseId: first.releaseId,
+        status: "done",
+        error: null,
+      },
+      runs: { core: later.releaseId, connect: later.releaseId },
+      uploads: [scripts.connect, scripts.core],
+      scripts: [scripts.connect, scripts.core].toSorted(),
+      applied: true,
+      route: { clientId, generation: 1 },
+    });
+  });
+
+  it("rolls a live client back to the release it ran before, and refuses past a Durable Object migration or with nothing before", async () => {
+    const first = await importRelease("dedicated");
+    const { clientId } = await liveClient(first);
+    const nothing = await codeOf(
+      startClientRelease(db, staff, clientId, { rollback: true })
+    );
+    const second = await importRelease("dedicated", {
+      notes: "feat(core): second",
+    });
+    await startClientRelease(db, staff, clientId, {
+      releaseId: second.releaseId,
+    });
+    await runClientProvision(context, await attempt(clientId));
+
+    await startClientRelease(db, staff, clientId, { rollback: true });
+    await runClientProvision(context, await attempt(clientId));
+    const back = {
+      operation: await operationOf(clientId),
+      runs: await runs(clientId),
+    };
+
+    // A release that adds a Durable Object migration can't be rolled back.
+    const third = await importRelease(
+      "dedicated",
+      { notes: "feat(core): new class" },
+      (core) => ({
+        ...core,
+        durableObjectMigrations: [
+          ...core.durableObjectMigrations,
+          { tag: "v2", new_sqlite_classes: ["Extra"] },
+        ],
+      })
+    );
+    await startClientRelease(db, staff, clientId, {
+      releaseId: third.releaseId,
+    });
+    await runClientProvision(context, await attempt(clientId));
+    const past = await codeOf(
+      startClientRelease(db, staff, clientId, { rollback: true })
+    );
+
+    expect({ nothing, back, past }).toMatchObject({
+      nothing: "nothing_to_roll_back",
+      back: {
+        operation: {
+          releaseId: first.releaseId,
+          previousReleaseId: second.releaseId,
+          status: "done",
+        },
+        runs: { core: first.releaseId, connect: first.releaseId },
+      },
+      past: "rollback_past_migration",
+    });
+  });
+
+  it("refuses a release of a client not live yet, or while its operation runs, and one of two at once", async () => {
+    const first = await importRelease("dedicated");
+    const pending = await setUp("dedicated", first);
+    const later = await importRelease("dedicated", {
+      notes: "feat(core): later",
+    });
+
+    const notLive = await codeOf(
+      startClientRelease(db, staff, pending.clientId, {
+        releaseId: later.releaseId,
+      })
+    );
+    const { clientId } = await liveClient(first);
+    const both = await Promise.all([
+      codeOf(
+        startClientRelease(db, staff, clientId, { releaseId: later.releaseId })
+      ),
+      codeOf(startClientRelease(db, staff, clientId, { rollback: true })),
+    ]);
+    const running = await codeOf(
+      startClientRelease(db, staff, clientId, { releaseId: first.releaseId })
+    );
+
+    expect({
+      notLive,
+      both: both.toSorted(),
+      running,
+      operation: await operationOf(clientId),
+    }).toMatchObject({
+      notLive: "client_not_active",
+      // The rollback has nothing before; the release takes the operation.
+      both: ["nothing_to_roll_back", "started"],
+      running: "operation_running",
+      operation: { releaseId: later.releaseId, status: "running" },
+    });
+  });
+
+  it("resumes a release that stopped part way, leaving its hostname where it was until it passes its probe", async () => {
+    const first = await importRelease("dedicated");
+    const { account, clientId } = await liveClient(first);
+    const later = await importRelease("dedicated", {
+      notes: "feat(core): later",
+    });
+    await startClientRelease(db, staff, clientId, {
+      releaseId: later.releaseId,
+    });
+    // Core's upload is refused: connect runs the later release already.
+    cloudflare.failNext(
+      (call) => call.method === "PUT" && call.path.endsWith("-grasp-os-core"),
+      400
+    );
+    await expect(failing(await attempt(clientId))).resolves.toMatchObject({
+      status: 400,
+    });
+    const stopped = {
+      operation: await operationOf(clientId),
+      route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
+    };
+
+    // Started again, it resumes: connect isn't uploaded twice.
+    await startClientRelease(db, staff, clientId, {
+      releaseId: later.releaseId,
+    });
+    const uploadsBefore = account.scriptUploads.length;
+    await runClientProvision(context, await attempt(clientId));
+    const { core } = await scriptsOf(clientId);
+
+    expect({
+      stopped,
+      resumed: account.scriptUploads
+        .slice(uploadsBefore)
+        .map(({ script }) => script),
+      operation: await operationOf(clientId),
+    }).toMatchObject({
+      stopped: {
+        operation: {
+          releaseId: later.releaseId,
+          status: "failed",
+          error: "cloudflare_400_10000",
+        },
+        route: { clientId, generation: 1 },
+      },
+      resumed: [core],
+      operation: { releaseId: later.releaseId, status: "done" },
+    });
+  });
+
+  it("releases a live client through its Workflow, as staff start it", async () => {
+    const first = await importRelease("dedicated");
+    const { clientId } = await liveClient(first);
+    const later = await importRelease("dedicated", {
+      notes: "feat(core): later",
+    });
+    const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
+    try {
+      await attempts.modifyAll(async (modifier) => {
+        await modifier.disableRetryDelays();
+      });
+      await releasePlacedClient(env, staff, clientId, {
+        releaseId: later.releaseId,
+      });
+      const [only] = await attempts.get();
+      await only?.waitForStatus("complete");
+      await expect(runs(clientId)).resolves.toStrictEqual({
+        core: later.releaseId,
+        connect: later.releaseId,
+      });
     } finally {
       await attempts.dispose();
     }

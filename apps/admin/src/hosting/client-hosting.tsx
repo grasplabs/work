@@ -4,7 +4,9 @@
  * go (the destination the admin picks by itself, and what keeps every
  * other from taking it), dedicated hosting as an advanced choice, and
  * starting or resuming its provisioning there, with where its operation
- * is (src/hosting/placement.ts).
+ * is (src/hosting/placement.ts). Once it's live, releasing it to a later
+ * release and rolling it back to the one before, which run the same
+ * operation again.
  */
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -33,7 +35,12 @@ import { useState } from "react";
 
 import { formatTime } from "../releases/format.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
-import { placeAndProvisionFn } from "./functions.ts";
+import {
+  placeAndProvisionFn,
+  releasePlacedClientFn,
+  rollbackPlacedClientFn,
+} from "./functions.ts";
+import type { PlaceResult } from "./functions.ts";
 import type {
   ClientHostingView,
   DestinationChoice,
@@ -240,6 +247,98 @@ const startWords = (view: ClientHostingView): string => {
     : "Start provisioning";
 };
 
+/**
+ * A live client's releases: a later one, the one a stopped release was
+ * of again (which resumes it), or back to the one before. Each runs its
+ * operation for that release, as provisioning did.
+ */
+const Releases = ({
+  view,
+  operation,
+  releases,
+}: {
+  view: ClientHostingView;
+  operation: NonNullable<ClientHostingView["operation"]>;
+  releases: readonly { id: string; notes: string }[];
+}) => {
+  const router = useRouter();
+  const { busy, failure, run } = useAction(placeRefusals);
+  const stopped = operation.status === "failed";
+  const others = releases.filter(({ id }) => id !== operation.releaseId);
+  const [releaseId, setReleaseId] = useState(
+    stopped ? operation.releaseId : (others[0]?.id ?? "")
+  );
+  const refreshing = async (task: () => Promise<PlaceResult>) => {
+    await run(
+      async () =>
+        await thenRefresh(task, async () => {
+          await router.invalidate({ sync: true });
+        })
+    );
+  };
+  const release = () => {
+    void refreshing(
+      async () =>
+        await releasePlacedClientFn({
+          data: { clientId: view.clientId, releaseId },
+        })
+    );
+  };
+  const rollBack = () => {
+    void refreshing(
+      async () =>
+        await rollbackPlacedClientFn({ data: { clientId: view.clientId } })
+    );
+  };
+  const choices = stopped ? releases : others;
+  return (
+    <div className="flex flex-col gap-4">
+      <Field>
+        <FieldLabel htmlFor="hosting-next-release">
+          {stopped ? "Release it to" : "Release"}
+        </FieldLabel>
+        <NativeSelect
+          id="hosting-next-release"
+          onChange={(event) => {
+            setReleaseId(event.target.value);
+          }}
+          value={releaseId}
+        >
+          {choices.map((each) => (
+            <NativeSelectOption key={each.id} value={each.id}>
+              {each.id}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </Field>
+      <div className="flex flex-wrap items-center gap-4">
+        <Button
+          disabled={busy || view.going || releaseId === ""}
+          onClick={release}
+        >
+          {stopped && releaseId === operation.releaseId
+            ? "Resume the release"
+            : "Release it"}
+        </Button>
+        {operation.previousReleaseId === null ? null : (
+          <Button
+            disabled={busy || view.going}
+            onClick={rollBack}
+            variant="outline"
+          >
+            {`Roll back to ${operation.previousReleaseId}`}
+          </Button>
+        )}
+        {failure === null ? null : (
+          <p className="text-destructive text-sm" role="alert">
+            {failure}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export const ClientHosting = ({
   view,
   releases,
@@ -295,7 +394,10 @@ export const ClientHosting = ({
       {view.operation === null ? null : (
         <Operation operation={view.operation} run={view.run} />
       )}
-      {done ? null : (
+      {view.active && view.operation !== null ? (
+        <Releases operation={view.operation} releases={releases} view={view} />
+      ) : null}
+      {done || view.active ? null : (
         <div className="flex flex-col gap-4">
           {view.operation === null ? (
             <Field>
