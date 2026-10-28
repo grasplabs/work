@@ -178,10 +178,12 @@ const citesWrite = (
     .onConflictDoNothing();
 
 /**
- * Of `records`, the reader's own, those resting on a collection they
- * can't read now, as the host decides it (`memories.readableBy`): what
+ * `records`, read by their owner (`ownerOf(reader)`: callers pass only
+ * the reader's own), with those resting on a collection the reader can't
+ * read now, as the host decides it (`memories.readableBy`), withheld: what
  * came from there is theirs no more than anyone's (GRA-1177), so each is
- * shown without its statement or what it cites, only to be retired.
+ * shown without its statement or what it cites, to be retired. Applied
+ * to any record passed, it only ever withholds more.
  */
 export const withheldOwn = async <C, R extends MemoryRecord>(
   brain: Brain<C>,
