@@ -515,6 +515,10 @@ const knowledgeDb: D1State = {
       `${brain}outcomes.ts`,
       "Execution records whose events were erased, and single events taken back: late captures stay erased."
     ),
+    brain_erased_documents: exported(
+      `${brain}erasures.ts`,
+      "Which documents each content purge erased, and when: copies made late go too."
+    ),
     brain_lessons: exported(
       `${brain}lessons.ts`,
       "Lesson candidates consolidated from a scope's episodes."

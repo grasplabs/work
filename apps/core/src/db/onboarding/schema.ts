@@ -360,6 +360,13 @@ export const documents = sqliteTable("documents", {
   by: text().notNull(),
   reading: text().notNull(),
   answer: text(),
+  /**
+   * How far the Brain's erasure records reached as its reading started
+   * (the Brain's erasures.ts `erasureMark`), while it waits to be checked
+   * against the purges since (documents.ts `checkReading`): kept from
+   * everyone until then. Null once checked.
+   */
+  checkMark: integer("check_mark"),
 });
 
 /**

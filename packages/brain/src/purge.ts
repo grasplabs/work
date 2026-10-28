@@ -20,6 +20,7 @@ import { checkedText, indexedValuesOf, writeVersion } from "./documents.ts";
 import type { DocumentRow, Writer } from "./documents.ts";
 import { fromBase64Url, sha256Hex, toBase64Url } from "./encoding.ts";
 import { forgetCollectionEntities } from "./entities.ts";
+import { erasedDocumentsWrite } from "./erasures.ts";
 import type { BrainEvent } from "./events.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { requireCurrentIndexed } from "./indexing.ts";
@@ -1701,6 +1702,14 @@ const purgeContent = async <C>(
       )
     ),
     rebuildOwed(db, purgeId),
+    // The documents it names, before the host's copies of them are
+    // forgotten: one made after that is found by them (erasures.ts).
+    ...(await erasedDocumentsWrite(
+      db,
+      purgeId,
+      named.map(({ document }) => document),
+      brain.ports.clock()
+    )),
   ]);
   const done: Counts[] = [];
   try {

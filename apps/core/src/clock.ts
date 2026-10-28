@@ -28,6 +28,7 @@ import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { syncLandscapes } from "./landscape.ts";
 import { retryDisconnects } from "./members.ts";
+import { checkReadings } from "./onboarding/documents.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
@@ -83,6 +84,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: retryAccessRevocations,
   },
   { name: "knowledge.uploads", period: "minute", run: sweepUploads },
+  // Shared documents' readings their writer never checked against the
+  // purges since (src/onboarding/documents.ts `checkReading`).
+  {
+    name: "onboarding.readings",
+    period: "minute",
+    run: checkReadings,
+  },
   // Knowledge payloads no version refers to (src/knowledge/payloads.ts).
   {
     name: "knowledge.payloads",
