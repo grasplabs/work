@@ -189,6 +189,27 @@ const restarted = async (runId: string): Promise<number> => {
   return stoppedAt;
 };
 
+/**
+ * The output step `name` of run `runId` recorded, as its run's object
+ * keeps it in its journal (`steps`), read from the object itself.
+ */
+const recordedOutput = async (
+  runId: string,
+  name: string
+): Promise<number | undefined> =>
+  await runInDurableObject(runObject(runId), (_instance, state) => {
+    const [row] = state.storage.sql
+      .exec(
+        "SELECT value FROM steps WHERE name = ? AND state = 'succeeded'",
+        name
+      )
+      .toArray();
+    const value = typeof row?.value === "string" ? row.value : "";
+    const found = /"output",(?<output>-?[\d.e+-]+)/u.exec(value)?.groups
+      ?.output;
+    return found === undefined ? undefined : Number(found);
+  });
+
 /** The audit entries of `action` about `target`. */
 const auditedOf = async (action: string, target: string) => {
   const events = await allEvents();
@@ -284,11 +305,19 @@ export const profileProofs = (where: string): void => {
               route: {
                 switch: [
                   { ada: { when: '${ .who == "Ada" }', then: "greet-ada" } },
+                  // Holds for Ada too, later: the first that holds wins.
+                  {
+                    alsoAda: {
+                      when: '${ .who == "Ada" }',
+                      then: "greet-again",
+                    },
+                  },
                   { anyone: { then: "greet-other" } },
                 ],
               },
             },
             { "greet-ada": { set: { status: "ada" }, then: "end" } },
+            { "greet-again": { set: { status: "again" }, then: "end" } },
             { "greet-other": { set: { status: "other" }, then: "end" } },
           ],
         });
@@ -458,7 +487,11 @@ export const profileProofs = (where: string): void => {
         const admin = await person("admin");
         const child = await published(admin, {
           output: { greeting: { type: "string" } },
-          do: [{ greet: { set: { greeting: '${ "Hello, " + .who }' } } }],
+          do: [
+            // Held open, so its parent waits on it through a restart.
+            { hold: { wait: "PT3S" } },
+            { greet: { set: { greeting: '${ "Hello, " + .who }' } } },
+          ],
         });
         const parent = await createWorkflowResource(
           env,
@@ -505,6 +538,9 @@ export const profileProofs = (where: string): void => {
           basedOn: null,
         });
         const runId = await started(admin, parent.id);
+        // The parent restarted while its child still runs: it starts no
+        // second child, and takes the first one's output once it ends.
+        await restarted(runId);
         const run = await ended(admin, parent.id, runId);
         const { results: children } = await env.DB.prepare(
           "SELECT status FROM workflow_resource_runs WHERE parent_run_id = ?"
@@ -541,6 +577,9 @@ export const profileProofs = (where: string): void => {
           ],
         });
         const runId = await started(by, workflow.id);
+        // What its `dice` step recorded, before the restart.
+        await waiting(runId);
+        const drawn = await recordedOutput(runId, "task:dice");
         const stoppedAt = await restarted(runId);
         const run = await ended(by, workflow.id, runId);
         const [at, r] = z
@@ -554,10 +593,13 @@ export const profileProofs = (where: string): void => {
           // after it, the time would be after the run was stopped.
           recorded: (at ?? Number.POSITIVE_INFINITY) <= stoppedAt,
           fraction: (r ?? -1) >= 0 && (r ?? 1) < 1,
+          // The draw it recorded, never a new one as it replayed.
+          sameDraw: r === drawn,
         }).toStrictEqual({
           status: "completed",
           recorded: true,
           fraction: true,
+          sameDraw: true,
         });
       });
 
