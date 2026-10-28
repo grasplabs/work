@@ -8483,6 +8483,10 @@ msgstr "Niet meer gedeclareerd"
 msgid "No longer held: {model}"
 msgstr "Niet meer vastgehouden: {model}"
 
+#: src/connections/tool-permissions.tsx
+msgid "No longer offered"
+msgstr "Niet meer aangeboden"
+
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "Draait niet meer {how}"
@@ -10799,6 +10803,7 @@ msgstr "De {amount} vrijgeven die voor deze modelaanroep wordt vastgehouden?"
 msgid "Reminded on {date}"
 msgstr "Herinnerd op {date}"
 
+#: src/connections/tool-permissions.tsx
 #: src/policies/policy-editing.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/person-limits.tsx
@@ -10817,6 +10822,10 @@ msgstr "{domain} verwijderen"
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
 msgstr "{file} verwijderen"
+
+#: src/connections/tool-permissions.tsx
+msgid "Remove {name}"
+msgstr "{name} verwijderen"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"

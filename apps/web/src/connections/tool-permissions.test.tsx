@@ -22,7 +22,8 @@ import { ToolPermissions } from "./tool-permissions.tsx";
 // An app's page letting an admin change what Grasp may do in it (GRA-993),
 // against core's connections as the page reaches them over RPC, faked:
 // each switch and badge sends the whole new choice of tools, the last tool
-// allowed can't be switched off, and Grasp's staff change nothing.
+// allowed can't be switched off, a tool no longer offered can only be
+// removed, and Grasp's staff change nothing.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -212,6 +213,35 @@ describe("changing what Grasp may do in a connected app", () => {
         { name: "HUBSPOT_CREATE_NOTE", resource: "pipeline" },
       ],
     ]);
+  });
+
+  it("lists a tool the toolkit no longer offers as removable, and keeps it through other changes", async () => {
+    const retired = {
+      ...connection,
+      tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_ARCHIVED_TOOL"],
+    };
+    const sent = await shown(retired);
+    const listed = row("HUBSPOT_ARCHIVED_TOOL").textContent ?? "";
+    await press(switchOf("HUBSPOT_DELETE_NOTE"));
+    await press(row("HUBSPOT_ARCHIVED_TOOL").querySelector("button"));
+
+    expect({ removable: listed.includes("Remove"), sent }).toStrictEqual({
+      removable: true,
+      sent: [
+        {
+          connectionId: "connection-1",
+          tools: [
+            { name: "HUBSPOT_LIST_CONTACTS", read: true },
+            "HUBSPOT_ARCHIVED_TOOL",
+            "HUBSPOT_DELETE_NOTE",
+          ],
+        },
+        {
+          connectionId: "connection-1",
+          tools: [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
+        },
+      ],
+    });
   });
 
   it("keeps the last tool allowed switched on, and lets Grasp's staff change nothing", async () => {

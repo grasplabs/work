@@ -8483,6 +8483,10 @@ msgstr "Plus déclarées"
 msgid "No longer held: {model}"
 msgstr "Plus retenu : {model}"
 
+#: src/connections/tool-permissions.tsx
+msgid "No longer offered"
+msgstr "N’est plus proposé"
+
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "Ne s’exécute plus {how}"
@@ -10799,6 +10803,7 @@ msgstr "Libérer les {amount} retenus pour cet appel au modèle ?"
 msgid "Reminded on {date}"
 msgstr "Relancé le {date}"
 
+#: src/connections/tool-permissions.tsx
 #: src/policies/policy-editing.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/person-limits.tsx
@@ -10817,6 +10822,10 @@ msgstr "Retirer {domain}"
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
 msgstr "Retirer {file}"
+
+#: src/connections/tool-permissions.tsx
+msgid "Remove {name}"
+msgstr "Retirer {name}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"
