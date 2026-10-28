@@ -66,6 +66,7 @@ export const placedRelease = async (
     commitSha: manifest.commit,
     manifest: JSON.stringify(manifest),
     manifestSha256: "0".repeat(64),
+    limitEvidence: release.limitEvidenceText ?? null,
     builtAt: new Date(built),
     importedAt: new Date(built),
   });

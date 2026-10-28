@@ -522,7 +522,11 @@ const startTarget = async (
   db: AdminDatabase,
   params: RolloutParams,
   clientId: string,
-  { status, client }: { status: string; client: TargetClient }
+  {
+    status,
+    change: recorded,
+    client,
+  }: { status: string; change: number | null; client: TargetClient }
 ): Promise<Claimed> => {
   const { rolloutId } = params;
   // Read again now the rollout holds the client: no other runner changes
@@ -577,14 +581,19 @@ const startTarget = async (
       ],
     }
   );
-  // Started already, as a retry finds it (`hasAlready`): recorded, the way
-  // back kept if it was saved.
+  // Started already, as a retry finds it (`hasAlready`): recorded. The way
+  // back saved is kept only for the change this target recorded; one
+  // someone else started and the rollout takes over goes back to what
+  // the client ran before that one, read now.
   await db
     .update(rolloutTargets)
     .set({
       deployId: operationId,
       change,
-      previous: sql`coalesce(${rolloutTargets.previous}, ${previousRun})`,
+      previous:
+        change === recorded
+          ? sql`coalesce(${rolloutTargets.previous}, ${previousRun})`
+          : previousRun,
       updatedAt: new Date(),
     })
     .where(and(targetWhere(rolloutId, clientId), stillHolds(holder)));
@@ -678,6 +687,7 @@ const claimTarget = async (
   }
   return await startTarget(db, params, clientId, {
     status: target.status,
+    change: target.change,
     client,
   });
 };

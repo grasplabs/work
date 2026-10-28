@@ -819,7 +819,8 @@ export const deleteTargetScript = async (
 export const uploadTargetScript = async (
   api: CloudflareApi,
   target: ScriptTarget,
-  upload: WorkerUpload
+  upload: WorkerUpload,
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   const path = targetPath(target);
   await api.call(
@@ -828,6 +829,7 @@ export const uploadTargetScript = async (
       path,
       body: await uploadForm(api, target.accountId, path, upload, "keep"),
       idempotent: upload.metadata.migrations === undefined,
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
@@ -882,13 +884,15 @@ export const targetMigrationState = async (
 export const putTargetSecret = async (
   api: CloudflareApi,
   target: ScriptTarget,
-  secret: Secret
+  secret: Secret,
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   await api.call(
     {
       method: "PUT",
       path: `${targetPath(target)}/secrets`,
       json: { name: secret.name, text: secret.value, type: "secret_text" },
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
@@ -901,13 +905,15 @@ export const putTargetSecret = async (
 export const deleteTargetSecret = async (
   api: CloudflareApi,
   target: ScriptTarget,
-  name: string
+  name: string,
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   try {
     await api.call(
       {
         method: "DELETE",
         path: `${targetPath(target)}/secrets/${encodeURIComponent(name)}`,
+        ...(signal === undefined ? {} : { signal }),
       },
       z.unknown()
     );
