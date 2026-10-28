@@ -56,6 +56,7 @@ const engine: App = {
   currentVersion: 2,
   pendingVersion: null,
   status: "published",
+  link: null,
   createdAt: "2026-10-01T09:00:00.000Z",
 };
 

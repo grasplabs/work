@@ -123,8 +123,74 @@ export interface App {
   pendingVersion: number | null;
   /** Where it is in its life (`appStatusSchema`). */
   status: AppStatus;
+  /**
+   * The last part of the App's own address under the workspace's
+   * (`appLinkSchema`), which opens it for whoever may use it while it is
+   * published; null while its builders gave it none.
+   */
+  link: string | null;
   createdAt: string;
 }
+
+/** The longest an App's link may be, in characters. */
+export const appLinkMaxLength = 48;
+
+/**
+ * Every address's first part the workspace already has, its pages' and
+ * core's own: no App's link may take one, so a link never stands for a
+ * page, nor a page for a link. Each new top-level page joins it, which
+ * its test holds the web app's routes to (web's app-own-links.test.ts).
+ */
+export const reservedAppLinks: ReadonlySet<string> = new Set([
+  "activity",
+  "api",
+  "apps",
+  "assets",
+  "brain",
+  "chat",
+  "chat-link",
+  "connect-microsoft",
+  "connections",
+  "dashboard",
+  "decisions",
+  "domains",
+  "engines",
+  "guest",
+  "inbox",
+  "integrations",
+  "interview",
+  "kit",
+  "knowledge",
+  "landscape",
+  "links",
+  "members",
+  "models",
+  "notifications",
+  "onboarding",
+  "package-artifacts",
+  "platform",
+  "policies",
+  "rpc",
+  "screen-frame",
+  "screen-modules",
+  "settings",
+  "setup",
+  "sign-in",
+  "workflows",
+]);
+
+/**
+ * An App's link, the last part of its address: lower-case letters and
+ * digits, single dashes between them, at most {@link appLinkMaxLength},
+ * and none the workspace already has (`reservedAppLinks`).
+ */
+export const appLinkSchema = z
+  .string()
+  .max(appLinkMaxLength)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
+  .refine((link) => !reservedAppLinks.has(link), {
+    message: "The workspace has a page at that address.",
+  });
 
 /**
  * Why an integration is one of an App's: it holds a permission on a
@@ -700,6 +766,19 @@ export interface AppsApi {
    */
   publish: (app: string) => Promise<App>;
   /**
+   * Gives the App its own link (`appLinkSchema`), or takes it off with
+   * `null`, for its builders: refused with `app.link_taken` when another
+   * App has it, and `app.invalid_link` for one it can't be. Audited. The
+   * link opens the App only while it is published.
+   */
+  setLink: (app: string, link: string | null) => Promise<App>;
+  /**
+   * The App link `link` opens, for the person: only one that is published
+   * and that they may use; any other is answered as no App at all
+   * (`app.not_found`), so a link tells nothing of an App they can't open.
+   */
+  openLink: (link: string) => Promise<{ app: AppId }>;
+  /**
    * Takes a published App back to a draft, for its builders: the people
    * it is shared with as users lose it, their open screens cleared.
    */
@@ -807,6 +886,9 @@ export const appErrors = defineErrorFamily({
     "A newer change to this App replaced this version's check before it finished. Make the version current again if you still want it.",
   "app.not_running": "The App has no current version to run yet.",
   "app.no_version": "Make a version of the App current before publishing it.",
+  "app.link_taken": "Another App has that link. Choose another.",
+  "app.invalid_link":
+    "A link is lower-case letters and digits with single dashes between them, at most 48, and none the workspace already has a page at.",
   "app.archived": "The App is archived. A builder can restore it.",
   "app.stops_pending":
     "Runs the App started are still being stopped from when it was archived. Try restoring it again in a few minutes.",
