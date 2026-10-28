@@ -33,7 +33,7 @@ import { rollbackClient, rollbackRing } from "../src/rollout/rollback.ts";
 import { clientEndedEvent, fleetConcurrency } from "../src/rollout/workflow.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, staff } from "./hosting.ts";
-import { livePlacedClient, placedRelease } from "./placed.ts";
+import { deployPlaced, livePlacedClient, placedRelease } from "./placed.ts";
 import type { PlacedClient } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
@@ -666,38 +666,22 @@ describe("rolling a release out to placed clients", () => {
     await using run = await followRollouts();
     const rolloutId = await rollOut(release, { scope: "all" });
     await run.waitForStepResult({ name: "ring 1 approved" });
-    // How many of its fleet clients run at once, as their targets say.
-    let peak = 0;
-    const watching = setInterval(() => {
-      void (async () => {
-        const [row] = await db
-          .select({ going: sql<number>`count(*)` })
-          .from(rolloutTargets)
-          .where(
-            and(
-              eq(rolloutTargets.rolloutId, rolloutId),
-              eq(rolloutTargets.ring, 1),
-              eq(rolloutTargets.status, "deploying")
-            )
-          );
-        peak = Math.max(peak, row?.going ?? 0);
-      })();
-    }, 5);
-    try {
-      await approveRollout(env, staff, rolloutId, ringChecked);
-      await run.waitForStatus("complete");
-    } finally {
-      clearInterval(watching);
-    }
+    await approveRollout(env, staff, rolloutId, ringChecked);
+    await run.waitForStatus("complete");
+    // Each client's account its own: how many had a call being answered at
+    // once is how many ran side by side (ring 0's alone, before).
+    const peak = cloudflare.peakAccounts();
     const children = await run.childRuns();
 
     expect({
+      sideBySide: peak > 1,
       withinLimit: peak <= fleetConcurrency,
       children: children.length,
       releases: await Promise.all(
         fleet.map(async ({ clientId }) => await releasesOf(clientId))
       ),
     }).toStrictEqual({
+      sideBySide: true,
       withinLimit: true,
       children: fleet.length,
       releases: fleet.map(() => on(release)),
@@ -852,6 +836,56 @@ describe("rolling a release out to placed clients", () => {
       firstOn: on(before),
       secondCoherent: 1,
       runners: [null, null],
+    });
+  });
+
+  it("keeps what a client ran before a rollout when its claim step runs again after starting its operation", async () => {
+    const before = await placedRelease("feat(core): before");
+    const internal = await live(0, before);
+    const release = await placedRelease("feat(core): runs");
+    await deployPlaced(internal.clientId, release);
+    // A setting changed since: the rollout of the release it runs already
+    // runs it again.
+    await db
+      .update(clients)
+      .set({ configChangedAt: new Date() })
+      .where(eq(clients.id, internal.clientId));
+    // The claim step dies once, right after it started the operation and
+    // before it recorded it: its retry finds the operation running.
+    const prepare = env.DB.prepare.bind(env.DB);
+    let died = false;
+    const dying = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
+      if (!died && query.includes('set "deploy_id"')) {
+        died = true;
+        throw new Error("the step died");
+      }
+      return prepare(query);
+    });
+    await using run = await followRollouts();
+    let rolloutId: string;
+    try {
+      rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+      await run.waitForStatus("complete");
+    } finally {
+      dying.mockRestore();
+    }
+
+    const rolledBack = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+
+    expect({
+      died,
+      target: await targetOf(rolloutId, internal.clientId),
+      // It ran this release before the rollout too: nothing to go back to,
+      // never the release before that.
+      rolledBack,
+      releases: await releasesOf(internal.clientId),
+    }).toMatchObject({
+      died: true,
+      target: { status: "done" },
+      rolledBack: "nothing_to_roll_back",
+      releases: on(release),
     });
   });
 

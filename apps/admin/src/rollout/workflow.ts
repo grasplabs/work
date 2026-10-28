@@ -68,7 +68,7 @@
 import { log } from "@grasp-os/shared/log";
 import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt } from "drizzle-orm";
 
 import type { Staff } from "../access.ts";
 import { sendStaffAlert } from "../alerts.ts";
@@ -508,6 +508,7 @@ const claimTarget = async (
     .select({
       status: rolloutTargets.status,
       deployId: rolloutTargets.deployId,
+      previous: rolloutTargets.previous,
     })
     .from(rolloutTargets)
     .where(targetWhere(rolloutId, clientId));
@@ -544,22 +545,36 @@ const claimTarget = async (
     await skipTarget(db, rolloutId, clientId, "no_release");
     return { state: "skipped" };
   }
-  const previous = previousRunOf(held);
+  const holder = { clientId, runId: rolloutId };
+  // What a rollback goes back to, saved before the operation starts, while
+  // the rollout holds the client: a retry of this step after the start
+  // reuses it, rather than reading it again off an operation it moved on.
+  if (parsePrevious(target.previous) === null) {
+    await db
+      .update(rolloutTargets)
+      .set({
+        previous: JSON.stringify(previousRunOf(held)),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          targetWhere(rolloutId, clientId),
+          isNull(rolloutTargets.previous),
+          stillHolds(holder)
+        )
+      );
+  }
   // As the client's runner: the rollout claimed it above.
   const { operationId } = await startClientRelease(
     db,
     params.startedBy,
-    { clientId, runId: rolloutId },
+    holder,
     { releaseId: release, again: release === running }
   );
   await db
     .update(rolloutTargets)
-    .set({
-      deployId: operationId,
-      previous: JSON.stringify(previous),
-      updatedAt: new Date(),
-    })
-    .where(targetWhere(rolloutId, clientId));
+    .set({ deployId: operationId, updatedAt: new Date() })
+    .where(and(targetWhere(rolloutId, clientId), stillHolds(holder)));
   return { state: "claimed", operationId };
 };
 
