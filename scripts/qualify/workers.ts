@@ -27,11 +27,15 @@ export const dispatchKeyHeader = "x-qual-key";
  */
 export const dispatcherSource = (prefix: string): string => `
 const prefix = ${JSON.stringify(prefix)};
+const resource = new RegExp(${JSON.stringify(`^g${prefix.replaceAll(/[^a-z0-9]/gu, "")}[a-z]-`)}, "u");
 export default {
   async fetch(request, env) {
     const target = request.headers.get(${JSON.stringify(targetHeader)}) ?? "";
     const key = request.headers.get(${JSON.stringify(dispatchKeyHeader)}) ?? "";
-    if (key === "" || key !== env.DISPATCH_KEY || !target.startsWith(prefix + "-")) {
+    // The run's own scripts: its prefix's, or a test client's release
+    // Worker, named as a placed client's (\`clientResourceName\`).
+    const own = target.startsWith(prefix + "-") || resource.test(target);
+    if (key === "" || key !== env.DISPATCH_KEY || !own) {
       return new Response("unknown", { status: 404 });
     }
     const headers = new Headers(request.headers);
