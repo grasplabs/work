@@ -40,6 +40,7 @@ import { sweepSpokenLines } from "./speech-cache.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
+import { sweepConnectorTriggerHolds } from "./workflows/connector-triggers.ts";
 import { cancelArchivedRuns, repairControls } from "./workflows/controls.ts";
 import { drainEmittedEvents } from "./workflows/event-delivery.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
@@ -207,6 +208,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: deleteExpiredEmail,
   },
   { name: "guests.sweep", period: "quarterHour", run: sweepGuestChats },
+  // Connector triggers' holds and tombstones of events long settled or no
+  // longer coming (src/workflows/connector-triggers.ts).
+  {
+    name: "workflows.connector_holds",
+    period: "quarterHour",
+    run: sweepConnectorTriggerHolds,
+  },
   { name: "channels.links", period: "quarterHour", run: sweepChannelLinks },
   // Stephen's counts past their week (src/channels/signals.ts).
   {

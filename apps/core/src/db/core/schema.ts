@@ -3777,6 +3777,17 @@ export const triggerResourceVersions = sqliteTable(
     scheduleCron: text("schedule_cron"),
     scheduleTimeZone: text("schedule_time_zone"),
     scheduleInput: text("schedule_input"),
+    /**
+     * For a connector trigger: the connection whose events start it, the
+     * part of it (a mailbox, a drive) or null for the account's own, and
+     * how each event becomes its run's input (canonical JSON: input fields
+     * to JSON Pointers into the event, and literal defaults), checked as
+     * the version was written (trigger-resources.ts). Its event type is
+     * `event_type`, with no `event_contract`. Null for any other kind.
+     */
+    connectionId: text("connection_id"),
+    connectionResource: text("connection_resource"),
+    inputMapping: text("input_mapping"),
   },
   (table) => [
     primaryKey({ columns: [table.triggerId, table.version] }),
@@ -3784,6 +3795,10 @@ export const triggerResourceVersions = sqliteTable(
     index("trigger_resource_versions_event")
       .on(table.eventContract, table.eventType)
       .where(sql`${table.eventContract} IS NOT NULL`),
+    // The connector triggers' versions that take a connection's events.
+    index("trigger_resource_versions_connection")
+      .on(table.connectionId, table.eventType)
+      .where(sql`${table.connectionId} IS NOT NULL`),
   ]
 );
 
@@ -3821,6 +3836,29 @@ export const triggerSchedules = sqliteTable(
       .on(table.nextAt)
       .where(sql`${table.nextAt} IS NOT NULL`),
   ]
+);
+
+/**
+ * Where an event stands for a connector trigger that didn't start its run
+ * (src/workflows/connector-triggers.ts), by the trigger and the event's
+ * key: held back at its hourly limit since `held_since` (`settled` null),
+ * or settled for it for good: `dropped`, held past a day, or `refused`,
+ * refused for good. A settled row is a tombstone, so the same event
+ * delivered again for another trigger's sake is known and starts nothing
+ * here. The clock sweeps both past their retention.
+ */
+export const connectorTriggerHolds = sqliteTable(
+  "connector_trigger_holds",
+  {
+    triggerId: text("trigger_id")
+      .notNull()
+      .references(() => triggerResources.id),
+    eventKey: text("event_key").notNull(),
+    heldSince: timestamp("held_since").notNull(),
+    settled: text({ enum: ["dropped", "refused"] }),
+    settledAt: timestamp("settled_at"),
+  },
+  (table) => [primaryKey({ columns: [table.triggerId, table.eventKey] })]
 );
 
 /**
@@ -4033,6 +4071,34 @@ export const workflowResourceRuns = sqliteTable(
       table.createdAt,
       table.id
     ),
+  ]
+);
+
+/**
+ * What each mail call of an independent workflow's run sent, for a native
+ * mail connector's send or draft (src/workflows/mail-stamps.ts): the
+ * call's stamp, which its message carries as a header, with every
+ * recipient the call named and who sent it, as `run_mail_calls` keeps an
+ * App run's. A copy that reaches a mailbox a connector trigger watches
+ * starts the trigger's run under the run, in its lineage
+ * (src/workflows/connector-triggers.ts). Keyed as `run_mail_calls` is.
+ * Removed with its run's details (src/workflows/retention.ts).
+ */
+export const resourceRunMailCalls = sqliteTable(
+  "resource_run_mail_calls",
+  {
+    origin: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    createdAt: timestamp("created_at").notNull(),
+    stamp: text().notNull(),
+    recipients: text({ mode: "json" }).$type<string[]>().notNull(),
+    senders: text({ mode: "json" }).$type<string[]>().notNull(),
+  },
+  (table) => [
+    index("resource_run_mail_calls_run_idx").on(table.runId),
+    uniqueIndex("resource_run_mail_calls_stamp_idx").on(table.stamp),
   ]
 );
 

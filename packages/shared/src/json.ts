@@ -50,3 +50,39 @@ export const canonicalText = (value: unknown): string => {
   const json = JSON.parse(JSON.stringify(value) ?? "null") as Json;
   return canonicalJson(json);
 };
+
+/**
+ * A JSON Pointer (RFC 6901): `""` for the whole document, or `/` before
+ * each reference token, `~0` and `~1` the only escapes (for `~` and `/`).
+ * The grammar of section 3, nothing else: never an expression.
+ */
+export const jsonPointerPattern = /^(?:\/(?:[^~/]|~[01])*)*$/u;
+
+/**
+ * The value at JSON Pointer `pointer` in `document` (RFC 6901, section 4),
+ * or undefined where there is none: an object's own member by name, an
+ * array's element by its index in decimal without leading zeros.
+ */
+export const valueAtPointer = (
+  document: Json,
+  pointer: string
+): Json | undefined => {
+  if (!jsonPointerPattern.test(pointer)) {
+    return undefined;
+  }
+  let value: Json | undefined = document;
+  for (const raw of pointer.split("/").slice(1)) {
+    const token = raw.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (value === undefined || value === null || typeof value !== "object") {
+      return undefined;
+    }
+    if (isJsonArray(value)) {
+      value = /^(?:0|[1-9]\d*)$/u.test(token)
+        ? value[Number(token)]
+        : undefined;
+    } else {
+      value = Object.hasOwn(value, token) ? value[token] : undefined;
+    }
+  }
+  return value;
+};

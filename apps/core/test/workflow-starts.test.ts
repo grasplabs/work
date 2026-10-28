@@ -1,5 +1,9 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { agentIdSchema, appIdSchema } from "@grasp-os/shared/ids";
+import {
+  agentIdSchema,
+  appIdSchema,
+  connectionIdSchema,
+} from "@grasp-os/shared/ids";
 import type {
   Authority,
   PermissionRequest,
@@ -1404,7 +1408,7 @@ describe("what code and triggers may learn and name", () => {
     ]).toStrictEqual([1, 1, 0]);
   });
 
-  it("lets nobody name a workflow subject they don't build, a store reach a workflow, or a trigger do more than start its workflow", async () => {
+  it("lets nobody name a workflow subject they don't build, a store reach a workflow, or a trigger do more than start its workflow and hear its own connection", async () => {
     const ada = await person("builder");
     const bob = await person("builder");
     const theirs = await workflowOf(ada);
@@ -1423,8 +1427,8 @@ describe("what code and triggers may learn and name", () => {
     });
     const ask = async (by: Person, permission: PermissionRequest) =>
       await outcome(requestPermission(env, by, permission, rolesOf(by)));
-    // A trigger reaches nothing but a start: said as such, not as what
-    // else it named.
+    // A trigger reaches nothing but a start, and a connector trigger its
+    // own connection: said as such, not as what else it named.
     const triggerWrites: unknown = await refusal(
       requestPermission(
         env,
@@ -1452,6 +1456,16 @@ describe("what code and triggers may learn and name", () => {
         ada,
         startsOn({ type: "trigger", triggerId: trigger.id }, shared.id)
       ),
+      // Not a connector trigger: it hears no connection.
+      systemHears: await ask(ada, {
+        subject: { type: "trigger", triggerId: trigger.id },
+        object: {
+          type: "connection",
+          connectionId: connectionIdSchema.parse("connection-outlook"),
+        },
+        actions: ["mail.list"],
+        binding: "OUTLOOK",
+      }),
       triggerWrites:
         typeof triggerWrites === "object" &&
         triggerWrites !== null &&
@@ -1462,7 +1476,12 @@ describe("what code and triggers may learn and name", () => {
       subjectNotBuilt: "workflow.resource_unavailable",
       storeStarts: "permission.invalid",
       triggerElsewhere: "permission.invalid",
-      triggerWrites: { issues: ["object: A trigger only starts a workflow."] },
+      systemHears: "permission.invalid",
+      triggerWrites: {
+        issues: [
+          "object: A trigger only starts a workflow, or hears its connection's events.",
+        ],
+      },
     });
   });
 });

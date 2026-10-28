@@ -1,10 +1,15 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import { connectorEventActions } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { triggerIdSchema } from "@grasp-os/shared/ids";
+import {
+  connectionIdSchema,
+  identifierSchema,
+  triggerIdSchema,
+} from "@grasp-os/shared/ids";
 import type { TriggerId } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, jsonPointerPattern } from "@grasp-os/shared/json";
 import { isAdmin, requireBuilder } from "@grasp-os/shared/roles";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { nextScheduledRun } from "@grasp-os/shared/workflows";
@@ -70,6 +75,14 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   its expression and time zone are checked to name a time to come.
 //   Nothing in it is evaluated. Its runs start as workflows/schedule-
 //   triggers.ts says.
+// - A connector trigger hearing a connection its creator may not use: the
+//   connection must exist and not be disconnected as it is created, and a
+//   personal one must be its creator's own, whom its runs act for. It
+//   hears nothing until an admin grants it the event's read action on
+//   exactly that connection (and part of it), a grant of its own beside
+//   `start` (permissions.ts). Its input is a fixed mapping (JSON Pointers
+//   into the event, RFC 6901) with literal defaults, never an expression.
+//   Its events start runs as workflows/connector-triggers.ts says.
 
 /** The kinds of trigger: what each is started by. */
 export const triggerKinds = [
@@ -116,6 +129,53 @@ export const scheduleTriggerConfigSchema = z.strictObject({
   missedOccurrences: z.literal("coalesce"),
 });
 
+/** Most input fields a connector trigger's mapping names. */
+const maxMappedFields = 50;
+
+const inputFieldSchema = z.string().min(1).max(128);
+
+/**
+ * How a connector trigger's event becomes its run's input (spec 15.2):
+ * each input field from a JSON Pointer into the event (RFC 6901; `/id`,
+ * `/payload/subject`), and literal defaults for fields the event lacks.
+ * Nothing in it is evaluated.
+ */
+export const inputMappingSchema = z.strictObject({
+  fields: z
+    .record(
+      inputFieldSchema,
+      z.string().max(512).regex(jsonPointerPattern, "Not a JSON Pointer")
+    )
+    .refine((fields) => Object.keys(fields).length <= maxMappedFields)
+    .default({}),
+  defaults: z
+    .record(inputFieldSchema, z.json())
+    .refine((defaults) => Object.keys(defaults).length <= maxMappedFields)
+    .default({}),
+});
+
+/** A connector trigger's mapping of its event to its run's input. */
+export type InputMapping = z.infer<typeof inputMappingSchema>;
+
+/**
+ * A connector trigger's configuration (spec 15.1, "Connect verified
+ * event"): the connection whose events start it, and the part of it (a
+ * mailbox, a drive) or none for the account's own; the event type; and
+ * how each event becomes the run's input.
+ */
+export const connectorTriggerConfigSchema = z.strictObject({
+  connection: z.strictObject({
+    connectionId: connectionIdSchema,
+    resource: identifierSchema.optional(),
+  }),
+  event: z
+    .string()
+    .refine((type) => Object.hasOwn(connectorEventActions, type), {
+      message: "Not an event type a connection reports",
+    }),
+  input: inputMappingSchema,
+});
+
 /** What a trigger version keeps of its configuration, by kind. */
 interface KindFields {
   eventContract: string | null;
@@ -123,6 +183,9 @@ interface KindFields {
   scheduleCron: string | null;
   scheduleTimeZone: string | null;
   scheduleInput: string | null;
+  connectionId: string | null;
+  connectionResource: string | null;
+  inputMapping: string | null;
 }
 
 const noKindFields: KindFields = {
@@ -131,6 +194,9 @@ const noKindFields: KindFields = {
   scheduleCron: null,
   scheduleTimeZone: null,
   scheduleInput: null,
+  connectionId: null,
+  connectionResource: null,
+  inputMapping: null,
 };
 
 const invalid = (issue: string) =>
@@ -172,18 +238,57 @@ const scheduleInputFor = async (
 };
 
 /**
+ * A connector trigger's fields, from `config`, checked: its connection
+ * must exist in connect and not be disconnected, and, if personal, be
+ * `principal`'s own, whom its runs act for.
+ */
+const connectorFieldsOf = async (
+  env: Env,
+  config: unknown,
+  principal: string
+): Promise<KindFields> => {
+  const { connection, event, input } = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    connectorTriggerConfigSchema,
+    config
+  );
+  const [owner] = await env.CONNECT.connectionOwners([connection.connectionId]);
+  if (
+    owner === undefined ||
+    owner.status === "disconnected" ||
+    (owner.ownerUserId !== null && owner.ownerUserId !== principal)
+  ) {
+    throw invalid(
+      "config.connection: Not a connection you may use: it must be connected, and a personal one your own."
+    );
+  }
+  return {
+    ...noKindFields,
+    eventType: event,
+    connectionId: connection.connectionId,
+    connectionResource: connection.resource ?? null,
+    inputMapping: canonicalJson(input),
+  };
+};
+
+/**
  * What a trigger of `kind` with `config` keeps in its version, checked
  * (`workflow.resource_invalid`): a system trigger's event, a schedule
  * trigger's schedule and input, accepted by version `version` of workflow
- * `workflowId`; nothing for any other kind.
+ * `workflowId`, a connector trigger's connection, event and mapping, for
+ * `principal`; nothing for any other kind.
  */
 const kindFieldsOf = async (
   env: Env,
   kind: (typeof triggerKinds)[number],
   config: unknown,
   workflowId: string,
-  version: number
+  version: number,
+  principal: string
 ): Promise<KindFields> => {
+  if (kind === "connector") {
+    return await connectorFieldsOf(env, config, principal);
+  }
   if (kind === "system") {
     const { event } = workflowResourceErrors.parse(
       "workflow.resource_invalid",
@@ -289,7 +394,14 @@ export const createTriggerResource = async (
   );
   const workflow = await requireWorkflowRole(env, by, workflowId, "builder");
   await requirePublished(env, workflow.id, version);
-  const fields = await kindFieldsOf(env, kind, config, workflow.id, version);
+  const fields = await kindFieldsOf(
+    env,
+    kind,
+    config,
+    workflow.id,
+    version,
+    by.userId
+  );
   const id = triggerIdSchema.parse(crypto.randomUUID());
   const configHash = await sha256Hex(canonicalJson(config));
   const policy = await quotaPolicy(env);
@@ -530,6 +642,12 @@ export const updateTriggerVersion = async (
       eventContract: sql`(SELECT event_contract FROM trigger_resource_versions
         WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
       eventType: sql`(SELECT event_type FROM trigger_resource_versions
+        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
+      connectionId: sql`(SELECT connection_id FROM trigger_resource_versions
+        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
+      connectionResource: sql`(SELECT connection_resource FROM trigger_resource_versions
+        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
+      inputMapping: sql`(SELECT input_mapping FROM trigger_resource_versions
         WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
       scheduleCron: schedule?.cron ?? null,
       scheduleTimeZone: schedule?.timeZone ?? null,

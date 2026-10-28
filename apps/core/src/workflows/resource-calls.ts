@@ -342,6 +342,10 @@ const callConnector = async (
           await requireCallAuthority(env, run, binding);
           effect.requireHolds();
         },
+        // Its mail is stamped with the run (mail-stamps.ts), so a copy
+        // that reaches a mailbox a connector trigger watches starts the
+        // trigger's run in this run's lineage, never as a new root.
+        stamping: { run: run.runId, stepKey: effect.key, kind: "resource" },
       };
     },
     {

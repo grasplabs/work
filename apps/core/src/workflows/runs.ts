@@ -1581,7 +1581,7 @@ export const recordWaiting = async (
  * The most runs mail, or connector events, start of one workflow in an
  * hour, each counted on its own.
  */
-const triggeredRunsPerHour = 60;
+export const triggeredRunsPerHour = 60;
 
 const hourMs = 60 * 60 * 1000;
 
