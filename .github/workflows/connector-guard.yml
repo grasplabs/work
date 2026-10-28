@@ -1,0 +1,70 @@
+# Holds a branch of Grasp's agent, `feat/connector-<app>`, to adding one
+# new connector and nothing else (GRA-689, scripts/connector-guard.ts):
+# only its own folder and its lockfile entry change, no dependency is
+# added, and it carries the plan a person approved, signed by the admin.
+# Any other pull request passes at once. Required on main
+# (.github/rulesets/main.json).
+#
+# `pull_request_target`, with main checked out: the guard that runs is
+# main's, never the branch's own, and nothing of the branch runs; its
+# commits are fetched and read through git, as data. So a branch can't
+# change what checks it, and no secret is used: the plan key is the
+# admin's public key, a repository variable.
+#
+# The connector's manifest, which only loading it gives, is held to the
+# plan by CI's own `static` job (check:connector-manifest), which this
+# guard keeps the branch from changing.
+name: Connector guard
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+  # The merge queue: what it merges was checked as a pull request.
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connector-guard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: connector-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Pass the merge queue
+        if: github.event_name == 'merge_group'
+        run: echo "Checked as a pull request."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request_target'
+        with:
+          # main, the guard's own copy; the branch is fetched below.
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        if: github.event_name == 'pull_request_target'
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - name: Check the branch
+        if: github.event_name == 'pull_request_target'
+        # Every value from the pull request through env, never interpolated
+        # into the script: a branch name is the branch author's to choose.
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          CONNECTOR_PLAN_KEY: ${{ vars.CONNECTOR_PLAN_KEY }}
+        run: |
+          if [ "$HEAD_REPO" != "$REPO" ]; then
+            echo "A fork's branch is never the agent's."
+            exit 0
+          fi
+          git fetch --no-tags origin "$HEAD_SHA"
+          vp run check:connector-pr

@@ -57,6 +57,9 @@
           },
           {
             "context": "stephen"
+          },
+          {
+            "context": "connector-guard"
           }
         ],
         "strict_required_status_checks_policy": false,

@@ -53,6 +53,14 @@ jobs:
       - run: vp run check:wrangler-configs
       - run: vp run check:state-registry
       - run: vp run check:playwright-image
+      # A branch of Grasp's agent: its connector's manifest reaches only
+      # the hosts the signed plan names (scripts/connector-guard.ts); any
+      # other branch passes. The connector guard keeps the branch from
+      # changing this job.
+      - run: vp run check:connector-manifest
+        env:
+          BRANCH: ${{ github.head_ref }}
+          CONNECTOR_PLAN_KEY: ${{ vars.CONNECTOR_PLAN_KEY }}
       # Generated files (Worker types, migrations, the
       # frontend's translation catalogs) must be committed.
       - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
