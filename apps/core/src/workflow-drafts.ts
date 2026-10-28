@@ -5,6 +5,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import {
   workflowDraftEditSchema,
   workflowDraftPublishSchema,
+  workflowStepEditSchema,
   workflowNamespace,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
@@ -40,6 +41,7 @@ import {
   sealedModules,
   workflowDefinition,
 } from "./workflow-resources.ts";
+import { applyStepEdit } from "./workflow-steps.ts";
 
 // The draft of an independent workflow's next definition, as its builders
 // and their agent edit it (platform specification 13.10 and 22.7). The
@@ -459,7 +461,9 @@ export const editWorkflowDraft = async (
   id: unknown,
   input: unknown,
   /** Admits the write, right before it commits: throws to write nothing. */
-  admit?: () => Promise<void>
+  admit?: () => Promise<void>,
+  /** The step edited on the canvas, which its audit event names. */
+  step?: { kind: "change" | "insert"; pointer: string }
 ): Promise<WorkflowDraft> => {
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "builder");
@@ -575,6 +579,9 @@ export const editWorkflowDraft = async (
           checked,
           problems: problems.length,
           modules: Object.keys(modules).length,
+          ...(step === undefined
+            ? {}
+            : { step: step.kind, stepPointer: step.pointer }),
         },
       }),
     ]);
@@ -601,6 +608,51 @@ export const editWorkflowDraft = async (
     modules,
     ...(checkpoint === undefined ? {} : { checkpoint }),
   });
+};
+
+/**
+ * Inserts or changes one step of workflow `id`'s draft for `by`, who must
+ * build it (`workflowStepEditSchema`, workflow-steps.ts): applied to the
+ * draft as it is at the revision they read, the draft before any edit
+ * included, and saved as its next revision with its modules as they are,
+ * exactly as `editWorkflowDraft` saves an edit. A revision another edit
+ * replaced is `workflow.draft_conflict`.
+ */
+export const editWorkflowStep = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  input: unknown
+): Promise<WorkflowDraft> => {
+  requireNotStaff(by);
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  const { expectedRevision, edit } = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    workflowStepEditSchema,
+    input
+  );
+  const draft = await draftOf(env, by, workflow);
+  if (draft.revision !== expectedRevision) {
+    throw workflowResourceErrors.create("workflow.draft_conflict");
+  }
+  return await editWorkflowDraft(
+    env,
+    by,
+    workflow.id,
+    {
+      expectedRevision,
+      source: applyStepEdit(draft.source, edit),
+      modules: draft.modules,
+    },
+    undefined,
+    {
+      kind: edit.kind,
+      pointer:
+        edit.kind === "change"
+          ? edit.pointer
+          : `${edit.list}/${String(edit.index)}`,
+    }
+  );
 };
 
 /**
