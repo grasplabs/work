@@ -1,4 +1,8 @@
-import { composioConsentText } from "@grasp-os/shared/connect";
+import {
+  composioConsentText,
+  composioToolName,
+  composioToolsSchema,
+} from "@grasp-os/shared/connect";
 import type {
   ConnectionPerson,
   OrganizationConnection,
@@ -37,7 +41,7 @@ const composio = fakeComposioApi(
       slug: "hubspot",
       name: "HubSpot",
       tools: [
-        { slug: "HUBSPOT_LIST_CONTACTS" },
+        { slug: "HUBSPOT_LIST_CONTACTS", inputs: ["pipeline"] },
         { slug: "HUBSPOT_CREATE_CONTACT" },
         { slug: "HUBSPOT_UPDATE_CONTACT" },
       ],
@@ -918,7 +922,7 @@ describe("a Composio connection", () => {
 const change = async (
   person: ConnectionPerson,
   connectionId: string,
-  tools: (string | { name: string; read?: boolean })[]
+  tools: (string | { name: string; read?: boolean; resource?: string })[]
 ) => await exports.default.changeToolkitTools({ person, connectionId, tools });
 
 /** The allowlist of the one server connect made at Composio. */
@@ -1184,6 +1188,128 @@ describe("changing what a connected Composio toolkit may do", () => {
       composio: [["HUBSPOT_LIST_CONTACTS"]],
       ok: 0,
     });
+  });
+
+  it("leaves Composio on connect's latest list when a newer change lands while a lost one sets Composio back", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const theirs = JSON.stringify(["HUBSPOT_LIST_CONTACTS"]);
+    const newest = ["HUBSPOT_UPDATE_CONTACT", "HUBSPOT_LIST_CONTACTS"];
+    // Another change beats this one while it is at Composio; as this one
+    // sets Composio back to that, a third lands, at Composio first.
+    composio.state.beforeUpdate = async () => {
+      await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+        .bind(theirs, connectionId)
+        .run();
+      composio.state.beforeUpdate = async () => {
+        await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+          .bind(JSON.stringify(newest), connectionId)
+          .run();
+        for (const server of composio.state.holds.servers.values()) {
+          server.allowedTools = newest;
+        }
+      };
+    };
+    const end = await outcome(
+      change(admin, connectionId, ["HUBSPOT_CREATE_CONTACT"])
+    );
+
+    expect({
+      end,
+      stored: await toolsNow(connectionId),
+      composio: serverTools(),
+    }).toStrictEqual({
+      end: "connection.tools_changed",
+      stored: JSON.stringify(newest),
+      composio: [newest],
+    });
+  });
+
+  it("sets Composio back when connect can't save a change Composio took, and records it failed", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const before = await toolsNow(connectionId);
+    // Connect's database refuses the change once Composio has it.
+    composio.state.beforeUpdate = async () => {
+      await env.DB.prepare(
+        "CREATE TRIGGER refuse_tools BEFORE UPDATE OF tools ON connections BEGIN SELECT RAISE(ABORT, 'refused'); END"
+      ).run();
+    };
+    let end: string;
+    try {
+      end = await outcome(
+        change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+      );
+    } finally {
+      await env.DB.prepare("DROP TRIGGER IF EXISTS refuse_tools").run();
+    }
+    const recorded = await events();
+
+    expect({
+      failed: end !== "ok",
+      unchanged: (await toolsNow(connectionId)) === before,
+      composio: serverTools(),
+      reasons: recorded
+        .filter(({ action }) => action === "connection.tools")
+        .map(({ detail }) => [detail.outcome, detail.reason]),
+    }).toStrictEqual({
+      failed: true,
+      unchanged: true,
+      composio: [
+        composioToolsSchema
+          .parse(JSON.parse(before ?? "[]"))
+          .map(composioToolName),
+      ],
+      reasons: [["failed", "connection.change_failed"]],
+    });
+  });
+
+  it("keeps the tools a change names in the same transaction as the change, so a retry still records them", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const before = await toolsNow(connectionId);
+    // The log refuses the event naming the tool added, once.
+    await env.DB.prepare(
+      "CREATE TRIGGER refuse_names BEFORE INSERT ON audit_outbox WHEN NEW.event LIKE '%connection.tools.added%' BEGIN SELECT RAISE(ABORT, 'refused'); END"
+    ).run();
+    let first: string;
+    try {
+      first = await outcome(
+        change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+      );
+    } finally {
+      await env.DB.prepare("DROP TRIGGER IF EXISTS refuse_names").run();
+    }
+    const unchanged = (await toolsNow(connectionId)) === before;
+    // Sent again, it is made, with its names.
+    await change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"]);
+    const recorded = await events();
+
+    expect({
+      first: first !== "ok",
+      unchanged,
+      stored: await toolsNow(connectionId),
+      came: namesIn(recorded, "connection.tools.added"),
+    }).toStrictEqual({
+      first: true,
+      unchanged: true,
+      stored: JSON.stringify(["HUBSPOT_UPDATE_CONTACT"]),
+      came: ["HUBSPOT_UPDATE_CONTACT"],
+    });
+  });
+
+  it("lists each tool's resource property, so a page changing the tools can keep it", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    await change(admin, connectionId, [
+      { name: "HUBSPOT_LIST_CONTACTS", read: true, resource: "pipeline" },
+      "HUBSPOT_UPDATE_CONTACT",
+    ]);
+    const listed = await exports.default.listConnections(admin);
+
+    expect(
+      listed.find(({ id }) => id === connectionId)?.toolResources
+    ).toStrictEqual({ HUBSPOT_LIST_CONTACTS: "pipeline" });
   });
 
   it("drops a held action of a tool taken away, so nobody is asked to confirm it", async () => {
