@@ -82,7 +82,7 @@ import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { log } from "@grasp-os/shared/log";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import type { StaffAlert } from "../alerts.ts";
@@ -103,7 +103,12 @@ import {
 import type { ScriptTarget } from "../cloudflare/workers.ts";
 import { actIfChanged } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
-import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
+import {
+  clientProvisions,
+  clients,
+  clientWorkers,
+  releases,
+} from "../db/schema.ts";
 import {
   appliedSchema,
   currentReleases,
@@ -317,6 +322,19 @@ const progressSchema = z.object({
   /** The core origin the probe passed at. */
   origin: z.string().optional(),
   /**
+   * The newest-built release whose database migrations may have run,
+   * recorded before they run (src/deploy/compatibility.ts `appliedSchema`):
+   * kept across releases, so a release that migrated and then failed, and
+   * the one started after it, don't forget the schema it left.
+   */
+  schema: z.string().optional(),
+  /**
+   * Each Worker's last Durable Object migration as its script was observed
+   * at (null for none): what a later release or rollback may not go back
+   * past, rather than what a release that never uploaded declared.
+   */
+  migrated: z.record(z.string(), z.string().nullable()).default({}),
+  /**
    * The sending domain's zone, for a release that sends mail, and whether
    * it was active (its name servers delegated) when last ensured.
    */
@@ -419,39 +437,40 @@ export const startClientProvision = async (
 };
 
 /**
- * The first Worker whose last Durable Object migration in `from` (what
- * runs) `to` doesn't have: going to `to` would take its script back past
- * a migration it ran. None when `to` has every one.
+ * The first Worker whose last Durable Object migration (`ran`, by Worker)
+ * `to` doesn't have: going to `to` would take its script back past a
+ * migration it ran. None when `to` has every one.
  */
 const behindMigration = (
-  from: ReleaseManifest,
+  ran: Readonly<Record<string, string | null>>,
   to: ReleaseManifest
 ): string | undefined =>
-  Object.entries(from.workers).find(([name, worker]) => {
-    const ran = worker.durableObjectMigrations.at(-1)?.tag;
-    return (
-      ran !== undefined &&
+  Object.entries(ran).find(
+    ([name, tag]) =>
+      tag !== null &&
       !(
         to.workers[name]?.durableObjectMigrations.some(
-          ({ tag }) => tag === ran
+          (step) => step.tag === tag
         ) ?? false
       )
-    );
-  })?.[0];
+  )?.[0];
 
 /**
- * Throws unless a client running `running` may go to `target` (a
- * rollback when `rollback`): both imported, and `target` with every
- * Durable Object migration a script ran. Checked for every target before
- * anything is uploaded: the upload refuses one per script too, but only
- * once connect may have gone.
+ * Throws unless the client of `operation` may go to `target` (a rollback
+ * when `rollback`): both imported, and `target` with every Durable Object
+ * migration a script ran. What a script ran is what it was observed at
+ * (`migrated`); a Worker never observed counts at the last migration of
+ * the release the operation has, which may have reached it. Checked for
+ * every target before anything is uploaded: the upload refuses one per
+ * script too, but only once connect may have gone.
  */
 const assertCanGo = async (
   db: AdminDatabase,
-  running: string,
+  operation: { releaseId: string; progress: string | null },
   target: string,
   rollback: boolean
 ): Promise<void> => {
+  const running = operation.releaseId;
   const [from, to] = await Promise.all([
     importedManifest(db, running),
     importedManifest(db, target),
@@ -469,7 +488,18 @@ const assertCanGo = async (
       `Release ${running}, which runs, isn't imported`
     );
   }
-  const behind = behindMigration(from, to);
+  const observedTags = progressSchema.parse(
+    JSON.parse(operation.progress ?? "{}")
+  ).migrated;
+  const ran = Object.fromEntries(
+    Object.entries(from.workers).map(([name, worker]) => [
+      name,
+      Object.hasOwn(observedTags, name)
+        ? (observedTags[name] ?? null)
+        : (worker.durableObjectMigrations.at(-1)?.tag ?? null),
+    ])
+  );
+  const behind = behindMigration(ran, to);
   if (behind !== undefined) {
     throw new ProvisionOperationError(
       rollback ? "rollback_past_migration" : "release_behind_migration",
@@ -556,7 +586,7 @@ export const startClientRelease = async (
     // starting it again resumes it.
     return { operationId: operation.id, releaseId: target };
   }
-  await assertCanGo(db, operation.releaseId, target, rollback === true);
+  await assertCanGo(db, operation, target, rollback === true);
   const now = new Date();
   // Conditional on the operation as read: of two starts at once, one
   // takes it; the other is refused, and starts nothing.
@@ -977,6 +1007,42 @@ const observedDatabases = async (
   return databases;
 };
 
+/** The newer-built of releases `a` (if any) and `b`. */
+const newerOf = async (
+  db: AdminDatabase,
+  a: string | undefined,
+  b: string
+): Promise<string> => {
+  if (a === undefined || a === b) {
+    return b;
+  }
+  const [newest] = await db
+    .select({ id: releases.id })
+    .from(releases)
+    .where(inArray(releases.id, [a, b]))
+    .orderBy(desc(releases.builtAt))
+    .limit(1);
+  return newest?.id ?? b;
+};
+
+/**
+ * Records Worker `app` observed at Durable Object migration `tag` in
+ * `progress` (which it updates), unless that's recorded already.
+ */
+const recordMigrated = async (
+  db: AdminDatabase,
+  loaded: Loaded,
+  progress: Progress,
+  app: App,
+  tag: string | undefined
+): Promise<void> => {
+  if (progress.migrated[app] === (tag ?? null)) {
+    return;
+  }
+  progress.migrated = { ...progress.migrated, [app]: tag ?? null };
+  await recordProgress(db, loaded, progress);
+};
+
 /** Step 4: the release's D1 migrations, on the client's own databases. */
 const migrate = async (
   context: ProvisionContext,
@@ -985,6 +1051,16 @@ const migrate = async (
 ): Promise<void> => {
   const databases = await observedDatabases(context, loaded, inventory);
   await assertHolds(context.db, loaded.held);
+  // Recorded before any runs: one that stops part way still left them.
+  const progress = await progressNow(context.db, loaded.operation.id);
+  const schema = await newerOf(
+    context.db,
+    progress.schema,
+    loaded.manifest.releaseId
+  );
+  if (schema !== progress.schema) {
+    await recordProgress(context.db, loaded, { ...progress, schema });
+  }
   const applied = await migrateDatabases(
     context.api,
     loaded.accountId,
@@ -1057,6 +1133,10 @@ const upload = async (
     progress.uploads[app] === fingerprint &&
     before.exists &&
     before.migrationTag === lastTag;
+  if (before.exists) {
+    // What it was observed at, whatever this upload does next.
+    await recordMigrated(db, loaded, progress, app, before.migrationTag);
+  }
   if (!done) {
     const migrations = pendingMigrations(
       worker.durableObjectMigrations,
@@ -1069,8 +1149,11 @@ const upload = async (
       rendered.bindings,
       vars
     );
-    // Delivered secrets go with the next delivery, whatever this upload keeps.
+    // Delivered secrets go with the next delivery, whatever this upload
+    // keeps. Its migrations count as run from here: an upload whose answer
+    // is lost may have run them, and is observed again before it's trusted.
     const { [app]: _delivered, ...secrets } = progress.secrets;
+    progress.migrated = { ...progress.migrated, [app]: lastTag ?? null };
     await recordProgress(db, loaded, { ...progress, secrets });
     await assertHolds(db, held);
     await uploadTargetScript(api, target, {
@@ -1095,6 +1178,7 @@ const upload = async (
       ...progress,
       secrets,
       uploads: { ...progress.uploads, [app]: fingerprint },
+      migrated: { ...progress.migrated, [app]: after.migrationTag ?? null },
     });
   }
   if (target.namespace === null) {

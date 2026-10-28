@@ -18,6 +18,7 @@ import {
   clients,
   releases,
 } from "../src/db/schema.ts";
+import { appliedSchema } from "../src/deploy/compatibility.ts";
 import {
   clientMailDomain,
   onboardingSender,
@@ -1752,6 +1753,48 @@ describe("provisioning a placed client", () => {
       past: "rollback_past_migration",
       behind: "release_behind_migration",
       uploaded: 0,
+    });
+  });
+
+  it("rolls back a release that stopped before any script ran its new Durable Object migration, and keeps the schema a stopped release migrated to", async () => {
+    const first = await importRelease("dedicated");
+    const { clientId } = await liveClient(first);
+    const { connect } = await scriptsOf(clientId);
+    // Declares a new class and a migration of its databases; stops at
+    // connect's upload, after its databases migrated and before any
+    // script ran the class's migration.
+    const later = await importRelease(
+      "dedicated",
+      {
+        notes: "feat(core): new class, new table",
+        migrations: {
+          "0000_init.sql": "CREATE TABLE a (id TEXT);",
+          "0001_more.sql": "CREATE TABLE b (id TEXT);",
+        },
+      },
+      (core) => ({
+        ...core,
+        durableObjectMigrations: [
+          ...core.durableObjectMigrations,
+          { tag: "v2", new_sqlite_classes: ["Extra"] },
+        ],
+      })
+    );
+    await startClientRelease(db, staff, clientId, {
+      releaseId: later.releaseId,
+    });
+    cloudflare.failNext(isUpload(connect), 400);
+    await failing(await attempt(clientId));
+
+    const back = await codeOf(
+      startClientRelease(db, staff, clientId, { rollback: true })
+    );
+    const schema = await appliedSchema(db, clientId);
+
+    expect({ back, schema: schema?.releaseId }).toStrictEqual({
+      back: "started",
+      // Back on the release before, its databases stay at the later one's.
+      schema: later.releaseId,
     });
   });
 

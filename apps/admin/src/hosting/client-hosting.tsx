@@ -263,11 +263,20 @@ const Releases = ({
 }) => {
   const router = useRouter();
   const { busy, failure, run } = useAction(placeRefusals);
-  const stopped = operation.status === "failed";
+  // Stopped: failed, or left running by a runner that has ended.
+  const stopped =
+    operation.status === "failed" ||
+    (operation.status === "running" && !view.going);
   const others = releases.filter(({ id }) => id !== operation.releaseId);
-  const [releaseId, setReleaseId] = useState(
-    stopped ? operation.releaseId : (others[0]?.id ?? "")
-  );
+  const choices = stopped ? releases : others;
+  // Staff's pick while it's still offered; otherwise the first offered,
+  // so what's shown is what's sent after the page refreshes.
+  const [picked, setPicked] = useState<string | null>(null);
+  const fallback = stopped ? operation.releaseId : (others[0]?.id ?? "");
+  const releaseId =
+    picked !== null && choices.some(({ id }) => id === picked)
+      ? picked
+      : fallback;
   const refreshing = async (task: () => Promise<PlaceResult>) => {
     await run(
       async () =>
@@ -290,7 +299,6 @@ const Releases = ({
         await rollbackPlacedClientFn({ data: { clientId: view.clientId } })
     );
   };
-  const choices = stopped ? releases : others;
   return (
     <div className="flex flex-col gap-4">
       <Field>
@@ -300,7 +308,7 @@ const Releases = ({
         <NativeSelect
           id="hosting-next-release"
           onChange={(event) => {
-            setReleaseId(event.target.value);
+            setPicked(event.target.value);
           }}
           value={releaseId}
         >

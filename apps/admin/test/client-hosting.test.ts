@@ -478,6 +478,17 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       `/organizations/${clientId}/setup`,
       caller
     );
+    // Its release left running by a runner that has ended: resumed from
+    // here, the release it was of offered first.
+    await db
+      .update(clientProvisions)
+      .set({ status: "running", step: "core" })
+      .where(eq(clientProvisions.clientId, clientId));
+    const stopped = await page(`/organizations/${clientId}/setup`, caller);
+    await db
+      .update(clientProvisions)
+      .set({ status: "done", step: "route" })
+      .where(eq(clientProvisions.clientId, clientId));
     const refused = await Promise.all([
       callServerFn(
         releasePlacedClientFn,
@@ -494,6 +505,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       status,
       release: html.includes("Release it"),
       rollBack: html.includes(`Roll back to ${before}`),
+      resume: stopped.html.includes("Resume the release"),
       place: html.includes("Place and start provisioning"),
       refused: refused.map((answer) => answer.includes("answered 403")),
       operation: await operationOf(clientId),
@@ -501,6 +513,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       status: 200,
       release: true,
       rollBack: true,
+      resume: true,
       place: false,
       refused: [true, true],
       operation: { releaseId: current, status: "done" },

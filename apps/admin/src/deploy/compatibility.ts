@@ -17,7 +17,7 @@
  * before, and a rollback going back no further (src/rollout/rollback.ts).
  */
 import type { ReleaseManifest } from "@grasp-os/shared/release";
-import { and, desc, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
 import {
@@ -191,9 +191,10 @@ export const currentReleases = async (
 
 /**
  * The release whose schemas client `clientId`'s databases are at, as its
- * records tell: the newest-built release a deploy or its provisioning
- * may have run the migrations of (one that finished a step before
- * them); null when none did. Its databases may be at a newer schema than
+ * records tell: the newest-built release a deploy or its operation may
+ * have run the migrations of (one that finished a step before them, or
+ * that the operation recorded before running them, whatever it did
+ * after); null when none did. Its databases may be at a newer schema than
  * the release its Workers run, after a rollback. Releases are built from
  * `main` in order, so a newer one ships every migration an older one
  * does, and its schemas run code from no older migration.
@@ -218,11 +219,23 @@ export const appliedSchema = async (
         ne(clientProvisions.step, "validated")
       )
     );
+  // What its operation recorded before it last ran migrations, kept across
+  // releases (src/hosting/operation.ts `schema`).
+  const recorded = db
+    .select({
+      releaseId: sql<string>`json_extract(${clientProvisions.progress}, '$.schema')`,
+    })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId));
   const [newest] = await db
     .select({ id: releases.id })
     .from(releases)
     .where(
-      or(inArray(releases.id, deployed), inArray(releases.id, provisioned))
+      or(
+        inArray(releases.id, deployed),
+        inArray(releases.id, provisioned),
+        inArray(releases.id, recorded)
+      )
     )
     .orderBy(desc(releases.builtAt))
     .limit(1);
