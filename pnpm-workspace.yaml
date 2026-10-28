@@ -6,14 +6,6 @@ packages:
 # Supply-chain defaults: new versions wait 3 days, exotic sub-dependencies are
 # blocked, and only the packages listed here may run install scripts.
 minimumReleaseAge: 4320
-# One-off exception Nick approved on 2026-10-22: pi 1.4.0 before its 3-day wait,
-# to test DeepSeek V4.1 Flash, which only 1.4.0's catalogue has. pi-agent-core
-# and pi-telemetry pin pi-ai's exact version, so they come along. Remove after
-# 2026-10-24, when 1.4.0 is past the wait.
-minimumReleaseAgeExclude:
-  - "@earendil-works/pi-agent-core@1.4.0"
-  - "@earendil-works/pi-ai@1.4.0"
-  - "@earendil-works/pi-telemetry@1.4.0"
 blockExoticSubdeps: true
 strictDepBuilds: true
 allowBuilds:

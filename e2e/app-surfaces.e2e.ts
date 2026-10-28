@@ -424,3 +424,52 @@ test("closing the panel, or opening another in its place, asks first while its s
   await leave.getByRole("button", { name: "Leave" }).click();
   await expect(sheet).toHaveCount(0);
 });
+
+test("one click or one held key in the panel's screen is one act of the person's: a navigation on its release or on a repeat goes nowhere", async ({
+  pageOf,
+}) => {
+  const { builder, name, app, chat } = await surfacedApp();
+  const page = await pageOf(builder);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto(`/?chat=${chat}`);
+  await page.getByRole("button", { name: "Side panel" }).click();
+  await page
+    .getByRole("complementary", { name: "Side panel" })
+    .getByRole("button", { name })
+    .click();
+  const beside = page
+    .getByRole("complementary", { name: "Side panel" })
+    .frameLocator('iframe[title="home app"]');
+  await expect(beside.getByRole("heading", { name: "Start" })).toBeVisible({
+    timeout: 20_000,
+  });
+  const main = page.getByRole("main").frameLocator('iframe[title="note app"]');
+
+  // One slow click: its press goes, as the person's act; a navigation its
+  // release asks for once that went is no act of theirs, and beside the
+  // page nothing goes without one.
+  await beside.getByRole("button", { name: "Press and lift" }).hover();
+  await page.mouse.down();
+  await expect(page).toHaveURL(new RegExp(`/domains/${app}/apps/note$`, "u"));
+  await expect(main.getByRole("heading", { name: "Note down" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.mouse.up();
+  await page.waitForTimeout(3000);
+  await expect(main.getByRole("heading", { name: "Note down" })).toBeVisible();
+
+  // One held key: its first press goes; what its repeats ask for doesn't.
+  await beside.getByRole("textbox", { name: "Keys" }).click();
+  await page.waitForTimeout(500);
+  await page.keyboard.down("a");
+  await expect(main.getByRole("heading", { name: "Note pressed" })).toBeVisible(
+    { timeout: 20_000 }
+  );
+  await page.keyboard.down("a");
+  await page.keyboard.down("a");
+  await page.keyboard.up("a");
+  await page.waitForTimeout(3000);
+  await expect(
+    main.getByRole("heading", { name: "Note pressed" })
+  ).toBeVisible();
+});

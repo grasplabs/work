@@ -24,6 +24,11 @@ export const sealedPackagesSchema = z.strictObject({
 });
 export type SealedPackageManifest = z.infer<typeof sealedPackagesSchema>;
 
+/** Where a version's manifest seals the approved packages its modules import. */
+export const manifestPackagesSchema = z.object({
+  packages: sealedPackagesSchema.optional(),
+});
+
 /** The packages a publication seals: its manifest's record, and the modules. */
 export interface SealedPackages {
   manifest: SealedPackageManifest;
