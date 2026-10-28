@@ -12,10 +12,12 @@ import { formatDate } from "../format.ts";
 import { PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading, SectionTitle } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadLandscape } from "../landscape/landscape-data.ts";
-import type { LandscapeApp } from "../landscape/landscape.ts";
 import { FindingsTable } from "../policies/findings-table.tsx";
-import { bookOf, policyToday } from "../policies/policies-data.ts";
+import {
+  bookOf,
+  findingsOfLoaded,
+  loadPolicies,
+} from "../policies/policies-data.ts";
 import {
   ConditionChips,
   PolicyExcerpt,
@@ -24,10 +26,14 @@ import {
 import {
   effectDescription,
   effectLabel,
-  findings,
+  findingsWith,
   ruleStatusDescription,
 } from "../policies/policy.ts";
-import type { PolicyBook, PolicyRule } from "../policies/policy.ts";
+import type {
+  PolicyBook,
+  PolicyFinding,
+  PolicyRule,
+} from "../policies/policy.ts";
 
 // One rule, as in the prototype (`routes/policies/rules/$ruleId.tsx`):
 // what it checks and why, whether it is on, and the apps it catches now.
@@ -38,11 +44,11 @@ import type { PolicyBook, PolicyRule } from "../policies/policy.ts";
 
 const RuleDetail = ({
   rule,
-  apps,
+  found: all,
   book,
 }: {
   rule: PolicyRule;
-  apps: readonly LandscapeApp[];
+  found: readonly PolicyFinding[];
   book: PolicyBook;
 }) => {
   const { t, i18n } = useLingui();
@@ -50,7 +56,10 @@ const RuleDetail = ({
     rule.policyId === null
       ? undefined
       : book.policies.find(({ id }) => id === rule.policyId);
-  const found = findings([rule], apps, book.exceptions, policyToday());
+  const found = findingsWith(
+    book,
+    all.filter(({ ruleId }) => ruleId === rule.id)
+  );
   const madeOn = formatDate(rule.createdAt);
   const { createdBy } = rule;
   return (
@@ -144,7 +153,7 @@ const RuleDetail = ({
 const RulePage = () => {
   const { t } = useLingui();
   const { ruleId } = Route.useParams();
-  const { apps, book: loaded } = Route.useLoaderData();
+  const { found, book: loaded } = Route.useLoaderData();
   const book = bookOf(loaded);
   const rule = book.rules.find(({ id }) => id === ruleId);
   if (rule === undefined) {
@@ -182,16 +191,15 @@ const RulePage = () => {
   }
   return (
     <RuleDetail
-      apps={apps.state === "ready" ? apps.data : []}
       book={book}
+      found={findingsOfLoaded(found).findings}
       rule={rule}
     />
   );
 };
 
 export const Route = createFileRoute("/_shell/policies/rules/$ruleId")({
-  loader: async ({ context: { core, identity } }) =>
-    await loadLandscape(core, identity),
+  loader: async ({ context: { core } }) => await loadPolicies(core),
   pendingComponent: PageLoading,
   component: RulePage,
 });

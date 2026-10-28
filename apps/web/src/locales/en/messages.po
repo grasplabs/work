@@ -65,7 +65,7 @@ msgstr "{0, plural, one {# more finding not shown: only the gravest are kept.} o
 msgid "{0, plural, one {# package in all, to run in: {targets}} other {# packages in all, to run in: {targets}}}"
 msgstr "{0, plural, one {# package in all, to run in: {targets}} other {# packages in all, to run in: {targets}}}"
 
-#. placeholder {0}: app.users
+#. placeholder {0}: app.people
 #. placeholder {0}: team.people
 #: src/onboarding/send-plan-form.tsx
 #: src/policies/findings-table.tsx
