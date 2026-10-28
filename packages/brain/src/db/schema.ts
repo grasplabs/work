@@ -380,6 +380,17 @@ export const brainPurges = sqliteTable(
      * it stood, as history); null otherwise.
      */
     supersededBy: text("superseded_by"),
+    /**
+     * The run of it under way (an attempt), random: only that run changes
+     * the purge or its steps, so a trailing one never does. Null once it
+     * completed.
+     */
+    attempt: text(),
+    /**
+     * When its attempt last renewed its hold, with each step's own writes
+     * (a lease): another run takes the purge over only once it lapsed.
+     */
+    attemptAt: timestamp("attempt_at"),
   },
   (table) => [
     // One open purge of the same input: running it again resumes it.
@@ -414,13 +425,6 @@ export const brainPurgeSteps = sqliteTable(
     reason: text(),
     /** What it changed, as JSON counts; null before it completed. */
     counts: text(),
-    /** When a run claimed it, while it runs (a lease). */
-    claimedAt: timestamp("claimed_at"),
-    /**
-     * The run that claimed it, random: only that run sets how it ended, so
-     * one that ran past its lease never overwrites the one that took over.
-     */
-    claim: text(),
     updatedAt: timestamp("updated_at").notNull(),
   },
   (table) => [primaryKey({ columns: [table.purgeId, table.step] })]

@@ -49,7 +49,12 @@ import {
   stagePayload,
 } from "./payloads.ts";
 import type { PayloadRef, StagedPayload } from "./payloads.ts";
-import { finishPurge, openPurge, runStep } from "./purge-ledger.ts";
+import {
+  attemptHolds,
+  finishPurge,
+  openPurge,
+  runStep,
+} from "./purge-ledger.ts";
 import type { StepCounts } from "./purge-ledger.ts";
 import {
   collectionPlan,
@@ -57,7 +62,7 @@ import {
   eraseFromSearchIndex,
   errorNameOf,
   owedWritesDone,
-  rebuildOwed,
+  rebuildOwedWhile,
   rebuildOwedIfChanged,
   secureDeleteReady,
 } from "./search-erasure.ts";
@@ -522,8 +527,9 @@ const purgePersonal = async <C>(
           purgeId
         )
       ),
-      rebuildOwed(db, purgeId),
     ],
+    // Each attempt owes its own rebuild.
+    (held, at) => [rebuildOwedWhile(db, held.purgeId, attemptHolds(held, at))],
     fresh
   );
   const { purgeId } = open;
@@ -539,10 +545,10 @@ const purgePersonal = async <C>(
   // after: erased from R2 too.
   const released = releasing(db, inArray(versions.documentId, inCollection));
   try {
-    await runStep(brain, purgeId, "host_files", async () => {
+    await runStep(brain, open, "host_files", async () => {
       await onErase.forgetFiles(by, { collectionId });
     });
-    await runStep(brain, purgeId, "records", async () => {
+    await runStep(brain, open, "records", async () => {
       const [first, ...rest]: BatchItem<"sqlite">[] = [
         ...(plan.kind === "keys"
           ? [
@@ -578,19 +584,19 @@ const purgePersonal = async <C>(
     // failed: it writes no more.
     await owedWritesDone(db, purgeId);
   }
-  await runStep(brain, purgeId, "payloads", async () => {
+  await runStep(brain, open, "payloads", async () => {
     await collectPayloads(brain, db);
   });
-  await runStep(brain, purgeId, "search", async () => {
+  await runStep(brain, open, "search", async () => {
     await cleanSearchIndex(async () => {
       await eraseCollectionFromSearchIndex(db, plan, { secure, id: purgeId });
     });
   });
   // The host's copies keep who wrote them: never the person erased.
-  await runStep(brain, purgeId, "host_actor", async () => {
+  await runStep(brain, open, "host_actor", async () => {
     await onErase.forgetActor(by, input.userId);
   });
-  await finishPurge(brain, purgeId);
+  await finishPurge(brain, open);
   return {
     purgeId,
     documents: open.counts.documents ?? 0,
@@ -1762,7 +1768,11 @@ const purgeContent = async <C>(
   // next purge to rebuild. A separator another document's text explained
   // at a purge's check that this one then takes the term from is covered
   // so, too. Run again, it goes on from its record (purge-ledger.ts).
-  const { purgeId, resumed: wasBegun } = await openPurge(
+  const {
+    purgeId,
+    attempt,
+    resumed: wasBegun,
+  } = await openPurge(
     brain,
     by,
     input,
@@ -1780,10 +1790,12 @@ const purgeContent = async <C>(
           id
         )
       ),
-      rebuildOwed(db, id),
     ],
+    // Each attempt owes its own rebuild.
+    (held, at) => [rebuildOwedWhile(db, held.purgeId, attemptHolds(held, at))],
     fresh
   );
+  const held = { purgeId, attempt };
   if (wasBegun) {
     await resumed(brain, by, input, scope, purgeId);
   }
@@ -1792,7 +1804,7 @@ const purgeContent = async <C>(
     // The Brain's records hold people's words too, everyone's, whatever
     // documents the purge names: before its documents, so one whose purge
     // fails doesn't leave them holding a term.
-    await runStep(brain, purgeId, "statements", async () => {
+    await runStep(brain, held, "statements", async () => {
       await eraseStatements(brain, by.actor, purgeId, (statement) =>
         erasedStatement(statement, matcher)
       );
@@ -1800,12 +1812,12 @@ const purgeContent = async <C>(
     // The host's copies hold people's words too: every one is rewritten,
     // whatever documents the purge names. First, so a document whose
     // purge fails doesn't leave them holding a term.
-    await runStep(brain, purgeId, "host_copies", async () => {
+    await runStep(brain, held, "host_copies", async () => {
       await onErase.rewrite(by, (text) => without(text, matcher));
     });
     // A copy made of a document named goes whatever it holds, also when
     // the document's own purge then fails.
-    await runStep(brain, purgeId, "host_documents", async () => {
+    await runStep(brain, held, "host_documents", async () => {
       await onErase.forgetDocuments(
         by,
         named.map(({ document, collection }) => ({
@@ -1820,7 +1832,7 @@ const purgeContent = async <C>(
       // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
       const counts = await runStep(
         brain,
-        purgeId,
+        held,
         documentStep(one.document.id),
         async () => ({
           ...(await purgeDocument(
@@ -1843,10 +1855,10 @@ const purgeContent = async <C>(
   }
   // What the rewrites let go of leaves R2 now; a failure fails the purge,
   // and running it again collects what's left (`collecting` rows).
-  await runStep(brain, purgeId, "payloads", async () => {
+  await runStep(brain, held, "payloads", async () => {
     await collectPayloads(brain, db);
   });
-  await runStep(brain, purgeId, "search", async () => {
+  await runStep(brain, held, "search", async () => {
     await cleanSearchIndex(async () => {
       // Resumed, the text may be rewritten already, so what made the index
       // need a rebuild can't be told any more: it is rebuilt.
@@ -1857,7 +1869,7 @@ const purgeContent = async <C>(
       });
     });
   });
-  await finishPurge(brain, purgeId);
+  await finishPurge(brain, held);
   const inDocuments = await stillFoundIn(
     db,
     input.terms,
