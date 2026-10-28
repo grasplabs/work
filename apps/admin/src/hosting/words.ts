@@ -118,6 +118,16 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "Core's clock or connect's isn't armed with tasks after the probe.",
   runner_replaced: "Another attempt took the client over.",
   operation_gone: "The operation's record was gone before it was done.",
+  client_not_active:
+    "The client isn't live: provision it first, then release it.",
+  operation_running:
+    "Its operation is still running: wait for it to end, or resume it if it stopped.",
+  nothing_to_roll_back:
+    "There's no release before the one it runs to go back to.",
+  rollback_past_migration:
+    "The release since added Durable Object migrations, which a script never goes back past: release a fix instead.",
+  release_behind_migration:
+    "That release lacks a Durable Object migration the client's scripts ran, which they never go back past: pick a later release.",
 };
 
 const knownWords: Readonly<Record<string, string>> = {
@@ -146,7 +156,7 @@ export const placeRefusals: Readonly<Record<PlaceRefusal, string>> = {
   no_automatic_destination:
     "There's no one shared destination to pick by itself: choose one.",
   other_run_held:
-    "The client was being provisioned in an account of its own: resume or end that first.",
+    "Another kind of run last worked on the client: let it end first.",
   already_running:
     "Something is working on the client already: wait for it to end.",
   not_provisioning:

@@ -82,11 +82,13 @@ import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { log } from "@grasp-os/shared/log";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
+import type { StaffAlert } from "../alerts.ts";
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
 import { findD1Database } from "../cloudflare/accounts.ts";
+import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
 import {
@@ -102,7 +104,12 @@ import {
 import type { ScriptTarget } from "../cloudflare/workers.ts";
 import { actIfChanged } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
-import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
+import {
+  clientProvisions,
+  clients,
+  clientWorkers,
+  releases,
+} from "../db/schema.ts";
 import {
   appliedSchema,
   currentReleases,
@@ -198,6 +205,22 @@ export const provisionOperationErrorCodes = [
   "runner_replaced",
   /** The operation's row is gone before it could be recorded done. */
   "operation_gone",
+  /** A release or rollback of a client that isn't active: it's provisioned first. */
+  "client_not_active",
+  /** A release or rollback while the client's operation still runs: it's resumed, or it ends, first. */
+  "operation_running",
+  /** A rollback of a client with no release before the one it runs. */
+  "nothing_to_roll_back",
+  /**
+   * A rollback past a Durable Object migration: the release since added
+   * one, and a script never goes back past a migration it ran.
+   */
+  "rollback_past_migration",
+  /**
+   * A release to one that lacks a Durable Object migration a script of the
+   * client's ran: an older release, which only a rollback may go to.
+   */
+  "release_behind_migration",
 ] as const;
 
 export type ProvisionOperationErrorCode =
@@ -253,6 +276,8 @@ export interface ProvisionContext {
   };
   /** Reading back what a step wrote (`observed`); tests pass a wait of 0. */
   observe?: { retryDelayMs?: number };
+  /** Tells staff when a release was rolled back on its own (src/alerts.ts). */
+  alert?: (alert: StaffAlert) => Promise<void>;
 }
 
 /**
@@ -297,6 +322,19 @@ const progressSchema = z.object({
   secrets: z.record(z.string(), z.string()).default({}),
   /** The core origin the probe passed at. */
   origin: z.string().optional(),
+  /**
+   * The newest-built release whose database migrations may have run,
+   * recorded before they run (src/deploy/compatibility.ts `appliedSchema`):
+   * kept across releases, so a release that migrated and then failed, and
+   * the one started after it, don't forget the schema it left.
+   */
+  schema: z.string().optional(),
+  /**
+   * Each Worker's last Durable Object migration as its script was observed
+   * at (null for none): what a later release or rollback may not go back
+   * past, rather than what a release that never uploaded declared.
+   */
+  migrated: z.record(z.string(), z.string().nullable()).default({}),
   /**
    * The sending domain's zone, for a release that sends mail, and whether
    * it was active (its name servers delegated) when last ensured.
@@ -350,18 +388,20 @@ export const provisionOf = async (db: AdminDatabase, clientId: string) =>
     .get();
 
 /**
- * Records the operation that provisions client `clientId` with release
- * `releaseId`, as `actor`, and returns its id: the one it has already
- * when it has one, so starting again resumes it (spec 40.1). An operation
- * of another release is refused (`operation_release_changed`): it isn't
- * replaced.
+ * Records the operation that provisions client `held.clientId` with
+ * release `releaseId`, as `actor`, and returns its id: the one it has
+ * already when it has one, so starting again resumes it (spec 40.1). An
+ * operation of another release is refused (`operation_release_changed`):
+ * it isn't replaced. Only while runner `held` holds the client, in the
+ * same statement: a start that lost the client writes nothing.
  */
 export const startClientProvision = async (
   db: AdminDatabase,
   actor: Actor,
-  clientId: string,
+  held: HeldClient,
   releaseId: string
 ): Promise<string> => {
+  const { clientId } = held;
   const now = new Date();
   const id = crypto.randomUUID();
   await actIfChanged(
@@ -369,15 +409,9 @@ export const startClientProvision = async (
     actor,
     db
       .insert(clientProvisions)
-      .values({
-        id,
-        clientId,
-        releaseId,
-        status: "running",
-        startedBy: actorName(actor),
-        createdAt: now,
-        updatedAt: now,
-      })
+      .select(
+        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
+      )
       .onConflictDoNothing(),
     {
       action: "provision.start",
@@ -397,6 +431,234 @@ export const startClientProvision = async (
     );
   }
   return operation.id;
+};
+
+/**
+ * The first Worker whose last Durable Object migration (`ran`, by Worker)
+ * `to` doesn't have: going to `to` would take its script back past a
+ * migration it ran. None when `to` has every one.
+ */
+const behindMigration = (
+  ran: Readonly<Record<string, string | null>>,
+  to: ReleaseManifest
+): string | undefined =>
+  Object.entries(ran).find(
+    ([name, tag]) =>
+      tag !== null &&
+      !(
+        to.workers[name]?.durableObjectMigrations.some(
+          (step) => step.tag === tag
+        ) ?? false
+      )
+  )?.[0];
+
+/**
+ * Throws unless the client of `operation` may go to `target` (a rollback
+ * when `rollback`): both imported, and `target` with every Durable Object
+ * migration a script ran. What a script ran is what it was observed at
+ * (`migrated`); a Worker never observed counts at the last migration of
+ * the release the operation has, which may have reached it. Checked for
+ * every target before anything is uploaded: the upload refuses one per
+ * script too, but only once connect may have gone.
+ */
+const assertCanGo = async (
+  db: AdminDatabase,
+  operation: { releaseId: string; progress: string | null },
+  target: string,
+  rollback: boolean
+): Promise<void> => {
+  const running = operation.releaseId;
+  const [from, to] = await Promise.all([
+    importedManifest(db, running),
+    importedManifest(db, target),
+  ]);
+  if (to === null) {
+    throw new ProvisionOperationError(
+      "release_not_imported",
+      `Release ${target} isn't imported`
+    );
+  }
+  // Without what runs, what the target would go back past is unknown.
+  if (from === null) {
+    throw new ProvisionOperationError(
+      "release_not_imported",
+      `Release ${running}, which runs, isn't imported`
+    );
+  }
+  const observedTags = progressSchema.parse(
+    JSON.parse(operation.progress ?? "{}")
+  ).migrated;
+  // Every Worker observed, the running release's or not, and the running
+  // release's others at its last migration.
+  const ran = {
+    ...Object.fromEntries(
+      Object.entries(from.workers).map(([name, worker]) => [
+        name,
+        worker.durableObjectMigrations.at(-1)?.tag ?? null,
+      ])
+    ),
+    ...observedTags,
+  };
+  const behind = behindMigration(ran, to);
+  if (behind !== undefined) {
+    throw new ProvisionOperationError(
+      rollback ? "rollback_past_migration" : "release_behind_migration",
+      `${behind} ran a Durable Object migration ${target} doesn't have`
+    );
+  }
+};
+
+/**
+ * The one release every Worker of client `clientId` was seen running
+ * (`client_workers`, written once an upload is observed), or null when
+ * they run different releases or none: what a release started now goes
+ * on from, and so what a rollback of it goes back to.
+ */
+const observedRelease = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<string | null> => {
+  const rows = await db
+    .select({ releaseId: clientWorkers.releaseId })
+    .from(clientWorkers)
+    .where(eq(clientWorkers.clientId, clientId));
+  const ids = new Set(rows.map(({ releaseId }) => releaseId));
+  const [only = null] = ids.size === 1 ? ids : [];
+  return only;
+};
+
+/**
+ * Takes active client `held.clientId`'s one operation to release
+ * `releaseId`, as `actor`, and returns its id (spec 40.3): a later
+ * release, or with `rollback` the one it ran before (spec 40.4). Every
+ * step of the operation then runs again for that release, onto the same
+ * stable scripts and the client's own resources, each finding what an
+ * earlier run did: an interrupted release is resumed by starting it
+ * again.
+ *
+ * Only by the runner holding the client (`held`), which a start claims
+ * first (src/hosting/workflow.ts): every write is conditional on that
+ * claim in the same statement, so a start that lost the client changes
+ * nothing, and the operation is never changed under the runner that
+ * runs it. Holding the client, an operation left `running` by a runner
+ * that ended is the holder's to resume or take elsewhere.
+ *
+ * What it goes back to is observed, never inferred from how the last run
+ * ended: a new release records the release every Worker was seen running
+ * as the one before it (`observedRelease`), and every target is checked
+ * against the Durable Object migrations each script was seen at
+ * (`assertCanGo`), before anything is uploaded.
+ *
+ * Refused for a client that isn't active (`client_not_active`), for a
+ * rollback with nothing before (`nothing_to_roll_back`), when the release
+ * it runs isn't imported (`release_not_imported`), past a migration a
+ * script ran (`rollback_past_migration`, `release_behind_migration`), and
+ * when the claim or the operation changed as it started
+ * (`operation_running`). Whether the code of either release works with
+ * the other and with the client's databases is the operation's first
+ * step's (`incompatibility`). `cause` goes in the audit event, as when a
+ * release is rolled back on its own.
+ */
+export const startClientRelease = async (
+  db: AdminDatabase,
+  actor: Actor,
+  held: HeldClient,
+  {
+    releaseId,
+    rollback,
+    cause,
+  }: { releaseId?: string; rollback?: boolean; cause?: string }
+): Promise<{ operationId: string; releaseId: string }> => {
+  const { clientId } = held;
+  const client = await db
+    .select({ status: clients.status })
+    .from(clients)
+    .where(eq(clients.id, clientId))
+    .get();
+  if (client?.status !== "active") {
+    throw new ProvisionOperationError(
+      "client_not_active",
+      `${clientId} isn't active`
+    );
+  }
+  const operation = await provisionOf(db, clientId);
+  if (operation === undefined) {
+    throw new ProvisionOperationError(
+      "client_not_active",
+      `${clientId} has no operation: it wasn't provisioned as a placement`
+    );
+  }
+  if (!(await holdsClient(db, clientId, held.runId))) {
+    throw new ProvisionOperationError(
+      "operation_running",
+      `${held.runId} doesn't hold ${clientId}`
+    );
+  }
+  const target =
+    rollback === true ? operation.previousReleaseId : (releaseId ?? null);
+  if (target === null) {
+    throw new ProvisionOperationError(
+      "nothing_to_roll_back",
+      `${clientId} has no release before ${operation.releaseId}`
+    );
+  }
+  if (operation.releaseId === target) {
+    if (rollback === true && operation.status === "done") {
+      throw new ProvisionOperationError(
+        "nothing_to_roll_back",
+        `${clientId} runs ${target} already`
+      );
+    }
+    // Done: it runs it already. Failed, or left running by a runner that
+    // ended: the holder runs it again, which resumes it.
+    return { operationId: operation.id, releaseId: target };
+  }
+  await assertCanGo(db, operation, target, rollback === true);
+  const before = await observedRelease(db, clientId);
+  const now = new Date();
+  // Conditional on the claim, and the operation as read: a start that lost
+  // either starts nothing.
+  const started = await actIfChanged(
+    db,
+    actor,
+    db
+      .update(clientProvisions)
+      .set({
+        releaseId: target,
+        previousReleaseId: before === target ? null : before,
+        status: "running",
+        step: null,
+        error: null,
+        startedBy: actorName(actor),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(clientProvisions.id, operation.id),
+          eq(clientProvisions.status, operation.status),
+          eq(clientProvisions.releaseId, operation.releaseId),
+          stillHolds(held)
+        )
+      ),
+    {
+      action: rollback === true ? "release.rollback" : "release.start",
+      clientId,
+      target,
+      detail: {
+        operation: operation.id,
+        from: operation.releaseId,
+        ...(cause === undefined ? {} : { cause }),
+      },
+    }
+  );
+  if (!started) {
+    throw new ProvisionOperationError(
+      "operation_running",
+      `${clientId}'s operation or its claim changed as the release started`
+    );
+  }
+  return { operationId: operation.id, releaseId: target };
 };
 
 type Operation = NonNullable<Awaited<ReturnType<typeof provisionOf>>>;
@@ -771,6 +1033,117 @@ const observedDatabases = async (
   return databases;
 };
 
+/** The newer-built of releases `a` (if any) and `b`. */
+const newerOf = async (
+  db: AdminDatabase,
+  a: string | undefined,
+  b: string
+): Promise<string> => {
+  if (a === undefined || a === b) {
+    return b;
+  }
+  const [newest] = await db
+    .select({ id: releases.id })
+    .from(releases)
+    .where(inArray(releases.id, [a, b]))
+    .orderBy(desc(releases.builtAt))
+    .limit(1);
+  return newest?.id ?? b;
+};
+
+/**
+ * The later of Durable Object migrations `recorded` and `seen`, in the
+ * order `history` runs them. Migrations only move forward, and a read may
+ * be stale, so an observation never lowers what's recorded: one this
+ * history doesn't know is kept as the later.
+ */
+const laterMigration = (
+  recorded: string | null | undefined,
+  seen: string | null,
+  history: WorkerEntry["durableObjectMigrations"]
+): string | null => {
+  if (recorded === undefined || recorded === null) {
+    return seen;
+  }
+  if (seen === null) {
+    return recorded;
+  }
+  const at = (tag: string) => history.findIndex((step) => step.tag === tag);
+  if (at(recorded) === -1) {
+    return recorded;
+  }
+  return at(seen) === -1 || at(seen) > at(recorded) ? seen : recorded;
+};
+
+/**
+ * Records Worker `app` observed at Durable Object migration `tag` before
+ * its upload, in `progress` (which it updates): only moving what's
+ * recorded forward (`laterMigration`), as a read may be stale. The
+ * observation after a confirmed upload is what sets it as it is.
+ */
+const recordMigrated = async (
+  db: AdminDatabase,
+  loaded: Loaded,
+  progress: Progress,
+  app: App,
+  tag: string | undefined,
+  history: WorkerEntry["durableObjectMigrations"]
+): Promise<void> => {
+  const later = laterMigration(progress.migrated[app], tag ?? null, history);
+  if (progress.migrated[app] === later) {
+    return;
+  }
+  progress.migrated = { ...progress.migrated, [app]: later };
+  await recordProgress(db, loaded, progress);
+};
+
+/**
+ * Sends Worker `app`'s upload (`send`) with its migrations counted as run
+ * from just before: an upload whose answer is lost may have run them, so
+ * what's recorded moves forward to the release's last (`laterMigration`)
+ * and is trusted lower again only once observed. An upload the API
+ * refused outright (a 4xx: nothing of it ran) puts back what was
+ * recorded before, its error code in the answer, so a refusal never
+ * blocks a rollback it couldn't have made unsafe.
+ */
+const uploadCountedAsRun = async (
+  db: AdminDatabase,
+  loaded: Loaded,
+  progress: Progress,
+  {
+    app,
+    history,
+  }: { app: App; history: WorkerEntry["durableObjectMigrations"] },
+  send: () => Promise<void>
+): Promise<void> => {
+  const { [app]: recorded, ...others } = progress.migrated;
+  progress.migrated = {
+    ...others,
+    [app]: laterMigration(recorded, history.at(-1)?.tag ?? null, history),
+  };
+  await recordProgress(db, loaded, progress);
+  try {
+    await send();
+  } catch (error) {
+    // Only Cloudflare's own refusal, its error code in the answer: a 4xx
+    // with no answer it wrote, or a timeout or rate limit a proxy may send
+    // after passing the upload on, keeps the worst case.
+    const refused =
+      error instanceof CloudflareApiError &&
+      error.status >= 400 &&
+      error.status < 500 &&
+      error.status !== 408 &&
+      error.status !== 429 &&
+      error.codes.length > 0;
+    if (refused) {
+      progress.migrated =
+        recorded === undefined ? others : { ...others, [app]: recorded };
+      await recordProgress(db, loaded, progress);
+    }
+    throw error;
+  }
+};
+
 /** Step 4: the release's D1 migrations, on the client's own databases. */
 const migrate = async (
   context: ProvisionContext,
@@ -779,6 +1152,16 @@ const migrate = async (
 ): Promise<void> => {
   const databases = await observedDatabases(context, loaded, inventory);
   await assertHolds(context.db, loaded.held);
+  // Recorded before any runs: one that stops part way still left them.
+  const progress = await progressNow(context.db, loaded.operation.id);
+  const schema = await newerOf(
+    context.db,
+    progress.schema,
+    loaded.manifest.releaseId
+  );
+  if (schema !== progress.schema) {
+    await recordProgress(context.db, loaded, { ...progress, schema });
+  }
   const applied = await migrateDatabases(
     context.api,
     loaded.accountId,
@@ -851,6 +1234,17 @@ const upload = async (
     progress.uploads[app] === fingerprint &&
     before.exists &&
     before.migrationTag === lastTag;
+  if (before.exists) {
+    // What it was observed at, whatever this upload does next.
+    await recordMigrated(
+      db,
+      loaded,
+      progress,
+      app,
+      before.migrationTag,
+      worker.durableObjectMigrations
+    );
+  }
   if (!done) {
     const migrations = pendingMigrations(
       worker.durableObjectMigrations,
@@ -863,17 +1257,26 @@ const upload = async (
       rendered.bindings,
       vars
     );
-    // Delivered secrets go with the next delivery, whatever this upload keeps.
+    // Delivered secrets go with the next delivery, whatever this upload
+    // keeps.
     const { [app]: _delivered, ...secrets } = progress.secrets;
-    await recordProgress(db, loaded, { ...progress, secrets });
-    await assertHolds(db, held);
-    await uploadTargetScript(api, target, {
-      ...prepared,
-      metadata: {
-        ...prepared.metadata,
-        ...(migrations === undefined ? {} : { migrations }),
-      },
-    });
+    progress.secrets = secrets;
+    await uploadCountedAsRun(
+      db,
+      loaded,
+      progress,
+      { app, history: worker.durableObjectMigrations },
+      async () => {
+        await assertHolds(db, held);
+        await uploadTargetScript(api, target, {
+          ...prepared,
+          metadata: {
+            ...prepared.metadata,
+            ...(migrations === undefined ? {} : { migrations }),
+          },
+        });
+      }
+    );
     const after = await observed(
       context,
       async () => await targetMigrationState(api, target),
@@ -887,8 +1290,8 @@ const upload = async (
     }
     await recordProgress(db, loaded, {
       ...progress,
-      secrets,
       uploads: { ...progress.uploads, [app]: fingerprint },
+      migrated: { ...progress.migrated, [app]: after.migrationTag ?? null },
     });
   }
   if (target.namespace === null) {
@@ -1349,24 +1752,30 @@ const recordFailure = async (
   }
 };
 
+/** Where a run of the operation stopped, recorded, and what stopped it. */
+interface Stopped {
+  operation: Operation;
+  step: ProvisionStep;
+  code: string;
+  error: unknown;
+}
+
 /**
- * Runs client `held.clientId`'s provisioning operation, as runner `held`,
- * from its first step, and records it done; one done already is left as
- * it is. Run it again, as this runner or another that claimed the client,
- * to resume one that failed. On a failure it records the step and the
- * error's code, audited, and throws the error.
+ * Runs client `held.clientId`'s operation once from its first step, as
+ * runner `held`, and records it done; one done already is left as it is.
+ * A failure is recorded (its step and code, audited) and answered.
  */
-export const runClientProvision = async (
+const runOperation = async (
   context: ProvisionContext,
   held: HeldClient
-): Promise<void> => {
+): Promise<Stopped | undefined> => {
   const { db, api } = context;
   const operation = await provisionOf(db, held.clientId);
   if (operation === undefined) {
     throw new Error(`${held.clientId} has no provisioning operation`);
   }
   if (operation.status === "done") {
-    return;
+    return undefined;
   }
   let step: ProvisionStep = "validated";
   try {
@@ -1409,6 +1818,7 @@ export const runClientProvision = async (
     step = "route";
     await route(context, loaded, origin);
     await complete(db, loaded);
+    return undefined;
   } catch (error) {
     const code = operationErrorCode(error);
     log.error("provision.failed", {
@@ -1418,6 +1828,123 @@ export const runClientProvision = async (
       error: code,
     });
     await recordFailure(db, { operation, held }, step, code);
+    return { operation, step, code, error };
+  }
+};
+
+/**
+ * Whether a run that failed at `step` with `code` rolls a live client
+ * back on its own: a release (one with a release before it) whose code
+ * went onto the client's stable scripts and then failed its probe. A
+ * user Worker has no documented version-then-promote, so the new code
+ * serves from its upload; the probe failing means it serves broken until
+ * the release before is back. `probe_unqualified` isn't the release's
+ * fault, and the release before would stop there too.
+ */
+const rollsBack = async (
+  db: AdminDatabase,
+  operation: Operation,
+  step: ProvisionStep,
+  code: string
+): Promise<boolean> => {
+  if (
+    step !== "probe" ||
+    code === "probe_unqualified" ||
+    operation.previousReleaseId === null ||
+    operation.previousReleaseId === operation.releaseId
+  ) {
+    return false;
+  }
+  const client = await db
+    .select({ status: clients.status })
+    .from(clients)
+    .where(eq(clients.id, operation.clientId))
+    .get();
+  return client?.status === "active";
+};
+
+/**
+ * Sends `alert` to staff, a failure logged and not thrown: an alert that
+ * can't be sent never hides what the operation did, or why it stopped.
+ */
+const tellStaff = async (
+  context: ProvisionContext,
+  alert: StaffAlert
+): Promise<void> => {
+  try {
+    await context.alert?.(alert);
+  } catch (error) {
+    log.error("provision.alert_unsent", {
+      clientId: alert.clientId,
+      kind: alert.kind,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+  }
+};
+
+/**
+ * Rolls client `held.clientId` back to the release it ran before
+ * `failed`, which failed its probe with `code`: through its operation,
+ * as runner `held`, audited as the system's rollback with the cause, and
+ * staff told either way. Throws when the rollback doesn't finish.
+ */
+const rollBackAfterProbe = async (
+  context: ProvisionContext,
+  held: HeldClient,
+  failed: Operation,
+  code: string
+): Promise<void> => {
+  const subject = failed.releaseId;
+  try {
+    await startClientRelease(context.db, "system", held, {
+      rollback: true,
+      cause: code,
+    });
+    const stopped = await runOperation(context, held);
+    if (stopped !== undefined) {
+      throw stopped.error;
+    }
+  } catch (error) {
+    log.error("provision.rollback_failed", {
+      operation: failed.id,
+      clientId: held.clientId,
+      error: operationErrorCode(error),
+    });
+    await tellStaff(context, {
+      clientId: held.clientId,
+      kind: "release_rollback_failed",
+      subject,
+    });
     throw error;
   }
+  await tellStaff(context, {
+    clientId: held.clientId,
+    kind: "release_rolled_back",
+    subject,
+  });
+};
+
+/**
+ * Runs client `held.clientId`'s provisioning operation, as runner `held`,
+ * from its first step, and records it done; one done already is left as
+ * it is. Run it again, as this runner or another that claimed the client,
+ * to resume one that failed. On a failure it records the step and the
+ * error's code, audited, and throws the error; except that a live
+ * client's release that fails its probe is rolled back to the release
+ * before on its own (`rollsBack`), and staff are told.
+ */
+export const runClientProvision = async (
+  context: ProvisionContext,
+  held: HeldClient
+): Promise<void> => {
+  const stopped = await runOperation(context, held);
+  if (stopped === undefined) {
+    return;
+  }
+  const { operation, step, code, error } = stopped;
+  if (await rollsBack(context.db, operation, step, code)) {
+    await rollBackAfterProbe(context, held, operation, code);
+    return;
+  }
+  throw error;
 };

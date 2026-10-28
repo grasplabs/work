@@ -613,10 +613,19 @@ export const clientProvisions = sqliteTable("client_provisions", {
     .notNull()
     .unique()
     .references(() => clients.id),
-  /** The release it provisions: fixed for the operation. */
+  /**
+   * The release it provisions, or the later one (or the one before) a
+   * release or rollback took it to: fixed while it runs.
+   */
   releaseId: text("release_id")
     .notNull()
     .references(() => releases.id),
+  /**
+   * The release the client ran before the latest release or rollback
+   * started (src/hosting/operation.ts): what a rollback takes it back to;
+   * null before its first release after provisioning.
+   */
+  previousReleaseId: text("previous_release_id").references(() => releases.id),
   status: text({ enum: ["running", "failed", "done"] }).notNull(),
   /** The last step that finished, such as `resources`; null before the first. */
   step: text(),
