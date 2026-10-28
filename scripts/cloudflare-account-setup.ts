@@ -4,9 +4,11 @@
  * before and around their first deploy, checked before it's created, so
  * running it again changes nothing that's there (GRA-283, GRA-430).
  *
- *   CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… node scripts/cloudflare-account-setup.ts [--dry-run]
+ *   node scripts/cloudflare-account-setup.ts [--account <id>] [--dry-run]
  *
- * In order:
+ * It drives Cloudflare's `cf` CLI, signed in with its own login (`cf
+ * login`), never an API token: the account is `--account`, or
+ * CLOUDFLARE_ACCOUNT_ID when that's not given. In order:
  * 1. the clients' dispatch namespace (`grasp-os-clients`), which the router
  *    and the admin bind;
  * 2. the admin's D1 database and R2 bucket, in the EU jurisdiction, and the
@@ -16,21 +18,25 @@
  *    Workers bind that it lacks: listed, never created, since a secret is
  *    created with its value, which an operator puts in themselves;
  * 4. on the clients' zone (`CLIENT_DOMAIN`, `ongrasp.app` unless set): a
- *    proxied wildcard record and the route `*.<domain>/*` to the router, the
- *    admin's custom domain (`ADMIN_HOST`, `admin.<domain>` unless set), and
- *    Email Routing on, its catch-all to the router.
+ *    proxied wildcard record, and Email Routing on with its catch-all to the
+ *    router.
  *
- * Step 4's route, custom domain and catch-all name a Worker, which must be
- * deployed first: until then each is reported pending, and running the
- * script again after the first deploy (deploy-ops) finishes them. The zone
- * itself isn't added: adding one means delegating its nameservers, which is
- * the domain owner's to do. Workers, Durable Objects, workflows and client
- * resources are deploys' and provisioning's, never this script's.
+ * cf has no command yet for a Worker route, a Worker custom domain or a new
+ * Secrets Store, so those three are reported `manual`, with what to set by
+ * hand: the route `*.<domain>/*` to the router, the admin's custom domain
+ * (`ADMIN_HOST`, `admin.<domain>` unless set) and, on an account without
+ * one, the store. The catch-all names the router, which must be deployed
+ * first: until then it's reported pending, and running the script again
+ * after the first deploy (deploy-ops) finishes it. The zone itself isn't
+ * added: adding one means delegating its nameservers, which is the domain
+ * owner's to do. Workers, Durable Objects, workflows and client resources
+ * are deploys' and provisioning's, never this script's.
  *
- * It never reads, prints or writes a secret's value, nor the token: errors
- * name the call and Cloudflare's own codes. With `--dry-run` it only reads,
- * and says what it would create.
+ * It never reads, prints or writes a secret's value: it only lists secrets'
+ * names, and errors name the cf command and what cf said. With `--dry-run`
+ * it only runs cf's list and get commands, and says what it would create.
  */
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -75,7 +81,8 @@ export type Outcome =
   | "created"
   | "would_create"
   | "pending"
-  | "missing";
+  | "missing"
+  | "manual";
 
 /** One step's report: what, how it ended, and why, never a secret. */
 export interface Report {
@@ -84,30 +91,20 @@ export interface Report {
   detail?: string;
 }
 
-/** A Cloudflare API call's answer, as far as the script reads it. */
-interface Answer {
-  status: number;
-  success: boolean;
-  result: unknown;
-  errors: { code: number; message: string }[];
-  totalPages: number;
-}
+/**
+ * Runs one cf command (its arguments, after `cf`) and answers what it
+ * printed, parsed: cf prints a command's result as JSON, a list as an
+ * array, and nothing for a change that returns no data (null).
+ */
+export type Cf = (args: readonly string[]) => Promise<unknown>;
 
-/** What the script asks Cloudflare, as `fetch` would. */
-export type Send = (request: Request) => Promise<Response>;
-
-/** A refused call: its method, path, status and Cloudflare's codes. */
-export class CloudflareCallError extends Error {
-  constructor(method: string, pathname: string, answer: Answer) {
-    const codes = answer.errors
-      .map(({ code, message }) => `${code} ${message}`)
-      .join("; ");
-    super(`${method} ${pathname} failed (${answer.status}): ${codes}`);
-    this.name = "CloudflareCallError";
+/** A cf command that failed: the command, and what cf said. */
+export class CfCommandError extends Error {
+  constructor(args: readonly string[], said: string) {
+    super(`cf ${args.join(" ")} failed: ${said}`);
+    this.name = "CfCommandError";
   }
 }
-
-const base = "https://api.cloudflare.com/client/v4";
 
 /** `value[key]` when value is an object, else undefined. */
 const field = (value: unknown, key: string): unknown =>
@@ -117,93 +114,46 @@ const field = (value: unknown, key: string): unknown =>
 
 const isList = (value: unknown): value is unknown[] => Array.isArray(value);
 
-/** The Cloudflare API, as the script uses it, through `send`. */
-const apiOf = (token: string, send: Send) => {
-  const call = async (
-    method: string,
-    pathname: string,
-    {
-      json,
-      headers = {},
-    }: { json?: unknown; headers?: Record<string, string> } = {}
-  ): Promise<Answer> => {
-    const response = await send(
-      new Request(`${base}${pathname}`, {
-        method,
-        headers: {
-          authorization: `Bearer ${token}`,
-          ...(json === undefined ? {} : { "content-type": "application/json" }),
-          ...headers,
-        },
-        ...(json === undefined ? {} : { body: JSON.stringify(json) }),
-      })
-    );
-    const body: unknown = await response.json().catch(() => null);
-    const errors = field(body, "errors");
-    return {
-      status: response.status,
-      success: field(body, "success") === true,
-      result: field(body, "result"),
-      errors: isList(errors)
-        ? errors.map((error) => ({
-            code: Number(field(error, "code")),
-            message: (() => {
-              const message = field(error, "message");
-              return typeof message === "string" ? message : "";
-            })(),
-          }))
-        : [],
-      totalPages: Number(field(field(body, "result_info"), "total_pages") ?? 1),
-    };
-  };
-  /** `call`, refused unless it succeeded. */
-  const ok = async (
-    method: string,
-    pathname: string,
-    options?: Parameters<typeof call>[2]
-  ): Promise<unknown> => {
-    const answer = await call(method, pathname, options);
-    if (!answer.success) {
-      throw new CloudflareCallError(method, pathname, answer);
-    }
-    return answer.result;
-  };
-  /** Every item of a list, page by page. */
-  const all = async (pathname: string): Promise<unknown[]> => {
-    const items: unknown[] = [];
-    const separator = pathname.includes("?") ? "&" : "?";
-    for (let page = 1; ; page += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one page after another
-      const answer = await call(
-        "GET",
-        `${pathname}${separator}page=${page}&per_page=100`
-      );
-      if (!answer.success) {
-        throw new CloudflareCallError("GET", pathname, answer);
-      }
-      if (isList(answer.result)) {
-        items.push(...answer.result);
-      }
-      if (!isList(answer.result) || page >= answer.totalPages) {
-        return items;
-      }
-    }
-  };
-  return { call, ok, all };
+/** A list cf answered, or the list under `key` when it answered an object. */
+const listOf = (answer: unknown, key?: string): unknown[] => {
+  if (isList(answer)) {
+    return answer;
+  }
+  const inner = key === undefined ? undefined : field(answer, key);
+  return isList(inner) ? inner : [];
 };
 
-type Api = ReturnType<typeof apiOf>;
+/** A page of a paged list, at most this long. */
+const perPage = 100;
+
+/** Every item of a paged cf list, page by page. */
+const allPages = async (
+  cf: Cf,
+  args: readonly string[]
+): Promise<unknown[]> => {
+  const items: unknown[] = [];
+  for (let page = 1; ; page += 1) {
+    const paging = ["--page", `${page}`, "--per-page", `${perPage}`];
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const answer = listOf(await cf([...args, ...paging]));
+    items.push(...answer);
+    if (answer.length < perPage) {
+      return items;
+    }
+  }
+};
 
 /** What one run works with. */
 export interface SetupOptions {
-  accountId: string;
-  token: string;
   /** The clients' zone: their hostnames are `<id>.<domain>`. */
   domain: string;
   /** The admin's hostname. */
   adminHost: string;
   dryRun: boolean;
-  send: Send;
+  /** cf, already pointed at the account (`cfRunner`). */
+  cf: Cf;
+  /** The account's id, to find the zone in it. */
+  accountId: string;
   /** The secrets the Workers bind (`neededSecrets`). */
   secrets: readonly string[];
 }
@@ -236,13 +186,11 @@ const namesOf = (items: unknown[], key: string): string[] =>
     return typeof name === "string" ? [name] : [];
   });
 
-/** Steps 1 to 3: the namespace, the databases, buckets and map, the store. */
-const accountSteps = async (
-  api: Api,
-  { accountId, dryRun, secrets }: SetupOptions,
+/** Step 1 and 2: the namespace, the databases, buckets and map. */
+const storageSteps = async (
+  { cf, dryRun }: SetupOptions,
   reports: Report[]
 ): Promise<void> => {
-  const account = `/accounts/${accountId}`;
   const { dispatchNamespace } = accountPlan;
   await ensure(
     reports,
@@ -250,13 +198,19 @@ const accountSteps = async (
     dryRun,
     async () =>
       namesOf(
-        await api.all(`${account}/workers/dispatch/namespaces`),
+        listOf(
+          await cf(["workers-for-platforms", "dispatch-namespaces", "list"])
+        ),
         "namespace_name"
       ).includes(dispatchNamespace),
     async () => {
-      await api.ok("POST", `${account}/workers/dispatch/namespaces`, {
-        json: { name: dispatchNamespace },
-      });
+      await cf([
+        "workers-for-platforms",
+        "dispatch-namespaces",
+        "create",
+        "--name",
+        dispatchNamespace,
+      ]);
     }
   );
   for (const { name, jurisdiction } of accountPlan.d1) {
@@ -266,9 +220,7 @@ const accountSteps = async (
       `D1 database ${name} (${jurisdiction})`,
       dryRun,
       async () => {
-        const databases = await api.all(
-          `${account}/d1/database?name=${encodeURIComponent(name)}`
-        );
+        const databases = await allPages(cf, ["d1", "list", "--name", name]);
         const database = databases.find((each) => field(each, "name") === name);
         if (database === undefined) {
           return false;
@@ -282,40 +234,49 @@ const accountSteps = async (
         return true;
       },
       async () => {
-        await api.ok("POST", `${account}/d1/database`, {
-          json: { name, jurisdiction },
-        });
+        await cf([
+          "d1",
+          "create",
+          "--name",
+          name,
+          "--jurisdiction",
+          jurisdiction,
+        ]);
       }
     );
   }
   for (const { name, jurisdiction } of accountPlan.r2) {
-    const headers = { "cf-r2-jurisdiction": jurisdiction };
     // oxlint-disable-next-line no-await-in-loop -- one bucket at a time
     await ensure(
       reports,
       `R2 bucket ${name} (${jurisdiction})`,
       dryRun,
+      async () =>
+        namesOf(
+          listOf(
+            await cf([
+              "r2",
+              "buckets",
+              "list",
+              "--name-contains",
+              name,
+              "--cf-r2-jurisdiction",
+              jurisdiction,
+            ]),
+            "buckets"
+          ),
+          "name"
+        ).includes(name),
       async () => {
-        const answer = await api.call("GET", `${account}/r2/buckets/${name}`, {
-          headers,
-        });
-        if (answer.status === 404) {
-          return false;
-        }
-        if (!answer.success) {
-          throw new CloudflareCallError(
-            "GET",
-            `${account}/r2/buckets/${name}`,
-            answer
-          );
-        }
-        return true;
-      },
-      async () => {
-        await api.ok("POST", `${account}/r2/buckets`, {
-          json: { name },
-          headers,
-        });
+        await cf([
+          "r2",
+          "buckets",
+          "create",
+          "--name",
+          name,
+          "--cf-r2-jurisdiction",
+          jurisdiction,
+        ]);
       }
     );
   }
@@ -327,7 +288,7 @@ const accountSteps = async (
       dryRun,
       async () => {
         const found = namesOf(
-          await api.all(`${account}/storage/kv/namespaces`),
+          await allPages(cf, ["kv", "namespaces", "list"]),
           "title"
         ).filter((each) => each === title);
         if (found.length > 1) {
@@ -338,40 +299,50 @@ const accountSteps = async (
         return found.length === 1;
       },
       async () => {
-        await api.ok("POST", `${account}/storage/kv/namespaces`, {
-          json: { title },
-        });
+        await cf(["kv", "namespaces", "create", "--title", title]);
       }
     );
   }
+};
+
+/** Step 3: the account's one store, and the secrets it lacks, by name. */
+const secretSteps = async (
+  { cf, secrets }: SetupOptions,
+  reports: Report[]
+): Promise<void> => {
   // The account's one store: scripts/wrangler-deploy.ts binds the only one.
-  const stores = await api.all(`${account}/secrets_store/stores`);
+  const stores = await allPages(cf, ["secrets-store", "stores", "list"]);
   if (stores.length > 1) {
     throw new Error(
       `The account has ${stores.length} Secrets Stores: deploys bind the only one`
     );
   }
-  let storeId: unknown = field(stores[0], "id");
-  if (typeof storeId === "string") {
-    reports.push({ step: "Secrets Store", outcome: "exists" });
-  } else if (dryRun) {
-    reports.push({ step: "Secrets Store", outcome: "would_create" });
-  } else {
-    const made = await api.ok("POST", `${account}/secrets_store/stores`, {
-      json: { name: accountPlan.secretsStore },
-    });
-    storeId = field(made, "id");
-    reports.push({ step: "Secrets Store", outcome: "created" });
+  const storeId = field(stores[0], "id");
+  if (typeof storeId !== "string") {
+    reports.push(
+      { step: "Secrets Store", outcome: "manual" },
+      {
+        step: "Secrets Store secrets",
+        outcome: "missing",
+        // cf can't create a store yet; names only, values are the operator's.
+        detail: `create a Secrets Store named ${accountPlan.secretsStore} in the dashboard, put these in: ${secrets.join(", ")}, then run again`,
+      }
+    );
+    return;
   }
-  const held =
-    typeof storeId === "string"
-      ? new Set(
-          namesOf(
-            await api.all(`${account}/secrets_store/stores/${storeId}/secrets`),
-            "name"
-          )
-        )
-      : new Set<string>();
+  reports.push({ step: "Secrets Store", outcome: "exists" });
+  const held = new Set(
+    namesOf(
+      await allPages(cf, [
+        "secrets-store",
+        "secrets",
+        "list",
+        "--store-id",
+        storeId,
+      ]),
+      "name"
+    )
+  );
   const missing = secrets.filter((name) => !held.has(name));
   reports.push(
     missing.length === 0
@@ -385,18 +356,87 @@ const accountSteps = async (
   );
 };
 
-/** Step 4: the zone's wildcard record, route, custom domain and Email Routing. */
-const zoneSteps = async (
-  api: Api,
-  { accountId, domain, adminHost, dryRun }: SetupOptions,
+/** The zone's Email Routing catch-all: to the router, once it's deployed. */
+const catchAllStep = async (
+  { cf, domain, dryRun }: SetupOptions,
+  zone: string[],
+  routerDeployed: boolean,
   reports: Report[]
 ): Promise<void> => {
-  const account = `/accounts/${accountId}`;
-  const zones = await api.all(
-    `/zones?name=${encodeURIComponent(domain)}&account.id=${accountId}`
+  const step = "Email Routing catch-all";
+  const { router } = accountPlan.workers;
+  const catchAll = await cf([
+    "email-routing",
+    "rules",
+    "catch-all",
+    "get",
+    ...zone,
+  ]);
+  const enabled = field(catchAll, "enabled") === true;
+  const actions = listOf(field(catchAll, "actions"));
+  const toRouter =
+    enabled &&
+    actions.some((action) => {
+      const value = field(action, "value");
+      return (
+        field(action, "type") === "worker" &&
+        isList(value) &&
+        value.includes(router)
+      );
+    });
+  // A catch-all that already sends mail somewhere else is someone's:
+  // never repointed here.
+  if (
+    !toRouter &&
+    enabled &&
+    actions.some((action) => field(action, "type") !== "drop")
+  ) {
+    throw new Error(
+      `${domain}'s Email Routing catch-all sends mail somewhere other than ${router}: change it by hand`
+    );
+  }
+  if (toRouter) {
+    reports.push({ step, outcome: "exists" });
+  } else if (!routerDeployed) {
+    reports.push({
+      step,
+      outcome: "pending",
+      detail: `deploy ${router}, then run again`,
+    });
+  } else if (dryRun) {
+    reports.push({ step, outcome: "would_create" });
+  } else {
+    await cf([
+      "email-routing",
+      "rules",
+      "catch-all",
+      "update",
+      ...zone,
+      "--body",
+      JSON.stringify({
+        actions: [{ type: "worker", value: [router] }],
+        matchers: [{ type: "all" }],
+        enabled: true,
+        name: "Every client's mail, to the router",
+      }),
+    ]);
+    reports.push({ step, outcome: "created" });
+  }
+};
+
+/** Step 4: the zone's wildcard record, route, custom domain and Email Routing. */
+const zoneSteps = async (
+  options: SetupOptions,
+  reports: Report[]
+): Promise<void> => {
+  const { cf, accountId, domain, adminHost, dryRun } = options;
+  const zones = listOf(
+    await cf(["zones", "list", "--name", domain, "--account-id", accountId])
   );
-  const zone = zones.find((each) => field(each, "name") === domain);
-  const zoneId = field(zone, "id");
+  const zoneId = field(
+    zones.find((each) => field(each, "name") === domain),
+    "id"
+  );
   if (typeof zoneId !== "string") {
     reports.push({
       step: `zone ${domain}`,
@@ -407,10 +447,7 @@ const zoneSteps = async (
     return;
   }
   reports.push({ step: `zone ${domain}`, outcome: "exists" });
-  const zonePath = `/zones/${zoneId}`;
-  const deployed = new Set(
-    namesOf(await api.all(`${account}/workers/scripts`), "id")
-  );
+  const zone = ["--zone", zoneId];
   const { admin, router } = accountPlan.workers;
   const wildcard = `*.${domain}`;
 
@@ -419,162 +456,130 @@ const zoneSteps = async (
     `DNS record ${wildcard}`,
     dryRun,
     async () => {
-      const records = await api.all(
-        `${zonePath}/dns_records?name=${encodeURIComponent(wildcard)}`
-      );
+      const records = await allPages(cf, [
+        "dns",
+        "records",
+        "list",
+        ...zone,
+        "--name",
+        wildcard,
+      ]);
       return records.length > 0;
     },
     async () => {
       // Proxied, to no origin: only for the route to the router to apply.
-      await api.ok("POST", `${zonePath}/dns_records`, {
-        json: {
+      await cf([
+        "dns",
+        "records",
+        "create",
+        ...zone,
+        "--body",
+        JSON.stringify({
           type: "AAAA",
           name: wildcard,
           content: "100::",
           proxied: true,
           ttl: 1,
-        },
-      });
+        }),
+      ]);
     }
   );
 
-  const pattern = `${wildcard}/*`;
-  const routes = await api.all(`${zonePath}/workers/routes`);
-  const route = routes.find((each) => field(each, "pattern") === pattern);
-  if (route !== undefined) {
-    const to = field(route, "script");
-    if (to !== router) {
-      throw new Error(
-        `Route ${pattern} goes to ${String(to)}, not ${router}: change it by hand`
-      );
+  // cf has no command for these two yet: set by hand, once each Worker is
+  // deployed. The custom domain takes precedence over the wildcard route.
+  reports.push(
+    {
+      step: `route ${wildcard}/*`,
+      outcome: "manual",
+      detail: `once ${router} is deployed, route ${wildcard}/* to it (Workers > ${router} > Domains & Routes), unless it already is`,
+    },
+    {
+      step: `custom domain ${adminHost}`,
+      outcome: "manual",
+      detail: `once ${admin} is deployed, add ${adminHost} as its custom domain (Workers > ${admin} > Domains & Routes), unless it already is`,
     }
-    reports.push({ step: `route ${pattern}`, outcome: "exists" });
-  } else if (!deployed.has(router)) {
-    reports.push({
-      step: `route ${pattern}`,
-      outcome: "pending",
-      detail: `deploy ${router}, then run again`,
-    });
-  } else if (dryRun) {
-    reports.push({ step: `route ${pattern}`, outcome: "would_create" });
-  } else {
-    await api.ok("POST", `${zonePath}/workers/routes`, {
-      json: { pattern, script: router },
-    });
-    reports.push({ step: `route ${pattern}`, outcome: "created" });
-  }
-
-  // The admin's own hostname: a custom domain, which takes precedence over
-  // the wildcard route.
-  const [domainEntry] = await api.all(
-    `${account}/workers/domains?hostname=${encodeURIComponent(adminHost)}`
   );
-  if (domainEntry !== undefined) {
-    const service = field(domainEntry, "service");
-    if (service !== admin) {
-      throw new Error(
-        `${adminHost} is ${String(service)}'s custom domain, not ${admin}: change it by hand`
-      );
-    }
-    reports.push({ step: `custom domain ${adminHost}`, outcome: "exists" });
-  } else if (!deployed.has(admin)) {
-    reports.push({
-      step: `custom domain ${adminHost}`,
-      outcome: "pending",
-      detail: `deploy ${admin}, then run again`,
-    });
-  } else if (dryRun) {
-    reports.push({
-      step: `custom domain ${adminHost}`,
-      outcome: "would_create",
-    });
-  } else {
-    await api.ok("PUT", `${account}/workers/domains`, {
-      json: {
-        hostname: adminHost,
-        service: admin,
-        zone_id: zoneId,
-        environment: "production",
-      },
-    });
-    reports.push({ step: `custom domain ${adminHost}`, outcome: "created" });
-  }
 
-  await ensure(
+  const emailOn = await ensure(
     reports,
     `Email Routing on ${domain}`,
     dryRun,
     async () =>
-      field(await api.ok("GET", `${zonePath}/email/routing`), "enabled") ===
-      true,
+      field(
+        await cf(["email-routing", "settings", "get", ...zone]),
+        "enabled"
+      ) === true,
     async () => {
       // Turns it on with the MX and SPF records it needs.
-      await api.ok("POST", `${zonePath}/email/routing/dns`, {
-        json: { name: domain },
-      });
+      await cf(["email-routing", "enable", ...zone, "--name", domain]);
     }
   );
-
-  const catchAll = await api.call(
-    "GET",
-    `${zonePath}/email/routing/rules/catch_all`
-  );
-  const actions = field(catchAll.result, "actions");
-  const toRouter =
-    field(catchAll.result, "enabled") === true &&
-    isList(actions) &&
-    actions.some((action) => {
-      const value = field(action, "value");
-      return (
-        field(action, "type") === "worker" &&
-        isList(value) &&
-        value.includes(router)
-      );
-    });
-  // A catch-all that already sends mail somewhere else is someone's:
-  // never repointed here, as a route or a custom domain isn't.
-  const elsewhere =
-    !toRouter &&
-    field(catchAll.result, "enabled") === true &&
-    isList(actions) &&
-    actions.some((action) => field(action, "type") !== "drop");
-  if (elsewhere) {
-    throw new Error(
-      `${domain}'s Email Routing catch-all sends mail somewhere other than ${router}: change it by hand`
-    );
-  }
-  if (toRouter) {
-    reports.push({ step: "Email Routing catch-all", outcome: "exists" });
-  } else if (!deployed.has(router)) {
+  if (!emailOn) {
     reports.push({
       step: "Email Routing catch-all",
       outcome: "pending",
-      detail: `deploy ${router}, then run again`,
+      detail: "turn Email Routing on first",
     });
-  } else if (dryRun) {
-    reports.push({ step: "Email Routing catch-all", outcome: "would_create" });
-  } else {
-    await api.ok("PUT", `${zonePath}/email/routing/rules/catch_all`, {
-      json: {
-        actions: [{ type: "worker", value: [router] }],
-        matchers: [{ type: "all" }],
-        enabled: true,
-        name: "Every client's mail, to the router",
-      },
-    });
-    reports.push({ step: "Email Routing catch-all", outcome: "created" });
+    return;
   }
+  const deployed = new Set(
+    namesOf(await allPages(cf, ["workers", "list"]), "name")
+  );
+  await catchAllStep(options, zone, deployed.has(router), reports);
 };
 
 /** Sets the account up as `options` says (see the header): each step's report, in order. */
 export const setUpAccount = async (
   options: SetupOptions
 ): Promise<Report[]> => {
-  const api = apiOf(options.token, options.send);
   const reports: Report[] = [];
-  await accountSteps(api, options, reports);
-  await zoneSteps(api, options, reports);
+  await storageSteps(options, reports);
+  await secretSteps(options, reports);
+  await zoneSteps(options, reports);
   return reports;
+};
+
+/** Environment variables that would make cf use something other than its own login. */
+const otherCredentials = [
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_API_KEY",
+  "CLOUDFLARE_EMAIL",
+];
+
+/** The real `cf`, on `accountId`, signed in with its own login. */
+export const cfRunner = (accountId: string): Cf => {
+  const env = { ...process.env, CLOUDFLARE_ACCOUNT_ID: accountId };
+  for (const name of otherCredentials) {
+    Reflect.deleteProperty(env, name);
+  }
+  const cf: Cf = async (args) => {
+    await Promise.resolve();
+    let stdout = "";
+    try {
+      // One command at a time, as the steps run: synchronously, like
+      // scripts/github-setup.ts runs gh.
+      stdout = execFileSync("cf", [...args], {
+        env,
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        maxBuffer: 16 * 1024 * 1024,
+      });
+    } catch (error) {
+      const said = field(error, "stderr");
+      throw new CfCommandError(
+        args,
+        typeof said === "string" && said.trim() !== ""
+          ? said.trim()
+          : String(error)
+      );
+    }
+    if (stdout.trim() === "") {
+      return null;
+    }
+    const answer: unknown = JSON.parse(stdout);
+    return answer;
+  };
+  return cf;
 };
 
 /** `name` from the environment, when it's set to something. */
@@ -583,24 +588,26 @@ const setting = (name: string): string | undefined => {
   return value === undefined || value === "" ? undefined : value;
 };
 
-/** `name` from the environment, or a clear stop. */
-const required = (name: string): string => {
-  const value = process.env[name];
-  if (value === undefined || value === "") {
-    throw new Error(`${name} is not set`);
-  }
-  return value;
+/** The value after `flag` on the command line, when it's there. */
+const argument = (flag: string): string | undefined => {
+  const at = process.argv.indexOf(flag);
+  return at === -1 ? undefined : process.argv[at + 1];
 };
 
 if (import.meta.main) {
+  const accountId = argument("--account") ?? setting("CLOUDFLARE_ACCOUNT_ID");
+  if (accountId === undefined) {
+    throw new Error(
+      "Give the account: --account <id> or CLOUDFLARE_ACCOUNT_ID"
+    );
+  }
   const domain = setting("CLIENT_DOMAIN") ?? "ongrasp.app";
   const reports = await setUpAccount({
-    accountId: required("CLOUDFLARE_ACCOUNT_ID"),
-    token: required("CLOUDFLARE_API_TOKEN"),
+    accountId,
     domain,
     adminHost: setting("ADMIN_HOST") ?? `admin.${domain}`,
     dryRun: process.argv.includes("--dry-run"),
-    send: async (request) => await fetch(request),
+    cf: cfRunner(accountId),
     secrets: neededSecrets(),
   });
   for (const { step, outcome, detail } of reports) {
@@ -609,12 +616,10 @@ if (import.meta.main) {
     );
   }
   if (
-    reports.some(
-      ({ outcome }) => outcome === "pending" || outcome === "missing"
-    )
+    reports.some(({ outcome }) => outcome !== "exists" && outcome !== "created")
   ) {
     console.log(
-      "Some steps wait on something: do what they say, then run this again."
+      "Some steps wait on something or need a hand: do what they say, then run this again."
     );
   }
 }

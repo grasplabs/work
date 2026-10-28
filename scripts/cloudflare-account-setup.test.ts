@@ -1,20 +1,26 @@
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   boundSecrets,
+  cfRunner,
   neededSecrets,
   setUpAccount,
 } from "./cloudflare-account-setup.ts";
-import type { Report, SetupOptions } from "./cloudflare-account-setup.ts";
+import type { Cf, Report, SetupOptions } from "./cloudflare-account-setup.ts";
 
 // The fresh-account setup (scripts/cloudflare-account-setup.ts) against a
-// stand-in for the Cloudflare API, the one outside system: it creates what
-// a fresh account lacks, in the EU where it should, creates nothing a
-// second time, waits on what needs a deployed Worker or the zone, refuses
-// to change what points elsewhere, and never sends or says a secret.
+// stand-in for the cf CLI, the one outside system: it creates what a fresh
+// account lacks, in the EU where it should, creates nothing a second time,
+// waits on what needs a deployed Worker or the zone, says what cf can't do
+// yet, refuses to change what points elsewhere, and never sends or says a
+// secret.
 
 const accountId = "0123456789abcdef0123456789abcdef";
-const token = "test-token-never-printed";
+const zoneId = "zone-1";
 
 /** A Cloudflare account and zone, as far as the script reads and writes them. */
 interface FakeState {
@@ -27,162 +33,139 @@ interface FakeState {
   zone: boolean;
   workers: string[];
   dns: string[];
-  routes: { pattern: string; script: string }[];
-  domains: { hostname: string; service: string }[];
   emailRouting: boolean;
   catchAll: string | null;
 }
 
-/** A call, as a route of the fake reads it. */
-interface Call {
-  url: URL;
-  request: Request;
-  /** A field of the call's JSON body, as text. */
-  field: (key: string) => string;
-}
+/** A command's flags, by name: `--name x` is `{ name: "x" }`. */
+const flagsOf = (args: readonly string[]): Map<string, string> => {
+  const flags = new Map<string, string>();
+  for (const [at, arg] of args.entries()) {
+    if (arg.startsWith("--")) {
+      flags.set(arg.slice(2), args[at + 1] ?? "");
+    }
+  }
+  return flags;
+};
 
-const answer = (result: unknown): Response =>
-  Response.json({
-    success: true,
-    errors: [],
-    result,
-    result_info: { total_pages: 1 },
-  });
+/** A field of a command's `--body`, as text. */
+const bodyField = (flags: Map<string, string>, key: string): string => {
+  const body: unknown = JSON.parse(flags.get("body") ?? "null");
+  return typeof body === "object" && body !== null
+    ? String(Reflect.get(body, key))
+    : "";
+};
 
-const notFound = (what: string): Response =>
-  Response.json(
-    {
-      success: false,
-      errors: [{ code: 7003, message: `No route for ${what}` }],
-    },
-    { status: 404 }
-  );
+/** One page of `items`, as cf answers a paged list. */
+const pageOf = (items: unknown[], flags: Map<string, string>): unknown[] => {
+  const page = Number(flags.get("page") ?? 1);
+  const size = Number(flags.get("per-page") ?? items.length);
+  return items.slice((page - 1) * size, page * size);
+};
 
-/** The fake's answers, by method and path. */
-const routesOf = (
+/** The fake's answers, by command (the arguments before the first flag). */
+const commandsOf = (
   state: FakeState
-): Record<string, (call: Call) => Response> => {
-  const account = `/accounts/${accountId}`;
-  return {
-    [`GET ${account}/workers/dispatch/namespaces`]: () =>
-      answer(state.namespaces.map((name) => ({ namespace_name: name }))),
-    [`POST ${account}/workers/dispatch/namespaces`]: ({ field }) => {
-      state.namespaces.push(field("name"));
-      return answer({});
-    },
-    [`GET ${account}/d1/database`]: ({ url }) =>
-      answer(
-        state.d1.filter(({ name }) => name === url.searchParams.get("name"))
-      ),
-    [`POST ${account}/d1/database`]: ({ field }) => {
-      state.d1.push({
-        name: field("name"),
-        jurisdiction: field("jurisdiction"),
-      });
-      return answer({});
-    },
-    [`POST ${account}/r2/buckets`]: ({ field, request }) => {
-      state.r2.push({
-        name: field("name"),
-        jurisdiction: request.headers.get("cf-r2-jurisdiction") ?? "default",
-      });
-      return answer({});
-    },
-    [`GET ${account}/storage/kv/namespaces`]: () =>
-      answer(state.kv.map((title) => ({ title, id: title }))),
-    [`POST ${account}/storage/kv/namespaces`]: ({ field }) => {
-      state.kv.push(field("title"));
-      return answer({});
-    },
-    [`GET ${account}/secrets_store/stores`]: () =>
-      answer(state.stores.map((id) => ({ id, name: id }))),
-    [`POST ${account}/secrets_store/stores`]: ({ field }) => {
-      state.stores.push(field("name"));
-      return answer({ id: field("name") });
-    },
-    "GET /zones": ({ url }) =>
-      answer(
-        state.zone ? [{ id: "zone-1", name: url.searchParams.get("name") }] : []
-      ),
-    [`GET ${account}/workers/scripts`]: () =>
-      answer(state.workers.map((id) => ({ id }))),
-    "GET /zones/zone-1/dns_records": ({ url }) =>
-      answer(
-        state.dns
-          .filter((name) => name === url.searchParams.get("name"))
-          .map((name) => ({ name }))
-      ),
-    "POST /zones/zone-1/dns_records": ({ field }) => {
-      state.dns.push(field("name"));
-      return answer({});
-    },
-    "GET /zones/zone-1/workers/routes": () => answer(state.routes),
-    "POST /zones/zone-1/workers/routes": ({ field }) => {
-      state.routes.push({ pattern: field("pattern"), script: field("script") });
-      return answer({});
-    },
-    [`GET ${account}/workers/domains`]: ({ url }) =>
-      answer(
-        state.domains.filter(
-          ({ hostname }) => hostname === url.searchParams.get("hostname")
-        )
-      ),
-    [`PUT ${account}/workers/domains`]: ({ field }) => {
-      state.domains.push({
-        hostname: field("hostname"),
-        service: field("service"),
-      });
-      return answer({});
-    },
-    "GET /zones/zone-1/email/routing": () =>
-      answer({ enabled: state.emailRouting }),
-    "POST /zones/zone-1/email/routing/dns": () => {
-      state.emailRouting = true;
-      return answer({});
-    },
-    "GET /zones/zone-1/email/routing/rules/catch_all": () =>
-      answer({
-        enabled: state.catchAll !== null,
-        actions:
-          state.catchAll === null
-            ? []
-            : [{ type: "worker", value: [state.catchAll] }],
-      }),
-    "PUT /zones/zone-1/email/routing/rules/catch_all": () => {
-      state.catchAll = "grasp-os-router";
-      return answer({});
-    },
-  };
-};
+): Record<string, (flags: Map<string, string>) => unknown> => ({
+  "workers-for-platforms dispatch-namespaces list": () =>
+    state.namespaces.map((name) => ({ namespace_name: name })),
+  "workers-for-platforms dispatch-namespaces create": (flags) => {
+    state.namespaces.push(flags.get("name") ?? "");
+    return {};
+  },
+  "d1 list": (flags) =>
+    pageOf(
+      state.d1.filter(({ name }) => name === flags.get("name")),
+      flags
+    ),
+  "d1 create": (flags) => {
+    state.d1.push({
+      name: flags.get("name") ?? "",
+      jurisdiction: flags.get("jurisdiction") ?? "default",
+    });
+    return {};
+  },
+  "r2 buckets list": (flags) => ({
+    buckets: state.r2.filter(
+      ({ name, jurisdiction }) =>
+        name.includes(flags.get("name-contains") ?? "") &&
+        jurisdiction === (flags.get("cf-r2-jurisdiction") ?? "default")
+    ),
+  }),
+  "r2 buckets create": (flags) => {
+    state.r2.push({
+      name: flags.get("name") ?? "",
+      jurisdiction: flags.get("cf-r2-jurisdiction") ?? "default",
+    });
+    return {};
+  },
+  "kv namespaces list": (flags) =>
+    pageOf(
+      state.kv.map((title) => ({ title, id: title })),
+      flags
+    ),
+  "kv namespaces create": (flags) => {
+    state.kv.push(flags.get("title") ?? "");
+    return {};
+  },
+  "secrets-store stores list": (flags) =>
+    pageOf(
+      state.stores.map((id) => ({ id, name: id })),
+      flags
+    ),
+  "secrets-store secrets list": (flags) =>
+    pageOf(
+      state.secrets.map((name) => ({ name })),
+      flags
+    ),
+  "zones list": (flags) =>
+    state.zone && flags.get("account-id") === accountId
+      ? [{ id: zoneId, name: flags.get("name") }]
+      : [],
+  "workers list": (flags) =>
+    pageOf(
+      state.workers.map((name) => ({ id: `id-${name}`, name })),
+      flags
+    ),
+  "dns records list": (flags) =>
+    pageOf(
+      state.dns
+        .filter((name) => name === flags.get("name"))
+        .map((name) => ({ name })),
+      flags
+    ),
+  "dns records create": (flags) => {
+    state.dns.push(bodyField(flags, "name"));
+    return {};
+  },
+  "email-routing settings get": () => ({ enabled: state.emailRouting }),
+  "email-routing enable": () => {
+    state.emailRouting = true;
+    return {};
+  },
+  "email-routing rules catch-all get": () => ({
+    enabled: state.catchAll !== null,
+    actions:
+      state.catchAll === null
+        ? []
+        : [{ type: "worker", value: [state.catchAll] }],
+  }),
+  "email-routing rules catch-all update": () => {
+    state.catchAll = "grasp-os-router";
+    return null;
+  },
+});
 
-/** What the fake answers a call no route of its takes: a bucket's or a store's secrets. */
-const answerByPath = (state: FakeState, { request, url }: Call): Response => {
-  const path = url.pathname.replace("/client/v4", "");
-  const bucket = /\/r2\/buckets\/(?<bucket>[^/]+)$/u.exec(path)?.groups?.bucket;
-  if (request.method === "GET" && bucket !== undefined) {
-    const jurisdiction = request.headers.get("cf-r2-jurisdiction") ?? "default";
-    return state.r2.some(
-      (each) => each.name === bucket && each.jurisdiction === jurisdiction
-    )
-      ? answer({ name: bucket })
-      : notFound(path);
-  }
-  if (
-    request.method === "GET" &&
-    /\/secrets_store\/stores\/[^/]+\/secrets$/u.test(path)
-  ) {
-    return answer(state.secrets.map((name) => ({ name })));
-  }
-  return notFound(`${request.method} ${path}`);
-};
+/** The commands that change something, by their last word. */
+const changing = new Set(["create", "enable", "update", "put", "delete"]);
 
-/** A stand-in for the Cloudflare API, starting as `start` says. */
-const fakeCloudflare = (
+/** A stand-in for cf, on one account, starting as `start` says. */
+const fakeCf = (
   start: {
     zone?: boolean;
     workers?: string[];
     secrets?: string[];
-    route?: string;
+    stores?: string[];
     catchAll?: string;
   } = {}
 ) => {
@@ -191,59 +174,50 @@ const fakeCloudflare = (
     d1: [],
     r2: [],
     kv: [],
-    stores: [],
+    stores: start.stores ?? ["store-1"],
     secrets: start.secrets ?? [],
     zone: start.zone ?? true,
     workers: start.workers ?? [],
     dns: [],
-    routes:
-      start.route === undefined
-        ? []
-        : [{ pattern: "*.ongrasp.app/*", script: start.route }],
-    domains: [],
     emailRouting: start.catchAll !== undefined,
     catchAll: start.catchAll ?? null,
   };
-  const routes = routesOf(state);
+  const commands = commandsOf(state);
   const writes: string[] = [];
-  const bodies: string[] = [];
-  const authorizations = new Set<string>();
-  const send = async (request: Request): Promise<Response> => {
-    const url = new URL(request.url);
-    const path = url.pathname.replace("/client/v4", "");
-    const body: unknown =
-      request.method === "GET"
-        ? undefined
-        : await request.json().catch(() => null);
-    authorizations.add(request.headers.get("authorization") ?? "");
-    if (request.method !== "GET") {
-      writes.push(`${request.method} ${path}`);
-      bodies.push(JSON.stringify(body ?? null));
+  const everything: string[] = [];
+  const cf: Cf = async (args) => {
+    await Promise.resolve();
+    const firstFlag = args.findIndex((arg) => arg.startsWith("-"));
+    const words = args.slice(0, firstFlag === -1 ? args.length : firstFlag);
+    const command = words.join(" ");
+    const flags = flagsOf(args);
+    everything.push(args.join(" "));
+    if (changing.has(words.at(-1) ?? "")) {
+      writes.push(command);
     }
-    const call: Call = {
-      url,
-      request,
-      field: (key) =>
-        typeof body === "object" && body !== null
-          ? String(Reflect.get(body, key))
-          : "",
-    };
-    const route = routes[`${request.method} ${path}`];
-    return route === undefined ? answerByPath(state, call) : route(call);
+    const zoned =
+      command.startsWith("dns") || command.startsWith("email-routing");
+    if (zoned && flags.get("zone") !== zoneId) {
+      throw new Error(`${command} without the zone`);
+    }
+    const answer = commands[command];
+    if (answer === undefined) {
+      throw new Error(`cf has no command ${command}`);
+    }
+    return answer(flags);
   };
-  return { state, writes, bodies, authorizations, send };
+  return { state, writes, everything, cf };
 };
 
 const optionsFor = (
-  send: SetupOptions["send"],
+  cf: Cf,
   more: Partial<SetupOptions> = {}
 ): SetupOptions => ({
   accountId,
-  token,
   domain: "ongrasp.app",
   adminHost: "admin.ongrasp.app",
   dryRun: false,
-  send,
+  cf,
   secrets: ["CLIENT_KEY", "ROUTER_KEY"],
   ...more,
 });
@@ -254,115 +228,127 @@ const outcomes = (reports: Report[]) =>
 
 describe("setting up a fresh account", () => {
   it("creates what the account lacks, in the EU where it should, and nothing again on a second run", async () => {
-    const cloudflare = fakeCloudflare({
+    const cloudflare = fakeCf({
       workers: ["grasp-os-admin", "grasp-os-router"],
     });
 
-    const first = await setUpAccount(optionsFor(cloudflare.send));
+    const first = await setUpAccount(optionsFor(cloudflare.cf));
     const writesFirst = cloudflare.writes.length;
-    const second = await setUpAccount(optionsFor(cloudflare.send));
+    const second = await setUpAccount(optionsFor(cloudflare.cf));
 
     expect({
       first: outcomes(first),
       second: new Set(second.map(({ outcome }) => outcome)),
-      writesAgain: cloudflare.writes.length - writesFirst,
+      writesAgain: cloudflare.writes.slice(writesFirst),
       d1: cloudflare.state.d1,
       r2: cloudflare.state.r2,
+      dns: cloudflare.state.dns,
       catchAll: cloudflare.state.catchAll,
-      routes: cloudflare.state.routes,
-      domains: cloudflare.state.domains,
     }).toStrictEqual({
       first: {
         "dispatch namespace grasp-os-clients": "created",
         "D1 database grasp-os-admin (eu)": "created",
         "R2 bucket grasp-os-releases (eu)": "created",
         "KV namespace grasp-os-router-hosts": "created",
-        "Secrets Store": "created",
+        "Secrets Store": "exists",
         "Secrets Store secrets": "missing",
         "zone ongrasp.app": "exists",
         "DNS record *.ongrasp.app": "created",
-        "route *.ongrasp.app/*": "created",
-        "custom domain admin.ongrasp.app": "created",
+        "route *.ongrasp.app/*": "manual",
+        "custom domain admin.ongrasp.app": "manual",
         "Email Routing on ongrasp.app": "created",
         "Email Routing catch-all": "created",
       },
-      // Only the secrets the operator still has to put in stay missing.
-      second: new Set(["exists", "missing"]),
-      writesAgain: 0,
+      // Only the secrets the operator still has to put in stay missing, and
+      // what cf can't do yet stays the operator's.
+      second: new Set(["exists", "missing", "manual"]),
+      writesAgain: [],
       d1: [{ name: "grasp-os-admin", jurisdiction: "eu" }],
       r2: [{ name: "grasp-os-releases", jurisdiction: "eu" }],
+      dns: ["*.ongrasp.app"],
       catchAll: "grasp-os-router",
-      routes: [{ pattern: "*.ongrasp.app/*", script: "grasp-os-router" }],
-      domains: [{ hostname: "admin.ongrasp.app", service: "grasp-os-admin" }],
     });
   });
 
-  it("names the secrets the store lacks, and never creates, sends or prints one", async () => {
-    const cloudflare = fakeCloudflare({ secrets: ["ROUTER_KEY"] });
+  it("names the secrets the store lacks, and never creates or changes one", async () => {
+    const cloudflare = fakeCf({ secrets: ["ROUTER_KEY"] });
 
-    const reports = await setUpAccount(optionsFor(cloudflare.send));
+    const reports = await setUpAccount(optionsFor(cloudflare.cf));
 
-    const secretsReport = reports.find(
-      ({ step }) => step === "Secrets Store secrets"
-    );
     expect({
-      report: secretsReport,
-      // Writes to a store's secrets: none, whatever the store lacks.
-      secretWrites: cloudflare.writes.filter((write) =>
-        write.endsWith("/secrets")
-      ).length,
-      tokenInReports: JSON.stringify(reports).includes(token),
-      tokenInBodies: cloudflare.bodies.some((body) => body.includes(token)),
-      sentAs: [...cloudflare.authorizations],
+      report: reports.find(({ step }) => step === "Secrets Store secrets"),
+      // Every secrets command run: the list of names, nothing else.
+      secretCommands: cloudflare.everything
+        .filter((command) => command.startsWith("secrets-store secrets"))
+        .map((command) => command.split(" --")[0]),
     }).toStrictEqual({
       report: {
         step: "Secrets Store secrets",
         outcome: "missing",
         detail: "put these in: CLIENT_KEY",
       },
-      secretWrites: 0,
-      tokenInReports: false,
-      tokenInBodies: false,
-      sentAs: [`Bearer ${token}`],
+      secretCommands: ["secrets-store secrets list"],
     });
   });
 
-  it("waits on the Workers' first deploy for what names them, and on the zone for everything on it", async () => {
-    const undeployed = fakeCloudflare();
-    const noZone = fakeCloudflare({ zone: false });
+  it("says to create the store by hand when the account has none, since cf can't", async () => {
+    const cloudflare = fakeCf({ stores: [] });
 
-    const beforeDeploy = outcomes(
-      await setUpAccount(optionsFor(undeployed.send))
-    );
-    const withoutZone = outcomes(await setUpAccount(optionsFor(noZone.send)));
+    const reports = await setUpAccount(optionsFor(cloudflare.cf));
 
     expect({
-      route: beforeDeploy["route *.ongrasp.app/*"],
-      domain: beforeDeploy["custom domain admin.ongrasp.app"],
+      store: outcomes(reports)["Secrets Store"],
+      secrets: reports.find(({ step }) => step === "Secrets Store secrets"),
+      stores: cloudflare.state.stores,
+    }).toStrictEqual({
+      store: "manual",
+      secrets: {
+        step: "Secrets Store secrets",
+        outcome: "missing",
+        detail:
+          "create a Secrets Store named grasp-os in the dashboard, put these in: CLIENT_KEY, ROUTER_KEY, then run again",
+      },
+      stores: [],
+    });
+  });
+
+  it("waits on the router's first deploy for the catch-all, and on the zone for everything on it", async () => {
+    const undeployed = fakeCf();
+    const noZone = fakeCf({ zone: false });
+
+    const beforeDeploy = outcomes(
+      await setUpAccount(optionsFor(undeployed.cf))
+    );
+    const withoutZone = await setUpAccount(optionsFor(noZone.cf));
+
+    expect({
       catchAll: beforeDeploy["Email Routing catch-all"],
       emailRouting: beforeDeploy["Email Routing on ongrasp.app"],
-      zone: withoutZone["zone ongrasp.app"],
+      zone: outcomes(withoutZone)["zone ongrasp.app"],
+      zoneSteps: withoutZone
+        .map(({ step }) => step)
+        .filter(
+          (step) => step.includes("ongrasp.app") || step.startsWith("Email")
+        ),
       zoneWrites: noZone.writes.filter(
-        (write) =>
-          write.startsWith("POST /zones") || write.startsWith("PUT /zones")
+        (write) => write.startsWith("dns") || write.startsWith("email-routing")
       ),
     }).toStrictEqual({
-      route: "pending",
-      domain: "pending",
       catchAll: "pending",
       emailRouting: "created",
       zone: "pending",
+      zoneSteps: ["zone ongrasp.app"],
       zoneWrites: [],
     });
   });
 
   it("only reads, and says what it would create, on a dry run", async () => {
-    const cloudflare = fakeCloudflare({
+    const cloudflare = fakeCf({
       workers: ["grasp-os-admin", "grasp-os-router"],
     });
 
     const reports = await setUpAccount(
-      optionsFor(cloudflare.send, { dryRun: true })
+      optionsFor(cloudflare.cf, { dryRun: true })
     );
 
     expect({
@@ -370,41 +356,79 @@ describe("setting up a fresh account", () => {
       outcomes: new Set(reports.map(({ outcome }) => outcome)),
     }).toStrictEqual({
       writes: [],
-      outcomes: new Set(["would_create", "missing", "exists"]),
+      outcomes: new Set([
+        "would_create",
+        "exists",
+        "missing",
+        "manual",
+        "pending",
+      ]),
     });
-  });
-
-  it("refuses to repoint a route that goes to another Worker", async () => {
-    const cloudflare = fakeCloudflare({
-      workers: ["grasp-os-admin", "grasp-os-router"],
-      route: "someone-else",
-    });
-
-    await expect(setUpAccount(optionsFor(cloudflare.send))).rejects.toThrow(
-      "goes to someone-else, not grasp-os-router"
-    );
-    expect(cloudflare.state.routes).toStrictEqual([
-      { pattern: "*.ongrasp.app/*", script: "someone-else" },
-    ]);
   });
 });
 
 describe("what points elsewhere already", () => {
   it("refuses to repoint an Email Routing catch-all that sends mail somewhere else", async () => {
-    const cloudflare = fakeCloudflare({
+    const cloudflare = fakeCf({
       workers: ["grasp-os-admin", "grasp-os-router"],
       catchAll: "someone-elses-worker",
     });
 
-    await expect(setUpAccount(optionsFor(cloudflare.send))).rejects.toThrow(
+    await expect(setUpAccount(optionsFor(cloudflare.cf))).rejects.toThrow(
       "sends mail somewhere other than grasp-os-router"
     );
     expect({
       catchAll: cloudflare.state.catchAll,
       catchAllWrites: cloudflare.writes.filter((write) =>
-        write.endsWith("/catch_all")
+        write.includes("catch-all")
       ),
     }).toStrictEqual({ catchAll: "someone-elses-worker", catchAllWrites: [] });
+  });
+});
+
+// A stand-in `cf` executable on PATH: it prints what it was run with, or
+// fails as cf does, on stderr.
+const withFakeCf = async <T>(
+  script: string,
+  test: () => Promise<T>
+): Promise<T> => {
+  const bin = await mkdtemp(path.join(tmpdir(), "fake-cf-"));
+  await writeFile(path.join(bin, "cf"), `#!/bin/sh\n${script}\n`);
+  await chmod(path.join(bin, "cf"), 0o755);
+  const saved = { ...process.env };
+  process.env.PATH = `${bin}${path.delimiter}${saved.PATH ?? ""}`;
+  process.env.CLOUDFLARE_API_TOKEN = "a-token-cf-must-not-use";
+  try {
+    return await test();
+  } finally {
+    process.env = saved;
+    await rm(bin, { recursive: true });
+  }
+};
+
+describe(cfRunner, () => {
+  it("runs cf on the account with its own login, never a token, and reads its JSON", async () => {
+    const answer = await withFakeCf(
+      `printf '{"args":"%s","account":"%s","token":"%s"}' "$*" "$CLOUDFLARE_ACCOUNT_ID" "$CLOUDFLARE_API_TOKEN"`,
+      async () => await cfRunner(accountId)(["d1", "list", "--name", "x"])
+    );
+
+    expect(answer).toStrictEqual({
+      args: "d1 list --name x",
+      account: accountId,
+      token: "",
+    });
+  });
+
+  it("names the command and what cf said when it fails", async () => {
+    await expect(
+      withFakeCf(
+        "echo 'Not authorized for this account' >&2; exit 1",
+        async () => await cfRunner(accountId)(["kv", "namespaces", "list"])
+      )
+    ).rejects.toThrow(
+      "cf kv namespaces list failed: Not authorized for this account"
+    );
   });
 });
 
