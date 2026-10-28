@@ -12,6 +12,7 @@ import type { DashboardApi } from "./dashboard.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
 import type { EmailPreferencesApi } from "./email-preferences.ts";
+import type { HeldStartsApi } from "./held-starts.ts";
 import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
 import type { KnowledgeApi } from "./knowledge.ts";
 import type { LandscapeApi } from "./landscape.ts";
@@ -162,6 +163,11 @@ export interface SessionApi {
    * from, whatever their role.
    */
   readonly decisions: DecisionsApi;
+  /**
+   * Starts of independent workflows the person's chats' agents asked for,
+   * held until they confirm them.
+   */
+  readonly heldStarts: HeldStartsApi;
   /**
    * npm packages proposed for Apps, and the people who approve them: a
    * permission of its own, which no role gives.

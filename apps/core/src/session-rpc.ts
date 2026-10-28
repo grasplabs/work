@@ -10,6 +10,7 @@ import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DependenciesRpc } from "./dependencies/rpc.ts";
 import { EmailPreferencesRpc } from "./email-preferences-rpc.ts";
+import { HeldStartsRpc } from "./held-starts-rpc.ts";
 import { MemoryRpc } from "./knowledge/memory-rpc.ts";
 import { KnowledgeRpc } from "./knowledge/rpc.ts";
 import { KnowledgeSignalsRpc } from "./knowledge/signals-rpc.ts";
@@ -71,6 +72,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #workflows: WorkflowsRpc;
   readonly #workflowResources: WorkflowResourcesRpc;
   readonly #decisions: DecisionsRpc;
+  readonly #heldStarts: HeldStartsRpc;
   readonly #dependencies: DependenciesRpc;
   readonly #screens: ScreensRpc;
   readonly #screenTrust: ScreenTrustRpc;
@@ -119,6 +121,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#workflows = new WorkflowsRpc(env, full);
     this.#workflowResources = new WorkflowResourcesRpc(env, full);
     this.#decisions = new DecisionsRpc(env, full);
+    this.#heldStarts = new HeldStartsRpc(env, full);
     this.#dependencies = new DependenciesRpc(env, full);
     this.#screens = new ScreensRpc(env, full);
     this.#screenTrust = new ScreenTrustRpc(env, full);
@@ -148,6 +151,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
       notifications: this.#notifications,
       connections: this.#connections,
       decisions: this.#decisions,
+      heldStarts: this.#heldStarts,
       chats: this.#chats,
     });
     this.#onboarding = new OnboardingRpc(env, check);
@@ -177,6 +181,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get waiting(): WaitingRpc {
     return this.#waiting;
+  }
+
+  get heldStarts(): HeldStartsRpc {
+    return this.#heldStarts;
   }
 
   get onboarding(): OnboardingRpc {

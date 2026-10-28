@@ -14,6 +14,7 @@ import {
   LockKeyholeIcon,
   PackageIcon,
   PencilLineIcon,
+  PlayIcon,
   RocketIcon,
   ScaleIcon,
   ShieldCheckIcon,
@@ -58,6 +59,7 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
   signInAgain: msg({ message: "Connection", context: "inbox item kind" }),
   externalDomain: msg({ message: "Domain", context: "inbox item kind" }),
   heldWrite: msg({ message: "Change", context: "inbox item kind" }),
+  heldStart: msg({ message: "Workflow start", context: "inbox item kind" }),
   unknownOutcome: msg({
     message: "Did it happen?",
     context: "inbox item kind: a change whose answer was lost",
@@ -88,6 +90,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   signInAgain: KeyRoundIcon,
   externalDomain: GlobeIcon,
   heldWrite: PencilLineIcon,
+  heldStart: PlayIcon,
   unknownOutcome: CircleHelpIcon,
   permissionRequest: LockKeyholeIcon,
   packages: PackageIcon,

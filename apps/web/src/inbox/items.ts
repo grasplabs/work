@@ -1,6 +1,7 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
+import type { HeldStart } from "@grasp-os/shared/held-starts";
 import type {
   GapAskedNotification,
   RunFailedNotification,
@@ -49,6 +50,7 @@ export type InboxKind =
   | "signInAgain"
   | "externalDomain"
   | "heldWrite"
+  | "heldStart"
   | "unknownOutcome"
   | "permissionRequest"
   | "packages"
@@ -69,6 +71,7 @@ export type Target =
 /** What an item was made from: what its page shows of it and acts on. */
 export type InboxSource =
   | { type: "held"; action: PendingAction }
+  | { type: "heldStart"; start: HeldStart }
   | { type: "outcome"; outcome: UnknownOutcome }
   | { type: "request"; request: Permission; pending: PendingRequests }
   | { type: "packages"; request: DependencyRequest; policyGeneration: number }
@@ -126,6 +129,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   signInAgain: "apps",
   externalDomain: "apps",
   heldWrite: "apps",
+  heldStart: "workflows",
   unknownOutcome: "apps",
   permissionRequest: "apps",
   packages: "apps",
@@ -205,6 +209,36 @@ const heldItems = (
       // What asked for it waits on the answer.
       urgent: true,
       source: { type: "held", action },
+    };
+  });
+
+/**
+ * A start of a workflow a chat's agent asked for, held until the person
+ * confirms it: nothing runs before, and it runs with exactly what is shown.
+ */
+const heldStartItems = (
+  starts: readonly HeldStart[],
+  me: string
+): InboxItem[] =>
+  starts.map((start) => {
+    const name = start.workflowName;
+    return {
+      id: `heldStart:${start.id}`,
+      kind: "heldStart",
+      title: t`Start ${name}?`,
+      context: name,
+      body: [
+        t`Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown.`,
+      ],
+      facts: [
+        { label: t`Workflow`, value: name },
+        { label: t`Waits until`, value: formatDateTime(start.expiresAt) },
+      ],
+      forWhom: { person: me },
+      date: start.requestedAt,
+      // The chat's agent waits on the answer.
+      urgent: true,
+      source: { type: "heldStart", start },
     };
   });
 
@@ -518,6 +552,7 @@ export const inboxItems = (
   const screens = readyOf(waiting.screens) ?? [];
   const failed = readyOf(waiting.failed);
   const decisions = readyOf(waiting.decisions) ?? [];
+  const heldStarts = readyOf(waiting.heldStarts) ?? [];
   const versions = readyOf(waiting.versions) ?? [];
   const reconnect = (readyOf(waiting.reconnect) ?? []).map(
     ({ integration, connection }): InboxItem => {
@@ -552,6 +587,7 @@ export const inboxItems = (
   return [
     ...decisionItems(decisions, me, readAt),
     ...heldItems(held, me),
+    ...heldStartItems(heldStarts, me),
     ...outcomeItems(outcomes, me),
     ...(requests === undefined ? [] : requestItems(requests)),
     ...(dependencies === undefined
@@ -578,6 +614,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.reconnect,
     waiting.versions,
     waiting.decisions,
+    waiting.heldStarts,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>

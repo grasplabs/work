@@ -449,6 +449,69 @@ const HeldItem = ({
 };
 
 /**
+ * A start of a workflow a chat's agent asked for: confirming starts it,
+ * as the agent acting for the person, with exactly the input shown, which
+ * is all shown before either button.
+ */
+const HeldStartItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "heldStart" }>;
+}) => {
+  const { t } = useLingui();
+  const { start } = source;
+  const { busy, failure, decide } = useDecide(frame.onSaid);
+  const name = start.workflowName;
+  return (
+    <ItemFrame
+      acts={[
+        {
+          label: t`Start`,
+          name: t`Start ${name}`,
+          onPress: async () => {
+            await decide(
+              async (session) => {
+                await session.heldStarts.confirm(start.id, start.inputHash);
+              },
+              t`Started: ${name}.`
+            );
+          },
+        },
+        {
+          label: t`Decline`,
+          name: t`Decline starting ${name}`,
+          onPress: async () => {
+            await decide(
+              async (session) => {
+                await session.heldStarts.decline(start.id);
+              },
+              t`Declined: ${name}.`
+            );
+          },
+        },
+      ]}
+      busy={busy}
+      extra={
+        <div className="flex flex-col gap-2">
+          <h3 className="font-medium">
+            <Trans>What it starts with</Trans>
+          </h3>
+          <pre className="bg-muted w-full overflow-x-auto rounded-md p-3 text-sm">
+            <code className="font-mono">
+              {JSON.stringify(start.input, null, 2)}
+            </code>
+          </pre>
+        </div>
+      }
+      failure={failure}
+      frame={frame}
+    />
+  );
+};
+
+/**
  * A change whose answer was lost: "It happened" or "It didn't happen", each
  * asked once more, as on the dashboard's pile (`outcome-card.tsx`). Saying
  * it didn't happen lets it go out again, so it waits while part of what was
@@ -743,6 +806,9 @@ export const ItemDetail = (frame: Frame) => {
   const { source } = frame.item;
   if (source.type === "held") {
     return <HeldItem frame={frame} source={source} />;
+  }
+  if (source.type === "heldStart") {
+    return <HeldStartItem frame={frame} source={source} />;
   }
   if (source.type === "outcome") {
     return <OutcomeItem frame={frame} source={source} />;

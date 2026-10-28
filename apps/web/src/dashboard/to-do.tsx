@@ -1,6 +1,7 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
+import type { HeldStart } from "@grasp-os/shared/held-starts";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
@@ -62,6 +63,8 @@ export interface Waiting {
   screens: Loaded<ScreensWaiting[]> | undefined;
   /** Decisions of workflows' runs that wait for the person's answer. */
   decisions: Loaded<DecisionView[]>;
+  /** Starts of workflows the person's chats' agents asked for, held for them to confirm. */
+  heldStarts: Loaded<HeldStart[]>;
 }
 
 /** Who counts what waits: what they may act on follows from their role. */
