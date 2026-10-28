@@ -657,8 +657,22 @@ export interface PurgeStatus {
   }[];
 }
 
+/** Where an export of the company's Brain stands, as its admin reads it (exports.ts). */
+export interface ExportStatus {
+  exportId: string;
+  state: "running" | "complete" | "failed" | "expired";
+  reason: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  expiresAt: string | null;
+  manifestSha256: string | null;
+  files: { name: string; sha256: string; bytes: number; rows: number }[];
+}
+
 /** Why a Knowledge call was refused. */
 export const knowledgeErrors = errorFamily({
+  "knowledge.export_purged":
+    "A purge ran while the export was written, so it was deleted. Ask for the export again.",
   "knowledge.not_found":
     "There's no such collection, document or version, or you can't see it.",
   "knowledge.forbidden": "You can't change this collection.",
