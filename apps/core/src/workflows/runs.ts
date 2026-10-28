@@ -524,8 +524,8 @@ const repairAfterMs = 60_000;
 const repairGivesUpAfterMs = 15 * 60_000;
 
 /**
- * Most starts one repair sends again: a budget for one cron run. Each one
- * the engine confirms leaves the set, so the next cron run takes the next.
+ * Most starts one repair sends again: a budget for one clock run. Each one
+ * the engine confirms leaves the set, so the next clock run takes the next.
  */
 const repairsPerRun = 50;
 
@@ -1463,7 +1463,7 @@ const repairStart = async (env: Env, row: RunRow): Promise<void> => {
  * it didn't. A start still unconfirmed `repairGivesUpAfterMs` on is marked
  * failed (`no_instance`).
  *
- * Each cron run takes at most `repairsPerRun` of them, in ID order from a
+ * Each clock run takes at most `repairsPerRun` of them, in ID order from a
  * random ID (`from`), wrapping round: starts the engine keeps failing on
  * can't hold every run's budget, and every one is reached in time.
  */
@@ -1498,7 +1498,7 @@ export const repairStarts = async (
         ]
       : onward;
   // Each on its own: one the engine or D1 fails on is tried again by the
-  // next cron run, and holds up none of the others.
+  // next clock run, and holds up none of the others.
   await Promise.all(
     rows.map(async (row) => {
       await repairStart(env, row);
@@ -1581,7 +1581,7 @@ export const recordWaiting = async (
  * The most runs mail, or connector events, start of one workflow in an
  * hour, each counted on its own.
  */
-const triggeredRunsPerHour = 60;
+export const triggeredRunsPerHour = 60;
 
 const hourMs = 60 * 60 * 1000;
 

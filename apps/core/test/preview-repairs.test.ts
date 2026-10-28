@@ -454,6 +454,66 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
   });
 
+  it("shows a warning its preview reports, such as React's development warnings, and fails only on a problem, however many warnings came first", async () => {
+    const kinds = `export default async (self, env) => {
+      const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
+      const checked = await env.build.check(app.id);
+      return { passed: checked.passed, kinds: checked.preview.problems.map(({ kind }) => kind) };
+    };`;
+    const { builder, app, chatId, stub } = await setUp([
+      codeStep(kinds),
+      says("It passes, with a warning."),
+      codeStep(kinds),
+      says("It fails."),
+    ]);
+    const id = chatIdSchema.parse(chatId);
+    // The side panel has the draft open, and its screen works.
+    await stub.saveDraft(
+      id,
+      app,
+      1,
+      desk(true),
+      [],
+      0,
+      await openTestRun(stub, id)
+    );
+    await previewAt(builder, chatId, 1);
+    const reported = async (kind: "warning" | "console", message: string) => {
+      await builder.api.chats.previewReport(chatId, app, 1, "desk", {
+        kind,
+        message,
+      });
+    };
+
+    // React's development warning, which the frame reports as a warning.
+    await reported(
+      "warning",
+      'Each child in a list should have a unique "key" prop.'
+    );
+    await stub.ask(id, { text: "Check the desk", model });
+    // More warnings than a revision keeps, then the draft's own
+    // console.error: the warnings never take its place.
+    for (let count = 0; count < 10; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one report after another, as a screen sends them
+      await reported("warning", `Warning number ${count}`);
+    }
+    await reported("console", "The desk couldn't be drawn.");
+    await stub.ask(id, { text: "Check it again", model });
+
+    const [warned, failed] = await codeResults(stub, chatId);
+    expect({
+      warned: returned(warned?.text),
+      failed: returned(failed?.text),
+    }).toStrictEqual({
+      warned: { passed: true, kinds: ["warning"] },
+      // Ten warnings kept, the eleventh dropped, and the problem kept.
+      failed: {
+        passed: false,
+        kinds: [...Array.from({ length: 10 }, () => "warning"), "console"],
+      },
+    });
+  });
+
   it("waits for no preview when the draft doesn't build, even with the panel open", async () => {
     const { builder, app, chatId, stub } = await setUp([
       codeStep(`export default async (self, env) => {

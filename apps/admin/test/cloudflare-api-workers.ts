@@ -282,6 +282,19 @@ const putScript = async (
   return envelope({ id: name });
 };
 
+/**
+ * An upload session's answer as Cloudflare sends it: its errors, messages
+ * and result info null rather than empty (seen on a real account, GRA-430).
+ */
+const sessionEnvelope = (result: Json): Response =>
+  Response.json({
+    success: true,
+    errors: null,
+    messages: null,
+    result_info: null,
+    result,
+  });
+
 /** Opens an assets upload session for the files `json`'s manifest lists that the account lacks. */
 const openAssetsSession = (account: AccountState, json: Json): Response => {
   const { manifest } = z
@@ -302,7 +315,7 @@ const openAssetsSession = (account: AccountState, json: Json): Response => {
   const jwt = `assets-${crypto.randomUUID()}`;
   if (missing.length === 0) {
     account.completions.add(jwt);
-    return envelope({ jwt, buckets: [] });
+    return sessionEnvelope({ jwt, buckets: [] });
   }
   account.sessions.set(jwt, new Set(missing));
   // Two files a bucket, so an upload takes several.
@@ -310,7 +323,7 @@ const openAssetsSession = (account: AccountState, json: Json): Response => {
     { length: Math.ceil(missing.length / 2) },
     (_, index) => missing.slice(index * 2, index * 2 + 2)
   );
-  return envelope({ jwt, buckets });
+  return sessionEnvelope({ jwt, buckets });
 };
 
 /** Takes a bucket of an upload session's files; the last completes it. */
@@ -369,7 +382,32 @@ const secretNames = (script: ScriptState | Response): Response => {
   return envelope(names.map((name) => ({ name, type: "secret_text" })));
 };
 
+/** Removes the secret `encoded` names from `script`: 404 when it has none so named. */
+const deleteSecret = (
+  script: ScriptState | Response,
+  encoded: string
+): Response => {
+  if (script instanceof Response) {
+    return script;
+  }
+  const name = decodeURIComponent(encoded);
+  if (script.versions.at(-1)?.secrets.has(name) !== true) {
+    return notFound();
+  }
+  return (
+    changeSecrets(script, (secrets) => {
+      secrets.delete(name);
+    }) ?? envelope(null)
+  );
+};
+
 export const workerRoutes: Route[] = [
+  {
+    method: "DELETE",
+    path: /^\/workers\/scripts\/(?<script>[^/]+)$/u,
+    answer: ({ account, params }) =>
+      account.scripts.delete(params.script ?? "") ? envelope(null) : notFound(),
+  },
   {
     method: "PUT",
     path: /^\/workers\/scripts\/(?<script>[^/]+)$/u,
@@ -518,21 +556,8 @@ export const workerRoutes: Route[] = [
   {
     method: "DELETE",
     path: /^\/workers\/scripts\/(?<script>[^/]+)\/secrets\/(?<name>[^/]+)$/u,
-    answer: ({ account, params }) => {
-      const script = scriptOf(account, params);
-      if (script instanceof Response) {
-        return script;
-      }
-      const name = decodeURIComponent(params.name ?? "");
-      if (script.versions.at(-1)?.secrets.has(name) !== true) {
-        return notFound();
-      }
-      return (
-        changeSecrets(script, (secrets) => {
-          secrets.delete(name);
-        }) ?? envelope(null)
-      );
-    },
+    answer: ({ account, params }) =>
+      deleteSecret(scriptOf(account, params), params.name ?? ""),
   },
   {
     method: "POST",
@@ -648,6 +673,17 @@ const userWorkerOf = (
 
 export const dispatchRoutes: Route[] = [
   {
+    method: "DELETE",
+    path: dispatchPath(""),
+    answer: ({ account, params }) => {
+      const scripts = namespaceOf(account, params);
+      if (scripts instanceof Response) {
+        return scripts;
+      }
+      return scripts.delete(params.script ?? "") ? envelope(null) : notFound();
+    },
+  },
+  {
     method: "PUT",
     path: dispatchPath(""),
     answer: async ({ account, call, params }) => {
@@ -661,9 +697,16 @@ export const dispatchRoutes: Route[] = [
     method: "GET",
     path: dispatchPath(""),
     answer: ({ account, params }) => {
-      const script = userWorkerOf(account, params);
-      if (script instanceof Response) {
-        return script;
+      const scripts = namespaceOf(account, params);
+      if (scripts instanceof Response) {
+        return scripts;
+      }
+      const script = scripts.get(params.script ?? "");
+      // A script the namespace hasn't got isn't a 404: Cloudflare answers
+      // the namespace's own details with a null script, as Grasp Work
+      // showed (GRA-430, 28 Oct).
+      if (script === undefined) {
+        return envelope({ dispatch_namespace: params.namespace, script: null });
       }
       return envelope({
         dispatch_namespace: params.namespace,
@@ -695,5 +738,11 @@ export const dispatchRoutes: Route[] = [
     method: "GET",
     path: dispatchPath("/secrets"),
     answer: ({ account, params }) => secretNames(userWorkerOf(account, params)),
+  },
+  {
+    method: "DELETE",
+    path: dispatchPath("/secrets/(?<name>[^/]+)"),
+    answer: ({ account, params }) =>
+      deleteSecret(userWorkerOf(account, params), params.name ?? ""),
   },
 ];

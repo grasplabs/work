@@ -8,8 +8,8 @@ import { defineErrorFamily } from "./errors.ts";
 // exceptions that let one app break one rule until a date. Everyone signed
 // in reads them, as everyone sees the Landscape the rules act on; only the
 // organization's own admins (never Grasp staff) change them, every change
-// audited. Which apps a rule catches is worked out from the Landscape's
-// facts (web's policies/policy.ts) until core reads those itself.
+// audited. Which apps a rule catches core works out from what it knows of
+// them (core's policy-findings.ts, through policy-engine.ts).
 
 /** The kinds of data an app can touch. */
 export const dataExposureTypeSchema = z.enum([
@@ -281,6 +281,48 @@ export interface PolicyBook {
 }
 
 /** Why a change to the policies was refused. */
+/** What a rule does to an app it matches: blocks or flags it, would do so, or lets it be for now. */
+export type FindingState = "blocked" | "flagged" | "watching" | "excepted";
+
+/**
+ * An app a rule can catch, as core knows it: one of the company's
+ * integrations, by its key (`native:microsoft`), or an app its identity
+ * provider granted access, by `landscape:<connection>:<client ID>`.
+ */
+export interface PolicyApp {
+  id: string;
+  name: string;
+  kind: "integration" | "landscape";
+  /** Who makes it, as the provider verified it; null while nothing says. */
+  vendor: string | null;
+  /** How many use it; null while nothing measures it. */
+  people: number | null;
+}
+
+/** One app one rule catches, and what the rule does to it. */
+export interface PolicyFinding {
+  ruleId: string;
+  app: PolicyApp;
+  state: FindingState;
+  /** The exception that lets the app be, when there is one. */
+  exception: PolicyException | null;
+}
+
+/** How many apps a policy's proposed rule would catch, were it kept. */
+export interface ProposalCatch {
+  policyId: string;
+  proposalId: string;
+  apps: number;
+}
+
+/** Which apps the rules catch, as core works it out from what it knows of them. */
+export interface PolicyFindings {
+  /** The most serious first, then the most used, then by name. */
+  findings: PolicyFinding[];
+  /** For each proposal of each policy, whatever was decided of it. */
+  proposals: ProposalCatch[];
+}
+
 export const policyErrors = defineErrorFamily({
   "policy.invalid":
     "That isn't a policy, rule or exception as Grasp keeps them: check each field.",
@@ -293,6 +335,12 @@ export const policyErrors = defineErrorFamily({
 export interface PoliciesApi {
   /** Every policy, rule and exception, newest first. Everyone signed in. */
   book: () => Promise<PolicyBook>;
+  /**
+   * Which apps each watching or active rule catches, and how many each
+   * policy's proposed rules would: over every app for the organization's
+   * own admins, over the apps they can see for anyone else.
+   */
+  findings: () => Promise<PolicyFindings>;
   /** Keeps a policy document for review. The organization's own admins only; audited. */
   upload: (upload: PolicyUpload) => Promise<PolicyDocument>;
   /** Puts a policy in use. The organization's own admins only; audited. */

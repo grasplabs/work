@@ -9,6 +9,8 @@ import {
   isAppLayout,
   kitModuleName,
   kitModules,
+  kitPreviewModules,
+  previewRuntime,
   screenRuntime,
   limitErrors,
   computeModuleErrors,
@@ -192,6 +194,19 @@ const compilerCalls = {
 type BuildKind = keyof typeof compilerCalls;
 
 /**
+ * The compiler call a build of `kind` for `profile` runs: a chat's draft's
+ * screens are built instrumented for React Fast Refresh, on the preview
+ * kit (spec 19.2.1); every other build is the same for both profiles.
+ */
+const compilerCallOf = (
+  kind: BuildKind,
+  profile: BuildProfile
+): (typeof compilerCalls)[BuildKind] | readonly ["build", "preview-screens"] =>
+  kind === "screen" && profile === "preview"
+    ? ["build", "preview-screens"]
+    : compilerCalls[kind];
+
+/**
  * Whether the compiler's answer is shaped as a build: its code is core's
  * own, which reads the App's source and never runs it, so its answer is
  * trusted as the Loader's is; only a broken one is refused.
@@ -224,10 +239,11 @@ const isBuildShaped = (value: unknown): boolean =>
 const compiled = async (
   runner: PlatformRunner,
   kind: BuildKind,
-  files: AppFiles
+  files: AppFiles,
+  profile: BuildProfile
 ): Promise<{ built: unknown; cache: boolean }> => {
   try {
-    const [method, target] = compilerCalls[kind];
+    const [method, target] = compilerCallOf(kind, profile);
     const built = await runner.run("compiler", method, [target, files]);
     return { built, cache: true };
   } catch (error) {
@@ -259,7 +275,7 @@ const compiled = async (
 const day = 24 * 60 * 60 * 1000;
 
 /**
- * How long a cached build is kept after it was last used: the cron's
+ * How long a cached build is kept after it was last used: the clock's
  * sweep deletes what is older (`sweepBuilds`). A build is the compiler's
  * output for files core keeps, under its version, so one swept is built
  * again, the same, the next time it is asked for: what runs never rests
@@ -321,7 +337,7 @@ const lastUsedOf = (object: R2Object): number => {
 
 /**
  * Deletes cached builds last used more than `buildKeepMs` before `now`,
- * from the cron: in code, not a bucket rule, so it runs wherever core
+ * from the clock: in code, not a bucket rule, so it runs wherever core
  * does. One page of one kind's prefix a run, at most `buildSweepBatch`
  * objects, from where the last run stopped; once a kind is done, the next
  * run starts the next. A build is never last used after it was uploaded,
@@ -516,7 +532,7 @@ const cachedBuild = async <Build>(
   // compiler call a kind makes (`compilerCalls`) builds again, rather than
   // serving what the old call built for as long as it is kept. Under its
   // profile too: a preview's build is never served as production's.
-  const [callMethod, callTarget] = compilerCalls[kind];
+  const [callMethod, callTarget] = compilerCallOf(kind, profile);
   const cacheKey = `${kind}-builds/${callMethod}.${callTarget}/${keySchema}/${profile}/${await buildKey(files)}.json`;
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
@@ -536,7 +552,7 @@ const cachedBuild = async <Build>(
         // Held as long as a build may take, and a little more.
         leaseMs,
         async () => {
-          const answer = await compiled(runner, kind, files);
+          const answer = await compiled(runner, kind, files, profile);
           if (!isBuild(answer.built)) {
             throw new TypeError(
               "The compiler answered something else than a build."
@@ -865,7 +881,11 @@ export const versionScreens = async (
     async () =>
       await Promise.all([
         buildScreens(env, files, app, { profile }),
-        kitModules(env.ASSETS),
+        // A preview runs on the preview kit (spec 19.2.1), which its
+        // build's closures name.
+        profile === "preview"
+          ? kitPreviewModules(env.ASSETS)
+          : kitModules(env.ASSETS),
       ])
   );
   if (loaded === "late") {
@@ -892,7 +912,9 @@ export const versionScreens = async (
     }
     const code = {
       entry,
-      runtime: kitModuleName(screenRuntime),
+      runtime: kitModuleName(
+        profile === "preview" ? previewRuntime : screenRuntime
+      ),
       modules: pick(build.modules, closure.modules),
       kit: pick(kit, closure.kitModules),
       css: build.css,

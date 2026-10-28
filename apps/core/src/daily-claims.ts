@@ -8,15 +8,15 @@ import type {
 } from "./db/core/schema.ts";
 
 // Claiming a UTC day's computation, for what is computed once a day from
-// the 15-minute cron trigger: the improvement signals (signals.ts) and
+// the 15-minute clock: the improvement signals (signals.ts) and
 // Knowledge's usage signals (knowledge/signals.ts). Each has a table of
 // computations with the same columns (id, day, started_at, finished_at),
 // one row per attempt.
 //
-// The first cron run of a day claims it: a claim is a row inserted only
+// The first clock run of a day claims it: a claim is a row inserted only
 // while the day has no finished computation, no claim younger than
 // `claimLeaseMs` and fewer than `claimsPerDay` claims, in one statement,
-// so two cron runs never both claim, and a computation that failed is
+// so two clock runs never both claim, and a computation that failed is
 // claimed again once its lease is up, a few times a day at most.
 //
 // Each attempt has an ID of its own. A computation finishes in one batch
@@ -30,7 +30,7 @@ import type {
 // where its row is gone, its writes fail on the foreign key.
 
 /** How long a claim holds its day before another may claim it. */
-// Longer than the 15 minutes between cron runs, so a run that starts a
+// Longer than the 15 minutes between clock runs, so a run that starts a
 // little early never finds a claim lapsed that is still running.
 export const claimLeaseMs = 20 * 60 * 1000;
 

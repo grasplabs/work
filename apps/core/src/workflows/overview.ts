@@ -972,11 +972,6 @@ export const dryRunWorkflow = async (
 };
 
 /**
- * Makes `owner` the owner of an App's workflow (owners.ts), for an admin
- * or a builder of the App, and returns the workflow's summary as it is
- * now.
- */
-/**
  * Makes `team` the team that owns an App's workflow (teams.ts), and
  * returns its summary as it is now.
  */
@@ -999,6 +994,11 @@ export const setTeam = async (
   return summary;
 };
 
+/**
+ * Makes `owner` the owner of an App's workflow (owners.ts), for an admin
+ * or a builder of the App, and returns the workflow's summary as it is
+ * now.
+ */
 export const setOwner = async (
   env: Env,
   by: Identity,

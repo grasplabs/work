@@ -11,6 +11,7 @@ import { z } from "zod";
 import { connectionOwnersOf } from "../connections.ts";
 import {
   mailDomains,
+  resourceRunMailCalls,
   runMailCalls,
   runMailStampClaims,
   runMailStamps,
@@ -138,6 +139,19 @@ import {
 export interface StampingRun {
   run: string;
   stepKey: string;
+  /**
+   * Whose run it is: an App's (the default), or an independent
+   * workflow's, whose mail carries a stamp only (`resource_run_mail_calls`):
+   * no email trigger starts an independent workflow, so its recipients
+   * carry no token.
+   */
+  kind?: "app" | "resource";
+}
+
+/** The run a stamped event is the mail of: an App's, or an independent workflow's. */
+export interface StampedRun {
+  kind: "app" | "resource";
+  runId: string;
 }
 
 /** A connection call, as core sends it to connect. */
@@ -403,6 +417,60 @@ export interface StampedMail {
 const stampBytes = 16;
 
 /**
+ * An independent workflow run's mail call (`stampedMail`), with `input`
+ * naming `addresses`: for a native mail connector's, a stamp recorded with
+ * its recipients and senders before the call leaves, the same one each
+ * time its step calls again; its input unchanged.
+ */
+const stampedResourceMail = async (
+  env: Env,
+  stamping: StampingRun,
+  call: StampedCall,
+  input: Readonly<Record<string, Json | undefined>>,
+  addresses: readonly string[]
+): Promise<StampedMail> => {
+  const db = drizzle(env.DB);
+  const origin = await sha256Hex(
+    JSON.stringify([
+      stamping.stepKey,
+      call.connectionId,
+      call.action,
+      canonicalJson(call.input),
+    ])
+  );
+  const decidedOf = async () =>
+    await db
+      .select({ stamp: resourceRunMailCalls.stamp })
+      .from(resourceRunMailCalls)
+      .where(eq(resourceRunMailCalls.origin, origin))
+      .get();
+  let decided = await decidedOf();
+  if (decided === undefined) {
+    const senders = await sendersOf(env, call.connectionId, input.mailbox);
+    if (senders === undefined) {
+      // Not a native mail connector's: its tool puts no stamp on mail.
+      return { input: call.input };
+    }
+    await db
+      .insert(resourceRunMailCalls)
+      .values({
+        origin,
+        runId: stamping.run,
+        createdAt: new Date(),
+        stamp: toHex(crypto.getRandomValues(new Uint8Array(stampBytes))),
+        recipients: [...new Set(addresses)],
+        senders,
+      })
+      .onConflictDoNothing();
+    decided = await decidedOf();
+  }
+  if (decided === undefined) {
+    throw new Error(`No mail decision of run ${stamping.run}`);
+  }
+  return { input: call.input, stamp: decided.stamp };
+};
+
+/**
  * `call` as `run` sends it. For a native mail connector's send or draft:
  * each address of its `to`, `cc` and `bcc` at a domain Email Routing
  * delivered for carries the run's token (`local+<token>@domain`), any
@@ -434,6 +502,9 @@ export const stampedMail = async (
   });
   if (addresses.length === 0) {
     return { input };
+  }
+  if (stamping.kind === "resource") {
+    return await stampedResourceMail(env, stamping, call, input, addresses);
   }
   // The call's decision, the first time it was made: the same call made
   // again under its key sends the same input and stamp, whatever core
@@ -589,17 +660,19 @@ const mailboxAddressesOf = async (
  *   source (connection and mailbox) to name the stamp
  *   (`run_mail_stamp_claims`): the same event delivered again is the same
  *   message, and any past the bound is mail like any other.
- * None otherwise: the event's runs are roots.
+ * None otherwise: the event's runs are roots. The run is an App's
+ * (`run_mail_calls`) or an independent workflow's
+ * (`resource_run_mail_calls`), as the stamp was recorded.
  */
 export const stampedEventRun = async (
   env: Env,
   event: DeliveredConnectorEvent
-): Promise<string | undefined> => {
+): Promise<StampedRun | undefined> => {
   if (event.stamp === undefined) {
     return undefined;
   }
   const db = drizzle(env.DB);
-  const call = await db
+  const appCall = await db
     .select({
       runId: runMailCalls.runId,
       recipients: runMailCalls.recipients,
@@ -608,6 +681,18 @@ export const stampedEventRun = async (
     .from(runMailCalls)
     .where(eq(runMailCalls.stamp, event.stamp))
     .get();
+  const call =
+    appCall ??
+    (await db
+      .select({
+        runId: resourceRunMailCalls.runId,
+        recipients: resourceRunMailCalls.recipients,
+        senders: resourceRunMailCalls.senders,
+      })
+      .from(resourceRunMailCalls)
+      .where(eq(resourceRunMailCalls.stamp, event.stamp))
+      .get());
+  const kind = appCall === undefined ? "resource" : "app";
   const recipients = call?.recipients ?? null;
   const senders = call?.senders ?? null;
   if (call === undefined || recipients === null || senders === null) {
@@ -639,23 +724,16 @@ export const stampedEventRun = async (
     eq(runMailStampClaims.stamp, event.stamp),
     eq(runMailStampClaims.source, source)
   );
+  const recorded =
+    kind === "app"
+      ? sql`EXISTS (SELECT 1 FROM ${runMailCalls} WHERE ${runMailCalls.stamp} = ${event.stamp})`
+      : sql`EXISTS (SELECT 1 FROM ${resourceRunMailCalls} WHERE ${resourceRunMailCalls.stamp} = ${event.stamp})`;
   await db
     .insert(runMailStampClaims)
     .select(
-      db
-        .select({
-          stamp: runMailCalls.stamp,
-          source: sql<string>`${source}`.as("source"),
-          eventKey: sql<string>`${eventKey}`.as("event_key"),
-          createdAt: sql<Date>`${Date.now()}`.as("created_at"),
-        })
-        .from(runMailCalls)
-        .where(
-          and(
-            eq(runMailCalls.stamp, event.stamp),
-            sql`(SELECT count(*) FROM ${runMailStampClaims} WHERE ${claimed}) < ${maxClaimsPerSource}`
-          )
-        )
+      sql`SELECT ${event.stamp}, ${source}, ${eventKey}, ${Date.now()}
+        WHERE ${recorded}
+          AND (SELECT count(*) FROM ${runMailStampClaims} WHERE ${claimed}) < ${maxClaimsPerSource}`
     )
     .onConflictDoNothing();
   const claim = await db
@@ -663,7 +741,7 @@ export const stampedEventRun = async (
     .from(runMailStampClaims)
     .where(and(claimed, eq(runMailStampClaims.eventKey, eventKey)))
     .get();
-  return claim === undefined ? undefined : call.runId;
+  return claim === undefined ? undefined : { kind, runId: call.runId };
 };
 
 /** Records that Email Routing delivered mail for `domain`. */

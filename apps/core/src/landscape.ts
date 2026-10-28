@@ -60,11 +60,11 @@ import type { SessionCheck } from "./session-check.ts";
 //   a count), never to Grasp staff, and every admin read of it is audited
 //   first. A person's grant goes once it wasn't seen for
 //   `landscapeRetentionDays`, and everything of a connection within 15
-//   minutes of its disconnect (the next cron run).
+//   minutes of its disconnect (the next clock run).
 // - Not read in phase 1: application permissions admins granted apps
 //   (app role assignments), the most dangerous consents (GRA-900).
 // - A flood: a sync makes at most `readsPerSync` reads, each bounded by
-//   connect, `readsPerRun` per cron run, going on over later runs; one
+//   connect, `readsPerRun` per clock run, going on over later runs; one
 //   that reaches its bound stops as partial, never loops, and what counts
 //   as current stays the last whole sync's.
 // - A sync stuck under way: one whose connection needs reconnecting, or
@@ -73,7 +73,7 @@ import type { SessionCheck } from "./session-check.ts";
 //   cursor after it, and every row as seen at the sync's start, so a page
 //   written again writes the same, and a sync that stopped goes on from
 //   its last page. A batch guarded by the cursor it read can't be written
-//   twice by two cron runs at once. A late write of an older sync changes
+//   twice by two clock runs at once. A late write of an older sync changes
 //   nothing: each upsert only moves a row forward.
 
 const dayMs = 24 * 60 * 60_000;
@@ -325,7 +325,7 @@ const syncToRun = async (
     connectionId: connection.id,
     currentSince: current?.currentSince ?? null,
   };
-  // Only one cron run starts it: the other finds it running. What counts
+  // Only one clock run starts it: the other finds it running. What counts
   // as current stays the last whole sync's until this one ends.
   const inserted = await db
     .insert(landscapeSyncs)
@@ -529,7 +529,7 @@ const readPage = async (
       )
     );
   // The page is staged with it, only by the run whose claim wins: another
-  // cron run that read the same page stages, publishes and drops nothing.
+  // clock run that read the same page stages, publishes and drops nothing.
   // The cursor moves on only once, and the sync's end is recorded only by
   // that run, right after its claim. A whole sync publishes what it
   // staged, all at once; one stopped at its bound publishes nothing, so

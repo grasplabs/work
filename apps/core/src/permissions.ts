@@ -7,6 +7,7 @@ import type {
   AuditEntry,
 } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { connectorEventActions } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import {
   appIdSchema,
@@ -658,7 +659,8 @@ const requireSenderFits = (
 /**
  * Refuses an object `subject` has no use for: what the platform offers is
  * for an App's code; a trigger only starts, so it holds `start` on a
- * workflow and nothing else; only an App sends a workflow's runs events; a store's own code reaches connections and
+ * workflow, and a connector trigger its event's read on its connection,
+ * and nothing else; only an App sends a workflow's runs events; a store's own code reaches connections and
  * collections alone. Only an agent writes a collection: an App, a workflow
  * and a store only read one (their collection stubs have no write), and
  * keep what they write in a business store, so `write` would give them
@@ -677,12 +679,17 @@ const requireObjectFits = (
   if (object.type === "platform" && subject.type !== "app" && !brainReader) {
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
+  // A connector trigger also hears its connection's events: which, the
+  // one its version names, is `requireTriggerPins`'s to check.
   if (
     subject.type === "trigger" &&
+    object.type !== "connection" &&
     (object.type !== "workflow" ||
       !actions.every((action) => action === "start"))
   ) {
-    refuseRequest("object: A trigger only starts a workflow.");
+    refuseRequest(
+      "object: A trigger only starts a workflow, or hears its connection's events."
+    );
   }
   requireSenderFits(subject, object, actions);
   if (
@@ -765,16 +772,75 @@ const requireStoreObject = async (
 };
 
 /**
+ * Refuses a connector trigger's grant on a connection but exactly the
+ * connection and part its current version names, for its event's read
+ * action alone.
+ */
+const requireTriggerHears = async (
+  env: Env,
+  triggerId: string,
+  object: Extract<PermissionObject, { type: "connection" }>,
+  actions: readonly string[]
+): Promise<void> => {
+  const heard = await drizzle(env.DB)
+    .select({
+      connectionId: triggerResourceVersions.connectionId,
+      resource: triggerResourceVersions.connectionResource,
+      eventType: triggerResourceVersions.eventType,
+    })
+    .from(triggerResources)
+    .innerJoin(
+      triggerResourceVersions,
+      and(
+        eq(triggerResourceVersions.triggerId, triggerResources.id),
+        eq(triggerResourceVersions.version, triggerResources.currentVersion)
+      )
+    )
+    .where(
+      and(
+        eq(triggerResources.id, triggerId),
+        eq(triggerResources.kind, "connector"),
+        isNull(triggerResources.deletedAt)
+      )
+    )
+    .get();
+  const action = Object.entries(connectorEventActions).find(
+    ([type]) => type === heard?.eventType
+  )?.[1];
+  if (
+    heard === undefined ||
+    heard.connectionId !== object.connectionId ||
+    heard.resource !== (object.resource ?? null) ||
+    action === undefined ||
+    actions.length !== 1 ||
+    actions[0] !== action
+  ) {
+    refuseRequest(
+      "object: A trigger's grant on a connection names its connection, and the read its event needs."
+    );
+  }
+};
+
+/**
  * Refuses a trigger's grant on any workflow but the one the trigger's
  * current version starts: a trigger starts one workflow, and its grant
- * names it. A trigger that isn't live names none.
+ * names it; on a connection, any but the one it hears
+ * (`requireTriggerHears`). A trigger that isn't live names none.
  */
 const requireTriggerPins = async (
   env: Env,
   subject: PermissionSubject,
-  object: PermissionObject
+  object: PermissionObject,
+  actions: readonly string[]
 ): Promise<void> => {
-  if (subject.type !== "trigger" || object.type !== "workflow") {
+  if (subject.type !== "trigger") {
+    return;
+  }
+  if (object.type === "connection") {
+    await requireTriggerHears(env, subject.triggerId, object, actions);
+    return;
+  }
+  if (object.type !== "workflow") {
     return;
   }
   const pinned = await drizzle(env.DB)
@@ -851,7 +917,7 @@ export const requestPermission = async (
   );
   await requireSubjectBuilder(subject, roles);
   requireObjectFits(subject, object, actions);
-  await requireTriggerPins(env, subject, object);
+  await requireTriggerPins(env, subject, object, actions);
   if (object.type === "workflow") {
     // Only someone with a role in the workflow names it: anyone else is
     // told it doesn't exist, as for one that doesn't.

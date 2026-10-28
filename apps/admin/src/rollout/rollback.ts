@@ -1,56 +1,44 @@
 /**
- * Rolling a client back from a rollout: each of its Workers sent all its
- * traffic back to the version it ran before the rollout reached it
- * (`previous` on its target, src/rollout/targets.ts). Instant: the
- * versions are there, with their own secrets, so nothing is uploaded, and
- * so only while those secrets are still the current ones: the client's
- * secrets generation, and every shared secret Secrets Store holds. A
- * rollback never brings back a key that was rotated or replaced, and may
- * be revoked; rolling forward with the current secrets is the way then.
- * Migrations only expand for the release after, so the previous code runs
- * on the database the release left, as long as the previous release is
- * the one right before it (or the same one, after a secrets rollout,
- * once the store holds what the client ran before again); a client
- * further back isn't rolled back, and neither is one whose databases a
- * migration since contracted for the previous code, as its release
- * declares (src/deploy/compatibility.ts). Crons and Workflows stay as the
- * release set them.
+ * Rolling a client back from a rollout: its one operation taken back to
+ * the release it last ran whole before the rollout reached it (`previous`
+ * on its target, src/rollout/targets.ts), and run again for it
+ * (src/hosting/operation.ts). Every step of the operation runs, onto the
+ * same stable scripts and the client's own resources, with the client's
+ * secrets as they are now: a rollback never brings back a key that was
+ * rotated or replaced, so no check of what the previous versions ran is
+ * needed. What does stop it, before it claims the client:
+ * - the release before's code doesn't work with what the client runs, or
+ *   with its databases as the rollout's migrations left them
+ *   (`incompatible`, `schema_incompatible`, src/deploy/compatibility.ts);
+ * - the rollout's release added a Durable Object migration, which a script
+ *   never goes back past (`rollback_past_migration`);
+ * - something other than the rollout's release or the one before runs
+ *   now (`superseded`);
+ * - a secrets rollout ran the same release, so there's nothing to go back
+ *   to that keeps the secrets current (`nothing_to_roll_back`).
  *
  * A rollback is a runner like the others (src/runners.ts): a Workflow
  * instance, `RollbackClient`, that claims the client, taking it from the
- * rollout it rolls back even while that rollout is deploying it (but not
- * while it's making the client's resources or running its migrations),
- * and from no other runner still going. It checks it still holds the
- * client before each Worker it restores, and records the rollback only
- * while it does, in the same batch. The rollout checks it still holds the
- * client right before and after each change it makes live, and once it
- * lost the client it changes nothing (src/rollout/workflow.ts). A change
- * of the rollout's already on its way when the rollback took the client
- * can still land: right before it records and releases the client, the
- * rollback reads what runs again and puts its versions back where one
- * did. A change that lands after the rollback released the client isn't
- * put right (drift shows it as split or drifted), which takes one on its
- * way for longer than the rollback's whole run. Rolling a client back
- * stops its rollout, and ends its run while it deploys no client (as
- * when it waits for approval).
+ * rollout it rolls back even while that rollout is running its operation:
+ * the rollout's next check finds it lost the client and changes nothing
+ * more (`runner_replaced`), and the operation it left running is
+ * superseded by the rollback's. Its operation's probe passes before the
+ * client's hostname moves, as for any release. Rolling a client back stops
+ * its rollout, and ends its run while it deploys no client (as when it
+ * waits for approval).
  */
 import { log } from "@grasp-os/shared/log";
 import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
-import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
-import { z } from "zod";
+import { and, eq, inArray } from "drizzle-orm";
 
 import type { Staff } from "../access.ts";
-import type { CloudflareApi } from "../cloudflare/api.ts";
-import { deployVersion, liveVersion } from "../cloudflare/workers.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
-  auditEvents,
+  clientProvisions,
   clientRuns,
-  clients,
   clientWorkers,
-  releases,
   rollouts,
   rolloutTargets,
 } from "../db/schema.ts";
@@ -62,36 +50,32 @@ import {
 import {
   activityKeys,
   clientDomain,
-  deployerApi,
-  MissingStoreSecretError,
-  sharedStoreSecrets,
+  deployContext,
 } from "../deploy/context.ts";
-import {
-  errorCode,
-  latestDeployOf,
-  recordedPrintOf,
-} from "../deploy/deploy.ts";
+import { assertLimitEvidence, errorCode } from "../deploy/deploy.ts";
 import { DeployError } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
-import { mappedGeneration } from "../deploy/router.ts";
-import {
-  sealedSecretPrints,
-  sealedWorkerSecrets,
-} from "../deploy/sealed-secrets.ts";
-import { sharedSecretPrints } from "../deploy/secrets.ts";
-import type { DeploySecrets } from "../deploy/secrets.ts";
 import { deployOrder } from "../deploy/versions.ts";
+import { InventoryError } from "../hosting/inventory.ts";
+import {
+  assertCanRollBack,
+  ProvisionOperationError,
+  runClientProvision,
+  settledSends,
+  startClientRelease,
+  startedAs,
+} from "../hosting/operation.ts";
 import {
   claimRun,
   currentRun,
   hasEnded,
-  holdsClient,
   instanceStatus,
   releaseRun,
   stillHolds,
 } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import {
+  deployStepConfig,
   guarded,
   isEngineAbort,
   quickStep,
@@ -100,173 +84,11 @@ import {
 } from "../workflow-steps.ts";
 import { tellCore } from "./activity.ts";
 import { RolloutError } from "./errors.ts";
-import { recordedShared } from "./shared-secrets.ts";
-import { parsePrevious } from "./targets.ts";
-import type { PreviousRun } from "./targets.ts";
-
-/** A Worker to send all traffic back to its previous version. */
-export interface RestoredWorker {
-  app: string;
-  scriptName: string;
-  version: string;
-}
-
-/**
- * Sends all of each of `workers`' traffic to its version, in order,
- * unless it goes there already. Forced: the previous version's secrets
- * are meant (`deployVersion`). `stillHeld`, when given, is checked right
- * before each: once it says no, nothing more is restored
- * (`runner_replaced`).
- */
-export const restoreVersions = async (
-  api: CloudflareApi,
-  accountId: string,
-  workers: readonly RestoredWorker[],
-  message: string,
-  stillHeld?: () => Promise<boolean>
-): Promise<void> => {
-  for (const { scriptName, version } of workers) {
-    // oxlint-disable-next-line no-await-in-loop -- checked right before each
-    if (stillHeld !== undefined && !(await stillHeld())) {
-      throw stop("runner_replaced", "The rollback no longer holds the client");
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time, in order
-    if ((await liveVersion(api, accountId, scriptName)) !== version) {
-      // oxlint-disable-next-line no-await-in-loop -- one Worker at a time, in order
-      await deployVersion(api, accountId, scriptName, version, {
-        message,
-        force: true,
-      });
-    }
-  }
-};
-
-/**
- * The version each Worker was confirmed live on, by app: null when it
- * wasn't (its traffic split, or its deployments couldn't be read).
- */
-export type Confirmed = Record<string, string | null>;
-
-/** How often a rollback tries to read what a Worker runs once it restored it. */
-const confirmAttempts = 3;
-
-/** A Worker the rollback couldn't confirm, as its record stores it. */
-const unconfirmed = "unknown";
-
-/** Where the rollback's record stores what `app` was confirmed live on. */
-const confirmedKey = (app: string): string => `confirmed_${app}`;
-
-/**
- * The version `scriptName` sends all its traffic to, read live, tried a
- * few times: null when its traffic is split, or it couldn't be read. A
- * read that fails never fails the restore it follows.
- */
-const confirmLive = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptName: string
-): Promise<string | null> => {
-  for (let attempt = 1; attempt <= confirmAttempts; attempt += 1) {
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- tried again only on failure
-      return (await liveVersion(api, accountId, scriptName)) ?? null;
-    } catch (error) {
-      log.warn("rollback.unconfirmed", {
-        scriptName,
-        attempt,
-        error: errorCode(error),
-      });
-    }
-  }
-  return null;
-};
-
-/** What each of `workers` is confirmed live on (`confirmLive`), by app. */
-const confirmVersions = async (
-  api: CloudflareApi,
-  accountId: string,
-  workers: readonly RestoredWorker[]
-): Promise<Confirmed> =>
-  Object.fromEntries(
-    await Promise.all(
-      workers.map(
-        async ({ app, scriptName }): Promise<[string, string | null]> => [
-          app,
-          await confirmLive(api, accountId, scriptName),
-        ]
-      )
-    )
-  );
-
-const detailSchema = z.record(z.string(), z.unknown());
-
-/**
- * What rollback of client `clientId` from rollout `rolloutId` stored as
- * confirmed live when it recorded itself (`recordRollback`): read back,
- * never live again once the client is released.
- */
-const storedConfirmed = async (
-  db: AdminDatabase,
-  rolloutId: string,
-  clientId: string,
-  workers: readonly RestoredWorker[]
-): Promise<Confirmed> => {
-  const [row] = await db
-    .select({ detail: auditEvents.detail })
-    .from(auditEvents)
-    .where(
-      and(
-        eq(auditEvents.clientId, clientId),
-        eq(auditEvents.target, rolloutId),
-        eq(auditEvents.action, "rollout.client_rolled_back")
-      )
-    )
-    // Newest first, as every read of the audit log orders it: by time,
-    // then in the order written.
-    .orderBy(desc(auditEvents.at), desc(sql`rowid`))
-    .limit(1);
-  const parsed = detailSchema.safeParse(JSON.parse(row?.detail ?? "null"));
-  const detail = parsed.success ? parsed.data : {};
-  return Object.fromEntries(
-    workers.map(({ app }) => {
-      const value = detail[confirmedKey(app)];
-      return [
-        app,
-        typeof value === "string" && value !== unconfirmed ? value : null,
-      ];
-    })
-  );
-};
-
-/**
- * Client `clientId`'s Workers as a rollback of release `releaseId` puts
- * them back: each Worker before those it binds (core before connect),
- * the reverse of a deploy's order, so no Worker runs against one newer
- * than itself.
- */
-export const workersToRestore = async (
-  db: AdminDatabase,
-  clientId: string,
-  releaseId: string,
-  previous: PreviousRun
-): Promise<RestoredWorker[]> => {
-  const manifest = await importedManifest(db, releaseId);
-  const scripts = await db
-    .select({ app: clientWorkers.worker, scriptName: clientWorkers.scriptName })
-    .from(clientWorkers)
-    .where(eq(clientWorkers.clientId, clientId));
-  const order = deployOrder(manifest?.workers ?? {}).toReversed();
-  return scripts
-    .toSorted((a, b) => order.indexOf(a.app) - order.indexOf(b.app))
-    .flatMap(({ app, scriptName }) => {
-      const version = previous.versions[app];
-      return version === undefined ? [] : [{ app, scriptName, version }];
-    });
-};
+import { parsePrevious, targetClient } from "./targets.ts";
 
 /**
  * A target's statuses once a step of the rollout's started on it: what can
- * be rolled back, if its traffic moved (`check`).
+ * be rolled back (`check`).
  */
 const reached = ["deploying", "done", "failed", "stopped"] as const;
 
@@ -278,93 +100,54 @@ const wasReached = (status: string): boolean =>
 const newRollbackId = (): string =>
   `rollback-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
 
-/** The steps of a deploy before anything of it is live: a rollback waits them out. */
-const preparing: ReadonlySet<string | null> = new Set([null, "resources"]);
-
-/** What a rollback of a client works from, once checked. */
-interface Checked {
-  accountId: string;
-  previous: PreviousRun;
-  /** Its Workers, in the order a rollback restores them. */
-  workers: RestoredWorker[];
-}
-
 /**
- * Whether `previous` is the release built right before release
- * `releaseId`: the only one whose code the release's migrations still
- * serve (they expand for it, and contract only in the release after).
+ * Throws unless release `back`'s code works with client `clientId` as the
+ * rollout's release `from` left it: with what it runs, its Workers taken
+ * back one at a time in the order its operation uploads them (connect,
+ * then core, which binds it), and on its databases' schemas
+ * (src/deploy/compatibility.ts); and unless a script of it ran a Durable
+ * Object migration `back` doesn't have, as each was seen
+ * (`assertCanRollBack`). Refused too as a deploy refuses `back`: recording
+ * no limits (`release_without_limits`), raising one without evidence
+ * (`limit_evidence_missing`), or past a release not imported
+ * (`release_history_incomplete`, src/releases/limits.ts).
  */
-const isReleaseBefore = async (
-  db: AdminDatabase,
-  releaseId: string,
-  previous: string | null
-): Promise<boolean> => {
-  const [release] = await db
-    .select({ builtAt: releases.builtAt })
-    .from(releases)
-    .where(eq(releases.id, releaseId));
-  if (release === undefined || previous === null) {
-    return false;
-  }
-  const [before] = await db
-    .select({ id: releases.id })
-    .from(releases)
-    .where(lt(releases.builtAt, release.builtAt))
-    .orderBy(desc(releases.builtAt))
-    .limit(1);
-  return before?.id === previous;
-};
-
-/**
- * Whether any of `workers` in account `accountId` isn't sending all its
- * traffic to its previous version, read live from the account: the
- * truth of what a rollback would change, whatever was or wasn't recorded
- * (an upload can go live and the write after it fail).
- */
-const movedOffPrevious = async (
-  api: CloudflareApi,
-  accountId: string,
-  workers: readonly RestoredWorker[]
-): Promise<boolean> => {
-  const live = await Promise.all(
-    workers.map(
-      async ({ scriptName }) => await liveVersion(api, accountId, scriptName)
-    )
-  );
-  return workers.some(({ version }, index) => live[index] !== version);
-};
-
-/**
- * Refuses (`incompatible`, `schema_incompatible`) going back to
- * `previous` from release `releaseId`, the rollout's, when its code
- * doesn't work with what client `clientId` runs now, with `workers`
- * restored one at a time, in order, or on the schemas its databases are
- * at (src/deploy/compatibility.ts). Each Worker it restores is taken to run
- * the rollout's release, whatever its record says: a version can go live
- * and the write after it fail, and the record lags what runs.
- */
-const assertCompatible = async (
+const assertCanGoBack = async (
   db: AdminDatabase,
   clientId: string,
-  releaseId: string,
-  previous: PreviousRun,
-  workers: readonly RestoredWorker[]
+  from: string,
+  back: string
 ): Promise<void> => {
   const [before, rolledOut] = await Promise.all([
-    previous.release === null ? null : importedManifest(db, previous.release),
-    importedManifest(db, releaseId),
+    importedManifest(db, back),
+    importedManifest(db, from),
   ]);
   if (before === null) {
-    return;
+    throw new RolloutError(
+      "release_not_imported",
+      `Release ${back} isn't imported`
+    );
+  }
+  try {
+    await assertCanRollBack(db, clientId, back);
+  } catch (error) {
+    if (
+      error instanceof ProvisionOperationError &&
+      error.code === "rollback_past_migration"
+    ) {
+      throw new RolloutError("rollback_past_migration", error.message);
+    }
+    throw error;
   }
   const current = await currentReleases(db, clientId);
-  for (const { app } of workers) {
+  const apps = deployOrder(before.workers);
+  for (const app of apps) {
     current.set(app, rolledOut);
   }
   const refused = incompatibility(
     current,
     before,
-    workers.map(({ app }) => app),
+    apps,
     await appliedSchema(db, clientId)
   );
   if (refused !== null) {
@@ -372,176 +155,48 @@ const assertCompatible = async (
       refused.code === "schema_incompatible"
         ? "schema_incompatible"
         : "incompatible",
-      `${clientId} can't go back to ${previous.release ?? ""}: ${refused.message}`
+      `${clientId} can't go back to ${back}: ${refused.message}`
     );
   }
-};
-
-/**
- * Refuses (`shared_secret_replaced`) putting `workers`' versions of client
- * `clientId` back unless each runs, of every shared secret it holds, the
- * value Secrets Store holds now: the fingerprints its deploy recorded for
- * it against the store's (`sharedSecretPrints`), secret by secret. A
- * provider key staff replaced, and may have revoked at the provider, never
- * comes back with a version that ran it. A version with no fingerprints on
- * record (one the admin didn't make, or made before it recorded them)
- * proves nothing of what it runs, so it's refused too. A secret the store
- * holds and a version doesn't brings no old key back: its code never read
- * it. `secrets` is what Secrets Store holds now (`storeSecretsNow`).
- */
-const assertSharedCurrent = async (
-  db: AdminDatabase,
-  clientId: string,
-  workers: readonly RestoredWorker[],
-  secrets: Pick<DeploySecrets, "clientKey" | "shared">
-): Promise<void> => {
-  const stale = await Promise.all(
-    workers.map(async ({ app, version }) => {
-      const [recorded, store] = await Promise.all([
-        recordedShared(db, clientId, app, version),
-        sharedSecretPrints(secrets, app),
-      ]);
-      return (
-        recorded === null ||
-        Object.entries(recorded).some(([name, print]) => store[name] !== print)
-      );
-    })
-  );
-  if (stale.some(Boolean)) {
-    throw new RolloutError(
-      "shared_secret_replaced",
-      `${clientId}'s previous versions don't run the shared secrets in Secrets Store now`
-    );
-  }
-};
-
-/**
- * The secrets in Secrets Store a rollback compares versions against.
- * Refused as a secrets rollout's start is (`secrets_store_incomplete`)
- * while the store is missing one, or the key the fingerprints are made
- * with: there's nothing to compare against.
- */
-const storeSecretsNow = async (
-  env: Env
-): Promise<Pick<DeploySecrets, "clientKey" | "shared">> => {
+  // Made live again as any release is: not one from before limits were
+  // recorded, nor one raising a limit without evidence.
   try {
-    return await sharedStoreSecrets(env);
+    await assertLimitEvidence(db, clientId, back);
   } catch (error) {
-    if (error instanceof MissingStoreSecretError) {
-      throw new RolloutError("secrets_store_incomplete", error.message);
+    if (
+      error instanceof DeployError &&
+      (error.code === "limit_evidence_missing" ||
+        error.code === "release_without_limits" ||
+        error.code === "release_history_incomplete")
+    ) {
+      throw new RolloutError(error.code, error.message);
     }
     throw error;
   }
 };
 
-const sealedPrintsSchema = z.record(z.string(), z.string());
-
 /**
- * The fingerprints of the sealed secrets (src/deploy/sealed-secrets.ts)
- * the deploy that uploaded client `clientId`'s version `version` of `app`
- * recorded, by name: none for a version recorded before deploys recorded
- * them, which ran none, as no client had one then.
- */
-const recordedSealed = async (
-  db: AdminDatabase,
-  clientId: string,
-  app: string,
-  version: string
-): Promise<Record<string, string>> => {
-  const text = await recordedPrintOf(db, clientId, app, version, "sealed");
-  const parsed = sealedPrintsSchema.safeParse(JSON.parse(text ?? "{}"));
-  return parsed.success ? parsed.data : {};
-};
-
-/**
- * Refuses (`sealed_secret_replaced`) putting `workers`' versions of client
- * `clientId` back unless each runs, of every sealed secret of the
- * client's it carries (its Teams bot's), the one the admin holds now: the
- * fingerprints its deploy recorded against those of the client's sealed
- * secrets, opened, secret by secret. A bot secret staff replaced, and may
- * have revoked in the client's Entra, never comes back with a version
- * that ran it. A secret set since that a version doesn't carry brings no
- * old one back, and the rollback marks the client's settings pending, so
- * its next deploy carries it again. One that no longer opens
- * (`CLIENT_KEY` changed) proves nothing of what a version carries, so a
- * version carrying any is refused then.
- */
-const assertSealedCurrent = async (
-  db: AdminDatabase,
-  clientId: string,
-  workers: readonly RestoredWorker[],
-  clientKey: string
-): Promise<void> => {
-  const stale = await Promise.all(
-    workers.map(async ({ app, version }) => {
-      const recorded = await recordedSealed(db, clientId, app, version);
-      if (Object.keys(recorded).length === 0) {
-        return false;
-      }
-      let now: Record<string, string>;
-      try {
-        now = await sealedSecretPrints(
-          clientKey,
-          await sealedWorkerSecrets(db, clientKey, clientId, app)
-        );
-      } catch (error) {
-        if (
-          error instanceof DeployError &&
-          error.code === "sealed_secret_unreadable"
-        ) {
-          return true;
-        }
-        throw error;
-      }
-      return Object.entries(recorded).some(
-        ([name, print]) => now[name] !== print
-      );
-    })
-  );
-  if (stale.some(Boolean)) {
-    throw new RolloutError(
-      "sealed_secret_replaced",
-      `${clientId}'s previous versions don't run the Teams bot secret the admin holds now`
-    );
-  }
-};
-
-/**
- * Checks that client `clientId` can be rolled back from rollout
- * `rolloutId`: the rollout reached it and recorded what it ran before,
- * and a Worker of the client isn't serving its previous version, read
- * live from its account (`nothing_to_roll_back`: otherwise there's
- * nothing to undo), the rollout's deploy is still its latest
- * (`superseded`) and past its resources and migrations
- * (`client_busy`: nothing of it is live before), what it ran before is the release right
- * before the rollout's, or the same one (`too_far_back`), whose code works
- * with what the client runs now, restored in the rollback's order
- * (`incompatible`, src/deploy/compatibility.ts), and runs on its
- * databases' schemas (`schema_incompatible`), and its secrets generation is
- * the one the previous versions carry, in the admin and the router's
- * map (`rotated_since`: the router would send a secret they don't have),
- * and they run the shared secrets Secrets Store holds now
- * (`shared_secret_replaced`, `assertSharedCurrent`) and the client's
- * sealed secrets the admin holds now (`sealed_secret_replaced`,
- * `assertSealedCurrent`).
+ * The release client `clientId`'s rollback from rollout `rolloutId` takes
+ * it back to, once everything that stops it is ruled out (see the header).
+ * Refused (`nothing_to_roll_back`) when the rollout didn't reach it or
+ * recorded nothing to go back to, or it's no placed active client.
  */
 const check = async (
-  env: Env,
-  api: CloudflareApi,
+  db: AdminDatabase,
   rolloutId: string,
   clientId: string
-): Promise<Checked> => {
-  const db = adminDatabase(env.DB);
+): Promise<string> => {
   const [target] = await db
     .select({
       status: rolloutTargets.status,
       deployId: rolloutTargets.deployId,
+      change: rolloutTargets.change,
+      rollbackChange: rolloutTargets.rollbackChange,
       previous: rolloutTargets.previous,
-      generation: clients.generation,
-      accountId: clients.accountId,
+      releaseId: rollouts.releaseId,
     })
     .from(rolloutTargets)
-    .innerJoin(clients, eq(clients.id, rolloutTargets.clientId))
+    .innerJoin(rollouts, eq(rollouts.id, rolloutTargets.rolloutId))
     .where(
       and(
         eq(rolloutTargets.rolloutId, rolloutId),
@@ -549,68 +204,49 @@ const check = async (
       )
     );
   const previous = parsePrevious(target?.previous ?? null);
+  const back = previous?.release ?? null;
+  const client = await targetClient(db, clientId);
+  const operation = client?.operation ?? null;
   if (
     target === undefined ||
-    previous === null ||
+    back === null ||
     target.deployId === null ||
-    !wasReached(target.status)
+    !wasReached(target.status) ||
+    operation === null ||
+    client?.status !== "active"
   ) {
     throw new RolloutError(
       "nothing_to_roll_back",
       `Rollout ${rolloutId} has nothing of ${clientId}'s to roll back`
     );
   }
-  const latest = await latestDeployOf(db, clientId);
-  if (latest?.id !== target.deployId) {
-    throw new RolloutError(
-      "superseded",
-      `A newer deploy of ${clientId} went out after rollout ${rolloutId}`
-    );
-  }
-  if (latest.status === "running" && preparing.has(latest.step)) {
-    throw new RolloutError(
-      "client_busy",
-      `Rollout ${rolloutId} is still preparing ${clientId}: nothing of it is live yet`
-    );
-  }
-  const workers = await workersToRestore(
-    db,
-    clientId,
-    latest.releaseId,
-    previous
-  );
-  if (!(await movedOffPrevious(api, target.accountId, workers))) {
+  // A secrets rollout ran the release the client ran: going back to it
+  // with the secrets current changes nothing.
+  const rolledOut = target.releaseId ?? back;
+  if (rolledOut === back) {
     throw new RolloutError(
       "nothing_to_roll_back",
-      `${clientId} runs what it ran before rollout ${rolloutId} already`
+      `${clientId} ran ${back} before rollout ${rolloutId} too`
     );
   }
-  // A secrets rollout's client ran the same release before: its code
-  // runs on the database as it is.
+  // Only while the change the rollout started is still the client's
+  // latest: any release, run again or rollback since raised it, whatever
+  // release it went to. Or the latest is this rollback's own, which
+  // failed: retried, it goes on with that change (`runBack`).
+  const rollbacksOwn =
+    target.rollbackChange !== null &&
+    operation.change === target.rollbackChange;
   if (
-    previous.release !== latest.releaseId &&
-    !(await isReleaseBefore(db, latest.releaseId, previous.release))
+    !rollbacksOwn &&
+    (target.change === null || operation.change !== target.change)
   ) {
     throw new RolloutError(
-      "too_far_back",
-      `${clientId} ran ${previous.release ?? "several releases"} before, not the release right before ${latest.releaseId}: roll out instead`
+      "superseded",
+      `${clientId} changed after rollout ${rolloutId}`
     );
   }
-  await assertCompatible(db, clientId, latest.releaseId, previous, workers);
-  const mapped = await mappedGeneration(
-    env.ROUTER_HOSTS,
-    `${clientId}.${clientDomain(env) ?? ""}`
-  );
-  if (mapped !== previous.generation || target.generation !== mapped) {
-    throw new RolloutError(
-      "rotated_since",
-      `${clientId}'s secrets rotated after rollout ${rolloutId} reached it`
-    );
-  }
-  const secrets = await storeSecretsNow(env);
-  await assertSharedCurrent(db, clientId, workers, secrets);
-  await assertSealedCurrent(db, clientId, workers, secrets.clientKey);
-  return { accountId: target.accountId, previous, workers };
+  await assertCanGoBack(db, clientId, rolledOut, back);
+  return back;
 };
 
 /** Releases client `clientId` from runner `runId`, logging a failure to. */
@@ -640,10 +276,9 @@ export interface RollbackParams {
 /**
  * Rolls client `clientId` back from rollout `rolloutId`, as `staff`:
  * claims the client, audited as `rollout.rollback`, and starts the
- * rollback's run (`RollbackClient`), whose id it returns; the run puts
- * the previous versions back in seconds. Refused when the client can't
- * be (`check`), and while a runner other than this rollout has it
- * (`client_busy`).
+ * rollback's run (`RollbackClient`), whose id it returns. Refused when the
+ * client can't be (`check`), and while a runner other than this rollout
+ * has it (`client_busy`).
  */
 export const rollbackClient = async (
   env: Env,
@@ -652,12 +287,7 @@ export const rollbackClient = async (
   clientId: string
 ): Promise<string> => {
   const db = adminDatabase(env.DB);
-  const { previous } = await check(
-    env,
-    await deployerApi(env),
-    rolloutId,
-    clientId
-  );
+  const back = await check(db, rolloutId, clientId);
   const busy = new RolloutError(
     "client_busy",
     `${clientId} has another runner`
@@ -675,7 +305,7 @@ export const rollbackClient = async (
       action: "rollout.rollback",
       clientId,
       target: rolloutId,
-      detail: { release: previous.release ?? "unknown" },
+      detail: { release: back },
     },
     { kind: "rollback", runId: newRollbackId() }
   );
@@ -698,27 +328,124 @@ export const rollbackClient = async (
 };
 
 /**
- * Records rollback `held` of client `held.clientId` from rollout
- * `rolloutId`, audited: its target `rolled_back`, the admin's record of
- * its Workers back on the previous versions, the rollout stopped
- * (`cancelled`), its config marked changed (the previous versions carry
- * the sign-in of their own deploy, not staff's latest, so the
- * next rollout or apply deploys them again), and the client released.
- * All of it only while the rollback still holds the client, in the same
- * batch: one that lost it changes nothing (`runner_replaced`).
+ * Takes client `held.clientId`'s operation back to release `back` as
+ * rollback `held`, and runs it, by what its operation recorded first, so
+ * a retry after any part of it does the rest and nothing twice:
+ * - the rollout's change still the latest: once any call the rollout's
+ *   run sent to the client's Workers has landed (`settledSends`), the
+ *   rollout's operation, if still running, is stopped (the rollout lost
+ *   the client), and the rollback started, a change of its own,
+ *   recorded on the target in the batch that starts it;
+ * - its own change, as recorded, still the latest on `back`: already
+ *   started, it's run (resumed, or nothing left to do once done), a
+ *   rollback that failed and is asked again included;
+ * - anything else changed it since: refused (`superseded`).
+ * The operation's own failures and the inventory's stop the step at once.
+ */
+const runBack = async (
+  env: Env,
+  params: RollbackParams,
+  held: HeldClient,
+  back: string
+): Promise<void> => {
+  const db = adminDatabase(env.DB);
+  const [target] = await db
+    .select({
+      change: rolloutTargets.change,
+      rollbackChange: rolloutTargets.rollbackChange,
+    })
+    .from(rolloutTargets)
+    .where(
+      and(
+        eq(rolloutTargets.rolloutId, params.rolloutId),
+        eq(rolloutTargets.clientId, held.clientId)
+      )
+    );
+  const operation = await db
+    .select({
+      releaseId: clientProvisions.releaseId,
+      change: clientProvisions.change,
+    })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, held.clientId))
+    .get();
+  const rolloutsChange = target?.change ?? null;
+  // Its own change, recorded on the target in the batch that started it.
+  const rollbacksChange = target?.rollbackChange ?? null;
+  const started =
+    rollbacksChange !== null &&
+    operation?.change === rollbacksChange &&
+    operation.releaseId === back;
+  if (!started && operation?.change !== rolloutsChange) {
+    throw stop(
+      "superseded",
+      `${held.clientId} changed after rollout ${params.rolloutId}`
+    );
+  }
+  try {
+    const context = await deployContext(env);
+    if (!started) {
+      // A call the rollout's run sent before the rollback took the client
+      // can't be stopped, only waited for: it lands before the rollback's
+      // own, so none lands after them and undoes them.
+      await settledSends(context, held.clientId, rolloutsChange ?? -1);
+      await db
+        .update(clientProvisions)
+        .set({ status: "failed", error: "rolled_back", updatedAt: new Date() })
+        .where(
+          and(
+            eq(clientProvisions.clientId, held.clientId),
+            eq(clientProvisions.status, "running"),
+            eq(clientProvisions.change, rolloutsChange ?? -1),
+            stillHolds(held)
+          )
+        );
+      await startClientRelease(db, params.startedBy, held, {
+        releaseId: back,
+        rollback: true,
+        alongside: (begun) => [
+          db
+            .update(rolloutTargets)
+            .set({ rollbackChange: begun.change, updatedAt: new Date() })
+            .where(
+              and(
+                eq(rolloutTargets.rolloutId, params.rolloutId),
+                eq(rolloutTargets.clientId, held.clientId),
+                stillHolds(held),
+                startedAs(begun)
+              )
+            ),
+        ],
+      });
+    }
+    // A rollback isn't rolled back on its own: staff see it fail.
+    await runClientProvision(context, held, {
+      rollBackOnProbe: false,
+    });
+  } catch (error) {
+    if (
+      error instanceof ProvisionOperationError ||
+      error instanceof InventoryError
+    ) {
+      throw stop(error.code, error.message);
+    }
+    throw error;
+  }
+};
+
+/**
+ * Records client `clientId`'s rollback from rollout `rolloutId`, audited
+ * once: its target `rolled_back` and the rollout stopped (`cancelled`). Its
+ * operation, done on the release before, released the client already.
  */
 const recordRollback = async (
   db: AdminDatabase,
   params: RollbackParams,
-  held: HeldClient,
-  previous: PreviousRun,
-  workers: readonly RestoredWorker[],
-  confirmed: Confirmed
+  back: string
 ): Promise<void> => {
   const { rolloutId, clientId, startedBy } = params;
   const now = new Date();
-  const holding = stillHolds(held);
-  const recorded = await actIfChanged(
+  await actIfChanged(
     db,
     startedBy,
     db
@@ -728,92 +455,26 @@ const recordRollback = async (
         and(
           eq(rolloutTargets.rolloutId, rolloutId),
           eq(rolloutTargets.clientId, clientId),
-          inArray(rolloutTargets.status, [...reached]),
-          holding
+          inArray(rolloutTargets.status, [...reached])
         )
       ),
     {
       action: "rollout.client_rolled_back",
       clientId,
       target: rolloutId,
-      detail: {
-        release: previous.release ?? "unknown",
-        ...Object.fromEntries(
-          workers.map(({ app, version }) => [app, version])
-        ),
-        // What each Worker was confirmed live on before the release below:
-        // what the client's Activity is told, now and on any rerun.
-        ...Object.fromEntries(
-          workers.map(({ app }) => [
-            confirmedKey(app),
-            confirmed[app] ?? unconfirmed,
-          ])
-        ),
-      },
+      detail: { release: back },
     },
     [
-      ...workers.map(({ scriptName, version }) =>
-        db
-          .update(clientWorkers)
-          .set({
-            releaseId: previous.release,
-            versionId: version,
-            deployedAt: now,
-          })
-          .where(
-            and(
-              eq(clientWorkers.clientId, clientId),
-              eq(clientWorkers.scriptName, scriptName),
-              holding
-            )
-          )
-      ),
-      db
-        .update(clients)
-        .set({ configChangedAt: now, updatedAt: now })
-        .where(and(eq(clients.id, clientId), holding)),
       db
         .update(rollouts)
         .set({ status: "cancelled", updatedAt: now })
         .where(
           and(
             eq(rollouts.id, rolloutId),
-            inArray(rollouts.status, ["running", "waiting"]),
-            holding
+            inArray(rollouts.status, ["running", "waiting"])
           )
         ),
-      // Last: everything above reads the claim this removes.
-      releaseRun(db, clientId, held.runId),
     ]
-  );
-  if (!recorded) {
-    throw stop("runner_replaced", "The rollback no longer holds the client");
-  }
-};
-
-/**
- * Whether rollback `held` recorded itself already: its client's target is
- * rolled back and the rollback no longer holds the client, as its record
- * batch leaves them in one go. A record step run again after that batch
- * committed (its result lost) finds it so, and is done.
- */
-const recordedAlready = async (
-  db: AdminDatabase,
-  rolloutId: string,
-  held: HeldClient
-): Promise<boolean> => {
-  const [target] = await db
-    .select({ status: rolloutTargets.status })
-    .from(rolloutTargets)
-    .where(
-      and(
-        eq(rolloutTargets.rolloutId, rolloutId),
-        eq(rolloutTargets.clientId, held.clientId)
-      )
-    );
-  return (
-    target?.status === "rolled_back" &&
-    !(await holdsClient(db, held.clientId, held.runId))
   );
 };
 
@@ -821,9 +482,8 @@ const recordedAlready = async (
  * Resumes cancelled rollout `rolloutId`'s run if staff paused it (or asked
  * to), so it goes on to its next step, where it finds the rollout
  * cancelled and ends the client it's on by the cancellation rule
- * (src/rollout/workflow.ts): stopped or skipped, its deploy cancelled and
- * the client released. Paused, it would never get there, and would hold
- * the client and leave the rollout open. Whichever of a pause and a
+ * (src/rollout/workflow.ts). Paused, it would never get there, and would
+ * hold the client and leave the rollout open. Whichever of a pause and a
  * rollback's cancel lands second calls it, so the run can't stay paused.
  */
 export const goOnToStop = async (
@@ -847,12 +507,11 @@ export const goOnToStop = async (
 /**
  * Ends rollout `rolloutId`'s run if the rollout is cancelled, its run
  * hasn't ended, and it's working on none of its clients: none deploying,
- * and none claimed (it claims a client before it marks it deploying), as
- * while it waits for approval, when it would only idle until its wait
- * timed out. A run working on a client is left to stop by itself at its
- * next step (src/rollout/workflow.ts), releasing the client, so no client
- * is left claimed by an ended run or part way; one staff paused would
- * never reach that step, so it's resumed to (`goOnToStop`).
+ * and none claimed, as while it waits for approval, when it would only
+ * idle until its wait timed out. A run working on a client is left to
+ * stop by itself at its next step (src/rollout/workflow.ts), releasing the
+ * client; one staff paused would never reach that step, so it's resumed
+ * to (`goOnToStop`).
  */
 const endIdleRollout = async (env: Env, rolloutId: string): Promise<void> => {
   const db = adminDatabase(env.DB);
@@ -898,15 +557,32 @@ const endIdleRollout = async (env: Env, rolloutId: string): Promise<void> => {
   }
 };
 
+/** The core version client `clientId` runs, as its operation's probe recorded it. */
+const coreVersionOf = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<string | null> => {
+  const row = await db
+    .select({ versionId: clientWorkers.versionId })
+    .from(clientWorkers)
+    .where(
+      and(
+        eq(clientWorkers.clientId, clientId),
+        eq(clientWorkers.worker, "core")
+      )
+    )
+    .get();
+  return row?.versionId ?? null;
+};
+
 /**
  * Rolling a client back, as a Cloudflare Workflow: an instance per
- * rollback, a runner of the client (src/runners.ts). It restores each
- * Worker's previous version while it holds the client, reads what runs
- * again and puts back any change that landed since, records it while it
- * still holds the client (a record step run again after its batch
- * committed is done), and ends the rollout's run while it deploys no
- * client (`endIdleRollout`). A rollback that fails, or lost the client,
- * releases it (if it still holds it) and records nothing.
+ * rollback, a runner of the client (src/runners.ts). It checks the client
+ * can go back, runs its operation for the release before (`runBack`),
+ * records it, ends the rollout's run while it deploys no client
+ * (`endIdleRollout`), and tells the client's core for its Activity. A
+ * rollback that fails, or lost the client, releases it (if it still holds
+ * it) and records nothing.
  */
 export class RollbackClient extends WorkflowEntrypoint<Env, RollbackParams> {
   override async run(
@@ -917,68 +593,24 @@ export class RollbackClient extends WorkflowEntrypoint<Env, RollbackParams> {
     const { rolloutId, clientId } = params;
     const held: HeldClient = { clientId, runId: event.instanceId };
     const db = adminDatabase(this.env.DB);
-    const holds = async () => await holdsClient(db, clientId, held.runId);
     try {
-      const plan = await step.do(
+      const back = await step.do(
         "plan",
         quickStep,
-        guarded(
-          async () =>
-            await check(
-              this.env,
-              await deployerApi(this.env),
-              rolloutId,
-              clientId
-            )
-        )
+        guarded(async () => await check(db, rolloutId, clientId))
       );
       await step.do(
-        "restore",
-        quickStep,
+        "run",
+        deployStepConfig,
         guarded(async () => {
-          await restoreVersions(
-            await deployerApi(this.env),
-            plan.accountId,
-            plan.workers,
-            `Rollback of rollout ${rolloutId}`,
-            holds
-          );
+          await runBack(this.env, params, held, back);
         })
       );
-      // What each Worker was confirmed live on, read last before the
-      // client was released and stored with the record: what the
-      // client's Activity is told.
-      const confirmed = await step.do(
+      await step.do(
         "record",
         quickStep,
-        guarded(async (): Promise<Confirmed> => {
-          // First: run again after its batch committed, it's done, and
-          // no longer holds the client it released; what it confirmed is
-          // what that batch stored, never read live after the release.
-          if (await recordedAlready(db, rolloutId, held)) {
-            return await storedConfirmed(db, rolloutId, clientId, plan.workers);
-          }
-          const api = await deployerApi(this.env);
-          // Read again, still holding the client, right before it's
-          // released: a traffic change of the rollout's that was on its
-          // way when the rollback took the client may have landed since.
-          await restoreVersions(
-            api,
-            plan.accountId,
-            plan.workers,
-            `Rollback of rollout ${rolloutId}`,
-            holds
-          );
-          const live = await confirmVersions(api, plan.accountId, plan.workers);
-          await recordRollback(
-            db,
-            params,
-            held,
-            plan.previous,
-            plan.workers,
-            live
-          );
-          return live;
+        guarded(async () => {
+          await recordRollback(db, params, back);
         })
       );
       await step.do(
@@ -989,30 +621,29 @@ export class RollbackClient extends WorkflowEntrypoint<Env, RollbackParams> {
         })
       );
       // In the client's own Activity too, as the platform update it is:
-      // told once it's done, of the core version confirmed live, and never
-      // failing it (`tellCore`: its keys are read inside it, so even their
-      // absence is only an unrecorded notice).
-      const core = plan.workers.find(({ app }) => app === "core");
-      if (core !== undefined) {
-        await step.do("tell core", quickStep, async () => {
-          const live = confirmed[core.app] ?? null;
-          await tellCore(
-            { db, secrets: async () => await activityKeys(this.env) },
-            clientId,
-            live,
-            {
-              by: params.startedBy.email,
-              what: "rollback",
-              // The previous release, if that's what core was confirmed on.
-              release:
-                live === core.version
-                  ? (plan.previous.release ?? "unknown")
-                  : "unknown",
-              at: new Date(event.timestamp).toISOString(),
-            }
-          );
-        });
-      }
+      // told once it's done, of the core version live, and never failing
+      // it (`tellCore`).
+      await step.do("tell core", quickStep, async () => {
+        await tellCore(
+          {
+            db,
+            secrets: async () => await activityKeys(this.env),
+            router: {
+              hosts: this.env.ROUTER_HOSTS,
+              domain: clientDomain(this.env),
+              dispatcher: this.env.DISPATCHER,
+            },
+          },
+          clientId,
+          await coreVersionOf(db, clientId),
+          {
+            by: params.startedBy.email,
+            what: "rollback",
+            release: back,
+            at: new Date(event.timestamp).toISOString(),
+          }
+        );
+      });
     } catch (error) {
       if (isEngineAbort(error)) {
         throw error;
@@ -1073,17 +704,16 @@ export const rollbackRing = async (
 };
 
 /** How long staff's rollback waits for its run, and how often it looks. */
-const rollbackWaitMs = 20_000;
+const rollbackWaitMs = 60_000;
 const rollbackPollMs = 500;
 
 /** A rollback run's statuses once it ended without finishing. */
 const failedRuns: ReadonlySet<string> = new Set(["errored", "terminated"]);
 
 /**
- * Waits for rollback run `runId` to end, up to `rollbackWaitMs` (its run
- * takes seconds), and returns whether it failed: errored, or ended
- * before it finished. One still going after that isn't failed, and the
- * page shows it as it is.
+ * Waits for rollback run `runId` to end, up to `rollbackWaitMs`, and
+ * returns whether it failed: errored, or ended before it finished. One
+ * still going after that isn't failed, and the page shows it as it is.
  */
 const rollbackFailed = async (env: Env, runId: string): Promise<boolean> => {
   const instance = await env.ROLLBACK_CLIENT.get(runId);
@@ -1123,9 +753,9 @@ export const rollbackClientAndWait = async (
 
 /**
  * Rolls ring `ring` of rollout `rolloutId` back, as `staff`
- * (`rollbackRing`), and waits for each client's run: one whose run
- * failed is listed as refused (`rollback_failed`), like one refused to
- * begin with.
+ * (`rollbackRing`), and waits for each client's run: one whose run failed
+ * is listed as refused (`rollback_failed`), like one refused to begin
+ * with.
  */
 export const rollbackRingAndWait = async (
   env: Env,

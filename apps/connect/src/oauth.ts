@@ -1009,7 +1009,7 @@ const stop = async (
   const db = drizzle(env.DB);
   // A Composio connection is stopped first, with its cleanup recorded in
   // the same transaction, and deleted at Composio only after: calls stop
-  // whatever becomes of that deletion, and the cron trigger retries it
+  // whatever becomes of that deletion, and the clock retries it
   // (src/composio-connections.ts). An OAuth grant is revoked first, as ever.
   const composio = connection.serverKind === "composio";
   const cleanupId = crypto.randomUUID();
@@ -1200,7 +1200,7 @@ export const disconnectPersonal = async (
 /**
  * Seals the verifiers of flows under way again with the current key, after
  * a rotation, as `resealTokens` does for tokens: a flow started just before
- * still finishes once the previous key is gone. The cron trigger calls it.
+ * still finishes once the previous key is gone. The clock calls it.
  */
 export const resealFlows = async (env: Env): Promise<void> => {
   const vault = await vaultFor(env);
@@ -1242,7 +1242,7 @@ export const resealFlows = async (env: Env): Promise<void> => {
   }
 };
 
-/** Deletes OAuth flows nobody finished in time. The cron trigger calls it. */
+/** Deletes OAuth flows nobody finished in time. The clock calls it. */
 export const purgeExpiredFlows = async (env: Env): Promise<void> => {
   await drizzle(env.DB)
     .delete(oauthFlows)

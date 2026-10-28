@@ -1,45 +1,40 @@
-import {
-  createExecutionContext,
-  createScheduledController,
-} from "cloudflare:test";
+import { runClockTasks } from "@grasp-os/workerflow/clock";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 
-import worker from "../src/index.ts";
+import { clockTasks, report } from "../src/clock.ts";
 
 /**
- * Runs core's cron trigger, as Cloudflare does every minute, on an env with
- * `changes`, for the minute `at` (now by default).
+ * Runs the clock's every-minute tasks once, as its alarm does, on an env
+ * with `changes`, for the minute `at` (now by default).
  */
-export const runCron = async (
+export const runMinuteTasks = async (
   changes: Partial<Env> = {},
   at = new Date()
 ): Promise<void> => {
-  await worker.scheduled(
-    createScheduledController({
-      cron: "* * * * *",
-      scheduledTime: at.getTime(),
-    }),
+  await runClockTasks(
     { ...env, ...changes },
-    createExecutionContext()
+    clockTasks,
+    "minute",
+    at.getTime(),
+    report
   );
 };
 
 /**
- * Runs core's cron trigger, as Cloudflare does every 15 minutes, on an env
+ * Runs the clock's quarter-hour tasks once, as its alarm does, on an env
  * with `changes`, for the time `at` (now by default).
  */
-export const runQuarterHourCron = async (
+export const runQuarterHourTasks = async (
   changes: Partial<Env> = {},
   at = new Date()
 ): Promise<void> => {
-  await worker.scheduled(
-    createScheduledController({
-      cron: "*/15 * * * *",
-      scheduledTime: at.getTime(),
-    }),
+  await runClockTasks(
     { ...env, ...changes },
-    createExecutionContext()
+    clockTasks,
+    "quarterHour",
+    at.getTime(),
+    report
   );
 };
 

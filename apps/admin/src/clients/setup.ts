@@ -157,9 +157,9 @@ export interface ClientSetup {
 
 /** What staff do to a client by hand, as its audit log names it. */
 const byHand: ReadonlySet<string> = new Set([
-  "client.provision_start",
-  "client.provision_retry",
-  "client.workers_paid",
+  "client.create",
+  "client.place",
+  "client.provision_placed",
   "client.ring",
   "client.pin",
   "client.unpin",

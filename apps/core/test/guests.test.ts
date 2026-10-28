@@ -864,7 +864,7 @@ describe("guest chats", { timeout: 60_000 }, () => {
     await sweepGuestChats(env, new Date(Date.now() + 29 * day));
     const before = [await readable(ended.id), await readable(open.id)];
     // A sweep deletes 100 at most, the oldest first, and the file's other
-    // tests left more than that: the cron's next runs take the rest.
+    // tests left more than that: the clock's next runs take the rest.
     const later = new Date(Date.now() + 31 * day);
     for (let run = 0; run < 4; run += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one run after another

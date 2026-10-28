@@ -17,6 +17,7 @@ import {
   mailboxAccount,
   outcome,
   ownAccount,
+  runMaintenance,
   someone,
   startAs,
   stateOf,
@@ -152,7 +153,7 @@ describe("sealed tokens", () => {
     await expect(accessTokenFor(rotated, connectionId)).rejects.toThrow(
       VaultError
     );
-    // The cron trigger seals them again; then the previous key can go.
+    // The clock seals them again; then the previous key can go.
     await resealTokens(rotating);
     const newVault = await vaultFor(rotated);
     const resealed = await tokenRow(connectionId);
@@ -498,7 +499,7 @@ describe("disconnecting", () => {
   });
 });
 
-describe("the cron trigger", () => {
+describe("the clock", () => {
   it("drops flows nobody finished in time", async () => {
     const person = someone();
     await startAs(person);
@@ -506,7 +507,7 @@ describe("the cron trigger", () => {
       .update(oauthFlows)
       .set({ expiresAt: new Date(Date.now() - 1) })
       .where(eq(oauthFlows.userId, person.userId));
-    await exports.default.scheduled();
+    await runMaintenance();
     await expect(
       drizzle(env.DB)
         .select()

@@ -5,6 +5,7 @@
  * them, as staff search the audit log and the code by them.
  */
 import type { InventoryErrorCode } from "./inventory.ts";
+import type { OffboardingErrorCode } from "./offboarding.ts";
 import type { ProvisionOperationErrorCode } from "./operation.ts";
 import type { DestinationProblem, PlaceRefusal } from "./placement.ts";
 import type { Capability } from "./policy.ts";
@@ -92,6 +93,12 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "The release doesn't work with what the client runs, or with itself.",
   schema_incompatible:
     "The release's code doesn't run on the client's databases as its migrations left them.",
+  release_without_limits:
+    "The release was built before platform limits were recorded, so it isn't made live.",
+  limit_evidence_missing:
+    "The release raises a platform limit without capacity and security evidence for this client's profile.",
+  release_history_incomplete:
+    "A release between where the client starts and this one isn't imported, so its evidence can't be read: import it first.",
   operation_release_changed:
     "Its provisioning is with another release: that release stays for the operation.",
   unknown_worker: "The release has a Worker other than core and connect.",
@@ -104,6 +111,8 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   upload_unobserved:
     "A script isn't at the release's Durable Object migration after its upload.",
   secrets_unobserved: "A script lacks a secret after it was delivered.",
+  secret_unrevoked:
+    "A script still has a secret it's no longer given after it was removed.",
   probe_unqualified:
     "There's no qualified way to probe core in a Workers for Platforms namespace yet, so its hostname stays unpublished.",
   probe_unanswered:
@@ -116,6 +125,18 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "Core's clock or connect's isn't armed with tasks after the probe.",
   runner_replaced: "Another attempt took the client over.",
   operation_gone: "The operation's record was gone before it was done.",
+  client_not_active:
+    "The client isn't live: provision it first, then release it.",
+  operation_running:
+    "Its operation is still running: wait for it to end, or resume it if it stopped.",
+  nothing_to_roll_back:
+    "There's no release before the one it runs to go back to.",
+  rollback_past_migration:
+    "The release since added Durable Object migrations, which a script never goes back past: release a fix instead.",
+  release_rolled_back:
+    "It failed its probe once live, so it was rolled back to the release before on its own: look at the release before releasing it again.",
+  release_behind_migration:
+    "That release lacks a Durable Object migration the client's scripts ran, which they never go back past: pick a later release.",
 };
 
 const knownWords: Readonly<Record<string, string>> = {
@@ -144,9 +165,31 @@ export const placeRefusals: Readonly<Record<PlaceRefusal, string>> = {
   no_automatic_destination:
     "There's no one shared destination to pick by itself: choose one.",
   other_run_held:
-    "The client was being provisioned in an account of its own: resume or end that first.",
+    "Another kind of run last worked on the client: let it end first.",
   already_running:
     "Something is working on the client already: wait for it to end.",
   not_provisioning:
     "The client isn't being provisioned: it's live or offboarded.",
 };
+
+/** What staff read when offboarding or deleting is refused, by its code. */
+export const offboardRefusals: Readonly<Record<OffboardingErrorCode, string>> =
+  {
+    client_unknown: "There's no such client.",
+    not_placed:
+      "It isn't placed in a hosting destination, which this offboarding is for.",
+    client_busy:
+      "Something is working on it right now: wait for that to end, then try again.",
+    not_offboarded: "It isn't offboarded: offboard it first.",
+    retention_running:
+      "Its resources are kept for 30 days after it was offboarded: try again once that's over.",
+    export_unconfirmed:
+      "Confirm that no export of it was made before deleting its resources.",
+    resource_not_owned:
+      "A resource recorded for it, or what its destination has under that name, isn't its own, so it was left: look at its inventory.",
+    destination_unsupported: "Its destination isn't one the admin deletes in.",
+    routing_unconfigured:
+      "The admin has no client domain set, so it can't take the client's hostname out of the router: set CLIENT_DOMAIN first.",
+    hostname_not_ours:
+      "Its hostname routes to another client in the router's map, so it was left: find out why before offboarding it.",
+  };

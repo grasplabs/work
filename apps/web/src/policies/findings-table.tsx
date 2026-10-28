@@ -26,8 +26,9 @@ import type { Finding } from "./policy.ts";
 
 // The apps that break a rule, as the prototype lists them
 // (`components/policies/findings-table.tsx`). The prototype allows an
-// exception, and ends one, from a row's menu; Grasp keeps no exceptions
-// yet, so the menu opens the app.
+// exception, and ends one, from a row's menu; here the menu opens the app
+// in the landscape. An app only the identity provider knows has no page
+// there yet, so it has no link and no menu.
 
 const FindingMenu = ({ finding }: { finding: Finding }) => {
   const { t } = useLingui();
@@ -124,13 +125,17 @@ export const FindingsTable = ({
                   <div className="flex min-w-0 items-center gap-3">
                     <AppLogo name={app.name} size="sm" />
                     <div className="flex min-w-0 flex-col">
-                      <Link
-                        className="truncate font-medium hover:underline"
-                        params={{ appId: app.id }}
-                        to="/landscape/$appId/overview"
-                      >
-                        {app.name}
-                      </Link>
+                      {app.kind === "integration" ? (
+                        <Link
+                          className="truncate font-medium hover:underline"
+                          params={{ appId: app.id }}
+                          to="/landscape/$appId/overview"
+                        >
+                          {app.name}
+                        </Link>
+                      ) : (
+                        <span className="truncate font-medium">{app.name}</span>
+                      )}
                       {app.vendor === null ? null : (
                         <span className="text-muted-foreground truncate">
                           {app.vendor}
@@ -163,17 +168,19 @@ export const FindingsTable = ({
                 </TableCell>
                 <TableCell className="hidden @xl:table-cell" variant="roomy">
                   <span className="text-muted-foreground tabular-nums">
-                    {app.users === null ? (
+                    {app.people === null ? (
                       <Trans context="usage of an app, which nothing measures yet">
                         Unknown
                       </Trans>
                     ) : (
-                      plural(app.users, { one: "# person", other: "# people" })
+                      plural(app.people, { one: "# person", other: "# people" })
                     )}
                   </span>
                 </TableCell>
                 <TableCell className="text-right" variant="end">
-                  <FindingMenu finding={finding} />
+                  {app.kind === "integration" ? (
+                    <FindingMenu finding={finding} />
+                  ) : null}
                 </TableCell>
               </TableRow>
             );

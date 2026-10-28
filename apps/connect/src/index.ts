@@ -77,7 +77,7 @@ import { keptChange } from "./changes.ts";
 import { channelSigningKeys } from "./channel-keys.ts";
 import { channelFetch } from "./channels.ts";
 import { requireClassRights } from "./class-rights.ts";
-import { clock, tickClock } from "./clock.ts";
+import { clock } from "./clock.ts";
 import {
   finishToolkitFlow,
   startToolkitConnection,
@@ -151,6 +151,7 @@ import {
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
+import { probeBindings } from "./probe.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
 export { ConnectorEgress } from "./egress.ts";
@@ -273,23 +274,6 @@ export default class Connect
   }
 
   /**
-   * Every minute: the clock's explicit tick (src/clock.ts), which drops
-   * OAuth and Composio flows nobody finished, deletes at Composio what
-   * earlier tries couldn't, and seals what a rotated key sealed again.
-   */
-  override async scheduled(controller?: ScheduledController): Promise<void> {
-    try {
-      await tickClock(
-        this.env,
-        this.ctx,
-        controller?.scheduledTime ?? Date.now()
-      );
-    } catch (error) {
-      log.error("cron.failed", errorFields(error));
-    }
-  }
-
-  /**
    * Arms connect's clock if nothing has: core's clock asks every minute
    * (core's src/clock.ts), the repair path that starts it on a new
    * deployment and after anything cleared its alarm. Reports it as it
@@ -300,7 +284,15 @@ export default class Connect
     return await clock(this.env).ensureRegistered();
   }
 
-  // The audit outbox (src/audit.ts). Core's cron trigger takes the events
+  /**
+   * Whether each of connect's private bindings answers a no-op, for the
+   * admin's provisioning probe, which core makes (src/probe.ts).
+   */
+  async probeBindings(): Promise<Record<string, boolean>> {
+    return await probeBindings(this.env);
+  }
+
+  // The audit outbox (src/audit.ts). Core's clock takes the events
   // connect recorded, appends them to the audit log, then acknowledges them,
   // with those the log can't take, which connect moves aside.
 
@@ -312,7 +304,7 @@ export default class Connect
     await ackAuditEvents(this.env, appended, rejected);
   }
 
-  // Connector events (src/events.ts). Core's cron trigger sends who
+  // Connector events (src/events.ts). Core's clock sends who
   // listens where, then takes the events read, delivers them to workflows,
   // and settles them.
 

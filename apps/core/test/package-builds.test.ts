@@ -1900,7 +1900,7 @@ describe("waiting for another build", () => {
 });
 
 describe("what a build leaves behind", () => {
-  it("deletes, from the cron, the leases builds left that nobody took again, and only those", async () => {
+  it("deletes, from the clock, the leases builds left that nobody took again, and only those", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const now = Date.now();
@@ -1922,7 +1922,7 @@ describe("what a build leaves behind", () => {
     expect(results.map(({ holder }) => holder)).toStrictEqual(["building"]);
   });
 
-  it("reads what the cron sweeps by index, never a whole table", async () => {
+  it("reads what the clock sweeps by index, never a whole table", async () => {
     const recorded = await recordedQueries(async () => {
       await sweepPackageFiles(env, new Date(Date.now() + 2 * 60 * 60 * 1000));
     });
@@ -1939,7 +1939,7 @@ describe("what a build leaves behind", () => {
     }).toStrictEqual({ tables: [true, true], scans: [] });
   });
 
-  it("deletes, from the cron, the files of a build whose lock gives up its room right after the build pins them", async () => {
+  it("deletes, from the clock, the files of a build whose lock gives up its room right after the build pins them", async () => {
     const name = named("evicted");
     await publish(plain(name, "1.0.0"));
     const app = await approvedApp({ [name]: "1.0.0" }, { targets: ["server"] });
@@ -2011,7 +2011,7 @@ describe("what a build leaves behind", () => {
     }).toStrictEqual({ evicted: true, left: true, after: 0 });
   });
 
-  it("deletes, from the cron, the files of a build that never pinned them", async () => {
+  it("deletes, from the clock, the files of a build that never pinned them", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const admin = await personApi("admin");

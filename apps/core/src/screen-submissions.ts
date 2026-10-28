@@ -747,7 +747,7 @@ export const dismissScreenSubmission = async (
     );
 };
 
-/** Removes the rows whose receipts are gone by `now`: the cron's sweep. */
+/** Removes the rows whose receipts are gone by `now`: the clock's sweep. */
 export const sweepScreenSubmissions = async (
   env: Env,
   now: Date

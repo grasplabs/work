@@ -49,3 +49,44 @@ describe("schedules across summer time", () => {
     ]);
   });
 });
+
+describe("schedule triggers across summer time", () => {
+  /** The next `count` times, skipping what the spring change skips. */
+  const skipping = (cron: string, after: string, count: number): string[] => {
+    const times: string[] = [];
+    let from = new Date(after);
+    for (let index = 0; index < count; index += 1) {
+      const next = nextScheduledRun(inAmsterdam(cron), from, "skip");
+      if (!next) {
+        break;
+      }
+      times.push(next.toISOString());
+      from = next;
+    }
+    return times;
+  };
+
+  it("skip a time the spring change skips", () => {
+    expect(skipping("30 2 * * *", "2027-03-27T12:00:00Z", 2)).toStrictEqual([
+      // 28 March has no 2:30: the next is 29 March's, in CEST.
+      "2027-03-29T00:30:00.000Z",
+      "2027-03-30T00:30:00.000Z",
+    ]);
+  });
+
+  it("fire through the skipped hour on the times that exist", () => {
+    expect(skipping("*/30 * * * *", "2027-03-28T00:15:00Z", 3)).toStrictEqual([
+      // 1:30 CET, then 3:00 CEST: no 2:00 or 2:30.
+      "2027-03-28T00:30:00.000Z",
+      "2027-03-28T01:00:00.000Z",
+      "2027-03-28T01:30:00.000Z",
+    ]);
+  });
+
+  it("fire a time the autumn change repeats once, the first time", () => {
+    expect(skipping("30 2 * * *", "2026-10-24T12:00:00Z", 2)).toStrictEqual([
+      "2026-10-25T00:30:00.000Z",
+      "2026-10-26T01:30:00.000Z",
+    ]);
+  });
+});

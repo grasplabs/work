@@ -1,0 +1,19 @@
+{
+  "name": "@grasp-os/gateway",
+  "private": true,
+  "description": "Connect gateway in Grasp's account: each placed client's core reaches its own connect in the clients' dispatch namespace through it",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "deploy": "node ../../scripts/wrangler-deploy.ts",
+    "typegen": "wrangler types --include-runtime=false"
+  },
+  "dependencies": {
+    "@grasp-os/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

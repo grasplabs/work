@@ -23,8 +23,7 @@
  * bot secrets about to expire (src/clients/teams-bot-expiry.ts), and the
  * watch's reads how Stephen fares at every client every hour
  * (src/clients/watch.ts).
- * `ProvisionClient` is the Workflow that onboards a client
- * (src/provision/workflow.ts), `Rollout` the one that rolls a release
+ * `Rollout` is the Workflow that rolls a release
  * out to clients (src/rollout/workflow.ts), `RolloutClient` deploys one
  * fleet client of a rollout, `RollbackClient` rolls a
  * client back from one, and `ApplyClient` applies a client's settings
@@ -59,7 +58,6 @@ export { ChatState } from "@grasp-os/chat/state";
 export { IntegrationBuild } from "./builds/workflow.ts";
 export { ApplyClient } from "./clients/apply.ts";
 export { ProvisionPlacedClient } from "./hosting/workflow.ts";
-export { ProvisionClient } from "./provision/workflow.ts";
 export { RollbackClient } from "./rollout/rollback.ts";
 export { RolloutClient } from "./rollout/fleet-client.ts";
 export { Rollout } from "./rollout/workflow.ts";

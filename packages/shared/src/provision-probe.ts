@@ -43,7 +43,10 @@ export const provisionProbeSchema = z.strictObject({
   version: z.string().nullable(),
   /** The client id its deploy set (`CLIENT_ID`); null where none is set. */
   clientId: z.string().nullable(),
-  /** Each private binding, by name: whether it answered a no-op call. */
+  /**
+   * Each private binding, by name: whether it answered a no-op call.
+   * Connect's own are `connect.<name>`, as connect answered core.
+   */
   bindings: z.record(z.string(), z.boolean()),
   /** Core's clock and connect's, each armed if it wasn't; null for one that didn't answer. */
   clocks: z.strictObject({

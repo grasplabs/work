@@ -8,9 +8,13 @@ import { z } from "zod";
 
 import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron, waitingInOutbox, whileLogDown } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
+import {
+  runMinuteTasks,
+  waitingInOutbox,
+  whileLogDown,
+} from "./maintenance.ts";
 import {
   auditedDuring,
   openRpc,
@@ -535,7 +539,7 @@ describe("saving a document", () => {
       ).resolves.toBe(1);
       return saved;
     });
-    await runCron();
+    await runMinuteTasks();
     const sent = await allEvents();
     expect(
       sent.filter(

@@ -27,9 +27,10 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
-import { manifestKey } from "@grasp-os/shared/release";
+import { limitEvidenceKey, manifestKey } from "@grasp-os/shared/release";
 import { AwsClient } from "aws4fetch";
 
+import { readLimitEvidence } from "./evidence-lib.ts";
 import { verifyRelease } from "./manifest-lib.ts";
 
 const UPLOAD_CONCURRENCY = 8;
@@ -49,6 +50,7 @@ const releaseDir = path.resolve(args.release);
 
 const { manifest, manifestBytes, blobs } = await verifyRelease(releaseDir);
 const published = manifestKey(manifest.releaseId);
+const evidenceBytes = readLimitEvidence(releaseDir, manifest);
 
 /** SHA-256, base64: the form of R2's `x-amz-checksum-sha256`. */
 const sha256Base64 = (bytes: Uint8Array): string =>
@@ -147,6 +149,38 @@ const upload = async (): Promise<void> => {
   console.info(
     `Blobs: ${uploaded} uploaded, ${results.length - uploaded} already there`
   );
+
+  // Published already, by an earlier attempt of this run: it stands, its
+  // evidence with it.
+  if ((await storedSha256(published)) !== undefined) {
+    console.warn(`::warning::${published} is already published; left as it is`);
+    return;
+  }
+  // The limit evidence, just before the manifest: nothing reads it until
+  // the manifest is there, so one an attempt that stopped left behind is
+  // replaced. R2 checks its SHA-256 on write, and the admin checks it
+  // again on import, before it stores anything.
+  if (evidenceBytes !== undefined) {
+    const key = limitEvidenceKey(manifest.releaseId);
+    const evidence = await client.fetch(url(key), {
+      method: "PUT",
+      body: evidenceBytes,
+      headers: {
+        "Content-Type": "application/json",
+        "x-amz-checksum-sha256": sha256Base64(evidenceBytes),
+        // The same SHA-256, hex, as the admin's import reads it when R2
+        // doesn't report the checksum to a Worker.
+        "x-amz-meta-sha256": createHash("sha256")
+          .update(evidenceBytes)
+          .digest("hex"),
+      },
+    });
+    if (!evidence.ok) {
+      throw new Error(
+        `PUT ${key}: ${evidence.status} ${await evidence.text()}`
+      );
+    }
+  }
 
   const put = await client.fetch(url(published), {
     method: "PUT",

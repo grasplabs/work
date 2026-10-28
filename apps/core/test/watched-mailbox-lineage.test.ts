@@ -14,8 +14,8 @@ import {
   graphControlUrl,
   graphSentUrl,
 } from "./connect-providers.ts";
-import { runCron, runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks, runQuarterHourTasks } from "./maintenance.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
@@ -256,7 +256,7 @@ const watchingApp = async (
     });
   }
   // Connect starts listening where the App listens.
-  await runCron();
+  await runMinuteTasks();
   return {
     app,
     address,
@@ -321,7 +321,7 @@ const inboxMessage = ({
 
 /**
  * `messages` arrive in `user`'s inbox at Graph, then a minute passes and
- * core's cron trigger runs: connect reads them, and core delivers them.
+ * core's clock runs: connect reads them, and core delivers them.
  */
 const arrive = async (
   user: string,
@@ -335,7 +335,7 @@ const arrive = async (
     });
   }
   await connectDb().prepare("UPDATE event_sources SET poll_at = 0").run();
-  await runCron();
+  await runMinuteTasks();
 };
 
 const startedSchema = z.object({ parent: z.string().optional() });
@@ -829,7 +829,7 @@ describe(
           const before = await kept();
 
           // Past every run's retention (the deployment's 30 days).
-          await runQuarterHourCron({}, new Date(Date.now() + 31 * day));
+          await runQuarterHourTasks({}, new Date(Date.now() + 31 * day));
 
           expect({ before, after: await kept() }).toStrictEqual({
             before: { calls: 2, claims: 2, refusals: 1 },
