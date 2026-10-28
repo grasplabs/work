@@ -31,6 +31,8 @@ const pageAt = (tab: TabBudget = tabBudget()) => {
     here: "/start",
     going: "/start",
     activated: true,
+    /** Whether the frame reported the person's act for the navigation. */
+    acted: true,
     now: 0,
     went: new Array<{ replace: boolean }>(),
     /** Whether the person stays on the next navigation (the leave dialog). */
@@ -54,7 +56,7 @@ const pageAt = (tab: TabBudget = tabBudget()) => {
   );
   const asked = async (replace = false): Promise<string> => {
     try {
-      await policy.navigate(note, replace);
+      await policy.navigate(note, replace, state.acted);
       return "went";
     } catch (error) {
       return screenErrors.codeOf(error) ?? "failed";
@@ -126,11 +128,11 @@ describe("a screen's navigation of the page", () => {
       },
       tabBudget()
     );
-    const waiting = answerOf(policy.navigate(note, false));
+    const waiting = answerOf(policy.navigate(note, false, true));
     await Promise.resolve();
     policy.stayed();
     const answered = await waiting;
-    const next = await answerOf(policy.navigate(note, false));
+    const next = await answerOf(policy.navigate(note, false, true));
     expect({ answered, next, went }).toStrictEqual({
       answered: "screen.navigation_cancelled",
       next: "screen.navigation_cancelled",
@@ -191,9 +193,11 @@ describe("a screen's navigation of the page", () => {
     );
     state.here = "/inbox";
     state.going = "/inbox";
-    const afterThePageMoved = await answerOf(policy.navigate(note, false));
+    const afterThePageMoved = await answerOf(
+      policy.navigate(note, false, true)
+    );
     state.going = "/brain";
-    const whileItMoves = await answerOf(policy.navigate(note, false));
+    const whileItMoves = await answerOf(policy.navigate(note, false, true));
     expect({ afterThePageMoved, whileItMoves, went }).toStrictEqual({
       afterThePageMoved: "went",
       whileItMoves: "screen.navigation_cancelled",
@@ -217,9 +221,9 @@ describe("a screen's navigation of the page", () => {
       tabBudget(),
       "beside"
     );
-    const unprompted = await answerOf(policy.navigate(note, false));
+    const unprompted = await answerOf(policy.navigate(note, false, acted));
     acted = true;
-    const clicked = await answerOf(policy.navigate(note, false));
+    const clicked = await answerOf(policy.navigate(note, false, acted));
     expect({ unprompted, clicked, went }).toStrictEqual({
       unprompted: "screen.navigation_cancelled",
       clicked: "went",
@@ -255,6 +259,30 @@ describe("a screen's navigation of the page", () => {
       chainedInPlace: "screen.navigation_cancelled",
       clicked: "went",
       afterActing: "went",
+    });
+  });
+
+  it("never takes activation and focus alone for the person's act: screens that focus themselves on a click elsewhere take only the tab's one go", async () => {
+    const tab = tabBudget();
+    // Each start holds the focus, the browser's activation still there
+    // from the click that opened the first, and no act of the person's in
+    // its own frame.
+    const hop = async (): Promise<string> => {
+      const start = pageAt(tab);
+      start.state.acted = false;
+      return await start.asked();
+    };
+    const first = await hop();
+    const second = await hop();
+    const third = await hop();
+    // The person clicks in the last one: theirs, and the tab's go is back.
+    const clickedIn = pageAt(tab);
+    const clicked = await clickedIn.asked();
+    expect({ first, second, third, clicked }).toStrictEqual({
+      first: "went",
+      second: "screen.navigation_cancelled",
+      third: "screen.navigation_cancelled",
+      clicked: "went",
     });
   });
 
