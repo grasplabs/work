@@ -82,6 +82,8 @@ export interface ClientHostingView {
   automatic: AutomaticChoice;
   /** Whether it's live: its later releases and rollbacks run the operation again. */
   active: boolean;
+  /** When staff offboarded it; null while they haven't (src/hosting/offboarding.ts). */
+  offboardedAt: Date | null;
   /** Its provisioning operation (`client_provisions`), if it has one. */
   operation: {
     releaseId: string;
@@ -181,7 +183,11 @@ export const getClientHosting = async (
 ): Promise<ClientHostingView | null> => {
   const db = adminDatabase(env.DB);
   const client = await db
-    .select({ id: clients.id, status: clients.status })
+    .select({
+      id: clients.id,
+      status: clients.status,
+      offboardedAt: clients.offboardedAt,
+    })
     .from(clients)
     .where(eq(clients.id, clientId))
     .get();
@@ -216,6 +222,7 @@ export const getClientHosting = async (
         ? automaticChoice(destinations)
         : { destinationId: placement.destinationId, reason: null },
     active: client.status === "active",
+    offboardedAt: client.offboardedAt,
     operation:
       operation === undefined
         ? null

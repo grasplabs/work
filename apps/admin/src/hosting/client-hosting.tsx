@@ -10,6 +10,7 @@
  */
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
   Collapsible,
   CollapsibleContent,
@@ -36,17 +37,23 @@ import { useState } from "react";
 import { formatTime } from "../releases/format.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
 import {
+  offboardPlacedClientFn,
   placeAndProvisionFn,
   releasePlacedClientFn,
   rollbackPlacedClientFn,
 } from "./functions.ts";
-import type { PlaceResult } from "./functions.ts";
+import type { OffboardResult, PlaceResult } from "./functions.ts";
 import type {
   ClientHostingView,
   DestinationChoice,
   DestinationProblem,
 } from "./placement.ts";
-import { operationErrorWords, placeRefusals, problemWords } from "./words.ts";
+import {
+  offboardRefusals,
+  operationErrorWords,
+  placeRefusals,
+  problemWords,
+} from "./words.ts";
 
 /** What the radio for the automatic destination is worth. */
 const automatic = "automatic";
@@ -347,6 +354,78 @@ const Releases = ({
   );
 };
 
+/**
+ * Offboarding it: its address out of the router at once, nothing deleted
+ * (src/hosting/offboarding.ts). Deleting its resources is a second step,
+ * once their retention is over, on Platform's Offboarded page.
+ */
+const Offboarding = ({ view }: { view: ClientHostingView }) => {
+  const router = useRouter();
+  const { busy, failure, run } = useAction(offboardRefusals);
+  const [understood, setUnderstood] = useState(false);
+  const act = (task: () => Promise<OffboardResult>) => {
+    void run(
+      async () =>
+        await thenRefresh(task, async () => {
+          await router.invalidate({ sync: true });
+        })
+    );
+  };
+  const { offboardedAt } = view;
+  if (offboardedAt === null) {
+    return (
+      <div className="flex flex-col gap-3 border-t pt-4">
+        <p className="text-sm">
+          Offboarding takes its address out of the router at once: its people
+          reach it no more. Nothing is deleted.
+        </p>
+        <Field orientation="horizontal">
+          <Checkbox
+            checked={understood}
+            id="offboard-understood"
+            onCheckedChange={setUnderstood}
+          />
+          <FieldLabel htmlFor="offboard-understood">
+            It stops serving its people now
+          </FieldLabel>
+        </Field>
+        <div className="flex flex-wrap items-center gap-4">
+          <Button
+            disabled={busy || !understood}
+            onClick={() => {
+              act(
+                async () =>
+                  await offboardPlacedClientFn({
+                    data: { clientId: view.clientId },
+                  })
+              );
+            }}
+            variant="destructive"
+          >
+            Offboard it
+          </Button>
+          {failure === null ? null : (
+            <p className="text-destructive text-sm" role="alert">
+              {failure}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <p className="border-t pt-4 text-sm">
+      {`Offboarded on ${formatTime(offboardedAt)} UTC: its resources are deleted, after their retention, from Platform's Offboarded page.`}
+    </p>
+  );
+};
+
+/** Whether it's still to provision: not live, done, or offboarded. */
+const provisionable = (view: ClientHostingView): boolean =>
+  view.operation?.status !== "done" &&
+  !view.active &&
+  view.offboardedAt === null;
+
 export const ClientHosting = ({
   view,
   releases,
@@ -385,7 +464,6 @@ export const ClientHosting = ({
       return result;
     });
   };
-  const done = view.operation?.status === "done";
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1 text-sm">
@@ -405,7 +483,8 @@ export const ClientHosting = ({
       {view.active && view.operation !== null ? (
         <Releases operation={view.operation} releases={releases} view={view} />
       ) : null}
-      {done || view.active ? null : (
+      {view.placement === null ? null : <Offboarding view={view} />}
+      {provisionable(view) ? (
         <div className="flex flex-col gap-4">
           {view.operation === null ? (
             <Field>
@@ -442,7 +521,7 @@ export const ClientHosting = ({
             <Problems problems={blocking} />
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 };
