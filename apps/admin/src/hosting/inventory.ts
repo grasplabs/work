@@ -15,6 +15,8 @@
  * (src/deploy/), which doesn't read it yet: the real-account qualification
  * comes first.
  */
+import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
+import type { ConnectGatewayProps } from "@grasp-os/shared/connect-gateway";
 import { toHex } from "@grasp-os/shared/encoding";
 import { d1IdPlaceholder } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
@@ -829,6 +831,17 @@ const unmappedBindings = new Set([
  */
 const durableObjectJurisdiction = "DURABLE_OBJECT_JURISDICTION";
 
+/** How a destination takes a Worker's bindings. */
+export interface RenderOptions {
+  /**
+   * A Workers for Platforms namespace: a user Worker can't bind another
+   * by a service binding (10143, GRA-430), so each service binding binds
+   * the connect gateway instead, its props naming the client's own script
+   * (@grasp-os/shared/connect-gateway, GRA-1217).
+   */
+  connectGateway?: boolean;
+}
+
 /** One of `worker`'s Workers as the destination takes it. */
 export interface RenderedWorker {
   scriptName: string;
@@ -849,7 +862,8 @@ export interface RenderedWorker {
 export const renderClientWorker = (
   worker: WorkerEntry,
   placement: ClientPlacement,
-  inventory: readonly ClientResource[]
+  inventory: readonly ClientResource[],
+  { connectGateway = false }: RenderOptions = {}
 ): RenderedWorker => {
   const byRole = new Map(inventory.map((row) => [row.role, row]));
   const resource = (
@@ -935,12 +949,30 @@ export const renderClientWorker = (
         break;
       }
       case "service": {
-        rendered.service = resource(
+        const script = resource(
           binding.name,
           `worker:${String(binding.service)}`,
           "worker_script"
         ).physicalName;
-        break;
+        if (!connectGateway) {
+          rendered.service = script;
+          break;
+        }
+        // The gateway forwards to the default entrypoint alone.
+        if (binding.entrypoint !== undefined) {
+          throw new InventoryError(
+            "unsupported_binding",
+            `${worker.name}'s ${binding.name} names an entrypoint, which the connect gateway doesn't forward to`
+          );
+        }
+        // Only what the binding is, its target and props: nothing else of
+        // the release's entry reaches the gateway.
+        return {
+          type: "service",
+          name: binding.name,
+          service: connectGatewayScript,
+          props: { script } satisfies ConnectGatewayProps,
+        };
       }
       case "durable_object_namespace": {
         // Another script's class would reach past this Worker's own objects.
