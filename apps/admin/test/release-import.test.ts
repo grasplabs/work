@@ -105,18 +105,22 @@ const sameSizeOther = (text: string): string =>
   text.replaceAll(/[0-9a-f]/gu, (char) => (char === "0" ? "1" : "0"));
 
 /** A release of about as many blobs as one built from main today. */
-const largeRelease = async (notes: string) => {
-  const token = crypto.randomUUID();
-  return await publishRelease({
-    notes,
-    assets: Object.fromEntries(
-      Array.from({ length: 700 }, (_, index) => [
-        `/asset-${index}.txt`,
-        `${token} ${index}`,
-      ])
-    ),
-  });
-};
+/** 700 static assets of `token`'s own: as many blobs as a release from main. */
+const largeAssets = (token: string): Record<string, string> =>
+  Object.fromEntries(
+    Array.from({ length: 700 }, (_, index) => [
+      `/asset-${index}.txt`,
+      `${token} ${index}`,
+    ])
+  );
+
+/** A release of about as many blobs as one built from main today. */
+const largeRelease = async (notes: string) =>
+  await publishRelease({ notes, assets: largeAssets(crypto.randomUUID()) });
+
+/** Every read `reads` counted, the manifests' included. */
+const allReads = (reads: ReadonlyMap<string, number>): number =>
+  [...reads.values()].reduce((sum, count) => sum + count, 0);
 
 const blobReadsOf = (reads: ReadonlyMap<string, number>): number[] =>
   [...reads]
@@ -492,26 +496,71 @@ CREATE TABLE t (id TEXT);`,
     const { store, reads } = countingStore();
 
     const first = await runImport(store);
-    const readFirst = blobReadsOf(reads).length;
+    // Every read of the run, each manifest's and blob's alike.
+    const readFirst = allReads(reads);
     const second = await runImport(store);
+    const readSecond = allReads(reads) - readFirst;
     const blobReads = blobReadsOf(reads);
 
     expect({
       first: first.imported.includes(release.id),
       firstFailed: first.failed.includes(release.id),
-      readFirst: readFirst <= MAX_READS_PER_RUN,
+      firstWithinReads: readFirst <= MAX_READS_PER_RUN,
+      secondWithinReads: readSecond <= MAX_READS_PER_RUN,
       second: second.imported.includes(release.id),
       everyBlobOnce: blobReads.every((count) => count === 1),
       blobs: blobReads.length,
     }).toStrictEqual({
       first: false,
       firstFailed: false,
-      readFirst: true,
+      firstWithinReads: true,
+      secondWithinReads: true,
       second: true,
       everyBlobOnce: true,
       blobs: release.blobs.size,
     });
     await expect(importEvents(release.id)).resolves.toHaveLength(1);
+  });
+
+  it("checks a release from its first blob again once its manifest was replaced partway", async () => {
+    const assets = largeAssets(crypto.randomUUID());
+    const release = await publishRelease({
+      notes: "feat(core): before",
+      assets,
+    });
+    const { store, reads } = countingStore();
+    const first = await runImport(store);
+    // The blobs the first run checked, before the manifest changed.
+    const checked = [...release.blobs.keys()].filter(
+      (key) => (reads.get(key) ?? 0) === 1
+    );
+    // Another manifest under the same id: the same blobs, another note.
+    const replaced = await buildRelease(
+      { notes: "feat(core): after", assets },
+      release.id
+    );
+    await putManifest(replaced);
+
+    const second = await runImport(store);
+    const third = await runImport(store);
+    const row = await releaseRow(release.id);
+
+    expect({
+      first: first.imported.includes(release.id),
+      checkedSome: checked.length > 0,
+      // Each read again, so checked from the start, and not imported yet.
+      readAgain: checked.every((key) => reads.get(key) === 2),
+      second: second.imported.includes(release.id),
+      third: third.imported.includes(release.id),
+      note: row?.manifest.includes("feat(core): after"),
+    }).toStrictEqual({
+      first: false,
+      checkedSome: true,
+      readAgain: true,
+      second: false,
+      third: true,
+      note: true,
+    });
   });
 
   it("fails a large release on a blob in a later batch, and checks it from its first blob next attempt", async () => {
