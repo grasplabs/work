@@ -12,6 +12,7 @@ import {
   workflowStartReceipts,
   runLineageChildren,
   runBrainEvidence,
+  resourceRunMailCalls,
   runMailCalls,
   runMailStampClaims,
   runMailStampRefusals,
@@ -437,6 +438,23 @@ export const sweepWorkflowStartDetails = async (
   await auditedBatch(env, db, [
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),
+    // What mail-stamps.ts keeps of its mail: its stamps' claims first,
+    // which name them, then its calls. A copy this late starts its runs
+    // as a root, as anyone's mail does.
+    db
+      .delete(runMailStampClaims)
+      .where(
+        inArray(
+          runMailStampClaims.stamp,
+          db
+            .select({ stamp: resourceRunMailCalls.stamp })
+            .from(resourceRunMailCalls)
+            .where(inArray(resourceRunMailCalls.runId, due))
+        )
+      ),
+    db
+      .delete(resourceRunMailCalls)
+      .where(inArray(resourceRunMailCalls.runId, due)),
     // Its own files go with its details (GRA-724): marked here, their
     // chunks deleted by `sweepRunFiles`.
     runFilesRemoved(db, due),
