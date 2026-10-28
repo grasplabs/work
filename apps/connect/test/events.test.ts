@@ -41,7 +41,7 @@ import type { GraphEventsFake } from "./graph-events-fake.ts";
 import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 
-// Connector events, as core's cron trigger drives them: it sends who
+// Connector events, as core's clock drives them: it sends who
 // listens where, connect listens exactly there, reads what changed from
 // Graph's recorded delta answers with the connection's token, and keeps
 // the events in its outbox until core settles them. Where it listens is

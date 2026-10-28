@@ -148,7 +148,7 @@ export const documents = sqliteTable(
     indexFailure: text("index_failure"),
     /**
      * Which run indexes the current version: 0 for the first, one more for
-     * each the cron trigger starts again after the one before failed.
+     * each the clock starts again after the one before failed.
      */
     indexRun: integer("index_run").notNull().default(0),
     /** When indexing the current version last failed for good. */

@@ -25,6 +25,7 @@ import {
   connectInterfacesCoreCalls,
   connectInterfaceVersion,
 } from "@grasp-os/shared/connect";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { ReleaseCompatibility } from "@grasp-os/shared/release";
 import {
   journalSchemaVersion,
@@ -233,6 +234,7 @@ const manifest = generateManifest(
     wranglerVersion,
     packages: packageVersions([...RELEASED_APPS, FRONTEND]),
     compatibility,
+    platformLimits: { ...platformLimits },
   },
   workers
 );

@@ -707,7 +707,7 @@ export const cancelRunsOf = async (
  * Cancels, a few at a time, the unfinished runs of Apps that are archived:
  * those archiving left (more than one call cancels, or a cancel that
  * failed), and a run whose start raced the archive. Each is cancelled for
- * whoever archived its App, or its owner. The cron trigger runs it every
+ * whoever archived its App, or its owner. The clock runs it every
  * minute.
  */
 export const cancelArchivedRuns = async (

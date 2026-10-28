@@ -17,6 +17,8 @@ import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 
+import type { CoreAddress } from "./core-address.ts";
+
 const encoder = new TextEncoder();
 
 /**
@@ -28,7 +30,7 @@ export type OnboardingCell = OnboardingSummary | "unreachable" | null;
 
 /** What asking a client's core takes. */
 export interface SummaryRequest {
-  coreUrl: string;
+  core: CoreAddress;
   routerSecret: string;
   /** The client's core auth secret, the signing key's source. */
   authSecret: string;
@@ -37,7 +39,7 @@ export interface SummaryRequest {
 
 /** Client core's onboarding summary, signed for, as `OnboardingCell` says. */
 export const onboardingSummaryOf = async ({
-  coreUrl,
+  core,
   routerSecret,
   authSecret,
   signal,
@@ -47,7 +49,7 @@ export const onboardingSummaryOf = async ({
   const signature = toHex(
     new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(body)))
   );
-  const response = await fetch(`${coreUrl}${onboardingSummaryPath}`, {
+  const response = await core.fetch(`${core.origin}${onboardingSummaryPath}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",

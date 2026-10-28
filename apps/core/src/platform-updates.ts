@@ -19,15 +19,15 @@ import { errorResponse } from "./errors.ts";
 
 // Platform updates in the client's Activity: every version the admin
 // deploys carries a `PLATFORM_CHANGE` var (@grasp-os/shared/platform-change)
-// saying who changed what. The every-minute cron inserts the version
+// saying who changed what. The every-minute clock run inserts the version
 // running now (the `CF_VERSION_METADATA` binding) into `platform_versions`,
 // one row per version ever recorded, and stores `platform.updated` in the
 // same batch only if that insert added the row. So each version is
-// recorded at most once, however many cron runs see it at the same time,
-// and however often isolates of two versions alternate on the cron during
+// recorded at most once, however many clock runs see it at the same time,
+// and however often isolates of two versions alternate on the clock during
 // a gradual rollout. A rollback to a version already recorded is not
 // recorded again here: the admin tells core of it (`platformUpdatePath`,
-// below). The event waits in core's outbox for the cron's drain, this
+// below). The event waits in core's outbox for the clock's drain, this
 // run's or the next.
 //
 // A version made outside the admin (a `wrangler deploy`, which keeps the
@@ -80,7 +80,7 @@ const record = async (
 
 /**
  * Records the running version as `platform.updated` if it has never been
- * recorded. The cron trigger calls it every minute.
+ * recorded. The clock calls it every minute.
  */
 export const recordPlatformUpdate = async (
   env: PlatformUpdateEnv
@@ -117,9 +117,9 @@ export const recordPlatformUpdate = async (
 };
 
 // A platform update that made no new version, a rollback to a version
-// core has run before, never reaches the cron above: the admin tells
+// core has run before, never reaches the clock above: the admin tells
 // core of it instead, at `platformUpdatePath`, signed (console-signed.ts).
-// It's recorded as `platform.updated`, the way the cron records a new
+// It's recorded as `platform.updated`, the way the clock records a new
 // version, with the version the rollback went back to.
 
 /**

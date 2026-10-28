@@ -6,8 +6,8 @@ import { invoiceMail } from "../../connect/test/fixtures/graph-events.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphControlUrl } from "./connect-providers.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -16,7 +16,7 @@ import { connectDb, testBinding } from "./test-env.ts";
 import { appWith } from "./workflow-apps.ts";
 
 // Connector events end to end: a builder's App listens for new mail on
-// their Microsoft 365 connection; core's cron trigger tells the real
+// their Microsoft 365 connection; core's clock tells the real
 // connect where to listen, connect reads Graph's recorded delta answers
 // (the stand-in behind it, test/connect-providers.ts), and core delivers
 // what it read to the workflow.
@@ -122,15 +122,15 @@ describe("connector events", () => {
 
   it("start the listening workflow once for a new mail in its mailbox", async () => {
     const { builder, connection, app, mailbox } = await listening();
-    await runCron();
+    await runMinuteTasks();
     const mail = invoiceMail(mailbox, 7, new Date().toISOString());
     await receive(mailbox, mail);
     await aMinuteLater();
-    await runCron();
+    await runMinuteTasks();
     // Graph shows the message again once it's read: the same message.
     await receive(mailbox, { ...mail, isRead: true });
     await aMinuteLater();
-    await runCron();
+    await runMinuteTasks();
     const runs = await builder.api.workflows.list(app);
 
     expect(runs).toHaveLength(1);
@@ -156,13 +156,13 @@ describe("connector events", () => {
 
   it("deliver only so many events a run, and the rest the next", async () => {
     const { builder, app, mailbox } = await listening();
-    await runCron();
+    await runMinuteTasks();
     await receive(mailbox, invoiceMail(mailbox, 1, new Date().toISOString()));
     await receive(mailbox, invoiceMail(mailbox, 2, new Date().toISOString()));
     await aMinuteLater();
-    await runCron({ CONNECTOR_EVENTS_PER_RUN: "1" });
+    await runMinuteTasks({ CONNECTOR_EVENTS_PER_RUN: "1" });
     const first = await builder.api.workflows.list(app);
-    await runCron({ CONNECTOR_EVENTS_PER_RUN: "1" });
+    await runMinuteTasks({ CONNECTOR_EVENTS_PER_RUN: "1" });
     const second = await builder.api.workflows.list(app);
 
     expect([first.length, second.length]).toStrictEqual([1, 2]);
@@ -170,11 +170,11 @@ describe("connector events", () => {
 
   it("stop listening once the workflow no longer listens", async () => {
     const { builder, connection, app } = await listening();
-    await runCron();
+    await runMinuteTasks();
     const before = await sources(connection);
     // The same workflow, started only by hand.
     await release(builder, app, inbox(`[{ type: "manual" }]`));
-    await runCron();
+    await runMinuteTasks();
 
     expect({ before, after: await sources(connection) }).toStrictEqual({
       before: ["m365.mail.received"],
@@ -184,9 +184,9 @@ describe("connector events", () => {
 
   it("find who listens by index, reading no table whole", async () => {
     const { connection } = await listening();
-    // As the cron trigger asks, telling connect where to listen.
+    // As the clock asks, telling connect where to listen.
     const recorded = await recordedQueries(async () => {
-      await runCron();
+      await runMinuteTasks();
     });
     const lookups = recorded.filter(
       ({ query }) =>

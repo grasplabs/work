@@ -158,7 +158,7 @@ export const archiveRetentionDays = (
 //
 // The log runs retention itself, daily, on its alarm (`AuditLog.alarm`),
 // which it arms when it appends an event while none is set (and core's
-// 15-minute cron trigger arms it too, for a deployment that appends
+// 15-minute clock arms it too, for a deployment that appends
 // nothing). Daily, not at each event's exact deadline: that would archive
 // a stretch per event, and each `audit.archived` event would bring an
 // alarm of its own. An event is archived at most a day past retention.
@@ -487,7 +487,7 @@ export class AuditLog extends DurableObject<Env> {
 
   /**
    * Arms the retention alarm if none is set (see `#armRetentionIfUnset`):
-   * core's 15-minute cron trigger calls it, so a deployment that appends
+   * core's 15-minute clock calls it, so a deployment that appends
    * nothing after a release still starts retention.
    */
   async armRetention(): Promise<void> {
@@ -518,7 +518,7 @@ export class AuditLog extends DurableObject<Env> {
   /**
    * Sets the alarm from within the alarm. If that fails, the alarm may be
    * left unset, so this instance forgets it was armed: the next append or
-   * 15-minute cron run arms it again. The error is thrown, so the platform
+   * 15-minute clock run arms it again. The error is thrown, so the platform
    * also retries the alarm, with backoff.
    */
   async #rearm(time: number): Promise<void> {

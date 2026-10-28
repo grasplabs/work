@@ -169,7 +169,25 @@ describe("the console's provisioning probe", () => {
           FILES: true,
           AUDIT_ARCHIVE: true,
           BRAIN_OBJECTS: true,
+          // The sandbox App code runs in, with a fresh isolate's answer.
+          LOADER: true,
           CONNECT: true,
+          // Every Durable Object namespace, in core's jurisdiction.
+          WORKSPACES: true,
+          APPS: true,
+          AUDIT_LOG: true,
+          BUILTINS: true,
+          CLOCK: true,
+          ONBOARDING: true,
+          MODEL_LEDGER: true,
+          DATA_STORES: true,
+          WORKFLOW_RUNS: true,
+          ACTION_INVOCATIONS: true,
+          CHAT_STATE: true,
+          // Connect's own, as connect answered for them.
+          "connect.DB": true,
+          "connect.LOADER": true,
+          "connect.CLOCK": true,
         },
       },
       core: { armed: true, tasks: clockTasks.map(({ name }) => name) },
@@ -257,6 +275,13 @@ describe("the console's provisioning probe", () => {
       ...deployed,
       FILES: down(env.FILES, "bucket 4f1c0a77d2 is gone"),
       CONNECT: down(env.CONNECT, "connect isn't deployed"),
+      APPS: down(env.APPS, "namespace 9b3e7d10aa isn't bound"),
+      // Neither sandbox runs App code: the host this test pool binds, nor
+      // the Loader.
+      ...(env.SANDBOX_HOST === undefined
+        ? {}
+        : { SANDBOX_HOST: down(env.SANDBOX_HOST, "pool 51c2e9 is full") }),
+      LOADER: down(env.LOADER, "pool 51c2e9 is full"),
     };
 
     const response = await probe(failing);
@@ -264,10 +289,20 @@ describe("the console's provisioning probe", () => {
     const text = await response.text();
 
     expect(provisionProbeSchema.parse(JSON.parse(text))).toMatchObject({
-      bindings: { DB: true, FILES: false, CONNECT: false },
+      bindings: {
+        DB: true,
+        FILES: false,
+        CONNECT: false,
+        APPS: false,
+        WORKSPACES: true,
+        LOADER: false,
+        "connect.CLOCK": false,
+      },
       clocks: { core: { armed: true }, connect: null },
     });
     expect(text).not.toContain("4f1c0a77d2");
+    expect(text).not.toContain("9b3e7d10aa");
+    expect(text).not.toContain("51c2e9");
     expect(text).not.toContain("deployed");
   });
 

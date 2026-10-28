@@ -318,7 +318,7 @@ const moduleIntegrity = async (bytes: Uint8Array): Promise<string> =>
 const day = 24 * 60 * 60 * 1000;
 
 /**
- * How long a staged build is kept after it was last staged: the cron's
+ * How long a staged build is kept after it was last staged: the clock's
  * sweep deletes what is older (`sweepScreenFrames`).
  */
 export const frameKeepMs = 30 * day;
@@ -467,7 +467,7 @@ export const deleteExpired = async (
 
 /**
  * Deletes staged builds' manifests and modules last staged more than
- * `frameKeepMs` before `now`, from the cron: in code, not a bucket rule,
+ * `frameKeepMs` before `now`, from the clock: in code, not a bucket rule,
  * so it runs wherever core does. One page of one prefix a run, at most
  * `sweepBatch` objects, from where the last run stopped; once a prefix is
  * done, the next run starts the other.

@@ -748,7 +748,7 @@ export const readStatistics = async (
 /**
  * Deletes rows past the retention, `sweptPerStatement` at a time, by the
  * index of their day, until none are left or `budgetMs` has passed: what a
- * cron run leaves, the next deletes.
+ * clock run leaves, the next deletes.
  */
 export const sweepStatistics = async (
   env: Env,

@@ -12,6 +12,7 @@ import {
   workflowStartReceipts,
   runLineageChildren,
   runBrainEvidence,
+  resourceRunMailCalls,
   runMailCalls,
   runMailStampClaims,
   runMailStampRefusals,
@@ -38,7 +39,7 @@ import { runFilesRemoved } from "./run-files.ts";
 // - the engine's record, by the engine itself: every run is created with
 //   the retention as its instance's own (engine.ts), which covers every
 //   way an instance ends (completed, terminated, errored);
-// - the rest by the 15-minute cron trigger (`sweepRunDetails`): what the
+// - the rest by the 15-minute clock (`sweepRunDetails`): what the
 //   run's row and its decisions keep, and connect's held actions.
 //
 // The run's row stays, with what it was and how it went: its ID, App,
@@ -135,7 +136,7 @@ const dayMs = 24 * 60 * 60 * 1000;
  */
 export const sweptPerBatch = 50;
 
-/** Most batches one cron run sweeps: 500 runs every 15 minutes. */
+/** Most batches one clock run sweeps: 500 runs every 15 minutes. */
 export const batchesPerSweep = 10;
 
 /** The statuses of a run that has ended. */
@@ -346,7 +347,7 @@ const pruneReceipts = async (
   }
 };
 
-/** Most start receipts, and parameter revisions, one cron run empties. */
+/** Most start receipts, and parameter revisions, one clock run empties. */
 export const startDetailsPerSweep = 500;
 
 /**
@@ -356,7 +357,7 @@ export const startDetailsPerSweep = 500;
  * the values of parameter revisions replaced before it or of workflows
  * deleted before it, at most {@link startDetailsPerSweep} of each, oldest
  * first, marked at `now`: set to null once, which is all the database
- * lets anything change of them. The rest is left to the next cron run.
+ * lets anything change of them. The rest is left to the next clock run.
  * One batch, so the attempts go only with their start's details, and
  * those of every start marked are gone.
  */
@@ -437,6 +438,23 @@ export const sweepWorkflowStartDetails = async (
   await auditedBatch(env, db, [
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),
+    // What mail-stamps.ts keeps of its mail: its stamps' claims first,
+    // which name them, then its calls. A copy this late starts its runs
+    // as a root, as anyone's mail does.
+    db
+      .delete(runMailStampClaims)
+      .where(
+        inArray(
+          runMailStampClaims.stamp,
+          db
+            .select({ stamp: resourceRunMailCalls.stamp })
+            .from(resourceRunMailCalls)
+            .where(inArray(resourceRunMailCalls.runId, due))
+        )
+      ),
+    db
+      .delete(resourceRunMailCalls)
+      .where(inArray(resourceRunMailCalls.runId, due)),
     // Its own files go with its details (GRA-724): marked here, their
     // chunks deleted by `sweepRunFiles`.
     runFilesRemoved(db, due),
@@ -551,11 +569,11 @@ const removedElsewhere = async (
  * Removes the details core and connect keep of runs that ended more than
  * the retention before `now`, longest ended first, read by the index of
  * ended runs that still have theirs: at most `batchesPerSweep` batches of
- * `sweptPerBatch`, the rest left to the next cron run. For each batch,
+ * `sweptPerBatch`, the rest left to the next clock run. For each batch,
  * what is kept elsewhere goes first (`removedElsewhere`), then the rows
  * are marked and emptied in one batch (`marked`). Each batch starts past
  * the last run of the one before, by when it ended and its ID, so a run
- * left out stays due for the next cron run and holds up none behind it.
+ * left out stays due for the next clock run and holds up none behind it.
  *
  * On-prem has no runs, and so reaches neither the engine nor connect.
  */

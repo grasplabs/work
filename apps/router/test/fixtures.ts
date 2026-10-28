@@ -94,3 +94,71 @@ export const fakeCores = () => {
     },
   };
 };
+
+/** A script's core by default: the core stand-in Worker (vite.config.ts). */
+const throughStandIn: Answer = async (request) => {
+  // SAFETY: vite.config.ts binds the core stand-in Worker as CORE_STAND_IN.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const core = Reflect.get(env, "CORE_STAND_IN") as Fetcher;
+  return await core.fetch(request);
+};
+
+/** A request as it reached a client's script through the dispatch namespace. */
+interface Dispatched extends Forwarded {
+  script: string;
+}
+
+/**
+ * A stand-in for the router's dispatch namespace (`DISPATCHER`), which runs
+ * only on Cloudflare: `get(script)` hands back the client's core for each
+ * of `scripts`, recording what reaches it, and throws for any other, as a
+ * namespace does for a script it doesn't have. By default each core is
+ * the core stand-in Worker (vite.config.ts), reached as a script is.
+ */
+export const fakeNamespace = (scripts: readonly string[]) => {
+  const received: Dispatched[] = [];
+  const asked: string[] = [];
+  const known = new Set(scripts);
+  let answer: Answer = throughStandIn;
+
+  beforeEach(() => {
+    received.length = 0;
+    asked.length = 0;
+    vi.spyOn(env.DISPATCHER, "get").mockImplementation((script) => {
+      asked.push(script);
+      if (!known.has(script)) {
+        throw new Error(`Worker not found: ${script}`);
+      }
+      const userWorker: Pick<Fetcher, "fetch"> = {
+        fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          received.push({
+            script,
+            url: request.url,
+            method: request.method,
+            redirect: request.redirect,
+            headers: new Headers(request.headers),
+            body: await request.clone().text(),
+          });
+          return await answer(request);
+        },
+      };
+      // SAFETY: a stand-in user Worker: only `fetch`, which the router calls.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      return userWorker as Fetcher;
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  return {
+    received,
+    /** Every script the router asked the namespace for, in order. */
+    asked,
+    /** Makes every script answer with `respond` instead, for this test. */
+    answerWith: (respond: Answer): void => {
+      answer = respond;
+    },
+  };
+};
