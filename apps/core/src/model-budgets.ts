@@ -126,7 +126,7 @@ export interface BudgetInput {
   work?:
     | { authority: Authority }
     | { onboarding: true }
-    | { platform: "brain_upkeep" | "dashboard_widgets" };
+    | { platform: "brain_upkeep" | "dashboard_widgets" | "policy_reading" };
 }
 
 /** The person a call is made by or for, if any. */
