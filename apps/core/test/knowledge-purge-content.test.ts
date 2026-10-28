@@ -482,7 +482,8 @@ describe("a purge of content", setUpTime, () => {
       found: true,
       first: "knowledge.purge_index_pending",
       rewrittenFirst: true,
-      again: 0,
+      // The same purge, gone on with (GRA-1122): what it rewrote in all.
+      again: 1,
       entriesLeft: 0,
     });
   });

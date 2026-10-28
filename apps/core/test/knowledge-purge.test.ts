@@ -902,15 +902,19 @@ describe("a purge whose index cleanup fails", setUpTime, () => {
     const heldAfterFirst = await holding(secret);
     // Nothing left to change, but the index is cleaned up.
     const again = await purged(admin, input);
+    const status = await admin.api.knowledge.purgeStatus(again.result.purgeId);
     expect({
       first,
       heldAfterFirst,
+      // The same purge, gone on with (GRA-1122): what it removed in all.
       again: again.result.versions,
+      status: status.state,
       heldAfterAgain: await holding(secret),
     }).toStrictEqual({
       first: "knowledge.purge_index_pending",
       heldAfterFirst: ["search_words_data.block"],
-      again: 0,
+      again: 1,
+      status: "complete",
       heldAfterAgain: [],
     });
   });
@@ -938,16 +942,222 @@ describe("a purge whose index cleanup fails", setUpTime, () => {
     const heldAfterFirst = await holding(secret);
     // The collection is gone already, but the index is cleaned up.
     const again = await purged(admin, input);
+    const status = await admin.api.knowledge.purgeStatus(again.result.purgeId);
     expect({
       first,
       heldAfterFirst,
+      // The same purge, gone on with (GRA-1122): what it removed in all.
       again: again.result.documents,
+      status: status.state,
       heldAfterAgain: await holding(secret),
     }).toStrictEqual({
       first: "knowledge.purge_index_pending",
       heldAfterFirst: ["search_words_data.block"],
-      again: 0,
+      again: 1,
+      status: "complete",
       heldAfterAgain: [],
+    });
+  });
+});
+
+/** Each step of a purge's status, as `step: state` or `step: state: reason`. */
+const stateOf = (status: {
+  steps: readonly { step: string; state: string; reason: string | null }[];
+}) =>
+  Object.fromEntries(
+    status.steps.map(({ step, state, reason }) => [
+      step,
+      reason === null ? state : `${state}: ${reason}`,
+    ])
+  );
+
+describe("a purge's record", setUpTime, () => {
+  // GRA-1122 (GRA-309's S1; the threat model is on the issue): each purge
+  // is a durable erasure, one step per projection it reaches. The ways it
+  // can fail, tried here: a step left half done with nothing saying so; a
+  // run again repeating a finished step, or starting another purge; the
+  // record holding what was erased; anyone but the client's admins
+  // reading it.
+  it("says which step is blocked and why, and when run again goes on as the same purge, erasing again what was written since", async () => {
+    const admin = await personOf("admin");
+    const secret = `vanbeek${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "people.md",
+      `# People\nWrite to ${secret}.`
+    );
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [secret],
+      reason: "other",
+    };
+    const failing = await rebuildFailingOnce(admin);
+    const { token } = await admin.api.knowledge.preparePurge(input);
+    let first = "";
+    const firstEvents = await auditedDuring(async () => {
+      first = await outcome(failing.knowledge.purge(input, token));
+    });
+    const begun = firstEvents.find(
+      ({ action }) => action === "knowledge.purged"
+    );
+    const purgeId = String(begun?.detail?.purgeId);
+    const blocked = await admin.api.knowledge.purgeStatus(purgeId);
+    // Remembered after the first run erased the records: the run again
+    // erases it too, though that step finished (the security review).
+    await admin.api.knowledge.remember(
+      { kind: "fact", text: `Mail ${secret} on Mondays.` },
+      { idempotencyKey: `key-${unique()}` }
+    );
+    let again: Awaited<ReturnType<typeof purged>> | undefined;
+    const againEvents = await auditedDuring(async () => {
+      again = await purged(admin, input);
+    });
+    const done = await admin.api.knowledge.purgeStatus(purgeId);
+    const ledger = await env.KNOWLEDGE.prepare(
+      "SELECT * FROM brain_purges JOIN brain_purge_steps ON brain_purge_steps.purge_id = brain_purges.id WHERE brain_purges.id = ?"
+    )
+      .bind(purgeId)
+      .all();
+    expect({
+      first,
+      blocked: { state: blocked.state, steps: stateOf(blocked) },
+      samePurge: again?.result.purgeId === purgeId,
+      stillFound: again?.result.stillFound,
+      memoryHolds: JSON.stringify(
+        await admin.api.knowledge.memoriesList()
+      ).includes(secret),
+      // Begun once: run again, it is only prepared and resumed.
+      againActions: againEvents
+        .map(({ action }) => action)
+        .filter((action) => action.startsWith("knowledge."))
+        .toSorted(),
+      done: { state: done.state, steps: stateOf(done) },
+      ledgerHoldsTerm: JSON.stringify(ledger.results).includes(secret),
+    }).toStrictEqual({
+      first: "knowledge.purge_index_pending",
+      blocked: {
+        state: "blocked",
+        steps: {
+          statements: "complete",
+          host_copies: "complete",
+          host_documents: "complete",
+          [`document:${document.id}`]: "complete",
+          payloads: "complete",
+          search: "blocked: knowledge.purge_index_pending",
+        },
+      },
+      samePurge: true,
+      stillFound: 0,
+      memoryHolds: false,
+      againActions: [
+        "knowledge.memory.purged",
+        "knowledge.purge.prepared",
+        "knowledge.purge.resumed",
+      ],
+      done: {
+        state: "complete",
+        steps: {
+          statements: "complete",
+          host_copies: "complete",
+          host_documents: "complete",
+          [`document:${document.id}`]: "complete",
+          payloads: "complete",
+          search: "complete",
+        },
+      },
+      ledgerHoldsTerm: false,
+    });
+  });
+
+  it("begins a blocked purge fresh when an admin asks, keeping the one it replaces as it stood", async () => {
+    const admin = await personOf("admin");
+    const secret = `dekker${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "people.md",
+      `# People\nWrite to ${secret}.`
+    );
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [secret],
+      reason: "other",
+    };
+    const failing = await rebuildFailingOnce(admin);
+    const firstPlan = await admin.api.knowledge.preparePurge(input);
+    let blockedId = "";
+    const events = await auditedDuring(async () => {
+      await outcome(failing.knowledge.purge(input, firstPlan.token));
+    });
+    blockedId = String(
+      events.find(({ action }) => action === "knowledge.purged")?.detail
+        ?.purgeId
+    );
+    const { token } = await admin.api.knowledge.preparePurge(input);
+    const fresh = await admin.api.knowledge.purge(input, token, {
+      fresh: true,
+    });
+    const old = await admin.api.knowledge.purgeStatus(blockedId);
+    const now = await admin.api.knowledge.purgeStatus(fresh.purgeId);
+    expect({
+      another: fresh.purgeId !== blockedId,
+      old: { state: old.state, supersededBy: old.supersededBy },
+      oldSearch: stateOf(old).search,
+      now: now.state,
+    }).toStrictEqual({
+      another: true,
+      old: { state: "superseded", supersededBy: fresh.purgeId },
+      oldSearch: "blocked: knowledge.purge_index_pending",
+      now: "complete",
+    });
+  });
+
+  it("is read by the client's admins alone", async () => {
+    const admin = await personOf("admin");
+    const user = await personOf("user");
+    const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
+    const staffRpc = await openRpc(staffSession);
+    const staff = staffRpc.core.authenticate();
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "people.md",
+      `# People\nWrite to someone${unique()}.`
+    );
+    const { result } = await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: ["someone"],
+      reason: "other",
+    });
+    const status = await admin.api.knowledge.purgeStatus(result.purgeId);
+    expect({
+      admin: status.state,
+      user: await outcome(user.api.knowledge.purgeStatus(result.purgeId)),
+      staff: await outcome(staff.knowledge.purgeStatus(result.purgeId)),
+      unknown: await outcome(
+        admin.api.knowledge.purgeStatus(crypto.randomUUID())
+      ),
+    }).toStrictEqual({
+      admin: "complete",
+      user: "role.forbidden",
+      staff: "role.forbidden",
+      unknown: "knowledge.not_found",
     });
   });
 });
