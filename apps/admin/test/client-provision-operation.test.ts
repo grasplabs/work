@@ -1124,8 +1124,10 @@ describe("provisioning a placed client", () => {
     const bindings = z
       .array(z.object({ name: z.string() }).loose())
       .parse(
-        account.namespaces.get(clientDispatchNamespace)?.get(core)?.versions.at(-1)
-          ?.metadata.bindings ?? []
+        account.namespaces
+          .get(clientDispatchNamespace)
+          ?.get(core)
+          ?.versions.at(-1)?.metadata.bindings ?? []
       );
     const [probed] = await db
       .select({ detail: auditEvents.detail })

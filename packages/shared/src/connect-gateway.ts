@@ -40,10 +40,16 @@ export const gatewayScriptOf = (props: unknown): string | undefined => {
 /**
  * Names the gateway never forwards: what the runtime or a caller reads on
  * an object that isn't one of connect's methods (a thenable's `then`, a
- * socket's `connect`, conversions), and anything private by convention.
+ * socket's `connect`, conversions), the entrypoint's own `ctx` and `env`,
+ * and anything private by convention. A denylist, not an allowlist: every
+ * other name reaches connect, so it never keeps one of connect's methods
+ * private. It needn't: whatever is forwarded only ever reaches the
+ * client's own connect, which core reaches directly elsewhere.
  */
 const notForwarded: ReadonlySet<string> = new Set([
   "constructor",
+  "ctx",
+  "env",
   "then",
   "connect",
   "toString",

@@ -159,6 +159,8 @@ describe("the connect gateway", () => {
       "toJSON",
       "valueOf",
       "_secret",
+      "ctx",
+      "env",
     ];
     // Not one of them reaches connect: `then` above all, or an RPC answer
     // of the gateway would be awaited into it.
