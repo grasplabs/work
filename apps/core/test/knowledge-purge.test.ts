@@ -1,9 +1,17 @@
 import {
+  attemptHolds,
+  attemptHoldsOrIdle,
   finishPurge,
   openPurge,
+  purgeAttemptLeaseMs,
   purgeStatus,
   runStep,
+  whileHeld,
 } from "@grasp-os/brain/purge-ledger";
+import {
+  owedWritesDoneWhile,
+  rebuildOwedWhile,
+} from "@grasp-os/brain/search-erasure";
 import { documentIdSchema } from "@grasp-os/shared/ids";
 import {
   purgeMaxDocuments,
@@ -13,6 +21,7 @@ import {
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-outbox.ts";
@@ -1203,7 +1212,7 @@ describe("a purge's record", setUpTime, () => {
       );
     const first = await open();
     // A second run while the first holds it, within its lease.
-    const whileHeld = await outcome(open());
+    const secondRun = await outcome(open());
     await runStep(brain, first, "one", async () => {
       await Promise.resolve();
     });
@@ -1218,15 +1227,77 @@ describe("a purge's record", setUpTime, () => {
     const status = await purgeStatus(brain, first.purgeId);
 
     expect({
-      whileHeld,
+      secondRun,
       trailing,
       state: status.state,
       steps: stateOf(status),
     }).toStrictEqual({
-      whileHeld: "knowledge.conflict",
+      secondRun: "knowledge.conflict",
       trailing: "knowledge.conflict",
       state: "complete",
       steps: { one: "complete" },
+    });
+  });
+
+  it("keeps the rebuild owed when an attempt that lost its purge marks its writes done", async () => {
+    const admin = await personOf("admin");
+    let now = Date.now();
+    const real = brainOf(env);
+    const brain = {
+      ...real,
+      ports: { ...real.ports, clock: () => new Date(now) },
+    };
+    const db = drizzle(env.KNOWLEDGE);
+    const by = {
+      actor: { type: "person", userId: admin.userId },
+      userId: admin.userId,
+    };
+    const input = {
+      type: "content" as const,
+      documentIds: [documentIdSchema.parse(crypto.randomUUID())],
+      terms: [`term${unique()}`],
+      reason: "other" as const,
+    };
+    const open = async () =>
+      await openPurge(
+        brain,
+        by,
+        input,
+        ["one"],
+        {},
+        () => [],
+        (held, at) => [
+          rebuildOwedWhile(db, held.purgeId, attemptHolds(held, at)),
+        ]
+      );
+    const lapsed = await open();
+    // Its lease runs out; another run takes the purge over and writes.
+    now += purgeAttemptLeaseMs + 1000;
+    const current = await open();
+    const marked = await whileHeld(brain, lapsed, (at) => [
+      owedWritesDoneWhile(db, lapsed.purgeId, attemptHoldsOrIdle(lapsed, at)),
+    ]);
+    const row = await env.KNOWLEDGE.prepare(
+      "SELECT writes_done_at AS done FROM search_rebuilds WHERE id = ?"
+    )
+      .bind(lapsed.purgeId)
+      .first<{ done: number | null }>();
+    // Owed for good otherwise: later tests would count its rebuild.
+    await env.KNOWLEDGE.prepare("DELETE FROM search_rebuilds WHERE id = ?")
+      .bind(lapsed.purgeId)
+      .run();
+
+    expect({
+      samePurge: current.purgeId === lapsed.purgeId,
+      marked,
+      // Still owed as written to: another purge's rebuild leaves it.
+      owed: row !== null,
+      writesDone: row?.done,
+    }).toStrictEqual({
+      samePurge: true,
+      marked: false,
+      owed: true,
+      writesDone: null,
     });
   });
 

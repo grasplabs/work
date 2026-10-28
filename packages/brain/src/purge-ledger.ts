@@ -152,6 +152,13 @@ export const attemptHolds = ({ purgeId, attempt }: PurgeAttempt, at: Date) =>
   sql`EXISTS (SELECT 1 FROM ${brainPurges} WHERE ${brainPurges.id} = ${purgeId} AND ${brainPurges.attempt} = ${attempt} AND ${brainPurges.attemptAt} = ${at.getTime()} AND ${brainPurges.completedAt} IS NULL AND ${brainPurges.supersededBy} IS NULL)`;
 
 /**
+ * `attemptHolds`, or the purge held by no attempt at all (`held` let it
+ * go as a step failed): nobody writes for it then.
+ */
+export const attemptHoldsOrIdle = (held: PurgeAttempt, at: Date) =>
+  sql`(${attemptHolds(held, at)} OR EXISTS (SELECT 1 FROM ${brainPurges} WHERE ${brainPurges.id} = ${held.purgeId} AND ${brainPurges.attempt} IS NULL))`;
+
+/**
  * Renews `held`'s hold on its purge to `now`, unless it lapsed, was taken
  * over, or the purge finished: what a step's writes are conditional on
  * (`attemptHolds`), in the same batch.
@@ -172,6 +179,38 @@ const renewHold = <C>(brain: Brain<C>, held: PurgeAttempt, now: Date) =>
         isNull(brainPurges.supersededBy)
       )
     );
+
+/**
+ * Writes `writes` with `held`'s hold renewed in the same batch, each
+ * conditional on it (`attemptHolds` at the time given): whether it held.
+ * Nothing is written for an attempt whose hold lapsed or was taken over.
+ */
+export const whileHeld = async <C>(
+  brain: Brain<C>,
+  held: PurgeAttempt,
+  writes: (at: Date) => BatchItem<"sqlite">[]
+): Promise<boolean> => {
+  const now = brain.ports.clock();
+  const [renewed] = await brain.db.batch([
+    renewHold(brain, held, now).returning({ id: brainPurges.id }),
+    ...writes(now),
+  ]);
+  return renewed.length > 0;
+};
+
+/**
+ * Renews `held`'s hold within a long step (between pages or tables), so a
+ * step never outlasts its lease unnoticed: `knowledge.conflict` once it
+ * lapsed or was taken over, and the step goes no further.
+ */
+export const keepHold = async <C>(
+  brain: Brain<C>,
+  held: PurgeAttempt
+): Promise<void> => {
+  if (!(await whileHeld(brain, held, () => []))) {
+    throw knowledgeErrors.create("knowledge.conflict");
+  }
+};
 
 /**
  * The record of the unfinished purge of `input`, resumed, or a new one,
