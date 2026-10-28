@@ -17,6 +17,11 @@ import type { LandscapeApp } from "../landscape/landscape.ts";
 import { FindingsTable } from "../policies/findings-table.tsx";
 import { bookOf, policyToday } from "../policies/policies-data.ts";
 import {
+  editsPolicies,
+  RuleActions,
+  RuleExceptions,
+} from "../policies/policy-editing.tsx";
+import {
   ConditionChips,
   PolicyExcerpt,
   RuleStatusBadge,
@@ -31,19 +36,22 @@ import type { PolicyBook, PolicyRule } from "../policies/policy.ts";
 
 // One rule, as in the prototype (`routes/policies/rules/$ruleId.tsx`):
 // what it checks and why, whether it is on, and the apps it catches now.
-// Core keeps the rules (policies/policies-data.ts); editing, deleting and
-// turning a rule on or off here, as the prototype does, come with the
-// policy pages' port. A link to a rule that isn't there finds the
-// prototype's state for one.
+// Core keeps the rules (policies/policies-data.ts); the organization's own
+// admins edit, delete and turn a rule on or off here, and let an app break
+// it until a day (policies/policy-editing.tsx). A link to a rule that
+// isn't there finds the prototype's state for one.
 
 const RuleDetail = ({
   rule,
   apps,
   book,
+  edits,
 }: {
   rule: PolicyRule;
   apps: readonly LandscapeApp[];
   book: PolicyBook;
+  /** Whether the reader may change it. */
+  edits: boolean;
 }) => {
   const { t, i18n } = useLingui();
   const policy =
@@ -60,6 +68,11 @@ const RuleDetail = ({
       />
       <Page>
         <PageHeading
+          action={
+            edits ? (
+              <RuleActions policies={book.policies} rule={rule} />
+            ) : undefined
+          }
           description={rule.description === "" ? undefined : rule.description}
           meta={<RuleStatusBadge status={rule.status} />}
           title={rule.name}
@@ -136,6 +149,13 @@ const RuleDetail = ({
             showRule={false}
           />
         </section>
+
+        <RuleExceptions
+          apps={apps}
+          edits={edits}
+          exceptions={book.exceptions}
+          rule={rule}
+        />
       </Page>
     </>
   );
@@ -145,6 +165,7 @@ const RulePage = () => {
   const { t } = useLingui();
   const { ruleId } = Route.useParams();
   const { apps, book: loaded } = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   const book = bookOf(loaded);
   const rule = book.rules.find(({ id }) => id === ruleId);
   if (rule === undefined) {
@@ -184,6 +205,7 @@ const RulePage = () => {
     <RuleDetail
       apps={apps.state === "ready" ? apps.data : []}
       book={book}
+      edits={editsPolicies(identity)}
       rule={rule}
     />
   );
