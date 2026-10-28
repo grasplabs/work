@@ -8483,6 +8483,10 @@ msgstr "Ya no declarados"
 msgid "No longer held: {model}"
 msgstr "Ya no retenido: {model}"
 
+#: src/connections/tool-permissions.tsx
+msgid "No longer offered"
+msgstr "Ya no se ofrece"
+
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "Ya no se ejecuta {how}"
@@ -10799,6 +10803,7 @@ msgstr "¿Liberar los {amount} retenidos para esta llamada al modelo?"
 msgid "Reminded on {date}"
 msgstr "Recordado el {date}"
 
+#: src/connections/tool-permissions.tsx
 #: src/policies/policy-editing.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/person-limits.tsx
@@ -10817,6 +10822,10 @@ msgstr "Quitar {domain}"
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
 msgstr "Quitar {file}"
+
+#: src/connections/tool-permissions.tsx
+msgid "Remove {name}"
+msgstr "Quitar {name}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"

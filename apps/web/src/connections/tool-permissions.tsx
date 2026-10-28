@@ -1,10 +1,11 @@
 import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { Button } from "@grasp-os/ui/components/button";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { EyeIcon, PenLineIcon } from "lucide-react";
+import { CircleSlashIcon, EyeIcon, PenLineIcon } from "lucide-react";
 
 import { ErrorText } from "../error-text.tsx";
 import type { Integration } from "./integrations.ts";
@@ -61,9 +62,43 @@ const groups: readonly {
 ];
 
 /**
+ * A tool `connection` allows that its toolkit no longer offers: it can
+ * only be removed (connect refuses adding a tool the toolkit lacks, but
+ * keeps one already allowed).
+ */
+const NoLongerOffered = ({
+  name,
+  disabled,
+  onRemove,
+}: {
+  name: string;
+  disabled: boolean;
+  onRemove: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <li className="flex min-h-11 items-center gap-2 border-b px-3 py-2 last:border-b-0">
+      <span className="text-muted-foreground min-w-0 flex-1 truncate">
+        {name}
+      </span>
+      <Button
+        aria-label={t`Remove ${name}`}
+        disabled={disabled}
+        onClick={onRemove}
+        size="sm"
+        variant="outline"
+      >
+        <Trans>Remove</Trans>
+      </Button>
+    </li>
+  );
+};
+
+/**
  * An admin's switches for which of `tools` `connection` allows, and which
- * of those only read. The last tool allowed can't be switched off: a
- * connection allows at least one (disconnect it instead).
+ * of those only read; one it allows that `tools` no longer has, to remove.
+ * The last tool allowed can't be switched off: a connection allows at
+ * least one (disconnect it instead).
  */
 export const ToolPermissions = ({
   tools,
@@ -77,6 +112,8 @@ export const ToolPermissions = ({
   const { i18n } = useLingui();
   const { busy, failure, change } = useChange();
   const allowed = allowedOf(connection);
+  const offered = new Set(tools.map(({ name }) => name));
+  const gone = allowed.filter(({ name }) => !offered.has(name));
   const save = (next: AllowedTool[]): void => {
     void change(async (session) => {
       await session.connections.changeTools({
@@ -127,6 +164,26 @@ export const ToolPermissions = ({
           </div>
         );
       })}
+      {gone.length === 0 ? null : (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
+            <CircleSlashIcon aria-hidden="true" className="size-3.5" />
+            <Trans>No longer offered</Trans>
+          </h3>
+          <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
+            {gone.map(({ name }) => (
+              <NoLongerOffered
+                disabled={busy || staff || allowed.length === 1}
+                key={name}
+                name={name}
+                onRemove={() => {
+                  save(allowed.filter((tool) => tool.name !== name));
+                }}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
       <ErrorText>{failure}</ErrorText>
     </div>
   );

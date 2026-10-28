@@ -8483,6 +8483,10 @@ msgstr "Nicht mehr deklariert"
 msgid "No longer held: {model}"
 msgstr "Nicht mehr zurückgehalten: {model}"
 
+#: src/connections/tool-permissions.tsx
+msgid "No longer offered"
+msgstr "Nicht mehr angeboten"
+
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "Läuft nicht mehr {how}"
@@ -10799,6 +10803,7 @@ msgstr "Die {amount} freigeben, die für diesen Modellaufruf zurückgehalten wer
 msgid "Reminded on {date}"
 msgstr "Erinnert am {date}"
 
+#: src/connections/tool-permissions.tsx
 #: src/policies/policy-editing.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/person-limits.tsx
@@ -10817,6 +10822,10 @@ msgstr "{domain} entfernen"
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
 msgstr "{file} entfernen"
+
+#: src/connections/tool-permissions.tsx
+msgid "Remove {name}"
+msgstr "{name} entfernen"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"
