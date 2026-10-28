@@ -73,6 +73,38 @@ const storeOf = (orders: unknown, extra: Record<string, unknown> = {}) => ({
 
 const storesPointer = "/document/metadata/grasp/stores";
 
+/**
+ * A store of one table whose field is `arrays` arrays deep around a
+ * string, with every generated kind over it.
+ */
+const nested = (arrays: number) => {
+  let deep: Record<string, unknown> = { type: "string" };
+  for (let level = 0; level < arrays; level += 1) {
+    deep = { type: "array", items: deep };
+  }
+  return {
+    intake: {
+      tables: {
+        orders: {
+          schema: {
+            type: "object",
+            properties: { lines: deep },
+            required: ["lines"],
+            additionalProperties: false,
+          },
+          indexes: {},
+        },
+      },
+      operations: {
+        getOrder: { kind: "get", table: "orders" },
+        addOrder: { kind: "insert", table: "orders" },
+        allOrders: { kind: "list", table: "orders" },
+        "orders.update": { kind: "patch", table: "orders" },
+      },
+    },
+  };
+};
+
 describe("stores a workflow declares", () => {
   it("checks a store's tables as a store's host does, and derives each generated operation's contract from its table", async () => {
     const result = await validated({
@@ -224,6 +256,24 @@ describe("stores a workflow declares", () => {
           pointer: `${storesPointer}/intake/operations`,
         },
       ],
+    });
+  });
+
+  it("refuses, pointing at it, an operation whose page or set would nest a deep table past the limits, never throwing", async () => {
+    // A field `arrays` arrays deep around a string. At 30, the deepest
+    // table the limits take, a list's page and a patch's arguments both
+    // wrap it past them; one level less, only the page does.
+    const at = (path: string) => ({
+      code: "profile.invalid_value",
+      pointer: `${storesPointer}/intake/operations/${path}`,
+    });
+
+    expect({
+      deepest: await refusals(nested(30)),
+      shallower: await refusals(nested(29)),
+    }).toStrictEqual({
+      deepest: [at("allOrders"), at("orders.update")],
+      shallower: [at("allOrders")],
     });
   });
 
