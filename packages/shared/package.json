@@ -133,6 +133,7 @@
     "./screen-port": "./src/screen-port.ts",
     "./screen-trust": "./src/screen-trust.ts",
     "./screens": "./src/screens.ts",
+    "./service-principals": "./src/service-principals.ts",
     "./shared-runs": "./src/shared-runs.ts",
     "./sign-in": "./src/sign-in.ts",
     "./signals": "./src/signals.ts",
