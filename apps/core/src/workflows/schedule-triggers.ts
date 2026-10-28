@@ -42,8 +42,9 @@ import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 //   core doesn't know included, is tried again for the same occurrence,
 //   so a new kind of failure never drops an occurrence silently.
 // - A schedule that keeps failing, spinning. Each failed try of an
-//   occurrence waits twice as long as the one before, up to an hour
-//   (`tryNow`). Refusals for good and failures in the workflow's own
+//   occurrence waits twice as long as the one before, up to an hour,
+//   counted from the last failed try (`tryNow`), so an occurrence long
+//   overdue still waits. Refusals for good and failures in the workflow's own
 //   terms (a full run limit, say) count toward stopping it: after
 //   `maxFailedStarts` in a row it stops, keeping no next occurrence,
 //   audited once (`trigger.schedule.stopped`), and its owner is told
@@ -64,7 +65,9 @@ import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 //   Only a live, enabled trigger whose current version is the one its
 //   schedule was worked out for is read as due; enabling or moving it
 //   works out its next occurrence again, from then, so what it missed
-//   meanwhile starts nothing.
+//   meanwhile starts nothing. A start read before such a change and
+//   admitted after it is fenced on the occurrence still being the
+//   schedule's next (`stillNext`), so it starts nothing either.
 
 /** Most due schedules one clock run starts; the rest start a minute later. */
 const schedulesPerRun = 50;
@@ -86,7 +89,7 @@ const refusedForGood: ReadonlySet<string> = new Set([
   "workflow.packages_revoked",
 ]);
 
-/** The most minutes a failed try waits before the next: 2^6 - 1. */
+/** The most times a failed try's wait doubles: 2^6 minutes, capped at an hour. */
 const maxBackoffDoublings = 6;
 
 /** A due schedule trigger, as its current version pins it. */
@@ -108,16 +111,17 @@ interface DueSchedule {
 const startKeyOf = (schedule: DueSchedule): string =>
   `${coreStartKeyPrefix}schedule:${schedule.triggerId}:${schedule.version}:${schedule.nextAt.toISOString()}`;
 
+/** The longest a failed try waits before the next, in minutes. */
+const maxBackoffMinutes = 60;
+
 /**
  * That a due schedule may be tried now: at once when no try of its
- * occurrence has failed, and after `n` failed ones, 2^n - 1 minutes after
- * it was due, up to an hour.
+ * occurrence has failed, and after `n` failed ones, 2^(n-1) minutes after
+ * the last of them failed, up to an hour. From the last failure, never
+ * from the occurrence: one long overdue (after an outage) still waits.
  */
 const tryNow = (now: Date) =>
-  lte(
-    sql`${triggerSchedules.nextAt} + ((1 << MIN(${triggerSchedules.attempts}, ${maxBackoffDoublings})) - 1) * ${minuteMs}`,
-    now.getTime()
-  );
+  sql`(${triggerSchedules.attempts} = 0 OR ${triggerSchedules.lastAttemptAt} IS NULL OR ${triggerSchedules.lastAttemptAt} + MIN(1 << MIN(${triggerSchedules.attempts} - 1, ${maxBackoffDoublings}), ${maxBackoffMinutes}) * ${minuteMs} <= ${now.getTime()})`;
 
 /** That `schedule` is still as it was read, as SQL. */
 const asRead = (schedule: DueSchedule) =>
@@ -128,6 +132,10 @@ const asRead = (schedule: DueSchedule) =>
     eq(triggerSchedules.failedStarts, schedule.failedStarts),
     eq(triggerSchedules.attempts, schedule.attempts)
   );
+
+/** That `schedule`'s occurrence is still its trigger's next, as SQL. */
+const stillNext = (schedule: DueSchedule) =>
+  sql`EXISTS (SELECT 1 FROM ${triggerSchedules} WHERE ${triggerSchedules.triggerId} = ${schedule.triggerId} AND ${triggerSchedules.version} = ${schedule.version} AND ${triggerSchedules.nextAt} = ${schedule.nextAt.getTime()})`;
 
 const systemEntry = (
   schedule: DueSchedule,
@@ -168,11 +176,13 @@ const recordFailure = async (
   const stops = failure.kind !== "core" && failedStarts >= maxFailedStarts;
   let nextAt: Date | null = schedule.nextAt;
   let attempts = schedule.attempts + 1;
+  let lastAttemptAt: Date | null = now;
   if (stops) {
     nextAt = null;
   } else if (failure.kind === "refused") {
     nextAt = nextOccurrence(schedule.cron, schedule.timeZone, now) ?? null;
     attempts = 0;
+    lastAttemptAt = null;
   }
   const db = drizzle(env.DB);
   // Each entry only if the update changed: `changes()` reads the statement
@@ -180,7 +190,7 @@ const recordFailure = async (
   await auditedBatch(env, db, [
     db
       .update(triggerSchedules)
-      .set({ nextAt, failedStarts, attempts })
+      .set({ nextAt, failedStarts, attempts, lastAttemptAt })
       .where(asRead(schedule)),
     ...(failure.kind === "refused"
       ? [
@@ -241,7 +251,10 @@ const startScheduled = async (
         input: z.json().parse(JSON.parse(schedule.input)),
         key: startKeyOf(schedule),
       },
-      undefined,
+      // Admitted only while this occurrence is still the schedule's next:
+      // disabled and enabled again since it was read, or moved, the
+      // schedule was worked out again, and this one starts nothing.
+      stillNext(schedule),
       {
         scheduledAt: schedule.nextAt.toISOString(),
         triggerVersion: String(schedule.version),
@@ -272,6 +285,7 @@ const startScheduled = async (
       nextAt: nextOccurrence(schedule.cron, schedule.timeZone, now) ?? null,
       failedStarts: 0,
       attempts: 0,
+      lastAttemptAt: null,
     })
     .where(asRead(schedule));
 };

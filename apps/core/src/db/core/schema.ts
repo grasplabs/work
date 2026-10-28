@@ -3705,6 +3705,11 @@ export const triggerSchedules = sqliteTable(
     nextAt: timestamp("next_at"),
     failedStarts: integer("failed_starts").notNull().default(0),
     attempts: integer().notNull().default(0),
+    /**
+     * When the last try of the occurrence failed: what the next try's
+     * wait counts from. Null while no try of it has failed.
+     */
+    lastAttemptAt: timestamp("last_attempt_at"),
   },
   (table) => [
     // The schedules due by a time.

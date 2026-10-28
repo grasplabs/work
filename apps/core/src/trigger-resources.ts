@@ -548,7 +548,13 @@ export const updateTriggerVersion = async (
             })
             .onConflictDoUpdate({
               target: triggerSchedules.triggerId,
-              set: { version: next, nextAt, failedStarts: 0, attempts: 0 },
+              set: {
+                version: next,
+                nextAt,
+                failedStarts: 0,
+                attempts: 0,
+                lastAttemptAt: null,
+              },
             }),
         ]),
     db
@@ -622,6 +628,7 @@ export const setTriggerEnabled = async (
           nextOccurrence(schedule.cron, schedule.timeZone, new Date()) ?? null,
         failedStarts: 0,
         attempts: 0,
+        lastAttemptAt: null,
       })
       .where(
         and(

@@ -4,6 +4,7 @@ CREATE TABLE `trigger_schedules` (
 	`next_at` integer,
 	`failed_starts` integer DEFAULT 0 NOT NULL,
 	`attempts` integer DEFAULT 0 NOT NULL,
+	`last_attempt_at` integer,
 	FOREIGN KEY (`trigger_id`) REFERENCES `trigger_resources`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint

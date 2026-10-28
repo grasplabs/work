@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8c503daa-fa3b-4073-b21c-5de705397a86",
+  "id": "9b3c85b6-d076-4099-8e87-38b5696f3198",
   "prevId": "140933c5-dff4-4bda-840f-2c2a5a7a221a",
   "tables": {
     "access_revocations": {
@@ -8621,6 +8621,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": 0
+        },
+        "last_attempt_at": {
+          "name": "last_attempt_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {

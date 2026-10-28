@@ -239,6 +239,43 @@ const failingOnce = (matches: RegExp): Env => {
   return { ...env, DB: db };
 };
 
+/**
+ * `env` whose database runs `meanwhile` once, just before the batch that
+ * admits a start (the one inserting its receipt) is sent: another
+ * request's change landing between a due schedule's read and its start.
+ */
+const changedBeforeAdmission = (meanwhile: () => Promise<void>): Env => {
+  let admitting = false;
+  let ran = false;
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): unknown => {
+          if (/^insert into "workflow_start_receipts"/iu.test(query)) {
+            admitting = true;
+          }
+          return target.prepare(query);
+        };
+      }
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]): Promise<unknown> => {
+          if (admitting && !ran) {
+            ran = true;
+            await meanwhile();
+          }
+          const answer: unknown = await target.batch(statements);
+          return answer;
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { ...env, DB: db };
+};
+
 const minuteMs = 60_000;
 
 /** The minute before the current one began: due now. */
@@ -603,6 +640,61 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
         { action: "trigger.schedule.restarted", detail: { version: 1 } },
       ],
     });
+  });
+
+  it("wait between failed tries from the last failure, however long overdue the occurrence is", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const trigger = await scheduleTrigger(admin, workflow.id);
+    // Three hours overdue, after an outage.
+    await dueAt(trigger.id, new Date(lastMinute().getTime() - 180 * minuteMs));
+    const failing = () =>
+      failingOnce(/^insert into "workflow_start_receipts"/iu);
+    const now = Date.now();
+    await startDueScheduleTriggers(failing(), new Date(now));
+    const first = await scheduleOf(trigger.id);
+    // Ten seconds on: still within the minute the first failure waits.
+    await startDueScheduleTriggers(failing(), new Date(now + 10_000));
+    const early = await scheduleOf(trigger.id);
+    // A minute on: tried again, and now it waits two.
+    await startDueScheduleTriggers(failing(), new Date(now + minuteMs));
+    const second = await scheduleOf(trigger.id);
+    await startDueScheduleTriggers(failing(), new Date(now + 2 * minuteMs));
+    const tooSoon = await scheduleOf(trigger.id);
+
+    expect({
+      first: first?.attempts,
+      early: early?.attempts,
+      second: second?.attempts,
+      tooSoon: tooSoon?.attempts,
+    }).toStrictEqual({ first: 1, early: 1, second: 2, tooSoon: 2 });
+  });
+
+  it("start nothing for an occurrence that stopped being the next between its read and its start", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const trigger = await scheduleTrigger(admin, workflow.id);
+    const stale = lastMinute();
+    await dueAt(trigger.id, stale);
+    // Disabled and enabled again meanwhile: its schedule worked out anew.
+    const reworked = stale.getTime() + 60 * minuteMs;
+    await startDueScheduleTriggers(
+      changedBeforeAdmission(async () => {
+        await env.DB.prepare(
+          "UPDATE trigger_schedules SET next_at = ? WHERE trigger_id = ?"
+        )
+          .bind(reworked, trigger.id)
+          .run();
+      })
+    );
+    const runs = await runsOf(trigger.id);
+    const after = await scheduleOf(trigger.id);
+
+    expect({
+      runs: runs.length,
+      next: after?.nextAt,
+      failedStarts: after?.failedStarts,
+    }).toStrictEqual({ runs: 0, next: reworked, failedStarts: 0 });
   });
 
   it("fire once per local time they name through the hour the autumn change repeats", async () => {
