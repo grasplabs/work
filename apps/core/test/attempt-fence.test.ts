@@ -19,6 +19,7 @@ import {
 import type { Settled } from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import { keepMessage } from "../src/workflows/kept-email.ts";
+import { runEvidenceMaxRows } from "../src/workflows/run-evidence.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -669,6 +670,228 @@ describe(
       );
 
       expect(codeOf(answered)).toBe("brain.denied");
+    });
+
+    /** Every outbound call of `attempt`, each answered by its code. */
+    const outbound = async (attempt: AttemptHost) => ({
+      model: codeOf(
+        await attempt.callModel({
+          binding: "MODEL",
+          instructions: "x",
+          input: "y",
+          outputSchema: {},
+        })
+      ),
+      connection: codeOf(
+        await attempt.callConnection("MAIL", ["send", {}, {}])
+      ),
+      function: codeOf(
+        await attempt.callFunction(
+          { contractId: "sample.hits", kind: "query" },
+          {}
+        )
+      ),
+      decision: codeOf(
+        await attempt.openDecision({
+          step: "tidy",
+          from: [],
+          description: "Approve",
+          timeout: "1 day",
+        })
+      ),
+    });
+    const allRevoked = {
+      model: "brain.revoked",
+      connection: "brain.revoked",
+      function: "brain.revoked",
+      decision: "brain.revoked",
+    };
+
+    /** An App granted the handbook and the Brain under `BRAIN` (and `MEMORY`). */
+    const evidenceApp = async (
+      admin: Awaited<ReturnType<typeof personApi>>
+    ) => {
+      const app = await appWith(admin, {});
+      const subject = { type: "app", appId: appIdSchema.parse(app) } as const;
+      const { collectionId, noteId } = await collectionWithNote(admin.api, {
+        name: "Handbook",
+        access: "everyone",
+      });
+      const collectionGrant = await requestGranted(
+        idp,
+        admin,
+        readCollection(subject, collectionId)
+      );
+      const brainGrant = await requestGranted(idp, admin, {
+        subject,
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+      await requestGranted(idp, admin, {
+        subject,
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "MEMORY",
+      });
+      const calls: WorkflowCalls = {
+        steps: { tidy: ["BRAIN", "MEMORY"] },
+        kinds: { tidy: "exact" },
+        models: {},
+        keyed: [],
+        all: ["BRAIN", "MEMORY"],
+      };
+      return { app, noteId, collectionGrant, brainGrant, calls };
+    };
+
+    it("refuses every outbound call once what a run recalled can't be read, and no later recall lifts it: in a loop, at once, or empty", async () => {
+      const admin = await personApi("admin");
+      const { app, collectionGrant, calls } = await evidenceApp(admin);
+      let answered: Record<string, string> = {};
+      let again = "";
+      await cancelledAt(
+        app,
+        admin.userId,
+        calls,
+        undefined,
+        async (attempt) => {
+          // Recalled in a loop, and twice at once: one narrow and empty.
+          for (const query of ["note", "other"]) {
+            // oxlint-disable-next-line no-await-in-loop -- one recall after another
+            await attempt.callBrain("BRAIN", "recall", { query });
+          }
+          await Promise.all([
+            attempt.callBrain("BRAIN", "recall", { query: "note" }),
+            attempt.callBrain("BRAIN", "recall", { query: "zzzznothing" }),
+          ]);
+          await admin.api.permissions.revoke(collectionGrant);
+          answered = await outbound(attempt);
+          // Recalled again, now finding nothing it may read.
+          await attempt.callBrain("BRAIN", "recall", { query: "zzzznothing" });
+          again = codeOf(
+            await attempt.callModel({
+              binding: "MODEL",
+              instructions: "x",
+              input: "y",
+              outputSchema: {},
+            })
+          );
+          return { ok: true, value: null };
+        }
+      );
+
+      expect({ answered, again }).toStrictEqual({
+        answered: allRevoked,
+        again: "brain.revoked",
+      });
+    });
+
+    it("refuses once a document it recalled is gone, though its collection may still be read", async () => {
+      const admin = await personApi("admin");
+      const { app, noteId, calls } = await evidenceApp(admin);
+      let model = "";
+      await cancelledAt(
+        app,
+        admin.userId,
+        calls,
+        undefined,
+        async (attempt) => {
+          await attempt.callBrain("BRAIN", "recall", { query: "note" });
+          // Erased from the Brain, as a purge erases it.
+          await env.KNOWLEDGE.prepare("DELETE FROM documents WHERE id = ?")
+            .bind(noteId)
+            .run();
+          model = codeOf(
+            await attempt.callModel({
+              binding: "MODEL",
+              instructions: "x",
+              input: "y",
+              outputSchema: {},
+            })
+          );
+          return { ok: true, value: null };
+        }
+      );
+
+      expect(model).toBe("brain.revoked");
+    });
+
+    it("refuses once the permission of the binding that recalled is revoked, though another brain permission holds", async () => {
+      const admin = await personApi("admin");
+      const { app, brainGrant, calls } = await evidenceApp(admin);
+      let before = "";
+      let after = "";
+      await cancelledAt(
+        app,
+        admin.userId,
+        calls,
+        undefined,
+        async (attempt) => {
+          await attempt.callBrain("BRAIN", "recall", { query: "note" });
+          before = codeOf(
+            await attempt.callConnection("MAIL", ["send", {}, {}])
+          );
+          await admin.api.permissions.revoke(brainGrant);
+          after = codeOf(
+            await attempt.callConnection("MAIL", ["send", {}, {}])
+          );
+          return { ok: true, value: null };
+        }
+      );
+
+      expect({
+        beforeIsRevoked: before === "brain.revoked",
+        after,
+      }).toStrictEqual({
+        beforeIsRevoked: false,
+        after: "brain.revoked",
+      });
+    });
+
+    it("refuses a recall that would keep more than a run's cap of evidence, though one citing only what it keeps still answers", async () => {
+      const admin = await personApi("admin");
+      const { app, noteId, calls } = await evidenceApp(admin);
+      let answered: Record<string, string> = {};
+      await cancelledAt(
+        app,
+        admin.userId,
+        calls,
+        undefined,
+        async (attempt) => {
+          // The note alone (`note.md`: "See …").
+          await attempt.callBrain("BRAIN", "recall", { query: "See" });
+          const kept = await env.DB.prepare(
+            "SELECT run_id AS run, permission_id AS permission FROM run_brain_evidence WHERE document_id = ?"
+          )
+            .bind(noteId)
+            .first<{ run: string; permission: string }>();
+          if (kept === null) {
+            throw new Error("The recall kept no evidence");
+          }
+          // Up to the cap, as a run recalling in a loop would come to.
+          await env.DB.prepare(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT INTO run_brain_evidence SELECT ?, 'filler-' || i, 'filler', 1, 'filler', ?, 0 FROM n"
+          )
+            .bind(runEvidenceMaxRows - 1, kept.run, kept.permission)
+            .run();
+          answered = {
+            // The note again: nothing more to keep.
+            again: codeOf(
+              await attempt.callBrain("BRAIN", "recall", { query: "See" })
+            ),
+            // `other.md` ("Back to …"): one past the cap.
+            past: codeOf(
+              await attempt.callBrain("BRAIN", "recall", { query: "Back" })
+            ),
+          };
+          return { ok: true, value: null };
+        }
+      );
+
+      expect(answered).toStrictEqual({
+        again: "ok",
+        past: "brain.budget_exceeded",
+      });
     });
 
     it("refuses a recall from a step whose review doesn't show it calling the Brain", async () => {

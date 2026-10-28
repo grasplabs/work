@@ -50,7 +50,7 @@ import { z } from "zod";
 import { signInConfig } from "../auth/config.ts";
 import { channelKeys, keyFor as channelKeyFor } from "./signing-keys.ts";
 import type { ChannelKeys } from "./signing-keys.ts";
-import { ConnectedTeamsAdapter } from "./teams-adapter.ts";
+import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 
 /** Who issues the tokens the Bot Framework sends its requests with. */
 const botFrameworkIssuer = "https://api.botframework.com";
@@ -243,11 +243,14 @@ const teamsLogger: Logger = {
  * the placeholder connect swaps for it (`channelCredentialPlaceholder`),
  * given as the token itself, so Microsoft's SDK never asks Entra for one.
  */
-export const teamsAdapter = (
+export const teamsAdapter = async (
   env: Env,
   keys: TeamsKeys = isolateKeys
-): ConnectedTeamsAdapter =>
-  new ConnectedTeamsAdapter(env, {
+): Promise<ConnectedTeamsAdapter> => {
+  // Loaded on first use: Microsoft's SDK under it (and Express, under
+  // that) would cost every isolate's startup, and only Teams needs it.
+  const { ConnectedTeamsAdapter: Adapter } = await import("./teams-adapter.ts");
+  return new Adapter(env, {
     appId: env.TEAMS_BOT_ID ?? "",
     appType: "SingleTenant",
     appTenantId: clientTenant(env),
@@ -256,3 +259,4 @@ export const teamsAdapter = (
     token: () => channelCredentialPlaceholder,
     logger: teamsLogger,
   });
+};

@@ -32,11 +32,11 @@ export const executionErrors = defineErrorFamily({
 /** Why a workflow call was refused. */
 export const workflowErrors = defineErrorFamily({
   "workflow.invalid": "That isn't a valid request for a workflow.",
-  "workflow.not_found": "The App's current version has no such workflow.",
+  "workflow.not_found": "The domain's current version has no such workflow.",
   "workflow.run_not_found": "There's no such workflow run.",
   "workflow.run_details_removed":
     "This run's details were removed when its retention ended, so there is nothing left to work out a fix from.",
-  "workflow.build_failed": "The App's workflows don't build.",
+  "workflow.build_failed": "The domain's workflows don't build.",
   "workflow.model_undeclared":
     "A workflow's AI step goes through a model resource this version doesn't declare as a text model, so it can't be made current.",
   "workflow.tests_failed":
@@ -60,29 +60,29 @@ export const workflowErrors = defineErrorFamily({
   "workflow.lineage_busy":
     "Steps still running in this workflow run, or in runs it started, hold what's left of its run time. Try again once they finish.",
   "workflow.queued":
-    "Workflow steps already running take this App's, this person's or the organization's share of the steps that may run at once. This one waits its turn and runs once a share comes free.",
+    "Workflow steps already running take this domain's, this person's or the organization's share of the steps that may run at once. This one waits its turn and runs once a share comes free.",
   "workflow.queue_timeout":
-    "This workflow step waited its turn to run for as long as a step may wait, so it was stopped. Steps already running kept the organization, this person or this App busy throughout: try again later.",
+    "This workflow step waited its turn to run for as long as a step may wait, so it was stopped. Steps already running kept the organization, this person or this domain busy throughout: try again later.",
   "workflow.queue_full":
-    "As many of this person's, or this App's, workflow steps are already waiting for their turn to run as may wait at once. Try again once some have run.",
+    "As many of this person's, or this domain's, workflow steps are already waiting for their turn to run as may wait at once. Try again once some have run.",
   "workflow.idempotency_key_invalid":
     "A workflow's connection calls take their step's own idempotency key (the `idempotencyKey` a side-effect step gets), or none: the platform keeps side effects to once per step and run.",
   "workflow.param_not_found":
-    "The workflow has no such parameter in the App's current version.",
+    "The workflow has no such parameter in the domain's current version.",
   "workflow.param_invalid": "That isn't a valid value for this parameter.",
   "workflow.param_conflict":
-    "The App's current version changed while the value was set. Try again.",
+    "The domain's current version changed while the value was set. Try again.",
   "workflow.trigger_gone":
-    "The trigger belongs to a version of the App that is no longer current.",
+    "The trigger belongs to a version of the domain that is no longer current.",
   "workflow.owner_invalid":
-    "Only a current member of the organization who can open the App can own its workflow.",
+    "Only a current member of the organization who can open the domain can own its workflow.",
   "workflow.owner_conflict":
     "Someone changed the workflow's owner meanwhile. Try again.",
   "workflow.team_invalid": "That isn't one of the organization's teams.",
   "workflow.email_taken":
-    "Another App's workflow already receives mail at this address.",
+    "Another domain's workflow already receives mail at this address.",
   "workflow.attachment_not_found":
-    "This App has no such attachment: the message isn't kept for it, or its 30 days have passed.",
+    "This domain has no such attachment: the message isn't kept for it, or its 30 days have passed.",
   "workflow.attachment_unreadable":
     "The kept message can't be read any more, so none of its attachments can.",
   "workflow.call_not_reviewed":
@@ -1386,6 +1386,28 @@ export interface RunActivity {
 }
 
 /**
+ * A workflow that uses a connection, as Integrations names and links it:
+ * an App's (its App and its name in the App's code), or an independent
+ * workflow (its ID and name).
+ */
+export type ConnectionWorkflow =
+  | { kind: "app"; app: AppId; appName: string; workflow: WorkflowId }
+  | { kind: "independent"; id: string; name: string };
+
+/**
+ * The workflows a person can open that use one connection: an App's whose
+ * App holds an active permission on it and whose code calls that
+ * permission's binding, and an independent workflow whose current version
+ * declares a connector binding an active approval serves through the
+ * workflow's own active permission on it. App workflows first, by App name
+ * and workflow, then independent ones by name.
+ */
+export interface ConnectionWorkflows {
+  connectionId: string;
+  workflows: ConnectionWorkflow[];
+}
+
+/**
  * A signed-in person's workflows. Anyone with a role in the App
  * (`AppsApi`) starts and follows its runs, and its builders cancel them;
  * every call checks the session and the person's role again.
@@ -1421,11 +1443,11 @@ export interface WorkflowsApi {
    */
   overview: () => Promise<WorkflowSummary[]>;
   /**
-   * The workflows of the Apps the person can open that use `connection`:
-   * each one whose App holds an active permission on it and whose code
-   * calls that permission's binding, summed up as in `overview`.
+   * Every connection some workflow the person can open uses, with those
+   * workflows (`ConnectionWorkflows`); a connection none of them uses
+   * isn't listed.
    */
-  ofConnection: (connection: string) => Promise<WorkflowSummary[]>;
+  byConnection: () => Promise<ConnectionWorkflows[]>;
   /**
    * Runs of the Apps the person can open, as `filter` narrows them:
    * waiting first (latest to wait first), then failed (latest ended

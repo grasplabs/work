@@ -1276,7 +1276,10 @@ type PinnedContract = Pick<
   "alias" | "kind" | "contractId" | "fingerprint"
 >;
 
-/** Where a version's manifest seals what its bindings pinned (`writeVersion`). */
+/**
+ * Where a version's manifest seals what its bindings pinned (`writeVersion`,
+ * `PinnedBinding`): read for its review and its export alike.
+ */
 const manifestBindingsSchema = z.object({
   bindings: z.array(
     z.object({
@@ -1284,6 +1287,8 @@ const manifestBindingsSchema = z.object({
       kind: z.enum(["workflow", ...catalogBindingKinds]),
       contractId: z.string().nullable(),
       fingerprint: z.string(),
+      resourceId: z.string().nullable(),
+      resourceVersion: z.int().nullable(),
     })
   ),
 });
@@ -2444,18 +2449,6 @@ export const workflowSource = async (
   return { files };
 };
 
-/** A version's bindings, as its manifest pins them (`writeVersion`). */
-const pinnedBindingsSchema = z.object({
-  bindings: z.array(
-    z.object({
-      alias: z.string(),
-      kind: z.string(),
-      resourceId: z.string().nullable(),
-      resourceVersion: z.int().nullable(),
-    })
-  ),
-});
-
 /** A binding of a version, as a definition export follows it. */
 export type ExportedBinding =
   | {
@@ -2623,7 +2616,7 @@ export const exportedWorkflowVersion = async (
     version,
     row.manifestHash
   );
-  const pinned = pinnedBindingsSchema.safeParse(parsedJson(row.manifest));
+  const pinned = manifestBindingsSchema.safeParse(parsedJson(row.manifest));
   const packages = await exportedPackages(env, workflow.id, row.manifest);
   if (!pinned.success || packages === undefined) {
     throw corrupt(workflow.id, version);

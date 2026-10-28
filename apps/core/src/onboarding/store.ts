@@ -503,7 +503,6 @@ const agreedSchema = z.record(z.string(), z.string());
 const agreedOf = (stored: string): Record<string, string> =>
   agreedSchema.safeParse(JSON.parse(stored)).data ?? {};
 
-/** A drawing as the store keeps it; null when there is none. */
 /**
  * Someone's admission as SQL, as `#interviewsOf` reads it: their
  * interview's start and how often anything they approved stopped counting,
@@ -513,6 +512,7 @@ const agreedOf = (stored: string): Record<string, string> =>
 const admissionSql = (person: string): SQL =>
   sql`(SELECT CASE WHEN agreed_at IS NULL THEN NULL ELSE coalesce(started_at, '') || '|' || revocations END FROM interview_states WHERE person = ${person})`;
 
+/** A drawing as the store keeps it; null when there is none. */
 const drawingOf = (stored: string | null): DrawnWork | null =>
   stored === null
     ? null

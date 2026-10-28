@@ -53,7 +53,7 @@ import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import { workflowRoleSql } from "./workflow-roles.ts";
 import {
   packagesHoldSql,
-  sealedPackagesSchema,
+  manifestPackagesSchema,
 } from "./workflows/package-seal.ts";
 import type { ChildPlace } from "./workflows/quotas.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
@@ -436,11 +436,6 @@ export const appSendHoldsSql = (
   person: string,
   workflow: WorkflowResourceId
 ): SQL => appGrantHoldsSql(app, appVersion, person, workflow, "send");
-
-/** Where a version's manifest seals the approved packages its modules import. */
-const manifestPackagesSchema = z.object({
-  packages: sealedPackagesSchema.optional(),
-});
 
 /**
  * That the approved graph `graphHash` workflow `id`'s version seals still

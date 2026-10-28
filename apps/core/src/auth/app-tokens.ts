@@ -73,7 +73,7 @@ const expiryOf = (session: SignedInSession, now: number): number =>
  * (token-keys.ts), through Better Auth's own adapter. Run by the cron.
  */
 export const sweepTokenKeys = async (env: Env, now: Date): Promise<void> => {
-  const auth = authFor(env, signInConfig(env));
+  const auth = await authFor(env, signInConfig(env));
   if (auth === undefined) {
     return;
   }
@@ -100,7 +100,7 @@ export const issueAppToken = async (
   session: SignedInSession,
   app: AppId
 ): Promise<{ token: string; expiresAt: Date } | undefined> => {
-  const auth = authFor(env, signInConfig(env));
+  const auth = await authFor(env, signInConfig(env));
   if (auth === undefined) {
     return undefined;
   }
@@ -166,7 +166,7 @@ export const checkAppToken = async (
   app: string
 ): Promise<TokenCheck> => {
   const invalid = { ok: false, reason: "invalid" } as const;
-  const auth = authFor(env, signInConfig(env));
+  const auth = await authFor(env, signInConfig(env));
   if (
     auth === undefined ||
     token.length > tokenMaxLength ||
