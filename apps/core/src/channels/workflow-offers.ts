@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { chatAuthority, chatContext } from "../agent-scope.ts";
 import type { AgentScope } from "../agent-scope.ts";
+import { activeMember } from "../auth/auth.ts";
 import type { Member } from "../auth/identity.ts";
 import { memberOf } from "../auth/identity.ts";
 import {
@@ -17,7 +18,7 @@ import {
   workflowResources,
   workflowResourceVersions,
 } from "../db/core/schema.ts";
-import { inList } from "../db/d1.ts";
+import { inList, notNullFailed } from "../db/d1.ts";
 import { isRestricted } from "../restricted.ts";
 import {
   listWorkflowResources,
@@ -209,20 +210,29 @@ export const offerStart = async (
   }
   const id = crypto.randomUUID();
   const now = Date.now();
-  await drizzle(env.DB)
-    .insert(chatWorkflowOffers)
-    .values({
-      id,
-      userId: person.userId,
-      workspaceId: scope.workspaceId,
-      chatId: scope.chatId,
-      workflowId: workflow.id,
-      workflowName: workflow.name,
-      version,
-      input: text,
-      createdAt: new Date(now),
-      expiresAt: new Date(now + offerMs),
-    });
+  try {
+    await drizzle(env.DB)
+      .insert(chatWorkflowOffers)
+      .values({
+        id,
+        // NULL, which fails the insert, once they are no longer a member:
+        // removed, or erased after, as the turn that offers it ran.
+        userId: sql`(SELECT ${person.userId} WHERE ${activeMember(person.userId)})`,
+        workspaceId: scope.workspaceId,
+        chatId: scope.chatId,
+        workflowId: workflow.id,
+        workflowName: workflow.name,
+        version,
+        input: text,
+        createdAt: new Date(now),
+        expiresAt: new Date(now + offerMs),
+      });
+  } catch (error) {
+    if (notNullFailed(error, "chat_workflow_offers.user_id")) {
+      throw permissionErrors.create("permission.person_inactive");
+    }
+    throw error;
+  }
   return { offer: id, workflow: workflow.id, version };
 };
 

@@ -83,9 +83,11 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
 import { Chat } from "chat";
 import type { Message, StateAdapter, Thread } from "chat";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { activeMember } from "../auth/auth.ts";
 import { signInConfig } from "../auth/config.ts";
 import { memberFromDirectory } from "../auth/directory-members.ts";
 import { channelConversations } from "../db/core/schema.ts";
@@ -331,7 +333,10 @@ export type ChannelHandoff = (accepted: ChannelMessage) => Promise<void>;
 
 /**
  * Keeps the conversation `userId` wrote in, or notes they wrote again, with
- * the language they wrote in where the door knows it (Teams).
+ * the language they wrote in where the door knows it (Teams). Only while
+ * they are a member, checked in the write itself: a message checked before
+ * they were removed, and kept after (they were erased meanwhile, say),
+ * keeps nothing of theirs.
  */
 const keepConversation = async (
   env: Env,
@@ -343,14 +348,11 @@ const keepConversation = async (
 ): Promise<void> => {
   await drizzle(env.DB)
     .insert(channelConversations)
-    .values({
-      platform,
-      threadId,
-      userId,
-      locale,
-      createdAt: now,
-      lastMessageAt: now,
-    })
+    .select(
+      sql`SELECT ${platform}, ${threadId}, ${userId}, ${now.getTime()},
+        ${now.getTime()}, ${locale ?? null}
+        WHERE ${activeMember(userId)}`
+    )
     .onConflictDoUpdate({
       target: [channelConversations.platform, channelConversations.threadId],
       set: { userId, locale, lastMessageAt: now },
