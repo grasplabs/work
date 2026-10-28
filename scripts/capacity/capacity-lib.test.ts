@@ -1,8 +1,3 @@
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -107,27 +102,29 @@ describe("the capacity job", () => {
   });
 });
 
-const root = path.join(import.meta.dirname, "../..");
-
-/** The report Vitest writes for its run of `file`, from the repo's root. */
-const reportOf = (file: string): unknown => {
-  const out = path.join(
-    mkdtempSync(path.join(tmpdir(), "grasp-os-capacity-test-")),
-    "report.json"
-  );
-  execFileSync(
-    path.join(root, "node_modules/.bin/vp"),
-    ["test", "run", "--reporter=json", `--outputFile=${out}`, file],
-    { cwd: root, stdio: "ignore" }
-  );
-  return JSON.parse(readFileSync(out, "utf-8"));
+/**
+ * The report Vitest writes (`--reporter=json`) for a run whose file filter
+ * matches nothing, as a mistyped workload path does: no test ran, and the
+ * run exits 0 and calls itself a success. Taken from such a run; spawning
+ * one here would boot every project of the workspace for nothing.
+ */
+const ranNothing = {
+  numTotalTestSuites: 0,
+  numPassedTestSuites: 0,
+  numFailedTestSuites: 0,
+  numPendingTestSuites: 0,
+  numTotalTests: 0,
+  numPassedTests: 0,
+  numFailedTests: 0,
+  numPendingTests: 0,
+  numTodoTests: 0,
+  success: true,
+  testResults: [],
 };
 
 describe("a capacity workload's run", () => {
   it("proves nothing for a mistyped path, which Vitest runs as nothing, exiting 0", () => {
-    expect(
-      workloadPassed(reportOf("scripts/capacity/no-such-workload.test.ts"))
-    ).toBeFalsy();
+    expect(workloadPassed(ranNothing)).toBeFalsy();
   });
 
   it("holds only when a test passed and none failed, skipped or was left to do", () => {
