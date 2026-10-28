@@ -8,6 +8,7 @@ import type { Brain } from "./brain.ts";
 import type { CollectionRow } from "./collections.ts";
 import { inList } from "./db/d1.ts";
 import {
+  brainEntityMatches,
   brainPayloads,
   collections,
   documents,
@@ -1466,6 +1467,13 @@ const purgeDocument = async <C>(
   // Before anything of it changes: one the host is saving now refuses, and
   // the purge fails here.
   await onErase.forgetFiles(by, filesNamed(document));
+  // Before its text is rewritten: an entity match it was the evidence for
+  // rests on text the purge may erase, so it goes, to be decided again on
+  // what is left. Before, so a purge that stops after rewriting leaves
+  // none to be found again.
+  await db
+    .delete(brainEntityMatches)
+    .where(eq(brainEntityMatches.evidenceDocumentId, document.id));
   const at = document.currentVersion;
   const { actor } = by;
   const earlier = await rewriteVersions(

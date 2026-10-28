@@ -1929,6 +1929,17 @@ const readableEvidence = <C>(brain: Brain<C>, allowed: Allowed): SQL =>
       )
   );
 
+/**
+ * Whether the reader sees the two sides in different collections: two
+ * entities that only one collection links are that collection's own
+ * business, not a match across collections.
+ */
+const acrossCollections = (
+  one: { collections: Set<string> },
+  other: { collections: Set<string> }
+): boolean =>
+  [...one.collections].some((a) => [...other.collections].some((b) => a !== b));
+
 /** The pairs among `ids` that have a decision, either way, as `pairKey`s. */
 const decidedPairs = async <C>(
   brain: Brain<C>,
@@ -2070,9 +2081,19 @@ export const entityMatchProposals = async <C>(
       entities.flatMap(({ collectionIds }) => collectionIds)
     ).size;
     const key = entities.map(({ id }) => id).join(",");
-    // Once every pair of it is decided, there is nothing left to propose.
-    const open = entities.some(({ id: a }, index) =>
-      entities.slice(index + 1).some(({ id: b }) => !decided.has(pairKey(a, b)))
+    // Once every pair of it that may be decided is (two entities only one
+    // collection links aren't a match across collections), there is
+    // nothing left to propose.
+    const open = entities.some(({ id: a, collectionIds: inA }, index) =>
+      entities
+        .slice(index + 1)
+        .some(
+          ({ id: b, collectionIds: inB }) =>
+            acrossCollections(
+              { collections: new Set(inA) },
+              { collections: new Set(inB) }
+            ) && !decided.has(pairKey(a, b))
+        )
     );
     if (
       entities.length > 1 &&
@@ -2135,12 +2156,19 @@ const readableSides = async <C>(
   sides: Map<string, { kind: string; collections: Set<string> }>;
   rows: ReadableMention[];
 }> => {
-  const rows = await readableMentions(
-    brain,
-    reader,
-    and(eq(brainMentions.state, "linked"), inList(brainMentions.entityId, ids)),
-    { memories: false }
-  );
+  // One read per entity: a window shared by all would let one entity's
+  // many mentions crowd out another's.
+  const rows: ReadableMention[] = [];
+  for (const id of new Set(ids)) {
+    // oxlint-disable-next-line no-await-in-loop -- one entity at a time, each bounded
+    const own = await readableMentions(
+      brain,
+      reader,
+      and(eq(brainMentions.state, "linked"), eq(brainMentions.entityId, id)),
+      { memories: false }
+    );
+    rows.push(...own);
+  }
   const sides = new Map<string, { kind: string; collections: Set<string> }>();
   for (const { entityId, kind, collectionId } of rows) {
     if (entityId !== null && collectionId !== null) {
@@ -2151,17 +2179,6 @@ const readableSides = async <C>(
   }
   return { sides, rows };
 };
-
-/**
- * Whether the reader sees the two sides in different collections: two
- * entities that only one collection links are that collection's own
- * business, not a match across collections.
- */
-const acrossCollections = (
-  one: { collections: Set<string> },
-  other: { collections: Set<string> }
-): boolean =>
-  [...one.collections].some((a) => [...other.collections].some((b) => a !== b));
 
 /** Refuses evidence that isn't a document version `reader` reads now. */
 const requireEvidence = async <C>(
@@ -2231,13 +2248,19 @@ const replaceable = async <C>(
   pair: SQL | undefined,
   decidedBy: string
 ): Promise<
-  | { decidedBy: string; decision: string; previousDecider: string | null }
+  | {
+      decidedBy: string;
+      decision: string;
+      revision: number;
+      previousDecider: string | null;
+    }
   | undefined
 > => {
   const existing = await brain.db
     .select({
       decidedBy: brainEntityMatches.decidedBy,
       decision: brainEntityMatches.decision,
+      revision: brainEntityMatches.revision,
     })
     .from(brainEntityMatches)
     .where(pair)
@@ -2297,13 +2320,14 @@ export const decideEntityMatch = async <C>(
       .values({ entityA, entityB, ...values })
       .onConflictDoUpdate({
         target: [brainEntityMatches.entityA, brainEntityMatches.entityB],
-        set: values,
-        // Exactly the decision the replacement was allowed against: one
-        // made or replaced meanwhile is left as it is (and refused below).
+        set: { ...values, revision: sql`${brainEntityMatches.revision} + 1` },
+        // Exactly the decision the replacement was allowed against, at the
+        // revision read: one made or replaced meanwhile, by anyone, the
+        // same person too, is left as it is (and refused below).
         setWhere:
           existing === undefined
             ? sql`0`
-            : eq(brainEntityMatches.decidedBy, existing.decidedBy),
+            : eq(brainEntityMatches.revision, existing.revision),
       }),
     outboxedIfChanged(brain, {
       actor: brain.ports.actorOf(reader),
