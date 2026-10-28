@@ -1,0 +1,316 @@
+/**
+ * What the real-account qualification (run.ts) uploads besides the
+ * release: small Workers whose every line is here, so what they prove is
+ * plain, and the rewrite of a release Worker's wrangler.json for one test
+ * client in the run's dispatch namespace. Each Worker is JavaScript text,
+ * uploaded as it is (no bundling), so the account runs exactly this.
+ */
+
+/** The compatibility date the probes run at: core's. */
+export const probeCompatibilityDate = "2026-09-15";
+
+/** The header the dispatcher takes its target script from. */
+export const targetHeader = "x-qual-script";
+/** The header that carries the run's dispatch key: without it, nothing passes. */
+export const dispatchKeyHeader = "x-qual-key";
+
+/**
+ * The run's dispatcher, an ordinary Worker on workers.dev: the only way
+ * into the namespace. It passes a request on to the user Worker its
+ * `x-qual-script` names, only one of the run's and only with the run's
+ * dispatch key, which it strips first.
+ */
+export const dispatcherSource = (prefix: string): string => `
+const prefix = ${JSON.stringify(prefix)};
+export default {
+  async fetch(request, env) {
+    const target = request.headers.get(${JSON.stringify(targetHeader)}) ?? "";
+    const key = request.headers.get(${JSON.stringify(dispatchKeyHeader)}) ?? "";
+    if (key === "" || key !== env.DISPATCH_KEY || !target.startsWith(prefix)) {
+      return new Response("unknown", { status: 404 });
+    }
+    const headers = new Headers(request.headers);
+    headers.delete(${JSON.stringify(targetHeader)});
+    headers.delete(${JSON.stringify(dispatchKeyHeader)});
+    try {
+      return await env.DISPATCHER.get(target).fetch(new Request(request, { headers }));
+    } catch (error) {
+      return new Response(String(error?.message ?? error), { status: 502 });
+    }
+  },
+};
+`;
+
+/**
+ * The outside world of the durability check: what the death fixture's
+ * steps tell it (packages/workerflow/test/death-fixture.ts, the same
+ * protocol as its plain-workerd harness), kept in a SQLite Durable Object
+ * so a kill of the fixture can't lose it. `GET /list?run=` reads them back.
+ */
+export const recorderSource = `
+import { DurableObject } from "cloudflare:workers";
+export class Effects extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS effects (n INTEGER PRIMARY KEY, run TEXT, label TEXT, key TEXT, attempt INTEGER, at INTEGER)");
+  }
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/list") {
+      const rows = this.ctx.storage.sql
+        .exec("SELECT run, label, key, attempt, at FROM effects WHERE run = ? ORDER BY n", url.searchParams.get("run") ?? "")
+        .toArray();
+      return Response.json(rows);
+    }
+    if (url.pathname !== "/effect") {
+      return new Response("{}");
+    }
+    const sent = await request.json();
+    this.ctx.storage.sql.exec(
+      "INSERT INTO effects (run, label, key, attempt, at) VALUES (?, ?, ?, ?, ?)",
+      sent.run, sent.label, sent.key, sent.attempt, Date.now()
+    );
+    const count = this.ctx.storage.sql.exec("SELECT count(*) AS n FROM effects").one().n;
+    return new Response(sent.label + "#" + count);
+  }
+}
+export default {
+  fetch: (request, env) => env.EFFECTS_OBJECT.get(env.EFFECTS_OBJECT.idFromName("effects")).fetch(request),
+};
+`;
+
+/**
+ * A test client's probe, a user Worker with the binding kinds core and
+ * connect need from a dispatch namespace:
+ * - \`/object\`: a SQLite Durable Object made in the EU jurisdiction, which
+ *   answers where its id says it is and that SQL runs;
+ * - \`/loader\`: a Worker Loader isolate with core's sandbox options (no
+ *   network, empty env), which tries the network and the Cache API;
+ * - \`/peer\`: a service binding to another user Worker in the namespace;
+ * - \`POST /reach\`: a fetch from inside the namespace to \`{ url, headers }\`,
+ *   for the attacks: what one client's code gets from another's.
+ */
+export const probeSource = `
+import { DurableObject } from "cloudflare:workers";
+export class ProbeObject extends DurableObject {
+  async fetch() {
+    const row = this.ctx.storage.sql.exec("SELECT 1 AS one").one();
+    return Response.json({ jurisdiction: this.ctx.id.jurisdiction ?? null, sql: row.one });
+  }
+}
+const isolate = \`
+export default {
+  async fetch(request, env) {
+    const target = new URL(request.url).searchParams.get("target");
+    const tried = {};
+    try { tried.fetch = (await fetch(target)).status; } catch (error) { tried.fetch = String(error?.message ?? error); }
+    try { await caches.default.put("https://qual.invalid/k", new Response("v")); tried.cache = "put"; } catch (error) { tried.cache = String(error?.message ?? error); }
+    tried.env = Object.keys(env ?? {}).length;
+    return Response.json(tried);
+  },
+};
+\`;
+const errorText = (error) => String(error?.message ?? error);
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    try {
+      if (url.pathname === "/object") {
+        const id = env.PROBE_OBJECT.jurisdiction("eu").idFromName("probe");
+        return await env.PROBE_OBJECT.get(id).fetch("http://object/");
+      }
+      if (url.pathname === "/loader") {
+        const stub = env.LOADER.load({
+          compatibilityDate: ${JSON.stringify(probeCompatibilityDate)},
+          mainModule: "isolate.js",
+          modules: { "isolate.js": isolate },
+          globalOutbound: null,
+          env: {},
+          limits: { cpuMs: 10000 },
+        });
+        const target = url.searchParams.get("target") ?? "https://example.com/";
+        return await stub.getEntrypoint().fetch("http://isolate/?target=" + encodeURIComponent(target));
+      }
+      if (url.pathname === "/peer") {
+        const answer = await env.PEER.fetch("http://peer/list?run=probe");
+        return Response.json({ status: answer.status });
+      }
+      if (url.pathname === "/reach" && request.method === "POST") {
+        const { url: target, headers } = await request.json();
+        const answer = await fetch(target, { headers, redirect: "manual" });
+        return Response.json({ status: answer.status });
+      }
+      return new Response("unknown", { status: 404 });
+    } catch (error) {
+      return Response.json({ error: errorText(error) }, { status: 500 });
+    }
+  },
+};
+`;
+
+/**
+ * The send_email spike (GRA-965): a user Worker with a \`send_email\`
+ * binding, which sends one plain message \`POST /send { from, to }\` asks
+ * for, and answers what the binding did.
+ */
+export const mailSource = `
+import { EmailMessage } from "cloudflare:email";
+export default {
+  async fetch(request, env) {
+    if (request.method !== "POST") {
+      return new Response("unknown", { status: 404 });
+    }
+    const { from, to } = await request.json();
+    const raw = [
+      "From: " + from,
+      "To: " + to,
+      "Subject: Grasp OS qualification (GRA-965)",
+      "Message-ID: <" + crypto.randomUUID() + "@" + from.split("@")[1] + ">",
+      "Date: " + new Date().toUTCString(),
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "Sent by a Workers for Platforms user Worker in a qualification run.",
+    ].join("\\r\\n");
+    try {
+      await env.EMAIL.send(new EmailMessage(from, to, raw));
+      return Response.json({ sent: true });
+    } catch (error) {
+      return Response.json({ sent: false, error: String(error?.message ?? error) });
+    }
+  },
+};
+`;
+
+/** A binding in an upload's metadata, as the API takes it. */
+export type UploadBinding = Record<string, unknown> & {
+  type: string;
+  name: string;
+};
+
+/** What a user Worker's upload says besides its modules. */
+export interface UploadMetadata {
+  main_module: string;
+  compatibility_date: string;
+  compatibility_flags?: string[];
+  bindings: UploadBinding[];
+  migrations?: { new_tag: string; new_sqlite_classes: string[] };
+}
+
+/** A Worker of a release's wrangler.json, as deploy-lib.ts writes it. */
+export type ReleaseConfig = Record<string, unknown> & { name: string };
+
+/** The binding kinds the release's Workers have, by their wrangler.json key. */
+export const bindingKeys = [
+  "durable_objects",
+  "workflows",
+  "worker_loaders",
+  "d1_databases",
+  "r2_buckets",
+  "send_email",
+  "services",
+  "ai",
+  "version_metadata",
+] as const;
+export type BindingKey = (typeof bindingKeys)[number];
+
+/** What a client's copy of a release Worker is given. */
+export interface ClientWorker {
+  prefix: string;
+  /** `a` or `b`. */
+  client: string;
+  /** Each release Worker's name (`grasp-os-connect`) to its app (`connect`). */
+  apps: Readonly<Record<string, string>>;
+  /** Each database the release names, to the id the run created for this client. */
+  databaseIds: Readonly<Record<string, string>>;
+  /** Binding kinds left out of this attempt. */
+  without: ReadonlySet<BindingKey>;
+}
+
+/** A client's resource or script name: `<prefix>-<client>-<name>`. */
+export const clientName = (
+  { prefix, client }: Pick<ClientWorker, "prefix" | "client">,
+  name: string
+): string => `${prefix}-${client}-${name}`;
+
+const listOf = (value: unknown): Record<string, unknown>[] =>
+  Array.isArray(value)
+    ? value.filter(
+        (entry): entry is Record<string, unknown> =>
+          typeof entry === "object" && entry !== null
+      )
+    : [];
+
+const textOf = (entry: Record<string, unknown>, key: string): string => {
+  const value = entry[key];
+  if (typeof value !== "string") {
+    throw new TypeError(`A binding has no ${key}`);
+  }
+  return value;
+};
+
+/**
+ * `config` (a release Worker's wrangler.json) as one test client's user
+ * Worker: named after the client, its databases and buckets the client's
+ * own (`<prefix>-<client>-…`, the databases by the ids the run created),
+ * its services the client's own copy of the other release Worker, no
+ * workers.dev, no previews and no cron triggers (which Workers for
+ * Platforms doesn't document for user Workers), and the binding kinds in
+ * `without` left out. Nothing of the other client is named.
+ */
+export const clientConfig = (
+  config: ReleaseConfig,
+  worker: ClientWorker
+): ReleaseConfig => {
+  const rename = (name: string) => clientName(worker, name);
+  const rewritten: ReleaseConfig = {
+    ...config,
+    name: rename(worker.apps[config.name] ?? config.name),
+    workers_dev: false,
+    preview_urls: false,
+    triggers: { crons: [] },
+    d1_databases: listOf(config.d1_databases).map((database) => {
+      const name = textOf(database, "database_name");
+      const id = worker.databaseIds[name];
+      if (id === undefined) {
+        throw new Error(`No database was created for ${name}`);
+      }
+      return { ...database, database_name: rename(name), database_id: id };
+    }),
+    r2_buckets: listOf(config.r2_buckets).map((bucket) => ({
+      ...bucket,
+      bucket_name: rename(textOf(bucket, "bucket_name")),
+    })),
+    services: listOf(config.services).map((service) => {
+      const app = worker.apps[textOf(service, "service")];
+      if (app === undefined) {
+        throw new Error(
+          `${config.name} binds ${textOf(service, "service")}, which isn't a Worker of the release`
+        );
+      }
+      return { ...service, service: rename(app) };
+    }),
+  };
+  const dropped: ReadonlySet<string> = worker.without;
+  return {
+    ...Object.fromEntries(
+      Object.entries(rewritten).filter(([key]) => !dropped.has(key))
+    ),
+    name: rewritten.name,
+  };
+};
+
+/**
+ * The databases and buckets a release Worker's wrangler.json names: what
+ * the run creates for each client before it uploads it.
+ */
+export const storageOf = (
+  config: ReleaseConfig
+): { databases: string[]; buckets: string[] } => ({
+  databases: listOf(config.d1_databases).map((database) =>
+    textOf(database, "database_name")
+  ),
+  buckets: listOf(config.r2_buckets).map((bucket) =>
+    textOf(bucket, "bucket_name")
+  ),
+});
