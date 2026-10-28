@@ -3325,8 +3325,8 @@ msgid "Budgets"
 msgstr "Presupuestos"
 
 #: src/routes/_shell.settings.members.tsx
-msgid "Build engines, their apps and workflows, and ask for the permissions they need"
-msgstr "Crear motores, sus aplicaciones y flujos de trabajo, y pedir los permisos que necesitan"
+msgid "Build domains, their apps and workflows, and ask for the permissions they need"
+msgstr "Crear dominios, sus aplicaciones y flujos de trabajo, y pedir los permisos que necesitan"
 
 #: src/labels.ts
 msgid "Builder"
@@ -4140,8 +4140,8 @@ msgid "Connect another account"
 msgstr "Conectar otra cuenta"
 
 #: src/routes/_shell.settings.members.tsx
-msgid "Connect shared accounts and decide what engines may do"
-msgstr "Conectar cuentas compartidas y decidir qué pueden hacer los motores"
+msgid "Connect shared accounts and decide what domains may do"
+msgstr "Conectar cuentas compartidas y decidir qué pueden hacer los dominios"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Connected"
