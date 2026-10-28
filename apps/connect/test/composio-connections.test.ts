@@ -1359,6 +1359,40 @@ describe("changing what a connected Composio toolkit may do", () => {
     });
   });
 
+  it("keeps or drops a tool its toolkit no longer has, but adds none it lacks", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    // Allowed when connected; Composio has since retired it.
+    const retired = ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_RETIRED_TOOL"];
+    await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+      .bind(JSON.stringify(retired), connectionId)
+      .run();
+    const kept = await outcome(
+      change(admin, connectionId, [...retired, "HUBSPOT_CREATE_CONTACT"])
+    );
+    const keptNow = await toolsNow(connectionId);
+    const added = await outcome(
+      change(admin, connectionId, [...retired, "HUBSPOT_NEVER_WAS"])
+    );
+    const dropped = await outcome(
+      change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"])
+    );
+
+    expect({
+      kept,
+      keptNow,
+      added,
+      dropped,
+      after: await toolsNow(connectionId),
+    }).toStrictEqual({
+      kept: "ok",
+      keptNow: JSON.stringify([...retired, "HUBSPOT_CREATE_CONTACT"]),
+      added: "connection.invalid",
+      dropped: "ok",
+      after: JSON.stringify(["HUBSPOT_LIST_CONTACTS"]),
+    });
+  });
+
   it("marks a connection whose Composio couldn't be brought in line, and the clock does it later", async () => {
     const admin = someone("admin");
     const connectionId = await connectHubSpot(admin);
@@ -1598,9 +1632,9 @@ describe("changing what a connected Composio toolkit may do", () => {
 // Composio kept in step with connect's tool list through crashes (GRA-993's
 // threat model). Actors share one connection: a change (`a`),
 // connect's clock reconciling (`r`) and a second change (`b`). Every send
-// to Composio is held at three points: before Composio applies it, after
-// it applied it but before it answers, and once answered, before connect
-// records the answer. A walk is the order the actors move from one point
+// to Composio is held at four points: before connect counts it, before
+// Composio applies it, after it applied it but before it answers, and
+// once answered, before connect records the answer. A walk is the order the actors move from one point
 // to the next; an actor no longer moved has crashed there, its send, if
 // held before applying, never landing. After every move, Composio may
 // differ from connect only while the connection counts as out of sync;
@@ -1610,16 +1644,25 @@ describe("changing what a connected Composio toolkit may do", () => {
 // and the clock, and many more drawn with a second change.
 
 /** One send's answer recorded: the statement held at `answered`. */
-const answeredSend = /^delete from "composio_tool_sends" where .*"seq" = \?/u;
+/**
+ * Where connect's side of a send is held: its count and unanswered row,
+ * one batch, before it goes out; and its answer recorded.
+ */
+const heldStatements =
+  /^(?:insert into "composio_tool_sends"|delete from "composio_tool_sends" where .*"seq" = \?)/u;
 
-/** `db`, whose statements matching `held` wait for `gate` before running. */
+/**
+ * `db`, whose statements matching `held` wait for `gate` before running,
+ * alone or in a batch.
+ */
 const gatedDb = (
   db: D1Database,
   held: RegExp,
   gate: () => Promise<void>
 ): D1Database => {
-  const gated = (statement: D1PreparedStatement): D1PreparedStatement =>
-    new Proxy(statement, {
+  const real = new WeakMap<D1PreparedStatement, D1PreparedStatement>();
+  const gated = (statement: D1PreparedStatement): D1PreparedStatement => {
+    const proxy = new Proxy(statement, {
       get: (target, property): unknown => {
         if (property === "bind") {
           return (...values: unknown[]) => gated(target.bind(...values));
@@ -1634,6 +1677,9 @@ const gatedDb = (
         };
       },
     });
+    real.set(proxy, statement);
+    return proxy;
+  };
   return new Proxy(db, {
     get: (target, property): unknown => {
       const value: unknown = Reflect.get(target, property);
@@ -1641,6 +1687,18 @@ const gatedDb = (
         return (query: string) => {
           const statement = target.prepare(query);
           return held.test(query) ? gated(statement) : statement;
+        };
+      }
+      if (property === "batch") {
+        return async (
+          statements: D1PreparedStatement[]
+        ): Promise<D1Result[]> => {
+          if (statements.some((statement) => real.has(statement))) {
+            await gate();
+          }
+          return await target.batch(
+            statements.map((statement) => real.get(statement) ?? statement)
+          );
         };
       }
       return typeof value === "function"
@@ -1731,7 +1789,7 @@ const walked = async (
         const run = actors[actor];
         const actorEnv = {
           ...env,
-          DB: gatedDb(env.DB, answeredSend, hold),
+          DB: gatedDb(env.DB, heldStatements, hold),
         };
         void (async () => {
           try {
@@ -1892,10 +1950,15 @@ describe("Composio's tool list through crashes", () => {
       ? await everyWalk(connectionId, serverId, actors)
       : await drawnWalks(connectionId, serverId, actors, {
           fixed: [
-            // The change's narrowing lands after the clock settled.
-            ["a", "r", "r", "r", "r", "a"],
-            // The clock reconciles while the narrowing is held.
-            ["r", "a", "a"],
+            // The narrowing, answered, crashes before the change's write:
+            // Composio narrower than connect.
+            ["a", "a"],
+            // The clock counts its send while the narrowing is unanswered;
+            // the narrowing lands after the clock's.
+            ["a", "a", "r", "r", "r", "a", "r", "r"],
+            // The clock counts and reads between the change's count and
+            // its unanswered row.
+            ["a", "r", "r", "r", "a", "r", "r", "a"],
           ],
           seed: 993,
           count: 800,
@@ -1923,6 +1986,9 @@ describe("Composio's tool list through crashes", () => {
       {
         fixed: [
           ["b", "a", "r", "a", "r", "b", "r", "r", "b", "b", "a", "r", "b"],
+          // A narrowing lands after the other change's reconcile, and is
+          // answered before that reconcile settles.
+          "r a r r r r r r a b b b b b b r b a a b r a b b".split(" "),
         ],
         seed: 993,
         // Every order of three is past running: many more drawn instead.

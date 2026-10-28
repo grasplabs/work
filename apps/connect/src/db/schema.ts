@@ -447,9 +447,9 @@ export const composioCleanups = sqliteTable(
 /**
  * Sends of a tool list to Composio not yet answered, by connection and
  * count (`connections.tools_sent_seq`): one may still land at Composio
- * after a later send settled, so a later send settles nothing while one
- * sent shortly before it is here (src/composio-connections.ts). Removed
- * once answered, or once a later send settles.
+ * after a later send, so a send counted while one sent shortly before it
+ * is here settles nothing (src/composio-connections.ts). Removed once
+ * answered, or once a later send settles.
  */
 export const composioToolSends = sqliteTable(
   "composio_tool_sends",
