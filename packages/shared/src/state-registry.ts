@@ -322,6 +322,10 @@ const coreDb: D1State = {
     workflow_model_waits: cache(`${core}workflows/model-waits.ts`),
     run_mail_stamps: exported(`${core}workflows/mail-stamps.ts`),
     run_mail_calls: exported(`${core}workflows/mail-stamps.ts`),
+    resource_run_mail_calls: exported(
+      `${core}workflows/mail-stamps.ts`,
+      "As run_mail_calls, for independent workflow runs: what keeps a connector trigger's mail loop in its run's lineage."
+    ),
     run_mail_stamp_claims: exported(`${core}workflows/mail-stamps.ts`),
     run_mail_stamp_refusals: exported(`${core}workflows/connector-events.ts`),
     run_lineage_accounts: exported(`${core}workflows/quotas.ts`),
@@ -376,6 +380,10 @@ const coreDb: D1State = {
     workflow_resource_members: exported(`${core}workflow-resources.ts`),
     trigger_resources: exported(`${core}trigger-resources.ts`),
     trigger_resource_versions: exported(`${core}trigger-resources.ts`),
+    connector_trigger_holds: exported(
+      `${core}workflows/connector-triggers.ts`,
+      "Events a connector trigger held back at its hourly limit: still owed a run, or dropped after a day."
+    ),
     trigger_schedules: exported(
       `${core}trigger-resources.ts`,
       "Schedule triggers' next ticks and failed starts: deadlines a move keeps (46.2 step 9)."
