@@ -4392,6 +4392,10 @@ msgstr "Impossible de copier l’empreinte"
 msgid "couldn't be read"
 msgstr "n’a pas pu être lu"
 
+#: src/workflows/team-picker.tsx
+msgid "Couldn't change the team of {named}"
+msgstr "Impossible de changer l’équipe de {named}"
+
 #: src/routes/_shell.workflows.index.tsx
 msgid "Couldn't load this domain's workflows."
 msgstr "Impossible de charger les workflows de ce domaine."
@@ -8442,6 +8446,10 @@ msgstr "Aucune partie prenante désignée"
 msgid "No steps yet. They are drawn once someone who does this work has agreed to their interview."
 msgstr "Pas encore d’étapes. Elles sont dessinées dès qu’une personne qui fait ce travail a validé son entretien."
 
+#: src/workflows/team-picker.tsx
+msgid "No team"
+msgstr "Aucune équipe"
+
 #: src/onboarding/organization-words.ts
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "No team lead named"
@@ -12330,6 +12338,7 @@ msgstr "ID de la cible"
 #: src/dashboard/standard-widgets.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/pulse-people.tsx
+#: src/workflows/team-picker.tsx
 msgid "Team"
 msgstr "Équipe"
 
@@ -12400,6 +12409,10 @@ msgstr "Taille de l’équipe inconnue"
 #: src/brain/brain.ts
 msgid "Team size unknown."
 msgstr "Taille de l’équipe inconnue."
+
+#: src/workflows/team-picker.tsx
+msgid "Team: {name}"
+msgstr "Équipe : {name}"
 
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
