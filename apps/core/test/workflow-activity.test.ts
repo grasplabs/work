@@ -302,6 +302,8 @@ describe("runs over time", () => {
       started,
       completed,
       failed,
+      // None of these runs asked a person: each completed one was alone.
+      completedAlone: completed,
     });
     const [asOwner, asUser, asStranger] = await Promise.all([
       owner.api.workflows.activity(),
