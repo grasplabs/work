@@ -12,7 +12,7 @@
  * allows. Without `live`, a write isn't run at all: it's recorded as
  * planned.
  */
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
 /** One line of the run's evidence. */
@@ -30,13 +30,15 @@ export const evidenceLog =
   };
 
 /** The last non-empty lines of `output`, for an error or the evidence. */
-export const lastLines = (output: string): string =>
-  output
+export const lastLines = (output: string): string => {
+  const lines = output
     .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "")
-    .slice(-3)
-    .join(" | ");
+    .map((line) => line.replace(/^[│┌└◆├]\s*/u, "").trim())
+    .filter((line) => line !== "");
+  // Cloudflare's own code and message first, where cf printed one.
+  const coded = lines.filter((line) => /\[\d{4,5}\]/u.test(line));
+  return [...coded, ...lines.slice(-2)].join(" | ");
+};
 
 /** A cf invocation that failed: its command and what cf said. */
 export class CfError extends Error {
@@ -116,10 +118,25 @@ const cfEnvironment = (accountId: string): NodeJS.ProcessEnv => {
   return { ...rest, CLOUDFLARE_ACCOUNT_ID: accountId };
 };
 
-/** cf's JSON result: an array for a list, an object otherwise, or null. */
-const parsed = (output: string): unknown => {
-  const text = output.trim();
-  return text === "" ? null : JSON.parse(text);
+/**
+ * cf's JSON result: an array for a list, an object otherwise. Anything
+ * else (nothing, or cf's help, which it prints with success for an option
+ * it won't take) is a failure, never an empty answer: a listing that
+ * reads as empty would let preflight pass an account it didn't read.
+ */
+const parsed = (command: string, output: string): unknown => {
+  try {
+    const value: unknown = JSON.parse(output.trim());
+    if (typeof value === "object" && value !== null) {
+      return value;
+    }
+  } catch {
+    // Not JSON: refused below.
+  }
+  throw new CfError(
+    command,
+    `cf printed no JSON result: ${output.slice(0, 200)}`
+  );
 };
 
 /** The run's cf: `read` for a command that changes nothing, `write` for one that does. */
@@ -128,32 +145,38 @@ export const cfCli = (options: CfOptions) => {
   const bin = options.bin ?? "cf";
   const created = new Set<string>();
 
-  const run = (args: readonly string[], cwd?: string): string => {
+  /**
+   * Runs cf: its result (standard output), and what it reported on the way
+   * (standard error: a deploy's URLs, a refusal's reason).
+   */
+  const run = (
+    args: readonly string[],
+    cwd?: string
+  ): { stdout: string; stderr: string } => {
     const command = args.join(" ");
-    try {
-      const output = execFileSync(bin, args, {
-        cwd,
-        env: cfEnvironment(accountId),
-        encoding: "utf-8",
-        // Never a terminal: cf asks nothing and prints only its result.
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 15 * 60 * 1000,
-        maxBuffer: 64 * 1024 * 1024,
-      });
-      record({ kind: "cf", command, ok: true });
-      return output;
-    } catch (error) {
-      const output =
-        typeof error === "object" && error !== null && "stderr" in error
-          ? `${String(error.stderr)}${"stdout" in error ? String(error.stdout) : ""}`
-          : String(error);
+    const ran = spawnSync(bin, args, {
+      cwd,
+      env: cfEnvironment(accountId),
+      encoding: "utf-8",
+      // Never a terminal: cf asks nothing and prints only its result.
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 15 * 60 * 1000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const stdout = ran.stdout ?? "";
+    const stderr = ran.stderr ?? "";
+    if (ran.status !== 0) {
+      const output = `${stderr}${stdout}${ran.error === undefined ? "" : String(ran.error)}`;
       record({ kind: "cf", command, ok: false, error: lastLines(output) });
       throw new CfError(command, output);
     }
+    record({ kind: "cf", command, ok: true });
+    return { stdout, stderr };
   };
 
   return {
-    read: (args: readonly string[]): unknown => parsed(run(args)),
+    read: (args: readonly string[]): unknown =>
+      parsed(args.join(" "), run(args).stdout),
     /**
      * Runs a write, or without `live` its `--dry-run`, after checking it
      * names only the run's own resources. Answers cf's result, and
@@ -175,10 +198,17 @@ export const cfCli = (options: CfOptions) => {
         record({ kind: "planned", command: args.join(" ") });
         return { planned: true, result: null, output: "" };
       }
-      const output = run(args, cwd);
+      const { stdout, stderr } = run(args, cwd);
+      // A deploy reports its URLs on standard error, with its progress.
+      const output = `${stdout}\n${stderr}`;
       // `cf deploy` prints progress, not JSON: its output is kept as text.
-      const json = args[0] !== "deploy";
-      return { planned: false, result: json ? parsed(output) : null, output };
+      // A change that answers no data prints nothing.
+      const json = args[0] !== "deploy" && stdout.trim() !== "";
+      return {
+        planned: false,
+        result: json ? parsed(args.join(" "), stdout) : null,
+        output,
+      };
     },
     /** Marks `id` as the run's own, so later writes may name it. */
     own: (id: string): void => {
