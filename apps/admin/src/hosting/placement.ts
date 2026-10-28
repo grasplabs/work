@@ -80,9 +80,13 @@ export interface ClientHostingView {
   /** Shared ones first, then dedicated, then the rest, each by id. */
   destinations: DestinationChoice[];
   automatic: AutomaticChoice;
+  /** Whether it's live: its later releases and rollbacks run the operation again. */
+  active: boolean;
   /** Its provisioning operation (`client_provisions`), if it has one. */
   operation: {
     releaseId: string;
+    /** What it ran before its latest release or rollback started; null before its first. */
+    previousReleaseId: string | null;
     status: "running" | "failed" | "done";
     /** The last step that finished; null before the first. */
     step: string | null;
@@ -177,7 +181,7 @@ export const getClientHosting = async (
 ): Promise<ClientHostingView | null> => {
   const db = adminDatabase(env.DB);
   const client = await db
-    .select({ id: clients.id })
+    .select({ id: clients.id, status: clients.status })
     .from(clients)
     .where(eq(clients.id, clientId))
     .get();
@@ -211,11 +215,13 @@ export const getClientHosting = async (
       placement === undefined
         ? automaticChoice(destinations)
         : { destinationId: placement.destinationId, reason: null },
+    active: client.status === "active",
     operation:
       operation === undefined
         ? null
         : {
             releaseId: operation.releaseId,
+            previousReleaseId: operation.previousReleaseId,
             status: operation.status,
             step: operation.step,
             error: operation.error,

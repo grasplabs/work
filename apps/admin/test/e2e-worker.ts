@@ -13,7 +13,8 @@
  * - A rollout holds each stage of a gradual deploy for seconds, not
  *   minutes (`gradualStages`, src/rollout/workflow.ts), as the tests'
  *   `disableSleeps` does: a journey sees the stages go by.
- * - `POST /__e2e/seed` seeds what a journey starts from (test/e2e-seed.ts).
+ * - `POST /__e2e/seed` seeds what a journey starts from, and
+ *   `POST /__e2e/seed-placed` the placed-client journey's (test/e2e-seed.ts).
  */
 import { loopbackHosts } from "@grasp-os/shared/router";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
@@ -28,7 +29,7 @@ import type {
 import server from "../src/server.ts";
 import { base } from "./cloudflare-api-kit.ts";
 import { fakeCloudflareApi } from "./cloudflare-api.ts";
-import { seed } from "./e2e-seed.ts";
+import { seed, seedPlaced } from "./e2e-seed.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
 export { ApplyClient } from "../src/clients/apply.ts";
@@ -123,6 +124,12 @@ export default {
         return new Response("Forbidden", { status: 403 });
       }
       return Response.json(await seed(cloudflare, tokens));
+    }
+    if (url.pathname === "/__e2e/seed-placed" && request.method === "POST") {
+      if (!loopbackHosts.has(url.hostname)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      return Response.json(await seedPlaced(cloudflare, tokens));
     }
     return await server.fetch(request, env);
   },
