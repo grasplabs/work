@@ -791,6 +791,18 @@ export const relationViewSchema = z.strictObject({
 });
 export type RelationView = z.infer<typeof relationViewSchema>;
 
+/**
+ * What `relations.get` answers: the newest relations readable sources
+ * state, at most a read's cap, and whether that cap or the claims weighed
+ * for conflicts left any out (`truncated`): then the evidence handed over
+ * isn't all there is, and proves nothing missing.
+ */
+export const relationsAnswerSchema = z.strictObject({
+  relations: z.array(relationViewSchema),
+  truncated: z.boolean(),
+});
+export type RelationsAnswer = z.infer<typeof relationsAnswerSchema>;
+
 /** The most paths one explanation returns, and its default. */
 export const explainPathsMax = 50;
 

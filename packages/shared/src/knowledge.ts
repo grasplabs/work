@@ -17,10 +17,10 @@ import type {
   MemoryPage,
   MemoryRecord,
   ReceiptsGetInput,
+  RelationsAnswer,
   RelationsExplainInput,
   RelationsExplanation,
   RelationsGetInput,
-  RelationView,
   RecallInput,
   RememberInput,
   LessonLineage,
@@ -334,7 +334,7 @@ export interface KnowledgeApi {
    * on a date and as known at a moment if asked, each with its passage
    * (GRA-306): what a source says, never an accepted fact.
    */
-  relations: (input: RelationsGetInput) => Promise<RelationView[]>;
+  relations: (input: RelationsGetInput) => Promise<RelationsAnswer>;
   /**
    * The paths out from one entity, one or two relations long, through what
    * the person may read, within a budget of paths and time (GRA-306).

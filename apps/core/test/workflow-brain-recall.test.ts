@@ -613,7 +613,7 @@ describe("a workflow's recall through the Brain binding", () => {
           "recaller",
           `  return await step.do("relations", { description: "Who owns it" }, async () => {
     const [found] = await brain(env.BRAIN).entities.list({ query: ${JSON.stringify(thing)} });
-    const relations = await brain(env.BRAIN).relations.get({ entityId: found?.id ?? "-" });
+    const { relations } = await brain(env.BRAIN).relations.get({ entityId: found?.id ?? "-" });
     return relations.map(({ subject, predicate, evidence }) => ({ owner: subject.name, predicate, evidence })) as Json;
   });`,
           { relations: [] }

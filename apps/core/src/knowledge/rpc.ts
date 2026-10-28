@@ -5,10 +5,10 @@ import type {
   EntitiesListInput,
   EntitySourcesInput,
   EntitySummary,
+  RelationsAnswer,
   RelationsExplainInput,
   RelationsExplanation,
   RelationsGetInput,
-  RelationView,
   MemoriesProposeChangeInput,
   MemoriesPublishInput,
   MemoriesRetireInput,
@@ -368,7 +368,7 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     );
   }
 
-  async relations(input: RelationsGetInput): Promise<RelationView[]> {
+  async relations(input: RelationsGetInput): Promise<RelationsAnswer> {
     return await this.#asReader(
       async (reader) => await relationsFor(brainOf(this.#env), reader, input)
     );
