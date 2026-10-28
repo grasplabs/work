@@ -33,7 +33,7 @@ import {
 import { provisionPlacedClient } from "../src/hosting/workflow.ts";
 import { claimRun } from "../src/runners.ts";
 import type { HeldClient } from "../src/runners.ts";
-import { notFound } from "./cloudflare-api-kit.ts";
+import { envelope, notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, placedClient, staff } from "./hosting.ts";
@@ -170,7 +170,6 @@ const operationOf = async (clientId: string) =>
     .where(eq(clientProvisions.clientId, clientId))
     .get();
 
-/** Runs the operation expecting it to fail, its logged failure kept out of the output, and returns the error. */
 /** A user Worker's script in a dispatch namespace: where it's put and read. */
 const userScriptPath =
   /\/workers\/dispatch\/namespaces\/[^/]+\/scripts\/[^/]+$/u;
@@ -200,6 +199,46 @@ const laggingUploads = (stale: number): Map<string, number> => {
   return answeredStale;
 };
 
+/** A Worker's own script in an account: where its secrets and deployments are read. */
+const ownScriptPath = /\/workers\/scripts\/(?<script>[^/]+)\/(?<rest>.+)$/u;
+
+/**
+ * Cloudflare's read-after-write lag on what the secrets step and the
+ * probe read back: after each `PUT` of an account Worker's secret, the
+ * next `stale` reads of its `read` (`secrets` or `deployments`) answer
+ * `staleAnswer`, as from before it. Returns how many reads were answered
+ * so, by script.
+ */
+const laggingAfterSecrets = (
+  read: "secrets" | "deployments",
+  stale: number,
+  staleAnswer: unknown
+): Map<string, number> => {
+  const behind = new Map<string, number>();
+  const answeredStale = new Map<string, number>();
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const request = new Request(input, init);
+    const found = ownScriptPath.exec(new URL(request.url).pathname)?.groups;
+    if (found?.script !== undefined) {
+      const { script, rest } = found;
+      if (request.method === "PUT" && rest === "secrets") {
+        behind.set(script, stale);
+      } else if (
+        request.method === "GET" &&
+        rest === read &&
+        (behind.get(script) ?? 0) > 0
+      ) {
+        behind.set(script, (behind.get(script) ?? 0) - 1);
+        answeredStale.set(script, (answeredStale.get(script) ?? 0) + 1);
+        return envelope(staleAnswer);
+      }
+    }
+    return await cloudflare.fetch(input, init);
+  });
+  return answeredStale;
+};
+
+/** Runs the operation expecting it to fail, its logged failure kept out of the output, and returns the error. */
 const failing = async (held: HeldClient): Promise<unknown> => {
   const errors = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
@@ -1017,6 +1056,39 @@ describe("provisioning a placed client", () => {
       // Connect's, read six times, then the run stopped.
       staleReads: [6],
     });
+  });
+
+  it("reads delivered secrets back through Cloudflare's lag, and goes on", async () => {
+    const manifest = await importRelease("dedicated");
+    const { clientId, held } = await setUp("dedicated", manifest);
+    // The secrets listed as before the last delivery: none of them.
+    const stale = laggingAfterSecrets("secrets", 3, []);
+
+    await runClientProvision(context, held);
+
+    expect({
+      operation: await operationOf(clientId),
+      staleReads: [...stale.values()],
+    }).toMatchObject({
+      operation: { status: "done" },
+      // Each Worker's secrets read back once the lag passed.
+      staleReads: [3, 3],
+    });
+  });
+
+  it("reads core's live version back through Cloudflare's lag, and goes on", async () => {
+    const manifest = await importRelease("dedicated");
+    const { clientId, held } = await setUp("dedicated", manifest);
+    // Its deployments as before its upload: none live.
+    const stale = laggingAfterSecrets("deployments", 3, { deployments: [] });
+
+    await runClientProvision(context, held);
+    const { core } = await scriptsOf(clientId);
+
+    expect({
+      operation: await operationOf(clientId),
+      staleReads: stale.get(core),
+    }).toMatchObject({ operation: { status: "done" }, staleReads: 3 });
   });
 
   it("keeps two clients in one destination to their own resources", async () => {
