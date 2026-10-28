@@ -111,6 +111,7 @@ import {
   dispatchKeyHeader,
   mailSource,
   outputOf,
+  ownObject,
   probeCompatibilityDate,
   probeSource,
   recorderSource,
@@ -118,7 +119,12 @@ import {
   targetHeader,
   writeBuildOutput,
 } from "./workers.ts";
-import type { BindingKey, OutputModule, OutputWorker } from "./workers.ts";
+import type {
+  BindingKey,
+  OutputBinding,
+  OutputModule,
+  OutputWorker,
+} from "./workers.ts";
 
 const steps = [
   "preflight",
@@ -153,6 +159,24 @@ const fallbackOrder: readonly BindingKey[] = [
   "worker_loaders",
   "services",
 ];
+
+/** Whether a wrangler.json binding entry binds anything: a non-empty list, or an object. */
+const hasBindings = (value: unknown): boolean =>
+  Array.isArray(value)
+    ? value.length > 0
+    : typeof value === "object" && value !== null;
+
+/** The binding kind a refusal's message names, when it names one. */
+const refusedKinds: readonly [RegExp, BindingKey][] = [
+  [/service binding/iu, "services"],
+  [/send[_ ]?email/iu, "send_email"],
+  [/version[_ ]metadata/iu, "version_metadata"],
+  [/worker[_ ]loader/iu, "worker_loaders"],
+  [/\bai\b|workers ai/iu, "ai"],
+];
+
+const refusedKind = (output: string): BindingKey | undefined =>
+  refusedKinds.find(([pattern]) => pattern.test(output))?.[1];
 
 /** How long a killed run may take to finish on its own. */
 const resumeDeadlineMs = 4 * 60 * 1000;
@@ -293,12 +317,36 @@ const namesIn = (
     .filter((name): name is string => name !== undefined)
     .toSorted((a, b) => a.localeCompare(b));
 
+/** Page size of the paged listings: cf refuses more for some (d1 list). */
+const pageSize = 100;
+
+/** Every page of a paged cf listing `args`, entries together. */
+const allPages = (listing: readonly string[]): unknown[] => {
+  const entries: unknown[] = [];
+  for (let page = 1; ; page += 1) {
+    const found = entriesOf(
+      cf.read([
+        ...listing,
+        "--per-page",
+        String(pageSize),
+        "--page",
+        String(page),
+      ])
+    );
+    entries.push(...found);
+    if (found.length < pageSize) {
+      return entries;
+    }
+  }
+};
+
 const inventory = (): Inventory => ({
-  scripts: namesIn(
-    cf.read(["workers", "scripts", "search", "--per-page", "1000"]),
-    ["script_name", "id", "name"]
-  ),
-  databases: namesIn(cf.read(["d1", "list", "--per-page", "1000"]), ["name"]),
+  scripts: namesIn(allPages(["workers", "scripts", "search"]), [
+    "script_name",
+    "id",
+    "name",
+  ]),
+  databases: namesIn(allPages(["d1", "list"]), ["name"]),
   buckets: namesIn(
     cf.read(["r2", "buckets", "list", "--per-page", "1000"]),
     ["name"],
@@ -484,8 +532,26 @@ const workersDevUrl = (output: string, name: string): string | undefined =>
     output
   )?.[0];
 
+/**
+ * The durability check's outside world: the recorder as an ordinary
+ * account Worker, which the death fixture reaches by a service binding
+ * (one user Worker can't bind another: 10143, seen on the GRA-430 run).
+ */
+const outsideName = `${prefix}-outside`;
+
 const dispatcherStep = (): void => {
   const name = `${prefix}-dispatcher`;
+  deploy(
+    {
+      name: outsideName,
+      compatibilityDate: probeCompatibilityDate,
+      env: { EFFECTS_OBJECT: ownObject("Effects") },
+      exports: { Effects: { type: "durable-object", storage: "sqlite" } },
+    },
+    "index.js",
+    oneModule(recorderSource),
+    { ordinary: true }
+  );
   const { planned, output } = deploy(
     {
       name,
@@ -494,6 +560,7 @@ const dispatcherStep = (): void => {
       previewUrls: false,
       env: {
         DISPATCHER: { type: "dispatch-namespace", namespace: prefix },
+        OUTSIDE: { type: "worker", worker: outsideName },
       },
     },
     "index.js",
@@ -529,7 +596,10 @@ const ensureDatabase = (name: string): string => {
     { names: [name] }
   );
   const made = textField(result, ["uuid"]);
-  if (planned || made === undefined) {
+  if (!planned && made === undefined) {
+    throw new Error(`cf created ${name} but answered no id for it`);
+  }
+  if (made === undefined) {
     // A dry run's stand-in: the run's own, for the writes planned on it.
     const standIn = `planned-${name}`;
     cf.own(standIn);
@@ -694,7 +764,9 @@ const deployReleaseWorker = async (
         {
           script: config.name,
           without: [...without],
-          bindings: bindingKeys.filter((key) => Object.hasOwn(config, key)),
+          bindings: bindingKeys.filter((key) =>
+            hasBindings(Reflect.get(config, key))
+          ),
           secrets: Object.keys(secrets),
         }
       );
@@ -709,9 +781,15 @@ const deployReleaseWorker = async (
         without: [...without],
         error: lastLines(error.output),
       });
-      const next = fallbackOrder.find(
-        (key) => !without.has(key) && Object.hasOwn(original, key)
-      );
+      const named = refusedKind(error.output);
+      const next =
+        named !== undefined &&
+        !without.has(named) &&
+        Object.hasOwn(original, named)
+          ? named
+          : fallbackOrder.find(
+              (key) => !without.has(key) && Object.hasOwn(original, key)
+            );
       if (next === undefined) {
         break;
       }
@@ -799,11 +877,7 @@ const deployRecorder = (): boolean =>
       name: recorderName,
       compatibilityDate: probeCompatibilityDate,
       env: {
-        EFFECTS_OBJECT: {
-          type: "durable-object",
-          worker: recorderName,
-          exportName: "Effects",
-        },
+        EFFECTS_OBJECT: ownObject("Effects"),
       },
       exports: { Effects: { type: "durable-object", storage: "sqlite" } },
     },
@@ -812,26 +886,52 @@ const deployRecorder = (): boolean =>
   ).planned;
 
 /** Uploads client `client`'s probe; true unless only planned. */
+/**
+ * Uploads client `client`'s probe; true unless only planned. With a
+ * service binding to the recorder first; where the namespace refuses one
+ * between user Workers, recorded, with a binding to the namespace itself
+ * in its place.
+ */
 const deployProbe = (client: Client): boolean => {
   const name = probeName(client);
-  return !deploy(
-    {
-      name,
-      compatibilityDate: probeCompatibilityDate,
-      env: {
-        PROBE_OBJECT: {
-          type: "durable-object",
-          worker: name,
-          exportName: "ProbeObject",
+  const probe = (peer: Record<string, OutputBinding>) =>
+    !deploy(
+      {
+        name,
+        compatibilityDate: probeCompatibilityDate,
+        env: {
+          PROBE_OBJECT: ownObject("ProbeObject"),
+          LOADER: { type: "worker-loader" },
+          ...peer,
         },
-        LOADER: { type: "worker-loader" },
-        PEER: { type: "worker", worker: recorderName },
+        exports: {
+          ProbeObject: { type: "durable-object", storage: "sqlite" },
+        },
       },
-      exports: { ProbeObject: { type: "durable-object", storage: "sqlite" } },
-    },
-    "index.js",
-    oneModule(probeSource)
-  ).planned;
+      "index.js",
+      oneModule(probeSource)
+    ).planned;
+  try {
+    const uploaded = probe({ PEER: { type: "worker", worker: recorderName } });
+    check(
+      `${client}: a user Worker may have a service binding to another user Worker`,
+      uploaded ? "pass" : "skipped"
+    );
+    return uploaded;
+  } catch (error) {
+    if (!(error instanceof CfError)) {
+      throw error;
+    }
+    check(
+      `${client}: a user Worker may have a service binding to another user Worker`,
+      "fail",
+      { error: lastLines(error.output) }
+    );
+    return probe({
+      PEERS: { type: "dispatch-namespace", namespace: prefix },
+      PEER_NAME: { type: "text", value: recorderName },
+    });
+  }
 };
 
 const probeChecks = async (client: Client): Promise<void> => {
@@ -865,8 +965,11 @@ const probeChecks = async (client: Client): Promise<void> => {
   );
   const peer = await jsonOf(await dispatch(probe, "/peer"));
   check(
-    `${client}: a service binding reaches another user Worker in the namespace`,
-    z.object({ status: z.literal(200) }).safeParse(peer).success
+    `${client}: a user Worker reaches another user Worker in the namespace`,
+    z
+      .object({ status: z.literal(200) })
+      .loose()
+      .safeParse(peer).success
       ? "pass"
       : "fail",
     { answer: peer }
@@ -879,10 +982,7 @@ const probesStep = async (): Promise<void> => {
     check("probes uploaded", "skipped");
     return;
   }
-  check(
-    "probes uploaded with a Durable Object, the Loader and a service binding",
-    "pass"
-  );
+  check("probes uploaded with a Durable Object and the Loader", "pass");
   for (const client of clients) {
     // oxlint-disable-next-line no-await-in-loop -- one client at a time
     await probeChecks(client);
@@ -938,12 +1038,8 @@ const deployFixture = (source: string): boolean =>
       compatibilityDate: probeCompatibilityDate,
       compatibilityFlags: ["nodejs_als"],
       env: {
-        RUNS: {
-          type: "durable-object",
-          worker: durableName,
-          exportName: "Runs",
-        },
-        EFFECTS: { type: "worker", worker: recorderName },
+        RUNS: ownObject("Runs"),
+        EFFECTS: { type: "worker", worker: outsideName },
       },
       exports: { Runs: { type: "durable-object", storage: "sqlite" } },
     },
@@ -957,7 +1053,7 @@ const effectRows = z.array(
 
 const effectsOf = async (id: string) => {
   const answer = await dispatch(
-    recorderName,
+    outsideName,
     `/list?run=${encodeURIComponent(id)}`
   );
   return effectRows.parse(await jsonOf(answer));
@@ -1042,7 +1138,7 @@ const killAndResume = async (
 
 const durabilityStep = async (): Promise<void> => {
   const source = bundledFixture();
-  if (!(deployRecorder() && deployFixture(source))) {
+  if (!deployFixture(source)) {
     check("durability fixture uploaded", "skipped");
     return;
   }
@@ -1092,9 +1188,7 @@ const auditBindings = (): void => {
       );
     }
   }
-  const objects = entriesOf(
-    cf.read(["durable-objects", "namespaces", "list", "--per-page", "1000"])
-  );
+  const objects = allPages(["durable-objects", "namespaces", "list"]);
   const ofClient = (client: Client) =>
     objects.filter(
       (object) =>
@@ -1235,6 +1329,48 @@ const emailStep = async (): Promise<void> => {
   }
 };
 
+/**
+ * Empties the run's EU bucket `name` (what the clients' cores wrote to it
+ * while they ran), a page of keys at a time, so it can be deleted.
+ */
+const emptyBucket = (name: string): void => {
+  for (;;) {
+    const keys = entriesOf(
+      cf.read([
+        "r2",
+        "objects",
+        "list",
+        "--bucket-name",
+        name,
+        "--cf-r2-jurisdiction",
+        "eu",
+        "--per-page",
+        "1000",
+      ])
+    )
+      .map((entry) => textField(entry, ["key"]))
+      .filter((key): key is string => key !== undefined);
+    if (keys.length === 0) {
+      return;
+    }
+    cf.write(
+      [
+        "r2",
+        "objects",
+        "bulk-delete",
+        "--bucket-name",
+        name,
+        "--cf-r2-jurisdiction",
+        "eu",
+        "--body",
+        JSON.stringify(keys),
+        "--force",
+      ],
+      { names: [name] }
+    );
+  }
+};
+
 /** Deletes every user Worker in the run's namespace. */
 const deleteUserWorkers = (): void => {
   const scripts = namesIn(
@@ -1276,17 +1412,27 @@ const cleanupStep = (): void => {
   if (found.namespaces.includes(prefix)) {
     deleteUserWorkers();
   }
-  for (const name of ours(found.namespaces)) {
-    cf.write(["workers-for-platforms", "dispatch-namespaces", "delete", name], {
-      names: [name],
-    });
-  }
-  for (const name of ours(found.scripts)) {
+  // The dispatcher first: it binds the namespace and the outside world.
+  const scripts = ours(found.scripts).toSorted(
+    (x, y) =>
+      Number(y.endsWith("-dispatcher")) - Number(x.endsWith("-dispatcher"))
+  );
+  for (const name of scripts) {
     cf.write(["workers", "delete", name, "--force"], { names: [name] });
   }
-  for (const database of entriesOf(
-    cf.read(["d1", "list", "--per-page", "1000"])
-  )) {
+  for (const name of ours(found.namespaces)) {
+    cf.write(
+      [
+        "workers-for-platforms",
+        "dispatch-namespaces",
+        "delete",
+        name,
+        "--force",
+      ],
+      { names: [name] }
+    );
+  }
+  for (const database of allPages(["d1", "list"])) {
     const name = textField(database, ["name"]);
     const uuid = textField(database, ["uuid"]);
     if (name !== undefined && isOwnName(name, prefix) && uuid !== undefined) {
@@ -1295,9 +1441,21 @@ const cleanupStep = (): void => {
     }
   }
   for (const name of ours(found.euBuckets)) {
-    cf.write(["r2", "buckets", "delete", name, "--cf-r2-jurisdiction", "eu"], {
-      names: [name],
-    });
+    emptyBucket(name);
+    cf.write(
+      [
+        "r2",
+        "buckets",
+        "delete",
+        name,
+        "--cf-r2-jurisdiction",
+        "eu",
+        "--force",
+      ],
+      {
+        names: [name],
+      }
+    );
   }
   const after = recordInventory("after cleanup");
   const left = inventoryKinds

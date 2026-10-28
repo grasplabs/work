@@ -21,8 +21,9 @@ export const dispatchKeyHeader = "x-qual-key";
 /**
  * The run's dispatcher, an ordinary Worker on workers.dev: the only way
  * into the namespace. It passes a request on to the user Worker its
- * `x-qual-script` names, only one of the run's and only with the run's
- * dispatch key, which it strips first.
+ * `x-qual-script` names (or to the durability check's outside world, an
+ * account Worker), only one of the run's and only with the run's dispatch
+ * key, which it strips first.
  */
 export const dispatcherSource = (prefix: string): string => `
 const prefix = ${JSON.stringify(prefix)};
@@ -37,7 +38,9 @@ export default {
     headers.delete(${JSON.stringify(targetHeader)});
     headers.delete(${JSON.stringify(dispatchKeyHeader)});
     try {
-      return await env.DISPATCHER.get(target).fetch(new Request(request, { headers }));
+      // The durability check's outside world is an account Worker of its own.
+      const to = target === prefix + "-outside" ? env.OUTSIDE : env.DISPATCHER.get(target);
+      return await to.fetch(new Request(request, { headers }));
     } catch (error) {
       return new Response(String(error?.message ?? error), { status: 502 });
     }
@@ -90,7 +93,8 @@ export default {
  *   answers where its id says it is and that SQL runs;
  * - \`/loader\`: a Worker Loader isolate with core's sandbox options (no
  *   network, empty env), which tries the network and the Cache API;
- * - \`/peer\`: a service binding to another user Worker in the namespace;
+ * - \`/peer\`: a service binding to another user Worker in the namespace,
+ *   or a binding to the namespace itself where the first is refused;
  * - \`POST /reach\`: a fetch from inside the namespace to \`{ url, headers }\`,
  *   for the attacks: what one client's code gets from another's.
  */
@@ -136,8 +140,11 @@ export default {
         return await stub.getEntrypoint().fetch("http://isolate/?target=" + encodeURIComponent(target));
       }
       if (url.pathname === "/peer") {
-        const answer = await env.PEER.fetch("http://peer/list?run=probe");
-        return Response.json({ status: answer.status });
+        // A service binding to the other user Worker, or, where the
+        // namespace refuses that, a binding to the namespace itself.
+        const peer = env.PEER ?? env.PEERS.get(env.PEER_NAME);
+        const answer = await peer.fetch("http://peer/list?run=probe");
+        return Response.json({ status: answer.status, through: env.PEER === undefined ? "dispatch-namespace" : "service" });
       }
       if (url.pathname === "/reach" && request.method === "POST") {
         const { url: target, headers } = await request.json();
@@ -307,6 +314,19 @@ export const storageOf = (
 /** A binding in Build Output's `worker.config.json`, as cf reads it. */
 export type OutputBinding = Record<string, unknown> & { type: string };
 
+/**
+ * A binding to a Durable Object class of the Worker itself. cf's typed
+ * binding (`durable-object`) names the Worker as the class's script, and
+ * in a dispatch namespace the API refuses that: no account script has the
+ * user Worker's name (10061, seen on the GRA-430 run). So it goes as the
+ * API's own binding, which names no script and means the Worker's own
+ * class, passed through as cf's `unsafe:` binding.
+ */
+export const ownObject = (className: string): OutputBinding => ({
+  type: "unsafe:durable_object_namespace",
+  class_name: className,
+});
+
 /** A Worker as Build Output describes it (cf's Build Output Specification, v0). */
 export interface OutputWorker {
   name: string;
@@ -452,11 +472,7 @@ export const outputOf = (
 ): Omit<OutputWorker, "manifest"> => {
   const env: Record<string, OutputBinding> = {};
   for (const binding of listOf(recordOf(config.durable_objects).bindings)) {
-    env[textOf(binding, "name")] = {
-      type: "durable-object",
-      worker: config.name,
-      exportName: textOf(binding, "class_name"),
-    };
+    env[textOf(binding, "name")] = ownObject(textOf(binding, "class_name"));
   }
   for (const loader of listOf(config.worker_loaders)) {
     env[textOf(loader, "binding")] = { type: "worker-loader" };
