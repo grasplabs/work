@@ -558,14 +558,18 @@ export const callApprovedStoreOperation = async (
 /**
  * Refuses `target` unless it can serve `declared` for workflow `id` now,
  * as the threat model above says (`workflow.binding_invalid`, naming why):
- * the one answer approving and starting both take.
+ * the one answer approving and starting both take. For a store operation,
+ * what serves it (its store and owning App, as they stand now), so an
+ * approval records it without reading it all again.
  */
 export const requireTargetServes = async (
   env: Env,
   id: string,
   declared: Extract<PinnedBinding, { resourceId: null }>,
   target: WorkflowBindingTarget
-): Promise<void> => {
+): Promise<
+  Awaited<ReturnType<typeof requireStoreOperationServes>> | undefined
+> => {
   if (servedKindOf(target) !== declared.kind) {
     throw invalid("target: Its kind isn't the binding's.");
   }
@@ -575,21 +579,20 @@ export const requireTargetServes = async (
       if (!allowed.includes(target.model)) {
         throw invalid("target.model: The deployment doesn't allow it.");
       }
-      return;
+      return undefined;
     }
     case "connector": {
       await requireConnectorServes(env, id, declared.contractId, target);
-      return;
+      return undefined;
     }
     case "storeOperation": {
-      await requireStoreOperationServes(
+      return await requireStoreOperationServes(
         env,
         id,
         declared.contractId,
         target,
         1
       );
-      return;
     }
     case "decision": {
       await requireDeciders(env, target.deciders);
@@ -604,7 +607,7 @@ export const requireTargetServes = async (
     }
     case "knowledge": {
       await requireKnowledgeServes(env, id, target);
-      return;
+      return undefined;
     }
     case "template": {
       if (
@@ -619,12 +622,13 @@ export const requireTargetServes = async (
           "target.contentHash: No published template version has that content now."
         );
       }
-      return;
+      return undefined;
     }
     default: {
       target satisfies never;
     }
   }
+  return undefined;
 };
 
 /**
@@ -729,19 +733,14 @@ export const approveWorkflowBinding = async (
       "alias: The version reviewed declares no such catalog binding."
     );
   }
-  await requireTargetServes(env, workflow.id, declared, target);
   // What serves a store operation, for the binding inventory: the store
-  // and its owning App, as they stand now.
-  const resolved =
-    target.kind === "storeOperation"
-      ? await requireStoreOperationServes(
-          env,
-          workflow.id,
-          declared.contractId,
-          target,
-          1
-        )
-      : undefined;
+  // and its owning App, as they stand now, from the one check.
+  const resolved = await requireTargetServes(
+    env,
+    workflow.id,
+    declared,
+    target
+  );
   const served = resolved?.served;
   const row: typeof workflowBindingApprovals.$inferSelect = {
     id: crypto.randomUUID(),
