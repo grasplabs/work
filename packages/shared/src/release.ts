@@ -477,11 +477,19 @@ const check = async (
  * checked for every place the manifest names it; a reader that keeps what
  * it returns holds exactly the bytes that were checked. Throws on the
  * first mismatch.
+ *
+ * `from` and `to` check only the blobs at those places, in the order the
+ * manifest names them (the same for the same manifest), so a reader with a
+ * bound on its reads can check a release a batch at a time.
  */
 export const verifyReleaseBlobs = async (
   manifest: ReleaseManifest,
   read: ReadBlob,
-  { concurrency = VERIFY_CONCURRENCY }: { concurrency?: number } = {}
+  {
+    concurrency = VERIFY_CONCURRENCY,
+    from = 0,
+    to,
+  }: { concurrency?: number; from?: number; to?: number } = {}
 ): Promise<void> => {
   const verifyOne = async ([key, expectations]: [
     string,
@@ -498,7 +506,11 @@ export const verifyReleaseBlobs = async (
       await check(key, bytes, expectation);
     }
   };
-  await mapConcurrently([...expectationsOf(manifest)], concurrency, verifyOne);
+  await mapConcurrently(
+    [...expectationsOf(manifest)].slice(from, to),
+    concurrency,
+    verifyOne
+  );
 };
 
 /** How many blobs a release names: what verifying it reads, besides its manifest. */

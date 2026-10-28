@@ -104,6 +104,25 @@ const assetOf = (release: TestRelease): string => {
 const sameSizeOther = (text: string): string =>
   text.replaceAll(/[0-9a-f]/gu, (char) => (char === "0" ? "1" : "0"));
 
+/** A release of about as many blobs as one built from main today. */
+const largeRelease = async (notes: string) => {
+  const token = crypto.randomUUID();
+  return await publishRelease({
+    notes,
+    assets: Object.fromEntries(
+      Array.from({ length: 700 }, (_, index) => [
+        `/asset-${index}.txt`,
+        `${token} ${index}`,
+      ])
+    ),
+  });
+};
+
+const blobReadsOf = (reads: ReadonlyMap<string, number>): number[] =>
+  [...reads]
+    .filter(([key]) => key.startsWith("blobs/"))
+    .map(([, count]) => count);
+
 describe("importing releases", () => {
   it("records a published release once its blobs verify, and audits it", async () => {
     const release = await publishRelease({ notes: "feat(core): one" });
@@ -408,9 +427,10 @@ CREATE TABLE t (id TEXT);`,
     ]);
   });
 
-  it("refuses a release naming more blobs than a run may read for one, before reading them", async () => {
+  it("refuses a release naming more blobs than it may, before reading them", async () => {
     const token = crypto.randomUUID();
-    const release = await publishRelease({
+    // Its manifest alone: none of its blobs is read.
+    const release = await buildRelease({
       notes: "feat(core): too many blobs",
       assets: Object.fromEntries(
         Array.from({ length: MAX_BLOBS_PER_RELEASE + 1 }, (_, index) => [
@@ -419,6 +439,7 @@ CREATE TABLE t (id TEXT);`,
         ])
       ),
     });
+    await putManifest(release);
     const { store, reads } = countingStore();
 
     const result = await runImport(store);
@@ -464,6 +485,58 @@ CREATE TABLE t (id TEXT);`,
 
     expect(first.imported).toStrictEqual([newest, middle]);
     expect(second.imported).toContain(oldest);
+  });
+
+  it("imports a release of 700 blobs a batch a run, reading each blob once", async () => {
+    const release = await largeRelease("feat(core): 700 blobs");
+    const { store, reads } = countingStore();
+
+    const first = await runImport(store);
+    const readFirst = blobReadsOf(reads).length;
+    const second = await runImport(store);
+    const blobReads = blobReadsOf(reads);
+
+    expect({
+      first: first.imported.includes(release.id),
+      firstFailed: first.failed.includes(release.id),
+      readFirst: readFirst <= MAX_READS_PER_RUN,
+      second: second.imported.includes(release.id),
+      everyBlobOnce: blobReads.every((count) => count === 1),
+      blobs: blobReads.length,
+    }).toStrictEqual({
+      first: false,
+      firstFailed: false,
+      readFirst: true,
+      second: true,
+      everyBlobOnce: true,
+      blobs: release.blobs.size,
+    });
+    await expect(importEvents(release.id)).resolves.toHaveLength(1);
+  });
+
+  it("fails a large release on a blob in a later batch, and checks it from its first blob next attempt", async () => {
+    const release = await largeRelease("feat(core): 700 blobs, one broken");
+    const [lastKey, lastBytes] = [...release.blobs].at(-1) ?? [];
+    if (lastKey === undefined || lastBytes === undefined) {
+      throw new Error("expected a blob");
+    }
+    await env.RELEASES.put(
+      lastKey,
+      sameSizeOther(new TextDecoder().decode(lastBytes))
+    );
+
+    const first = await runImport();
+    const second = await runImport();
+    expect(second.failed).toContain(release.id);
+    expect(first.failed).not.toContain(release.id);
+
+    await env.RELEASES.put(lastKey, lastBytes);
+    const { store, reads } = countingStore();
+    await runImport(store, { now: inMinutes(10) });
+    const third = await runImport(store, { now: inMinutes(10) });
+
+    expect(third.imported).toContain(release.id);
+    expect(blobReadsOf(reads)).toHaveLength(release.blobs.size);
   });
 
   it("reads the whole listing, a page at a time", async () => {
