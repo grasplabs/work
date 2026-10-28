@@ -441,6 +441,14 @@ export const triggerDeclarationsSchema = z
 export const coreStepPrefix = "$grasp:";
 
 /**
+ * What a decision task's waits for its answer, and its looks after them,
+ * start with (core's workflows/resource-host.ts): core's steps, so they
+ * count against none of the run's steps however long it waits, each named
+ * `<prefix><its task's step>:wait:<round>` or `…:woken:<round>`.
+ */
+export const decisionPollStepPrefix = `${coreStepPrefix}decision:`;
+
+/**
  * The idempotency key of a run's step, as the SDK hands it to the step
  * and core requires it on the step's connection calls: the run ID
  * (encoded, so no run ID and step name make another's key) and the step's
