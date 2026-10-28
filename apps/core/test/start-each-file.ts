@@ -25,6 +25,18 @@ import { closeOpenSockets } from "./open-sockets.ts";
 import { resetStorage } from "./reset-storage.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
+// What core loads on first use rather than at startup (models.ts,
+// auth/auth.ts, channels/teams.ts), loaded here up front: Vite transforms
+// a module the first time a test imports it, seconds for these, which
+// would land in the middle of a test's timing.
+await Promise.all([
+  import("@earendil-works/pi-ai/api/anthropic-messages"),
+  import("@earendil-works/pi-ai/api/openai-responses"),
+  import("@earendil-works/pi-ai/api/openai-completions"),
+  import("@better-auth/sso"),
+  import("../src/channels/teams-adapter.ts"),
+]);
+
 /** Migrations, read by vite.config.ts into bindings. */
 const migrationsSchema = z.array(
   z.object({ name: z.string(), queries: z.array(z.string()) })

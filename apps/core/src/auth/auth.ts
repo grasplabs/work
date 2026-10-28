@@ -1,4 +1,4 @@
-import { sso } from "@better-auth/sso";
+import type { sso } from "@better-auth/sso";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { actorOf } from "@grasp-os/shared/audit";
 import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
@@ -655,10 +655,22 @@ const keyUseOf = (body: unknown): KeyUse => {
     : { kid: undefined };
 };
 
+/**
+ * Better Auth's SSO plugin, loaded the first time an Auth is made: it
+ * brings SAML and XML parsing, which would cost every isolate's startup
+ * (Cloudflare caps the CPU a Worker's startup may use) though most
+ * requests never sign anyone in.
+ */
+const loadSso = async (): Promise<typeof sso> => {
+  const { sso: plugin } = await import("@better-auth/sso");
+  return plugin;
+};
+
 const createAuth = (
   env: Env,
   config: SignInConfig,
-  providers: OidcProvider[]
+  providers: OidcProvider[],
+  ssoOf: typeof sso
 ) => {
   const db = drizzle(env.DB);
   const tokenKeys = tokenKeysOf(env);
@@ -849,7 +861,7 @@ const createAuth = (
           },
         },
       }),
-      sso({
+      ssoOf({
         // Providers come only from deployment config, never from the
         // database: registering one in-product is off.
         defaultSSO: providers.map((provider) => ({
@@ -931,10 +943,10 @@ const auths = new WeakMap<Env, Map<string, Auth>>();
  * configured. Fails closed: without the secret or the config nobody is
  * signed in.
  */
-export const authFor = (
+export const authFor = async (
   env: Env,
   config: SignInConfig | undefined
-): Auth | undefined => {
+): Promise<Auth | undefined> => {
   if (!(config && env.BETTER_AUTH_SECRET)) {
     return undefined;
   }
@@ -942,7 +954,8 @@ export const authFor = (
   const key = providers.map(({ providerId }) => providerId).join(" ");
   const byProviders = auths.get(env) ?? new Map<string, Auth>();
   auths.set(env, byProviders);
-  const auth = byProviders.get(key) ?? createAuth(env, config, providers);
+  const auth =
+    byProviders.get(key) ?? createAuth(env, config, providers, await loadSso());
   byProviders.set(key, auth);
   return auth;
 };

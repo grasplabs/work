@@ -137,11 +137,11 @@ import type { PressLine } from "./workflow-offers.ts";
  * Every platform's adapter, keyed by the platform's name, checking
  * against the keys this isolate fetched, or `teamsKeys` when given.
  */
-export const channelAdapters = (
+export const channelAdapters = async (
   env: Env,
   { teamsKeys }: { teamsKeys?: TeamsKeys } = {}
 ) => ({
-  teams: teamsAdapter(env, teamsKeys),
+  teams: await teamsAdapter(env, teamsKeys),
   slack: slackAdapter(env),
   whatsapp: whatsAppAdapter(env),
   telegram: telegramAdapter(env),
@@ -151,7 +151,7 @@ export const channelAdapters = (
  * A platform the door has an adapter for: Gmail's is built per push, for
  * the mailbox the deployment set up (gmail.ts).
  */
-type Platform = keyof ReturnType<typeof channelAdapters> | "gmail";
+type Platform = keyof Awaited<ReturnType<typeof channelAdapters>> | "gmail";
 
 /**
  * Whether the deployment set `platform` up: Teams once it has the bot's id
@@ -1510,7 +1510,7 @@ export const channelResponse = async (
   }
   const activity = parsed.data;
   const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
-  const adapter = teamsAdapter(env, teamsKeys);
+  const adapter = await teamsAdapter(env, teamsKeys);
   const { line, userId, acts, kept, shared } = await gate(
     env,
     state,
