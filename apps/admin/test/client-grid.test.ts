@@ -1,6 +1,8 @@
+import { clientDispatchNamespace } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import {
   clientGrid,
@@ -166,6 +168,69 @@ describe("the client grid", () => {
       },
       waiting: undefined,
       analyticsCalls: 1,
+    });
+  });
+
+  it("reaches a core in the clients' dispatch namespace through it, by the script its hostname's entry names, and no other", async () => {
+    const release = await importedRelease("feat(core): in the namespace");
+    const acme = await liveClient(release);
+    const host = `${acme.clientId}.grasp.test`;
+    const entry = await env.ROUTER_HOSTS.get(host, "json");
+    const { generation } = z.object({ generation: z.int() }).parse(entry);
+    // Its core moved into the namespace, its hostname's entry naming it there.
+    const script = [...acme.account.scripts.keys()].find((name) =>
+      name.endsWith("core")
+    );
+    const state = acme.account.scripts.get(script ?? "");
+    if (script === undefined || state === undefined) {
+      throw new Error("The deploy left no core script");
+    }
+    acme.account.namespaces.set(
+      clientDispatchNamespace,
+      new Map([[script, state]])
+    );
+    acme.account.scripts.delete(script);
+    await env.ROUTER_HOSTS.put(
+      host,
+      JSON.stringify({ clientId: acme.clientId, script, generation })
+    );
+    const namespace = cloudflare.dispatcher(
+      acme.account.id,
+      clientDispatchNamespace
+    );
+    vi.spyOn(env.DISPATCHER, "get").mockImplementation(
+      (name) =>
+        // SAFETY: a stand-in user Worker: only `fetch`, which the admin calls.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        namespace.get(name) as Fetcher
+    );
+
+    const reached = await gridLive(env, new Date(), uncached);
+    // Then its entry names a script the namespace doesn't have.
+    await env.ROUTER_HOSTS.put(
+      host,
+      JSON.stringify({
+        clientId: acme.clientId,
+        script: "grasp-gone",
+        generation,
+      })
+    );
+    const gone = await gridLive(env, new Date(), uncached);
+
+    const dispatched = cloudflare.dispatched();
+    expect({
+      reached: reached[acme.clientId]?.reach,
+      gone: gone[acme.clientId]?.reach,
+      // To its own script, at its hostname, and never anywhere else.
+      reachedIt: dispatched.some(
+        ({ script: to, url }) => to === script && new URL(url).host === host
+      ),
+      onlyIt: dispatched.every(({ script: to }) => to === script),
+    }).toStrictEqual({
+      reached: "reachable",
+      gone: "unreachable",
+      reachedIt: true,
+      onlyIt: true,
     });
   });
 

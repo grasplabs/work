@@ -135,6 +135,13 @@
   "kv_namespaces": [
     { "binding": "ROUTER_HOSTS", "id": "router-hosts-namespace" },
   ],
+  // The clients' Workers for Platforms namespace, as the router binds it
+  // (@grasp-os/shared/router, `clientDispatchNamespace`): how the admin
+  // reaches a client's core there, to check it before its hostname goes in
+  // the map and to ask it what staff read (src/clients/core-address.ts).
+  "dispatch_namespaces": [
+    { "binding": "DISPATCHER", "namespace": "grasp-os-clients" },
+  ],
   // What provisioning and deploys need from the account's Secrets Store
   // (src/deploy/context.ts): the tenant admin's token, which created client
   // accounts while clients had accounts of their own, and nothing reads

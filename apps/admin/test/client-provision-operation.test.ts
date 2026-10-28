@@ -1,6 +1,11 @@
+import { provisionProbePath } from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { moduleKey } from "@grasp-os/shared/release";
-import { deriveRouterSecret, routerHostKey } from "@grasp-os/shared/router";
+import {
+  clientDispatchNamespace,
+  deriveRouterSecret,
+  routerHostKey,
+} from "@grasp-os/shared/router";
 import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -163,15 +168,19 @@ const placedOperation = async (
 };
 
 /** A client placed in a new destination of `kind` on a new account, its operation started and claimed. */
-const setUp = async (kind: Kind, manifest: ReleaseManifest) => {
+const setUp = async (
+  kind: Kind,
+  manifest: ReleaseManifest,
+  inNamespace = namespace
+) => {
   const account = cloudflare.addAccount();
   if (kind === "workers_for_platforms") {
-    account.namespaces.set(namespace, new Map());
+    account.namespaces.set(inNamespace, new Map());
   }
   const destinationId = await destination({
     kind,
     accountId: account.id,
-    namespace: kind === "workers_for_platforms" ? namespace : null,
+    namespace: kind === "workers_for_platforms" ? inNamespace : null,
   });
   const placed = await placedOperation(destinationId, manifest);
   return { account, destinationId, ...placed };
@@ -1071,6 +1080,141 @@ describe("provisioning a placed client", () => {
       });
     }
   );
+
+  it("probes a core in the namespace the router binds through that binding, and routes its hostname to its script", async () => {
+    const manifest = await importRelease("workers_for_platforms");
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest,
+      clientDispatchNamespace
+    );
+    const outbound = cloudflare.calls.length;
+
+    await runClientProvision(
+      {
+        ...context,
+        router: {
+          ...context.router,
+          dispatcher: cloudflare.dispatcher(
+            account.id,
+            clientDispatchNamespace
+          ),
+        },
+      },
+      held
+    );
+
+    const { core } = await scriptsOf(clientId);
+    const [probed] = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.probe")
+        )
+      );
+    expect({
+      operation: await operationOf(clientId),
+      // On record: the version it answered wasn't checked against its upload.
+      versionUnchecked: z
+        .object({ versionUnchecked: z.number().optional() })
+        .parse(JSON.parse(probed?.detail ?? "{}")).versionUnchecked,
+      entry: await env.ROUTER_HOSTS.get(`${clientId}.${domain}`, "json"),
+      // Its health and the admin's probe, through the namespace, at the
+      // hostname the router will reach it at: never over workers.dev.
+      dispatched: cloudflare.dispatched().map(({ script, url }) => ({
+        script,
+        path: new URL(url).pathname,
+        host: new URL(url).host,
+      })),
+      workersDev: cloudflare.calls
+        .slice(outbound)
+        .filter(({ path }) => path.includes("workers.dev")).length,
+    }).toMatchObject({
+      operation: { status: "done" },
+      versionUnchecked: 1,
+      entry: { clientId, script: core, generation: 1 },
+      dispatched: [
+        { script: core, path: "/health", host: `${clientId}.${domain}` },
+        {
+          script: core,
+          path: provisionProbePath,
+          host: `${clientId}.${domain}`,
+        },
+      ],
+      workersDev: 0,
+    });
+  });
+
+  it("can't reach a core uploaded to the same namespace in another account, its hostname unpublished", async () => {
+    const manifest = await importRelease("workers_for_platforms");
+    const { clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest,
+      clientDispatchNamespace
+    );
+    // The router's own account, whose namespace of that name lacks the core.
+    const routers = cloudflare.addAccount("Router");
+    routers.namespaces.set(clientDispatchNamespace, new Map());
+
+    const outcome = await runClientProvision(
+      {
+        ...context,
+        router: {
+          ...context.router,
+          dispatcher: cloudflare.dispatcher(
+            routers.id,
+            clientDispatchNamespace
+          ),
+        },
+      },
+      held
+    ).then(
+      () => "done",
+      (error: unknown) => (error instanceof Error ? error.message : "")
+    );
+
+    expect({
+      outcome: outcome === "done" ? outcome : "stopped",
+      operation: await operationOf(clientId),
+      dispatched: cloudflare.dispatched().length,
+      routed: await routed(clientId),
+    }).toMatchObject({
+      outcome: "stopped",
+      operation: { status: "failed" },
+      dispatched: 0,
+      routed: false,
+    });
+  });
+
+  it("stops at the probe for a core in a namespace the router doesn't bind, its hostname unpublished", async () => {
+    const manifest = await importRelease("workers_for_platforms");
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest
+    );
+
+    await expect(
+      runClientProvision(
+        {
+          ...context,
+          router: {
+            ...context.router,
+            dispatcher: cloudflare.dispatcher(account.id, namespace),
+          },
+        },
+        held
+      ).then(
+        () => "done",
+        (error: unknown) => (error instanceof Error ? error.message : "")
+      )
+    ).resolves.toContain("which the router doesn't bind");
+    expect({
+      dispatched: cloudflare.dispatched().length,
+      routed: await routed(clientId),
+    }).toStrictEqual({ dispatched: 0, routed: false });
+  });
 
   it("uploads into a Workers for Platforms namespace, and stops at the probe it can't qualify", async () => {
     const manifest = await importRelease("workers_for_platforms");

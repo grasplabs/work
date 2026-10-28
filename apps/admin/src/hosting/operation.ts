@@ -69,10 +69,11 @@
  *   doesn't list for user Workers is refused before an upload
  *   (`wfp_binding_unqualified`): a release that sends mail among them, as
  *   whether a user Worker can send through a `send_email` binding at all
- *   is a spike of its own. How the admin probes, and the router
- *   reaches, a user Worker in a namespace isn't qualified, so the probe
- *   stops there (`probe_unqualified`) and the hostname stays unpublished.
- *   Real-account qualification is GRA-430's.
+ *   is a spike of its own. The admin probes a user Worker in the
+ *   namespace it and the router bind (`clientDispatchNamespace`) through
+ *   that binding, as the router then reaches it (GRA-283); one in any
+ *   other namespace stops at the probe (`probe_unqualified`), its
+ *   hostname unpublished. Real-account qualification is GRA-430's.
  *
  * Failures are recorded as codes, never messages; secret values never
  * reach a row, an audit event or a log line, only their keyed
@@ -81,11 +82,17 @@
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { log } from "@grasp-os/shared/log";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
-import { deriveRouterSecret } from "@grasp-os/shared/router";
+import {
+  clientDispatchNamespace,
+  deriveRouterSecret,
+} from "@grasp-os/shared/router";
+import type { RouterTarget } from "@grasp-os/shared/router";
 import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import type { StaffAlert } from "../alerts.ts";
+import { coreAddressOf } from "../clients/core-address.ts";
+import type { ClientDispatcher, CoreAddress } from "../clients/core-address.ts";
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
 import { findD1Database } from "../cloudflare/accounts.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
@@ -128,6 +135,7 @@ import { sendsMail } from "../deploy/resources.ts";
 import {
   coreOrigin,
   registerHostname,
+  smokeAnswering,
   smokeCheck,
   workersSubdomain,
 } from "../deploy/router.ts";
@@ -273,6 +281,11 @@ export interface ProvisionContext {
     hosts: RouterHosts;
     domain: string;
     smoke?: SmokeOptions;
+    /**
+     * The clients' dispatch namespace, as the router binds it: how a core
+     * placed on Workers for Platforms is reached (GRA-283).
+     */
+    dispatcher?: ClientDispatcher;
   };
   /** Reading back what a step wrote (`observed`); tests pass a wait of 0. */
   observe?: { retryDelayMs?: number };
@@ -1511,53 +1524,96 @@ const deliverSecrets = async (
 const probeTimeoutMs = 10_000;
 
 /**
+ * Where the client's core answers for the probe and the router: its user
+ * Worker through the dispatch namespace the router and the admin bind, for
+ * a Workers for Platforms destination; its account's workers.dev origin
+ * otherwise. A namespace other than the bound one can't be reached through
+ * the binding, so it is refused (`probe_unqualified`), never probed or
+ * routed some other way. What the router's map entry names, too.
+ */
+const reachableCore = async (
+  context: ProvisionContext,
+  loaded: Loaded,
+  target: ScriptTarget
+): Promise<{ core: CoreAddress; entry: RouterTarget }> => {
+  const { held } = loaded;
+  if (target.namespace === null) {
+    const subdomain = await workersSubdomain(
+      context.api,
+      target.accountId,
+      held.clientId
+    );
+    const origin = coreOrigin(target.scriptName, subdomain);
+    return {
+      core: { origin, fetch: context.router.smoke?.fetch ?? fetch },
+      entry: { kind: "origin", origin },
+    };
+  }
+  const entry: RouterTarget = { kind: "dispatch", script: target.scriptName };
+  const core =
+    target.namespace === clientDispatchNamespace
+      ? coreAddressOf(
+          entry,
+          `${held.clientId}.${context.router.domain}`,
+          context.router.dispatcher
+        )
+      : undefined;
+  if (core === undefined) {
+    throw new ProvisionOperationError(
+      "probe_unqualified",
+      `${target.scriptName} is in namespace ${target.namespace}, which the router doesn't bind`
+    );
+  }
+  return { core, entry };
+};
+
+/**
  * Step 7: core answers its health check, as the version live, to the
  * router secret the router will send, then the admin's signed probe as
  * this client at that version, each of its private bindings answering
- * and both clocks armed. Returns its origin.
+ * and both clocks armed, reached as the router will reach it
+ * (`reachableCore`). Returns what the router's map entry names.
  */
 const probe = async (
   context: ProvisionContext,
   loaded: Loaded,
   inventory: readonly ClientResource[]
-): Promise<string> => {
+): Promise<RouterTarget> => {
   const { api, db } = context;
   const { held } = loaded;
   const target = targetOf(loaded, inventory, "core");
-  if (target.namespace !== null) {
-    throw new ProvisionOperationError(
-      "probe_unqualified",
-      `No qualified way to reach ${target.scriptName} in namespace ${target.namespace} yet`
-    );
-  }
-  const subdomain = await workersSubdomain(
-    api,
-    target.accountId,
-    held.clientId
-  );
-  const origin = coreOrigin(target.scriptName, subdomain);
-  const version = await observed(
-    context,
-    async () => await liveVersion(api, target.accountId, target.scriptName),
-    (live) => live !== undefined
-  );
-  if (version === undefined) {
-    throw new ProvisionOperationError(
-      "upload_unobserved",
-      `${target.scriptName} has no version live`
-    );
-  }
+  const { core, entry } = await reachableCore(context, loaded, target);
+  const { origin } = core;
   const routerSecret = await deriveRouterSecret(
     context.secrets.routerKey,
     held.clientId,
     loaded.client.generation
   );
-  const attempts = await smokeCheck(
-    origin,
-    routerSecret,
-    version,
-    context.router.smoke
-  );
+  const smoke = { ...context.router.smoke, fetch: core.fetch };
+  // An account's own Worker: the version its deployment has live, which
+  // core must answer as. One in the namespace: live at once on upload, its
+  // versions not listed by the documented API, so the version answering
+  // is the one the probe is held to (GRA-283; GRA-430 qualifies it).
+  let version: string;
+  let attempts: number;
+  if (target.namespace === null) {
+    // Read back through Cloudflare's lag (#1360): the upload may not show yet.
+    const live = await observed(
+      context,
+      async () => await liveVersion(api, target.accountId, target.scriptName),
+      (seen) => seen !== undefined
+    );
+    if (live === undefined) {
+      throw new ProvisionOperationError(
+        "upload_unobserved",
+        `${target.scriptName} has no version live`
+      );
+    }
+    version = live;
+    attempts = await smokeCheck(origin, routerSecret, live, smoke);
+  } else {
+    ({ version, attempts } = await smokeAnswering(origin, routerSecret, smoke));
+  }
   const answer = await probeCore({
     origin,
     routerSecret,
@@ -1566,7 +1622,7 @@ const probe = async (
       held.clientId,
       loaded.client.generation
     ),
-    fetch: context.router.smoke?.fetch ?? fetch,
+    fetch: core.fetch,
     timeoutMs: context.router.smoke?.attemptTimeoutMs ?? probeTimeoutMs,
   });
   if (answer === undefined) {
@@ -1587,8 +1643,18 @@ const probe = async (
     throw new ProvisionOperationError(fault.code, fault.message);
   }
   const progress = await progressNow(db, loaded.operation.id);
-  await recordStep(db, loaded, "probe", { attempts }, { ...progress, origin });
-  return origin;
+  await recordStep(
+    db,
+    loaded,
+    "probe",
+    // On record: a namespace core's version was the one it answered, not
+    // checked against its upload (GRA-430 qualifies how to).
+    target.namespace === null
+      ? { attempts }
+      : { attempts, versionUnchecked: 1 },
+    { ...progress, origin }
+  );
+  return entry;
 };
 
 /**
@@ -1632,17 +1698,27 @@ const setUpMail = async (
 const route = async (
   context: ProvisionContext,
   loaded: Loaded,
-  origin: string
+  target: RouterTarget
 ): Promise<void> => {
   const { held } = loaded;
+  const { generation } = loaded.client;
+  // Only a script of this client's own placement (`g<deploymentId>-…`,
+  // inventory.ts): a mis-recorded inventory never publishes another's.
+  if (
+    target.kind === "dispatch" &&
+    !target.script.startsWith(`g${loaded.placement.deploymentId}-`)
+  ) {
+    throw new ProvisionOperationError(
+      "probe_unqualified",
+      `${target.script} isn't a script of ${held.clientId}'s placement`
+    );
+  }
   await registerHostname(
     context.router.hosts,
     `${held.clientId}.${context.router.domain}`,
-    {
-      clientId: held.clientId,
-      coreUrl: origin,
-      generation: loaded.client.generation,
-    },
+    target.kind === "dispatch"
+      ? { clientId: held.clientId, script: target.script, generation }
+      : { clientId: held.clientId, coreUrl: target.origin, generation },
     // The last thing before the write: KV can't make it conditional.
     async () => {
       await assertHolds(context.db, held);
@@ -1831,13 +1907,13 @@ const runOperation = async (
     await deliverSecrets(context, loaded, inventory);
 
     step = "probe";
-    const origin = await probe(context, loaded, inventory);
+    const target = await probe(context, loaded, inventory);
 
     step = "mail";
     await setUpMail(context, loaded);
 
     step = "route";
-    await route(context, loaded, origin);
+    await route(context, loaded, target);
     await complete(db, loaded);
     return undefined;
   } catch (error) {

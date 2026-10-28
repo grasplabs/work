@@ -228,6 +228,6 @@ export const deployContext = async (env: Env): Promise<DeployContext> => {
     store: env.RELEASES,
     secrets: await deploySecrets(env),
     signInApps: signInApps(env),
-    router: { hosts: env.ROUTER_HOSTS, domain },
+    router: { hosts: env.ROUTER_HOSTS, domain, dispatcher: env.DISPATCHER },
   };
 };
