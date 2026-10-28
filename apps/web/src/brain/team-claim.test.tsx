@@ -140,10 +140,12 @@ describe("a team's claim, wherever the Brain names it", () => {
       throw new Error("No chip");
     }
     await hover(chip);
+    // The preview itself, opened, not the chip's own label.
+    const preview = document.querySelector('[data-slot="hover-card-content"]');
     expect({
-      quoted: document.body.textContent?.includes(`“${claimText}”`),
-      named: document.body.textContent?.includes(claimText),
-    }).toStrictEqual({ quoted: false, named: true });
+      open: preview !== null,
+      title: preview?.querySelector(".font-medium")?.textContent,
+    }).toStrictEqual({ open: true, title: claimText });
   });
 
   it("lists it among the statements naming a note in plain words, beside someone's quoted words", async () => {
