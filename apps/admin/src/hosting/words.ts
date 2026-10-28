@@ -93,6 +93,12 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "The release doesn't work with what the client runs, or with itself.",
   schema_incompatible:
     "The release's code doesn't run on the client's databases as its migrations left them.",
+  release_without_limits:
+    "The release was built before platform limits were recorded, so it isn't made live.",
+  limit_evidence_missing:
+    "The release raises a platform limit without capacity and security evidence for this client's profile.",
+  release_history_incomplete:
+    "A release between where the client starts and this one isn't imported, so its evidence can't be read: import it first.",
   operation_release_changed:
     "Its provisioning is with another release: that release stays for the operation.",
   unknown_worker: "The release has a Worker other than core and connect.",

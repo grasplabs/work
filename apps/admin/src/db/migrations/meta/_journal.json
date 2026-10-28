@@ -225,6 +225,13 @@
       "when": 1793217906340,
       "tag": "0031_client_changes",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1793219732109,
+      "tag": "0032_release_limit_evidence",
+      "breakpoints": true
     }
   ]
 }
