@@ -226,7 +226,11 @@ export interface PreviewProblem {
   source: "screen" | "server";
   /** The screen it happened on, or the server method that failed. */
   at: string;
-  kind: "error" | "rejection" | "console" | "failed";
+  /**
+   * `warning`: a `console.error` call of the kit's, such as React's
+   * development warnings, which a draft's check shows and never fails on.
+   */
+  kind: "error" | "rejection" | "console" | "failed" | "warning";
   message: string;
   stack?: string;
 }
