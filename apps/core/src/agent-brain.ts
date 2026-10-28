@@ -2,8 +2,8 @@ import type {
   BrainSourceRef,
   EntitySummary,
   MemoryPack,
+  RelationsAnswer,
   RelationsExplanation,
-  RelationView,
   SkillRead,
   SkillSelection,
 } from "@grasp-os/brain/contract";
@@ -251,12 +251,12 @@ export class BrainAgentApi
    * What the chat's readable sources say about one entity, each with its
    * passage: observed, never an accepted fact.
    */
-  async relations(input: unknown): Promise<RelationView[]> {
+  async relations(input: unknown): Promise<RelationsAnswer> {
     return await this.#delegated("brain.relations", async (reader) => {
-      const views = await relationsFor(brainOf(this.env), reader, input);
+      const answer = await relationsFor(brainOf(this.env), reader, input);
       return {
-        value: views,
-        ...citing(views.map(({ sourceRef }) => sourceRef)),
+        value: answer,
+        ...citing(answer.relations.map(({ sourceRef }) => sourceRef)),
       };
     });
   }
