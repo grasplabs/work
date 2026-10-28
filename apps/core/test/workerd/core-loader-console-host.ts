@@ -29,6 +29,8 @@ export const objectCases = [
   "setter",
   "redefined",
   "subclass",
+  "detailed",
+  "overDetailed",
 ] as const;
 
 export type ObjectCase = (typeof objectCases)[number];
@@ -49,6 +51,8 @@ const methodOf: Readonly<Record<ObjectCase, string>> = {
   setter: "rawWaitUntil",
   redefined: "rawWaitUntil",
   subclass: "subclassWaitUntil",
+  detailed: "failDetailed",
+  overDetailed: "failDetailed",
 };
 
 /** What the App's class's constructor does beyond making its base, by case. */
@@ -110,6 +114,12 @@ export class App extends DurableObject {
   ${accessorOf(name)}
   fail() {
     throw Object.assign(new TypeError(value), { details: { retryAfterMs: 5 } });
+  }
+  // Details as long as core keeps an App error's (\`appErrorDetailsBytes\`,
+  // 16 KiB), or past it.
+  failDetailed() {
+    const note = "d".repeat(${JSON.stringify(name)} === "detailed" ? 12_000 : 20_000);
+    throw Object.assign(new TypeError(value), { details: { note } });
   }
   async timer() {
     setTimeout(() => { throw new Error(value); }, 0);

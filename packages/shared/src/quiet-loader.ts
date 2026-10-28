@@ -1,3 +1,4 @@
+import { appErrorDetailsBytes } from "./apps.ts";
 import {
   capturedModules,
   hasNodeModules,
@@ -177,8 +178,15 @@ export const builtins = Object.freeze({
 /** The built-ins module's name: none the isolate's modules have. */
 const builtinsModule = "grasp-sandbox-builtins.js";
 
+/**
+ * The most characters of a thrown error's details, as JSON, that cross: as
+ * many as core keeps of an App error's (`appErrorDetailsBytes`, as UTF-8),
+ * since no character takes less than a byte. Core checks the bytes itself.
+ */
+const maxThrownDetails = appErrorDetailsBytes;
+
 /** The most characters of a thrown error's whole JSON text that are read. */
-const maxThrownText = 2 * (maxThrownMessage + 8192 + 1024);
+const maxThrownText = 2 * (maxThrownMessage + maxThrownDetails + 1024);
 
 /**
  * The deepest plain data the wrapper copies out of a call's answer: as
@@ -186,9 +194,6 @@ const maxThrownText = 2 * (maxThrownMessage + 8192 + 1024);
  * an answer the call would carry.
  */
 const maxAnswerDepth = plainDataBounds.depth;
-
-/** The most characters of a thrown error's details, as JSON, that cross. */
-const maxThrownDetails = 8192;
 
 /**
  * The wrapper main module of an isolate whose entrypoint `entrypoint` is

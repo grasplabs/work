@@ -549,6 +549,38 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
     }
   );
 
+  // An App error's details cross whole as long as core keeps them
+  // (\`appErrorDetailsBytes\`, 16 KiB); past that, the error crosses without.
+  it.each([
+    ["detailed", 12_000],
+    ["overDetailed", null],
+  ])(
+    "keeps an App class's error details (%s) as long as core does",
+    async (name, kept) => {
+      const response = await fetch(new URL(`/do/${name}/quiet`, served.url));
+      const answer = z
+        .object({
+          value: z.string(),
+          thrown: z.object({
+            kind: z.string(),
+            message: z.string(),
+            details: z.object({ note: z.string() }).nullable(),
+          }),
+        })
+        .parse(await response.json());
+
+      expect({
+        kind: answer.thrown.kind,
+        message: answer.thrown.message,
+        note: answer.thrown.details?.note.length ?? null,
+      }).toStrictEqual({
+        kind: "TypeError",
+        message: answer.value,
+        note: kept,
+      });
+    }
+  );
+
   // A tailed class's console reaches the tail through the runtime's own
   // console, which plain workerd prints to its own stdout, served
   // \`--verbose\` or not. So only Cloudflare loads a class with a tail
