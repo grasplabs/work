@@ -402,15 +402,15 @@ export const relationsExplain = async <C>(
   // reached, in the order first reached, are the next hop's starts.
   const firstPaths = stepsFrom(first.relations, entityId, entityId);
   let room = add(firstPaths.map(({ view, to }) => ({ relations: [view], to })));
-  const reached = new Map<string, RelationView>();
+  // Every first-hop relation into an entity, not just the first: each is a
+  // path of its own, extended by the entity's relations, read once.
+  const reached = new Map<string, RelationView[]>();
   for (const { view, to } of firstPaths.slice(0, paths.length)) {
-    if (!reached.has(to.entityId)) {
-      reached.set(to.entityId, view);
-    }
+    reached.set(to.entityId, [...(reached.get(to.entityId) ?? []), view]);
   }
   const starts = hops === 2 && room ? [...reached.entries()] : [];
   truncated ||= starts.length > explainFanOut;
-  for (const [via, step] of starts.slice(0, explainFanOut)) {
+  for (const [via, firstSteps] of starts.slice(0, explainFanOut)) {
     if (!room || brain.ports.clock().getTime() >= deadline) {
       truncated ||= room;
       break;
@@ -420,11 +420,11 @@ export const relationsExplain = async <C>(
     read.push(...next.relations);
     considered.push(...next.considered);
     truncated ||= next.cut;
+    const onward = stepsFrom(next.relations, via, entityId);
     room = add(
-      stepsFrom(next.relations, via, entityId).map(({ view, to }) => ({
-        relations: [step, view],
-        to,
-      }))
+      firstSteps.flatMap((step) =>
+        onward.map(({ view, to }) => ({ relations: [step, view], to }))
+      )
     );
   }
   truncated ||= !room;

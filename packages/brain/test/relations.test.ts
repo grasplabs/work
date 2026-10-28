@@ -775,6 +775,64 @@ describe("explained relations", () => {
     });
   });
 
+  it("follows every relation into an entity on, two routes to the same one each a path", async () => {
+    const thing = `Onboarding ${word()}`;
+    const tool = `Personio ${word()}`;
+    const owns = `Anna owns ${thing}.`;
+    const leads = `Anna leads ${thing}.`;
+    const uses = `${thing} uses ${tool}.`;
+    const host = testHost(
+      modelOf({
+        [owns]: {
+          entities: [
+            { kind: "person", name: "Anna" },
+            { kind: "process", name: thing },
+            { kind: "tool", name: tool },
+          ],
+          relations: [
+            {
+              subject: "Anna",
+              predicate: "owns",
+              object: thing,
+              evidence: owns,
+            },
+            {
+              subject: "Anna",
+              predicate: "leads",
+              object: thing,
+              evidence: leads,
+            },
+            { subject: thing, predicate: "uses", object: tool, evidence: uses },
+          ],
+        },
+      })
+    );
+    const team = await newCollection(host.brain, "Operations");
+    await savedAndLinked(
+      host,
+      team,
+      "handbook.md",
+      `${owns}\n${leads}\n${uses}`
+    );
+    const reader: Caller = { userId: "reader", reads: [team.id] };
+    const explained = await relationsExplain(host.brain, reader, {
+      entityId: await entityOf(host, reader, "Anna"),
+    });
+
+    expect({
+      paths: inOrder(named(explained)),
+      truncated: explained.truncated,
+    }).toStrictEqual({
+      paths: inOrder([
+        [`Anna leads ${thing}`, `→ ${thing}`],
+        [`Anna owns ${thing}`, `→ ${thing}`],
+        [`Anna leads ${thing}`, `${thing} uses ${tool}`, `→ ${tool}`],
+        [`Anna owns ${thing}`, `${thing} uses ${tool}`, `→ ${tool}`],
+      ]),
+      truncated: false,
+    });
+  });
+
   it("never follows a relation the reader can't read, even to one they can", async () => {
     const payroll = `Payroll ${word()}`;
     const mentors = "Anna mentors Bob.";
