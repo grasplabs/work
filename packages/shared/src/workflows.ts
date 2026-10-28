@@ -1386,6 +1386,28 @@ export interface RunActivity {
 }
 
 /**
+ * A workflow that uses a connection, as Integrations names and links it:
+ * an App's (its App and its name in the App's code), or an independent
+ * workflow (its ID and name).
+ */
+export type ConnectionWorkflow =
+  | { kind: "app"; app: AppId; appName: string; workflow: WorkflowId }
+  | { kind: "independent"; id: string; name: string };
+
+/**
+ * The workflows a person can open that use one connection: an App's whose
+ * App holds an active permission on it and whose code calls that
+ * permission's binding, and an independent workflow whose current version
+ * declares a connector binding an active approval serves through the
+ * workflow's own active permission on it. App workflows first, by App name
+ * and workflow, then independent ones by name.
+ */
+export interface ConnectionWorkflows {
+  connectionId: string;
+  workflows: ConnectionWorkflow[];
+}
+
+/**
  * A signed-in person's workflows. Anyone with a role in the App
  * (`AppsApi`) starts and follows its runs, and its builders cancel them;
  * every call checks the session and the person's role again.
@@ -1421,11 +1443,11 @@ export interface WorkflowsApi {
    */
   overview: () => Promise<WorkflowSummary[]>;
   /**
-   * The workflows of the Apps the person can open that use `connection`:
-   * each one whose App holds an active permission on it and whose code
-   * calls that permission's binding, summed up as in `overview`.
+   * Every connection some workflow the person can open uses, with those
+   * workflows (`ConnectionWorkflows`); a connection none of them uses
+   * isn't listed.
    */
-  ofConnection: (connection: string) => Promise<WorkflowSummary[]>;
+  byConnection: () => Promise<ConnectionWorkflows[]>;
   /**
    * Runs of the Apps the person can open, as `filter` narrows them:
    * waiting first (latest to wait first), then failed (latest ended
