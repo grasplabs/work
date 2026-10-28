@@ -60,6 +60,27 @@ export const modelScripts = {
       says("Weekly, to your team: I'll set that up."),
     ],
   },
+  /**
+   * One question as long as one may be, with as many choices as one may
+   * have, each as long as one may be (`chatAskLimits`): all of it, and
+   * Send, in reach in the dock's frame.
+   */
+  longQuestion: {
+    opener: "Help me choose how the support rota should work.",
+    replies: [
+      asks([
+        {
+          question: `${"Which of these ways of running the weekly support rota should we start with, given the team's size and hours? ".repeat(3).slice(0, 299).trim()}?`,
+          choices: Array.from(
+            { length: 6 },
+            (_, index) =>
+              `Option ${index + 1}: ${"rotate the on-call person each week and hand over open tickets on Monday morning ".repeat(2).slice(0, 108).trim()}`
+          ),
+        },
+      ]),
+      says("Option 6 it is: I'll draft the rota."),
+    ],
+  },
 } as const satisfies Record<string, ModelScript>;
 
 /**

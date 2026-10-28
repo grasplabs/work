@@ -269,6 +269,10 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
   await expect(messages.getByText(answer.text)).toBeVisible({
     timeout: 30_000,
   });
+  // The turn ended: what only a finished answer offers, and no failure.
+  await expect(
+    messages.getByRole("button", { name: "Ask again" })
+  ).toBeVisible();
   await expect(messages.getByRole("alert")).toHaveCount(0);
 });
 
@@ -346,6 +350,44 @@ test("the chat dock asks questions folded away too, the way to open it beside th
   await asked.getByRole("radio", { name: "Weekly" }).click();
   await asked.getByRole("button", { name: "Next" }).click();
   await asked.getByRole("radio", { name: "My team" }).click();
+  await asked.getByRole("button", { name: "Send" }).click();
+  await expect(dock.getByText(answer.text)).toBeVisible({ timeout: 30_000 });
+});
+
+test("the chat dock keeps a question as long as one may be, with all its choices and Send, in reach", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener, replies } = modelScripts.longQuestion;
+  const [, answer] = replies;
+  const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
+  // A short laptop screen: the dock's frame is as tall as the window lets
+  // it be, shorter than the whole question.
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await page.goto("/domains");
+  const box = page.getByRole("textbox", { name: "Ask Grasp" });
+  const send = page
+    .locator("form")
+    .filter({ has: box })
+    .getByRole("button", { name: "Send" });
+  await box.fill(question);
+  await expect(send).toBeEnabled();
+  await box.press("Enter");
+  const dock = page.getByRole("region", { name: "Ask Grasp" });
+  const asked = dock.getByRole("region", { name: "Grasp asks" });
+  await expect(asked).toBeVisible({ timeout: 30_000 });
+
+  // Nothing runs past the dock's frame, which hides what does (a click
+  // would scroll it into view; a person can't): the question scrolls in
+  // its own place, Send below it.
+  await expect
+    .poll(
+      async () =>
+        await dock.evaluate((frame) => frame.scrollHeight <= frame.clientHeight)
+    )
+    .toBe(true);
+  await asked.getByRole("radio", { name: /^Option 6:/u }).click();
   await asked.getByRole("button", { name: "Send" }).click();
   await expect(dock.getByText(answer.text)).toBeVisible({ timeout: 30_000 });
 });
