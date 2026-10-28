@@ -179,9 +179,8 @@ describe("a client's release Worker as Build Output", () => {
       previewUrls: false,
       env: {
         WORKSPACE: {
-          type: "durable-object",
-          worker: "qual-x-a-core",
-          exportName: "Workspace",
+          type: "unsafe:durable_object_namespace",
+          class_name: "Workspace",
         },
         LOADER: { type: "worker-loader" },
         DB: { type: "d1", id: "db-a" },
