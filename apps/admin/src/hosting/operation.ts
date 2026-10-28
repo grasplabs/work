@@ -177,7 +177,11 @@ import {
   placementOf,
   renderClientWorker,
 } from "./inventory.ts";
-import type { ClientPlacement, ClientResource } from "./inventory.ts";
+import type {
+  ClientPlacement,
+  ClientResource,
+  RenderOptions,
+} from "./inventory.ts";
 import { privateBindings, probeCore, probeFault } from "./probe.ts";
 import { ensureClientResources } from "./provision.ts";
 
@@ -391,18 +395,32 @@ const appSchema = z.enum(apps);
 /**
  * Binding kinds Cloudflare documents for Workers for Platforms user
  * Workers: D1, R2 and Durable Objects (configuration/bindings), and
- * static assets (configuration/static-assets). The vars and secrets the
- * admin adds go in the upload's own metadata and secrets calls. Every
- * other kind core and connect bind (a service binding to connect, Worker
- * Loader, version metadata, email) waits for real-account qualification
- * (GRA-430) rather than be assumed to work.
+ * static assets (configuration/static-assets), and what the GRA-430 run
+ * on a real namespace (28 Oct) qualified: the Worker Loader, version
+ * metadata and a service binding, which renders to the connect gateway (a
+ * user Worker can't bind another, 10143; `renderOptionsOf`). A
+ * `send_email` binding uploads, but whether it delivers is GRA-965's
+ * spike, still open. The vars and secrets the admin adds go in the
+ * upload's own metadata and secrets calls.
  */
 const wfpBindings: ReadonlySet<string> = new Set([
   "d1",
   "r2_bucket",
   "durable_object_namespace",
   "assets",
+  "worker_loader",
+  "version_metadata",
+  "service",
 ]);
+
+/**
+ * How `loaded`'s destination takes a Worker's bindings: in a Workers for
+ * Platforms namespace, a service binding binds the connect gateway, with
+ * props naming the client's own script (GRA-1217).
+ */
+const renderOptionsOf = (loaded: Loaded): RenderOptions => ({
+  connectGateway: loaded.destination.kind === "workers_for_platforms",
+});
 
 /** Throws `runner_replaced` unless `held` still holds its client. */
 const assertHolds = async (
@@ -1049,8 +1067,12 @@ const targetOf = (
   const worker = workerOf(loaded.manifest, app);
   return {
     accountId: loaded.accountId,
-    scriptName: renderClientWorker(worker, loaded.placement, inventory)
-      .scriptName,
+    scriptName: renderClientWorker(
+      worker,
+      loaded.placement,
+      inventory,
+      renderOptionsOf(loaded)
+    ).scriptName,
     namespace:
       loaded.destination.kind === "workers_for_platforms"
         ? loaded.destination.namespace
@@ -1081,6 +1103,18 @@ const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
     throw new ProvisionOperationError(
       "wfp_binding_unqualified",
       `${worker.name}'s ${unqualified.name} is a ${unqualified.type} binding, which Workers for Platforms doesn't document for user Workers`
+    );
+  }
+  // The gateway reaches one namespace, the clients': a service binding of
+  // a Worker in any other would reach nothing.
+  const service = worker.bindings.find(({ type }) => type === "service");
+  if (
+    service !== undefined &&
+    loaded.destination.namespace !== clientDispatchNamespace
+  ) {
+    throw new ProvisionOperationError(
+      "wfp_binding_unqualified",
+      `${worker.name}'s ${service.name} needs the connect gateway, which serves namespace ${clientDispatchNamespace} alone`
     );
   }
   if (worker.crons.length > 0) {
@@ -1462,7 +1496,12 @@ const upload = async (
   const { api, db, store } = context;
   const { manifest, held, placement } = loaded;
   const worker = workerOf(manifest, app);
-  const rendered = renderClientWorker(worker, placement, inventory);
+  const rendered = renderClientWorker(
+    worker,
+    placement,
+    inventory,
+    renderOptionsOf(loaded)
+  );
   // Its mail sends from the client's onboarding sender alone, as a
   // deploy's does (`renderBindings`).
   const mailSender = mailSenderOf(context, held.clientId);
@@ -2211,7 +2250,8 @@ const runOperation = async (
       renderClientWorker(
         workerOf(loaded.manifest, app),
         loaded.placement,
-        inventory
+        inventory,
+        renderOptionsOf(loaded)
       );
     }
     for (const app of order) {

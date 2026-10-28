@@ -4,7 +4,8 @@
  * own store, and a binding to the router's hostname map at that
  * namespace. Both ids differ per account,
  * so the config carries placeholders and this fills them in before
- * `wrangler deploy`:
+ * `wrangler deploy` (`filledConfig`, ./wrangler-deploy-config.ts); a config
+ * with neither, such as the connect gateway's, deploys as it is:
  * - `"account-secrets-store"`: from SECRETS_STORE_ID when the job sets it
  *   (deploy-ops does), otherwise from the Cloudflare API, as the
  *   account's only store;
@@ -30,10 +31,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-/** The `store_id` a config names instead of a real one. */
-const storePlaceholder = '"account-secrets-store"';
-/** The KV `id` a config names instead of the router's map's. */
-const hostsPlaceholder = '"router-hosts-namespace"';
+import { filledConfig } from "./wrangler-deploy-config.ts";
+
 /** The title the router's first deploy gives its map (wrangler's `<worker>-<binding>`). */
 const hostsTitle = "grasp-os-router-hosts";
 /** Where the Cloudflare Vite plugin's build says its config is. */
@@ -217,20 +216,11 @@ const configPath = (): string => {
 };
 
 const config = configPath();
-let text = readFileSync(config, "utf-8");
-if (!text.includes(storePlaceholder) && !text.includes(hostsPlaceholder)) {
-  throw new Error(`${config} names no placeholder to fill in`);
-}
-const store = text.includes(storePlaceholder) ? await storeId() : undefined;
-if (store !== undefined) {
-  text = text.replaceAll(storePlaceholder, JSON.stringify(store));
-}
-if (text.includes(hostsPlaceholder)) {
-  text = text.replaceAll(hostsPlaceholder, JSON.stringify(await hostsId()));
-}
-if (store !== undefined) {
-  text = await withStoredSecrets(text, store);
-}
+const text = await filledConfig(readFileSync(config, "utf-8"), {
+  storeId,
+  hostsId,
+  withStoredSecrets,
+});
 // Next to the config, so the paths in it (main, assets) still resolve.
 const deployConfig = path.join(path.dirname(config), "wrangler.deploy.jsonc");
 writeFileSync(deployConfig, text);
