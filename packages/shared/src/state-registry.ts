@@ -298,7 +298,11 @@ const coreDb: D1State = {
     ),
     run_brain_evidence: transient(
       `${core}workflows/host.ts`,
-      "What each run's latest recall cites, checked before its next calls."
+      "What each run's recalls and reads cite, checked before its next calls."
+    ),
+    run_chat_sources: transient(
+      `${core}workflow-starts.ts`,
+      "What the chat that had a run started had read, checked before its next calls."
     ),
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
