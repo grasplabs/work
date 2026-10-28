@@ -163,6 +163,27 @@ const clockTaskNames = {
 };
 
 /**
+ * The connect beside a core in a dispatch namespace, which has no CONNECT
+ * binding there (Workers for Platforms documents none for user Workers):
+ * the same deployment's connect script in the same namespace. It stands in
+ * for however GRA-430 qualifies a namespaced core reaching connect; until
+ * then a real one answers none of connect's bindings.
+ */
+const namespacedConnect = (
+  account: AccountState,
+  live: VersionState
+): ScriptState | undefined => {
+  for (const scripts of account.namespaces.values()) {
+    for (const [name, script] of scripts) {
+      if (script.versions.includes(live) && name.endsWith("-core")) {
+        return scripts.get(`${name.slice(0, -"-core".length)}-connect`);
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
  * What a client's core answers the admin's provisioning probe with, as
  * core does (core's src/provision-probe.ts), once the signature checks
  * out with the key its live version's auth secret gives and the request
@@ -204,8 +225,10 @@ const answerProbe = async (
     ({ name }) => name === "CONNECT"
   )?.service;
   const connectBindings = bindingsSchema.parse(
-    account.scripts.get(connectScript ?? "")?.versions.at(-1)?.metadata
-      .bindings ?? []
+    (connectScript === undefined
+      ? namespacedConnect(account, live)
+      : account.scripts.get(connectScript)
+    )?.versions.at(-1)?.metadata.bindings ?? []
   );
   const clientId = bindings.find(({ name }) => name === "CLIENT_ID")?.json;
   const down = new Set(probe.down);
@@ -1018,6 +1041,7 @@ export const fakeCloudflareApi = (
   const adminReads = { now: 0, peak: 0 };
   /** The requests a redirect sent elsewhere, with the router secret they carried. */
   const redirected: { url: string; routerSecret: string | null }[] = [];
+  const dispatched: { namespace: string; script: string; url: string }[] = [];
 
   /** Whose token a call carries: the deployer's or the tenant admin's. */
   const callers = new Map([
@@ -1387,6 +1411,41 @@ export const fakeCloudflareApi = (
     return await workerAnswer(request, url, worker);
   };
 
+  /**
+   * The dispatch namespace `name` in account `accountId`, as a Worker
+   * binding reaches it: only that account's namespace, as a real
+   * DISPATCHER binds one namespace in its own account. Each script's live
+   * version answers as a workers.dev Worker's does (`workerAnswer`); a
+   * script it doesn't have, or one only another account holds, throws, as
+   * Workers for Platforms does.
+   */
+  const dispatcher = (accountId: string, name: string) => ({
+    get: (scriptName: string) => {
+      const account = accounts.get(accountId);
+      const script = account?.namespaces.get(name)?.get(scriptName);
+      const [only] = script?.deployments[0]?.versions ?? [];
+      const live = script?.versions.find(({ id }) => id === only?.version_id);
+      const worker =
+        account === undefined || script === undefined || live === undefined
+          ? undefined
+          : { account, script, live };
+      if (worker === undefined) {
+        throw new Error(`Worker not found: ${scriptName}`);
+      }
+      return {
+        fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          dispatched.push({
+            namespace: name,
+            script: scriptName,
+            url: request.url,
+          });
+          return await workerAnswer(request, new URL(request.url), worker);
+        },
+      };
+    },
+  });
+
   /** What the API, or a Worker on workers.dev, answers `fetch(input, init)` with. */
   const answerFetch = async (
     input: RequestInfo | URL,
@@ -1475,11 +1534,20 @@ export const fakeCloudflareApi = (
     adminReads.now = 0;
     adminReads.peak = 0;
     redirected.length = 0;
+    dispatched.length = 0;
   };
 
   return {
     /** Answers in place of `fetch`. */
     fetch: answerFetch,
+    /** The dispatch namespace `name`, as the router and the admin bind it. */
+    dispatcher,
+    /** Every request a namespace's script got through `dispatcher`, in this test. */
+    dispatched: (): readonly {
+      namespace: string;
+      script: string;
+      url: string;
+    }[] => dispatched,
     /** Empties the fake. */
     reset,
     /** Every call the fake got in this test, in order. */
