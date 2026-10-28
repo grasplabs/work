@@ -176,6 +176,12 @@ export const workflowResourceErrors = defineErrorFamily({
     "This version was built for a protocol between the platform and workflow code that this platform doesn't run. Publish it again as a new version.",
   "workflow.start_invalid":
     "That isn't a valid start: name an exact published version, and input the workflow accepts.",
+  "workflow.start_held_gone":
+    "That start no longer waits for you: it was confirmed, declined or let lapse, or isn't yours.",
+  "workflow.start_held_changed":
+    "What that start would send changed since you saw it. Look at it again, then confirm.",
+  "workflow.start_offer_only":
+    "In a chat app, offer the start on a card instead: the person presses Start there.",
   "workflow.start_denied":
     "You, or what starts it for you, may not start this workflow, or that changed as it started. Check again, then retry.",
   "workflow.start_conflict":

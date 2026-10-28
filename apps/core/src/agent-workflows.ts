@@ -7,15 +7,19 @@ import type {
   WorkflowRole,
   WorkflowRunStatus,
 } from "@grasp-os/shared/workflow-resources";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowRun, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
 import { asPerson } from "./agent-person.ts";
+import { admitEffect } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { askableFor } from "./channels/askable-workflows.ts";
 import type { AskableWorkflow } from "./channels/askable-workflows.ts";
 import { appHost } from "./durable-objects.ts";
+import { holdStart } from "./held-starts.ts";
+import type { AgentStart } from "./held-starts.ts";
 import { listWorkflowResources } from "./workflow-resources.ts";
 import { listAllRuns, workflowOverview } from "./workflows/overview.ts";
 import { listResourceRuns } from "./workflows/resource-runs.ts";
@@ -41,6 +45,38 @@ import { runStatus } from "./workflows/runs.ts";
 // The owner's choice to open it to asking is what lets the agent see it:
 // no permission of the agent's reaches further, and nothing it offers runs
 // without the press.
+//
+// The agent may also ask to start an independent workflow itself
+// (`start`, platform specification 15.1), through the one start contract
+// and receipt every start has (workflow-starts.ts). Its start waits for
+// its person to confirm it in Grasp (held-starts.ts), as a change an
+// agent makes always does. Threat model, and how each is closed:
+//
+// - A start nothing the person said asked for (an instruction read from a
+//   mail, a page, a file): the agent's start only holds; the run starts
+//   once the person confirms it, in their own session. In a chat app's
+//   chat, where Grasp shows nothing to confirm, the agent offers the
+//   start on a card instead (`offer`), which only the person's press
+//   starts (`workflow.start_offer_only`).
+// - An agent starting what it wasn't given: holding it, and starting it,
+//   need the agent's own active `start` grant on the workflow, in this
+//   chat's workspace, which only an admin gives.
+// - An agent lending its person more than they have: the run acts for the
+//   chat's person, who must have a role in the workflow themselves, read
+//   again as the start is admitted: the agent's grant and the person's
+//   role, intersected, never either alone.
+// - A start held or run twice: the agent names a key of its own, which
+//   core scopes to the chat; the same key in the chat is the same held
+//   start, and its run the same run.
+// - Restricted data carried into a run: a chat that read restricted data
+//   starts a restricted run, for good (`restrictedStart`).
+// - A start nobody can trace: every call is audited as the agent acting
+//   for its person (`agent.call`), holding as `workflow.start.held`,
+//   the person's decision as theirs, and the start as
+//   `workflow.start.admitted` with the agent as its delegate actor.
+// - A code run that ended, or lost a revocation, still asking: the write
+//   is admitted against the chat's open code run before it is held
+//   (`admitEffect`).
 
 /**
  * Whether the agent may read the runs of App `app`'s workflows: those of
@@ -306,6 +342,40 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
     });
   }
 
+  /**
+   * Asks to start independent workflow `workflow` with `input`, as the
+   * agent acting for the chat's person, under `key`: held until the person
+   * confirms it in Grasp. The same key in the chat answers where that
+   * start stands. Refused in a chat app's chat, where it is offered.
+   */
+  async start(
+    workflow: unknown,
+    input: unknown,
+    key: unknown
+  ): Promise<AgentStart> {
+    return await asPerson(this.env, this.ctx.props, {
+      // Its own `start` grant on the workflow is read as the start is
+      // decided, held and admitted (workflow-starts.ts).
+      allowed: () => true,
+      action: "write",
+      method: "workflows.start",
+      read: async (person) => {
+        const scope = this.ctx.props;
+        if (scope.via !== undefined && scope.via !== "web") {
+          throw workflowResourceErrors.create("workflow.start_offer_only");
+        }
+        await admitEffect(this.env, scope);
+        return await holdStart(this.env, scope, person, workflow, input, key);
+      },
+      detail: (standing) => ({
+        workflow: standing.workflow,
+        version: standing.version,
+        held: standing.held,
+        status: standing.status,
+      }),
+    });
+  }
+
   /** One run, as it is now. */
   async status(run: unknown): Promise<AgentRun> {
     return await asPerson(this.env, this.ctx.props, {
@@ -403,13 +473,31 @@ workflows: {
     createdAt: string;
     endedAt: string | null;
   }[]>;
+  /**
+   * Asks to start independent workflow \`workflow\` (its ID) with \`input\`,
+   * as the person you act for, at its current version. Nothing runs yet: it
+   * waits for them to confirm it in Grasp, and \`status\` says "waiting";
+   * say in your answer that it waits for them. Call again with the same
+   * \`key\` to see where it stands ("started"; "refused", with why, when
+   * your grant or their access went before it started; "declined"; "lapsed"),
+   * never with a new key for the same start. Only once an admin granted you
+   * \`start\` on it, and only one the person could start themselves. In a
+   * chat app (Microsoft Teams, Slack) it is refused: use \`offer\` there.
+   * Ask only for what the person asked for.
+   */
+  start(workflow: string, input: unknown, key: string): Promise<
+    | { status: "waiting"; held: string; workflow: string; version: number; expiresAt: string }
+    | { status: "started"; held: string; workflow: string; version: number; start: string }
+    | { status: "refused"; held: string; workflow: string; version: number; code: string }
+    | { status: "declined" | "lapsed"; held: string; workflow: string; version: number }
+  >;
 };`;
 
 /** `env.workflows`. */
 export const workflowsApi: AgentApi = {
   name: "workflows",
   summary:
-    "The workflows this chat may follow, and their runs. Offering a start starts nothing until the person presses it.",
+    "The workflows this chat may follow, and their runs. Offering a start starts nothing until the person presses it; starting one yourself waits for the person to confirm it in Grasp.",
   types: workflowsTypes,
   declaration: workflowsDeclaration,
   stub: (scope) => exports.WorkflowsApi({ props: scope }),
