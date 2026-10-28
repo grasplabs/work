@@ -62,6 +62,14 @@ const decisionLook = /^:decision:(?:asked|reached|outcome|woken:\d+)$/u;
 /** A try's retry of a task's step: a round of it, and the backoff before one. */
 const retryRound = /^:retry:\d+$/u;
 const retryBackoff = /^:retry:\d+:wait$/u;
+/**
+ * A step of a retried round (resource-host.ts, `#retried`): core's own
+ * steps of a held call or a decision in the round, `:retry:<round>` then
+ * what they are as in a first round. The round's own steps (`retryRound`,
+ * `retryBackoff`) are the retry's, not these.
+ */
+const retriedStep =
+  /^:retry:(?<round>\d+)(?<inner>:(?:held|decision):[a-z0-9:]+)$/u;
 
 /** The prefix of core's own steps of a wait (host.ts, `waitStepPrefix`). */
 const waitPrefix = `${coreStepPrefix.replaceAll("$", "\\$")}wait:`;
@@ -176,12 +184,16 @@ const retryWait = (wait: Pending, task: string, title: string): Json => ({
   purpose: "retry",
 });
 
-/** The hold a held call's wait or check is, once a round (`holding`). */
+/**
+ * The hold a held call's wait or check is, once a round (`holding`), of
+ * the retried round `retry` names, if one.
+ */
 const heldOf = (
   wait: Pending,
   id: string,
   rest: string,
-  holding: Set<string>
+  holding: Set<string>,
+  retry = ""
 ): Json[] | undefined => {
   const isWait = wait.type === "waitForEvent" && heldWait.test(rest);
   const isCheck = wait.type === "retry" && heldCheck.test(rest);
@@ -189,7 +201,7 @@ const heldOf = (
     return undefined;
   }
   const round = (heldWait.exec(rest) ?? heldCheck.exec(rest))?.groups?.round;
-  const once = `${id}:${round ?? ""}`;
+  const once = `${id}${retry}:${round ?? ""}`;
   if (holding.has(once)) {
     return [];
   }
@@ -300,14 +312,23 @@ const taskWaitsOf = (
   if (task === undefined || wait.openedAt === null) {
     return [];
   }
-  const held = heldOf(wait, id, rest, holding);
+  // A retried round's held call or decision reads as a first round's.
+  const retried = retriedStep.exec(rest)?.groups;
+  const step = retried?.inner ?? rest;
+  const held = heldOf(
+    wait,
+    id,
+    step,
+    holding,
+    retried === undefined ? "" : `:retry:${retried.round ?? ""}`
+  );
   if (held !== undefined) {
     return held;
   }
   if (wait.type !== "waitForEvent") {
-    return timerOf(wait, id, rest);
+    return timerOf(wait, id, step);
   }
-  if (decisionWait.test(rest)) {
+  if (decisionWait.test(step)) {
     return decisionOf(wait, id, task, context);
   }
   return rest === "" ? awaitedOf(wait, id, task, context) : [];
