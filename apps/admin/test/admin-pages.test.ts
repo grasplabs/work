@@ -612,11 +612,7 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("offers to add an organization from the overview: by hand, with Attio and Rooms shown but not yet to start from, on the newest release", async () => {
-    await publishRelease({ notes: "feat(core): older" });
-    const newest = await publishRelease({ notes: "feat(core): newest" });
-    await importReleases(env.RELEASES, db);
-
+  it("offers to add an organization from the overview: by hand, with Attio and Rooms shown but not yet to start from, and no account to adopt", async () => {
     const overview = await page("/");
     const { status, html } = await page("/new-organization");
     const main = html.slice(html.indexOf("<main"));
@@ -637,11 +633,6 @@ describe("the admin's frame", () => {
         disabled: choice.includes('aria-disabled="true"'),
       };
     });
-    const selected = main.slice(
-      main.lastIndexOf("<option", main.indexOf(" selected")),
-      main.indexOf("</option>", main.indexOf(" selected"))
-    );
-
     expect({
       link: overview.html.includes('href="/new-organization"'),
       status,
@@ -658,11 +649,12 @@ describe("the admin's frame", () => {
         "domains",
         "entraTenantId",
         "googleHostedDomain",
-        "releaseId",
         "ring",
-        "accountId",
       ].every((field) => main.includes(`name="${field}"`)),
-      newest: selected.includes(`value="${newest.id}"`),
+      // Its release and destination are chosen on its Setup, once added.
+      account: ["releaseId", "accountId"].some((field) =>
+        main.includes(`name="${field}"`)
+      ),
     }).toStrictEqual({
       link: true,
       status: 200,
@@ -674,7 +666,7 @@ describe("the admin's frame", () => {
       },
       why: [true, true],
       fields: true,
-      newest: true,
+      account: false,
     });
   });
 

@@ -9,7 +9,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { ProvisionError } from "../provision/control.ts";
+import { ProvisionError } from "../provision/errors.ts";
 import { InventoryError } from "./inventory.ts";
 import { ProvisionOperationError } from "./operation.ts";
 import {

@@ -508,6 +508,25 @@ const assertSealedCurrent = async (
 };
 
 /**
+ * The account a rollback of client `clientId` acts in: its own. A client
+ * placed in a hosting destination, or with no account of its own, is
+ * refused (`client_placed`): its Workers are its inventory's, which a
+ * rollback here doesn't touch.
+ */
+const accountOf = (
+  clientId: string,
+  target: { placed: string | null; accountId: string | null }
+): string => {
+  if (target.placed !== null || target.accountId === null) {
+    throw new RolloutError(
+      "client_placed",
+      `${clientId} is placed in a hosting destination, which a rollback here doesn't touch`
+    );
+  }
+  return target.accountId;
+};
+
+/**
  * Checks that client `clientId` can be rolled back from rollout
  * `rolloutId`: the rollout reached it and recorded what it ran before,
  * and a Worker of the client isn't serving its previous version, read
@@ -554,12 +573,6 @@ const check = async (
         eq(rolloutTargets.clientId, clientId)
       )
     );
-  if (target !== undefined && target.placed !== null) {
-    throw new RolloutError(
-      "client_placed",
-      `${clientId} is placed in a hosting destination, which a rollback here doesn't touch`
-    );
-  }
   const previous = parsePrevious(target?.previous ?? null);
   if (
     target === undefined ||
@@ -572,6 +585,7 @@ const check = async (
       `Rollout ${rolloutId} has nothing of ${clientId}'s to roll back`
     );
   }
+  const accountId = accountOf(clientId, target);
   const latest = await latestDeployOf(db, clientId);
   if (latest?.id !== target.deployId) {
     throw new RolloutError(
@@ -591,7 +605,7 @@ const check = async (
     latest.releaseId,
     previous
   );
-  if (!(await movedOffPrevious(api, target.accountId, workers))) {
+  if (!(await movedOffPrevious(api, accountId, workers))) {
     throw new RolloutError(
       "nothing_to_roll_back",
       `${clientId} runs what it ran before rollout ${rolloutId} already`
@@ -622,7 +636,7 @@ const check = async (
   const secrets = await storeSecretsNow(env);
   await assertSharedCurrent(db, clientId, workers, secrets);
   await assertSealedCurrent(db, clientId, workers, secrets.clientKey);
-  return { accountId: target.accountId, previous, workers };
+  return { accountId, previous, workers };
 };
 
 /** Releases client `clientId` from runner `runId`, logging a failure to. */

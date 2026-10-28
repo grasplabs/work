@@ -23,6 +23,7 @@ import {
   rolloutTargets,
 } from "../db/schema.ts";
 import { latestDeployOf } from "../deploy/deploy.ts";
+import { DeployError } from "../deploy/errors.ts";
 import { mappedGeneration } from "../deploy/router.ts";
 import type { RouterHosts } from "../deploy/router.ts";
 
@@ -124,7 +125,8 @@ export type PreviousRun = z.infer<typeof previousRunSchema>;
 /** The client a rollout reaches, as it reads it. */
 export interface TargetClient {
   id: string;
-  accountId: string;
+  /** Its own account; null for a client created as a placement, which no rollout targets. */
+  accountId: string | null;
   status: "provisioning" | "active" | "offboarded";
   pinnedReleaseId: string | null;
   /**
@@ -287,10 +289,17 @@ export const previousRunOf = async (
   hostname: string,
   client: TargetClient
 ): Promise<PreviousRun> => {
+  const { accountId } = client;
+  if (accountId === null) {
+    throw new DeployError(
+      "client_placed",
+      `${client.id} has no account of its own: it's provisioned as a placement`
+    );
+  }
   const versions: Record<string, string> = {};
   for (const { worker, scriptName } of client.workers) {
     // oxlint-disable-next-line no-await-in-loop -- two Workers
-    const live = await liveVersion(api, client.accountId, scriptName);
+    const live = await liveVersion(api, accountId, scriptName);
     if (live === undefined) {
       throw new TrafficSplitError(scriptName);
     }

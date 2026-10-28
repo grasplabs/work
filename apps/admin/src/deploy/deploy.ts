@@ -194,7 +194,8 @@ export const isPlaced = async (
 
 /**
  * Throws `client_placed` when client `clientId` is placed in a hosting
- * destination. A placed client's Workers and resources are its
+ * destination, or has no account of its own, as every client created
+ * since placements replaced account adoption. A placed client's Workers and resources are its
  * inventory's (src/hosting/inventory.ts), under names this path doesn't
  * know: deploying it here would make a second core in its account, with
  * empty databases, and point its hostname at that.
@@ -203,7 +204,11 @@ export const assertNotPlaced = async (
   db: AdminDatabase,
   clientId: string
 ): Promise<void> => {
-  if (await isPlaced(db, clientId)) {
+  const [client] = await db
+    .select({ accountId: clients.accountId })
+    .from(clients)
+    .where(eq(clients.id, clientId));
+  if (client?.accountId === null || (await isPlaced(db, clientId))) {
     throw new DeployError(
       "client_placed",
       `${clientId} is placed in a hosting destination, which this path doesn't deploy`
@@ -297,7 +302,14 @@ const deployOf = async (db: AdminDatabase, id: string) => {
   if (row === undefined) {
     throw new Error(`No deploy ${id}`);
   }
-  return row;
+  const { accountId } = row;
+  if (accountId === null) {
+    throw new DeployError(
+      "client_placed",
+      `${row.clientId} has no account of its own: it's provisioned as a placement`
+    );
+  }
+  return { ...row, accountId };
 };
 
 /** Client `clientId`'s latest deploy: what it deploys, and how far it got. */

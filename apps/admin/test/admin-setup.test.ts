@@ -106,7 +106,6 @@ describe("an organization's Setup", () => {
         "Beta",
         "Open its Grasp",
         "Its activity",
-        "Open in Cloudflare",
       ].map((text) => header.includes(text)),
       // Nothing of it is left to the old client pages.
       toOldPages: status.html.includes('href="/clients/'),
@@ -154,7 +153,6 @@ describe("an organization's Setup", () => {
         settingUp: deploys.html.includes("Setting it up"),
       },
       resources: [
-        acme.account.id,
         "grasp-os-core",
         "grasp-os-connect",
         "grasp-os-knowledge",
@@ -178,7 +176,7 @@ describe("an organization's Setup", () => {
       ),
     }).toStrictEqual({
       statuses: [200, 200, 200, 200, 200],
-      header: [true, true, true, true, true, true, true],
+      header: [true, true, true, true, true, true],
       toOldPages: false,
       needs: false,
       numbers: [true, true],
@@ -187,7 +185,7 @@ describe("an organization's Setup", () => {
       checklist: [true, true, true],
       deployed: true,
       deploys: { last: true, every: true, settingUp: false },
-      resources: [true, true, true, true, true, true],
+      resources: [true, true, true, true, true],
       releases: {
         follows: true,
         runs: true,
