@@ -12,6 +12,7 @@
     "./collections": "./src/collections.ts",
     "./contract": "./src/contract.ts",
     "./documents": "./src/documents.ts",
+    "./exports": "./src/exports.ts",
     "./entities": "./src/entities.ts",
     "./errors": "./src/errors.ts",
     "./events": "./src/events.ts",
