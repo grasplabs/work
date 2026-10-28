@@ -1,17 +1,26 @@
 import { appChangesSchema, appErrors } from "@grasp-os/shared/apps";
-import type { App, AppMemberRef } from "@grasp-os/shared/apps";
+import type { App, AppAnswerer, AppMemberRef } from "@grasp-os/shared/apps";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { appFor, toApp } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
-import { appMembers, apps, teamMembers, teams } from "./db/core/schema.ts";
+import {
+  appMembers,
+  apps,
+  members,
+  personErasures,
+  teamMembers,
+  teams,
+  users,
+} from "./db/core/schema.ts";
 import { indexAppNow } from "./knowledge/apps-collection.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { openTo } from "./workflows/owners.ts";
@@ -56,14 +65,15 @@ const requireAudience = async (
 };
 
 /**
- * That `userId` may answer for `app` now, as SQL: a current member of the
+ * That `userId` (an ID, or a column holding one) may answer for `app` now,
+ * as SQL: a current member of the
  * organization who can open it (`openTo`) as its status lets them
  * (app-access.ts). A draft or an archived App is open only to whoever
  * builds it: an admin, or a builder by role in the organization who owns
  * it or with whom it is shared as a builder, as a person or through a
  * team.
  */
-const mayAnswer = (userId: string, app: string): SQL => sql`(
+const mayAnswer = (userId: string | SQLiteColumn, app: string): SQL => sql`(
   ${activeMember(userId)} AND ${openTo(userId, app)}
   AND (
     EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.status} = 'published')
@@ -81,6 +91,36 @@ const mayAnswer = (userId: string, app: string): SQL => sql`(
     ))
   )
 )`;
+
+/**
+ * Who may answer for App `app` now (`mayAnswer`), by ID and name, never
+ * an email, for one of its builders who may name them (never Grasp
+ * staff). Anyone removed or erased is no member any more, and isn't one.
+ */
+export const appAnswerers = async (
+  env: Env,
+  by: Identity,
+  app: unknown
+): Promise<AppAnswerer[]> => {
+  const found = await appFor(env, by, app, "builder");
+  requireNotStaff(by);
+  // Aliased: `mayAnswer`'s own reads of `members` must not take its
+  // column for theirs.
+  const candidate = alias(members, "candidate");
+  const rows = await drizzle(env.DB)
+    .select({ id: candidate.userId, name: users.name })
+    .from(candidate)
+    .innerJoin(users, eq(users.id, candidate.userId))
+    .where(
+      and(
+        eq(candidate.organizationId, organizationId),
+        mayAnswer(candidate.userId, found.id),
+        sql`NOT EXISTS (SELECT 1 FROM ${personErasures} WHERE ${personErasures.userId} = ${candidate.userId})`
+      )
+    )
+    .orderBy(users.name, candidate.userId);
+  return rows;
+};
 
 /**
  * `app.responsible_invalid` unless `userId` is a current member of the
