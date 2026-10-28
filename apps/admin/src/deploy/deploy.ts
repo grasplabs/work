@@ -55,6 +55,7 @@ import { act, actIfChanged, audit } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
 import {
   clientDeploys,
+  clientPlacements,
   clients,
   clientWorkers,
   settings,
@@ -181,6 +182,30 @@ export const redeployKind = (changes: {
 };
 
 /**
+ * Throws `client_placed` when client `clientId` is placed in a hosting
+ * destination. A placed client's Workers and resources are its
+ * inventory's (src/hosting/inventory.ts), under names this path doesn't
+ * know: deploying it here would make a second core in its account, with
+ * empty databases, and point its hostname at that.
+ */
+export const assertNotPlaced = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<void> => {
+  const placed = await db
+    .select({ clientId: clientPlacements.clientId })
+    .from(clientPlacements)
+    .where(eq(clientPlacements.clientId, clientId))
+    .get();
+  if (placed !== undefined) {
+    throw new DeployError(
+      "client_placed",
+      `${clientId} is placed in a hosting destination, which this path doesn't deploy`
+    );
+  }
+};
+
+/**
  * Starts deploying release `releaseId` to client `clientId`, and returns
  * the deploy's id for `runDeploy`. The client's older deploys that hadn't
  * finished are superseded in the same batch. A client whose id can't be
@@ -204,6 +229,7 @@ export const startDeploy = async (
       `${clientId} can't be a client's hostname`
     );
   }
+  await assertNotPlaced(db, clientId);
   const id = crypto.randomUUID();
   const now = new Date();
   await act(
@@ -544,6 +570,8 @@ const loadDeploy = async (
     return null;
   }
   const { clientId, releaseId } = deploy;
+  // Placed after this deploy started: it stops before it changes anything.
+  await assertNotPlaced(db, clientId);
   if (
     deploy.status === "superseded" ||
     (await latestDeployId(db, clientId)) !== id

@@ -47,6 +47,7 @@ import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
   auditEvents,
+  clientPlacements,
   clientRuns,
   clients,
   clientWorkers,
@@ -539,15 +540,26 @@ const check = async (
       previous: rolloutTargets.previous,
       generation: clients.generation,
       accountId: clients.accountId,
+      placed: clientPlacements.clientId,
     })
     .from(rolloutTargets)
     .innerJoin(clients, eq(clients.id, rolloutTargets.clientId))
+    .leftJoin(
+      clientPlacements,
+      eq(clientPlacements.clientId, rolloutTargets.clientId)
+    )
     .where(
       and(
         eq(rolloutTargets.rolloutId, rolloutId),
         eq(rolloutTargets.clientId, clientId)
       )
     );
+  if (target !== undefined && target.placed !== null) {
+    throw new RolloutError(
+      "client_placed",
+      `${clientId} is placed in a hosting destination, which a rollback here doesn't touch`
+    );
+  }
   const previous = parsePrevious(target?.previous ?? null);
   if (
     target === undefined ||

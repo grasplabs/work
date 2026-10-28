@@ -29,6 +29,7 @@ import {
 import { clientDomain, deployContext } from "../src/deploy/context.ts";
 import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
+import { placeClient } from "../src/hosting/inventory.ts";
 import { startProvisioning } from "../src/provision/control.ts";
 import { importReleases } from "../src/releases/import.ts";
 import {
@@ -52,6 +53,7 @@ import { checkRevocation } from "../src/rollout/shared-secrets.ts";
 import { fleetConcurrency } from "../src/rollout/workflow.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { destination } from "./hosting.ts";
 import { racingDb } from "./racing-db.ts";
 import { declared, publishRelease } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
@@ -1114,6 +1116,52 @@ describe("rolling a release out", () => {
     });
     await expect(rolloutRow(rolloutId)).resolves.toMatchObject({
       status: "done",
+    });
+  });
+
+  it("leaves a client placed in a hosting destination to its own path: no rollout, deploy, rollback or drift reaches it", async () => {
+    // A placed client's Workers and resources are its inventory's, under
+    // names this path doesn't know: deploying it here would make a second
+    // core in its account, with empty databases, and point its hostname
+    // at that. Here the client is placed after rollouts reached it, the
+    // worst case: everything of this path has a record of it.
+    const first = await importedRelease("feat(core): before placing");
+    const internal = await activeClient(0, first);
+    const acme = await activeClient(0, first);
+    const second = await importedRelease("feat(core): reaches both");
+    await using run = await followRollouts();
+    const reached = await rollOut(second, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    await placeClient(db, staff, {
+      clientId: acme.clientId,
+      destinationId: await destination(),
+      policyId: "eu-storage",
+    });
+    const counts = deploymentCounts(acme.account);
+
+    const rollback = await codeOf(
+      rollbackClient(env, staff, reached, acme.clientId)
+    );
+    const third = await importedRelease("feat(core): after placing");
+    const next = await rollOut(third, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    const deploy = await codeOf(startDeploy(db, staff, acme.clientId, third));
+    const api = cloudflareApi({ token, retryDelayMs: 0 });
+
+    expect({
+      rollback,
+      targets: Object.keys(await targetsOf(next)),
+      deploy,
+      drift: await driftOf(api, db, acme.clientId),
+      counts: deploymentCounts(acme.account),
+      runner: await runnerOf(acme.clientId),
+    }).toStrictEqual({
+      rollback: "client_placed",
+      targets: [internal.clientId],
+      deploy: "client_placed",
+      drift: null,
+      counts,
+      runner: null,
     });
   });
 
