@@ -131,6 +131,36 @@ export interface TestPrincipal {
     reference: Reference,
     input: WorkflowInputOf<Reference>
   ) => Promise<WorkflowTestRun<WorkflowOutputOf<Reference>>>;
+  /**
+   * Answers the decision `run` waits for in its task `task` (a
+   * `grasp.decision` call), as this principal: approved or declined, with
+   * `value` as the decision's contract takes it: inside loops, the item
+   * `answer.at` names, else the task's latest. Waits for the run to ask it,
+   * until the test's deadline; one already answered isn't waited on. Only
+   * the principal it asks answers it, one the fixture lets answer through
+   * its binding
+   * (`workflows.<alias>.deciders`), and only once, while the run goes on:
+   * anything else fails, as `t.rejectsCode` reads it (`decision.forbidden`,
+   * `decision.invalid`, `decision.closed`, `decision.not_found`).
+   */
+  respond: (
+    run: WorkflowTestRun,
+    task: string,
+    answer: TestDecisionAnswer
+  ) => Promise<void>;
+}
+
+/** How a test principal answers a run's decision (`respond`). */
+export interface TestDecisionAnswer {
+  readonly approved: boolean;
+  /** What the answer carries, as the decision's contract takes it. */
+  readonly value?: Json;
+  /**
+   * For a task inside `for` loops, the item it asks for: each loop's
+   * index, outermost first, such as `[1, 0]`. Without it, the task's
+   * latest decision.
+   */
+  readonly at?: readonly number[];
 }
 
 /**
@@ -418,6 +448,12 @@ export interface AppTestSession {
   runOutcome: (run: number) => Promise<string>;
   /** How many times run `run`'s task `task` completed its step. */
   completedCount: (run: number, task: string) => Promise<number>;
+  /**
+   * Answers, as principal `name`, the decision run `run` waits for:
+   * `request` is the answer's JSON text (`{ task, approved, value? }`), and
+   * the answer the JSON text of an `OperationResult` holding nothing.
+   */
+  respond: (name: string, run: number, request: string) => Promise<string>;
   /**
    * Ends the session: removes the runs its test started, releases the
    * live queries it left open, and discards its fixture store.
@@ -921,6 +957,24 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
       });
       return handle;
     }) as TestPrincipal["start"],
+    respond: async (
+      handle: WorkflowTestRun,
+      task: string,
+      { approved, value, at }: TestDecisionAnswer
+    ): Promise<void> => {
+      unwrapped(
+        await session.respond(
+          name,
+          numberOf(run, handle),
+          JSON.stringify({
+            task,
+            approved,
+            ...(value === undefined ? {} : { value }),
+            ...(at === undefined ? {} : { at }),
+          })
+        )
+      );
+    },
   });
 };
 
