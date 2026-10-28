@@ -274,7 +274,7 @@ const refused: GatewayReply = {
 };
 
 describe("a piece of work, drawn", { timeout: 60_000 }, () => {
-  it("is drawn from three agreed interviews, keeps each person's numbers apart, and gives the next interview what is still open", async () => {
+  it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview only what nobody has said yet, never a colleague's words", async () => {
     const store = onboardingStore(env);
     const ids = await team();
     const { tickets } = await mapped(ids);
@@ -356,10 +356,16 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       differs: work?.drawn?.differs,
       outOfTen: work?.drawn?.differently.map(({ outOfTen }) => outOfTen),
       known: { approved: work?.known.approved, state: work?.known.state },
-      before: before.includes("left open"),
-      after: after.includes(
-        "What earlier interviews left open, to ask when it comes up: Why do some look the customer up in Salesforce? How many tickets come in a busy week for the whole team?"
+      before: before.includes("Nobody has said yet"),
+      after: after
+        .split("\n")
+        .find((line) => line.startsWith("Nobody has said yet")),
+      // The drawing's open questions are written from what as few as one
+      // colleague said: none reaches another person's interview (GRA-330).
+      openQuestions: work?.drawn?.open.filter((question) =>
+        after.includes(question)
       ),
+      saidByMo: after.includes("Salesforce"),
       due: [ids.max, ids.mia, ids.mo].filter((id) => due.includes(id)),
       counted: usage.some(
         ({ purpose, model }) => purpose === "drawing" && model === careful
@@ -399,7 +405,10 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       // Noor does it too and hasn't talked: three of four.
       known: { approved: 3, state: "mapping" },
       before: false,
-      after: true,
+      after:
+        "Nobody has said yet, so ask when it comes up: where it waits, and for what; what they look at to decide; who gets it after them; what done right looks like.",
+      openQuestions: [],
+      saidByMo: false,
       due: [],
       counted: true,
     });
