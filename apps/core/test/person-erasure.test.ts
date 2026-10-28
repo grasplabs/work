@@ -493,6 +493,17 @@ describe("erasing a person", () => {
         "INSERT INTO notifications (id, person_id, type, created_at, updated_at) VALUES (?, ?, 'run_failed', ?, ?)"
       ).bind(crypto.randomUUID(), userId, now, now),
     ]);
+    // A team of theirs that came back.
+    const team = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Theirs', 'organization', ?)"
+      ).bind(team, now),
+      env.DB.prepare(
+        "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+      ).bind(crypto.randomUUID(), team, userId, now),
+    ]);
+    const seeded = await rowsOf("team_members", "user_id", userId);
     // Someone else's, which stays.
     const other = `other-${crypto.randomUUID().slice(0, 8)}@acme.test`;
     await env.DB.prepare(
@@ -504,6 +515,7 @@ describe("erasing a person", () => {
     await admin.api.members.erase(userId, String(person.person.name));
 
     expect({
+      seeded,
       accounts: await rowsOf("channel_accounts", "user_id", userId),
       links: await rowsOf("channel_links", "used_by", userId),
       conversations: await rowsOf("channel_conversations", "user_id", userId),
@@ -513,6 +525,7 @@ describe("erasing a person", () => {
       invitedThem: await invitedOf(email),
       invitedOther: await invitedOf(other),
     }).toStrictEqual({
+      seeded: 1,
       accounts: 0,
       links: 0,
       conversations: 0,
@@ -522,5 +535,110 @@ describe("erasing a person", () => {
       invitedThem: 0,
       invitedOther: 1,
     });
+  });
+
+  it("takes out every invitation to their old address, however many there were", async () => {
+    const { admin, person } = await removedPerson();
+    const email = String(person.person.email);
+    const now = Date.now();
+    await env.DB.batch(
+      Array.from({ length: 150 }, (_, index) =>
+        env.DB.prepare(
+          "INSERT INTO invitations (id, organization_id, email, role, status, expires_at, created_at, inviter_id) VALUES (?, 'organization', ?, 'user', 'canceled', ?, ?, ?)"
+        ).bind(
+          crypto.randomUUID(),
+          index % 2 === 0 ? email : email.toUpperCase(),
+          now + 60_000,
+          now - index,
+          admin.userId
+        )
+      )
+    );
+
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+
+    expect({
+      channels: erased.areas.find(({ area }) => area === "channels")?.state,
+      invited: await invitedOf(email),
+    }).toStrictEqual({ channels: "complete", invited: 0 });
+  });
+
+  it("keeps the invitation of someone the address was released to while their erasure ran", async () => {
+    const { admin, person } = await removedPerson();
+    const email = String(person.person.email);
+    const now = Date.now();
+    await env.DB.prepare(
+      "INSERT INTO invitations (id, organization_id, email, role, status, expires_at, created_at, inviter_id) VALUES (?, 'organization', ?, 'user', 'accepted', ?, ?, ?)"
+    )
+      .bind(crypto.randomUUID(), email, now + 60_000, now, admin.userId)
+      .run();
+    // Core's database as the erasure reaches it: just before the batch
+    // that takes out their invitations, after it read which were theirs,
+    // an admin releases the address and invites its new owner.
+    const deletes = new WeakSet<D1PreparedStatement>();
+    const tagged = (statement: D1PreparedStatement): D1PreparedStatement => {
+      deletes.add(statement);
+      const bind = statement.bind.bind(statement);
+      statement.bind = (...values) => tagged(bind(...values));
+      return statement;
+    };
+    let reinvited: Promise<{ id: string }> | undefined;
+    const real = env.DB;
+    const interleaved: D1Database = {
+      prepare: (query) => {
+        const statement = real.prepare(query);
+        return /^delete from "invitations"/iu.test(query)
+          ? tagged(statement)
+          : statement;
+      },
+      batch: async <T>(statements: D1PreparedStatement[]) => {
+        if (statements.some((statement) => deletes.has(statement))) {
+          reinvited ??= (async () => {
+            await admin.api.members.releaseAddress(email);
+            return await admin.api.members.invite(email, "user");
+          })();
+          await reinvited;
+        }
+        return await real.batch<T>(statements);
+      },
+      exec: async (query) => await real.exec(query),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    // Their address goes first, their invitations on a later try: the
+    // area that takes them out fails the first time, as it would on a
+    // failure of the database, and the clock runs it again.
+    const trigger = `keep_channels_${person.userId.replaceAll("-", "_")}`;
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO channel_accounts (id, platform, platform_user_id, user_id, name, linked_at, linked_how) VALUES (?, 'teams', ?, ?, 'Them on Teams', ?, 'sign_in_link')"
+      ).bind(crypto.randomUUID(), `teams-${person.userId}`, person.userId, now),
+      env.DB.prepare(
+        `CREATE TRIGGER ${trigger} BEFORE DELETE ON channel_accounts
+         WHEN OLD.user_id = '${person.userId}'
+         BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+      ),
+    ]);
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    await env.DB.prepare(`DROP TRIGGER ${trigger}`).run();
+
+    await runMinuteTasks({ DB: interleaved });
+
+    const newOwner = await reinvited;
+    const { results } = await env.DB.prepare(
+      "SELECT id FROM invitations WHERE lower(email) = lower(?)"
+    )
+      .bind(email)
+      .all<{ id: string }>();
+    const after = await admin.api.members.erasure(person.userId);
+    expect({
+      invitations: results.map(({ id }) => id),
+      channels: after.erasure?.areas.find(({ area }) => area === "channels")
+        ?.state,
+    }).toStrictEqual({ invitations: [newOwner?.id], channels: "complete" });
   });
 });

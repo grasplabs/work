@@ -201,17 +201,40 @@ const channels: ErasureStep = {
     // Under the key their hash was made with only: one made with an older
     // key matches no address hashed now (erased-people.ts), so their
     // invitations aren't found, and stay, until a rotation re-keys it.
-    const sameKey = erasure.keyVersion === emailKeyVersion;
-    const invited = await db
-      .select({ id: invitations.id, email: invitations.email })
-      .from(invitations);
-    const theirs: string[] = [];
-    for (const { id, email } of invited) {
-      // oxlint-disable-next-line no-await-in-loop -- one address at a time
-      if (sameKey && (await emailHashOf(env, email)) === erasure.emailHash) {
-        theirs.push(id);
+    // Their address is the one whose hash is theirs: each address hashed
+    // once, as invitations store it in any case.
+    let address: string | undefined;
+    if (erasure.keyVersion === emailKeyVersion) {
+      const invited = await db
+        .selectDistinct({ email: sql<string>`lower(${invitations.email})` })
+        .from(invitations);
+      for (const { email } of invited) {
+        // oxlint-disable-next-line no-await-in-loop -- one address at a time
+        if ((await emailHashOf(env, email)) === erasure.emailHash) {
+          address = email;
+          break;
+        }
       }
     }
+    // By the address itself, in one statement, however many invitations
+    // went to it. Only those made before the erasure was asked for: none
+    // could be made to it after (members.ts refuses an erased address)
+    // until an admin released it and someone else was invited under it,
+    // whose invitation stays.
+    const theirInvitations =
+      address === undefined
+        ? []
+        : [
+            db.delete(invitations).where(
+              and(
+                sql`lower(${invitations.email}) = ${address}`,
+                sql`${invitations.createdAt} <= (
+                  SELECT ${personErasures.requestedAt} FROM ${personErasures}
+                  WHERE ${personErasures.userId} = ${userId}
+                )`
+              )
+            ),
+          ];
     await db.batch([
       db.delete(channelAccounts).where(eq(channelAccounts.userId, userId)),
       db.delete(channelLinks).where(eq(channelLinks.usedBy, userId)),
@@ -221,7 +244,7 @@ const channels: ErasureStep = {
       db
         .delete(chatWorkflowOffers)
         .where(eq(chatWorkflowOffers.userId, userId)),
-      db.delete(invitations).where(inArray(invitations.id, theirs)),
+      ...theirInvitations,
       db.delete(notifications).where(eq(notifications.personId, userId)),
       db.delete(teamMembers).where(eq(teamMembers.userId, userId)),
       completed(db, userId, "channels"),
