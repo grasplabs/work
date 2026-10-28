@@ -93,17 +93,20 @@ const columns = {
 };
 
 /**
- * The relations of `entityId` that `reader` may read now, that hold on
- * `at` (all, without it) and that the Brain knew at `knownAt` (now,
- * without it), conflicts among them marked: answers to "who owns it now",
- * "who owned it then", and "what did we know then", each with the passage
- * of the source version that says so.
+ * The relations a read answers (`relationsFor`), with where every claim
+ * it weighed came from (`considered`): the answered relations' sources,
+ * and those past the cap that still decided whether one is
+ * `conflicting`. A caller that labels what it was handed (a chat) labels
+ * it with all of them.
  */
-export const relationsFor = async <C>(
+export const relationsRead = async <C>(
   brain: Brain<C>,
   reader: C,
   input: unknown
-): Promise<RelationsAnswer> => {
+): Promise<{
+  answer: RelationsAnswer;
+  considered: { collectionIds: string[]; documentIds: string[] };
+}> => {
   const { entityId, predicate, at, knownAt } = brainErrors.parse(
     "brain.invalid",
     relationsGetInputSchema,
@@ -303,7 +306,23 @@ export const relationsFor = async <C>(
     ...collectionIds.map((id) => ({ id, sensitive: false }))
   );
   return {
-    relations: answered,
-    truncated: read.cut || claims.cut,
+    answer: { relations: answered, truncated: read.cut || claims.cut },
+    considered: { collectionIds, documentIds },
   };
+};
+
+/**
+ * The relations of `entityId` that `reader` may read now, that hold on
+ * `at` (all, without it) and that the Brain knew at `knownAt` (now,
+ * without it), conflicts among them marked: answers to "who owns it now",
+ * "who owned it then", and "what did we know then", each with the passage
+ * of the source version that says so.
+ */
+export const relationsFor = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<RelationsAnswer> => {
+  const { answer } = await relationsRead(brain, reader, input);
+  return answer;
 };
