@@ -697,9 +697,16 @@ export const dispatchRoutes: Route[] = [
     method: "GET",
     path: dispatchPath(""),
     answer: ({ account, params }) => {
-      const script = userWorkerOf(account, params);
-      if (script instanceof Response) {
-        return script;
+      const scripts = namespaceOf(account, params);
+      if (scripts instanceof Response) {
+        return scripts;
+      }
+      const script = scripts.get(params.script ?? "");
+      // A script the namespace hasn't got isn't a 404: Cloudflare answers
+      // the namespace's own details with a null script, as Grasp Work
+      // showed (GRA-430, 28 Oct).
+      if (script === undefined) {
+        return envelope({ dispatch_namespace: params.namespace, script: null });
       }
       return envelope({
         dispatch_namespace: params.namespace,
