@@ -1,4 +1,5 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
+import { erasureMark } from "@grasp-os/brain/erasures";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
@@ -19,6 +20,8 @@ import {
   interviewErasure,
 } from "../src/onboarding/interview-erasure.ts";
 import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
+import { brainOf } from "../src/knowledge/ports.ts";
+import { checkReadings, readingCheckMs } from "../src/onboarding/documents.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { keptLine } from "../src/speech-cache.ts";
 import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
@@ -46,6 +49,12 @@ import { wordFile } from "./word-file.ts";
 // - The purge in the audit log with any of the document's words.
 // - A reading holding a purged term of a document the purge doesn't name.
 // - A drawing under way as the document goes, kept as it ends.
+// - A reading made while a purge names its document, kept after the
+//   purge forgot the readings there (GRA-1121): checked after it is kept,
+//   and forgotten then.
+// - Its writer stopping between keeping it and checking it: the reading
+//   is served unchecked, or never checked at all.
+// - A reading started after a purge, forgotten as if the purge reached it.
 
 const idp = mockIdp();
 
@@ -526,6 +535,25 @@ const withHook = (
   });
 };
 
+/** The documents the admin is shown. */
+const listedOf = async (admin: SessionApi) =>
+  await admin.onboarding.documents();
+
+/** The IDs of the documents the admin is shown. */
+const listedIds = async (admin: SessionApi): Promise<Set<string>> => {
+  const listed = await listedOf(admin);
+  return new Set(listed.map(({ id }) => id));
+};
+
+/** A reading that says `text`, as a writer keeps it. */
+const readingOf = (text: string) => ({
+  about: `How claims are typed into ${text}.`,
+  tools: [text],
+  teams: [],
+  unclear: [],
+  ask: null,
+});
+
 /** The tickets of `team` as the store holds them now. */
 const ticketsOf = async (teamId: string) => {
   const works = await onboardingStore(env).teamWorks(teamId);
@@ -800,6 +828,109 @@ describe(
         thrown: null,
         left: [],
         drewAgainWith: false,
+      });
+    });
+
+    it("forgets a reading made while a purge names its document, and keeps the next", async () => {
+      const { api: admin } = await signedInApi(idp, "admin");
+      const name = `again-${unique()}.docx`;
+      const word = sentinelOf();
+      const first = await share(admin, name, word);
+      const late = sentinelOf();
+      // Shared again while the purge runs: as the reading's request reaches
+      // the gateway, after the reading started and before it is kept.
+      let purged = false;
+      const gateway = answeringGateway(async () => {
+        if (!purged) {
+          purged = true;
+          await purge(admin, [first.document], [word]);
+        }
+        return readingWith(late);
+      });
+      const ai: AiBinding = env.AI;
+      const spy = vi
+        .spyOn(ai, "fetch")
+        .mockImplementation(gateway.binding.fetch);
+      let refused: unknown;
+      try {
+        await admin.onboarding.shareDocument({
+          locale: "en",
+          name,
+          bytes: documentWith(late),
+        });
+      } catch (error) {
+        refused = error;
+      } finally {
+        spy.mockRestore();
+      }
+      const left = await storeTablesWith(late);
+      const shown = await listedOf(admin);
+      const listed = shown.filter((document) => document.name === name);
+      const next = sentinelOf();
+      const kept = await share(admin, name, next);
+      const after = await admin.onboarding.documents();
+      expect({
+        purged,
+        refused: String(refused).includes("couldn't be read"),
+        left,
+        listed,
+        kept: after.some(({ id }) => id === kept.upload),
+      }).toStrictEqual({
+        purged: true,
+        refused: true,
+        left: [],
+        listed: [],
+        kept: true,
+      });
+    });
+
+    it("keeps a reading its writer never checked from everyone, and checks it later: forgotten when a purge named its document since it started, served when not", async () => {
+      const { api: admin } = await signedInApi(idp, "admin");
+      const store = onboardingStore(env);
+      const name = `crashed-${unique()}.docx`;
+      const word = sentinelOf();
+      const shared = await share(admin, name, word);
+      const before = await erasureMark(brainOf(env));
+      await purge(admin, [shared.document], [word]);
+      const after = await erasureMark(brainOf(env));
+      const late = sentinelOf();
+      const fresh = sentinelOf();
+      const lateId = `late-${unique()}`;
+      const freshId = `fresh-${unique()}`;
+      // Kept after the purge by writers that stopped before their check:
+      // one whose reading started before the purge, one after it.
+      await store.addDocument(
+        { id: lateId, name, reading: readingOf(late) },
+        before,
+        { type: "system" }
+      );
+      await store.addDocument(
+        { id: freshId, name, reading: readingOf(fresh) },
+        after,
+        { type: "system" }
+      );
+      const unchecked = await listedIds(admin);
+      const brief = await store.documentsBrief("Ops");
+      const answered = await admin.onboarding
+        .answerDocument(freshId, "Yes")
+        .then(
+          () => true,
+          () => false
+        );
+      await checkReadings(env, new Date(Date.now() + readingCheckMs + 1000));
+      const checked = await listedIds(admin);
+      expect({
+        served: [lateId, freshId].filter((id) => unchecked.has(id)),
+        brief: [late, fresh].filter((text) => brief.includes(text)),
+        answered,
+        checked: [lateId, freshId].filter((id) => checked.has(id)),
+        left: await storeTablesWith(late),
+      }).toStrictEqual({
+        served: [],
+        brief: [],
+        answered: false,
+        checked: [freshId],
+        left: [],
       });
     });
   }

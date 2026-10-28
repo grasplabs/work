@@ -598,6 +598,30 @@ export const brainErasedEvidence = sqliteTable("brain_erased_evidence", {
 });
 
 /**
+ * The documents a content purge named, and when (GRA-1121): written before
+ * the purge reaches anything, the host's copies included, so a copy made
+ * from one that lands after the purge forgot that document's copies is
+ * found and forgotten too (../erasures.ts), by the rowid: a rowid table,
+ * never WITHOUT ROWID. Each document's ID and a hash of its place, never
+ * its name or a term: the erasure's own record.
+ */
+export const brainErasedDocuments = sqliteTable(
+  "brain_erased_documents",
+  {
+    purgeId: text("purge_id").notNull(),
+    documentId: text("document_id").notNull(),
+    /** SHA-256 of its collection and path (../erasures.ts `placeHash`). */
+    place: text().notNull(),
+    erasedAt: timestamp("erased_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.purgeId, table.documentId] }),
+    // A copy's check, by the place it read (and the rowid, as its mark).
+    index("brain_erased_documents_place_idx").on(table.place),
+  ]
+);
+
+/**
  * The people a personal purge forgot, and when: a capture of their work
  * from before then, delivered again after a lost reply or a restart, is
  * never recorded again, and never makes them a member again

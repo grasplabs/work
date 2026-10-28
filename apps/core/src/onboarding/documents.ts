@@ -1,6 +1,8 @@
 import { ensureCollection } from "@grasp-os/brain/collections";
+import { erasedSince, erasureMark } from "@grasp-os/brain/erasures";
 import type { OnErase } from "@grasp-os/brain/purge";
 import { actorOf, auditActorSchema } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
@@ -195,8 +197,41 @@ const keep = async (
   }
 };
 
+/** Who forgets a reading made of a document a purge erased meanwhile. */
+const erasureActor: AuditActor = { type: "system" };
+
 /** How long a reading may take: someone waits for it. */
 const readingTimeoutMs = 60_000;
+
+/** A reading kept unchecked: its document's place, and the erasure mark it started at. */
+interface Unchecked {
+  id: string;
+  name: string;
+  checkMark: number;
+}
+
+/**
+ * Checks a reading against the purges since it started (the Brain's
+ * erasures.ts): one that named its document in the meantime may have
+ * forgotten the readings before this one was kept, so this one goes too,
+ * as the purge's own forget would have taken it; otherwise it is served.
+ * Whether it was kept.
+ */
+const checkReading = async (
+  env: Env,
+  { id, name, checkMark }: Unchecked
+): Promise<boolean> => {
+  const store = onboardingStore(env);
+  const erased = await erasedSince(brainOf(env), checkMark, [
+    { collectionId: onboardingDocumentsCollection, path: name },
+  ]);
+  if (erased) {
+    await store.forgetDocuments([id], erasureActor);
+    return false;
+  }
+  await store.checkDocument(id);
+  return true;
+};
 
 /**
  * Shares a document: its text read in the extractor's sandbox (never
@@ -215,6 +250,9 @@ export const shareDocument = async (
     throw documentErrors.create("document.not_read");
   }
   const store = onboardingStore(env);
+  // When the reading starts: a purge since that names the document leaves
+  // no reading of it (`checkReading`).
+  const mark = await erasureMark(brainOf(env));
   // Read before anything is kept: a document that can't be read leaves no
   // file behind in Knowledge, and sharing it again makes no second one.
   let text: string;
@@ -274,10 +312,33 @@ export const shareDocument = async (
   });
   const reading = documentReadingOf(answered.output);
   const { id } = await keep(env, person, input);
-  return await store.addDocument(
+  const added = await store.addDocument(
     { id, name: input.name, reading },
+    mark,
     actorOf(person)
   );
+  if (!(await checkReading(env, { id, name: input.name, checkMark: mark }))) {
+    throw documentErrors.create("document.not_read");
+  }
+  return added;
+};
+
+/** How long a reading's writer has to check it before the sweep does. */
+export const readingCheckMs = 5 * 60 * 1000;
+
+/**
+ * Checks the readings whose writer stopped before checking them
+ * (`checkReading`), from the mark each started at: kept from everyone
+ * meanwhile.
+ */
+export const checkReadings = async (env: Env, at: Date): Promise<void> => {
+  const unchecked = await onboardingStore(env).uncheckedDocuments(
+    new Date(at.getTime() - readingCheckMs)
+  );
+  for (const each of unchecked) {
+    // oxlint-disable-next-line no-await-in-loop -- one reading at a time
+    await checkReading(env, each);
+  }
 };
 
 /** Every text a document's reading keeps: its name, the reading and the admin's answer. */
@@ -305,11 +366,11 @@ export const documentReadingErasure = (
   const store = onboardingStore(env);
   return {
     count: async (holds) => {
-      const shared = await store.documents();
+      const shared = await store.documents(true);
       return shared.filter((document) => textsOf(document).some(holds)).length;
     },
     rewrite: async (by, rewrite) => {
-      const shared = await store.documents();
+      const shared = await store.documents(true);
       const holding = shared.filter((document) =>
         textsOf(document).some((text) => rewrite(text) !== text)
       );
@@ -329,7 +390,7 @@ export const documentReadingErasure = (
       if (paths.size === 0) {
         return;
       }
-      const shared = await store.documents();
+      const shared = await store.documents(true);
       const of = shared.filter(({ name }) => paths.has(name));
       if (of.length > 0) {
         await store.forgetDocuments(

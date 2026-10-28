@@ -3891,19 +3891,66 @@ export class Onboarding extends DurableObject<Env> {
     return this.choices();
   }
 
-  /** The documents the admin shared, the newest first. */
-  documents(): OnboardingDocument[] {
+  /**
+   * The documents the admin shared, the newest first: those checked
+   * against the purges since their reading started (`checkDocument`), or,
+   * for a purge, `unchecked` too.
+   */
+  documents(unchecked = false): OnboardingDocument[] {
     return this.#db
       .select()
       .from(documents)
+      .where(unchecked ? undefined : isNull(documents.checkMark))
       .orderBy(desc(documents.at))
       .all()
       .map(documentOf);
   }
 
-  /** Keeps a shared document's reading; in the log and the audit log without its words. */
+  /**
+   * The documents still waiting to be checked that were added before
+   * `before`, each with the erasure mark its reading started at: their writer never
+   * checked them.
+   */
+  uncheckedDocuments(
+    before: Date
+  ): { id: string; name: string; checkMark: number }[] {
+    return this.#db
+      .select({
+        id: documents.id,
+        name: documents.name,
+        checkMark: documents.checkMark,
+      })
+      .from(documents)
+      .where(
+        and(
+          isNotNull(documents.checkMark),
+          lt(documents.at, before.toISOString())
+        )
+      )
+      .all()
+      .flatMap(({ checkMark, ...rest }) =>
+        checkMark === null ? [] : [{ ...rest, checkMark }]
+      );
+  }
+
+  /** Serves a document checked against the purges since its reading started. */
+  checkDocument(id: string): void {
+    this.#db
+      .update(documents)
+      .set({ checkMark: null })
+      .where(eq(documents.id, id))
+      .run();
+  }
+
+  /**
+   * Keeps a shared document's reading, which started at erasure mark
+   * `checkMark`,
+   * unchecked (`checkDocument`); in the log and the audit log without its
+   * words.
+   */
   addDocument(
     kept: { id: string; name: string; reading: DocumentReading },
+    checkMark: number,
     by: AuditActor
   ): OnboardingDocument {
     const row = {
@@ -3913,6 +3960,7 @@ export class Onboarding extends DurableObject<Env> {
       by: whoIs(by),
       reading: JSON.stringify(kept.reading),
       answer: null,
+      checkMark,
     };
     this.ctx.storage.transactionSync(() => {
       this.#db.insert(documents).values(row).run();
@@ -3925,7 +3973,7 @@ export class Onboarding extends DurableObject<Env> {
     return documentOf(row);
   }
 
-  /** Keeps the admin's answer to a document's question; null for no such document. */
+  /** Keeps the admin's answer to a checked document's question; null for no such document. */
   answerDocument(
     id: string,
     answer: string,
@@ -3934,7 +3982,7 @@ export class Onboarding extends DurableObject<Env> {
     const [row] = this.#db
       .select()
       .from(documents)
-      .where(eq(documents.id, id))
+      .where(and(eq(documents.id, id), isNull(documents.checkMark)))
       .all();
     if (row === undefined) {
       return null;
@@ -4045,6 +4093,7 @@ export class Onboarding extends DurableObject<Env> {
     return this.#db
       .select({ id: documents.id })
       .from(documents)
+      .where(isNull(documents.checkMark))
       .all()
       .map(({ id }) => id);
   }
