@@ -635,6 +635,28 @@ export interface PurgeResult {
   stillFound?: number;
 }
 
+/**
+ * Where a purge stands (GRA-1122): each projection it reaches, as a step
+ * queued, running, complete or blocked, with why one is blocked (an error
+ * code) and what each changed (counts). `blocked` while any step is, until
+ * the purge run again with the same input goes on from it.
+ */
+export interface PurgeStatus {
+  purgeId: string;
+  kind: "personal" | "content";
+  state: "running" | "blocked" | "complete" | "superseded";
+  createdAt: string;
+  completedAt: string | null;
+  /** The purge an admin started fresh in its place; null otherwise. */
+  supersededBy: string | null;
+  steps: {
+    step: string;
+    state: "queued" | "running" | "complete" | "blocked";
+    reason: string | null;
+    counts: Record<string, number>;
+  }[];
+}
+
 /** Why a Knowledge call was refused. */
 export const knowledgeErrors = errorFamily({
   "knowledge.not_found":
