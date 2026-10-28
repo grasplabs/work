@@ -27,6 +27,28 @@ import { whileLogDown } from "./maintenance.ts";
 
 const stub = () => clock(env);
 
+/**
+ * Runs the clock's alarm as Cloudflare does, then waits for the tasks it
+ * started to settle, which the alarm doesn't wait for: all of them but
+ * `running`, the ones a test keeps running.
+ */
+const alarm = async (running: readonly string[] = []): Promise<void> => {
+  await runDurableObjectAlarm(stub());
+  await vi.waitFor(
+    async () => {
+      const tasks: ClockTaskState[] = await stub().tasks();
+      const going = tasks
+        .filter(
+          ({ name, runningSince }) =>
+            runningSince !== null && !running.includes(name)
+        )
+        .map(({ name }) => name);
+      expect(going).toStrictEqual([]);
+    },
+    { timeout: 20_000, interval: 50 }
+  );
+};
+
 /** Each task's run count, by name. */
 const runsByTask = async (): Promise<Record<string, number>> => {
   const tasks: ClockTaskState[] = await stub().tasks();
@@ -132,7 +154,7 @@ describe("the client's clock", () => {
     // Every task ran this slot; one minute task is still running, started
     // by an alarm that may still be going.
     await stub().ensure();
-    await runDurableObjectAlarm(stub());
+    await alarm();
     const [first = ""] = minutes;
     await runInDurableObject(stub(), (_, state) => {
       state.storage.sql.exec(
@@ -146,7 +168,7 @@ describe("the client's clock", () => {
     // comes back at the next slot, not a second later.
     const later = now + 5 * clockPeriods.minute;
     at(later);
-    await runDurableObjectAlarm(stub());
+    await alarm([first]);
     const next =
       (Math.floor(later / clockPeriods.minute) + 1) * clockPeriods.minute;
     expect((await alarmAt()) ?? 0).toBeGreaterThanOrEqual(next);
@@ -154,7 +176,7 @@ describe("the client's clock", () => {
 
   it("leaves an armed alarm where it is, however often it's asked", async () => {
     at(freshTime());
-    await runDurableObjectAlarm(stub());
+    await alarm();
     const armed = await alarmAt();
 
     await stub().ensure();
@@ -169,9 +191,9 @@ describe("the client's clock", () => {
     await clearAlarm();
     const before = await runsByTask();
     await stub().ensure();
-    await runDurableObjectAlarm(stub());
+    await alarm();
     // A duplicate alarm in the same slots, as Cloudflare may deliver one.
-    await runDurableObjectAlarm(stub());
+    await alarm();
     const first = await runsByTask();
     expect(ranSince(before, first, all)).toStrictEqual(each(all, 1));
     // Armed for the next minute's slot.
@@ -184,7 +206,7 @@ describe("the client's clock", () => {
     // quarter hour's not yet.
     now += 2 * clockPeriods.minute;
     at(now);
-    await runDurableObjectAlarm(stub());
+    await alarm();
     const late = await runsByTask();
     expect(ranSince(first, late, all)).toStrictEqual({
       ...each(minutes, 1),
@@ -196,7 +218,7 @@ describe("the client's clock", () => {
     now += 3 * 60 * clockPeriods.minute;
     reached = now;
     at(now);
-    await runDurableObjectAlarm(stub());
+    await alarm();
     expect(ranSince(late, await runsByTask(), all)).toStrictEqual(each(all, 1));
   });
 
@@ -205,7 +227,7 @@ describe("the client's clock", () => {
     // The audit log can't be reached while the alarm runs: arming its
     // retention fails (the drain leaves its events waiting, and says so).
     await whileLogDown(async () => {
-      await runDurableObjectAlarm(stub());
+      await alarm();
     });
     const tasks = await stub().tasks();
     const failed = tasks
@@ -221,7 +243,7 @@ describe("the client's clock", () => {
 
     // The next slot's alarm runs it again, and it recovers.
     at(freshTime());
-    await runDurableObjectAlarm(stub());
+    await alarm();
     const settled = await stub().tasks();
     const recovered = settled.find(({ name }) => name === "audit.retention");
     expect([recovered?.outcome, recovered?.failures]).toStrictEqual(["ok", 0]);
@@ -248,16 +270,71 @@ describe("the client's clock", () => {
 
     // A minute on, an alarm leaves them to it while its lease holds...
     at(now + clockPeriods.minute);
-    await runDurableObjectAlarm(stub());
+    await alarm(minutes);
     const leased = await runsByTask();
     expect(ranSince(claimed, leased, minutes)).toStrictEqual(each(minutes, 0));
 
     // ...and the watchdog, once it's over, runs them.
     reached = now + clockLeaseMs;
     at(reached);
-    await runDurableObjectAlarm(stub());
+    await alarm();
     expect(ranSince(leased, await runsByTask(), minutes)).toStrictEqual(
       each(minutes, 1)
     );
+  });
+
+  it("runs the other tasks on time while one is slow, and arms the next slot without waiting for it", async () => {
+    const now = freshTime();
+    at(now);
+    // Arming the audit log's retention hangs until the test lets it go.
+    const gate = Promise.withResolvers<boolean>();
+    const real = env.AUDIT_LOG.getByName.bind(env.AUDIT_LOG);
+    const slow = vi
+      .spyOn(env.AUDIT_LOG, "getByName")
+      .mockImplementation((name) => {
+        const log = real(name);
+        return new Proxy(log, {
+          get: (target, property): unknown => {
+            if (property === "armRetention") {
+              return async () => {
+                await gate.promise;
+              };
+            }
+            const value: unknown = Reflect.get(target, property);
+            return value;
+          },
+        });
+      });
+    try {
+      const before = await runsByTask();
+      await alarm(["audit.retention"]);
+      const armed = await alarmAt();
+      const next =
+        (Math.floor(now / clockPeriods.minute) + 1) * clockPeriods.minute;
+
+      // A minute on, the minute's tasks run again; the slow one still runs.
+      at(now + clockPeriods.minute);
+      await alarm(["audit.retention"]);
+      const states = await stub().tasks();
+      const retention = states.find(({ name }) => name === "audit.retention");
+
+      expect({
+        armed: (armed ?? 0) <= next + 1000,
+        minutes: ranSince(before, await runsByTask(), minutes),
+        stillRunning: retention?.runningSince !== null,
+      }).toStrictEqual({
+        armed: true,
+        minutes: each(minutes, 2),
+        stillRunning: true,
+      });
+    } finally {
+      gate.resolve(true);
+      slow.mockRestore();
+    }
+    await vi.waitFor(async () => {
+      const states = await stub().tasks();
+      const retention = states.find(({ name }) => name === "audit.retention");
+      expect(retention?.runningSince).toBeNull();
+    });
   });
 });

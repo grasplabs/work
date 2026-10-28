@@ -26,6 +26,20 @@ const ranSince = (
 const each = (value: number) =>
   Object.fromEntries(names.map((name) => [name, value]));
 
+/** Runs the clock's alarm, then waits for the tasks it started to settle. */
+const alarm = async (): Promise<void> => {
+  await runDurableObjectAlarm(clock(env));
+  await vi.waitFor(
+    async () => {
+      const tasks = await clock(env).tasks();
+      expect(
+        tasks.filter(({ runningSince }) => runningSince !== null)
+      ).toStrictEqual([]);
+    },
+    { timeout: 20_000, interval: 50 }
+  );
+};
+
 describe("connect's clock", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -35,9 +49,9 @@ describe("connect's clock", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     await exports.default.ensureClock();
     const before = await runsByTask();
-    await runDurableObjectAlarm(clock(env));
+    await alarm();
     // A duplicate alarm in the same minute runs nothing again.
-    await runDurableObjectAlarm(clock(env));
+    await alarm();
     const first = await runsByTask();
     expect(ranSince(before, first)).toStrictEqual(each(1));
     const states = await clock(env).tasks();
@@ -45,7 +59,7 @@ describe("connect's clock", () => {
 
     // A minute on, the next alarm runs them again.
     vi.setSystemTime(Date.now() + clockPeriods.minute);
-    await runDurableObjectAlarm(clock(env));
+    await alarm();
     expect(ranSince(first, await runsByTask())).toStrictEqual(each(1));
   });
 

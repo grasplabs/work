@@ -54,12 +54,6 @@ export type ClockReport = (
  */
 export const clockLeaseMs = 10 * minuteMs;
 
-/**
- * How long an alarm waits for its tasks before it settles what ended and
- * re-arms: one still running keeps its lease and is recorded when it ends.
- */
-export const clockAlarmWaitMs = 4 * minuteMs;
-
 /** What the clock records of a task. */
 export interface ClockTaskState {
   name: string;
@@ -102,42 +96,37 @@ const dueAt = (period: ClockPeriod, slot: number): number =>
   (slot + 1) * clockPeriods[period] + clockSlotOffsetMs;
 
 /**
- * Runs `tasks` concurrently on `env` for time `at`, calling `settle` as
- * each ends, and waits for them at most `clockAlarmWaitMs`: one still
- * running keeps its lease and settles when it ends.
+ * Starts `tasks` on `env` for time `at`, each on its own, and returns at
+ * once: `settle` is called as each ends, kept alive by `waitUntil`. The
+ * alarm doesn't wait for them, so a slow one delays no other task's next
+ * slot: it keeps its lease, and the alarms after it leave it be until it
+ * settles or its lease is over.
  */
-const runClaimed = async <E>(
+const startClaimed = <E>(
   env: E,
   tasks: readonly ClockTask<E>[],
   at: number,
   settle: (name: string, failed: boolean) => unknown,
   report: ClockReport,
   waitUntil: (promise: Promise<unknown>) => void
-): Promise<void> => {
-  const runs = tasks.map(async (task) => {
-    let failed = false;
-    try {
-      await task.run(env, new Date(at));
-    } catch (error) {
-      failed = true;
-      report("clock.task_failed", task.name, error);
-    }
-    try {
-      await settle(task.name, failed);
-    } catch (error) {
-      report("clock.settle_failed", task.name, error);
-    }
-  });
-  // Kept alive past the wait: a task that outlives it still ends, and
-  // settles, on its own invocation.
-  const all = Promise.allSettled(runs);
-  waitUntil(all);
-  const { promise: waited, resolve } = Promise.withResolvers<"waited">();
-  const timer = setTimeout(() => {
-    resolve("waited");
-  }, clockAlarmWaitMs);
-  await Promise.race([all, waited]);
-  clearTimeout(timer);
+): void => {
+  for (const task of tasks) {
+    const run = async (): Promise<void> => {
+      let failed = false;
+      try {
+        await task.run(env, new Date(at));
+      } catch (error) {
+        failed = true;
+        report("clock.task_failed", task.name, error);
+      }
+      try {
+        await settle(task.name, failed);
+      } catch (error) {
+        report("clock.settle_failed", task.name, error);
+      }
+    };
+    waitUntil(run());
+  }
 };
 
 /** A Worker's clock (see the header comment): it extends this with its tasks. */
@@ -185,10 +174,11 @@ export abstract class ClockObject<E> extends DurableObject<E> {
   }
 
   /**
-   * Runs every task whose period moved to a slot it hasn't run for, and
-   * no live activation runs. The watchdog is armed first: an activation
-   * that dies, evicted or crashed, is followed by another once its lease
-   * is over, and that one runs what's due then.
+   * Starts every task whose period moved to a slot it hasn't run for, and
+   * no live activation runs, each on its own, then arms the next slot. The
+   * watchdog is armed first: an activation that dies, evicted or crashed,
+   * before it arms the next slot is followed by another once its lease is
+   * over, and that one runs what's due then.
    */
   override async alarm(): Promise<void> {
     const now = Date.now();
@@ -203,7 +193,7 @@ export abstract class ClockObject<E> extends DurableObject<E> {
         now,
         now
       );
-      await runClaimed(
+      startClaimed(
         this.env,
         claimed,
         now,
@@ -216,6 +206,8 @@ export abstract class ClockObject<E> extends DurableObject<E> {
         }
       );
     } finally {
+      // Armed for the next slot before any task ends: the claimed ones
+      // hold their leases, so it doesn't run them again meanwhile.
       await this.#rearm();
     }
   }
@@ -297,8 +289,8 @@ export abstract class ClockObject<E> extends DurableObject<E> {
 
   /**
    * When the alarm should next run: the nearest slot any task is due for,
-   * a second from now at the earliest. A task another activation still
-   * runs is due once that activation's lease is over, if that's later.
+   * a second from now at the earliest. A task still running past the slot
+   * it's due for is due once its run's lease is over.
    */
   #nextAlarm(now: number): number {
     const state = this.#states();
@@ -308,11 +300,12 @@ export abstract class ClockObject<E> extends DurableObject<E> {
         task.period,
         known?.lastSlot ?? slotOf(task.period, now) - 1
       );
-      // One another activation still runs is left to it until its lease
-      // is over: not before then, or the alarm would come every second.
+      // One still running past the slot it's due for is left to its run
+      // until its lease is over: not before then, or the alarm would come
+      // every second. One running its current slot is due for the next.
       const running = known?.runningSince ?? null;
-      return running !== null && now - running < clockLeaseMs
-        ? Math.max(next, running + clockLeaseMs)
+      return running !== null && now - running < clockLeaseMs && next <= now
+        ? running + clockLeaseMs
         : next;
     });
     return Math.max(now + clockSlotOffsetMs, Math.min(...due));
