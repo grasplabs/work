@@ -71,6 +71,7 @@ const chatGpt: LandscapeApp = {
   firstSeen: "2026-09-01T10:00:00.000Z",
   connectionIds: [],
   use: { sources: ["native"], engines: [] },
+  discovered: null,
   blocked: false,
   flagged: false,
   policySource: null,

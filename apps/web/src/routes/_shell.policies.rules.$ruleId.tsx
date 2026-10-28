@@ -174,7 +174,7 @@ const RuleDetail = ({
 const RulePage = () => {
   const { t } = useLingui();
   const { ruleId } = Route.useParams();
-  const { apps, found, book: loaded } = Route.useLoaderData();
+  const { apps, findings, book: loaded } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const book = bookOf(loaded);
   const rule = book.rules.find(({ id }) => id === ruleId);
@@ -216,7 +216,7 @@ const RulePage = () => {
       book={book}
       apps={apps.state === "ready" ? apps.data : []}
       edits={editsPolicies(identity)}
-      found={findingsOfLoaded(found).findings}
+      found={findingsOfLoaded(findings).findings}
       rule={rule}
     />
   );

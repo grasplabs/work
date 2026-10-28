@@ -18,6 +18,8 @@ import { formatNumber } from "../format.ts";
 import { PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { loadLandscapeFreshness } from "../landscape/landscape-data.ts";
+import { IncompleteNotice, SyncNotices } from "../landscape/sync-notice.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 import { FindingsTable } from "../policies/findings-table.tsx";
 import {
@@ -102,7 +104,7 @@ const Figure = ({
 
 const PoliciesPage = () => {
   const { t, i18n } = useLingui();
-  const { book, found: read } = Route.useLoaderData();
+  const { book, found: read, syncs, incomplete } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const navigate = useNavigate();
   const tab = Route.useSearch().tab ?? "rules";
@@ -148,6 +150,9 @@ const PoliciesPage = () => {
           title={t`Policies`}
         />
         <NotLoaded page={read} />
+        {/* What the rules were checked against may not be the whole landscape. */}
+        <SyncNotices syncs={syncs} />
+        <IncompleteNotice incomplete={incomplete} syncs={syncs} />
 
         <dl className="bg-border grid grid-cols-2 gap-px overflow-hidden rounded-xl border md:grid-cols-4">
           <Figure label={t`Active rules`} value={active} />
@@ -251,7 +256,13 @@ export const Route = createFileRoute("/_shell/policies/")({
       : {},
   // The tab is in the address; the findings are read once.
   shouldReload: false,
-  loader: async ({ context: { core } }) => await loadPolicies(core),
+  loader: async ({ context: { core, identity } }) => {
+    const [policies, freshness] = await Promise.all([
+      loadPolicies(core),
+      loadLandscapeFreshness(core, identity),
+    ]);
+    return { ...policies, ...freshness };
+  },
   pendingComponent: PageLoading,
   component: PoliciesPage,
 });

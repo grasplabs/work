@@ -10,6 +10,7 @@ import type {
   OAuthProvider,
 } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
+import { landscapeProviderSchema } from "@grasp-os/shared/landscape";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -80,7 +81,18 @@ export const canReconnect = (
   connection: ListedConnection,
   offered: boolean,
   identity: Pick<Identity, "role" | "staff">
-): boolean => canSignInAgain(connection, offered, identity);
+): boolean => {
+  // The landscape's own connection, which the catalog doesn't offer: an
+  // admin's to connect again (core's `landscape.connect`).
+  if (
+    connection.source === "native" &&
+    !identity.staff &&
+    landscapeProviderSchema.safeParse(connection.provider).success
+  ) {
+    return isAdmin(identity.role);
+  }
+  return canSignInAgain(connection, offered, identity);
+};
 
 /**
  * The connection an integration's page offers to sign in to again: the
@@ -520,8 +532,18 @@ const NativeFlow = ({
   // included: by picking an option, or by going on to sign in with it.
   const [chose, setChose] = useState(false);
   const provider = oauthProviderSchema.safeParse(integration.id);
+  const landscape = landscapeProviderSchema.safeParse(integration.id).success;
   const app = integration.name;
   const start = async (): Promise<void> => {
+    if (landscape) {
+      await begin(
+        async (session) =>
+          await session.landscape.connect({
+            returnTo: returnToOf(integration.key),
+          })
+      );
+      return;
+    }
     if (!provider.success) {
       return;
     }

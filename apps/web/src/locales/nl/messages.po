@@ -353,6 +353,10 @@ msgstr "{count, plural, one {# pakket} other {# pakketten}}"
 msgid "{count, plural, one {# part so far} other {# parts so far}}"
 msgstr "{count, plural, one {# onderdeel tot nu toe} other {# onderdelen tot nu toe}}"
 
+#: src/landscape/usage-tab.tsx
+msgid "{count, plural, one {# person granted this app access for themselves.} other {# people granted this app access for themselves.}}"
+msgstr "{count, plural, one {# persoon gaf deze app zelf toegang.} other {# mensen gaven deze app zelf toegang.}}"
+
 #: src/onboarding/organization-words.ts
 msgid "{count, plural, one {# person is asked about no piece of work} other {# people are asked about no piece of work}}"
 msgstr "{count, plural, one {# persoon krijgt geen vragen over een stuk werk} other {# personen krijgen geen vragen over een stuk werk}}"
@@ -2817,6 +2821,10 @@ msgstr "Apps per categorie"
 msgid "Apps flagged"
 msgstr "Gemarkeerde apps"
 
+#: src/landscape/sync-notice.tsx
+msgid "Apps found in Microsoft Entra as of {when}."
+msgstr "Apps gevonden in Microsoft Entra, stand van {when}."
+
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "Apps it catches"
 msgstr "Apps die de regel treft"
@@ -3311,6 +3319,10 @@ msgstr "Tak {name}"
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Kruimelpad"
+
+#: src/landscape/landscape.ts
+msgid "Broad access granted by a person"
+msgstr "Ruime toegang gegeven door een persoon"
 
 #: src/knowledge/frame.tsx
 msgid "Browse"
@@ -4182,6 +4194,14 @@ msgstr "Opnieuw koppelen"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connect another account"
 msgstr "Nog een account koppelen"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Connect Microsoft Entra"
+msgstr "Microsoft Entra koppelen"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Connect Microsoft Entra to read which apps people and admins granted access, once a day. Grasp only reads: no mail, files or sign-ins."
+msgstr "Koppel Microsoft Entra om eens per dag te lezen tot welke apps mensen en beheerders toegang hebben verleend. Grasp leest alleen: geen mail, bestanden of aanmeldingen."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect shared accounts and decide what domains may do"
@@ -5763,6 +5783,10 @@ msgstr "Financiële gegevens"
 msgid "Find a team or a person"
 msgstr "Team of persoon zoeken"
 
+#: src/landscape/connect-landscape.tsx
+msgid "Find the apps your people use"
+msgstr "Vind de apps die je mensen gebruiken"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
 msgstr "Bevindingen"
@@ -5794,6 +5818,10 @@ msgstr "Eerst heb ik je personeelslijst nodig."
 #: src/landscape/landscape-overview.ts
 msgid "First seen"
 msgstr "Voor het eerst gezien"
+
+#: src/landscape/landscape.ts
+msgid "First seen in the last 7 days."
+msgstr "Voor het eerst gezien in de afgelopen 7 dagen."
 
 #: src/interview/words.ts
 msgid "First, the steps."
@@ -6983,6 +7011,10 @@ msgstr "Misschien is het verwijderd."
 msgid "It may have been renamed or removed."
 msgstr "Misschien is het hernoemd of verwijderd."
 
+#: src/landscape/landscape.ts
+msgid "It names its publisher {publisher} itself, unverified."
+msgstr "Hij noemt zelf {publisher} als uitgever, niet geverifieerd."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
 msgstr "Het telt niet meer mee tegen de budgetten, alsof het niets kostte. Dit kan niet ongedaan worden gemaakt."
@@ -7890,9 +7922,37 @@ msgstr "Berichten die ze Grasp in een chatapp sturen."
 msgid "Microphone: {name}"
 msgstr "Microfoon: {name}"
 
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft didn't answer the reads. Grasp tries again tomorrow."
+msgstr "Microsoft gaf geen antwoord op de leesacties. Grasp probeert het morgen opnieuw."
+
+#: src/connections/integrations.ts
+msgid "Microsoft Entra (application landscape)"
+msgstr "Microsoft Entra (applicatielandschap)"
+
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft Entra hasn't been fully read yet."
+msgstr "Microsoft Entra is nog niet volledig gelezen."
+
+#: src/landscape/connect-landscape.tsx
+msgid "Microsoft Entra needs connecting again"
+msgstr "Microsoft Entra moet opnieuw gekoppeld worden"
+
+#: src/landscape/landscape.ts
+msgid "Microsoft hasn't verified who publishes this app."
+msgstr "Microsoft heeft niet geverifieerd wie deze app uitgeeft."
+
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft kept throttling the reads until the day was over."
+msgstr "Microsoft bleef de leesacties afremmen tot de dag voorbij was."
+
 #: src/brain/brain.ts
 msgid "Microsoft sign-in"
 msgstr "Inloggen met Microsoft"
+
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft's list changed under the read. It starts over tomorrow."
+msgstr "De lijst van Microsoft veranderde tijdens het lezen. Morgen begint het opnieuw."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Middle"
@@ -8215,6 +8275,11 @@ msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Nooit"
 
+#: src/landscape/landscape.ts
+msgctxt "an app first seen this week"
+msgid "New"
+msgstr "Nieuw"
+
 #: src/brain/goals-editor.tsx
 msgid "New board goal"
 msgstr "Nieuw doel van de directie"
@@ -8317,6 +8382,10 @@ msgstr "Nee"
 #: src/onboarding/setup-steps.tsx
 msgid "No {onlySignIn}? A staff list works too."
 msgstr "Geen {onlySignIn}? Een personeelslijst werkt ook."
+
+#: src/landscape/landscape.ts
+msgid "No admin consent"
+msgstr "Geen toestemming van een beheerder"
 
 #: src/landscape/landscape.ts
 #: src/policies/policy.ts
@@ -9563,6 +9632,10 @@ msgstr "Online"
 msgid "Only admins can read the audit trail"
 msgstr "Alleen beheerders kunnen de audittrail lezen"
 
+#: src/landscape/usage-tab.tsx
+msgid "Only admins see who they are."
+msgstr "Alleen beheerders zien wie dat zijn."
+
 #: src/engines/app-page.tsx
 msgid "Only described"
 msgstr "Alleen beschreven"
@@ -10163,6 +10236,10 @@ msgstr "Mensen loggen in met een adres in deze domeinen, via het account van je 
 msgid "People tell a step two ways, and nobody can say why."
 msgstr "Mensen vertellen een stap op twee manieren, en niemand kan zeggen waarom."
 
+#: src/landscape/landscape.ts
+msgid "People use it, and no admin approved it for everyone."
+msgstr "Mensen gebruiken hem, en geen beheerder keurde hem voor iedereen goed."
+
 #: src/policies/policy-editing.tsx
 msgctxt "rule condition"
 msgid "People using it"
@@ -10759,6 +10836,10 @@ msgstr "Ontvangstbewijs"
 #: src/routes/_shell.index.tsx
 msgid "Recent chats"
 msgstr "Recente chats"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Reconnect Microsoft Entra"
+msgstr "Microsoft Entra opnieuw koppelen"
 
 #: src/landscape/audit-trail.tsx
 msgid "Recorded by"
@@ -12067,6 +12148,10 @@ msgstr "Iemand anders"
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Iemand anders heeft zich in deze browser aangemeld, dus deze app is gestopt. Probeer het opnieuw om hem te openen als de persoon die nu is aangemeld."
 
+#: src/landscape/landscape.ts
+msgid "Someone gave it access to their mail, files, chats or the directory on their own."
+msgstr "Iemand gaf de app zelf toegang tot hun mail, bestanden, chats of de directory."
+
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
 msgstr "Iemand die er niet meer is"
@@ -12979,6 +13064,14 @@ msgstr "De app wordt gemarkeerd in het applicatielandschap, zodat de eigenaar er
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 msgstr "De goedkeuring van de code van deze app is ingetrokken, en de app is gestopt. Een beheerder kan de code opnieuw goedkeuren op de pagina van het domein."
 
+#: src/landscape/sync-notice.tsx
+msgid "The apps found in Microsoft Entra may be incomplete: Grasp couldn't check its last read."
+msgstr "De apps gevonden in Microsoft Entra zijn mogelijk onvolledig: Grasp kon de laatste leesactie niet controleren."
+
+#: src/landscape/sync-notice.tsx
+msgid "The apps found in Microsoft Entra may be incomplete: its last read didn't finish."
+msgstr "De apps gevonden in Microsoft Entra zijn mogelijk onvolledig: de laatste leesactie werd niet afgerond."
+
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."
 msgstr "De apps die teams noemden, en de apps die in gebruik zijn maar door niemand genoemd."
@@ -13266,6 +13359,14 @@ msgstr "De kickoff, en de documenten die het bedrijf deelde."
 msgid "The last interviews added less than {stop} new facts"
 msgstr "De laatste interviews voegden minder dan {stop} nieuwe feiten toe"
 
+#: src/landscape/sync-notice.tsx
+msgid "The last read of Microsoft Entra failed"
+msgstr "De laatste leesactie van Microsoft Entra is mislukt"
+
+#: src/landscape/sync-notice.tsx
+msgid "The last read of Microsoft Entra stopped at its limit"
+msgstr "De laatste leesactie van Microsoft Entra stopte bij de limiet"
+
 #: src/workflows/resource-runs.tsx
 msgid "The latest runs, newest first."
 msgstr "De laatste runs, nieuwste eerst."
@@ -13309,6 +13410,14 @@ msgstr "Het bericht"
 #: src/interview/words.ts
 msgid "The microphone is not available here. Type your answer."
 msgstr "De microfoon werkt hier niet. Typ je antwoord."
+
+#: src/landscape/sync-notice.tsx
+msgid "The Microsoft Entra connection is to another organization's tenant, so nothing it read was kept."
+msgstr "De Microsoft Entra-koppeling hoort bij de tenant van een andere organisatie, dus niets ervan is bewaard."
+
+#: src/landscape/sync-notice.tsx
+msgid "The Microsoft Entra connection needs an admin to connect it again."
+msgstr "Een beheerder moet de Microsoft Entra-koppeling opnieuw maken."
 
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
@@ -13986,6 +14095,10 @@ msgstr "Deze pagina is niet geladen"
 msgid "This page is not here"
 msgstr "Deze pagina is er niet"
 
+#: src/landscape/usage-tab.tsx
+msgid "This person granted access to {scopes}. Grasp last saw the grant on {lastSeen}."
+msgstr "Deze persoon gaf toegang tot {scopes}. Grasp zag deze toestemming het laatst op {lastSeen}."
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "This policy is not here any more"
 msgstr "Dit beleid is er niet meer"
@@ -14482,6 +14595,10 @@ msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wi
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
 msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wijzigt actueel worden gemaakt, in dit domein noch in een ander domein dat de opslag gebruikt. Geen enkel record is de oorzaak, dus er valt niets te herstellen: geef de wijziging op, zodat de opslag weer wijzigingen aanneemt."
+
+#: src/landscape/landscape.ts
+msgid "Unverified publisher"
+msgstr "Niet-geverifieerde uitgever"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Up to {upTo} minutes"
@@ -16166,6 +16283,10 @@ msgstr "Jouw onboarding"
 #: src/dashboard/signals.tsx
 msgid "your organization"
 msgstr "je organisatie"
+
+#: src/landscape/sync-notice.tsx
+msgid "Your organization has more grants than one day's read takes, so some apps may be missing."
+msgstr "Je organisatie heeft meer toestemmingen dan één dag lezen aankan, dus er kunnen apps ontbreken."
 
 #: src/connections/connect-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
