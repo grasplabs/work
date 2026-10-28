@@ -104,6 +104,8 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   upload_unobserved:
     "A script isn't at the release's Durable Object migration after its upload.",
   secrets_unobserved: "A script lacks a secret after it was delivered.",
+  secret_unrevoked:
+    "A script still has a secret it's no longer given after it was removed.",
   probe_unqualified:
     "There's no qualified way to probe core in a Workers for Platforms namespace yet, so its hostname stays unpublished.",
   probe_unanswered:

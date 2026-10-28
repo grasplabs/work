@@ -369,6 +369,25 @@ const secretNames = (script: ScriptState | Response): Response => {
   return envelope(names.map((name) => ({ name, type: "secret_text" })));
 };
 
+/** Removes the secret `encoded` names from `script`: 404 when it has none so named. */
+const deleteSecret = (
+  script: ScriptState | Response,
+  encoded: string
+): Response => {
+  if (script instanceof Response) {
+    return script;
+  }
+  const name = decodeURIComponent(encoded);
+  if (script.versions.at(-1)?.secrets.has(name) !== true) {
+    return notFound();
+  }
+  return (
+    changeSecrets(script, (secrets) => {
+      secrets.delete(name);
+    }) ?? envelope(null)
+  );
+};
+
 export const workerRoutes: Route[] = [
   {
     method: "PUT",
@@ -518,21 +537,8 @@ export const workerRoutes: Route[] = [
   {
     method: "DELETE",
     path: /^\/workers\/scripts\/(?<script>[^/]+)\/secrets\/(?<name>[^/]+)$/u,
-    answer: ({ account, params }) => {
-      const script = scriptOf(account, params);
-      if (script instanceof Response) {
-        return script;
-      }
-      const name = decodeURIComponent(params.name ?? "");
-      if (script.versions.at(-1)?.secrets.has(name) !== true) {
-        return notFound();
-      }
-      return (
-        changeSecrets(script, (secrets) => {
-          secrets.delete(name);
-        }) ?? envelope(null)
-      );
-    },
+    answer: ({ account, params }) =>
+      deleteSecret(scriptOf(account, params), params.name ?? ""),
   },
   {
     method: "POST",
@@ -695,5 +701,11 @@ export const dispatchRoutes: Route[] = [
     method: "GET",
     path: dispatchPath("/secrets"),
     answer: ({ account, params }) => secretNames(userWorkerOf(account, params)),
+  },
+  {
+    method: "DELETE",
+    path: dispatchPath("/secrets/(?<name>[^/]+)"),
+    answer: ({ account, params }) =>
+      deleteSecret(userWorkerOf(account, params), params.name ?? ""),
   },
 ];

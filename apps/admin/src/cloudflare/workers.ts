@@ -867,6 +867,30 @@ export const putTargetSecret = async (
   );
 };
 
+/**
+ * Removes the secret `name` from the script `target` names. One that's
+ * already gone counts as removed, so a retried step succeeds.
+ */
+export const deleteTargetSecret = async (
+  api: CloudflareApi,
+  target: ScriptTarget,
+  name: string
+): Promise<void> => {
+  try {
+    await api.call(
+      {
+        method: "DELETE",
+        path: `${targetPath(target)}/secrets/${encodeURIComponent(name)}`,
+      },
+      z.unknown()
+    );
+  } catch (error) {
+    if (!isNotFound(error)) {
+      throw error;
+    }
+  }
+};
+
 /** The names of the secrets the script `target` names has; their values are never read. */
 export const targetSecretNames = async (
   api: CloudflareApi,
