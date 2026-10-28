@@ -7365,6 +7365,8 @@ msgstr "Limit for {name}"
 msgid "Limits per person"
 msgstr "Limits per person"
 
+#: src/engines/app-link.tsx
+#: src/engines/app-page.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Link"
@@ -7392,6 +7394,11 @@ msgstr "Link out"
 #: src/onboarding/interview-words.ts
 msgid "Link out on {date}"
 msgstr "Link out on {date}"
+
+#. placeholder {0}: app.name
+#: src/engines/app-link.tsx
+msgid "Link to {0}"
+msgstr "Link to {0}"
 
 #: src/settings/chat-accounts.tsx
 msgid "Link your {app} account {account}?"
@@ -7523,6 +7530,10 @@ msgstr "Low"
 #: src/landscape/insight.tsx
 msgid "Low confidence"
 msgstr "Low confidence"
+
+#: src/engines/app-link.tsx
+msgid "Lower-case letters and digits, with single dashes between them; not the name of one of the workspace's pages."
+msgstr "Lower-case letters and digits, with single dashes between them; not the name of one of the workspace's pages."
 
 #: src/policies/policy.ts
 msgid "Made by {vendors}"
@@ -8716,6 +8727,7 @@ msgid "None waiting for an admin."
 msgstr "None waiting for an admin."
 
 #: src/brain/brain.ts
+#: src/engines/app-page.tsx
 #: src/landscape/app-cells.tsx
 msgid "None yet"
 msgstr "None yet"
@@ -9337,6 +9349,10 @@ msgstr "Only mapped"
 msgid "Only people who may approve packages see what is approved across the workspace."
 msgstr "Only people who may approve packages see what is approved across the workspace."
 
+#: src/engines/app-link.tsx
+msgid "Only someone signed in to the workspace opens it."
+msgstr "Only someone signed in to the workspace opens it."
+
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Only the first way"
@@ -9574,6 +9590,10 @@ msgstr "Opening your interview…"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Opens at {threshold}%"
 msgstr "Opens at {threshold}%"
+
+#: src/engines/app-link.tsx
+msgid "Opens the App for the workspace's members who may use it, while it is published."
+msgstr "Opens the App for the workspace's members who may use it, while it is published."
 
 #: src/engines/resource-bindings.tsx
 msgid "Operations"
@@ -10602,6 +10622,10 @@ msgstr "Remove {file}"
 msgid "Remove {name}?"
 msgstr "Remove {name}?"
 
+#: src/engines/app-link.tsx
+msgid "Remove link"
+msgstr "Remove link"
+
 #: src/settings/person-limits.tsx
 msgid "Remove the exception for {name}"
 msgstr "Remove the exception for {name}"
@@ -11150,6 +11174,10 @@ msgstr "Said it happened: {who}."
 msgid "Said yes"
 msgstr "Said yes"
 
+#: src/engines/app-link.tsx
+msgid "sales-pipeline"
+msgstr "sales-pipeline"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Same version, different contents: {changed}"
 msgstr "Same version, different contents: {changed}"
@@ -11175,6 +11203,10 @@ msgstr "Save as PDF"
 #: src/screens/screen-frame.tsx
 msgid "Save first"
 msgstr "Save first"
+
+#: src/engines/app-link.tsx
+msgid "Save link"
+msgstr "Save link"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"

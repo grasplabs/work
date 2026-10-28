@@ -174,6 +174,7 @@ export const toApp = (row: AppRow): App => ({
   currentVersion: row.currentVersion,
   pendingVersion: row.pendingVersion,
   status: row.status,
+  link: row.link,
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -587,6 +588,7 @@ export const createApp = async (
     statusChangedAt: null,
     statusChangedBy: null,
     createdAt: new Date(),
+    link: null,
   };
   const app = toApp(row);
   const db = drizzle(env.DB);

@@ -31,6 +31,7 @@ const app = (id: string, pendingVersion: number | null): App => ({
   currentVersion: null,
   pendingVersion,
   status: "published",
+  link: null,
   createdAt: "2026-09-29T00:00:00.000Z",
 });
 

@@ -8,11 +8,13 @@ import type {
   ViewedApp,
 } from "@grasp-os/shared/apps";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
+import type { AppId } from "@grasp-os/shared/ids";
 
 import { AppBlueprintsRpc } from "./app-blueprints.ts";
 import { AppFilesRpc } from "./app-files-rpc.ts";
 import { AppIntegrationsRpc } from "./app-integrations.ts";
 import { AppMembersRpc } from "./app-members.ts";
+import { openAppLink, setAppLink } from "./app-own-links.ts";
 import { updateApp } from "./app-settings.ts";
 import { changeStatus } from "./app-status.ts";
 import type { AppTransition } from "./app-status.ts";
@@ -124,6 +126,20 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
 
   async restore(app: string): Promise<App> {
     return await this.#changeStatus(app, "restore");
+  }
+
+  async setLink(app: string, link: string | null): Promise<App> {
+    return await withPerson(
+      this.#check,
+      async (by) => await setAppLink(this.#env, by, app, link)
+    );
+  }
+
+  async openLink(link: string): Promise<{ app: AppId }> {
+    return await withPerson(
+      this.#check,
+      async (by) => await openAppLink(this.#env, by, link)
+    );
   }
 
   async #changeStatus(app: string, transition: AppTransition): Promise<App> {
