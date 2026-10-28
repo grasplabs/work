@@ -7,7 +7,7 @@
  * started for: one ring, one client, or every client, ring by ring, with
  * no approval between them (src/rollout/workflow.ts).
  */
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
@@ -61,9 +61,10 @@ const byRing = (a: RolloutTarget, b: RolloutTarget): number =>
 /**
  * The active clients a rollout for `scope` reaches, each in the ring it's
  * in now: ring 0's, and the scope's. In the order it reaches them. A
- * client placed in a hosting destination is never one: a rollout deploys
- * account by account (src/deploy/deploy.ts), which a placed client's
- * Workers and resources aren't (src/hosting/).
+ * client placed in a hosting destination, or with no account of its own,
+ * is never one: a rollout deploys account by account
+ * (src/deploy/deploy.ts), which such a client's Workers and resources
+ * aren't (src/hosting/).
  */
 export const targetsOf = async (
   db: AdminDatabase,
@@ -77,6 +78,8 @@ export const targetsOf = async (
       and(
         eq(clients.status, "active"),
         isNull(clientPlacements.clientId),
+        // A client with no account of its own isn't one this path deploys.
+        isNotNull(clients.accountId),
         scopeFilter(scope)
       )
     );

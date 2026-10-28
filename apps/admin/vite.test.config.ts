@@ -118,12 +118,17 @@ export default defineProject({
         },
         // Where the fake Cloudflare API runs client D1 queries, one for
         // each database it holds at once (test/cloudflare-api-workers.ts).
-        d1Databases: Object.fromEntries(
-          Array.from({ length: 24 }, (_, slot) => [
-            `CLIENT_D1_${slot}`,
-            `client-d1-${slot}`,
-          ])
-        ),
+        d1Databases: {
+          ...Object.fromEntries(
+            Array.from({ length: 24 }, (_, slot) => [
+              `CLIENT_D1_${slot}`,
+              `client-d1-${slot}`,
+            ])
+          ),
+          // An empty admin database a migration test brings up step by
+          // step, with rows in it (test/admin-migrations.test.ts).
+          MIGRATION_D1: "migration-d1",
+        },
       },
     }),
   ],
