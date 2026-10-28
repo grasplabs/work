@@ -372,6 +372,7 @@ workflows: {
    * shown whole. Refused in a chat that read restricted data.
    */
   offer(workflow: string, input: unknown): Promise<{ offer: string; workflow: string; version: number }>;
+  /**
    * The independent workflows (env.workflowBuild) you may follow, of those
    * the person has a role in.
    */

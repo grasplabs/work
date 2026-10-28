@@ -343,7 +343,13 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "bind",
       async (by) => {
         await this.#admit();
-        const bound = await bindWorkflowToApp(this.env, by, workflow, binding);
+        const bound = await bindWorkflowToApp(
+          this.env,
+          by,
+          workflow,
+          binding,
+          this.#admit
+        );
         return {
           id: bound.id,
           app: bound.app,

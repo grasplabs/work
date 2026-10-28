@@ -275,6 +275,108 @@ describe("the agent building an independent workflow", () => {
     }).toStrictEqual({ isError: true, revoked: true, versions: [] });
   });
 
+  it("binds nothing once its permission is revoked while the binding is being read", async () => {
+    const { admin, builder, app, chat, grant } = await setUp([]);
+    const flow = await builder.api.workflowResources.create(
+      `unbound-${unique()}`
+    );
+    const started = await builder.api.workflowResources.draft(flow.id);
+    await builder.api.workflowResources.editDraft(flow.id, {
+      expectedRevision: started.revision,
+      source: definitionOf(flow.name),
+      modules: {},
+    });
+    await builder.api.workflowResources.publishDraft(flow.id, {
+      revision: 1,
+      basedOn: null,
+    });
+    const calls = tryEach({
+      bind: `await env.workflowBuild.bind(${JSON.stringify(flow.id)}, { app: ${JSON.stringify(app)}, alias: "summary", version: 1 })`,
+    });
+    await pointAtGateway(
+      chat.stub,
+      fakeGateway(codeStep(calls), says("It was stopped."))
+    );
+    const granted = await grant();
+    // The last read before the binding is saved (the binding it would
+    // replace) is held until the grant is revoked, so the save comes after
+    // the revocation. Flags, polled, not promises: each side runs in a
+    // request of its own.
+    const { DB: database } = env;
+    const held = { reading: false, revoked: false };
+    const replacingRead = /from "app_workflow_bindings"/u;
+    const holding = (statement: D1PreparedStatement): D1PreparedStatement =>
+      new Proxy(statement, {
+        get: (target, property) => {
+          if (property === "bind") {
+            return (...values: unknown[]): D1PreparedStatement =>
+              holding(target.bind(...values));
+          }
+          const value: unknown = Reflect.get(target, property);
+          if (typeof value !== "function") {
+            return value;
+          }
+          return async (...args: unknown[]): Promise<unknown> => {
+            held.reading = true;
+            while (!held.revoked) {
+              // oxlint-disable-next-line no-await-in-loop -- polled
+              await scheduler.wait(20);
+            }
+            const answered: unknown = await Reflect.apply(value, target, args);
+            return answered;
+          };
+        },
+      });
+    env.DB = new Proxy(database, {
+      get: (target, property) => {
+        if (property === "prepare") {
+          return (query: string): D1PreparedStatement => {
+            const statement = target.prepare(query);
+            return query.startsWith("select") &&
+              replacingRead.test(query) &&
+              !held.revoked
+              ? holding(statement)
+              : statement;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return (...args: unknown[]): unknown => {
+          const answered: unknown = Reflect.apply(value, target, args);
+          return answered;
+        };
+      },
+    });
+    try {
+      const asked = chat.ask("Bind it");
+      await vi.waitFor(() => {
+        expect(held.reading).toBeTruthy();
+      });
+      await admin.api.permissions.revoke(granted);
+      held.revoked = true;
+      await asked;
+    } finally {
+      held.revoked = true;
+      env.DB = database;
+    }
+
+    // The revocation closed the run: its save was refused, and nothing
+    // was bound.
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    const bound = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM app_workflow_bindings WHERE workflow_resource_id = ?"
+    )
+      .bind(flow.id)
+      .first<{ n: number }>();
+    expect({
+      isError: result?.isError,
+      revoked: result?.text.startsWith("Error (revoked):"),
+      bound: bound?.n,
+    }).toStrictEqual({ isError: true, revoked: true, bound: 0 });
+  });
+
   it("names what a rebind replaced in its record", async () => {
     const { builder, app } = await setUp([]);
     const flow = await builder.api.workflowResources.create(

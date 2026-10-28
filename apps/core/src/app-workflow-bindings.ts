@@ -107,7 +107,9 @@ export const bindWorkflowToApp = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  /** Admits the write, right before it commits: throws to write nothing. */
+  admit?: () => Promise<void>
 ): Promise<AppWorkflowBinding> => {
   requireNotStaff(by);
   const { app, alias, version } = workflowResourceErrors.parse(
@@ -162,6 +164,9 @@ export const bindWorkflowToApp = async (
       )
     )
     .get();
+  // After every read: an agent whose permission was revoked meanwhile
+  // binds nothing.
+  await admit?.();
   try {
     await auditedBatch(env, db, [
       db
