@@ -1,6 +1,7 @@
 import { appLimits } from "@grasp-os/shared/app-limits";
 import type {
   App,
+  AppAnswerer,
   AppChanges,
   AppMember,
   ViewedApp,
@@ -22,7 +23,7 @@ import { ArchiveIcon, ArrowLeftIcon, LayoutGridIcon } from "lucide-react";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { readPeople } from "../directory.ts";
+import { listedOrNone, readPeople } from "../directory.ts";
 import { buildsApp } from "../engines/app-role.ts";
 import {
   ArchiveDialog,
@@ -169,11 +170,14 @@ const AppSettings = ({
   app,
   members,
   people,
+  eligible,
   builds,
 }: {
   app: ViewedApp;
   members: readonly AppMember[];
   people: ReadonlyMap<string, string>;
+  /** Who may answer for it, as core decides (`apps.answerers`). */
+  eligible: readonly AppAnswerer[];
   builds: boolean;
 }) => {
   const { t } = useLingui();
@@ -189,24 +193,26 @@ const AppSettings = ({
       );
     });
   };
-  // Names from whom it is shared with, and, for an admin, everyone's.
+  // Names from whom it is shared with, who may answer for it, and, for an
+  // admin, everyone's.
   const names = new Map(people);
   for (const member of members) {
     if (member.type === "person" && member.name !== null) {
       names.set(member.id, member.name);
     }
   }
+  for (const { id, name } of eligible) {
+    names.set(id, name);
+  }
   const personName = (userId: string): string => names.get(userId) ?? userId;
   const nameOf = (member: AppMember): string =>
     member.name ??
     (member.type === "person" ? personName(member.id) : member.id);
-  // Who may answer for it: the people it is shared with, and its owner.
+  // Who may answer for it, as core decides: those it is shared with
+  // through a team too. Whoever answers now stays on the list.
   const answerers = [
     ...new Map([
-      [app.owner, personName(app.owner)] as const,
-      ...members
-        .filter(({ type }) => type === "person")
-        .map((member) => [member.id, nameOf(member)] as const),
+      ...eligible.map(({ id, name }) => [id, name] as const),
       [app.responsible, personName(app.responsible)] as const,
     ]),
   ].map(([id, name]) => ({ id, name }));
@@ -390,7 +396,7 @@ const AppSettingsPage = () => {
       />
     );
   }
-  const { app, members, people } = page.data;
+  const { app, members, people, answerers } = page.data;
   return (
     <>
       <SiteHeader
@@ -403,6 +409,7 @@ const AppSettingsPage = () => {
       <AppSettings
         app={app}
         builds={buildsApp(app, identity)}
+        eligible={answerers}
         members={members}
         people={people}
       />
@@ -415,14 +422,16 @@ export const Route = createFileRoute("/_shell/apps/$app_/settings")({
   component: AppSettingsPage,
   loader: async ({ context: { core, identity }, params }) =>
     await loadFromCore(core, async (session) => {
-      const [app, members, people] = await Promise.all([
+      const [app, members, people, answerers] = await Promise.all([
         session.apps.get(params.app),
         session.apps.members.list(params.app),
         // Everyone's names only for an admin, who may list members.
         isAdmin(identity.role)
           ? readPeople(session)
           : Promise.resolve(new Map<string, string>()),
+        // Who may answer for it, for its builders: none for anyone else.
+        listedOrNone(session.apps.answerers(params.app)),
       ]);
-      return { app, members, people };
+      return { app, members, people, answerers };
     }),
 });

@@ -1,5 +1,6 @@
 import type {
   App,
+  AppAnswerer,
   AppChanges,
   AppContents,
   AppsApi,
@@ -13,7 +14,7 @@ import { AppBlueprintsRpc } from "./app-blueprints.ts";
 import { AppFilesRpc } from "./app-files-rpc.ts";
 import { AppIntegrationsRpc } from "./app-integrations.ts";
 import { AppMembersRpc } from "./app-members.ts";
-import { updateApp } from "./app-settings.ts";
+import { appAnswerers, updateApp } from "./app-settings.ts";
 import { changeStatus } from "./app-status.ts";
 import type { AppTransition } from "./app-status.ts";
 import { AppVersionsRpc } from "./app-versions-rpc.ts";
@@ -137,6 +138,13 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return await withPerson(
       this.#check,
       async (by) => await updateApp(this.#env, by, app, changes)
+    );
+  }
+
+  async answerers(app: string): Promise<AppAnswerer[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await appAnswerers(this.#env, by, app)
     );
   }
 
