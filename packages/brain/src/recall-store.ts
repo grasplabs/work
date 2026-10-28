@@ -50,8 +50,11 @@ export interface PinnedVersion extends VersionRef {
 }
 
 /** What one pin is known by. */
-const pinKey = ({ documentId, collectionId, version }: VersionRef): string =>
-  JSON.stringify([collectionId, documentId, version]);
+export const pinKey = ({
+  documentId,
+  collectionId,
+  version,
+}: VersionRef): string => JSON.stringify([collectionId, documentId, version]);
 
 /**
  * The versions of `refs` that `reader` may read now, each pinned as its
@@ -96,6 +99,20 @@ const readablePins = async <C>(
   return new Map(pins.map((pin) => [pinKey(pin), pin]));
 };
 
+/** `BrainStore.unchangedPins`, for `brain`. */
+const unchangedPins = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  pins: readonly PinnedVersion[]
+): Promise<Set<string>> => {
+  const readable = await readablePins(brain, reader, pins);
+  return new Set(
+    pins.flatMap((pin) =>
+      readable.get(pinKey(pin))?.text === pin.text ? [pinKey(pin)] : []
+    )
+  );
+};
+
 /** The Brain's store, as recall reads it. */
 export interface BrainStore<C> {
   /**
@@ -129,6 +146,15 @@ export interface BrainStore<C> {
     reader: C,
     pins: readonly PinnedVersion[]
   ) => Promise<void>;
+  /**
+   * Of `pins`, those `reader` may still read as they were pinned, each as
+   * `pinKey` names it: one query, whatever their number. One gone, moved
+   * to another collection, or rewritten by a purge, is not.
+   */
+  unchangedPins: (
+    reader: C,
+    pins: readonly PinnedVersion[]
+  ) => Promise<Set<string>>;
   /** Sections that match `query`, best first, of those `reader` may read. */
   findEvidence: (
     reader: C,
@@ -168,11 +194,13 @@ export const d1BrainStore = <C>(brain: Brain<C>): BrainStore<C> => ({
     });
   },
   requireDocumentsReadable: async (reader, pins) => {
-    const readable = await readablePins(brain, reader, pins);
-    if (pins.some((pin) => readable.get(pinKey(pin))?.text !== pin.text)) {
+    const unchanged = await unchangedPins(brain, reader, pins);
+    if (pins.some((pin) => !unchanged.has(pinKey(pin)))) {
       throw brainErrors.create("brain.not_found");
     }
   },
+  unchangedPins: async (reader, pins) =>
+    await unchangedPins(brain, reader, pins),
   findEvidence: async (reader, { query, collectionIds, limit }) =>
     await searchSections(
       brain,
