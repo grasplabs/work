@@ -1,6 +1,6 @@
 /**
  * The real-account qualification of Workers for Platforms (GRA-430), as a
- * repeatable run against a disposable Cloudflare account:
+ * repeatable run against Grasp's Cloudflare account:
  *
  *   op run --env-file qualify.env -- node scripts/qualify/run.ts <step>... [--live]
  *
@@ -13,16 +13,20 @@
  * Without `--live` every write is only planned and recorded; reads still
  * go to the account. Every resource the run writes is named after its
  * prefix (`--prefix`, `qual-<yyyymmdd>` by default), the API client
- * refuses any write that names something else (cloudflare.ts), and
- * `preflight` refuses an account holding anything not named `qual-…`, so a
- * run can only ever touch a disposable account's own qualification
- * resources. The evidence, one JSON line per call and per check, and the
+ * refuses any write that names something else (cloudflare.ts), so a run
+ * only ever touches its own qualification resources. `preflight` refuses
+ * an account holding anything it doesn't know (`knownName`): the run's
+ * and earlier runs' (`qual-…`), the platform's own (`grasp-os-…`, as
+ * scripts/cloudflare-account-setup.ts and deploys leave them) and placed
+ * clients' (`g<deployment>-…`), so a run never starts in an account it
+ * wasn't meant for. The evidence, one JSON line per call and per check, and the
  * run's state (the generated keys and ids, mode 0600) go to `--out`, by
  * default a directory under the system's temporary directory.
  *
  * Steps, in the order a full run takes them (`all`):
  * - `preflight`: the token, the account, the Workers for Platforms
- *   entitlement, and the account's inventory, refused unless disposable.
+ *   entitlement, and the account's inventory, refused if it holds
+ *   anything unknown.
  * - `namespace`: the run's dispatch namespace.
  * - `dispatcher`: an ordinary Worker on workers.dev that dispatches into
  *   the namespace, only with the run's dispatch key.
@@ -79,6 +83,7 @@ import { layOutWorker } from "../release/deploy-lib.ts";
 import {
   cloudflareApi,
   CloudflareError,
+  knownName,
   evidenceLog,
   plannedWriteError,
   verifyToken,
@@ -452,17 +457,17 @@ const preflight = async (): Promise<void> => {
   const found = await recordInventory("before");
   const foreign = inventoryKinds.flatMap((kind) =>
     found[kind]
-      .filter((name) => !name.startsWith("qual-"))
+      .filter((name) => !knownName(name))
       .map((name) => `${kind}:${name}`)
   );
   check(
-    "account holds nothing but qualification resources",
+    "account holds only Grasp's and qualification resources",
     foreign.length === 0 ? "pass" : "fail",
     { foreign }
   );
   if (foreign.length > 0) {
     throw new Error(
-      `Refused: the account isn't disposable, it holds ${foreign.join(", ")}`
+      `Refused: the account isn't one this run knows, it holds ${foreign.join(", ")}`
     );
   }
 };

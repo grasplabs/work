@@ -122,6 +122,19 @@ export const namesOwn = (
   );
 };
 
+/** A placed client's resource, named after its deployment by provisioning. */
+const clientResource = /^g[a-z0-9]+-grasp-os-/u;
+
+/**
+ * Whether `name` is one a run expects in Grasp's account: a qualification
+ * run's, the platform's own, or a placed client's. Only ever read: the
+ * run writes nothing but its own (cloudflare.ts).
+ */
+export const knownName = (name: string): boolean =>
+  name.startsWith("qual-") ||
+  name.startsWith("grasp-os-") ||
+  clientResource.test(name);
+
 /** The run's API client: `call` for one request, `own` for an id the run made. */
 export const cloudflareApi = (options: ApiOptions) => {
   const { accountId, token, prefix, live, record } = options;
