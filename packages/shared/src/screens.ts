@@ -584,8 +584,8 @@ export interface ScreensApi {
 
 /** Why a call to an App's screens was refused. */
 export const screenErrors = defineErrorFamily({
-  "screen.not_found": "The App has no such screen.",
-  "screen.build_failed": "The App's screens don't build.",
+  "screen.not_found": "The domain has no such app.",
+  "screen.build_failed": "The domain's apps don't build.",
   "screen.build_slow":
     "The app's screens are still building. Try again in a moment.",
   "screen.not_sealed":
@@ -603,7 +603,7 @@ export const screenErrors = defineErrorFamily({
   "screen.input_too_large":
     "That is more data than a screen may send in one call.",
   "screen.answer_too_large":
-    "The App answered with more data than a screen takes in one call.",
+    "The domain answered with more data than an app takes in one call.",
   "screen.unreviewed":
     "Nobody has approved this app's code for the engine's data yet.",
   "screen.revoked": "The approval of this app's code was taken back.",
