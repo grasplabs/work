@@ -42,6 +42,7 @@
     "./app-file-limits": "./src/app-file-limits.ts",
     "./app-files": "./src/app-files.ts",
     "./app-link-limits": "./src/app-link-limits.ts",
+    "./app-webhooks": "./src/app-webhooks.ts",
     "./app-links": "./src/app-links.ts",
     "./app-limits": "./src/app-limits.ts",
     "./app-releases": "./src/app-releases.ts",

@@ -241,6 +241,20 @@ export const slackApp = {
 export const slackPostedUrl = "https://slack-control.test/posted";
 
 /**
+ * A company's webhook receiver (core's app-webhooks.ts, connect's
+ * webhooks.ts), on a public-looking host: it answers 200, but a path
+ * `/status/<code>` with that status, `/redirect` with a redirect, and
+ * `/fail-<n>/...` with 503 its first `n` times.
+ */
+export const webhookReceiverOrigin = "https://hooks.acme-receiver.test";
+
+/**
+ * Where tests read what reached the webhook receiver, in order: each
+ * request's URL, method, headers and body.
+ */
+export const webhookReceivedUrl = "https://webhook-control.test/received";
+
+/**
  * Where tests remove the bot from a conversation, as uninstalling its app
  * does: POST `{ conversation }`; the Bot Connector refuses its posts there
  * with 403 from then on.
@@ -431,6 +445,35 @@ const whatsAppAnswer = async (request, url) => {
 };
 const google = (${googleGmailFake.toString()})(${JSON.stringify(gmailAccount)});
 let googleKeys = [];
+const webhookCalls = [];
+const webhookFailures = new Map();
+/** The webhook receiver's answer to \`request\`, kept for tests to read. */
+const webhookAnswer = async (request, url) => {
+  webhookCalls.push({
+    url: url.href,
+    method: request.method,
+    headers: Object.fromEntries(request.headers),
+    body: await request.text(),
+  });
+  const [, first = "", second = ""] = url.pathname.split("/");
+  if (first === "status") {
+    return new Response(null, { status: Number(second) });
+  }
+  if (first === "redirect") {
+    return new Response(null, {
+      status: 307,
+      headers: { location: "https://elsewhere.test/" },
+    });
+  }
+  if (first.startsWith("fail-")) {
+    const failed = webhookFailures.get(url.pathname) ?? 0;
+    if (failed < Number(first.slice("fail-".length))) {
+      webhookFailures.set(url.pathname, failed + 1);
+      return new Response(null, { status: 503 });
+    }
+  }
+  return new Response(null, { status: 200 });
+};
 const slackCalls = [];
 /** Slack's Web API, as far as the door's adapter calls it. */
 const slackAnswer = async (request, url) => {
@@ -706,6 +749,12 @@ export default {
     }
     if (url.href === ${JSON.stringify(whatsAppSentUrl)}) {
       return Response.json(whatsAppSent);
+    }
+    if (url.origin === ${JSON.stringify(webhookReceiverOrigin)}) {
+      return await webhookAnswer(request, url);
+    }
+    if (url.href === ${JSON.stringify(webhookReceivedUrl)}) {
+      return Response.json(webhookCalls);
     }
     if (url.hostname === "slack.com") {
       return await slackAnswer(request, url);
