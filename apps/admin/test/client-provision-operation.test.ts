@@ -1,4 +1,5 @@
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
+import { moduleKey } from "@grasp-os/shared/release";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -1796,6 +1797,46 @@ describe("provisioning a placed client", () => {
       // Back on the release before, its databases stay at the later one's.
       schema: later.releaseId,
     });
+  });
+
+  it("never lowers what a script ran on a stale read: an upload whose answer was lost still keeps a rollback from going back past its migration", async () => {
+    const first = await importRelease("dedicated");
+    const { account, clientId } = await liveClient(first);
+    const { core } = await scriptsOf(clientId);
+    const later = await importRelease(
+      "dedicated",
+      { notes: "feat(core): new class", core: "export default { core: 9 };" },
+      (entry) => ({
+        ...entry,
+        durableObjectMigrations: [
+          ...entry.durableObjectMigrations,
+          { tag: "v2", new_sqlite_classes: ["Extra"] },
+        ],
+      })
+    );
+    await startClientRelease(db, staff, clientId, {
+      releaseId: later.releaseId,
+    });
+    // Core's upload runs its migration, and the answer never arrives.
+    cloudflare.failNext(isUpload(core), "lost");
+    await failing(await attempt(clientId));
+    // Resumed: core reads at the migration before, as a stale read would,
+    // and the upload stops before it's sent (its module gone from the store).
+    const script = account.scripts.get(core);
+    if (script === undefined) {
+      throw new Error("core isn't in the fake");
+    }
+    script.migrationTag = "v1";
+    const [module] = later.workers.core?.modules ?? [];
+    await env.RELEASES.delete(moduleKey(module?.sha256 ?? ""));
+    await failing(await attempt(clientId));
+    script.migrationTag = "v2";
+
+    const back = await codeOf(
+      startClientRelease(db, staff, clientId, { rollback: true })
+    );
+
+    expect(back).toBe("rollback_past_migration");
   });
 
   it("refuses a release of a client not live yet, or while its operation runs, and one of two at once", async () => {

@@ -491,14 +491,17 @@ const assertCanGo = async (
   const observedTags = progressSchema.parse(
     JSON.parse(operation.progress ?? "{}")
   ).migrated;
-  const ran = Object.fromEntries(
-    Object.entries(from.workers).map(([name, worker]) => [
-      name,
-      Object.hasOwn(observedTags, name)
-        ? (observedTags[name] ?? null)
-        : (worker.durableObjectMigrations.at(-1)?.tag ?? null),
-    ])
-  );
+  // Every Worker observed, the running release's or not, and the running
+  // release's others at its last migration.
+  const ran = {
+    ...Object.fromEntries(
+      Object.entries(from.workers).map(([name, worker]) => [
+        name,
+        worker.durableObjectMigrations.at(-1)?.tag ?? null,
+      ])
+    ),
+    ...observedTags,
+  };
   const behind = behindMigration(ran, to);
   if (behind !== undefined) {
     throw new ProvisionOperationError(
@@ -1026,20 +1029,48 @@ const newerOf = async (
 };
 
 /**
- * Records Worker `app` observed at Durable Object migration `tag` in
- * `progress` (which it updates), unless that's recorded already.
+ * The later of Durable Object migrations `recorded` and `seen`, in the
+ * order `history` runs them. Migrations only move forward, and a read may
+ * be stale, so an observation never lowers what's recorded: one this
+ * history doesn't know is kept as the later.
+ */
+const laterMigration = (
+  recorded: string | null | undefined,
+  seen: string | null,
+  history: WorkerEntry["durableObjectMigrations"]
+): string | null => {
+  if (recorded === undefined || recorded === null) {
+    return seen;
+  }
+  if (seen === null) {
+    return recorded;
+  }
+  const at = (tag: string) => history.findIndex((step) => step.tag === tag);
+  if (at(recorded) === -1) {
+    return recorded;
+  }
+  return at(seen) === -1 || at(seen) > at(recorded) ? seen : recorded;
+};
+
+/**
+ * Records Worker `app` observed at Durable Object migration `tag` before
+ * its upload, in `progress` (which it updates): only moving what's
+ * recorded forward (`laterMigration`), as a read may be stale. The
+ * observation after a confirmed upload is what sets it as it is.
  */
 const recordMigrated = async (
   db: AdminDatabase,
   loaded: Loaded,
   progress: Progress,
   app: App,
-  tag: string | undefined
+  tag: string | undefined,
+  history: WorkerEntry["durableObjectMigrations"]
 ): Promise<void> => {
-  if (progress.migrated[app] === (tag ?? null)) {
+  const later = laterMigration(progress.migrated[app], tag ?? null, history);
+  if (progress.migrated[app] === later) {
     return;
   }
-  progress.migrated = { ...progress.migrated, [app]: tag ?? null };
+  progress.migrated = { ...progress.migrated, [app]: later };
   await recordProgress(db, loaded, progress);
 };
 
@@ -1135,7 +1166,14 @@ const upload = async (
     before.migrationTag === lastTag;
   if (before.exists) {
     // What it was observed at, whatever this upload does next.
-    await recordMigrated(db, loaded, progress, app, before.migrationTag);
+    await recordMigrated(
+      db,
+      loaded,
+      progress,
+      app,
+      before.migrationTag,
+      worker.durableObjectMigrations
+    );
   }
   if (!done) {
     const migrations = pendingMigrations(
