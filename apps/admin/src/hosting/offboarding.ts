@@ -46,7 +46,7 @@ import { clientPlacements, clientResources, clients } from "../db/schema.ts";
 import { clientDomain, deployerApi } from "../deploy/context.ts";
 import { DeployError } from "../deploy/errors.ts";
 import { unregisterHostname } from "../deploy/router.ts";
-import { currentRun, hasEnded } from "../runners.ts";
+import { currentRun, hasEnded, releaseRun } from "../runners.ts";
 import { clientInventory, destinationOf, placementOf } from "./inventory.ts";
 import type { ClientPlacement, ClientResource } from "./inventory.ts";
 
@@ -115,8 +115,15 @@ const placedClientOf = async (
   return { ...client, placement };
 };
 
-/** Throws `client_busy` while a runner still works on client `clientId`. */
-const assertIdle = async (env: Env, clientId: string): Promise<void> => {
+/**
+ * Throws `client_busy` while a runner still works on client `clientId`,
+ * and answers the claim of one that ended, if any: what offboarding takes
+ * away, so a runner that ended holds nothing and writes nothing after.
+ */
+const assertIdle = async (
+  env: Env,
+  clientId: string
+): Promise<string | null> => {
   const run = await currentRun(env, clientId);
   if (run !== null && !hasEnded(run.status)) {
     throw new OffboardingError(
@@ -124,6 +131,7 @@ const assertIdle = async (env: Env, clientId: string): Promise<void> => {
       `${clientId} has a runner still going: ${run.runId}`
     );
   }
+  return run?.runId ?? null;
 };
 
 /**
@@ -147,7 +155,7 @@ export const offboardPlacedClient = async (
     );
   }
   if (client.status !== "offboarded") {
-    await assertIdle(env, clientId);
+    const ended = await assertIdle(env, clientId);
     const now = new Date();
     const offboarded = await actIfChanged(
       db,
@@ -162,7 +170,10 @@ export const offboardPlacedClient = async (
         action: "client.offboard",
         clientId,
         target: client.placement.destinationId,
-      }
+      },
+      // A runner that ended loses its claim with it: waking, it holds
+      // nothing, so it writes nothing to the operation of a client gone.
+      ended === null ? [] : [releaseRun(db, clientId, ended)]
     );
     if (!offboarded) {
       throw new OffboardingError(

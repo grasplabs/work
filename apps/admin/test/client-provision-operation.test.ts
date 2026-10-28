@@ -44,7 +44,7 @@ import {
   provisionPlacedClient,
   releasePlacedClient,
 } from "../src/hosting/workflow.ts";
-import { claimRun } from "../src/runners.ts";
+import { claimRun, startingMs } from "../src/runners.ts";
 import type { HeldClient } from "../src/runners.ts";
 import { envelope, notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
@@ -2123,7 +2123,9 @@ describe("provisioning a placed client", () => {
     // Again: it's offboarded already, and its hostname stays out.
     await offboardPlacedClient(env, staff, clientId);
     const refused = await codeOf(
-      startClientRelease(db, staff, clientId, { releaseId: later.releaseId })
+      startClientRelease(db, staff, await attempt(clientId), {
+        releaseId: later.releaseId,
+      })
     );
     const client = await db
       .select({ status: clients.status, offboardedAt: clients.offboardedAt })
@@ -2504,59 +2506,79 @@ const expectedOf = (
   };
 };
 
+/**
+ * A live client on release A, with B (a new class and table) and C (B's,
+ * and a table more) imported, and B's runner stopped for good at `point`:
+ * its run left running, as a crash leaves it.
+ */
+const crashedAt = async (point: CrashPoint) => {
+  const { started, claimed, plan } = point;
+  const a = await importRelease("dedicated");
+  const { clientId } = await liveClient(a);
+  const scripts = await scriptsOf(clientId);
+  // B adds a class (a Durable Object migration) and a table; C keeps
+  // both and adds a table of its own.
+  const b = await importRelease(
+    "dedicated",
+    {
+      notes: "feat(core): b",
+      core: "export default { core: 'b' };",
+      migrations: {
+        "0000_init.sql": "CREATE TABLE a (id TEXT);",
+        "0001_more.sql": "CREATE TABLE b (id TEXT);",
+      },
+    },
+    withExtraClass
+  );
+  const c = await importRelease(
+    "dedicated",
+    {
+      notes: "feat(core): c",
+      core: "export default { core: 'c' };",
+      migrations: {
+        "0000_init.sql": "CREATE TABLE a (id TEXT);",
+        "0001_more.sql": "CREATE TABLE b (id TEXT);",
+        "0002_most.sql": "CREATE TABLE c (id TEXT);",
+      },
+    },
+    withExtraClass
+  );
+
+  // B's runner, to where it stops: then it dies, its run left running.
+  let dead: HeldClient | undefined;
+  if (claimed) {
+    dead = await attempt(clientId);
+  }
+  if (started && dead !== undefined) {
+    await startClientRelease(db, staff, dead, { releaseId: b.releaseId });
+    const restore = plan?.(scripts);
+    await failing(dead);
+    restore?.();
+    await db
+      .update(clientProvisions)
+      .set({ status: "running", error: null })
+      .where(eq(clientProvisions.clientId, clientId));
+  }
+
+  if (dead !== undefined) {
+    // Its instance gone long since, as a crash leaves it: its claim may be
+    // replaced, and nothing counts it as starting.
+    await db
+      .update(clientRuns)
+      .set({ claimedAt: new Date(Date.now() - 2 * startingMs) })
+      .where(eq(clientRuns.clientId, clientId));
+  }
+  return { clientId, dead, a, b, c };
+};
+
 describe("a release's runner crashing, and another action on the client after", () => {
   useStoreSecrets({ deployer: token, tenant: `${token}-tenant-admin` });
 
   it.each(walk)(
     "$at, then $action: ends coherent, by what its Workers ran, and the dead runner writes nothing",
     async ({ action, ...point }) => {
-      const { started, claimed, plan } = point;
-      const a = await importRelease("dedicated");
-      const { clientId } = await liveClient(a);
-      const scripts = await scriptsOf(clientId);
-      // B adds a class (a Durable Object migration) and a table; C keeps
-      // both and adds a table of its own.
-      const b = await importRelease(
-        "dedicated",
-        {
-          notes: "feat(core): b",
-          core: "export default { core: 'b' };",
-          migrations: {
-            "0000_init.sql": "CREATE TABLE a (id TEXT);",
-            "0001_more.sql": "CREATE TABLE b (id TEXT);",
-          },
-        },
-        withExtraClass
-      );
-      const c = await importRelease(
-        "dedicated",
-        {
-          notes: "feat(core): c",
-          core: "export default { core: 'c' };",
-          migrations: {
-            "0000_init.sql": "CREATE TABLE a (id TEXT);",
-            "0001_more.sql": "CREATE TABLE b (id TEXT);",
-            "0002_most.sql": "CREATE TABLE c (id TEXT);",
-          },
-        },
-        withExtraClass
-      );
-
-      // B's runner, to where it stops: then it dies, its run left running.
-      let dead: HeldClient | undefined;
-      if (claimed) {
-        dead = await attempt(clientId);
-      }
-      if (started && dead !== undefined) {
-        await startClientRelease(db, staff, dead, { releaseId: b.releaseId });
-        const restore = plan?.(scripts);
-        await failing(dead);
-        restore?.();
-        await db
-          .update(clientProvisions)
-          .set({ status: "running", error: null })
-          .where(eq(clientProvisions.clientId, clientId));
-      }
+      const { started } = point;
+      const { clientId, dead, a, b, c } = await crashedAt(point);
 
       // The next action, as a new holder.
       const holder = await attempt(clientId);
@@ -2612,6 +2634,60 @@ describe("a release's runner crashing, and another action on the client after", 
             }),
         staleWrote: false,
         schemaAtLeastB: true,
+      });
+    }
+  );
+
+  it.each(crashPoints)(
+    "$at, then offboarding: unrouted at once, and neither the dead runner nor a later start serves it again",
+    async (point) => {
+      const { clientId, dead, b } = await crashedAt(point);
+      const hostname = `${clientId}.${domain}`;
+
+      const offboarded = await codeOf(
+        offboardPlacedClient(env, staff, clientId)
+      );
+      const routeAfter = await mappedRoute(env.ROUTER_HOSTS, hostname);
+      const settled = await operationOf(clientId);
+      // The dead runner, waking: holds nothing, writes and routes nothing.
+      const stale =
+        dead === undefined
+          ? "none"
+          : String(
+              await failing(dead).then((error) =>
+                error instanceof Error && "code" in error ? error.code : error
+              )
+            );
+      const later = await codeOf(
+        startClientRelease(db, staff, await attempt(clientId), {
+          releaseId: b.releaseId,
+        })
+      );
+      let staleExpected = "none";
+      if (point.started) {
+        staleExpected = "runner_replaced";
+      } else if (dead !== undefined) {
+        staleExpected = "null";
+      }
+
+      expect({
+        offboarded,
+        routeAfter,
+        stale: dead === undefined ? "none" : stale,
+        unchanged:
+          JSON.stringify(await operationOf(clientId)) ===
+          JSON.stringify(settled),
+        routeAtEnd: await mappedRoute(env.ROUTER_HOSTS, hostname),
+        later,
+      }).toStrictEqual({
+        offboarded: "started",
+        routeAfter: null,
+        // It lost its claim with the offboarding; one that never started
+        // finds its operation done, and runs nothing.
+        stale: staleExpected,
+        unchanged: true,
+        routeAtEnd: null,
+        later: "client_not_active",
       });
     }
   );
