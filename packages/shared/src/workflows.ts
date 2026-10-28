@@ -1484,6 +1484,11 @@ export interface WorkflowsApi {
     team: string | null
   ) => Promise<WorkflowSummary>;
   /**
+   * The organization's teams, by name, that a workflow's team may be set
+   * to (`setTeam`); for admins and builders, never Grasp staff.
+   */
+  teams: () => Promise<{ id: string; name: string }[]>;
+  /**
    * Dry-runs a workflow's tests at the App's current version, with the
    * parameter values set now; for the App's builders.
    */

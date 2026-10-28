@@ -4392,6 +4392,10 @@ msgstr "Fingerabdruck konnte nicht kopiert werden"
 msgid "couldn't be read"
 msgstr "konnte nicht gelesen werden"
 
+#: src/workflows/team-picker.tsx
+msgid "Couldn't change the team of {named}"
+msgstr "Das Team von {named} konnte nicht geändert werden"
+
 #: src/routes/_shell.workflows.index.tsx
 msgid "Couldn't load this domain's workflows."
 msgstr "Die Workflows dieser Domäne konnten nicht geladen werden."
@@ -8442,6 +8446,10 @@ msgstr "Noch kein Stakeholder benannt"
 msgid "No steps yet. They are drawn once someone who does this work has agreed to their interview."
 msgstr "Noch keine Schritte. Sie werden gezeichnet, sobald jemand, der diese Arbeit macht, seinem Interview zugestimmt hat."
 
+#: src/workflows/team-picker.tsx
+msgid "No team"
+msgstr "Kein Team"
+
 #: src/onboarding/organization-words.ts
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "No team lead named"
@@ -12330,6 +12338,7 @@ msgstr "Ziel-ID"
 #: src/dashboard/standard-widgets.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/pulse-people.tsx
+#: src/workflows/team-picker.tsx
 msgid "Team"
 msgstr "Team"
 
@@ -12400,6 +12409,10 @@ msgstr "Teamgröße unbekannt"
 #: src/brain/brain.ts
 msgid "Team size unknown."
 msgstr "Teamgröße unbekannt."
+
+#: src/workflows/team-picker.tsx
+msgid "Team: {name}"
+msgstr "Team: {name}"
 
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
