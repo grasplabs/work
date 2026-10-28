@@ -41,7 +41,10 @@ import {
   workflowResources,
   workflowResourceVersions,
   workflowStartReceipts,
+  runBrainEvidence,
   runChatSources,
+  runInheritedEvidence,
+  workflowResourceRuns,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { appHost, workspace } from "./durable-objects.ts";
@@ -58,6 +61,7 @@ import {
   manifestPackagesSchema,
 } from "./workflows/package-seal.ts";
 import type { ChildPlace } from "./workflows/quotas.ts";
+import { ancestorsMax } from "./workflows/resource-reads.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
 import { runEvidenceMaxRows } from "./workflows/run-evidence.ts";
@@ -1090,6 +1094,89 @@ const chatPinsOf = async (
   };
 };
 
+/**
+ * The runs whose pins a trigger's run fired by an event inherits
+ * (GRA-1093): the run that emitted it and its ancestors, as their rows
+ * say, nearest first. It may outlive them all, so what they were held to
+ * is copied as it is admitted (`causePinsAdmitted`), never read through
+ * them later. None for any other start. More than a run keeps is refused
+ * (`brain.budget_exceeded`).
+ */
+const causePinsOf = async (
+  env: Env,
+  invoker: StartInvoker
+): Promise<string[]> => {
+  if (invoker.type !== "trigger" || invoker.cause === undefined) {
+    return [];
+  }
+  const db = drizzle(env.DB);
+  const lineage: string[] = [];
+  let next: string | null = invoker.cause.runId;
+  while (next !== null) {
+    if (lineage.length > ancestorsMax || lineage.includes(next)) {
+      throw brainErrors.create("brain.budget_exceeded");
+    }
+    lineage.push(next);
+    // oxlint-disable-next-line no-await-in-loop -- one run after its parent
+    const row = await db
+      .select({ parent: workflowResourceRuns.parentRunId })
+      .from(workflowResourceRuns)
+      .where(eq(workflowResourceRuns.id, next))
+      .get();
+    next = row?.parent ?? null;
+  }
+  const ids = JSON.stringify(lineage);
+  const counted = await db.get<{ n: number }>(
+    sql`SELECT (SELECT count(*) FROM ${runBrainEvidence} WHERE ${runBrainEvidence.runId} IN (SELECT value FROM json_each(${ids})))
+      + (SELECT count(*) FROM ${runInheritedEvidence} WHERE ${runInheritedEvidence.runId} IN (SELECT value FROM json_each(${ids})))
+      + (SELECT count(*) FROM ${runChatSources} WHERE ${runChatSources.runId} IN (SELECT value FROM json_each(${ids}))) AS n`
+  );
+  if (counted.n > runEvidenceMaxRows) {
+    throw brainErrors.create("brain.budget_exceeded");
+  }
+  return lineage;
+};
+
+/**
+ * What runs `causeRuns` were held to, copied onto run `runId` once it is
+ * `admitted`: their own pins, under each as the run it came through,
+ * what they inherited as it was, and what their chats had read.
+ */
+const causePinsAdmitted = (
+  env: Env,
+  runId: string,
+  causeRuns: readonly string[],
+  admitted: SQL
+): BatchItem<"sqlite">[] => {
+  if (causeRuns.length === 0) {
+    return [];
+  }
+  const db = drizzle(env.DB);
+  const ids = JSON.stringify(causeRuns);
+  const among = (column: SQL | typeof runBrainEvidence.runId) =>
+    sql`${column} IN (SELECT value FROM json_each(${ids}))`;
+  return [
+    db
+      .insert(runInheritedEvidence)
+      .select(
+        sql`SELECT ${runId}, ${runBrainEvidence.runId}, ${workflowResourceRuns.workflowResourceId}, ${workflowResourceRuns.principalId}, ${runBrainEvidence.documentId}, ${runBrainEvidence.collectionId}, ${runBrainEvidence.version}, ${runBrainEvidence.pinned}, ${runBrainEvidence.permissionId}, ${runBrainEvidence.recalled} FROM ${runBrainEvidence} JOIN ${workflowResourceRuns} ON ${workflowResourceRuns.id} = ${runBrainEvidence.runId} WHERE ${among(runBrainEvidence.runId)} AND ${admitted}`
+      )
+      .onConflictDoNothing(),
+    db
+      .insert(runInheritedEvidence)
+      .select(
+        sql`SELECT ${runId}, inherited.via_run_id, inherited.via_workflow_id, inherited.via_principal, inherited.document_id, inherited.collection_id, inherited.version, inherited.pinned, inherited.permission_id, inherited.recalled FROM ${runInheritedEvidence} AS inherited WHERE ${among(sql`inherited.run_id`)} AND ${admitted}`
+      )
+      .onConflictDoNothing(),
+    db
+      .insert(runChatSources)
+      .select(
+        sql`SELECT ${runId}, chat.source_id, chat.workspace_id, chat.chat_id, chat.agent_id, chat.person_id FROM ${runChatSources} AS chat WHERE ${among(sql`chat.run_id`)} AND ${admitted}`
+      )
+      .onConflictDoNothing(),
+  ];
+};
+
 /** The chat a run was started from, and what it had read. */
 interface ChatPins {
   scope: {
@@ -1291,6 +1378,8 @@ export const decideWorkflowStart = async (
   // And what the chat behind it had read, copied onto its run as it is
   // admitted (`chatPinsOf`).
   const pins = await chatPinsOf(env, invoker);
+  // And what the run whose event fired it was held to (`causePinsOf`).
+  const causeRuns = await causePinsOf(env, invoker);
   // Frozen now, from what was read above: the parameter values of the
   // revision in force, and what serves each binding.
   const params = await frozenParams(env, id, version, configRevision);
@@ -1336,6 +1425,7 @@ export const decideWorkflowStart = async (
       alsoAdmitted: (admitted) => [
         ...(handed.admitted?.(admitted) ?? []),
         ...pinsAdmitted(env, handed.runId ?? runId, pins, admitted),
+        ...causePinsAdmitted(env, handed.runId ?? runId, causeRuns, admitted),
       ],
       workflowId: id,
       version,

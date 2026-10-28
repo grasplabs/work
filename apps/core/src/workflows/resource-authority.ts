@@ -170,7 +170,9 @@ export interface CandidateBinding {
 }
 
 /** Who a run's calls act as: the workflow, for its principal, as a run. */
-export const runAuthority = (run: CallingRun): Authority => ({
+export const runAuthority = (
+  run: Pick<CallingRun, "workflowId" | "principal">
+): Authority => ({
   subject: {
     type: "workflow",
     workflowId: workflowResourceIdSchema.parse(run.workflowId),
@@ -180,7 +182,9 @@ export const runAuthority = (run: CallingRun): Authority => ({
 });
 
 /** Where a run's calls work: the run itself. */
-export const runContext = (run: CallingRun): WorkContext => ({
+export const runContext = (
+  run: Pick<CallingRun, "workflowId" | "runId">
+): WorkContext => ({
   type: "workflowRun",
   workflowId: workflowResourceIdSchema.parse(run.workflowId),
   runId: runIdSchema.parse(run.runId),
