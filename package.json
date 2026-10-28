@@ -21,7 +21,6 @@
     "check:playwright-image": "node scripts/check-playwright-image.ts",
     "github:setup": "node scripts/github-setup.ts",
     "check:branch": "node scripts/check-branch-name.ts",
-    "stephen:changed": "node scripts/stephen-eval.ts changed",
     "stephen:report": "node scripts/stephen-eval.ts report",
     "build:jq-wasm": "node scripts/jq-wasm/build.ts",
     "check:secrets": "secretlint \"**/*\"",
@@ -68,7 +67,7 @@
   "devEngines": {
     "runtime": {
       "name": "node",
-      "version": "^24.11.0",
+      "version": "^24.22.0",
       "onFail": "error"
     }
   },

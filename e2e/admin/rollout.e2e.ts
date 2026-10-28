@@ -44,7 +44,7 @@ const startRollout = async (page: Page, releaseId: string): Promise<void> => {
   await expect(page.getByLabel("Release")).toHaveValue(releaseId);
   await expect(
     page.getByText(
-      "Only ring 0 has active clients, so this reaches only our own deployments."
+      "Only Alpha has active clients, so this reaches only our own deployments."
     )
   ).toBeVisible();
   await page.getByRole("button", { name: "Start rollout" }).click();
@@ -86,7 +86,7 @@ const checkDrift = async (page: Page, clientId: string) => {
   }));
 };
 
-test("staff roll a release out to ring 0 and watch it go and finish", async ({
+test("staff roll a release out to Alpha and watch it go and finish", async ({
   page,
   request,
 }) => {
@@ -94,9 +94,10 @@ test("staff roll a release out to ring 0 and watch it go and finish", async ({
 
   await startRollout(page, releaseId);
 
-  await expect(page.getByText("Rolling out to ring 0")).toBeVisible();
+  await expect(page.getByText("Rolling out to Alpha")).toBeVisible();
+  // Named by the release's version, not its id.
   await expect(
-    page.getByRole("heading", { name: `Rollout of ${releaseId}` })
+    page.getByRole("heading", { name: /^Rollout of v\d+\.\d+$/u })
   ).toBeVisible();
   await expect(targetRow(page, clientId)).toBeVisible();
   // The page follows the run on its own, without a reload: the rollout's

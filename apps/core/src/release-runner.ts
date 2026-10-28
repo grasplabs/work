@@ -10,7 +10,11 @@ import {
   appErrorMessageMaxLength,
   operationResultMaxBytes,
 } from "@grasp-os/shared/operation-limits";
-import { quietLoader } from "@grasp-os/shared/quiet-loader";
+import {
+  captureEntrypoint,
+  captureMethod,
+} from "@grasp-os/shared/quiet-isolate";
+import { capturedCode, quietLoader } from "@grasp-os/shared/quiet-loader";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import {
   isolateArgumentDepth,
@@ -32,6 +36,7 @@ import {
   capability,
   runInSession,
   sessionEndedError,
+  consoleSinkOf,
 } from "./sandbox-session.ts";
 import type { ConsoleLine, NestedRun, SessionCall } from "./sandbox-session.ts";
 import { sandbox } from "./sandbox.ts";
@@ -163,6 +168,19 @@ export class Run extends WorkerEntrypoint {
 
 interface RunEntrypoint extends Rpc.WorkerEntrypointBranded {
   run: (path: string, args: Json, remote: RpcTarget) => Promise<Settled>;
+}
+
+/**
+ * The capture module's entrypoint (@grasp-os/shared/quiet-isolate): runs
+ * `Run`'s `run`, then hands what it wrote to `sink`.
+ */
+interface CaptureEntrypoint extends Rpc.WorkerEntrypointBranded {
+  [captureMethod]: (
+    entrypoint: "Run",
+    method: "run",
+    args: [string, Json, RpcTarget],
+    sink: (lines: unknown) => Promise<void>
+  ) => Promise<Settled>;
 }
 
 /** What the isolate answers, before core reads it: data, untrusted. */
@@ -424,6 +442,51 @@ const tailLines = async (
 };
 
 /**
+ * Runs `path` with `args` in a fresh isolate of core's own Loader, loaded
+ * with `modules`, what it writes with `console` going to `tail`, if given.
+ * On Cloudflare the Loader hands it there itself, and prints nothing.
+ * Plain workerd would print it to the process's logs too, the deployment's
+ * (GRA-919): there the isolate records it instead, printing nothing, and
+ * hands it over once the call settled, read as the sandbox host's session
+ * reads it (`consoleSinkOf`: bounded again, as it comes from App code).
+ */
+const inLoader = async (
+  env: Pick<Env, "LOADER" | "RUNTIME_PROFILE">,
+  tail: Fetcher | undefined,
+  modules: WorkerLoaderWorkerCode["modules"],
+  path: string,
+  args: Json,
+  channel: RpcTarget
+): Promise<Settled> => {
+  const code = {
+    ...sandbox,
+    mainModule: runModule,
+    modules,
+    env: {},
+    ...(tail === undefined ? {} : { tails: [tail] }),
+  };
+  const loader = quietLoader(env.LOADER);
+  if (tail === undefined || env.RUNTIME_PROFILE === "cloudflare") {
+    return await loader
+      .get(null, () => code)
+      .getEntrypoint<RunEntrypoint>("Run")
+      .run(path, args, channel);
+  }
+  const sink = consoleSinkOf(async (lines) => {
+    await tailLines(tail, lines);
+  });
+  const captured = loader
+    .get(null, () => capturedCode(code))
+    .getEntrypoint<CaptureEntrypoint>(captureEntrypoint);
+  return await captured[captureMethod](
+    "Run",
+    "run",
+    [path, args, channel],
+    sink
+  );
+};
+
+/**
  * The runner of `release`: each call in a fresh isolate of its own (the
  * loader names none, so none is shared or kept), loaded with the release's
  * verified modules and the SDK modules sealed with it (never the SDK the
@@ -468,16 +531,7 @@ export const releaseRunner =
     const answer = settledSchema.safeParse(
       host === undefined
         ? await Promise.race([
-            quietLoader(env.LOADER)
-              .get(null, () => ({
-                ...sandbox,
-                mainModule: runModule,
-                modules,
-                env: {},
-                ...(tailOf === undefined ? {} : { tails: [tailOf(path)] }),
-              }))
-              .getEntrypoint<RunEntrypoint>("Run")
-              .run(path, args, isolateChannel),
+            inLoader(env, tailOf?.(path), modules, path, args, isolateChannel),
             // Given up on: settled at once, its isolate left to the
             // runtime, as nothing of core's is held for it.
             ...(signal === undefined ? [] : [whenAborted(signal)]),

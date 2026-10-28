@@ -74,14 +74,14 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
   await expect(
     page.getByRole("region", { name: "Waiting elsewhere" })
   ).toHaveCount(0);
-  // The board is there, with nothing on it yet: core counts no hours,
-  // goals or teams' work, and there are no workflows in their columns.
+  // The board is there, with nothing of theirs on it yet: core counts no
+  // hours or teams' work, and there are no workflows in their columns. The
+  // board's goals are the company's: another journey's may be on it
+  // (e2e/board-goals.e2e.ts).
   await expect(
     page.getByRole("region", { name: "Return a month" })
   ).toContainText("No workflow with counted hours here yet.");
-  await expect(page.getByRole("region", { name: "Board goals" })).toContainText(
-    "No goals yet."
-  );
+  await expect(page.getByRole("region", { name: "Board goals" })).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Teams with AI" })
   ).toContainText("No teams yet.");
@@ -235,10 +235,16 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   ];
   await expect(titles).toHaveText(begun);
   await expect(reset).toHaveCount(0);
-  // The empty card is always there, last; with every widget on the board
-  // there is nothing to add from it.
+  // The empty card is always there, last, to ask Grasp for a widget; with
+  // every one of Grasp's own on the board there is none to put back.
   const add = page.getByRole("button", { name: "Add a widget" });
-  await expect(add).toBeDisabled();
+  await add.click();
+  const card = page.getByRole("dialog", { name: "Add a widget" });
+  await expect(
+    card.getByRole("textbox", { name: "Ask Grasp for a widget" })
+  ).toBeVisible();
+  await expect(card.getByText("Put one back")).toHaveCount(0);
+  await page.keyboard.press("Escape");
 
   // Taken off, it stays off.
   await page
@@ -267,7 +273,6 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     .getByRole("button", { name: "Domains" })
     .click();
   await expect(titles).toHaveText([...without, "Domains"]);
-  await expect(add).toBeDisabled();
   await expect
     .poll(saved)
     .toStrictEqual([

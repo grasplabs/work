@@ -576,6 +576,14 @@ const sessionShape = {
        * Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("brain_upkeep") }),
+      /**
+       * Core's own making of a person's dashboard widget
+       * (dashboard-widgets.ts): it carries the names of their engines and
+       * workflows, judged as onboarding's is, and is made for them, on
+       * their budget, by the trigger that names them. Only core's own code
+       * makes such a call.
+       */
+      z.strictObject({ platform: z.literal("dashboard_widgets") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,

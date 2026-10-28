@@ -235,7 +235,6 @@ describe("the admin's frame", () => {
       "Integrations to build",
       "Platform",
       "Ask Grasp",
-      "Sources",
       "Stephen Lab",
       "Organizations",
     ].map((text) => sidebar.indexOf(text));
@@ -391,61 +390,6 @@ describe("the admin's frame", () => {
       nothingToBuild: false,
       companyAsked: true,
       companyWords: true,
-    });
-  });
-
-  it("lays out the sources: the admin's own tools with no address until the admin serves them, today's digest, and every system to connect in order", async () => {
-    const acme = await liveClient();
-    acme.account.admin = readySnapshot("Acme");
-
-    const { status, html } = await page("/sources");
-    const text = html.replaceAll(tags, " ").replaceAll(spaces, " ");
-    const parts = [
-      ">Sources</h1>",
-      ">Grasp admin</h2>",
-      ">The morning digest</h2>",
-      ">To connect, in this order</h2>",
-    ].map((part) => html.indexOf(part));
-    // The systems still to connect, in the order they come.
-    const order = [
-      "Grasp platform",
-      "Rooms",
-      "Attio",
-      "Stripe",
-      "Composio",
-      "Discord",
-    ].map((name) => text.indexOf(`${name} To come`));
-
-    expect({
-      status,
-      partsInOrder:
-        parts.every((at) => at >= 0) &&
-        parts.toSorted((a, b) => a - b).every((at, i) => at === parts[i]),
-      systemsInOrder:
-        order.every((at) => at >= 0) &&
-        order.toSorted((a, b) => a - b).every((at, i) => at === order[i]),
-      // Not served yet (GRA-656): nothing to copy, and its tools listed.
-      address: html.includes("/api/admin/mcp"),
-      ownToCome: html
-        .slice(
-          html.indexOf(">Grasp admin</h2>"),
-          html.indexOf(">The morning digest</h2>")
-        )
-        .includes(">To come</span>"),
-      tools: html.includes(">daily_digest</code>"),
-      // The digest is today's, from the organizations that answered.
-      digest: text.includes("Grasp, ") && text.includes("1 organization"),
-      // Rooms is read through its service route, so no MCP tools of its own.
-      roomsTools: html.includes(">get_signature_receipt</code>"),
-    }).toStrictEqual({
-      status: 200,
-      partsInOrder: true,
-      systemsInOrder: true,
-      address: false,
-      ownToCome: true,
-      tools: true,
-      digest: true,
-      roomsTools: false,
     });
   });
 
@@ -1270,43 +1214,70 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("shows an organization whose core didn't answer by its name and why, with no sections", async () => {
+  it("opens an organization whose core didn't answer with its column of sections, each saying why nothing of it is read, and its Setup", async () => {
     const down = await liveClient();
     down.account.unhealthy = 1000;
     const waiting = await recordClient("provisioning");
 
     const downPage = await page(`/organizations/${down.clientId}`);
     const downMembers = await page(`/organizations/${down.clientId}/members`);
+    const downSetup = await page(`/organizations/${down.clientId}/setup`);
     const waitingPage = await page(`/organizations/${waiting.clientId}`);
-    /** What the page says of `name`: its title, why, and whether any section is there. */
+    /** What the page says of `name`: its title, its column, and whether anything of its core is there. */
     const pageOf = (
       { status, html }: { status: number; html: string },
-      name: string
+      name: string,
+      title = name
     ) => ({
       status,
-      title: html.includes(`${name}</h1>`),
-      column: columnOf(html, name) !== "",
-      sections: [
-        "Members</h1>",
-        "Needs Grasp",
-        "% known",
-        "From the company",
-      ].some((text) => html.includes(text)),
+      title: html.includes(`${title}</h1>`),
+      column:
+        columnOf(html, name).includes("Members") &&
+        columnOf(html, name).includes("Not read now"),
+      fromCore: ["Needs Grasp", "% known", "From the company"].some((text) =>
+        html.includes(text)
+      ),
+      toSetup: html.includes(
+        `href="/organizations/${name === down.name ? down.clientId : waiting.clientId}/setup"`
+      ),
     });
 
     expect({
       down: pageOf(downPage, down.name),
       downWhy: downPage.html.includes("Its Grasp can’t be read now:"),
-      downMembers: pageOf(downMembers, down.name),
+      downMembers: pageOf(downMembers, down.name, "Members"),
+      membersWhy: downMembers.html.includes("Its Grasp can’t be read now:"),
+      // Its Setup is the admin's own record, read whatever its core does.
+      setup: downSetup.html.includes("How it stands"),
       waiting: pageOf(waitingPage, waiting.name),
       waitingWhy: waitingPage.html.includes(
         "Its Grasp isn’t deployed yet, so there is nothing of it to read."
       ),
     }).toStrictEqual({
-      down: { status: 200, title: true, column: false, sections: false },
+      down: {
+        status: 200,
+        title: true,
+        column: true,
+        fromCore: false,
+        toSetup: true,
+      },
       downWhy: true,
-      downMembers: { status: 200, title: true, column: false, sections: false },
-      waiting: { status: 200, title: true, column: false, sections: false },
+      downMembers: {
+        status: 200,
+        title: true,
+        column: true,
+        fromCore: false,
+        toSetup: true,
+      },
+      membersWhy: true,
+      setup: true,
+      waiting: {
+        status: 200,
+        title: true,
+        column: true,
+        fromCore: false,
+        toSetup: true,
+      },
       waitingWhy: true,
     });
   });

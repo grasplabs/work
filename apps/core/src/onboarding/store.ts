@@ -55,6 +55,7 @@ import {
   setupChoicesSchema,
 } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
+import type { OnboardingContext } from "@grasp-os/shared/onboarding-context";
 import type {
   DocumentReading,
   OnboardingDocument,
@@ -172,6 +173,7 @@ import { storedDocumentReadingSchema } from "./document-reading.ts";
 import { checkedSupport } from "./drawing-support.ts";
 import type { Support } from "./drawing-support.ts";
 import {
+  contextOf,
   kickoffBrief,
   storedAnswersSchema,
   storedReadingSchema,
@@ -501,7 +503,6 @@ const agreedSchema = z.record(z.string(), z.string());
 const agreedOf = (stored: string): Record<string, string> =>
   agreedSchema.safeParse(JSON.parse(stored)).data ?? {};
 
-/** A drawing as the store keeps it; null when there is none. */
 /**
  * Someone's admission as SQL, as `#interviewsOf` reads it: their
  * interview's start and how often anything they approved stopped counting,
@@ -511,6 +512,7 @@ const agreedOf = (stored: string): Record<string, string> =>
 const admissionSql = (person: string): SQL =>
   sql`(SELECT CASE WHEN agreed_at IS NULL THEN NULL ELSE coalesce(started_at, '') || '|' || revocations END FROM interview_states WHERE person = ${person})`;
 
+/** A drawing as the store keeps it; null when there is none. */
 const drawingOf = (stored: string | null): DrawnWork | null =>
   stored === null
     ? null
@@ -865,6 +867,7 @@ export class Onboarding extends DurableObject<Env> {
       agreed: agreementsIn(row.agreements),
       paused: row.pausedAt !== null,
       sponsor: this.#sponsor(),
+      context: this.#context(),
       waiting: roster === null ? 0 : this.#waiting(roster),
     };
   }
@@ -879,6 +882,20 @@ export class Onboarding extends DurableObject<Env> {
         (unconfirmed.people.has(person.id) ||
           unconfirmed.teams.has(person.team))
     ).length;
+  }
+
+  /** What the admin's onboarding knows of the company from the kickoff: read without its transcript. */
+  #context(): OnboardingContext {
+    const [row] = this.#db
+      .select({ reading: kickoff.reading, answers: kickoff.answers })
+      .from(kickoff)
+      .all();
+    return row === undefined
+      ? contextOf(null, {})
+      : contextOf(
+          storedReadingSchema.parse(JSON.parse(row.reading)),
+          storedAnswersSchema.parse(JSON.parse(row.answers))
+        );
   }
 
   /** The sponsor's first name, when the kickoff named them: read without its transcript. */

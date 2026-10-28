@@ -414,6 +414,54 @@ describe("App roles", { timeout: 60_000 }, () => {
     );
   });
 
+  it("say each person's own role in an App as they open or list it: by whom it is shared with, capped by their role in the organization", async () => {
+    const admin = await personApi("admin");
+    const [owner, sharedAsUser, sharedAsBuilder] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const memberOnly = await personApi("user");
+    const team = await newTeam(admin, [memberOnly]);
+    const app = await newApp(owner);
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: sharedAsUser.userId,
+      role: "user",
+    });
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: sharedAsBuilder.userId,
+      role: "builder",
+    });
+    // Builders as a team, yet one of them can't build in the organization.
+    await owner.api.apps.members.add(app, {
+      type: "team",
+      id: team,
+      role: "builder",
+    });
+    const roles = async ({ api }: Person) => {
+      const [opened, listed] = await Promise.all([
+        api.apps.get(app),
+        api.apps.list(),
+      ]);
+      return [opened.role, listed.find(({ id }) => id === app)?.role];
+    };
+
+    await expect(
+      Promise.all(
+        [owner, sharedAsUser, sharedAsBuilder, memberOnly, admin].map(roles)
+      )
+    ).resolves.toStrictEqual([
+      ["builder", "builder"],
+      // A builder in the organization, but only a user of this App.
+      ["user", "user"],
+      ["builder", "builder"],
+      ["user", "user"],
+      ["builder", "builder"],
+    ]);
+  });
+
   it("never let someone build whose role in the organization doesn't", async () => {
     const admin = await personApi("admin");
     const owner = await personApi("builder");

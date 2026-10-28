@@ -1,5 +1,5 @@
 import { brainErrors } from "@grasp-os/brain/contract";
-import { memoriesPublish } from "@grasp-os/brain/memories";
+import { memoriesPublish, turnMemoryLimits } from "@grasp-os/brain/memories";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -518,6 +518,83 @@ describe("shared memory over time", setUpTime, () => {
       afterCas: false,
       forAda: true,
       afterOutsiders: false,
+    });
+  });
+});
+
+describe("a record whose sources a reader loses", setUpTime, () => {
+  // GRA-1123 (GRA-309's S3; the threat model is on the issue): a record
+  // rests on what everyone reading it may read now, decided in the query
+  // itself. One resting on a collection someone has lost is gone from
+  // their next recall and chat, at once, and takes no place among those
+  // they may still read, and their next pack is of a new access revision.
+  it("leaves it out of the next recall and chat context at once, in the query, so newer ones they can't read never crowd out an older one they can", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ada = await signedInApi(idp, "user");
+    const ben = await signedInApi(idp, "user");
+    const team = await newTeam(admin, [ada, ben]);
+    const readers = await newTeam(admin, [ada, ben]);
+    const cited = await documentIn(admin, {
+      name: `Readers ${unique()}`,
+      access: "teams",
+      teams: [readers],
+    });
+    const u = unique();
+    await ada.api.knowledge.memoriesPublish(
+      { scope: "team", scopeId: team, kind: "fact", text: `Plain ${u}` },
+      { idempotencyKey: key() }
+    );
+    // Newer than it, more of them than a chat's memory holds.
+    for (let index = 0; index <= turnMemoryLimits.records; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one record after another, newest last
+      await ada.api.knowledge.memoriesPublish(
+        {
+          scope: "team",
+          scopeId: team,
+          kind: "fact",
+          text: `Rests ${index} ${u}`,
+          sourceRefs: [cited],
+        },
+        { idempotencyKey: key() }
+      );
+    }
+    const recalled = async (person: Person) => {
+      const pack = await person.api.knowledge.recall({ query: u });
+      return {
+        revision: pack.accessRevision,
+        resting: pack.items.filter(
+          ({ statement }) =>
+            statement.startsWith("Rests ") && statement.endsWith(u)
+        ).length,
+      };
+    };
+    const before = await recalled(ben);
+    // Ben leaves the readers of what the newer records rest on.
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId: readers,
+      userId: ben.userId,
+    });
+    const after = await recalled(ben);
+    const context = await memoryTextOf(ben);
+    const forAda = await memoryTextOf(ada);
+
+    expect({
+      before: before.resting > 0,
+      after: after.resting,
+      newRevision: after.revision !== before.revision,
+      context: {
+        plain: context.includes(`Plain ${u}`),
+        resting: Array.from({ length: turnMemoryLimits.records + 1 }).some(
+          (_each, index) => context.includes(`Rests ${index} ${u}`)
+        ),
+      },
+      forAda: forAda.includes(`Rests ${turnMemoryLimits.records} ${u}`),
+    }).toStrictEqual({
+      before: true,
+      after: 0,
+      newRevision: true,
+      context: { plain: true, resting: false },
+      forAda: true,
     });
   });
 });

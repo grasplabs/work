@@ -8,6 +8,7 @@ import type {
   DocumentSourceId,
   SetupChoices,
 } from "@grasp-os/shared/onboarding-choices";
+import type { OnboardingContext } from "@grasp-os/shared/onboarding-context";
 import type { KnownPart } from "@grasp-os/shared/onboarding-gate";
 
 import type { ShapeKey } from "../brain/dot-shapes.ts";
@@ -92,17 +93,51 @@ export const documentSources: readonly DocumentSource[] = [
   },
 ];
 
-/** The places in the order to offer them: those of the company's sign-in first, the rest as they are. */
+/** What the kickoff named of where the company works: its suites and its places. */
+export type Named = Pick<OnboardingContext, "suites" | "sources">;
+
+/** Nothing named: everything is offered, as for anyone. */
+const namedNothing: Named = { suites: [], sources: [] };
+
+/**
+ * The suites to offer of those `offered`, as the kickoff named them (a
+ * company that works in Google isn't offered Microsoft): those it named,
+ * when it named any of them; all of them otherwise.
+ */
+export const suitesFor = <Suite extends OAuthProvider>(
+  offered: readonly Suite[],
+  named: Named = namedNothing
+): Suite[] => {
+  const kept = offered.filter((suite) => named.suites.includes(suite));
+  return kept.length > 0 ? kept : [...offered];
+};
+
+/**
+ * The places in the order to offer them: those the kickoff named first,
+ * then those of the company's sign-in, then the rest. Where the kickoff
+ * named the suites the company works in, another suite's places aren't
+ * offered, unless already `noted`.
+ */
 export const sourcesFor = (
-  signIn: readonly OAuthProvider[]
-): DocumentSource[] => [
-  ...documentSources.filter(
-    ({ suite }) => suite !== null && signIn.includes(suite)
-  ),
-  ...documentSources.filter(
-    ({ suite }) => suite === null || !signIn.includes(suite)
-  ),
-];
+  signIn: readonly OAuthProvider[],
+  named: Named = namedNothing,
+  noted: readonly DocumentSourceId[] = []
+): DocumentSource[] => {
+  const offered = documentSources.filter(
+    ({ id, suite }) =>
+      named.suites.length === 0 ||
+      suite === null ||
+      named.suites.includes(suite) ||
+      noted.includes(id)
+  );
+  const rank = ({ id, suite }: DocumentSource): number => {
+    if (named.sources.includes(id)) {
+      return 0;
+    }
+    return suite !== null && signIn.includes(suite) ? 1 : 2;
+  };
+  return offered.toSorted((one, other) => rank(one) - rank(other));
+};
 
 /** How long the interviews run unless planned otherwise, in days. */
 export const listenDays = 14;
@@ -301,6 +336,18 @@ export const reachedOf = (
     Math.max(stored, plan === null ? 0 : stepIndex("listening")),
     steps.length - 1
   );
+
+/**
+ * Where the admin can go from step `index`, having been as far as
+ * `reached`: back a step always, on a step only as far as they have been,
+ * and to any step up to there. The way back, the way on, the dots and the
+ * arrow keys all go by it.
+ */
+export const waysFrom = (index: number, reached: number) => ({
+  back: steps[index - 1],
+  on: index < reached ? steps[index + 1] : undefined,
+  open: (at: number) => at <= reached,
+});
 
 /**
  * What only the admin can settle, by id (the prototype's `reviewItems`):

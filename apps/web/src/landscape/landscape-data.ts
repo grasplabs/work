@@ -1,3 +1,4 @@
+import type { PolicyBook } from "@grasp-os/shared/policies";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 import type { HeldPermissions } from "../connections/connection-list.tsx";
@@ -6,6 +7,7 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Loaded } from "../load-from-core.tsx";
+import { readPolicyBook } from "../policies/policies-data.ts";
 import type { AppEngine, LandscapeApp } from "./landscape.ts";
 
 // Where the Landscape's apps come from. The prototype's are V1 demo
@@ -95,6 +97,8 @@ export const landscapeAppsOf = (
 /** What the Landscape's pages read: the apps, or why there are none. */
 export interface LandscapeData {
   apps: Loaded<LandscapeApp[]>;
+  /** The company's policies, whose rules mark the apps. */
+  book: Loaded<PolicyBook>;
 }
 
 /**
@@ -106,13 +110,12 @@ export const loadLandscape = async (
   core: CoreConnection,
   identity: Identity
 ): Promise<LandscapeData> => {
-  const { catalog, connections, held } = await loadIntegrations(
-    core,
-    identity,
-    { held: true }
-  );
+  const [{ catalog, connections, held }, book] = await Promise.all([
+    loadIntegrations(core, identity, { held: true }),
+    readPolicyBook(core),
+  ]);
   if (connections.state !== "ready") {
-    return { apps: connections };
+    return { apps: connections, book };
   }
   const integrations = integrationsOf(
     catalog.state === "ready" ? catalog.data.entries : [],
@@ -126,5 +129,6 @@ export const loadLandscape = async (
         held?.state === "ready" ? held.data : undefined
       ),
     },
+    book,
   };
 };

@@ -399,7 +399,7 @@ export const PackagesCard = ({
   // An App or a workflow, in one queue: what the packages are for says
   // which, and only an App has a page to go to.
   const engine = request.subject.name;
-  const kind = request.subject.type === "workflow" ? t`Workflow` : t`App`;
+  const kind = request.subject.type === "workflow" ? t`Workflow` : t`Domain`;
   const who = t`Packages for ${ph({ domain: engine })}`;
   // Read again once it is decided. A refused decision stays, with why:
   // reading again would take the card, and the reason, away.

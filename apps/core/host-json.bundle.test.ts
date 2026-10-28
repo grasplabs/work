@@ -165,10 +165,6 @@ describe("the host's JSON module, bundled as Wrangler bundles core", () => {
     );
     await run(
       [
-        // Wrangler's launcher passes Node's flags on to the CLI it
-        // spawns: without Sparkplug, Node 24's GC segfault (vite.config.ts)
-        // can't kill it. One that died anyway fails the setup.
-        "--no-sparkplug",
         wrangler,
         "deploy",
         "--dry-run",

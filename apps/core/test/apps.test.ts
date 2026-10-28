@@ -345,7 +345,11 @@ describe("App code", { timeout: 60_000 }, () => {
       proposed: { currentVersion: 1, pendingVersion: 2 },
       approved: { currentVersion: 2, pendingVersion: null },
     });
-    await expect(apps.get(app.id)).resolves.toStrictEqual(approved);
+    // As its builder reads it: with their own role in it.
+    await expect(apps.get(app.id)).resolves.toStrictEqual({
+      ...approved,
+      role: "builder",
+    });
 
     // Rolling back is making an earlier version current.
     const rolledBack = await apps.versions.setCurrent(app.id, 1);

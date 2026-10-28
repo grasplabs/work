@@ -35,6 +35,7 @@ import {
 } from "../admin/new-organization.ts";
 import type { StartingPoint } from "../admin/new-organization.ts";
 import { AdminPage } from "../admin/page.tsx";
+import { ringChoices, ringWords } from "../admin/platform-parts.tsx";
 import { SettingUpNow } from "../admin/setup-actions.tsx";
 import type { Refresh } from "../admin/setup-actions.tsx";
 import { formatDate } from "../admin/words.ts";
@@ -49,6 +50,7 @@ import {
 } from "../provision/functions.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { useProvisionAction } from "../provision/use-action.ts";
+import { releaseName } from "../releases/version.ts";
 import { InvalidFieldError } from "../use-action.ts";
 
 /** Client `clientId`'s provisioning; null for none, or an id that can't be one. */
@@ -449,9 +451,7 @@ const NewOrganization = () => {
                 >
                   {releases.map((release) => (
                     <NativeSelectOption key={release.id} value={release.id}>
-                      {release.notes === ""
-                        ? release.id
-                        : `${release.id} · ${release.notes}`}
+                      {releaseName(release)}
                     </NativeSelectOption>
                   ))}
                 </NativeSelect>
@@ -459,16 +459,21 @@ const NewOrganization = () => {
               </Field>
               <Field>
                 <FieldLabel htmlFor="org-ring">Ring</FieldLabel>
-                <Input
-                  defaultValue={1}
+                <NativeSelect
+                  className="w-full"
+                  defaultValue="1"
                   id="org-ring"
-                  min={0}
                   name="ring"
-                  required
-                  type="number"
-                />
+                >
+                  {ringChoices(0).map((ring) => (
+                    <NativeSelectOption key={ring} value={String(ring)}>
+                      {ringWords(ring)}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
                 <FieldDescription>
-                  When rollouts reach it: ring 0 first.
+                  When rollouts reach it: Alpha (our own deployments) first,
+                  then Beta, then Production.
                 </FieldDescription>
               </Field>
               <Field>
