@@ -9,6 +9,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
+  decisionPollStepPrefix,
   executionErrors,
   maxAttemptTimeoutMs,
   stepIdempotencyKey,
@@ -2592,6 +2593,12 @@ export class ResourceRunHost
         })
       );
     let seen = await look(`${stepName}:decision:reached`);
+    // Its waits and the looks after them are core's steps, counted against
+    // none of the run's: a decision is one step however long it waits, and
+    // how often it looks (a test's run every second) costs the run nothing.
+    // Under core's prefix, which no step of the run's own can take.
+    const pollStep = (part: "wait" | "woken", round: number) =>
+      `${decisionPollStepPrefix}${stepName}:${part}:${round}`;
     for (let round = 0; !seen.answered && seen.at < deadline; round += 1) {
       // A test's run looks again every so often as well: its answer keeps
       // no wake owed (fixture-decisions.ts), so one lost on the way is
@@ -2601,7 +2608,7 @@ export class ResourceRunHost
         : deadline - seen.at;
       try {
         // oxlint-disable-next-line no-await-in-loop -- one wait at a time
-        await this.#step.waitForEvent(`${stepName}:decision:wait:${round}`, {
+        await this.#step.waitForEvent(pollStep("wait", round), {
           type: decisionEventType(decision),
           timeout,
         });
@@ -2614,7 +2621,7 @@ export class ResourceRunHost
         }
       }
       // oxlint-disable-next-line no-await-in-loop -- one look per wake
-      seen = await look(`${stepName}:decision:woken:${round}`);
+      seen = await look(pollStep("woken", round));
     }
     // Recorded: an answer after it can't change what a replay hears.
     return outcomeSchema.parse(

@@ -113,7 +113,8 @@ const loopTasks = [
 const definitionOf = (
   name: string,
   contract: string,
-  tasks: unknown[]
+  tasks: unknown[],
+  maxSteps?: number
 ): string =>
   JSON.stringify({
     document: {
@@ -134,6 +135,7 @@ const definitionOf = (
             },
           },
           bindings: { invoiceApproval: { kind: "decision", contract } },
+          ...(maxSteps === undefined ? {} : { limits: { maxSteps } }),
         },
       },
     },
@@ -209,7 +211,12 @@ const invoicesApp = async (
   {
     tasks = approvalTasks(),
     tests = {},
-  }: { tasks?: unknown[]; tests?: Record<string, string> } = {}
+    maxSteps,
+  }: {
+    tasks?: unknown[];
+    tests?: Record<string, string>;
+    maxSteps?: number;
+  } = {}
 ) => {
   const admin = await person("admin");
   const builder = await person("builder");
@@ -228,7 +235,7 @@ const invoicesApp = async (
     `approve-${unique()}`
   );
   await publishWorkflowVersion(env, builder, workflow.id, {
-    definition: definitionOf(workflow.name, contract, tasks),
+    definition: definitionOf(workflow.name, contract, tasks, maxSteps),
     basedOn: null,
   });
   await bindWorkflowToApp(env, builder, workflow.id, {
@@ -611,6 +618,23 @@ describe(
             decidedBy: "approver",
           },
         ],
+      });
+      await session.close();
+    });
+
+    it("spends none of its run's steps however long it waits for its answer", async () => {
+      // As many steps as the workflow takes when answered at once.
+      const app = await invoicesApp({}, { maxSteps: 6 });
+      const { session, run, runId } = await runningIn(app);
+      await asked(runId);
+      // Some seconds of looking, every second, before the answer comes.
+      await scheduler.wait(5000);
+      const answered = await respond(session, "approver", run, {
+        approved: true,
+      });
+      expect({ answered, end: await endOf(session, run) }).toStrictEqual({
+        answered: "ok",
+        end: { status: "completed", output: { status: "approved" } },
       });
       await session.close();
     });

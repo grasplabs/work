@@ -121,7 +121,7 @@ describe("the waits a screen is shown of a run", () => {
       shownWaits(
         [
           pendingOf(9, "task:send", "retry"),
-          pendingOf(10, "task:ask:decision:woken:0", "retry"),
+          pendingOf(10, "$grasp:decision:task:ask:woken:0", "retry"),
           pendingOf(11, `$grasp:wait:${key}:busy:1`),
           pendingOf(12, `$grasp:wait:${key}:busy:1:run`, "retry"),
         ],
@@ -144,7 +144,7 @@ describe("the waits a screen is shown of a run", () => {
         [
           pendingOf(
             13,
-            "task:ask:decision:wait:0",
+            "$grasp:decision:task:ask:wait:0",
             "waitForEvent",
             decisionEventType(decision)
           ),
@@ -155,7 +155,7 @@ describe("the waits a screen is shown of a run", () => {
         [
           pendingOf(
             13,
-            "task:ask:decision:wait:0",
+            "$grasp:decision:task:ask:wait:0",
             "waitForEvent",
             decisionEventType(decision)
           ),
