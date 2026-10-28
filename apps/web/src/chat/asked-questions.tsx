@@ -145,7 +145,9 @@ export const AskedQuestions = ({
   return (
     <section
       aria-label={t`Grasp asks`}
-      className="bg-card flex flex-col gap-3 rounded-xl border p-4 text-sm"
+      // Bounded, so a question with long choices fits the dock's frame:
+      // the question and its choices scroll, Send stays in reach.
+      className="bg-card flex max-h-96 min-h-0 flex-col gap-3 rounded-xl border p-4 text-sm"
     >
       <div className="text-muted-foreground flex items-center gap-2 text-xs">
         <MessageCircleQuestionIcon aria-hidden="true" className="size-3.5" />
@@ -157,41 +159,43 @@ export const AskedQuestions = ({
           </Trans>
         )}
       </div>
-      <p className="font-medium" id={`${ids}-question`}>
-        {question.question}
-      </p>
-      <RadioGroup
-        aria-labelledby={`${ids}-question`}
-        onValueChange={(value: unknown) => {
-          if (typeof value === "string") {
-            setAnswer({ ...answer, choice: value });
-          }
-        }}
-        value={answer.choice ?? null}
-      >
-        {question.choices.map((choice, index) => (
-          <div className="flex items-center gap-2" key={choice}>
-            <RadioGroupItem id={`${ids}-${step}-${index}`} value={choice} />
-            <Label htmlFor={`${ids}-${step}-${index}`}>{choice}</Label>
-          </div>
-        ))}
-        <div className="flex items-center gap-2">
-          <RadioGroupItem id={`${ids}-${step}-other`} value={other} />
-          <Label htmlFor={`${ids}-${step}-other`}>
-            <Trans>Something else</Trans>
-          </Label>
-        </div>
-      </RadioGroup>
-      {answer.choice === other ? (
-        <Input
-          aria-label={t`Your answer`}
-          autoFocus
-          onChange={(event) => {
-            setAnswer({ ...answer, own: event.target.value });
+      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+        <p className="font-medium" id={`${ids}-question`}>
+          {question.question}
+        </p>
+        <RadioGroup
+          aria-labelledby={`${ids}-question`}
+          onValueChange={(value: unknown) => {
+            if (typeof value === "string") {
+              setAnswer({ ...answer, choice: value });
+            }
           }}
-          value={answer.own}
-        />
-      ) : null}
+          value={answer.choice ?? null}
+        >
+          {question.choices.map((choice, index) => (
+            <div className="flex items-center gap-2" key={choice}>
+              <RadioGroupItem id={`${ids}-${step}-${index}`} value={choice} />
+              <Label htmlFor={`${ids}-${step}-${index}`}>{choice}</Label>
+            </div>
+          ))}
+          <div className="flex items-center gap-2">
+            <RadioGroupItem id={`${ids}-${step}-other`} value={other} />
+            <Label htmlFor={`${ids}-${step}-other`}>
+              <Trans>Something else</Trans>
+            </Label>
+          </div>
+        </RadioGroup>
+        {answer.choice === other ? (
+          <Input
+            aria-label={t`Your answer`}
+            autoFocus
+            onChange={(event) => {
+              setAnswer({ ...answer, own: event.target.value });
+            }}
+            value={answer.own}
+          />
+        ) : null}
+      </div>
       <ErrorText>{failure}</ErrorText>
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={onType} size="sm" variant="ghost">
