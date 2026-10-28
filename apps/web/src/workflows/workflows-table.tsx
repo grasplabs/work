@@ -60,8 +60,8 @@ const LastRun = ({ workflow }: { workflow: WorkflowSummary }) =>
   );
 
 /**
- * A count of a workflow's runs, linking to them: an engine's workflow's on
- * the Runs tab, an independent one's on its own page, which lists them.
+ * A count of a workflow's runs, linking to them on the Runs tab: an
+ * engine's workflow's on the overview's, an independent one's on its page's.
  */
 const RunCount = ({
   workflow,
@@ -94,6 +94,7 @@ const RunCount = ({
       aria-label={label}
       className="relative z-10 underline-offset-4 hover:underline"
       params={{ workflow: workflow.workflowId }}
+      search={{ tab: "runs" }}
       to="/workflows/$workflow"
     >
       {children}
