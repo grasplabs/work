@@ -24,9 +24,9 @@ import {
 } from "../src/knowledge/uploads.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, storedVersionTexts } from "./knowledge.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { finished } from "./runs.ts";
 import { signInConfig } from "./sign-in-config.ts";
 import {
@@ -451,7 +451,7 @@ describe("uploads", { timeout: 60_000 }, () => {
     const earlier = await leftPending(person, "travel-policy.docx", {
       name: "Policy.docx",
     });
-    await runCron();
+    await runMinuteTasks();
     const ended_ = await ended(person.api, earlier);
     const document = await person.api.knowledge.getDocument(
       later.documentId ?? ""
@@ -860,7 +860,7 @@ export default class extends WorkerEntrypoint {
       ]);
     });
     await failUpload({ ...env, DB: core }, id, "internal.unexpected");
-    await runCron();
+    await runMinuteTasks();
     const cleanups = await env.DB.prepare(
       "SELECT count(*) AS n FROM upload_cleanups WHERE upload_id = ?"
     )
@@ -920,13 +920,13 @@ export default class extends WorkerEntrypoint {
       bytes: await fixture("offices.xlsx"),
     });
     const storedAtFirst = await originalStored(person.collectionId, again.id);
-    // Once nothing can still be storing it, the cron trigger deletes it.
+    // Once nothing can still be storing it, the clock deletes it.
     await env.DB.prepare(
       "UPDATE upload_cleanups SET created_at = 0 WHERE upload_id = ?"
     )
       .bind(again.id)
       .run();
-    await runCron();
+    await runMinuteTasks();
 
     expect({
       upload: await outcome(person.api.uploads.get(again.id)),
@@ -1036,7 +1036,7 @@ export default class extends WorkerEntrypoint {
       name: "open.docx",
       staff: true,
     });
-    await runCron();
+    await runMinuteTasks();
     await settled(whileOpen);
     const afterClosing = await leftPending(staff, "travel-policy.docx", {
       name: "closed.docx",
@@ -1053,7 +1053,7 @@ export default class extends WorkerEntrypoint {
       },
     };
     try {
-      await runCron();
+      await runMinuteTasks();
       await settled(afterClosing);
     } finally {
       env.SIGN_IN = before;
@@ -1085,7 +1085,7 @@ export default class extends WorkerEntrypoint {
     await env.DB.prepare("DELETE FROM team_members WHERE user_id = ?")
       .bind(member.userId)
       .run();
-    await runCron();
+    await runMinuteTasks();
     const { documents } = await admin.api.knowledge.listDocuments(collectionId);
 
     await expect(ended(member.api, id)).resolves.toMatchObject({
@@ -1345,7 +1345,7 @@ export default class extends WorkerEntrypoint {
   it("start the run of an upload that core stopped before starting it", async () => {
     const person = await personWithCollection();
     const id = await leftPending(person, "travel-policy.docx");
-    await runCron();
+    await runMinuteTasks();
 
     await expect(ended(person.api, id)).resolves.toMatchObject({
       status: "ready",
@@ -1369,7 +1369,7 @@ export default class extends WorkerEntrypoint {
     await env.DB.prepare("UPDATE uploads SET id = ? WHERE id = ?")
       .bind(id, `${id}-moved`)
       .run();
-    await runCron();
+    await runMinuteTasks();
 
     await expect(person.api.uploads.get(id)).resolves.toMatchObject({
       status: "failed",

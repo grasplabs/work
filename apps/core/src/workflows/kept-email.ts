@@ -16,7 +16,7 @@ import type { Attachment, Email } from "postal-mime";
 // received, so a name another App's run passes finds nothing. A message
 // with no attachment but inline ones (images in its HTML, say), or one
 // received while the feature is off, isn't kept (`stored: null`). Only its
-// day's name says when a message goes: the 15-minute cron trigger deletes
+// day's name says when a message goes: the 15-minute clock deletes
 // a day's messages once 30 days have passed since that day ended
 // (`deleteExpiredEmail`), so a message is kept 30 to 31 days.
 //
@@ -46,7 +46,7 @@ const keptKey = (app: string, stored: string): string => {
   return `${keptPrefix}${day}/${app}/${id}`;
 };
 
-/** The most kept messages one cron run deletes: one R2 list and delete. */
+/** The most kept messages one clock run deletes: one R2 list and delete. */
 const maxDeletedPerRun = 1000;
 
 /** `raw` parsed, or undefined for a message that doesn't parse. */

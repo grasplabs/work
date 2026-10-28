@@ -69,7 +69,7 @@ export class AppVersionsRpc extends CoreRpcTarget implements AppVersionsApi {
    * Makes a version current through a verified candidate, over `expected`
    * when given (app-activation.ts, app-candidates.ts), then indexes the App into the Apps collection
    * (knowledge/apps-collection.ts): its entry holds the new version once
-   * this returns, unless indexing failed or raced another; the cron
+   * this returns, unless indexing failed or raced another; the clock
    * trigger then heals it within 15 minutes.
    */
   async setCurrent(

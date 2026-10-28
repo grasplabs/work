@@ -13,7 +13,6 @@ import {
 } from "../src/workflows/retention.ts";
 import { startRun } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
-import { runQuarterHourCron } from "./cron.ts";
 import {
   approvalTests,
   asksOf,
@@ -22,6 +21,7 @@ import {
   remember,
 } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { racingDb } from "./racing-db.ts";
 import {
@@ -45,7 +45,7 @@ import {
 
 // Retention of workflow runs, from its threat model (src/workflows/
 // retention.ts): once a run has ended for the deployment's retention, the
-// engine removes its record of it, the 15-minute cron what core and
+// engine removes its record of it, the clock, every 15 minutes, what core and
 // connect keep of it, and the run stays. Each case below is a way that
 // could go wrong: a run swept too early, or while it still waits; a run
 // left half swept; a swept run run again; and a reader handed a swept run
@@ -55,8 +55,8 @@ import {
 // core gives each run and purges an ended run's record once it is over
 // (its own tests show the purge). Here the tests check that core asks for
 // it, and everything core does. Time is the
-// cron's own: each sweep is run for a time that many days on, as
-// Cloudflare would run it then, so no test waits or sets a clock.
+// clock's own: each sweep is run for a time that many days on, as the
+// clock would run it then, so no test waits or fakes the time.
 
 const idp = mockIdp();
 
@@ -72,7 +72,7 @@ const transcript = "TRANSCRIPT the guest said the margin is 12%";
 const removed = (days: number): string =>
   `The details of this run were removed: they are kept for ${days} days after a run ends.`;
 
-/** The time `days` from now, for the cron to run at. */
+/** The time `days` from now, for the clock to run at. */
 const daysOn = (days: number): Date => new Date(Date.now() + days * day);
 
 /**
@@ -252,14 +252,14 @@ describe("run retention", { timeout: 60_000 }, () => {
       failed: await builder.api.workflows.status(failed.id),
     };
 
-    await runQuarterHourCron({}, daysOn(29));
+    await runQuarterHourTasks({}, daysOn(29));
     const within = {
       done: await builder.api.workflows.status(done.id),
       failed: await builder.api.workflows.status(failed.id),
     };
     const receiptsWithin = await receiptsOf(done.id);
     const at = daysOn(31);
-    await runQuarterHourCron({}, at);
+    await runQuarterHourTasks({}, at);
     const after = {
       done: await builder.api.workflows.status(done.id),
       failed: await builder.api.workflows.status(failed.id),
@@ -392,7 +392,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     );
     const before = { receipts: await receiptsOf(run.id), lineage: ended };
 
-    await runQuarterHourCron({}, daysOn(31));
+    await runQuarterHourTasks({}, daysOn(31));
     const after = {
       receipts: await receiptsOf(run.id),
       lineage: await lineage(),
@@ -464,9 +464,9 @@ describe("run retention", { timeout: 60_000 }, () => {
     const failed = await endedRun(builder, app, "fails");
     const shorter = { ...env, RUN_RETENTION_DAYS: "7" };
 
-    await runQuarterHourCron(shorter, daysOn(6));
+    await runQuarterHourTasks(shorter, daysOn(6));
     const within = await builder.api.workflows.status(failed.id);
-    await runQuarterHourCron(shorter, daysOn(8));
+    await runQuarterHourTasks(shorter, daysOn(8));
     // Read where the retention is 7 days, and where it is the default.
     const { core } = await openRpc(builder.session, { coreEnv: shorter });
     const asSet = await core.authenticate().workflows.status(failed.id);
@@ -499,12 +499,12 @@ describe("run retention", { timeout: 60_000 }, () => {
     // Over 30 days the engine no longer has the run's record to keep.
     for (const days of ["0", "soon", "31", "1.5"]) {
       // oxlint-disable-next-line no-await-in-loop -- one sweep after another
-      await runQuarterHourCron({ RUN_RETENTION_DAYS: days });
+      await runQuarterHourTasks({ RUN_RETENTION_DAYS: days });
       // oxlint-disable-next-line no-await-in-loop -- one sweep after another
       invalid.push(await sweptOf(old));
     }
     // The longest it may be.
-    await runQuarterHourCron({ RUN_RETENTION_DAYS: "30" });
+    await runQuarterHourTasks({ RUN_RETENTION_DAYS: "30" });
 
     expect({ invalid, valid: await sweptOf(old) }).toStrictEqual({
       invalid: [0, 0, 0, 0],
@@ -617,11 +617,11 @@ describe("run retention", { timeout: 60_000 }, () => {
       .run();
 
     // While it sleeps.
-    await runQuarterHourCron({}, daysOn(400));
+    await runQuarterHourTasks({}, daysOn(400));
     const waiting = await rowOf(run.id);
     // While it is stopped, as by a deploy or a crash.
     await stopped(run.id);
-    await runQuarterHourCron({}, daysOn(400));
+    await runQuarterHourTasks({}, daysOn(400));
     const whileStopped = {
       row: await rowOf(run.id),
       engine: await inEngine(run.id),
@@ -677,7 +677,7 @@ describe("run retention", { timeout: 60_000 }, () => {
         .bind(run.id)
         .first<Record<string, string | null>>();
 
-    await runQuarterHourCron({}, daysOn(400));
+    await runQuarterHourTasks({}, daysOn(400));
     const asked = await decisionRow();
     const decision = asked?.id ?? "";
     const open = await decider.api.decisions.get(decision);
@@ -687,7 +687,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     });
     await finished(run.id);
     const answered = await builder.api.workflows.status(run.id);
-    await runQuarterHourCron({}, daysOn(31));
+    await runQuarterHourTasks({}, daysOn(31));
     const after = await decider.api.decisions.get(decision);
     const kept = await decisionRow();
 
@@ -743,7 +743,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       sweepRunDetails(env, late),
     ]);
     const once = await rowOf(failed.id);
-    await runQuarterHourCron({}, daysOn(60));
+    await runQuarterHourTasks({}, daysOn(60));
     const again = await rowOf(failed.id);
 
     expect({
@@ -768,7 +768,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     } as const;
     const run = await startRun(env, delivery);
     await finished(run.id);
-    await runQuarterHourCron({}, daysOn(31));
+    await runQuarterHourTasks({}, daysOn(31));
     // The engine's record went as its retention ended.
     await runObject(run.id).deleteRun();
 
@@ -874,7 +874,7 @@ describe("run retention", { timeout: 60_000 }, () => {
         return await call();
       },
       async () => {
-        await runQuarterHourCron({}, daysOn(31));
+        await runQuarterHourTasks({}, daysOn(31));
         return {
           cancelled: await sweptOf([run.id]),
           other: await sweptOf([done.id]),
@@ -882,7 +882,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       }
     );
     const stillThere = await inEngine(run.id);
-    await runQuarterHourCron({}, daysOn(31));
+    await runQuarterHourTasks({}, daysOn(31));
 
     expect({
       between,
@@ -904,9 +904,9 @@ describe("run retention", { timeout: 60_000 }, () => {
     const perSweep = batchesPerSweep * sweptPerBatch;
     const runs = await oldRuns(builder, app, perSweep + 1, 40);
 
-    await runQuarterHourCron();
+    await runQuarterHourTasks();
     const first = await sweptOf(runs);
-    await runQuarterHourCron();
+    await runQuarterHourTasks();
 
     expect({ first, second: await sweptOf(runs) }).toStrictEqual({
       first: perSweep,

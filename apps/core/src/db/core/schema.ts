@@ -225,7 +225,7 @@ export const memberRemovals = sqliteTable(
     removedAt: timestamp("removed_at").notNull(),
     /**
      * When connect completed disconnecting their personal connections;
-     * until then the cron trigger retries it (`retryDisconnects`).
+     * until then the clock retries it (`retryDisconnects`).
      */
     disconnectedAt: timestamp("disconnected_at"),
   },
@@ -679,7 +679,7 @@ export const appIntegrations = sqliteTable(
 
 /**
  * Revocations an App's host couldn't be told of (src/access-revocations.ts):
- * told again by the cron trigger until it takes them, so a host away for
+ * told again by the clock until it takes them, so a host away for
  * longer than its retries still clears the screens of whoever lost a
  * role. `user_ids` is null for everyone the host knows of.
  */
@@ -694,7 +694,7 @@ export const accessRevocations = sqliteTable(
     attempts: integer().notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
   },
-  // The cron trigger tells the least tried first, oldest first among them,
+  // The clock tells the least tried first, oldest first among them,
   // once it dropped those a day old.
   (table) => [
     index("access_revocations_due").on(table.attempts, table.createdAt),
@@ -2736,7 +2736,7 @@ export const dependencyLocks = sqliteTable(
  * recorded before they could be left behind (src/packages/cleanup.ts): a
  * tarball (`kind` `tarball`, `key` its integrity) as it is stored, and the
  * tarballs and pinned artifacts of a lock as it is deleted; an artifact
- * (`kind` `build`, `key` its hash) as a build writes its files. The cron
+ * (`kind` `build`, `key` its hash) as a build writes its files. The clock
  * deletes the files of one no lock names once it is an hour old, then the
  * row; one a lock names loses its row only. Recording one again moves its
  * time on.
@@ -2749,7 +2749,7 @@ export const packageCleanups = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [
-    // The cron's sweep: records an hour old, oldest first.
+    // The clock's sweep: records an hour old, oldest first.
     index("package_cleanups_created_at_idx").on(table.createdAt),
   ]
 );
@@ -2792,7 +2792,7 @@ export const buildReceipts = sqliteTable("build_receipts", {
  * (src/packages/build.ts): a build takes its lease before it builds, and
  * gives it back when it ends; another of the same App, graph and target
  * waits for it, then hands out what it pinned. A lease that outlived
- * `expiresAt` (a build that died) may be taken, and the cron deletes it
+ * `expiresAt` (a build that died) may be taken, and the clock deletes it
  * once nobody did (src/packages/cleanup.ts).
  */
 export const dependencyBuildLeases = sqliteTable(
@@ -2819,7 +2819,7 @@ export const dependencyBuildLeases = sqliteTable(
         table.target,
       ],
     }),
-    // The cron's sweep of leases that lapsed.
+    // The clock's sweep of leases that lapsed.
     index("dependency_build_leases_expires_at_idx").on(table.expiresAt),
   ]
 );
@@ -3200,7 +3200,7 @@ export const appStatisticSteps = sqliteTable(
 );
 
 /**
- * Every version of core the cron has seen running (src/platform-updates.ts),
+ * Every version of core the clock has seen running (src/platform-updates.ts),
  * each recorded once: the insert of a version not here is audited as
  * `platform.updated` in the same batch.
  */
@@ -4726,7 +4726,7 @@ export const uploads = sqliteTable(
  * Originals to delete from R2 (knowledge/uploads.ts), by key: recorded
  * with the upload, before its original is stored, and cleared once it is
  * saved; recorded again by a purge. Deleted by the failure that makes one
- * unneeded, or by the cron trigger once its upload is gone or failed.
+ * unneeded, or by the clock once its upload is gone or failed.
  */
 export const uploadCleanups = sqliteTable("upload_cleanups", {
   /** The original's key in R2. */

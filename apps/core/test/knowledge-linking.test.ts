@@ -15,8 +15,8 @@ import { extractEntities } from "../src/knowledge/entities.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { signedInApi, unique, whoami } from "./sign-in.ts";
 
 // Linking a saved document's entities, in core: the clock's sweep starts
@@ -66,7 +66,7 @@ describe("linking Brain sources in core", () => {
       const found = await vi.waitFor(
         async () => {
           // Each sweep starts a few runs: as many as it takes.
-          await runCron({}, new Date(Date.now() + settleMs + 60_000));
+          await runMinuteTasks({}, new Date(Date.now() + settleMs + 60_000));
           const entities = await entitiesFor(brainOf(env), reader, {
             query: name,
           });

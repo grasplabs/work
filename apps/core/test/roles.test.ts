@@ -5,8 +5,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { allEvents } from "./audit-events.ts";
-import { runCron, waitingInOutbox, whileLogDown } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  runMinuteTasks,
+  waitingInOutbox,
+  whileLogDown,
+} from "./maintenance.ts";
 import {
   auditedDuring,
   callAuth,
@@ -197,7 +201,7 @@ describe("member and team changes", () => {
       return id;
     });
 
-    await runCron();
+    await runMinuteTasks();
     const sent = await allEvents();
     expect(
       sent.filter(

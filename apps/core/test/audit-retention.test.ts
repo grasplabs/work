@@ -11,8 +11,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import type { AuditLog } from "../src/audit-log.ts";
 import { auditLog, retainAuditLog } from "../src/audit-log.ts";
 import { allEvents, exportReader, verifyAll } from "./audit-events.ts";
-import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
 import { outcome, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // Retention: the audit log's own alarm moves events past the deployment's
@@ -260,7 +260,7 @@ describe("audit log retention", () => {
     await expect(held(old, log)).resolves.toBeFalsy();
   });
 
-  it("arms the deployment's log from the 15-minute cron trigger, also when nothing is appended", async () => {
+  it("arms the deployment's log from the 15-minute clock, also when nothing is appended", async () => {
     const log = auditLog(env);
     // As after a release: no alarm, an object started afresh, no appends.
     await runInDurableObject(log, async (_instance, state) => {
@@ -268,7 +268,7 @@ describe("audit log retention", () => {
     });
     await evictDurableObject(log);
 
-    await runQuarterHourCron();
+    await runQuarterHourTasks();
     await expect(alarmOf(log)).resolves.not.toBeNull();
   });
 
@@ -328,7 +328,7 @@ describe("audit log retention", () => {
     await expect(held(event, log)).resolves.toBeFalsy();
   });
 
-  it("arms again from the 15-minute cron trigger after the alarm couldn't set the next one", async () => {
+  it("arms again from the 15-minute clock after the alarm couldn't set the next one", async () => {
     const log = newLog();
     // Armed, and known to be by this object.
     await logged(log);
@@ -348,7 +348,7 @@ describe("audit log retention", () => {
     });
     await expect(alarmOf(log)).resolves.toBeNull();
 
-    // What the cron trigger calls.
+    // What the clock calls.
     await log.armRetention();
     await expect(alarmOf(log)).resolves.not.toBeNull();
   });

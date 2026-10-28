@@ -1,5 +1,6 @@
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
+import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -264,7 +265,8 @@ const deliver = async (
       forward: async () => await Promise.reject(new Error("Never forwards")),
       reply: async () => await Promise.reject(new Error("Never replies")),
     },
-    env
+    env,
+    createExecutionContext()
   );
   return rejected;
 };

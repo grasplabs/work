@@ -59,7 +59,7 @@ import { inList } from "../db/d1.ts";
 // - A file outliving its run's retention: its run's details going marks
 //   it deleted in the same batch (retention.ts), and `sweepRunFiles`
 //   deletes its chunks, then its row, retrying what R2 refused on the
-//   next cron run. A file never finished is swept a day after it opened.
+//   next clock run. A file never finished is swept a day after it opened.
 //   A deleted file's chunks are swept only after `sweepGraceMs`, longer
 //   than any attempt, so an append under way finishes its put first; a
 //   put that still lands after its chunk went deletes its object again
@@ -734,7 +734,7 @@ export const callFiles = async (
 
 /** Most chunks one sweep deletes at a time: R2's bound for one delete. */
 const chunksPerDelete = 1000;
-/** Most deletes one sweep makes, so a cron run stays bounded. */
+/** Most deletes one sweep makes, so a clock run stays bounded. */
 const deletesPerSweep = 10;
 /**
  * How long a deleted file's chunks stay before the sweep takes them:
@@ -967,7 +967,7 @@ export const startFilesDropped = async (
 export const runFilesRemoved = (db: ReturnType<typeof drizzle>, runIds: SQL) =>
   db
     .update(workflowRunFiles)
-    // Stamped by the clock, never a late cron's scheduled time, so the
+    // Stamped with the real time, never a late alarm's slot, so the
     // grace counts from when the file really went.
     .set({ state: "deleted", deletedAt: new Date() })
     .where(
@@ -981,9 +981,9 @@ export const runFilesRemoved = (db: ReturnType<typeof drizzle>, runIds: SQL) =>
  * Sweeps run files: those never finished a day after they opened are
  * deleted, and the chunks of files deleted longer ago than
  * `sweepGraceMs` go from R2, then their rows. What
- * R2 refuses stays, for the next cron run to try again. `now` is the
- * clock as the sweep runs, never the cron's scheduled time, which a late
- * run would make shorten the grace.
+ * R2 refuses stays, for the next clock run to try again. `now` is the
+ * real time as the sweep runs, never the clock's slot, which a late
+ * alarm would make shorten the grace.
  */
 export const sweepRunFiles = async (
   env: Env,
