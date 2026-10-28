@@ -522,15 +522,28 @@ const startTarget = async (
   params: RolloutParams,
   clientId: string,
   {
+    status,
     previous,
     change: recorded,
     client,
-  }: { previous: string | null; change: number | null; client: TargetClient }
+  }: {
+    status: string;
+    previous: string | null;
+    change: number | null;
+    client: TargetClient;
+  }
 ): Promise<Claimed> => {
   const { rolloutId } = params;
   // Read again now the rollout holds the client: no other runner changes
-  // what it runs from here.
+  // what it runs from here. What skips it is decided again on this read:
+  // a newer release or a pin that landed between the rollout's first read
+  // and its claim skips it too, while nothing of it has started.
   const held = (await targetClient(db, clientId)) ?? client;
+  const skip = await skipFor(db, params, held);
+  if (skip !== null && status === "pending") {
+    await skipTarget(db, rolloutId, clientId, skip);
+    return { state: "skipped" };
+  }
   const running = runningRelease(held);
   const release = params.releaseId ?? running;
   if (release === null) {
@@ -659,6 +672,7 @@ const claimTarget = async (
     return { state: "claimed", operationId: resumed };
   }
   return await startTarget(db, params, clientId, {
+    status: target.status,
     previous: target.previous,
     change: target.change,
     client,

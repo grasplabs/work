@@ -1744,6 +1744,68 @@ describe("a client's changes, counted", () => {
     });
   });
 
+  it("skips a retried client a newer release reached between the rollout's read and its claim, never taking it back", async () => {
+    const before = await placedRelease("feat(core): before");
+    await live(0, before);
+    const acme = await live(1, before);
+    const release = await placedRelease("feat(core): fails once");
+    const later = await placedRelease("feat(core): later");
+    cloudflare.failNext(
+      (call) =>
+        call.method === "PUT" &&
+        call.path.startsWith(`/accounts/${acme.account.id}/`) &&
+        call.path.endsWith("-grasp-os-connect"),
+      400
+    );
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    await approveRollout(env, staff, rolloutId, ringChecked);
+    await run.waitForStepResult({ name: "retry 1 asked" });
+    // The retry reads the client, its change still the rollout's, then
+    // claims it; staff's release of a newer one finishes just before.
+    const prepare = env.DB.prepare.bind(env.DB);
+    const batch = env.DB.batch.bind(env.DB);
+    let claiming = false;
+    let raced = false;
+    const preparing = vi
+      .spyOn(env.DB, "prepare")
+      .mockImplementation((query) => {
+        if (query.startsWith('insert into "client_runs"')) {
+          claiming = true;
+        }
+        return prepare(query);
+      });
+    const batching = vi
+      .spyOn(env.DB, "batch")
+      .mockImplementation(async (statements) => {
+        if (claiming && !raced) {
+          raced = true;
+          await deployPlaced(acme.clientId, later);
+        }
+        return await batch(statements);
+      });
+    try {
+      await retryRollout(env, staff, rolloutId);
+      await run.waitForStatus("complete");
+    } finally {
+      preparing.mockRestore();
+      batching.mockRestore();
+    }
+
+    expect({
+      raced,
+      target: await targetOf(rolloutId, acme.clientId),
+      releases: await releasesOf(acme.clientId),
+      runner: await runnerOf(acme.clientId),
+    }).toStrictEqual({
+      raced: true,
+      target: { ring: 1, status: "skipped", error: "newer" },
+      releases: on(later),
+      runner: null,
+    });
+  });
+
   it("holds a shared secret's revocation while a Worker holding it isn't read, whatever its operation delivered", async () => {
     const release = await placedRelease("feat(core): runs");
     const internal = await live(0, release);
