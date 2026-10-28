@@ -322,7 +322,9 @@ export const AppPage = ({
   const editable = builds && !archived;
   const chat = useAppChat(app.id);
   return (
-    <div className="flex min-h-0 flex-1 flex-col text-sm">
+    // `min-w-0`: beside the Apps sidebar, a long name never widens it past
+    // the space left.
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col text-sm">
       <div className="bg-background flex flex-none flex-wrap items-center gap-x-6 gap-y-2 border-b px-4 py-3 md:px-6">
         <span className="flex min-w-0 items-center gap-2.5">
           <span
@@ -332,7 +334,8 @@ export const AppPage = ({
             <LayoutGridIcon className="size-4" />
           </span>
           {editable ? (
-            <AppTitle app={app} />
+            // Another App's page drops an unfinished rename of this one.
+            <AppTitle app={app} key={app.id} />
           ) : (
             <h1 className="min-w-0 truncate text-base font-medium">{name}</h1>
           )}
