@@ -9,8 +9,8 @@
  * never its output or a secret), and every write is refused unless every
  * resource it names is the run's own (its prefix, or an id it created),
  * so a run can't touch anything else in the account, whatever the login
- * allows. Without `live`, a write runs as cf's own `--dry-run`, which
- * sends nothing.
+ * allows. Without `live`, a write isn't run at all: it's recorded as
+ * planned.
  */
 import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -62,6 +62,14 @@ export const knownName = (name: string): boolean =>
   name.startsWith("grasp-os-") ||
   clientResource.test(name);
 
+/**
+ * Whether `name` is the run's own by its name: the prefix itself, or a
+ * name under it (`<prefix>-…`). Never one that merely starts the same,
+ * which another run's prefix could (`qual-2026` and `qual-20261028`).
+ */
+export const isOwnName = (name: string, prefix: string): boolean =>
+  name === prefix || name.startsWith(`${prefix}-`);
+
 /** A name or id as the run makes them: nothing a path or flag could hide. */
 const plainName = /^[A-Za-z0-9_-]+$/u;
 
@@ -77,7 +85,7 @@ export const ownsAll = (
   names.length > 0 &&
   names.every(
     (name) =>
-      plainName.test(name) && (name.startsWith(prefix) || created.has(name))
+      plainName.test(name) && (isOwnName(name, prefix) || created.has(name))
   );
 
 export interface CfOptions {
@@ -161,11 +169,13 @@ export const cfCli = (options: CfOptions) => {
           `Refused: cf ${args.join(" ")} names something not of run ${prefix}`
         );
       }
-      const output = run(live ? args : [...args, "--dry-run"], cwd);
+      // A dry run runs no write at all: nothing rests on cf honouring
+      // its own --dry-run.
       if (!live) {
         record({ kind: "planned", command: args.join(" ") });
-        return { planned: true, result: null, output };
+        return { planned: true, result: null, output: "" };
       }
+      const output = run(args, cwd);
       // `cf deploy` prints progress, not JSON: its output is kept as text.
       const json = args[0] !== "deploy";
       return { planned: false, result: json ? parsed(output) : null, output };
