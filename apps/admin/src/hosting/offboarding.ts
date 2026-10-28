@@ -437,6 +437,15 @@ export const deletePlacedClient = async (
     const outcome = await deleteResource(where, databases, row);
     if (outcome === "emptying") {
       deletion.emptying.push(row.physicalName);
+      // Its objects now expire, which can't be undone: recorded as it's
+      // set, whatever the run does after.
+      // oxlint-disable-next-line no-await-in-loop -- each recorded as it goes
+      await audit(db, staff, {
+        action: "client.empty_bucket",
+        clientId,
+        target: row.destinationId,
+        detail: { role: row.role, physicalName: row.physicalName },
+      });
     } else {
       // oxlint-disable-next-line no-await-in-loop -- each recorded as it goes
       await recordDeleted(db, staff, row);

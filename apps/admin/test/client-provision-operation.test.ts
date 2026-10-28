@@ -2219,10 +2219,20 @@ describe("provisioning a placed client", () => {
     const firstRun = await deletePlacedClient(env, staff, clientId, {
       exportConfirmed: true,
     });
+    const [emptied] = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "client.empty_bucket")
+        )
+      );
     const emptying = {
       emptying: firstRun.emptying,
       rule: account.lifecycles.has(files.physicalName),
       kept: account.buckets.some(({ name }) => name === files.physicalName),
+      audited: z.unknown().parse(JSON.parse(emptied?.detail ?? "null")),
     };
     // Its objects expired since: the next run deletes it.
     account.fullBuckets.delete(files.physicalName);
@@ -2254,7 +2264,12 @@ describe("provisioning a placed client", () => {
       // Refused before anything went: its scripts and their objects too.
       untouched: holdings(next.account),
     }).toStrictEqual({
-      emptying: { emptying: [files.physicalName], rule: true, kept: true },
+      emptying: {
+        emptying: [files.physicalName],
+        rule: true,
+        kept: true,
+        audited: { role: files.role, physicalName: files.physicalName },
+      },
       second: [],
       bucketGone: 0,
       notOwned: "resource_not_owned",
