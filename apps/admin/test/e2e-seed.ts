@@ -1,23 +1,19 @@
-import type { ReleaseManifest } from "@grasp-os/shared/release";
 /**
- * What the browser journeys' admin starts from (e2e/admin-rollout.e2e.ts),
- * made as the admin's tests make it: its database migrated, its Secrets
- * Store filled as deploy-ops fills it, and a client in ring 0, on its own
- * account in the fake Cloudflare API, running a release a deploy made live,
- * with a newer release imported to roll out.
+ * What the browser journeys' admin starts from (e2e/admin/*.e2e.ts), made
+ * as the admin's tests make it: its database migrated, its Secrets Store
+ * filled as deploy-ops fills it, and a client in ring 0, placed in a
+ * dedicated destination of its own on the fake Cloudflare API, provisioned
+ * on a release, with a newer release imported to roll out.
  */
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 
-import { act, adminDatabase } from "../src/db/act.ts";
-import { clients, releases } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
+import { adminDatabase } from "../src/db/act.ts";
+import { clients } from "../src/db/schema.ts";
 import { saveDestination } from "../src/hosting/inventory.ts";
-import { importReleases } from "../src/releases/import.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
 import { evidence, verified } from "./hosting.ts";
-import { buildRelease, publishRelease, putBlobs } from "./releases.ts";
+import { deployPlaced, placedClientRecord, placedRelease } from "./placed.ts";
 import { adminOf, adminSecrets } from "./secrets-store-admin.ts";
 
 /** What a seed made, for the journeys to find on the admin's pages. */
@@ -25,6 +21,8 @@ export interface Seeded {
   clientId: string;
   /** The newest release, which it doesn't run yet. */
   releaseId: string;
+  /** The release it runs. */
+  previousReleaseId: string;
 }
 
 /** The admin's migrations, as drizzle-kit writes them (src/db/migrations). */
@@ -89,10 +87,10 @@ const fillStore = async (tokens: {
 const staff = { email: "staff@grasp.test", sub: "" };
 
 /**
- * Seeds the admin: a new client in ring 0 on the fake's new account,
- * running a release a deploy made live, and a newer release. Every client
- * an earlier seed made is offboarded, so a journey tried again reaches
- * only its own.
+ * Seeds the admin: a new client in ring 0, placed in a dedicated
+ * destination of its own on the fake's new account and provisioned on a
+ * release, and a newer release. Every client an earlier seed made is
+ * offboarded, so a journey tried again reaches only its own.
  */
 export const seed = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
@@ -100,48 +98,21 @@ export const seed = async (
 ): Promise<Seeded> => {
   await migrate(env.DB);
   await fillStore(tokens);
-  const db = adminDatabase(env.DB);
-  await db
+  await adminDatabase(env.DB)
     .update(clients)
     .set({ status: "offboarded" })
     .where(eq(clients.status, "active"));
-  const previous = await publishRelease({ notes: "feat(core): what runs" });
-  await importReleases(env.RELEASES, db);
-  const account = cloudflare.addAccount();
-  const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name: clientId,
-        accountId: account.id,
-        ring: 0,
-        status: "active",
-        signIn: JSON.stringify({
-          domains: ["acme.test"],
-          admins: ["ada@acme.test"],
-          googleHostedDomain: "acme.test",
-        }),
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, previous.id)
-  );
-  const next = await publishRelease({
-    notes: "feat(core): roll out",
+  const previous = await placedRelease("feat(core): what runs", {
+    core: "export default { core: 1 };",
+    connect: "export default { connect: 1 };",
+  });
+  const { clientId } = await placedClientRecord(cloudflare, 0);
+  await deployPlaced(clientId, previous);
+  const next = await placedRelease("feat(core): roll out", {
     core: "export default { core: 2 };",
     connect: "export default { connect: 2 };",
   });
-  await importReleases(env.RELEASES, db);
-  return { clientId, releaseId: next.id };
+  return { clientId, releaseId: next, previousReleaseId: previous };
 };
 
 /** What a placed seed made, for the placed-client journey to choose on the admin's pages. */
@@ -151,53 +122,6 @@ export interface SeededPlaced {
   /** Two releases a placed client runs, oldest first. */
   releaseIds: [string, string];
 }
-
-/**
- * A release a placed client runs, imported as the admin imports one:
- * core's own Durable Object classes, and none of the Workflows binding a
- * placed client has no resource for (as test/client-provision-operation
- * imports one), built `builtAt`.
- */
-const placedRelease = async (
-  notes: string,
-  core: string,
-  builtAt: Date
-): Promise<string> => {
-  const built = await buildRelease({
-    notes,
-    core,
-    connect: core.replace("core", "connect"),
-  });
-  const { core: worker } = built.manifest.workers;
-  if (worker === undefined) {
-    throw new Error("The seed's release has no core");
-  }
-  const manifest: ReleaseManifest = {
-    ...built.manifest,
-    workers: {
-      ...built.manifest.workers,
-      core: {
-        ...worker,
-        durableObjectMigrations: [
-          { tag: "v1", new_sqlite_classes: ["Workspace", "AuditLog"] },
-        ],
-        bindings: worker.bindings.filter(({ type }) => type !== "workflow"),
-      },
-    },
-  };
-  await putBlobs(built);
-  await adminDatabase(env.DB)
-    .insert(releases)
-    .values({
-      id: manifest.releaseId,
-      commitSha: manifest.commit,
-      manifest: JSON.stringify(manifest),
-      manifestSha256: "0".repeat(64),
-      builtAt,
-      importedAt: builtAt,
-    });
-  return manifest.releaseId;
-};
 
 /**
  * Seeds the admin for the placed-client journey: a dedicated destination
@@ -220,16 +144,13 @@ export const seedPlaced = async (
     policies: ["eu-storage"],
     capabilities: verified({}, evidence),
   });
-  const now = Date.now();
-  const first = await placedRelease(
-    "feat(core): what it starts on",
-    "export default { core: 1 };",
-    new Date(now - 60_000)
-  );
-  const second = await placedRelease(
-    "feat(core): what it's released to",
-    "export default { core: 2 };",
-    new Date(now)
-  );
+  const first = await placedRelease("feat(core): what it starts on", {
+    core: "export default { core: 1 };",
+    connect: "export default { connect: 1 };",
+  });
+  const second = await placedRelease("feat(core): what it's released to", {
+    core: "export default { core: 2 };",
+    connect: "export default { connect: 2 };",
+  });
   return { destinationId, releaseIds: [first, second] };
 };

@@ -87,7 +87,16 @@ import {
   deriveRouterSecret,
 } from "@grasp-os/shared/router";
 import type { RouterTarget } from "@grasp-os/shared/router";
-import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 
 import type { StaffAlert } from "../alerts.ts";
@@ -144,6 +153,7 @@ import { sealedWorkerSecrets } from "../deploy/sealed-secrets.ts";
 import {
   clientAuthSecret,
   retainedPreviousKeys,
+  sharedSecretPrints,
   workerSecrets,
 } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
@@ -229,6 +239,11 @@ export const provisionOperationErrorCodes = [
    * client's ran: an older release, which only a rollback may go to.
    */
   "release_behind_migration",
+  /**
+   * The release failed its probe once live and was rolled back to the
+   * release before on its own: a rollout counts the client failed.
+   */
+  "release_rolled_back",
 ] as const;
 
 export type ProvisionOperationErrorCode =
@@ -333,6 +348,12 @@ const progressSchema = z.object({
   uploads: z.record(z.string(), z.string()).default({}),
   /** Each Worker's delivered secrets: their fingerprint, names and values. */
   secrets: z.record(z.string(), z.string()).default({}),
+  /**
+   * Each Worker's shared secrets as last delivered, each by name with its
+   * own keyed fingerprint (`sharedSecretPrints`): what proves a rotated
+   * shared secret reached the client (src/rollout/shared-secrets.ts).
+   */
+  shared: z.record(z.string(), z.record(z.string(), z.string())).default({}),
   /** The core origin the probe passed at. */
   origin: z.string().optional(),
   /**
@@ -521,6 +542,24 @@ const assertCanGo = async (
   }
 };
 
+/** How a release start is audited: a rollback, a run again of what runs, or a release. */
+const releaseAction = ({
+  rollback,
+  again,
+}: {
+  rollback?: boolean;
+  again?: boolean;
+}): string => {
+  if (rollback === true) {
+    return "release.rollback";
+  }
+  return again === true ? "release.again" : "release.start";
+};
+
+type Operation = NonNullable<Awaited<ReturnType<typeof provisionOf>>>;
+
+
+
 /**
  * The one release every Worker of client `clientId` was seen running
  * (`client_workers`, written once an upload is observed), or null when
@@ -579,8 +618,9 @@ export const startClientRelease = async (
   {
     releaseId,
     rollback,
+    again,
     cause,
-  }: { releaseId?: string; rollback?: boolean; cause?: string }
+  }: { releaseId?: string; rollback?: boolean; again?: boolean; cause?: string }
 ): Promise<{ operationId: string; releaseId: string }> => {
   const { clientId } = held;
   const client = await db
@@ -608,7 +648,9 @@ export const startClientRelease = async (
     );
   }
   const target =
-    rollback === true ? operation.previousReleaseId : (releaseId ?? null);
+    releaseId ??
+    (rollback === true ? operation.previousReleaseId : null) ??
+    (again === true ? operation.releaseId : null);
   if (target === null) {
     throw new ProvisionOperationError(
       "nothing_to_roll_back",
@@ -622,12 +664,21 @@ export const startClientRelease = async (
         `${clientId} runs ${target} already`
       );
     }
-    // Done: it runs it already. Failed, or left running by a runner that
-    // ended: the holder runs it again, which resumes it.
-    return { operationId: operation.id, releaseId: target };
+    // Done: it runs it already, unless asked to run it `again` (its
+    // settings or secrets as they are now). Failed, or left running by a
+    // runner that ended: the holder runs it again, which resumes it.
+    if (again !== true || operation.status !== "done") {
+      return { operationId: operation.id, releaseId: target };
+    }
   }
   await assertCanGo(db, operation, target, rollback === true);
+  // Run again, it goes on from what it went on from; a new release, from
+  // what every Worker was seen running.
   const before = await observedRelease(db, clientId);
+  let previousReleaseId = before === target ? null : before;
+  if (target === operation.releaseId) {
+    previousReleaseId = operation.previousReleaseId;
+  }
   const now = new Date();
   // Conditional on the claim, and the operation as read: a start that lost
   // either starts nothing.
@@ -638,7 +689,7 @@ export const startClientRelease = async (
       .update(clientProvisions)
       .set({
         releaseId: target,
-        previousReleaseId: before === target ? null : before,
+        previousReleaseId,
         status: "running",
         step: null,
         error: null,
@@ -655,7 +706,7 @@ export const startClientRelease = async (
         )
       ),
     {
-      action: rollback === true ? "release.rollback" : "release.start",
+      action: releaseAction({ rollback, again }),
       clientId,
       target,
       detail: {
@@ -673,8 +724,6 @@ export const startClientRelease = async (
   }
   return { operationId: operation.id, releaseId: target };
 };
-
-type Operation = NonNullable<Awaited<ReturnType<typeof provisionOf>>>;
 
 /** What a run of the operation works on, loaded once. */
 interface Loaded {
@@ -1506,9 +1555,12 @@ const deliverSecrets = async (
     const removed = await revokeRetired(context, loaded, target, given, names);
     revoked.push(...removed);
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
+    const shared = await sharedSecretPrints(context.secrets, app);
+    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
     await recordProgress(db, loaded, {
       ...progress,
       secrets: { ...progress.secrets, [app]: print },
+      shared: { ...progress.shared, [app]: shared },
     });
   }
   // The names removed, never a value: what an operator set by hand and
@@ -1518,6 +1570,47 @@ const deliverSecrets = async (
     revoked: revoked.length,
     revokedNames: revoked.join(","),
   });
+};
+
+/**
+ * Records each Worker's version live, as its probe found it, on what the
+ * client runs (`client_workers`): what drift compares against
+ * (src/rollout/drift.ts). Core's is the version its probe answered as;
+ * connect's, read from its script in an account's own Workers, or none in
+ * a namespace, whose versions the admin reads only through core's health.
+ * Only while the runner holds the client.
+ */
+const recordLiveVersions = async (
+  context: ProvisionContext,
+  loaded: Loaded,
+  inventory: readonly ClientResource[],
+  coreVersion: string
+): Promise<void> => {
+  const { api, db } = context;
+  const { held } = loaded;
+  for (const app of appsOf(loaded.manifest)) {
+    const target = targetOf(loaded, inventory, app);
+    let version: string | null = coreVersion;
+    if (app !== "core") {
+      version =
+        target.namespace === null
+          ? // oxlint-disable-next-line no-await-in-loop -- two Workers
+            ((await liveVersion(api, target.accountId, target.scriptName)) ??
+            null)
+          : null;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- two Workers
+    await db
+      .update(clientWorkers)
+      .set({ versionId: version })
+      .where(
+        and(
+          eq(clientWorkers.clientId, held.clientId),
+          eq(clientWorkers.worker, app),
+          stillHolds(held)
+        )
+      );
+  }
 };
 
 /** How long core's signed probe may take, its body included. */
@@ -1642,6 +1735,7 @@ const probe = async (
   if (fault !== null) {
     throw new ProvisionOperationError(fault.code, fault.message);
   }
+  await recordLiveVersions(context, loaded, inventory, version);
   const progress = await progressNow(db, loaded.operation.id);
   await recordStep(
     db,
@@ -1799,6 +1893,21 @@ const complete = async (db: AdminDatabase, loaded: Loaded): Promise<void> => {
           and(
             eq(clients.id, held.clientId),
             eq(clients.status, "provisioning"),
+            stillHolds(held)
+          )
+        ),
+      // A rotation it delivered is live from now, while the generation is
+      // still the one it delivered (src/deploy/rotation.ts): the previous
+      // keys' window counts from here (src/deploy/secrets.ts).
+      db
+        .update(clients)
+        .set({ rotationLiveAt: now })
+        .where(
+          and(
+            eq(clients.id, held.clientId),
+            eq(clients.generation, loaded.client.generation),
+            isNotNull(clients.rotatedAt),
+            isNull(clients.rotationLiveAt),
             stillHolds(held)
           )
         ),
@@ -2028,18 +2137,22 @@ const rollBackAfterProbe = async (
  * to resume one that failed. On a failure it records the step and the
  * error's code, audited, and throws the error; except that a live
  * client's release that fails its probe is rolled back to the release
- * before on its own (`rollsBack`), and staff are told.
+ * before on its own (`rollsBack`), and staff are told. Only for a release
+ * to another release: a run of the release it runs again (settings,
+ * rotation, a secrets rollout) or a rollback passes `rollBackOnProbe`
+ * false, as going back a release wouldn't undo what failed.
  */
 export const runClientProvision = async (
   context: ProvisionContext,
-  held: HeldClient
+  held: HeldClient,
+  { rollBackOnProbe = true }: { rollBackOnProbe?: boolean } = {}
 ): Promise<void> => {
   const stopped = await runOperation(context, held);
   if (stopped === undefined) {
     return;
   }
   const { operation, step, code, error } = stopped;
-  if (await rollsBack(context.db, operation, step, code)) {
+  if (rollBackOnProbe && (await rollsBack(context.db, operation, step, code))) {
     await rollBackAfterProbe(context, held, operation, code);
     return;
   }

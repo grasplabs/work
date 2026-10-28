@@ -21,24 +21,16 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
   unknown_client: "There's no such client.",
   nothing_to_roll_back:
     "The rollout didn't reach that client, so there's nothing to roll back.",
-  client_placed:
-    "That client is placed in a hosting destination, which rollouts and rollbacks don't reach.",
   superseded:
     "Something newer was deployed to that client since: roll out the release you want instead.",
-  too_far_back:
-    "That client ran an older release than the one right before this rollout's: roll out the release you want instead.",
   incompatible:
     "What that client ran before doesn't work with what it runs now, so going back could break it: roll out a release that does instead.",
   schema_incompatible:
     "What that client ran before doesn't run on its databases since this rollout's migrations: roll out a release that does instead.",
-  rotated_since:
-    "That client's secrets rotated since, and its previous versions don't have the new ones: roll out instead.",
-  shared_secret_replaced:
-    "A shared secret that client's previous versions run was replaced since, or the admin has no record of which they run, so going back could bring a retired key back: roll out instead.",
-  sealed_secret_replaced:
-    "That client's Teams bot secret was replaced since its previous versions ran, so going back could bring a revoked secret back: roll out instead.",
   client_busy:
     "Something else is deploying to that client right now: try again in a moment.",
+  rollback_past_migration:
+    "Its release added Durable Object migrations, which a client never goes back past: roll a fix out instead.",
   rollback_failed:
     "The rollback didn't finish: check the client's drift, then try again.",
   secrets_store_incomplete:

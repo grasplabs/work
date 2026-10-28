@@ -5,27 +5,23 @@
  * Ring 0 is Grasp's own deployments (`grasp-os-internal`): every rollout
  * reaches them first, then, once a staff member approves, what it was
  * started for: one ring, one client, or every client, ring by ring, with
- * no approval between them (src/rollout/workflow.ts).
+ * no approval between them (src/rollout/workflow.ts). Each is a client
+ * placed in a hosting destination, whose one operation a rollout runs for
+ * its release (src/hosting/operation.ts).
  */
-import { and, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
-import type { CloudflareApi } from "../cloudflare/api.ts";
-import { liveVersion } from "../cloudflare/workers.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
-  clientDeploys,
   clientPlacements,
+  clientProvisions,
   clients,
   clientWorkers,
   releases,
   rolloutTargets,
 } from "../db/schema.ts";
-import { latestDeployOf } from "../deploy/deploy.ts";
-import { DeployError } from "../deploy/errors.ts";
-import { mappedGeneration } from "../deploy/router.ts";
-import type { RouterHosts } from "../deploy/router.ts";
 
 /** The ring every rollout reaches first: Grasp's own deployments. */
 export const firstRing = 0;
@@ -59,12 +55,9 @@ const byRing = (a: RolloutTarget, b: RolloutTarget): number =>
   a.ring - b.ring || a.clientId.localeCompare(b.clientId);
 
 /**
- * The active clients a rollout for `scope` reaches, each in the ring it's
- * in now: ring 0's, and the scope's. In the order it reaches them. A
- * client placed in a hosting destination, or with no account of its own,
- * is never one: a rollout deploys account by account
- * (src/deploy/deploy.ts), which such a client's Workers and resources
- * aren't (src/hosting/).
+ * The active placed clients a rollout for `scope` reaches, each in the
+ * ring it's in now: ring 0's, and the scope's. In the order it reaches
+ * them. One that isn't placed has no operation to run.
  */
 export const targetsOf = async (
   db: AdminDatabase,
@@ -73,16 +66,8 @@ export const targetsOf = async (
   const rows = await db
     .select({ clientId: clients.id, ring: clients.ring })
     .from(clients)
-    .leftJoin(clientPlacements, eq(clientPlacements.clientId, clients.id))
-    .where(
-      and(
-        eq(clients.status, "active"),
-        isNull(clientPlacements.clientId),
-        // A client with no account of its own isn't one this path deploys.
-        isNotNull(clients.accountId),
-        scopeFilter(scope)
-      )
-    );
+    .innerJoin(clientPlacements, eq(clientPlacements.clientId, clients.id))
+    .where(and(eq(clients.status, "active"), scopeFilter(scope)));
   return rows.toSorted(byRing);
 };
 
@@ -114,23 +99,43 @@ export const ringsOf = async (
 };
 
 /**
- * What a client ran before a rollout reached it: the release, the version
- * each Worker ran with all its traffic, and the secrets generation the
- * router's map had for it. A rollback puts these back.
+ * What a client ran before a rollout reached it: the release it last ran
+ * whole, which a rollback takes it back to, and its secrets generation
+ * then. `versions` is what each Worker ran, where known; a rollback runs
+ * the release again rather than put versions back, with the client's
+ * current secrets.
  */
 export const previousRunSchema = z.object({
   release: z.string().nullable(),
   generation: z.int().nullable(),
   versions: z.record(z.string(), z.string()),
+  /**
+   * Each Worker's shared secrets as last delivered, by name with its keyed
+   * fingerprint: what proves a secrets rollout rotated one
+   * (src/rollout/shared-secrets.ts).
+   */
+  shared: z.record(z.string(), z.record(z.string(), z.string())).optional(),
 });
 export type PreviousRun = z.infer<typeof previousRunSchema>;
 
 /** The client a rollout reaches, as it reads it. */
 export interface TargetClient {
   id: string;
-  /** Its own account; null for a client created as a placement, which no rollout targets. */
-  accountId: string | null;
   status: "provisioning" | "active" | "offboarded";
+  /** Its secrets generation, from 1 (src/deploy/rotation.ts). */
+  generation: number;
+  /**
+   * Its one operation (src/hosting/operation.ts): the release it last
+   * worked on, how it ended, and the release before; null for a client
+   * that isn't placed.
+   */
+  operation: {
+    releaseId: string;
+    status: "running" | "failed" | "done";
+    previousReleaseId: string | null;
+    /** Each Worker's shared secrets as last delivered, by name with its fingerprint. */
+    shared: Record<string, Record<string, string>>;
+  } | null;
   pinnedReleaseId: string | null;
   /**
    * Whether its secrets rotated and no deploy made the new generation
@@ -168,18 +173,30 @@ export const isConfigPending = async (
   if (configChangedAt === null) {
     return false;
   }
-  const [lastDone] = await db
-    .select({ createdAt: clientDeploys.createdAt })
-    .from(clientDeploys)
-    .where(
-      and(
-        eq(clientDeploys.clientId, clientId),
-        eq(clientDeploys.status, "done")
-      )
-    )
-    .orderBy(desc(clientDeploys.createdAt))
-    .limit(1);
-  return lastDone === undefined || lastDone.createdAt <= configChangedAt;
+  // Its operation's last run that finished: what it started with is live.
+  const operation = await db
+    .select({
+      status: clientProvisions.status,
+      createdAt: clientProvisions.createdAt,
+    })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId))
+    .get();
+  return operation?.status !== "done" || operation.createdAt <= configChangedAt;
+};
+
+const deliveredSchema = z
+  .object({
+    shared: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+  })
+  .loose();
+
+/** The shared-secret fingerprints an operation's progress records, by Worker. */
+export const deliveredShared = (
+  progress: string | null
+): Record<string, Record<string, string>> => {
+  const parsed = deliveredSchema.safeParse(JSON.parse(progress ?? "{}"));
+  return parsed.success ? (parsed.data.shared ?? {}) : {};
 };
 
 /** Client `clientId`, as a rollout reads it; undefined when it's gone. */
@@ -190,8 +207,8 @@ export const targetClient = async (
   const [client] = await db
     .select({
       id: clients.id,
-      accountId: clients.accountId,
       status: clients.status,
+      generation: clients.generation,
       pinnedReleaseId: clients.pinnedReleaseId,
       rotatedAt: clients.rotatedAt,
       rotationLiveAt: clients.rotationLiveAt,
@@ -213,8 +230,24 @@ export const targetClient = async (
     .from(clientWorkers)
     .leftJoin(releases, eq(releases.id, clientWorkers.releaseId))
     .where(eq(clientWorkers.clientId, clientId));
+  const row = await db
+    .select({
+      releaseId: clientProvisions.releaseId,
+      status: clientProvisions.status,
+      previousReleaseId: clientProvisions.previousReleaseId,
+      progress: clientProvisions.progress,
+    })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId))
+    .get();
+  let operation: TargetClient["operation"] = null;
+  if (row !== undefined) {
+    const { progress, ...fields } = row;
+    operation = { ...fields, shared: deliveredShared(progress) };
+  }
   return {
     ...rest,
+    operation,
     rotationPending: rotatedAt !== null && rotationLiveAt === null,
     configPending: await isConfigPending(db, clientId, configChangedAt),
     workers,
@@ -272,46 +305,26 @@ export const runningRelease = (client: TargetClient): string | null => {
   return release;
 };
 
-/** A client whose Worker's traffic is split between versions: a rollout doesn't start on it. */
-export class TrafficSplitError extends Error {
-  constructor(scriptName: string) {
-    super(`${scriptName}'s traffic is split between versions`);
-    this.name = "TrafficSplitError";
-  }
-}
-
 /**
- * What `client` runs now, for a rollback to put back: each Worker's
- * version with all its traffic, and the router map's generation. A Worker
- * whose traffic is split has no one version to go back to, so the
- * rollout doesn't start on it (`TrafficSplitError`).
+ * What `client` runs now, for a rollback to take it back to: the release
+ * its operation last ran whole (the one it's on once done; the one before
+ * a release that stopped part way), with each Worker's recorded version
+ * and its secrets generation.
  */
-export const previousRunOf = async (
-  api: CloudflareApi,
-  hosts: RouterHosts,
-  hostname: string,
-  client: TargetClient
-): Promise<PreviousRun> => {
-  const { accountId } = client;
-  if (accountId === null) {
-    throw new DeployError(
-      "client_placed",
-      `${client.id} has no account of its own: it's provisioned as a placement`
-    );
-  }
-  const versions: Record<string, string> = {};
-  for (const { worker, scriptName } of client.workers) {
-    // oxlint-disable-next-line no-await-in-loop -- two Workers
-    const live = await liveVersion(api, accountId, scriptName);
-    if (live === undefined) {
-      throw new TrafficSplitError(scriptName);
-    }
-    versions[worker] = live;
+export const previousRunOf = (client: TargetClient): PreviousRun => {
+  const { operation } = client;
+  let release: string | null = null;
+  if (operation !== null) {
+    release =
+      operation.status === "done"
+        ? operation.releaseId
+        : operation.previousReleaseId;
   }
   return {
-    release: runningRelease(client),
-    generation: await mappedGeneration(hosts, hostname),
-    versions,
+    release,
+    generation: client.generation,
+    versions: {},
+    shared: operation?.shared ?? {},
   };
 };
 
@@ -322,53 +335,4 @@ export const parsePrevious = (previous: string | null): PreviousRun | null => {
   }
   const parsed = previousRunSchema.safeParse(JSON.parse(previous));
   return parsed.success ? parsed.data : null;
-};
-
-/**
- * A target's statuses while its rollout started on the client and never
- * finished it: part way (its rollout's run ended without recording it),
- * failed, or stopped.
- */
-const unfinished = ["deploying", "failed", "stopped"] as const;
-
-/**
- * What client `clientId` ran before the rollout that last deployed to it,
- * for the rollout that now deploys `next.releaseId` to it to carry
- * forward as its own `previous`; null when there's nothing to carry.
- *
- * It's carried only when that rollout never finished the client and
- * nothing was deployed since (its deploy is the client's latest, and not
- * done), and what the client runs now is nothing to roll back to:
- * - the rollout now is of that same release, a retry: what the client
- *   runs now is that release's own unfinished work, in part or whole;
- * - or the client runs no one release whole (`next.running` is null: one
- *   Worker live, the next failed).
- * A rollback then puts the client back where it last ran whole. Anything
- * else is a later release reaching a client that runs the unfinished one
- * whole (it failed after its Workers went live): that release is what it
- * ran before, and what a rollback puts back.
- */
-export const unfinishedPrevious = async (
-  db: AdminDatabase,
-  clientId: string,
-  next: { releaseId: string; running: string | null }
-): Promise<PreviousRun | null> => {
-  const latest = await latestDeployOf(db, clientId);
-  if (latest === undefined || latest.status === "done") {
-    return null;
-  }
-  if (latest.releaseId !== next.releaseId && next.running !== null) {
-    return null;
-  }
-  const [target] = await db
-    .select({ previous: rolloutTargets.previous })
-    .from(rolloutTargets)
-    .where(
-      and(
-        eq(rolloutTargets.clientId, clientId),
-        eq(rolloutTargets.deployId, latest.id),
-        inArray(rolloutTargets.status, [...unfinished])
-      )
-    );
-  return parsePrevious(target?.previous ?? null);
 };
