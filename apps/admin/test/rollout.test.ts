@@ -2169,6 +2169,22 @@ describe("rolling new secrets out", () => {
         "rollout.done",
       ],
     });
+    // A client placed in a hosting destination, whose secrets its own
+    // operation delivers, holds nothing back.
+    const placed = `placed-${crypto.randomUUID().slice(0, 8)}`;
+    await db.insert(clients).values({
+      id: placed,
+      name: placed,
+      status: "active",
+      accountId: crypto.randomUUID().replaceAll("-", ""),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await placeClient(db, staff, {
+      clientId: placed,
+      destinationId: await destination(),
+      policyId: "eu-storage",
+    });
     // The rotation reached every active client, read live: the old
     // Microsoft secret can go, and only it. Core's secrets didn't change,
     // so nothing is said of them.
