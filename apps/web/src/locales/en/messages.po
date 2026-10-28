@@ -353,6 +353,10 @@ msgstr "{count, plural, one {# package} other {# packages}}"
 msgid "{count, plural, one {# part so far} other {# parts so far}}"
 msgstr "{count, plural, one {# part so far} other {# parts so far}}"
 
+#: src/landscape/usage-tab.tsx
+msgid "{count, plural, one {# person granted this app access for themselves.} other {# people granted this app access for themselves.}}"
+msgstr "{count, plural, one {# person granted this app access for themselves.} other {# people granted this app access for themselves.}}"
+
 #: src/onboarding/organization-words.ts
 msgid "{count, plural, one {# person is asked about no piece of work} other {# people are asked about no piece of work}}"
 msgstr "{count, plural, one {# person is asked about no piece of work} other {# people are asked about no piece of work}}"
@@ -2817,6 +2821,10 @@ msgstr "Apps by category"
 msgid "Apps flagged"
 msgstr "Apps flagged"
 
+#: src/landscape/sync-notice.tsx
+msgid "Apps found in Microsoft Entra as of {when}."
+msgstr "Apps found in Microsoft Entra as of {when}."
+
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "Apps it catches"
 msgstr "Apps it catches"
@@ -3311,6 +3319,10 @@ msgstr "Branch {name}"
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Breadcrumb"
+
+#: src/landscape/landscape.ts
+msgid "Broad access granted by a person"
+msgstr "Broad access granted by a person"
 
 #: src/knowledge/frame.tsx
 msgid "Browse"
@@ -4182,6 +4194,14 @@ msgstr "Connect again"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connect another account"
 msgstr "Connect another account"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Connect Microsoft Entra"
+msgstr "Connect Microsoft Entra"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Connect Microsoft Entra to read which apps people and admins granted access, once a day. Grasp only reads: no mail, files or sign-ins."
+msgstr "Connect Microsoft Entra to read which apps people and admins granted access, once a day. Grasp only reads: no mail, files or sign-ins."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect shared accounts and decide what domains may do"
@@ -5763,6 +5783,10 @@ msgstr "Financial data"
 msgid "Find a team or a person"
 msgstr "Find a team or a person"
 
+#: src/landscape/connect-landscape.tsx
+msgid "Find the apps your people use"
+msgstr "Find the apps your people use"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
 msgstr "Findings"
@@ -5794,6 +5818,10 @@ msgstr "First I need your staff list."
 #: src/landscape/landscape-overview.ts
 msgid "First seen"
 msgstr "First seen"
+
+#: src/landscape/landscape.ts
+msgid "First seen in the last 7 days."
+msgstr "First seen in the last 7 days."
 
 #: src/interview/words.ts
 msgid "First, the steps."
@@ -6983,6 +7011,10 @@ msgstr "It may have been removed."
 msgid "It may have been renamed or removed."
 msgstr "It may have been renamed or removed."
 
+#: src/landscape/landscape.ts
+msgid "It names its publisher {publisher} itself, unverified."
+msgstr "It names its publisher {publisher} itself, unverified."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
 msgstr "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
@@ -7890,9 +7922,37 @@ msgstr "Messages they send Grasp in a chat app."
 msgid "Microphone: {name}"
 msgstr "Microphone: {name}"
 
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft didn't answer the reads. Grasp tries again tomorrow."
+msgstr "Microsoft didn't answer the reads. Grasp tries again tomorrow."
+
+#: src/connections/integrations.ts
+msgid "Microsoft Entra (application landscape)"
+msgstr "Microsoft Entra (application landscape)"
+
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft Entra hasn't been fully read yet."
+msgstr "Microsoft Entra hasn't been fully read yet."
+
+#: src/landscape/connect-landscape.tsx
+msgid "Microsoft Entra needs connecting again"
+msgstr "Microsoft Entra needs connecting again"
+
+#: src/landscape/landscape.ts
+msgid "Microsoft hasn't verified who publishes this app."
+msgstr "Microsoft hasn't verified who publishes this app."
+
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft kept throttling the reads until the day was over."
+msgstr "Microsoft kept throttling the reads until the day was over."
+
 #: src/brain/brain.ts
 msgid "Microsoft sign-in"
 msgstr "Microsoft sign-in"
+
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft's list changed under the read. It starts over tomorrow."
+msgstr "Microsoft's list changed under the read. It starts over tomorrow."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Middle"
@@ -8215,6 +8275,11 @@ msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Never"
 
+#: src/landscape/landscape.ts
+msgctxt "an app first seen this week"
+msgid "New"
+msgstr "New"
+
 #: src/brain/goals-editor.tsx
 msgid "New board goal"
 msgstr "New board goal"
@@ -8317,6 +8382,10 @@ msgstr "No"
 #: src/onboarding/setup-steps.tsx
 msgid "No {onlySignIn}? A staff list works too."
 msgstr "No {onlySignIn}? A staff list works too."
+
+#: src/landscape/landscape.ts
+msgid "No admin consent"
+msgstr "No admin consent"
 
 #: src/landscape/landscape.ts
 #: src/policies/policy.ts
@@ -9563,6 +9632,10 @@ msgstr "Online"
 msgid "Only admins can read the audit trail"
 msgstr "Only admins can read the audit trail"
 
+#: src/landscape/usage-tab.tsx
+msgid "Only admins see who they are."
+msgstr "Only admins see who they are."
+
 #: src/engines/app-page.tsx
 msgid "Only described"
 msgstr "Only described"
@@ -10163,6 +10236,10 @@ msgstr "People sign in with an address in these domains, through your organizati
 msgid "People tell a step two ways, and nobody can say why."
 msgstr "People tell a step two ways, and nobody can say why."
 
+#: src/landscape/landscape.ts
+msgid "People use it, and no admin approved it for everyone."
+msgstr "People use it, and no admin approved it for everyone."
+
 #: src/policies/policy-editing.tsx
 msgctxt "rule condition"
 msgid "People using it"
@@ -10759,6 +10836,10 @@ msgstr "Receipt"
 #: src/routes/_shell.index.tsx
 msgid "Recent chats"
 msgstr "Recent chats"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Reconnect Microsoft Entra"
+msgstr "Reconnect Microsoft Entra"
 
 #: src/landscape/audit-trail.tsx
 msgid "Recorded by"
@@ -12067,6 +12148,10 @@ msgstr "Someone else"
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 
+#: src/landscape/landscape.ts
+msgid "Someone gave it access to their mail, files, chats or the directory on their own."
+msgstr "Someone gave it access to their mail, files, chats or the directory on their own."
+
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
 msgstr "Someone no longer here"
@@ -12979,6 +13064,14 @@ msgstr "The app is marked in the landscape, so its owner can act on it."
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 msgstr "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 
+#: src/landscape/sync-notice.tsx
+msgid "The apps found in Microsoft Entra may be incomplete: Grasp couldn't check its last read."
+msgstr "The apps found in Microsoft Entra may be incomplete: Grasp couldn't check its last read."
+
+#: src/landscape/sync-notice.tsx
+msgid "The apps found in Microsoft Entra may be incomplete: its last read didn't finish."
+msgstr "The apps found in Microsoft Entra may be incomplete: its last read didn't finish."
+
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."
 msgstr "The apps teams named, and the ones seen in use that nobody mentioned."
@@ -13266,6 +13359,14 @@ msgstr "The kickoff, and the documents the company shared."
 msgid "The last interviews added less than {stop} new facts"
 msgstr "The last interviews added less than {stop} new facts"
 
+#: src/landscape/sync-notice.tsx
+msgid "The last read of Microsoft Entra failed"
+msgstr "The last read of Microsoft Entra failed"
+
+#: src/landscape/sync-notice.tsx
+msgid "The last read of Microsoft Entra stopped at its limit"
+msgstr "The last read of Microsoft Entra stopped at its limit"
+
 #: src/workflows/resource-runs.tsx
 msgid "The latest runs, newest first."
 msgstr "The latest runs, newest first."
@@ -13309,6 +13410,14 @@ msgstr "The message"
 #: src/interview/words.ts
 msgid "The microphone is not available here. Type your answer."
 msgstr "The microphone is not available here. Type your answer."
+
+#: src/landscape/sync-notice.tsx
+msgid "The Microsoft Entra connection is to another organization's tenant, so nothing it read was kept."
+msgstr "The Microsoft Entra connection is to another organization's tenant, so nothing it read was kept."
+
+#: src/landscape/sync-notice.tsx
+msgid "The Microsoft Entra connection needs an admin to connect it again."
+msgstr "The Microsoft Entra connection needs an admin to connect it again."
 
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
@@ -13986,6 +14095,10 @@ msgstr "This page didn't load"
 msgid "This page is not here"
 msgstr "This page is not here"
 
+#: src/landscape/usage-tab.tsx
+msgid "This person granted access to {scopes}. Grasp last saw the grant on {lastSeen}."
+msgstr "This person granted access to {scopes}. Grasp last saw the grant on {lastSeen}."
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "This policy is not here any more"
 msgstr "This policy is not here any more"
@@ -14482,6 +14595,10 @@ msgstr "Until this is resolved, no release that changes this store's tables can 
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
 msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+
+#: src/landscape/landscape.ts
+msgid "Unverified publisher"
+msgstr "Unverified publisher"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Up to {upTo} minutes"
@@ -16166,6 +16283,10 @@ msgstr "Your onboarding"
 #: src/dashboard/signals.tsx
 msgid "your organization"
 msgstr "your organization"
+
+#: src/landscape/sync-notice.tsx
+msgid "Your organization has more grants than one day's read takes, so some apps may be missing."
+msgstr "Your organization has more grants than one day's read takes, so some apps may be missing."
 
 #: src/connections/connect-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."

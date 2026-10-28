@@ -36,6 +36,7 @@ const landscapeApp = (
   blocked: false,
   flagged: false,
   policySource: null,
+  discovered: null,
   ...patch,
 });
 

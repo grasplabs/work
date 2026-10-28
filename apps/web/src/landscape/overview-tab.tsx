@@ -38,6 +38,7 @@ import {
   GlobeIcon,
   RadarIcon,
   ServerIcon,
+  ShieldAlertIcon,
   ShieldCheckIcon,
   SparklesIcon,
   Trash2Icon,
@@ -50,6 +51,7 @@ import { InsightPopover, StatusDot } from "./insight.tsx";
 import { appTabs } from "./landscape-app.ts";
 import { appProfile } from "./landscape-overview.ts";
 import type { ProfileFact, ProfileKey } from "./landscape-overview.ts";
+import { signalLabel, signalTextOf } from "./landscape.ts";
 import type { LandscapeApp } from "./landscape.ts";
 import { OwnerAvatar } from "./owner.tsx";
 import { Facts, Section } from "./section.tsx";
@@ -157,9 +159,15 @@ const ProfileSection = ({ app }: { app: LandscapeApp }) => {
   );
 };
 
-/** The signals that weigh most on the app; Grasp raises none for apps yet. */
-const RiskSignalsSection = ({ appId }: { appId: string }) => {
-  const { t } = useLingui();
+/**
+ * The signals that weigh most on the app: those the identity provider's
+ * grants raise for an app found there; none for any other yet.
+ */
+const RiskSignalsSection = ({ app }: { app: LandscapeApp }) => {
+  const { t, i18n } = useLingui();
+  const appId = app.id;
+  const signals = app.discovered?.signals ?? [];
+  const unverifiedPublisher = app.discovered?.unverifiedPublisher ?? null;
   return (
     <Section
       action={
@@ -176,19 +184,37 @@ const RiskSignalsSection = ({ appId }: { appId: string }) => {
       description={t`The signals that weigh most on this app.`}
       title={t`Risk signals`}
     >
-      <Empty size="sm">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ShieldCheckIcon />
-          </EmptyMedia>
-          <EmptyTitle>
-            <Trans>No risk signals</Trans>
-          </EmptyTitle>
-          <EmptyDescription>
-            <Trans>Nothing to raise right now.</Trans>
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      {signals.length > 0 ? (
+        <ItemGroup spacing="tight">
+          {signals.map((signal) => (
+            <Item key={signal} size="sm">
+              <ItemMedia variant="icon">
+                <ShieldAlertIcon />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>{i18n._(signalLabel[signal])}</ItemTitle>
+                <ItemDescription>
+                  {signalTextOf(signal, unverifiedPublisher, i18n)}
+                </ItemDescription>
+              </ItemContent>
+            </Item>
+          ))}
+        </ItemGroup>
+      ) : (
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <ShieldCheckIcon />
+            </EmptyMedia>
+            <EmptyTitle>
+              <Trans>No risk signals</Trans>
+            </EmptyTitle>
+            <EmptyDescription>
+              <Trans>Nothing to raise right now.</Trans>
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
     </Section>
   );
 };
@@ -355,7 +381,7 @@ export const OverviewTab = ({ app }: { app: LandscapeApp }) => {
     <div className="flex flex-col gap-6">
       <ProfileSection app={app} />
       <div className="grid gap-6 xl:grid-cols-2">
-        <RiskSignalsSection appId={app.id} />
+        <RiskSignalsSection app={app} />
         <VendorDocumentsSection />
       </div>
       <AdoptionSection appId={app.id} />

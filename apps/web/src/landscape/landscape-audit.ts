@@ -374,13 +374,23 @@ export interface TrailSearch {
  */
 export interface TrailRead {
   connectionIds: string[];
+  /**
+   * The one app of the connections the trail is of, for an app found in
+   * the identity provider's grants: a record naming another app (who
+   * looked at who granted that one access) is left out.
+   */
+  appId?: string | undefined;
   records: AuditRecord[];
   searches: TrailSearch[];
 }
 
 /** An app's trail before anything is read. */
-export const startTrail = (connectionIds: readonly string[]): TrailRead => ({
+export const startTrail = (
+  connectionIds: readonly string[],
+  appId?: string
+): TrailRead => ({
   connectionIds: [...connectionIds],
+  appId,
   records: [],
   searches: [
     ...connectionIds.map((id) => ({
@@ -394,13 +404,22 @@ export const startTrail = (connectionIds: readonly string[]): TrailRead => ({
 /** Most pages read of each search at a time: each page reads a bounded stretch of the log. */
 export const pagesPerRead = 10;
 
-/** Whether a record is about one of `connectionIds`. */
+/**
+ * Whether a record is about one of `connectionIds`, and, given `appId`,
+ * names no other app.
+ */
 const onConnections = (
   { event }: AuditRecord,
-  connectionIds: readonly string[]
+  connectionIds: readonly string[],
+  appId?: string
 ): boolean => {
   const connection = event === null ? undefined : connectionOf(event);
-  return connection !== undefined && connectionIds.includes(connection);
+  const app = event?.detail.app;
+  return (
+    connection !== undefined &&
+    connectionIds.includes(connection) &&
+    (appId === undefined || typeof app !== "string" || app === appId)
+  );
 };
 
 /** Up to `pages` more pages of one search, from where it stopped. */
@@ -441,12 +460,13 @@ export const readTrail = async (
   );
   const records = new Map(read.records.map((record) => [record.seq, record]));
   for (const record of done.flatMap((each) => each.records)) {
-    if (onConnections(record, read.connectionIds)) {
+    if (onConnections(record, read.connectionIds, read.appId)) {
       records.set(record.seq, record);
     }
   }
   return {
     connectionIds: read.connectionIds,
+    appId: read.appId,
     records: [...records.values()].toSorted(
       (one, other) => other.seq - one.seq
     ),
@@ -503,11 +523,19 @@ const searchOn =
  */
 export const readAppAudit = async (
   session: Session,
-  connections: readonly TrailConnection[]
+  connections: readonly TrailConnection[],
+  /** The one app of them, for an app found in the identity provider's grants. */
+  appId?: string
 ): Promise<AppAuditTrail> => {
   const [directory, read] = await Promise.all([
     readDirectory(session),
-    readTrail(searchOn(session), startTrail(connections.map(({ id }) => id))),
+    readTrail(
+      searchOn(session),
+      startTrail(
+        connections.map(({ id }) => id),
+        appId
+      )
+    ),
   ]);
   return {
     read,
