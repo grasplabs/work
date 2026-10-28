@@ -25,16 +25,17 @@ const zoneId = "zone-1";
 /** A Cloudflare account and zone, as far as the script reads and writes them. */
 interface FakeState {
   namespaces: string[];
-  d1: { name: string; jurisdiction: string }[];
+  d1: { name: string; jurisdiction?: string }[];
   r2: { name: string; jurisdiction: string }[];
   kv: string[];
   stores: string[];
   secrets: string[];
   zone: boolean;
   workers: string[];
-  dns: string[];
+  dns: { type: string; name: string; content: string; proxied: boolean }[];
   emailRouting: boolean;
-  catchAll: string | null;
+  /** The catch-all: on or off, and where it sends mail. */
+  catchAll: { enabled: boolean; type: string; to: string } | null;
 }
 
 /** A command's flags, by name: `--name x` is `{ name: "x" }`. */
@@ -129,13 +130,19 @@ const commandsOf = (
     ),
   "dns records list": (flags) =>
     pageOf(
-      state.dns
-        .filter((name) => name === flags.get("name"))
-        .map((name) => ({ name })),
+      state.dns.filter(
+        ({ name, type }) =>
+          name === flags.get("name") && type === (flags.get("type") ?? type)
+      ),
       flags
     ),
   "dns records create": (flags) => {
-    state.dns.push(bodyField(flags, "name"));
+    state.dns.push({
+      type: bodyField(flags, "type"),
+      name: bodyField(flags, "name"),
+      content: bodyField(flags, "content"),
+      proxied: bodyField(flags, "proxied") === "true",
+    });
     return {};
   },
   "email-routing settings get": () => ({ enabled: state.emailRouting }),
@@ -144,14 +151,14 @@ const commandsOf = (
     return {};
   },
   "email-routing rules catch-all get": () => ({
-    enabled: state.catchAll !== null,
+    enabled: state.catchAll?.enabled ?? false,
     actions:
       state.catchAll === null
-        ? []
-        : [{ type: "worker", value: [state.catchAll] }],
+        ? [{ type: "drop" }]
+        : [{ type: state.catchAll.type, value: [state.catchAll.to] }],
   }),
   "email-routing rules catch-all update": () => {
-    state.catchAll = "grasp-os-router";
+    state.catchAll = { enabled: true, type: "worker", to: "grasp-os-router" };
     return null;
   },
 });
@@ -160,27 +167,20 @@ const commandsOf = (
 const changing = new Set(["create", "enable", "update", "put", "delete"]);
 
 /** A stand-in for cf, on one account, starting as `start` says. */
-const fakeCf = (
-  start: {
-    zone?: boolean;
-    workers?: string[];
-    secrets?: string[];
-    stores?: string[];
-    catchAll?: string;
-  } = {}
-) => {
+const fakeCf = (start: Partial<FakeState> = {}) => {
   const state: FakeState = {
     namespaces: [],
     d1: [],
     r2: [],
     kv: [],
-    stores: start.stores ?? ["store-1"],
-    secrets: start.secrets ?? [],
-    zone: start.zone ?? true,
-    workers: start.workers ?? [],
+    stores: ["store-1"],
+    secrets: [],
+    zone: true,
+    workers: [],
     dns: [],
-    emailRouting: start.catchAll !== undefined,
-    catchAll: start.catchAll ?? null,
+    emailRouting: start.catchAll !== undefined && start.catchAll !== null,
+    catchAll: null,
+    ...start,
   };
   const commands = commandsOf(state);
   const writes: string[] = [];
@@ -265,8 +265,15 @@ describe("setting up a fresh account", () => {
       writesAgain: [],
       d1: [{ name: "grasp-os-admin", jurisdiction: "eu" }],
       r2: [{ name: "grasp-os-releases", jurisdiction: "eu" }],
-      dns: ["*.ongrasp.app"],
-      catchAll: "grasp-os-router",
+      dns: [
+        {
+          type: "AAAA",
+          name: "*.ongrasp.app",
+          content: "100::",
+          proxied: true,
+        },
+      ],
+      catchAll: { enabled: true, type: "worker", to: "grasp-os-router" },
     });
   });
 
@@ -367,22 +374,94 @@ describe("setting up a fresh account", () => {
   });
 });
 
-describe("what points elsewhere already", () => {
-  it("refuses to repoint an Email Routing catch-all that sends mail somewhere else", async () => {
-    const cloudflare = fakeCf({
-      workers: ["grasp-os-admin", "grasp-os-router"],
-      catchAll: "someone-elses-worker",
-    });
+const deployed = ["grasp-os-admin", "grasp-os-router"];
 
-    await expect(setUpAccount(optionsFor(cloudflare.cf))).rejects.toThrow(
+describe("what points elsewhere already", () => {
+  it("refuses to repoint an Email Routing catch-all that sends mail somewhere else, on or off", async () => {
+    const on = { enabled: true, type: "worker", to: "someone-elses-worker" };
+    const off = { enabled: false, type: "forward", to: "someone@example.com" };
+    const enabled = fakeCf({ workers: deployed, catchAll: on });
+    const disabled = fakeCf({ workers: deployed, catchAll: off });
+
+    await expect(setUpAccount(optionsFor(enabled.cf))).rejects.toThrow(
+      "sends mail somewhere other than grasp-os-router"
+    );
+    await expect(setUpAccount(optionsFor(disabled.cf))).rejects.toThrow(
       "sends mail somewhere other than grasp-os-router"
     );
     expect({
-      catchAll: cloudflare.state.catchAll,
-      catchAllWrites: cloudflare.writes.filter((write) =>
+      catchAlls: [enabled.state.catchAll, disabled.state.catchAll],
+      catchAllWrites: [...enabled.writes, ...disabled.writes].filter((write) =>
         write.includes("catch-all")
       ),
-    }).toStrictEqual({ catchAll: "someone-elses-worker", catchAllWrites: [] });
+    }).toStrictEqual({ catchAlls: [on, off], catchAllWrites: [] });
+  });
+
+  it("refuses to turn Email Routing on over the zone's own mail", async () => {
+    const mx = {
+      type: "MX",
+      name: "ongrasp.app",
+      content: "mail.example.com",
+      proxied: false,
+    };
+    const cloudflare = fakeCf({ workers: deployed, dns: [mx] });
+
+    await expect(setUpAccount(optionsFor(cloudflare.cf))).rejects.toThrow(
+      "already has MX records for other mail"
+    );
+    expect({
+      emailRouting: cloudflare.state.emailRouting,
+      writes: cloudflare.writes.filter((write) => write.startsWith("email")),
+      mx: cloudflare.state.dns.filter(({ type }) => type === "MX"),
+    }).toStrictEqual({ emailRouting: false, writes: [], mx: [mx] });
+  });
+
+  it("refuses a wildcard record that isn't the router's own proxied one", async () => {
+    const unproxied = {
+      type: "AAAA",
+      name: "*.ongrasp.app",
+      content: "100::",
+      proxied: false,
+    };
+    const elsewhere = {
+      type: "CNAME",
+      name: "*.ongrasp.app",
+      content: "someone.example.com",
+      proxied: true,
+    };
+
+    for (const record of [unproxied, elsewhere]) {
+      const cloudflare = fakeCf({ dns: [record] });
+      // oxlint-disable-next-line no-await-in-loop -- one zone at a time
+      await expect(setUpAccount(optionsFor(cloudflare.cf))).rejects.toThrow(
+        "already has a record that isn't the router's proxied 100::"
+      );
+      expect(cloudflare.state.dns).toStrictEqual([record]);
+    }
+  });
+
+  it("refuses a database it can't tell is in the EU", async () => {
+    const cloudflare = fakeCf({ d1: [{ name: "grasp-os-admin" }] });
+
+    await expect(setUpAccount(optionsFor(cloudflare.cf))).rejects.toThrow(
+      "D1 database grasp-os-admin exists in jurisdiction undefined, not eu"
+    );
+  });
+});
+
+describe("reading cf's lists", () => {
+  it("stops when a list keeps answering full pages, as if cf ignored --page", async () => {
+    const full = Array.from({ length: 100 }, (_, at) => ({
+      title: `kv-${at}`,
+    }));
+    const cf: Cf = async (args) => {
+      await Promise.resolve();
+      return args.includes("kv") ? full : [];
+    };
+
+    await expect(setUpAccount(optionsFor(cf))).rejects.toThrow(
+      "answered more than 100 full pages"
+    );
   });
 });
 

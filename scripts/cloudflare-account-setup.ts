@@ -125,6 +125,8 @@ const listOf = (answer: unknown, key?: string): unknown[] => {
 
 /** A page of a paged list, at most this long. */
 const perPage = 100;
+/** More pages than any list here has: past it, cf is taken to ignore `--page`. */
+const pagesMax = 100;
 
 /** Every item of a paged cf list, page by page. */
 const allPages = async (
@@ -132,7 +134,7 @@ const allPages = async (
   args: readonly string[]
 ): Promise<unknown[]> => {
   const items: unknown[] = [];
-  for (let page = 1; ; page += 1) {
+  for (let page = 1; page <= pagesMax; page += 1) {
     const paging = ["--page", `${page}`, "--per-page", `${perPage}`];
     // oxlint-disable-next-line no-await-in-loop -- one page after another
     const answer = listOf(await cf([...args, ...paging]));
@@ -141,6 +143,9 @@ const allPages = async (
       return items;
     }
   }
+  throw new Error(
+    `cf ${args.join(" ")} answered more than ${pagesMax} full pages: is it paging?`
+  );
 };
 
 /** What one run works with. */
@@ -226,9 +231,10 @@ const storageSteps = async (
           return false;
         }
         const held = field(database, "jurisdiction");
-        if (typeof held === "string" && held !== jurisdiction) {
+        // Never taken as the EU on silence.
+        if (held !== jurisdiction) {
           throw new Error(
-            `D1 database ${name} exists in jurisdiction ${held}, not ${jurisdiction}: move it by hand`
+            `D1 database ${name} exists in jurisdiction ${String(held)}, not ${jurisdiction}: move it by hand`
           );
         }
         return true;
@@ -384,13 +390,9 @@ const catchAllStep = async (
         value.includes(router)
       );
     });
-  // A catch-all that already sends mail somewhere else is someone's:
-  // never repointed here.
-  if (
-    !toRouter &&
-    enabled &&
-    actions.some((action) => field(action, "type") !== "drop")
-  ) {
+  // A catch-all that already sends mail somewhere else is someone's, even
+  // switched off: never repointed here.
+  if (!toRouter && actions.some((action) => field(action, "type") !== "drop")) {
     throw new Error(
       `${domain}'s Email Routing catch-all sends mail somewhere other than ${router}: change it by hand`
     );
@@ -424,6 +426,15 @@ const catchAllStep = async (
   }
 };
 
+/** The record types that can carry the wildcard to the router. */
+const addressTypes = new Set(["A", "AAAA", "CNAME"]);
+
+/** The wildcard's origin: none (the discard prefix), since the route answers. */
+const wildcardOrigin = "100::";
+
+/** The suffix of Email Routing's own MX hosts (route1.mx.cloudflare.net, …). */
+const emailRoutingMx = ".mx.cloudflare.net";
+
 /** Step 4: the zone's wildcard record, route, custom domain and Email Routing. */
 const zoneSteps = async (
   options: SetupOptions,
@@ -456,7 +467,7 @@ const zoneSteps = async (
     `DNS record ${wildcard}`,
     dryRun,
     async () => {
-      const records = await allPages(cf, [
+      const atWildcard = await allPages(cf, [
         "dns",
         "records",
         "list",
@@ -464,7 +475,26 @@ const zoneSteps = async (
         "--name",
         wildcard,
       ]);
-      return records.length > 0;
+      const records = atWildcard.filter((record) =>
+        addressTypes.has(String(field(record, "type")))
+      );
+      if (records.length === 0) {
+        return false;
+      }
+      // Anything but this script's own proxied record is someone's: it
+      // would send clients' hostnames to its origin, changed by hand.
+      const ours = records.every(
+        (record) =>
+          field(record, "type") === "AAAA" &&
+          field(record, "content") === wildcardOrigin &&
+          field(record, "proxied") === true
+      );
+      if (!ours) {
+        throw new Error(
+          `${wildcard} already has a record that isn't the router's proxied ${wildcardOrigin}: change it by hand`
+        );
+      }
+      return true;
     },
     async () => {
       // Proxied, to no origin: only for the route to the router to apply.
@@ -477,7 +507,7 @@ const zoneSteps = async (
         JSON.stringify({
           type: "AAAA",
           name: wildcard,
-          content: "100::",
+          content: wildcardOrigin,
           proxied: true,
           ttl: 1,
         }),
@@ -504,11 +534,33 @@ const zoneSteps = async (
     reports,
     `Email Routing on ${domain}`,
     dryRun,
-    async () =>
-      field(
-        await cf(["email-routing", "settings", "get", ...zone]),
-        "enabled"
-      ) === true,
+    async () => {
+      const settings = await cf(["email-routing", "settings", "get", ...zone]);
+      if (field(settings, "enabled") === true) {
+        return true;
+      }
+      // Turning it on replaces the zone's MX records: mail that goes
+      // somewhere already is someone's, never taken over here.
+      const mx = await allPages(cf, [
+        "dns",
+        "records",
+        "list",
+        ...zone,
+        "--type",
+        "MX",
+        "--name",
+        domain,
+      ]);
+      const foreign = mx.filter(
+        (record) => !String(field(record, "content")).endsWith(emailRoutingMx)
+      );
+      if (foreign.length > 0) {
+        throw new Error(
+          `${domain} already has MX records for other mail: turn Email Routing on by hand if that's right`
+        );
+      }
+      return false;
+    },
     async () => {
       // Turns it on with the MX and SPF records it needs.
       await cf(["email-routing", "enable", ...zone, "--name", domain]);
