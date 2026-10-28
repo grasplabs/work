@@ -259,7 +259,7 @@ const compiled = async (
 const day = 24 * 60 * 60 * 1000;
 
 /**
- * How long a cached build is kept after it was last used: the cron's
+ * How long a cached build is kept after it was last used: the clock's
  * sweep deletes what is older (`sweepBuilds`). A build is the compiler's
  * output for files core keeps, under its version, so one swept is built
  * again, the same, the next time it is asked for: what runs never rests
@@ -321,7 +321,7 @@ const lastUsedOf = (object: R2Object): number => {
 
 /**
  * Deletes cached builds last used more than `buildKeepMs` before `now`,
- * from the cron: in code, not a bucket rule, so it runs wherever core
+ * from the clock: in code, not a bucket rule, so it runs wherever core
  * does. One page of one kind's prefix a run, at most `buildSweepBatch`
  * objects, from where the last run stopped; once a kind is done, the next
  * run starts the next. A build is never last used after it was uploaded,

@@ -12,7 +12,6 @@ import {
   verifiedCandidate,
 } from "./apps.ts";
 import { actingFor, envOf, knowledgeIn } from "./contexts.ts";
-import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import {
   knowledgeRacing,
@@ -21,6 +20,7 @@ import {
   storedGrant,
   storedVersionTexts,
 } from "./knowledge.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
 import {
   auditedDuring,
   letSessionRecheckPass,
@@ -259,7 +259,7 @@ describe("indexing", setUpTime, () => {
     });
   });
 
-  it("catches up on the 15-minute cron trigger with versions whose indexing failed", async () => {
+  it("catches up on the 15-minute clock with versions whose indexing failed", async () => {
     const owner = await personOf("builder");
     const word = term();
     let id = "";
@@ -271,14 +271,14 @@ describe("indexing", setUpTime, () => {
       []
     );
 
-    await runQuarterHourCron();
+    await runQuarterHourTasks();
     await expect(entriesFound(owner.knowledge, word)).resolves.toStrictEqual([
       entryPath(id),
     ]);
     // Caught up: the next run writes nothing.
     const entry = await entryOf(owner, id);
     const events = await auditedDuring(async () => {
-      await runQuarterHourCron();
+      await runQuarterHourTasks();
     });
     expect(
       events.filter(({ target }) => target?.id === entry.id)
@@ -288,7 +288,7 @@ describe("indexing", setUpTime, () => {
     });
   });
 
-  it("indexes an App renamed or described anew at once, and catches up on the cron trigger when that failed", async () => {
+  it("indexes an App renamed or described anew at once, and catches up on the clock when that failed", async () => {
     const owner = await personOf("builder");
     const app = await releasedApp(owner, agentsMd(term()));
     const path = entryPath(app.id);
@@ -306,7 +306,7 @@ describe("indexing", setUpTime, () => {
       await api.apps.update(app.id, { name: `Leave ${later}` });
     });
     const failed = await foundFor(owner.knowledge, renamed, later);
-    await runQuarterHourCron();
+    await runQuarterHourTasks();
     const caughtUp = await foundFor(owner.knowledge, renamed, later);
 
     expect({ atOnce, failed, caughtUp }).toStrictEqual({
@@ -331,7 +331,7 @@ describe("indexing", setUpTime, () => {
       );
     });
 
-    // The cron indexes version 2; just before its write lands, version 3
+    // The clock indexes version 2; just before its write lands, version 3
     // is made current, and indexed, first.
     const events = await auditedDuring(async () => {
       await indexApps({
@@ -354,7 +354,7 @@ describe("indexing", setUpTime, () => {
     );
   });
 
-  it("heals an entry left at a version no longer current on the next cron run", async () => {
+  it("heals an entry left at a version no longer current on the next clock run", async () => {
     const owner = await personOf("builder");
     const [first, second] = [term(), term()];
     const app = await releasedApp(owner, agentsMd(first));
@@ -362,8 +362,8 @@ describe("indexing", setUpTime, () => {
       await release({ api }, app.id, { "AGENTS.md": agentsMd(second) });
     });
 
-    // The cron read version 2 as current; before it writes, the App is
-    // rolled back to version 1, whose text its entry still has. The cron's
+    // The clock read version 2 as current; before it writes, the App is
+    // rolled back to version 1, whose text its entry still has. The clock's
     // write lands after: the entry holds version 2's text, and says so.
     await indexApps({
       ...env,
@@ -379,7 +379,7 @@ describe("indexing", setUpTime, () => {
       found: { [first]: [], [second]: [entryPath(app.id)] },
     });
 
-    await runQuarterHourCron();
+    await runQuarterHourTasks();
     await expect(
       entryState(owner, app.id, [first, second])
     ).resolves.toStrictEqual({

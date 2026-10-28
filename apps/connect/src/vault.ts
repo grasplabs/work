@@ -13,11 +13,11 @@ import { log } from "@grasp-os/shared/log";
 //
 // Rotating the key: set the current key as `TOKEN_ENCRYPTION_KEY_PREVIOUS`
 // and a new one as `TOKEN_ENCRYPTION_KEY`. New values are sealed with the
-// new key, and the cron trigger seals the stored ones again with it
+// new key, and the clock seals the stored ones again with it
 // (`resealTokens`, `resealFlows`); once no token (`key_id`) and no flow's
 // verifier is left under the previous key's ID, remove the previous key.
 
-/** Most values of one kind the cron trigger seals again per run. */
+/** Most values of one kind the clock seals again per run. */
 export const resealBatchSize = 50;
 
 /** A key is 32 random bytes, in base64: `openssl rand -base64 32`. */
@@ -100,7 +100,7 @@ export interface Vault {
   keyId: string;
   /**
    * A `LIKE` pattern for values sealed with the previous key, while one is
-   * set: those the cron trigger seals again. `undefined` without one.
+   * set: those the clock seals again. `undefined` without one.
    */
   sealedWithPrevious: string | undefined;
   seal: (plaintext: string, context: string) => Promise<string>;

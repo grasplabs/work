@@ -25,6 +25,7 @@ import {
   callAs,
   chatOrigin,
   outcome,
+  runMaintenance,
   serverUrl,
   someone,
 } from "./connect.ts";
@@ -1519,12 +1520,12 @@ describe("a write held from a chat platform", () => {
     const connectionId = await addConnection();
     await holdFromTeams(anna, connectionId, Date.now() + hourMs);
     // Before midnight the clock leaves it waiting.
-    await exports.default.scheduled();
+    await runMaintenance();
     const before = await leftFor(connectionId);
     later(hourMs + 1);
     // Listed no more the moment its day is over.
     const listed = await waitingFor(anna);
-    await exports.default.scheduled();
+    await runMaintenance();
     const after = await leftFor(connectionId);
     expect({
       before: before.held.length,
@@ -1577,7 +1578,7 @@ describe("a write held from a chat platform", () => {
     const { idempotencyKey: _key, ...call } = mail(connectionId);
     await hold(inChat(anna), call);
     later(30 * 24 * hourMs);
-    await exports.default.scheduled();
+    await runMaintenance();
     const held = await heldFor(anna);
     const { output } = await confirm(anna, held);
     expect({ endsAt: held.endsAt, output }).toStrictEqual({

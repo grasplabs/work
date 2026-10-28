@@ -69,7 +69,7 @@ import type { KnowledgeTally } from "./usage-tally.ts";
 // past their review date, each for the owner of its collection. Read from
 // the audit log (reads, and searches that found nothing) and the
 // documents, never on a request: once a UTC day, by the first run of the
-// 15-minute cron trigger of a day that claims it (src/daily-claims.ts),
+// 15-minute clock of a day that claims it (src/daily-claims.ts),
 // reading the audit log in the same pass as the improvement signals
 // (src/daily-signals.ts).
 //

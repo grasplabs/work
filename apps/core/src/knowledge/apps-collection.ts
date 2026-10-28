@@ -37,16 +37,16 @@ import { brainOf } from "./ports.ts";
 // The App registry is in the core database and the collection in
 // Knowledge's, so no batch holds both. Making a version current, and
 // renaming or describing an App anew (app-settings.ts), indexes the App
-// straight after (`indexAppNow`), and a cron trigger every 15 minutes
+// straight after (`indexAppNow`), and the clock every 15 minutes
 // indexes every App whose entry isn't of its current version, name and
 // description (`indexApps`): one whose indexing failed. Indexing where
-// they change keeps entries current; the cron trigger only catches up, so
+// they change keeps entries current; the clock only catches up, so
 // every 15 minutes is enough. `app_entries`, in core's database, has the
 // version each entry holds and a hash of its name and description
 // (`described`), written once the entry is:
 // should that write fail, the entry is indexed again by the next run.
 //
-// Two indexings of one App at once (a version change and the cron, say)
+// Two indexings of one App at once (a version change and the clock, say)
 // never write over each other: each reads what `app_entries` holds and the
 // entry before the App, and writes only over the entry's version it read
 // (the save's `ifVersion`), so the one that loses writes nothing; one that
@@ -55,7 +55,7 @@ import { brainOf } from "./ports.ts";
 // have read the App before a version change that the loser saw, and so
 // leave the text of a version that is no longer current: `app_entries`
 // then names that version, which differs from the App's, and the next
-// cron run indexes it again. So the entry heals itself within 15 minutes.
+// clock run indexes it again. So the entry heals itself within 15 minutes.
 
 /** Who indexes: Grasp itself, with no person behind it. */
 const appsActor: AuditActor = { type: "system" };
@@ -63,7 +63,7 @@ const appsActor: AuditActor = { type: "system" };
 /** The author and owner of the entries' versions. */
 const appsWriter: Writer = { actor: appsActor, userId: "grasp" };
 
-/** Most Apps one cron run indexes: each is a read from R2 and a batch. */
+/** Most Apps one clock run indexes: each is a read from R2 and a batch. */
 const indexedPerRun = 20;
 
 /**
@@ -302,7 +302,7 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
 };
 
 /**
- * `indexApp`, whose failure is logged and left to the cron trigger (see
+ * `indexApp`, whose failure is logged and left to the clock (see
  * `indexApps`): a conflict, another indexing that wrote first, is left to
  * it silently.
  */
@@ -320,7 +320,7 @@ export const indexAppNow = async (env: Env, appId: string): Promise<void> => {
  * Indexes the Apps in use whose entries aren't of their current version,
  * name and description, at most `indexedPerRun`, one at a time, from a random one on (by ID,
  * wrapping around): Apps whose indexing fails every time can't keep the
- * others waiting run after run. The cron trigger calls it every 15
+ * others waiting run after run. The clock calls it every 15
  * minutes.
  */
 export const indexApps = async (env: Env): Promise<void> => {
@@ -370,7 +370,7 @@ export const indexApps = async (env: Env): Promise<void> => {
 /**
  * Refuses with `knowledge.read_only` a purge of an App's entry while what
  * indexing would write now (`entryNow`) holds a term (`holds`), saying
- * where: the next indexing (a version made current, the cron catching up)
+ * where: the next indexing (a version made current, the clock catching up)
  * makes the entry from the App itself, out of a purge's reach, and would
  * put it back, even when the entry is still of an older version without
  * it. Refuses too, failing closed, when the App or its current version

@@ -1788,7 +1788,7 @@ describe("an App's locks and the files they name", () => {
     }).toStrictEqual({ code: "dependency.stale", locks: [] });
   });
 
-  it("deletes a lock no pending or approved request names, records its tarballs, and the cron deletes those no lock names", async () => {
+  it("deletes a lock no pending or approved request names, records its tarballs, and the clock deletes those no lock names", async () => {
     const decide = await approverOf();
     const { builder, app } = await builderWithApp();
     const [kept, replaced, denied] = [
@@ -1814,7 +1814,7 @@ describe("an App's locks and the files they name", () => {
       denied: await recordedForCleanup(deniedIntegrity),
     };
 
-    // An hour on, the cron deletes what no lock names, and keeps the rest.
+    // An hour on, the clock deletes what no lock names, and keeps the rest.
     const later = new Date(Date.now() + 2 * 60 * 60 * 1000);
     for (let run = 0; run < 20; run += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one run at a time

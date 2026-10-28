@@ -78,9 +78,7 @@
         "nodejs_compat",
         "global_fetch_strictly_public"
       ],
-      "crons": [
-        "* * * * *"
-      ],
+      "crons": [],
       "d1Databases": [
         {
           "binding": "DB",
@@ -261,10 +259,7 @@
       "compatibilityFlags": [
         "nodejs_compat"
       ],
-      "crons": [
-        "* * * * *",
-        "*/15 * * * *"
-      ],
+      "crons": [],
       "d1Databases": [
         {
           "binding": "DB",
