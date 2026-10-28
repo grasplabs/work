@@ -1,0 +1,1 @@
+ALTER TABLE `connections` ADD `tools_unsynced_at` integer;
