@@ -1087,16 +1087,22 @@ describe("changing what a connected Composio toolkit may do", () => {
       change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
     );
     const recorded = await events();
-    const failed = recorded.find(({ action }) => action === "connection.tools");
 
+    // Composio refuses the setting back as well: recorded, and left marked
+    // for the clock to finish.
     expect({
       end,
       unchanged: (await toolsNow(connectionId)) === before,
-      failed: failed?.detail,
-    }).toMatchObject({
+      failed: recorded
+        .filter(({ action }) => action === "connection.tools")
+        .map(({ detail }) => [detail.outcome, detail.reason]),
+    }).toStrictEqual({
       end: "connection.provider_refused",
       unchanged: true,
-      failed: { outcome: "failed", reason: "connection.provider_refused" },
+      failed: [
+        ["failed", "connection.tools_restore_failed"],
+        ["failed", "connection.provider_refused"],
+      ],
     });
   });
 
@@ -1159,7 +1165,10 @@ describe("changing what a connected Composio toolkit may do", () => {
     }).toStrictEqual({
       end: "Error: Logging broke",
       unchanged: true,
-      failed: [["failed", "connection.change_failed"]],
+      failed: [
+        ["failed", "connection.tools_restore_failed"],
+        ["failed", "connection.change_failed"],
+      ],
     });
   });
 
@@ -1457,5 +1466,48 @@ describe("changing what a connected Composio toolkit may do", () => {
       left: 0,
       reason: "connection.tools_changed",
     });
+  });
+
+  it("keeps a held action whose tool a newer change allowed again before it is dropped", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const inChat = agentFor("user-anna", "agent-chat", "interactive");
+    const held = await callAs(
+      inChat,
+      call(connectionId, "HUBSPOT_CREATE_CONTACT")
+    );
+    // Narrowed first; by the time Composio is brought in line, a newer
+    // change has allowed the held action's tool again.
+    const heldNow = async () => {
+      const row = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM pending_actions WHERE id = ?"
+      )
+        .bind(held.pending?.id ?? "")
+        .first<{ n: number }>();
+      return row?.n;
+    };
+    let whileNarrowing: number | undefined;
+    composio.state.beforeUpdate = async () => {
+      whileNarrowing = await heldNow();
+      composio.state.beforeUpdate = async () => {
+        await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+          .bind(
+            JSON.stringify(["HUBSPOT_LIST_CONTACTS", "HUBSPOT_CREATE_CONTACT"]),
+            connectionId
+          )
+          .run();
+      };
+    };
+    await change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]);
+    const left = await heldNow();
+    const recorded = await events();
+
+    expect({
+      whileNarrowing,
+      left,
+      dropped: recorded.some(
+        ({ action }) => action === "connection.action.dropped"
+      ),
+    }).toStrictEqual({ whileNarrowing: 1, left: 1, dropped: false });
   });
 });

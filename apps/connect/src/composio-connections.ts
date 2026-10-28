@@ -19,16 +19,7 @@ import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import {
-  and,
-  asc,
-  eq,
-  isNotNull,
-  isNull,
-  lte,
-  notInArray,
-  sql,
-} from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -1223,10 +1214,16 @@ export const changeToolkitTools = async (
   // A held action of a tool not allowed would be refused when confirmed:
   // dropped, so nobody is asked to confirm it. Idempotent, so the same
   // choice sent again finishes it should an earlier try stop short.
+  // By the list connect holds as each is dropped, never this change's:
+  // a newer change may have allowed its tool again meanwhile.
   const dropUnallowed = async () => {
     await dropPendingActions(
       env,
-      sql`${pendingActions.connectionId} = ${row.id} AND ${notInArray(pendingActions.action, names)}`,
+      sql`${pendingActions.connectionId} = ${row.id} AND ${pendingActions.action} NOT IN (
+        SELECT CASE WHEN allowed.type = 'object'
+          THEN json_extract(allowed.value, '$.name') ELSE allowed.value END
+        FROM json_each((SELECT ${connections.tools} FROM ${connections}
+          WHERE ${connections.id} = ${row.id})) AS allowed)`,
       "connection.tools_changed",
       person
     );
@@ -1256,6 +1253,10 @@ export const changeToolkitTools = async (
   try {
     await setServerTools(key, serverId, narrowed);
   } catch (error) {
+    // Composio may have taken the narrowing all the same (an answer lost
+    // or unreadable): brought back to connect's list, which is unchanged,
+    // or marked for the clock to (`reconcileOrMark`).
+    await reconcile();
     // Recorded whatever went wrong: Composio refusing, or anything else
     // on the way, which goes on as it was.
     if (!(error instanceof ComposioError)) {
