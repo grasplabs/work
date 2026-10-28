@@ -166,7 +166,7 @@ const commandsOf = (
         : [{ type: state.catchAll.type, value: [state.catchAll.to] }],
   }),
   "email-routing rules catch-all update": () => {
-    state.catchAll = { enabled: true, type: "worker", to: "grasp-work-router" };
+    state.catchAll = { enabled: true, type: "worker", to: "grasp-router" };
     return null;
   },
 });
@@ -237,7 +237,7 @@ const outcomes = (reports: Report[]) =>
 describe("setting up a fresh account", () => {
   it("creates what the account lacks, in the EU where it should, and nothing again on a second run", async () => {
     const cloudflare = fakeCf({
-      workers: ["grasp-work-admin", "grasp-work-router"],
+      workers: ["grasp-admin", "grasp-router"],
     });
 
     const first = await setUpAccount(optionsFor(cloudflare.cf));
@@ -254,10 +254,14 @@ describe("setting up a fresh account", () => {
       catchAll: cloudflare.state.catchAll,
     }).toStrictEqual({
       first: {
-        "dispatch namespace grasp-work-clients": "created",
-        "D1 database grasp-work-admin (eu)": "created",
-        "R2 bucket grasp-work-releases (eu)": "created",
-        "KV namespace grasp-work-router-hosts": "created",
+        "dispatch namespace grasp-clients": "created",
+        "dispatch namespace grasp-clients-staging": "created",
+        "D1 database grasp-admin (eu)": "created",
+        "D1 database grasp-admin-staging (eu)": "created",
+        "R2 bucket grasp-releases (eu)": "created",
+        "R2 bucket grasp-releases-staging (eu)": "created",
+        "KV namespace grasp-router-hosts": "created",
+        "KV namespace grasp-router-hosts-staging": "created",
         "Secrets Store": "exists",
         "Secrets Store secrets": "missing",
         "zone ongrasp.app": "exists",
@@ -271,8 +275,14 @@ describe("setting up a fresh account", () => {
       // what cf can't do yet stays the operator's.
       second: new Set(["exists", "missing", "manual"]),
       writesAgain: [],
-      d1: [{ name: "grasp-work-admin", jurisdiction: "eu" }],
-      r2: [{ name: "grasp-work-releases", jurisdiction: "eu" }],
+      d1: [
+        { name: "grasp-admin", jurisdiction: "eu" },
+        { name: "grasp-admin-staging", jurisdiction: "eu" },
+      ],
+      r2: [
+        { name: "grasp-releases", jurisdiction: "eu" },
+        { name: "grasp-releases-staging", jurisdiction: "eu" },
+      ],
       dns: [
         {
           type: "AAAA",
@@ -281,7 +291,7 @@ describe("setting up a fresh account", () => {
           proxied: true,
         },
       ],
-      catchAll: { enabled: true, type: "worker", to: "grasp-work-router" },
+      catchAll: { enabled: true, type: "worker", to: "grasp-router" },
     });
   });
 
@@ -321,7 +331,7 @@ describe("setting up a fresh account", () => {
         step: "Secrets Store secrets",
         outcome: "missing",
         detail:
-          "create a Secrets Store named grasp-work in the dashboard, put these in: CLIENT_KEY, ROUTER_KEY, then run again",
+          "create a Secrets Store named grasp in the dashboard, put these in: CLIENT_KEY, ROUTER_KEY, then run again",
       },
       stores: [],
     });
@@ -385,7 +395,7 @@ describe("setting up a fresh account", () => {
 
   it("only reads, and says what it would create, on a dry run", async () => {
     const cloudflare = fakeCf({
-      workers: ["grasp-work-admin", "grasp-work-router"],
+      workers: ["grasp-admin", "grasp-router"],
     });
 
     const reports = await setUpAccount(
@@ -408,7 +418,7 @@ describe("setting up a fresh account", () => {
   });
 });
 
-const deployed = ["grasp-work-admin", "grasp-work-router"];
+const deployed = ["grasp-admin", "grasp-router"];
 
 describe("what points elsewhere already", () => {
   it("refuses to repoint an Email Routing catch-all that sends mail somewhere else, on or off", async () => {
@@ -418,10 +428,10 @@ describe("what points elsewhere already", () => {
     const disabled = fakeCf({ workers: deployed, catchAll: off });
 
     await expect(setUpAccount(optionsFor(enabled.cf))).rejects.toThrow(
-      "sends mail somewhere other than grasp-work-router"
+      "sends mail somewhere other than grasp-router"
     );
     await expect(setUpAccount(optionsFor(disabled.cf))).rejects.toThrow(
-      "sends mail somewhere other than grasp-work-router"
+      "sends mail somewhere other than grasp-router"
     );
     expect({
       catchAlls: [enabled.state.catchAll, disabled.state.catchAll],
@@ -475,10 +485,10 @@ describe("what points elsewhere already", () => {
   });
 
   it("refuses a database it can't tell is in the EU", async () => {
-    const cloudflare = fakeCf({ d1: [{ name: "grasp-work-admin" }] });
+    const cloudflare = fakeCf({ d1: [{ name: "grasp-admin" }] });
 
     await expect(setUpAccount(optionsFor(cloudflare.cf))).rejects.toThrow(
-      "D1 database grasp-work-admin exists in jurisdiction undefined, not eu"
+      "D1 database grasp-admin exists in jurisdiction undefined, not eu"
     );
   });
 });

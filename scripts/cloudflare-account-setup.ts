@@ -9,8 +9,8 @@
  * It drives Cloudflare's `cf` CLI, signed in with its own login (`cf
  * login`), never an API token: the account is `--account`, or
  * CLOUDFLARE_ACCOUNT_ID when that's not given. In order:
- * 1. the clients' dispatch namespace (`grasp-work-clients`), which the router
- *    and the admin bind;
+ * 1. each stage's clients' dispatch namespace (`grasp-clients`,
+ *    `grasp-clients-staging`), which its router and admin bind;
  * 2. the admin's D1 database and R2 bucket, in the EU jurisdiction, and the
  *    router's hostname map (KV, which holds routing only), by the names the
  *    two wrangler.jsonc files and scripts/wrangler-deploy.ts look them up by;
@@ -42,22 +42,30 @@ import path from "node:path";
 
 const root = path.join(import.meta.dirname, "..");
 
-/** What a fresh account needs, by the names deploys look each up by. */
+/**
+ * What a fresh account needs, for production and staging, by the names
+ * deploys look each up by (Nick's scheme, @grasp-os/shared/names once the
+ * platform naming PR lands: grasp-<what>, -staging appended for staging).
+ */
 export const accountPlan = {
-  /**
-   * The clients' Workers for Platforms namespace (@grasp-os/shared/router,
-   * `clientDispatchNamespace`, once GRA-283's router lands).
-   */
-  dispatchNamespace: "grasp-work-clients",
+  /** Each stage's clients' Workers for Platforms namespace. */
+  dispatchNamespaces: ["grasp-clients", "grasp-clients-staging"],
   /** The admin's database (apps/admin/wrangler.jsonc, `DB`). */
-  d1: [{ name: "grasp-work-admin", jurisdiction: "eu" }],
+  d1: [
+    { name: "grasp-admin", jurisdiction: "eu" },
+    { name: "grasp-admin-staging", jurisdiction: "eu" },
+  ],
   /** The admin's releases (apps/admin/wrangler.jsonc, `RELEASES`). */
-  r2: [{ name: "grasp-work-releases", jurisdiction: "eu" }],
+  r2: [
+    { name: "grasp-releases", jurisdiction: "eu" },
+    { name: "grasp-releases-staging", jurisdiction: "eu" },
+  ],
   /** The router's hostname map, by the title scripts/wrangler-deploy.ts finds. */
-  kv: ["grasp-work-router-hosts"],
+  kv: ["grasp-router-hosts", "grasp-router-hosts-staging"],
   /** The store's name, when the account has none yet. */
-  secretsStore: "grasp-work",
-  workers: { admin: "grasp-work-admin", router: "grasp-work-router" },
+  secretsStore: "grasp",
+  /** Production's Workers, which the zone's route and custom domain name. */
+  workers: { admin: "grasp-admin", router: "grasp-router" },
 } as const;
 
 /** The wrangler configs whose Secrets Store bindings name the secrets needed. */
@@ -196,28 +204,30 @@ const storageSteps = async (
   { cf, dryRun }: SetupOptions,
   reports: Report[]
 ): Promise<void> => {
-  const { dispatchNamespace } = accountPlan;
-  await ensure(
-    reports,
-    `dispatch namespace ${dispatchNamespace}`,
-    dryRun,
-    async () =>
-      namesOf(
-        listOf(
-          await cf(["workers-for-platforms", "dispatch-namespaces", "list"])
-        ),
-        "namespace_name"
-      ).includes(dispatchNamespace),
-    async () => {
-      await cf([
-        "workers-for-platforms",
-        "dispatch-namespaces",
-        "create",
-        "--name",
-        dispatchNamespace,
-      ]);
-    }
-  );
+  for (const dispatchNamespace of accountPlan.dispatchNamespaces) {
+    // oxlint-disable-next-line no-await-in-loop -- one namespace at a time
+    await ensure(
+      reports,
+      `dispatch namespace ${dispatchNamespace}`,
+      dryRun,
+      async () =>
+        namesOf(
+          listOf(
+            await cf(["workers-for-platforms", "dispatch-namespaces", "list"])
+          ),
+          "namespace_name"
+        ).includes(dispatchNamespace),
+      async () => {
+        await cf([
+          "workers-for-platforms",
+          "dispatch-namespaces",
+          "create",
+          "--name",
+          dispatchNamespace,
+        ]);
+      }
+    );
+  }
   for (const { name, jurisdiction } of accountPlan.d1) {
     // oxlint-disable-next-line no-await-in-loop -- one database at a time
     await ensure(
