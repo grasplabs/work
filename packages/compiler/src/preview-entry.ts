@@ -1,176 +1,191 @@
-import Babel from "@babel/standalone";
+import type {
+  BuildOptions,
+  BuildResult,
+  Plugin,
+} from "esbuild-wasm/esm/browser.js";
 
 /**
  * A chat's preview as one ES module (spec 19.2.1): the App's modules a
- * screen loads, put together into one entry, which the preview frame
- * evaluates for each update and React Fast Refresh swaps in. The kit's
- * modules stay outside it, imported by their flat names, which the
- * frame's import map resolves to the same modules every update: one
- * React, one SDK client, one Refresh runtime for the whole session.
+ * screen loads, bundled into one entry, which the preview frame
+ * evaluates for each update and React Fast Refresh swaps in. One module,
+ * so the frame checks one size and one SHA-256 before it imports it as a
+ * `data:` module (GRA-409), and so no update needs the frame's import map,
+ * which can't change once modules loaded, to name new code. The kit's
+ * modules stay outside it, imported by their flat names, which that
+ * import map resolves to the same modules every update: one React, one
+ * SDK client, one Refresh runtime for the whole session.
  *
- * Each App module, already compiled and instrumented for Refresh, becomes
- * an async function in the entry's own module table, with its imports and
- * exports made calls and properties (Babel's CommonJS transform) and its
- * dynamic imports resolved in the same table. Async, as a module may
- * await at its top level as any ES module may: the modules it imports
- * are evaluated first, in the order it imports them, each awaited, so
- * its `require`s find them done, as an ES module's imports would be. One
- * already started and not done is one importing it, a cycle, and is not
- * awaited, as ES modules don't await a cycle either. Nothing is recompiled:
- * assembly only rewrites how modules reach each other, so it is measured
- * on its own, never claimed as a compile of unchanged source.
+ * esbuild bundles it, as it bundles an App's packages (packages/bundle.ts),
+ * so the entry keeps ES module semantics rather than a loader of our own
+ * approximating them: modules evaluate once, in import order; a module
+ * awaiting at its top level is done before what imports it runs, however
+ * many import it at once; cycles and dynamic imports resolve within the
+ * entry. Nothing is recompiled: the modules come compiled and instrumented
+ * for Refresh, and bundling only joins them, so it is measured on its own,
+ * never claimed as a compile of unchanged source.
  */
 
-/** The names the entry's own code uses: none an App module can shadow at its top level. */
-const names = {
-  kit: "__graspKit",
-  table: "__graspModules",
-  cache: "__graspLoaded",
-  load: "__graspLoad",
-  require: "__graspRequire",
-  dynamicImport: "__graspImport",
-} as const;
+/** esbuild's `build`, started: the isolate's own, or Node's in a test. */
+export type Bundle = (
+  options: BuildOptions & { write: false }
+) => Promise<BuildResult<BuildOptions & { write: false }>>;
 
-/** The parts of a Babel node the entry's own plugin reads. */
-interface Node {
-  readonly type: string;
-  readonly source?: { readonly value: unknown } | null;
-}
-
-/** The parts of Babel's plugin API the entry's own plugin uses. */
-interface PluginApi {
-  readonly types: { identifier: (name: string) => unknown };
-}
-
-/** One App module as CommonJS, and the modules it imports statically, in order. */
-interface CommonJsModule {
-  readonly code: string;
-  readonly imports: readonly string[];
-}
+/** The namespace of the App's modules, which only this plugin loads. */
+const appNamespace = "grasp-preview";
 
 /**
- * One App module as CommonJS: its body, reaching others through
- * `require`, and its dynamic imports made calls of the entry's own.
+ * What every import matches, for esbuild's plugin filters, which are Go
+ * regular expressions: no `u` flag (esbuild refuses one).
  */
-const asCommonJs = (code: string, name: string): CommonJsModule => {
-  const imports: string[] = [];
-  const entryPlugin = ({ types }: PluginApi) => ({
-    visitor: {
-      Program: {
-        enter: (path: { node: { body: readonly Node[] } }) => {
-          for (const statement of path.node.body) {
-            const source = statement.source?.value;
-            const imported =
-              statement.type === "ImportDeclaration" ||
-              statement.type === "ExportAllDeclaration" ||
-              statement.type === "ExportNamedDeclaration";
-            if (imported && typeof source === "string") {
-              imports.push(source);
-            }
-          }
-        },
-      },
-      CallExpression: (path: {
-        node: { callee: unknown };
-        get: (key: "callee") => { isImport: () => boolean };
-      }) => {
-        if (path.get("callee").isImport()) {
-          path.node.callee = types.identifier(names.dynamicImport);
-        }
-      },
-    },
-  });
-  const transformed =
-    Babel.transform(code, {
-      filename: name,
-      babelrc: false,
-      configFile: false,
-      sourceType: "module",
-      compact: true,
-      plugins: [entryPlugin, "transform-modules-commonjs"],
-    }).code ?? "";
-  return { code: transformed, imports: [...new Set(imports)] };
+// oxlint-disable-next-line require-unicode-regexp
+const anything = /.*/;
+
+/** The prefix of each entry's own module, which no App module has. */
+const entryModule = "grasp-preview-entry";
+
+/** Why a bundle failed, in esbuild's words, one line each. */
+const failureOf = (error: unknown): string => {
+  const errors: unknown =
+    typeof error === "object" && error !== null && "errors" in error
+      ? error.errors
+      : undefined;
+  if (Array.isArray(errors)) {
+    const texts = errors.flatMap((each: unknown) =>
+      typeof each === "object" && each !== null && "text" in each
+        ? [String(each.text)]
+        : []
+    );
+    if (texts.length > 0) {
+      return texts.join("\n");
+    }
+  }
+  return error instanceof Error ? error.message : String(error);
 };
 
+/** One screen to bundle: its module and the App modules it loads, itself among them. */
+export interface PreviewScreen {
+  readonly closure: readonly string[];
+  /** The kit modules its closure imports, by flat name. */
+  readonly kitModules: readonly string[];
+}
+
+/** An entry's own module: the screen's default export, and only that. */
+const entryModuleOf = (index: number): string => `${entryModule}-${index}`;
+
 /**
- * The entry for screen module `entry`: the App's `modules` in its closure
- * (`closure`, by flat name, the entry among them) and the kit modules
- * they import (`kitModules`, by flat name). Its default export is the
- * screen's component. Deterministic: the same modules make the same
- * entry, byte for byte.
+ * Each screen's entry, by its module's name: the App's `modules` in its
+ * closure, bundled by `bundle` with the kit modules they import left
+ * outside. One esbuild run for every screen, so a module two screens load
+ * is read once. Each entry's default export is its screen's component.
+ * Deterministic: the same modules make the same entries, byte for byte.
  */
-export const previewEntry = ({
-  entry,
-  closure,
-  modules,
-  kitModules,
-}: {
-  entry: string;
-  closure: readonly string[];
-  modules: Readonly<Record<string, string>>;
-  kitModules: readonly string[];
-}): string => {
-  const kit = [...new Set(kitModules)].toSorted();
-  const own = [...new Set(closure)].toSorted();
-  if (!own.includes(entry)) {
-    throw new Error(`The preview's closure doesn't hold its entry, ${entry}.`);
-  }
-  const imports = kit
-    .map((name, index) => `import * as k${index} from ${JSON.stringify(name)};`)
-    .join("\n");
-  // A kit module as the CommonJS interop reads it: an ES module's
-  // namespace, marked as one so its default export is its `default`.
-  const kitTable = kit
-    .map(
-      (name, index) =>
-        `${JSON.stringify(name)}: Object.freeze(Object.assign(Object.create(null), k${index}, { __esModule: true }))`
-    )
-    .join(",\n");
-  const table = own
-    .map((name) => {
-      const code = modules[name];
-      if (code === undefined) {
+export const previewEntries = async (
+  {
+    screens,
+    modules,
+  }: {
+    screens: Readonly<Record<string, PreviewScreen>>;
+    modules: Readonly<Record<string, string>>;
+  },
+  bundle: Bundle
+): Promise<Record<string, string>> => {
+  const entries = Object.keys(screens).toSorted();
+  const own = new Set<string>();
+  const kit = new Set<string>();
+  for (const entry of entries) {
+    const screen = screens[entry];
+    if (screen === undefined || !screen.closure.includes(entry)) {
+      throw new Error(
+        `The preview's closure doesn't hold its entry, ${entry}.`
+      );
+    }
+    for (const name of screen.closure) {
+      if (modules[name] === undefined) {
         throw new Error(
           `The preview's closure names ${name}, which is missing.`
         );
       }
-      const module = asCommonJs(code, name);
-      return `${JSON.stringify(name)}: [${JSON.stringify(module.imports)}, async (module, exports, require, ${names.dynamicImport}) => {${module.code}\n}]`;
+      own.add(name);
+    }
+    for (const name of screen.kitModules) {
+      kit.add(name);
+    }
+  }
+  if (entries.length === 0) {
+    return {};
+  }
+  // A closure holds every App module its modules import, so only an
+  // import of a module outside every closure, or of nothing, is refused.
+  const entryModules = new Map(
+    entries.map((entry, index) => [entryModuleOf(index), entry])
+  );
+  const resolver: Plugin = {
+    name: "grasp-preview",
+    setup: (build) => {
+      // Every import resolves here: a kit module stays outside, an App
+      // module of a closure comes from `modules`, and nothing else is read
+      // from anywhere.
+      build.onResolve({ filter: anything }, ({ path }) => {
+        if (entryModules.has(path) || own.has(path)) {
+          return { path, namespace: appNamespace };
+        }
+        if (kit.has(path)) {
+          return { path, external: true };
+        }
+        return { errors: [{ text: `The preview has no module ${path}.` }] };
+      });
+      build.onLoad(
+        { filter: anything, namespace: appNamespace },
+        ({ path }) => {
+          const entry = entryModules.get(path);
+          return {
+            contents:
+              entry === undefined
+                ? (modules[path] ?? "")
+                : `export { default } from ${JSON.stringify(entry)};`,
+            loader: "js",
+          };
+        }
+      );
+    },
+  };
+  let outputs: { path: string; text: string }[];
+  try {
+    const result = await bundle({
+      entryPoints: Object.fromEntries(
+        [...entryModules.keys()].map((name) => [name, name])
+      ),
+      bundle: true,
+      write: false,
+      format: "esm",
+      splitting: false,
+      platform: "neutral",
+      target: "es2022",
+      mainFields: [],
+      conditions: [],
+      outdir: "/preview",
+      entryNames: "[name]",
+      // esbuild names it so (unicorn would have it "utf-8").
+      // oxlint-disable-next-line unicorn/text-encoding-identifier-case
+      charset: "utf8",
+      legalComments: "none",
+      logLevel: "silent",
+      plugins: [resolver],
+    });
+    outputs = result.outputFiles;
+  } catch (error) {
+    throw new Error(`The preview's entry didn't bundle: ${failureOf(error)}`, {
+      cause: error,
+    });
+  }
+  const bundled = new Map(outputs.map(({ path, text }) => [path, text]));
+  return Object.fromEntries(
+    [...entryModules].map(([name, entry]) => {
+      const text = bundled.get(`/preview/${name}.js`);
+      if (text === undefined) {
+        throw new Error(`The preview's entry for ${entry} didn't bundle.`);
+      }
+      return [entry, text];
     })
-    .join(",\n");
-  return `${imports}
-const ${names.kit} = {
-${kitTable}
-};
-const ${names.table} = {
-${table}
-};
-const ${names.cache} = Object.create(null);
-const ${names.require} = (name) => {
-  if (Object.hasOwn(${names.kit}, name)) return ${names.kit}[name];
-  const loaded = ${names.cache}[name];
-  if (loaded === undefined) throw new Error("The preview has no module " + name + ".");
-  return loaded.module.exports;
-};
-const ${names.load} = async (name) => {
-  if (Object.hasOwn(${names.kit}, name) || Object.hasOwn(${names.cache}, name)) return;
-  const defined = ${names.table}[name];
-  if (defined === undefined) throw new Error("The preview has no module " + name + ".");
-  const [needs, define] = defined;
-  const loaded = { module: { exports: {} } };
-  ${names.cache}[name] = loaded;
-  loaded.done = (async () => {
-    for (const need of needs) await ${names.load}(need);
-    await define(loaded.module, loaded.module.exports, ${names.require}, ${names.dynamicImport});
-  })();
-  await loaded.done;
-};
-const ${names.dynamicImport} = async (name) => {
-  const loaded = ${names.cache}[name];
-  await (loaded === undefined ? ${names.load}(name) : loaded.done);
-  return ${names.require}(name);
-};
-await ${names.load}(${JSON.stringify(entry)});
-export default ${names.require}(${JSON.stringify(entry)}).default;
-`;
+  );
 };

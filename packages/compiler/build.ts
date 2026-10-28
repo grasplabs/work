@@ -770,7 +770,14 @@ const buildCompiler = async (): Promise<string> => {
       minify: true,
       target: "es2022",
       rolldownOptions: {
-        external: ["cloudflare:workers", "#kit", ...nodeBuiltins],
+        // esbuild's WebAssembly is a module of the isolate, as the
+        // package builder's is: what bundles a preview's entries.
+        external: [
+          "cloudflare:workers",
+          "#kit",
+          "./esbuild.wasm",
+          ...nodeBuiltins,
+        ],
         output: {
           format: "es",
           codeSplitting: false,

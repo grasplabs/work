@@ -18,6 +18,7 @@
  */
 import { packageEntrySchema } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { build as esbuild } from "esbuild-wasm/esm/browser.js";
 import { compile } from "tailwindcss";
 
 import kit from "#kit";
@@ -50,6 +51,7 @@ import {
 } from "./compile.ts";
 import { isError } from "./diagnostic.ts";
 import type { Diagnostic } from "./diagnostic.ts";
+import esbuildWasm from "./esbuild.wasm";
 import {
   collectDirectives,
   collectImports,
@@ -100,7 +102,9 @@ import {
   screenRuntime,
 } from "./kit.ts";
 import { lint } from "./lint.ts";
-import { previewEntry } from "./preview-entry.ts";
+import { startEsbuild } from "./packages/build.ts";
+import { previewEntries } from "./preview-entry.ts";
+import type { Bundle } from "./preview-entry.ts";
 import {
   appCodeTarget,
   computeTarget,
@@ -459,6 +463,17 @@ const checkScreens = (files: Record<string, string>): Diagnostic[] => {
 };
 
 /**
+ * esbuild, started on the WebAssembly module this isolate was loaded with
+ * (`esbuild.wasm`), once: what bundles a preview's entries
+ * (preview-entry.ts). Started on a preview's first build, so a build that
+ * bundles nothing never pays for it.
+ */
+const bundle: Bundle = async (options) => {
+  await startEsbuild(esbuildWasm);
+  return await esbuild(options);
+};
+
+/**
  * Builds an App's screens: `screens/*.tsx`, the `components/` they use and
  * the declarations (`*.d.ts`) at the App's root and among its components,
  * which are types alone and never modules.
@@ -562,18 +577,22 @@ export const buildScreens = async (
     diagnostics,
     ...(preview
       ? {
-          entries: Object.fromEntries(
-            Object.entries(screens).map(([entry, closure]) => [
-              entry,
-              previewEntry({
-                entry,
-                closure: closure.modules,
-                modules,
-                kitModules: closure.modules.flatMap((name) => [
-                  ...(imports.get(name)?.kit ?? []),
-                ]),
-              }),
-            ])
+          entries: await previewEntries(
+            {
+              screens: Object.fromEntries(
+                Object.entries(screens).map(([entry, closure]) => [
+                  entry,
+                  {
+                    closure: closure.modules,
+                    kitModules: closure.modules.flatMap((name) => [
+                      ...(imports.get(name)?.kit ?? []),
+                    ]),
+                  },
+                ])
+              ),
+              modules,
+            },
+            bundle
           ),
         }
       : {}),

@@ -170,6 +170,22 @@ const memoiser = <T>() => {
 /** Loader isolates' code, read once per isolate (`memoiser`). */
 const memoisedWorker = memoiser<WorkerLoaderWorkerCode>();
 
+/** esbuild's WebAssembly, read once per isolate (`memoiser`). */
+const memoisedWasm = memoiser<ArrayBuffer>();
+
+/**
+ * esbuild's WebAssembly, as the compiler (for a preview's entries) and the
+ * package builder both load it: read once per isolate for both, as it is
+ * the largest file either reads.
+ */
+const esbuildWasmOf = async (assets: Fetcher): Promise<ArrayBuffer> =>
+  await memoisedWasm(
+    assets,
+    compilerAssets.esbuildWasm,
+    async () =>
+      await readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm")
+  );
+
 /** The module sets every App imports, read once per isolate (`memoiser`). */
 const memoisedModules = memoiser<KitModules>();
 
@@ -236,9 +252,10 @@ const compilerWorker = async (
   assets: Fetcher
 ): Promise<WorkerLoaderWorkerCode> =>
   await memoisedWorker(assets, `compiler:${version}`, async () => {
-    const [source, kitJson] = await Promise.all([
+    const [source, kitJson, wasm] = await Promise.all([
       readCompilerFile(assets, compilerAssets.source, "javascript"),
       readCompilerFile(assets, compilerAssets.kit, "json"),
+      esbuildWasmOf(assets),
     ]);
     const kit: unknown = JSON.parse(kitJson);
     return {
@@ -247,6 +264,9 @@ const compilerWorker = async (
       modules: {
         "compiler.js": source,
         [kitModule]: { json: kit },
+        // Compiled as the isolate loads; the isolate itself can't. What
+        // bundles a preview's entries (preview-entry.ts).
+        "esbuild.wasm": { wasm },
       },
     };
   });
@@ -308,15 +328,17 @@ const memoisedCode = memoiser<PlatformCode>();
  */
 export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
   await memoisedCode(assets, `compiler:${version}`, async () => {
-    const [source, kit] = await Promise.all([
+    const [source, kit, wasm] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.source, "javascript"),
       readCompilerBytes(assets, compilerAssets.kit, "json"),
+      esbuildWasmOf(assets),
     ]);
     return {
       mainModule: "compiler.js",
       modules: {
         "compiler.js": { type: "js", bytes: new Uint8Array(source) },
         [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
+        "esbuild.wasm": { type: "wasm", bytes: new Uint8Array(wasm) },
       },
       nodejsCompat: true,
       cpuMs: isolateSettings.limits.cpuMs,
@@ -353,7 +375,7 @@ export const startPackageBuilder = async (
     async () => {
       const [source, wasm] = await Promise.all([
         readCompilerFile(assets, compilerAssets.packageBuilder, "javascript"),
-        readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
+        esbuildWasmOf(assets),
       ]);
       return {
         ...packageBuilderSettings,
@@ -380,7 +402,7 @@ export const packageBuilderCode = async (
   await memoisedCode(assets, `package-builder:${version}`, async () => {
     const [source, wasm] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.packageBuilder, "javascript"),
-      readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
+      esbuildWasmOf(assets),
     ]);
     return {
       mainModule: "package-builder.js",
