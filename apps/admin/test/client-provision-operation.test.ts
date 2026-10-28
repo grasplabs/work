@@ -1,3 +1,4 @@
+import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
 import { provisionProbePath } from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { moduleKey } from "@grasp-os/shared/release";
@@ -87,6 +88,15 @@ const documented = new Set([
   "durable_object_namespace",
   "assets",
 ]);
+
+/** Core binding its connect, as the real one does (`adjust` for `importRelease`). */
+const bindsConnect = (core: WorkerEntry): WorkerEntry => ({
+  ...core,
+  bindings: [
+    ...core.bindings,
+    { type: "service", name: "CONNECT", service: "grasp-os-connect" },
+  ],
+});
 
 /**
  * A release imported for a placed client: core binds its own Durable
@@ -629,7 +639,8 @@ const refusals: Refusal[] = [
     code: "model_spend_undecided",
   },
   {
-    name: "a binding Workers for Platforms doesn't document for user Workers",
+    // The connect gateway serves the clients' namespace alone (GRA-1217).
+    name: "a service binding in a namespace the connect gateway doesn't serve",
     kind: "workers_for_platforms",
     adjust: (core) => ({
       ...core,
@@ -1081,8 +1092,13 @@ describe("provisioning a placed client", () => {
     }
   );
 
-  it("probes a core in the namespace the router binds through that binding, and routes its hostname to its script", async () => {
-    const manifest = await importRelease("workers_for_platforms");
+  it("probes a core in the namespace the router binds through that binding, its connect through the gateway, and routes its hostname to its script", async () => {
+    // Core binds its connect, as the real one does: through the gateway.
+    const manifest = await importRelease(
+      "workers_for_platforms",
+      {},
+      bindsConnect
+    );
     const { account, clientId, held } = await setUp(
       "workers_for_platforms",
       manifest,
@@ -1104,7 +1120,15 @@ describe("provisioning a placed client", () => {
       held
     );
 
-    const { core } = await scriptsOf(clientId);
+    const { core, connect } = await scriptsOf(clientId);
+    const bindings = z
+      .array(z.object({ name: z.string() }).loose())
+      .parse(
+        account.namespaces
+          .get(clientDispatchNamespace)
+          ?.get(core)
+          ?.versions.at(-1)?.metadata.bindings ?? []
+      );
     const [probed] = await db
       .select({ detail: auditEvents.detail })
       .from(auditEvents)
@@ -1121,6 +1145,8 @@ describe("provisioning a placed client", () => {
         .object({ versionUnchecked: z.number().optional() })
         .parse(JSON.parse(probed?.detail ?? "{}")).versionUnchecked,
       entry: await env.ROUTER_HOSTS.get(`${clientId}.${domain}`, "json"),
+      // Its connect, as core binds it: the gateway, naming its own script.
+      connectBinding: bindings.find(({ name }) => name === "CONNECT"),
       // Its health and the admin's probe, through the namespace, at the
       // hostname the router will reach it at: never over workers.dev.
       dispatched: cloudflare.dispatched().map(({ script, url }) => ({
@@ -1135,6 +1161,12 @@ describe("provisioning a placed client", () => {
       operation: { status: "done" },
       versionUnchecked: 1,
       entry: { clientId, script: core, generation: 1 },
+      connectBinding: {
+        type: "service",
+        name: "CONNECT",
+        service: connectGatewayScript,
+        props: { script: connect },
+      },
       dispatched: [
         { script: core, path: "/health", host: `${clientId}.${domain}` },
         {
