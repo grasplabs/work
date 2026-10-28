@@ -318,6 +318,12 @@ export const fakeComposioApi = (
      * change landing in between, once.
      */
     beforeUpdate: (() => Promise<void>) | undefined;
+    /**
+     * Awaited as it takes a server's update: before applying it
+     * (`"apply"`), and after, before answering (`"answer"`). A test holds a
+     * send there, or drops it there for good, as a crash would.
+     */
+    updateGate: ((at: "apply" | "answer") => Promise<void>) | undefined;
   } = {
     requests: [],
     health: "up",
@@ -332,6 +338,7 @@ export const fakeComposioApi = (
     logos: new Map(),
     mcp: mcp.state,
     beforeUpdate: undefined,
+    updateGate: undefined,
   };
 
   /** The logo host's answer, as `state.logos` has it. */
@@ -501,7 +508,9 @@ export const fakeComposioApi = (
       state.beforeUpdate = undefined;
       await before?.();
       const body = await bodyOf(request);
+      await state.updateGate?.("apply");
       server.allowedTools = stringsOf(body.allowed_tools);
+      await state.updateGate?.("answer");
       return Response.json({ id: route.slice("/mcp/".length) });
     }
     if (
@@ -601,6 +610,7 @@ export const fakeComposioApi = (
     state.toolsStatus = undefined;
     state.failing = undefined;
     state.beforeUpdate = undefined;
+    state.updateGate = undefined;
     state.serverUrlBase = mcpBase;
     state.accountInUrl = "own";
     state.holds = {

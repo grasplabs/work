@@ -101,17 +101,22 @@ export const connections = sqliteTable(
     composioAuthConfigId: text("composio_auth_config_id"),
     tools: text(),
     /**
-     * When Composio was last sent a tool list it may not have taken: set
-     * before each send, so a send cut short by a crash is still marked.
-     * Connect's clock reconciles a marked connection until Composio
-     * matches `tools` (src/composio-connections.ts); null once it does.
+     * Sends of a tool list to Composio, counted: the count goes up before
+     * each send (src/composio-connections.ts `sendTools`), so a send a
+     * crash cuts short is still counted.
      */
-    toolsUnsyncedAt: timestamp("tools_unsynced_at"),
+    toolsSentSeq: integer("tools_sent_seq").notNull().default(0),
+    /**
+     * The send after which Composio was seen to match `tools`. Out of sync
+     * while below `tools_sent_seq`: connect's clock reconciles it.
+     */
+    toolsSettledSeq: integer("tools_settled_seq").notNull().default(0),
     /** Reconciles that failed in a row since Composio last matched. */
     toolsSyncFailures: integer("tools_sync_failures").notNull().default(0),
     /**
-     * Not before when connect's clock tries a failing reconcile again,
-     * backing off as failures add up; null for one not yet tried.
+     * Not before when connect's clock reconciles it again: after a failure,
+     * backing off as failures add up, or while a send Composio didn't
+     * answer may still land there; null for one not yet tried.
      */
     toolsSyncRetryAt: timestamp("tools_sync_retry_at"),
     createdAt: timestamp("created_at").notNull(),
@@ -437,6 +442,23 @@ export const composioCleanups = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [index("composio_cleanups_retry_idx").on(table.retryAt)]
+);
+
+/**
+ * Sends of a tool list to Composio not yet answered, by connection and
+ * count (`connections.tools_sent_seq`): one may still land at Composio
+ * after a later send settled, so a later send settles nothing while one
+ * sent shortly before it is here (src/composio-connections.ts). Removed
+ * once answered, or once a later send settles.
+ */
+export const composioToolSends = sqliteTable(
+  "composio_tool_sends",
+  {
+    connectionId: text("connection_id").notNull(),
+    seq: integer().notNull(),
+    sentAt: timestamp("sent_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.connectionId, table.seq] })]
 );
 
 /**

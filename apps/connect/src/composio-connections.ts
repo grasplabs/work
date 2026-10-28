@@ -19,7 +19,19 @@ import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, asc, eq, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -39,6 +51,7 @@ import type { Connection } from "./connections.ts";
 import {
   composioCleanups,
   composioFlows,
+  composioToolSends,
   connections,
   pendingActions,
 } from "./db/schema.ts";
@@ -1024,6 +1037,64 @@ const setServerTools = async (
   });
 };
 
+/**
+ * How long after it was sent a send Composio didn't answer may still land
+ * there: well past connect's own wait for an answer (composio.ts).
+ */
+const unansweredLandsWithinMs = 120_000;
+
+/**
+ * Sends Composio's server `serverId` the tool list `tools` of connection
+ * `connectionId`, counted first (`tools_sent_seq`), so the connection is
+ * out of sync from before the send until a reconcile settles it
+ * (`settle`), whatever happens to this one. The send is kept as unanswered
+ * (`composio_tool_sends`) until Composio answers it: one it never answers
+ * may land there later still. Its count.
+ */
+const sendTools = async (
+  db: ReturnType<typeof drizzle>,
+  key: string,
+  serverId: string,
+  connectionId: string,
+  tools: readonly (string | ComposioToolRule)[]
+): Promise<number> => {
+  const counted = await db
+    .update(connections)
+    .set({ toolsSentSeq: sql`${connections.toolsSentSeq} + 1` })
+    .where(eq(connections.id, connectionId))
+    .returning({ seq: connections.toolsSentSeq })
+    .get();
+  if (counted === undefined) {
+    throw new Error("The connection is gone.");
+  }
+  const { seq } = counted;
+  await db
+    .insert(composioToolSends)
+    .values({ connectionId, seq, sentAt: new Date() });
+  const answered = async () => {
+    await db
+      .delete(composioToolSends)
+      .where(
+        and(
+          eq(composioToolSends.connectionId, connectionId),
+          eq(composioToolSends.seq, seq)
+        )
+      );
+  };
+  try {
+    await setServerTools(key, serverId, tools);
+  } catch (error) {
+    // Composio answered, refusing: this send lands nowhere later. One it
+    // never answered stays kept.
+    if (error instanceof ComposioError && error.status !== undefined) {
+      await answered();
+    }
+    throw error;
+  }
+  await answered();
+  return seq;
+};
+
 /** Rounds of bringing Composio to connect's list before giving up. */
 const reconcileRounds = 3;
 
@@ -1034,14 +1105,14 @@ const reconcileRounds = 3;
  * what it sent. A send overtaken by a newer change, which may have landed
  * at Composio before it, is so followed by that change's list: the last
  * send of every change is of connect's latest list, whatever the order.
- * Whether it ended with Composio told the latest one.
+ * The count of the send that told Composio the latest one, if one did.
  */
 const reconciled = async (
   db: ReturnType<typeof drizzle>,
   key: string,
   serverId: string,
   connectionId: string
-): Promise<boolean> => {
+): Promise<number | undefined> => {
   const listNow = async (): Promise<string | undefined> => {
     const now = await db
       .select({ tools: connections.tools })
@@ -1054,48 +1125,24 @@ const reconciled = async (
   for (let round = 0; round < reconcileRounds; round += 1) {
     const parsed = composioToolsSchema.safeParse(JSON.parse(sent ?? "null"));
     if (!parsed.success) {
-      return false;
+      return undefined;
     }
+    let seq: number;
     try {
       // oxlint-disable-next-line no-await-in-loop -- one send, then a read
-      await setServerTools(key, serverId, parsed.data);
+      seq = await sendTools(db, key, serverId, connectionId, parsed.data);
     } catch (error) {
       log.warn("composio.tools_reconcile_failed", errorFields(error));
-      return false;
+      return undefined;
     }
     // oxlint-disable-next-line no-await-in-loop -- read after each send
     const after = await listNow();
     if (after === sent) {
-      return true;
+      return seq;
     }
     sent = after;
   }
-  return false;
-};
-
-/**
- * Marks connection `connectionId` as maybe out of sync with Composio, as
- * of `at`, before a send to Composio: a send cut short (a crash, say)
- * stays marked for connect's clock. Only ever moved later, so a reconcile
- * that started before another's send leaves that send's mark.
- */
-const markUnsynced = async (
-  db: ReturnType<typeof drizzle>,
-  connectionId: string,
-  at: Date
-): Promise<void> => {
-  await db
-    .update(connections)
-    .set({ toolsUnsyncedAt: at })
-    .where(
-      and(
-        eq(connections.id, connectionId),
-        or(
-          isNull(connections.toolsUnsyncedAt),
-          lt(connections.toolsUnsyncedAt, at)
-        )
-      )
-    );
+  return undefined;
 };
 
 /** How long the clock waits after a reconcile's first failure. */
@@ -1104,57 +1151,101 @@ const unsyncedRetryBaseMs = 60_000;
 const unsyncedRetryDoublings = 6;
 
 /**
- * Reconciles connection `connectionId` (`reconciled`), marked out of sync
- * while it runs (`markUnsynced`), for connect's clock to try again
- * (`reconcileUnsyncedTools`) should it not finish; the mark cleared once
- * it did, unless a send after it started set it again. A failure puts
- * the next try off, twice as long each time, so ones that keep failing
- * leave the clock to others. Whether it did.
+ * Settles connection `connectionId` at send `seq`, which told Composio
+ * connect's latest list: only if no send came after it (that one's
+ * reconcile, or the clock, settles), and none sent shortly before it is
+ * unanswered (it may land after this one: the clock settles once it no
+ * longer can). Whether it settled.
  */
-const reconcileOrMark = async (
+const settle = async (
+  db: ReturnType<typeof drizzle>,
+  connectionId: string,
+  seq: number
+): Promise<boolean> => {
+  const now = Date.now();
+  const mayLandLater = db
+    .select({ seq: composioToolSends.seq })
+    .from(composioToolSends)
+    .where(
+      and(
+        eq(composioToolSends.connectionId, connectionId),
+        lt(composioToolSends.seq, seq),
+        gt(composioToolSends.sentAt, new Date(now - unansweredLandsWithinMs))
+      )
+    );
+  const settled = await db
+    .update(connections)
+    .set({ toolsSettledSeq: seq, toolsSyncFailures: 0, toolsSyncRetryAt: null })
+    .where(
+      and(
+        eq(connections.id, connectionId),
+        eq(connections.toolsSentSeq, seq),
+        notExists(mayLandLater)
+      )
+    )
+    .returning({ id: connections.id })
+    .get();
+  if (settled !== undefined) {
+    await db
+      .delete(composioToolSends)
+      .where(
+        and(
+          eq(composioToolSends.connectionId, connectionId),
+          lte(composioToolSends.seq, seq)
+        )
+      );
+    return true;
+  }
+  // Still the latest send: one before it may land yet, so the clock comes
+  // back once it no longer can. A later send's is its own to settle.
+  await db
+    .update(connections)
+    .set({ toolsSyncRetryAt: new Date(now + unansweredLandsWithinMs) })
+    .where(
+      and(eq(connections.id, connectionId), eq(connections.toolsSentSeq, seq))
+    );
+  return false;
+};
+
+/**
+ * Reconciles connection `connectionId` (`reconciled`) and settles it at
+ * the send that did (`settle`); out of sync until then, for connect's
+ * clock to try again (`reconcileUnsyncedTools`). A failure puts the next
+ * try off, twice as long each time, so ones that keep failing leave the
+ * clock to others. Whether Composio was told connect's latest list.
+ */
+const reconcileAndSettle = async (
   db: ReturnType<typeof drizzle>,
   key: string,
   serverId: string,
   connectionId: string
 ): Promise<boolean> => {
-  const startedAt = new Date();
-  await markUnsynced(db, connectionId, startedAt);
-  const done = await reconciled(db, key, serverId, connectionId);
-  await (done
-    ? db
-        .update(connections)
-        .set({
-          toolsUnsyncedAt: null,
-          toolsSyncFailures: 0,
-          toolsSyncRetryAt: null,
-        })
-        .where(
-          and(
-            eq(connections.id, connectionId),
-            // A mark set after this reconcile started is another's.
-            lte(connections.toolsUnsyncedAt, startedAt)
-          )
-        )
-    : db
-        .update(connections)
-        .set({
-          toolsSyncFailures: sql`${connections.toolsSyncFailures} + 1`,
-          // SQLite reads the failures before this update's.
-          toolsSyncRetryAt: sql`${startedAt.getTime()} + (${unsyncedRetryBaseMs} << min(${connections.toolsSyncFailures}, ${unsyncedRetryDoublings}))`,
-        })
-        .where(eq(connections.id, connectionId)));
-  return done;
+  const startedAt = Date.now();
+  const seq = await reconciled(db, key, serverId, connectionId);
+  if (seq === undefined) {
+    await db
+      .update(connections)
+      .set({
+        toolsSyncFailures: sql`${connections.toolsSyncFailures} + 1`,
+        // SQLite reads the failures before this update's.
+        toolsSyncRetryAt: sql`${startedAt} + (${unsyncedRetryBaseMs} << min(${connections.toolsSyncFailures}, ${unsyncedRetryDoublings}))`,
+      })
+      .where(eq(connections.id, connectionId));
+    return false;
+  }
+  await settle(db, connectionId, seq);
+  return true;
 };
 
 /** Most connections out of sync one clock run reconciles. */
 const unsyncedPerRun = 20;
 
 /**
- * Reconciles Composio for the connections marked out of sync, a few each
- * run: what a change's reconcile left unfinished (Composio away, or
- * refusing for a while), or a send a crash cut short. Ones never tried
- * first, then the longest due, and none before its retry time, so ones
- * that keep failing never hold back the rest. Connect's clock runs it.
+ * Reconciles Composio for the connections out of sync, a few each run:
+ * what a change's reconcile left unfinished (Composio away, or refusing
+ * for a while), or a send a crash cut short. Ones never tried first, then
+ * the longest due, and none before its retry time, so ones that keep
+ * failing never hold back the rest. Connect's clock runs it.
  */
 export const reconcileUnsyncedTools = async (env: Env): Promise<void> => {
   const key = composioKey(env);
@@ -1167,7 +1258,7 @@ export const reconcileUnsyncedTools = async (env: Env): Promise<void> => {
     .from(connections)
     .where(
       and(
-        isNotNull(connections.toolsUnsyncedAt),
+        gt(connections.toolsSentSeq, connections.toolsSettledSeq),
         eq(connections.status, "active"),
         eq(connections.serverKind, "composio"),
         isNotNull(connections.composioServerId),
@@ -1178,17 +1269,14 @@ export const reconcileUnsyncedTools = async (env: Env): Promise<void> => {
       )
     )
     // SQLite sorts nulls first: never tried before tried.
-    .orderBy(
-      asc(connections.toolsSyncRetryAt),
-      asc(connections.toolsUnsyncedAt)
-    )
+    .orderBy(asc(connections.toolsSyncRetryAt), asc(connections.id))
     .limit(unsyncedPerRun);
   for (const { id, serverId } of marked) {
     if (serverId === null) {
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- one connection at a time
-    if (!(await reconcileOrMark(db, key, serverId, id))) {
+    if (!(await reconcileAndSettle(db, key, serverId, id))) {
       log.warn("composio.tools_still_unsynced", { connectionId: id });
     }
   }
@@ -1278,7 +1366,7 @@ export const changeToolkitTools = async (
   // Composio told what connect holds, recorded for whoever reconciles
   // should it not finish: connect, which every call goes by, stays as it is.
   const reconcile = async () => {
-    if (!(await reconcileOrMark(db, key, serverId, row.id))) {
+    if (!(await reconcileAndSettle(db, key, serverId, row.id))) {
       await failed("connection.tools_restore_failed", "failed");
     }
   };
@@ -1298,12 +1386,11 @@ export const changeToolkitTools = async (
   const kept = new Set(previous.map(composioToolName));
   const narrowed = tools.filter((tool) => kept.has(composioToolName(tool)));
   try {
-    await markUnsynced(db, row.id, new Date());
-    await setServerTools(key, serverId, narrowed);
+    await sendTools(db, key, serverId, row.id, narrowed);
   } catch (error) {
     // Composio may have taken the narrowing all the same (an answer lost
     // or unreadable): brought back to connect's list, which is unchanged,
-    // or marked for the clock to (`reconcileOrMark`).
+    // or left out of sync for the clock (`reconcileAndSettle`).
     await reconcile();
     // Recorded whatever went wrong: Composio refusing, or anything else
     // on the way, which goes on as it was.
