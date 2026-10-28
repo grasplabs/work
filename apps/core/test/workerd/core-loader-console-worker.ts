@@ -412,7 +412,15 @@ export const App = new Proxy(Real, {
   // Arrays with holes: each crosses as sparse as it is.
   "/answer-sparse": `export class App extends WorkerEntrypoint {
   run() {
-    return { empty: new Array(3), holed: [1, , 3] };
+    // A fractional name is no index: its throwing getter is never read.
+    const fractional = [1];
+    Object.defineProperty(fractional, "0.5", {
+      enumerable: false,
+      get() {
+        throw new Error("read-fraction-c40b");
+      },
+    });
+    return { empty: new Array(3), holed: [1, , 3], fractional };
   }
 }`,
   // The global error constructors replaced as the App's module loads, with
@@ -490,6 +498,7 @@ const answerOfReview = async (
         answered: {
           empty: shapeOf(Reflect.get(answer, "empty")),
           holed: shapeOf(Reflect.get(answer, "holed")),
+          fractional: shapeOf(Reflect.get(answer, "fractional")),
         },
       };
     }

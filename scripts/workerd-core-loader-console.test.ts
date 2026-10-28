@@ -319,6 +319,7 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
         answered: {
           empty: { length: 3, has: [] },
           holed: { length: 3, has: ["0", "2"] },
+          fractional: { length: 1, has: ["0"] },
         },
       },
       fetchReplaced: {

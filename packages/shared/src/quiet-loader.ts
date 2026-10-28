@@ -297,8 +297,8 @@ const plainOf = (value, depth, seen) => {
       const key = names[index];
       const at = typeof key === "string" ? +key : -1;
       // An index's canonical text alone: not \`length\`, nor a named
-      // property, nor "01" or "-0".
-      if (at >= 0 && at < length && stringOf(at) === key) {
+      // property, nor "01", "-0" or "0.5".
+      if (at >= 0 && at < length && at % 1 === 0 && stringOf(at) === key) {
         field(copy, key, plainOf(get(value, key), depth + 1, seen));
       }
     }

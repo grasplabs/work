@@ -32,9 +32,10 @@ export const isolateBase: {
 
 /**
  * `flags` with Node.js compatibility: for the platform's own code that is
- * written for Node (the compiler, extraction), never App code.
+ * written for Node (the compiler, extraction), never App code. The flags
+ * that turn it off dropped, and nothing added: on by default at
+ * {@link compatibilityDate}, `nodejs_compat` named as well only makes
+ * workerd print that it needn't be, to the process's output.
  */
-export const withNode = (flags: readonly string[]): string[] => [
-  ...flags.filter((flag) => !withoutNode.includes(flag)),
-  "nodejs_compat",
-];
+export const withNode = (flags: readonly string[]): string[] =>
+  flags.filter((flag) => !withoutNode.includes(flag));
