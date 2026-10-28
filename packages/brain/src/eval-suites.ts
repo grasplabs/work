@@ -1,0 +1,462 @@
+import { and, desc, eq } from "drizzle-orm";
+import { z } from "zod";
+
+import { auditedBatch, outboxed, outboxedIfChanged } from "./audit.ts";
+import type { Brain } from "./brain.ts";
+import { brainEvalCases, brainEvalSuiteVersions } from "./db/schema.ts";
+import { inChunks } from "./documents.ts";
+import type { Writer } from "./documents.ts";
+import { toHex } from "./encoding.ts";
+import { canonicalJson } from "./json.ts";
+import type { Json } from "./json.ts";
+import { knowledgeErrors } from "./knowledge.ts";
+
+// Learning suites, as versions frozen by their digests (GRA-311, L1; the
+// Brain design's "Proposed evaluation service"): the cases, grader and
+// pinned versions a skill is judged by. A designer proposes a version from
+// permitted evidence; it is calibrated (L4) and accepted by its domain
+// owner, naming the revision they read; from then on it never changes. A
+// grader or case change is a new version, so scores are compared only
+// within one.
+//
+// Cases fall in three splits: development (the optimizer may see them),
+// validation (aggregate metrics only) and the sealed final set (the
+// evaluator alone). A group of related variants, and every case from one
+// source, stays in one split, so nothing leaks from one into another; a
+// version whose splits share a group or source is refused. Each split's
+// digest is kept with the version, so a run states exactly what it ran.
+// Who may read which split is the host's (L2); this keeps the record.
+
+/** The splits of a suite's cases. */
+export const evalSplits = ["development", "validation", "final"] as const;
+export type EvalSplit = (typeof evalSplits)[number];
+
+/** Most cases one suite version holds. */
+export const evalCasesMax = 2000;
+
+const caseSchema = z.strictObject({
+  caseId: z.string().min(1).max(100),
+  split: z.enum(evalSplits),
+  family: z.string().min(1).max(100),
+  group: z.string().min(1).max(100),
+  source: z.string().min(1).max(200),
+  input: z.json(),
+  expected: z.json(),
+});
+
+const proposalSchema = z.strictObject({
+  suiteId: z.string().min(1).max(100),
+  name: z.string().min(1).max(200),
+  ownerId: z.string().min(1).max(100),
+  cases: z
+    .array(caseSchema)
+    .min(1)
+    .max(evalCasesMax)
+    .refine(
+      (cases) =>
+        new Set(cases.map(({ caseId }) => caseId)).size === cases.length,
+      "Each case once"
+    ),
+  grader: z.strictObject({
+    version: z.string().min(1).max(100),
+    requiredChecks: z.array(z.string().min(1).max(200)).max(100),
+    spec: z.json(),
+  }),
+  pins: z.strictObject({
+    baseline: z.string().min(1).max(200),
+    model: z.string().min(1).max(200),
+    environment: z.string().min(1).max(200),
+    policy: z.string().min(1).max(200),
+  }),
+});
+export type EvalSuiteProposal = z.input<typeof proposalSchema>;
+
+/** A suite version, as anyone allowed to see it reads it: never a case. */
+export interface EvalSuiteVersion {
+  suiteId: string;
+  version: number;
+  revision: number;
+  ownerId: string;
+  name: string;
+  state: "proposed" | "calibrated" | "accepted" | "retired";
+  digests: Record<EvalSplit, string> & { grader: string };
+  /** How many cases each split holds, and of how many families. */
+  counts: Record<EvalSplit, { cases: number; families: number }>;
+  grader: { version: string; requiredChecks: string[] };
+  pins: {
+    baseline: string;
+    model: string;
+    environment: string;
+    policy: string;
+  };
+  proposedBy: string;
+  acceptedBy: string | null;
+  acceptedAt: string | null;
+}
+
+/**
+ * The keyed digest of a split's cases: an HMAC under a key the host
+ * derives from a secret it holds, so a digest shown to whoever reads a
+ * version can't confirm a guess at the cases, the sealed final ones
+ * included (the GRA-311 review).
+ */
+const casesDigestOf = async <C>(
+  brain: Brain<C>,
+  value: Json
+): Promise<string> => {
+  const key = await brain.ports.keys.hmac("grasp-os eval suite cases v1", [
+    "sign",
+  ]);
+  const mac = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(canonicalJson(value))
+  );
+  return toHex(new Uint8Array(mac));
+};
+
+/** A group or source label as compared: trimmed, case and width folded. */
+const labelOf = (label: string): string =>
+  label.normalize("NFKC").trim().toLowerCase();
+
+/**
+ * Refuses, as `knowledge.invalid`, a group or source in more than one
+ * split: related variants would leak from one into another.
+ */
+const requireApart = (cases: readonly z.infer<typeof caseSchema>[]): void => {
+  // A group, a source, or the very same input, in one split alone.
+  const keys = [
+    ["group", (each: z.infer<typeof caseSchema>) => labelOf(each.group)],
+    ["source", (each: z.infer<typeof caseSchema>) => labelOf(each.source)],
+    ["input", (each: z.infer<typeof caseSchema>) => canonicalJson(each.input)],
+  ] as const;
+  for (const [name, keyOf] of keys) {
+    const seen = new Map<string, EvalSplit>();
+    for (const each of cases) {
+      const key = keyOf(each);
+      const before = seen.get(key);
+      if (before !== undefined && before !== each.split) {
+        throw knowledgeErrors.create("knowledge.invalid", {
+          issues: [
+            `cases: a ${name} of ${each.caseId} is in both ${before} and ${each.split}`,
+          ],
+        });
+      }
+      seen.set(key, each.split);
+    }
+  }
+  for (const split of evalSplits) {
+    if (!cases.some((each) => each.split === split)) {
+      throw knowledgeErrors.create("knowledge.invalid", {
+        issues: [`cases: none in ${split}`],
+      });
+    }
+  }
+};
+
+const graderSchema = z.object({
+  version: z.string(),
+  requiredChecks: z.array(z.string()),
+});
+
+const pinsSchema = z.object({
+  baseline: z.string(),
+  model: z.string(),
+  environment: z.string(),
+  policy: z.string(),
+});
+
+/** Suite `suiteId`'s version `version`: never its cases. */
+export const suiteVersion = async <C>(
+  brain: Brain<C>,
+  suiteId: string,
+  version: number
+): Promise<EvalSuiteVersion> => {
+  const { db } = brain;
+  const [row] = await db
+    .select()
+    .from(brainEvalSuiteVersions)
+    .where(
+      and(
+        eq(brainEvalSuiteVersions.suiteId, suiteId),
+        eq(brainEvalSuiteVersions.version, version)
+      )
+    );
+  if (row === undefined) {
+    throw knowledgeErrors.create("knowledge.not_found");
+  }
+  const cases = await db
+    .select({ split: brainEvalCases.split, family: brainEvalCases.family })
+    .from(brainEvalCases)
+    .where(
+      and(
+        eq(brainEvalCases.suiteId, suiteId),
+        eq(brainEvalCases.version, version)
+      )
+    );
+  const countsOf = (split: EvalSplit) => {
+    const of = cases.filter((each) => each.split === split);
+    return {
+      cases: of.length,
+      families: new Set(of.map(({ family }) => family)).size,
+    };
+  };
+  const grader = graderSchema.parse(JSON.parse(row.grader));
+  return {
+    suiteId,
+    version,
+    revision: row.revision,
+    ownerId: row.ownerId,
+    name: row.name,
+    state: row.state,
+    digests: {
+      development: row.developmentDigest,
+      validation: row.validationDigest,
+      final: row.finalDigest,
+      grader: row.graderDigest,
+    },
+    counts: {
+      development: countsOf("development"),
+      validation: countsOf("validation"),
+      final: countsOf("final"),
+    },
+    grader: { version: grader.version, requiredChecks: grader.requiredChecks },
+    pins: pinsSchema.parse(JSON.parse(row.pins)),
+    proposedBy: row.proposedBy,
+    acceptedBy: row.acceptedBy,
+    acceptedAt: row.acceptedAt?.toISOString() ?? null,
+  };
+};
+
+/**
+ * Proposes the next version of suite `input.suiteId`, as `by`, its
+ * designer: recorded `proposed`, with its digests, and audited. A version
+ * is never changed after: a correction is another one.
+ */
+export const proposeSuiteVersion = async <C>(
+  brain: Brain<C>,
+  by: Writer,
+  input: unknown
+): Promise<EvalSuiteVersion> => {
+  const proposal = knowledgeErrors.parse(
+    "knowledge.invalid",
+    proposalSchema,
+    input
+  );
+  requireApart(proposal.cases);
+  // Its owner is never its designer, and stays the suite's owner from
+  // version to version, unless they hand it on (`changeSuiteOwner`).
+  if (proposal.ownerId === by.userId) {
+    throw knowledgeErrors.create("knowledge.forbidden");
+  }
+  const { db } = brain;
+  const [latest] = await db
+    .select({
+      version: brainEvalSuiteVersions.version,
+      ownerId: brainEvalSuiteVersions.ownerId,
+      nextOwnerId: brainEvalSuiteVersions.nextOwnerId,
+    })
+    .from(brainEvalSuiteVersions)
+    .where(eq(brainEvalSuiteVersions.suiteId, proposal.suiteId))
+    .orderBy(desc(brainEvalSuiteVersions.version))
+    .limit(1);
+  if (
+    latest !== undefined &&
+    (latest.nextOwnerId ?? latest.ownerId) !== proposal.ownerId
+  ) {
+    throw knowledgeErrors.create("knowledge.forbidden");
+  }
+  const version = (latest?.version ?? 0) + 1;
+  const ordered = proposal.cases.toSorted((a, b) =>
+    a.caseId.localeCompare(b.caseId)
+  );
+  const digestOfSplit = async (split: EvalSplit) =>
+    await casesDigestOf(
+      brain,
+      ordered.filter((each) => each.split === split)
+    );
+  const now = brain.ports.clock();
+  const grader = {
+    version: proposal.grader.version,
+    requiredChecks: proposal.grader.requiredChecks,
+    spec: proposal.grader.spec,
+  };
+  try {
+    await auditedBatch(brain.ports, db, [
+      db.insert(brainEvalSuiteVersions).values({
+        suiteId: proposal.suiteId,
+        version,
+        revision: 1,
+        ownerId: proposal.ownerId,
+        name: proposal.name,
+        developmentDigest: await digestOfSplit("development"),
+        validationDigest: await digestOfSplit("validation"),
+        finalDigest: await digestOfSplit("final"),
+        grader: canonicalJson(grader),
+        // Keyed too: a grader's spec may hold expected patterns or
+        // thresholds a guess could be checked against.
+        graderDigest: await casesDigestOf(brain, grader),
+        pins: canonicalJson(proposal.pins),
+        proposedBy: by.userId,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      ...inChunks(
+        ordered.map((each) => ({
+          suiteId: proposal.suiteId,
+          version,
+          caseId: each.caseId,
+          split: each.split,
+          family: each.family,
+          group: each.group,
+          source: each.source,
+          input: canonicalJson(each.input),
+          expected: canonicalJson(each.expected),
+        }))
+      ).map((chunk) => db.insert(brainEvalCases).values(chunk)),
+      outboxed(brain, {
+        actor: by.actor,
+        action: "knowledge.eval_suite.proposed",
+        target: { type: "eval_suite", id: proposal.suiteId },
+        detail: { version, cases: ordered.length },
+      }),
+    ]);
+  } catch (error) {
+    // Another version proposed at the same time took this number.
+    if (String(error).includes("UNIQUE")) {
+      throw knowledgeErrors.create("knowledge.conflict");
+    }
+    throw error;
+  }
+  return await suiteVersion(brain, proposal.suiteId, version);
+};
+
+/** Which states a version may move to, from which. */
+const moves = {
+  calibrated: ["proposed"],
+  accepted: ["calibrated"],
+  retired: ["proposed", "calibrated", "accepted"],
+} as const;
+
+/**
+ * Moves suite version `version` to `to`, as `by`, if it stands at
+ * `expectedRevision` in a state it may move from: `knowledge.conflict`
+ * otherwise. Only its owner accepts it, never its designer on their
+ * behalf; an accepted version is never changed, only retired.
+ */
+export const moveSuiteVersion = async <C>(
+  brain: Brain<C>,
+  by: Writer,
+  suiteId: string,
+  version: number,
+  to: keyof typeof moves,
+  expectedRevision: number
+): Promise<EvalSuiteVersion> => {
+  const current = await suiteVersion(brain, suiteId, version);
+  if (
+    to === "accepted" &&
+    (current.ownerId !== by.userId || current.proposedBy === by.userId)
+  ) {
+    throw knowledgeErrors.create("knowledge.forbidden");
+  }
+  // Retiring is the owner's too: anyone else finds nothing.
+  if (to === "retired" && current.ownerId !== by.userId) {
+    throw knowledgeErrors.create("knowledge.not_found");
+  }
+  const from: readonly string[] = moves[to];
+  if (current.revision !== expectedRevision || !from.includes(current.state)) {
+    throw knowledgeErrors.create("knowledge.conflict");
+  }
+  const { db } = brain;
+  const now = brain.ports.clock();
+  const [moved] = await auditedBatch(brain.ports, db, [
+    db
+      .update(brainEvalSuiteVersions)
+      .set({
+        state: to,
+        revision: expectedRevision + 1,
+        updatedAt: now,
+        ...(to === "accepted"
+          ? { acceptedBy: by.userId, acceptedAt: now }
+          : {}),
+      })
+      .where(
+        and(
+          eq(brainEvalSuiteVersions.suiteId, suiteId),
+          eq(brainEvalSuiteVersions.version, version),
+          eq(brainEvalSuiteVersions.revision, expectedRevision)
+        )
+      )
+      .returning({ version: brainEvalSuiteVersions.version }),
+    outboxedIfChanged(brain, {
+      actor: by.actor,
+      action: `knowledge.eval_suite.${to}`,
+      target: { type: "eval_suite", id: suiteId },
+      detail: { version, revision: expectedRevision + 1 },
+    }),
+  ]);
+  if (moved.length === 0) {
+    throw knowledgeErrors.create("knowledge.conflict");
+  }
+  return await suiteVersion(brain, suiteId, version);
+};
+
+/**
+ * Hands suite `suiteId` on to `ownerId`, as `by`, its owner now: the
+ * versions proposed after its latest one, at `expectedRevision`, are
+ * theirs. A version's own owner never changes. Never to the designer who
+ * proposed it.
+ */
+export const changeSuiteOwner = async <C>(
+  brain: Brain<C>,
+  by: Writer,
+  suiteId: string,
+  ownerId: string,
+  expectedRevision: number
+): Promise<EvalSuiteVersion> => {
+  const { db } = brain;
+  const [latest] = await db
+    .select()
+    .from(brainEvalSuiteVersions)
+    .where(eq(brainEvalSuiteVersions.suiteId, suiteId))
+    .orderBy(desc(brainEvalSuiteVersions.version))
+    .limit(1);
+  if (latest === undefined) {
+    throw knowledgeErrors.create("knowledge.not_found");
+  }
+  if (latest.ownerId !== by.userId || latest.proposedBy === ownerId) {
+    throw knowledgeErrors.create("knowledge.forbidden");
+  }
+  if (latest.revision !== expectedRevision) {
+    throw knowledgeErrors.create("knowledge.conflict");
+  }
+  const now = brain.ports.clock();
+  const [moved] = await auditedBatch(brain.ports, db, [
+    db
+      .update(brainEvalSuiteVersions)
+      // From the next version on: a version's own owner never changes.
+      .set({
+        nextOwnerId: ownerId,
+        revision: expectedRevision + 1,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(brainEvalSuiteVersions.suiteId, suiteId),
+          eq(brainEvalSuiteVersions.version, latest.version),
+          eq(brainEvalSuiteVersions.revision, expectedRevision)
+        )
+      )
+      .returning({ version: brainEvalSuiteVersions.version }),
+    outboxedIfChanged(brain, {
+      actor: by.actor,
+      action: "knowledge.eval_suite.owner_changed",
+      target: { type: "eval_suite", id: suiteId },
+      detail: { version: latest.version, ownerId },
+    }),
+  ]);
+  if (moved.length === 0) {
+    throw knowledgeErrors.create("knowledge.conflict");
+  }
+  return await suiteVersion(brain, suiteId, latest.version);
+};
