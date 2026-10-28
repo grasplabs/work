@@ -1023,7 +1023,15 @@ export class RollbackClient extends WorkflowEntrypoint<Env, RollbackParams> {
         await step.do("tell core", quickStep, async () => {
           const live = confirmed[core.app] ?? null;
           await tellCore(
-            { db, secrets: async () => await activityKeys(this.env) },
+            {
+              db,
+              secrets: async () => await activityKeys(this.env),
+              router: {
+                hosts: this.env.ROUTER_HOSTS,
+                domain: clientDomain(this.env),
+                dispatcher: this.env.DISPATCHER,
+              },
+            },
             clientId,
             live,
             {

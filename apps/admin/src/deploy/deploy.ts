@@ -47,6 +47,7 @@ import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
 
+import type { ClientDispatcher } from "../clients/core-address.ts";
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
@@ -128,6 +129,11 @@ export interface DeployContext {
     domain: string;
     /** How the smoke check reaches core. */
     smoke?: SmokeOptions;
+    /**
+     * The clients' dispatch namespace, as the router binds it: how a core
+     * placed on Workers for Platforms is reached (hosting/operation.ts).
+     */
+    dispatcher?: ClientDispatcher;
   };
 }
 

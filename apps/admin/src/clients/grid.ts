@@ -17,7 +17,7 @@
 import { deadline } from "@grasp-os/shared/deadline";
 import { log } from "@grasp-os/shared/log";
 import { onboardingSummarySchema } from "@grasp-os/shared/onboarding-summary";
-import { deriveRouterSecret } from "@grasp-os/shared/router";
+import { deriveRouterSecret, routerTargetOf } from "@grasp-os/shared/router";
 import { asc, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -46,6 +46,8 @@ import { driftOf } from "../rollout/drift.ts";
 import type { ManifestOf } from "../rollout/drift.ts";
 import { sharedSecretsStatus, storeCheck } from "../rollout/shared-secrets.ts";
 import type { StoreCheck } from "../rollout/shared-secrets.ts";
+import { coreAddressOf } from "./core-address.ts";
+import type { ClientDispatcher, CoreAddress } from "./core-address.ts";
 import { onboardingSummaryOf } from "./onboarding.ts";
 import type { OnboardingCell } from "./onboarding.ts";
 
@@ -202,14 +204,20 @@ const recordedClients = async (db: AdminDatabase) => {
   });
 };
 
-/** What the router knows of client `clientId`'s core: its route, and the secret it sends. */
+/**
+ * What the router knows of client `clientId`'s core: where it answers (its
+ * script through `dispatcher`, or its origin: `coreAddressOf`), and the
+ * secret the router sends. A script without a dispatcher to reach it by is
+ * `unknown`, never another client's core.
+ */
 export const routeOf = async (
   hosts: RouterHosts,
   routerKey: string | null,
   clientId: string,
-  hostname: string | null
+  hostname: string | null,
+  dispatcher: ClientDispatcher | undefined
 ): Promise<
-  | { coreUrl: string; generation: number; secret: string }
+  | { core: CoreAddress; generation: number; secret: string }
   | "no_route"
   | "unknown"
 > => {
@@ -220,8 +228,12 @@ export const routeOf = async (
   if (route === null || route.clientId !== clientId) {
     return "no_route";
   }
+  const core = coreAddressOf(routerTargetOf(route), hostname, dispatcher);
+  if (core === undefined) {
+    return "unknown";
+  }
   return {
-    coreUrl: route.coreUrl,
+    core,
     generation: route.generation,
     secret: await deriveRouterSecret(routerKey, clientId, route.generation),
   };
@@ -241,7 +253,7 @@ const reachOf = async (
   }
   // Its own deadline starts as it's sent; the row's stops it too.
   const fetchCore: typeof fetch = async (input, init) =>
-    await fetch(input, {
+    await route.core.fetch(input, {
       ...init,
       signal:
         init?.signal === undefined || init.signal === null
@@ -250,7 +262,7 @@ const reachOf = async (
     });
   const version = await answeringVersion(
     fetchCore,
-    route.coreUrl,
+    route.core.origin,
     route.secret,
     healthTimeoutMs
   );
@@ -271,7 +283,7 @@ const onboardingOf = async (
     return null;
   }
   return await onboardingSummaryOf({
-    coreUrl: route.coreUrl,
+    core: route.core,
     routerSecret: route.secret,
     authSecret: await clientAuthSecret(secrets, clientId, route.generation),
     signal: AbortSignal.any([signal, AbortSignal.timeout(healthTimeoutMs)]),
@@ -343,7 +355,13 @@ const liveOf = async (
         );
   const route = await orElse(
     async () =>
-      await routeOf(env.ROUTER_HOSTS, routerKey, row.id, row.hostname),
+      await routeOf(
+        env.ROUTER_HOSTS,
+        routerKey,
+        row.id,
+        row.hostname,
+        env.DISPATCHER
+      ),
     "unknown" as const,
     "grid.route_unread",
     row.id

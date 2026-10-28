@@ -1018,6 +1018,7 @@ export const fakeCloudflareApi = (
   const adminReads = { now: 0, peak: 0 };
   /** The requests a redirect sent elsewhere, with the router secret they carried. */
   const redirected: { url: string; routerSecret: string | null }[] = [];
+  const dispatched: { namespace: string; script: string; url: string }[] = [];
 
   /** Whose token a call carries: the deployer's or the tenant admin's. */
   const callers = new Map([
@@ -1387,6 +1388,40 @@ export const fakeCloudflareApi = (
     return await workerAnswer(request, url, worker);
   };
 
+  /**
+   * The dispatch namespace `name`, as a Worker binding it reaches it: each
+   * script's live version answers as a workers.dev Worker's does
+   * (`workerAnswer`), in whichever account holds that namespace; a script
+   * it doesn't have throws, as Workers for Platforms does.
+   */
+  const dispatcher = (name: string) => ({
+    get: (scriptName: string) => {
+      const found = [...accounts.values()].flatMap((account) => {
+        const script = account.namespaces.get(name)?.get(scriptName);
+        const [only] = script?.deployments[0]?.versions ?? [];
+        const live = script?.versions.find(({ id }) => id === only?.version_id);
+        return script === undefined || live === undefined
+          ? []
+          : [{ account, script, live }];
+      });
+      const [worker] = found;
+      if (worker === undefined) {
+        throw new Error(`Worker not found: ${scriptName}`);
+      }
+      return {
+        fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          dispatched.push({
+            namespace: name,
+            script: scriptName,
+            url: request.url,
+          });
+          return await workerAnswer(request, new URL(request.url), worker);
+        },
+      };
+    },
+  });
+
   /** What the API, or a Worker on workers.dev, answers `fetch(input, init)` with. */
   const answerFetch = async (
     input: RequestInfo | URL,
@@ -1475,11 +1510,20 @@ export const fakeCloudflareApi = (
     adminReads.now = 0;
     adminReads.peak = 0;
     redirected.length = 0;
+    dispatched.length = 0;
   };
 
   return {
     /** Answers in place of `fetch`. */
     fetch: answerFetch,
+    /** The dispatch namespace `name`, as the router and the admin bind it. */
+    dispatcher,
+    /** Every request a namespace's script got through `dispatcher`, in this test. */
+    dispatched: (): readonly {
+      namespace: string;
+      script: string;
+      url: string;
+    }[] => dispatched,
     /** Empties the fake. */
     reset,
     /** Every call the fake got in this test, in order. */
