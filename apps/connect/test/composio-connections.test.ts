@@ -1368,8 +1368,16 @@ describe("changing what a connected Composio toolkit may do", () => {
         .first<{ at: number | null }>();
     const marked = await unsynced();
     composio.state.failing = undefined;
-    await reconcileUnsyncedTools(env);
-    const cleared = await unsynced();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let cleared: { at: number | null } | null;
+    try {
+      // Past the wait after its first failure.
+      vi.setSystemTime(Date.now() + 61_000);
+      await reconcileUnsyncedTools(env);
+      cleared = await unsynced();
+    } finally {
+      vi.useRealTimers();
+    }
 
     expect({
       marked: marked?.at !== null,
@@ -1379,6 +1387,88 @@ describe("changing what a connected Composio toolkit may do", () => {
       marked: true,
       composio: [["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"]],
       cleared: null,
+    });
+  });
+
+  it("marks a connection before Composio is told, so a send a crash cuts short is still repaired", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const unsynced = async () => {
+      const row = await env.DB.prepare(
+        "SELECT tools_unsynced_at AS at FROM connections WHERE id = ?"
+      )
+        .bind(connectionId)
+        .first<{ at: number | null }>();
+      return row?.at ?? null;
+    };
+    let whileTold: number | null = null;
+    composio.state.beforeUpdate = async () => {
+      whileTold = await unsynced();
+    };
+    await change(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]);
+
+    expect({
+      markedWhileTold: whileTold !== null,
+      afterwards: await unsynced(),
+    }).toStrictEqual({ markedWhileTold: true, afterwards: null });
+  });
+
+  it("keeps reconciling newer marked connections while older ones keep failing", async () => {
+    const admin = someone("admin");
+    await env.DB.prepare(
+      "UPDATE connections SET tools_unsynced_at = NULL"
+    ).run();
+    const marked: string[] = [];
+    for (let n = 0; n < 21; n += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+      marked.push(await connectHubSpot(admin));
+    }
+    const serverOf = async (connectionId: string) => {
+      const row = await stored(connectionId);
+      return row?.serverId ?? "";
+    };
+    const marks = marked.map((connectionId, n) =>
+      env.DB.prepare(
+        "UPDATE connections SET tools_unsynced_at = ? WHERE id = ?"
+      ).bind(n + 1, connectionId)
+    );
+    await env.DB.batch(marks);
+    // The 20 marked first are gone at Composio, so theirs keep failing;
+    // the newest one only lags connect.
+    const failing = marked.slice(0, 20);
+    const newest = marked[20] ?? "";
+    for (const connectionId of failing) {
+      // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+      composio.state.holds.servers.delete(await serverOf(connectionId));
+    }
+    const newestServer = composio.state.holds.servers.get(
+      await serverOf(newest)
+    );
+    const lagging = [...(newestServer?.allowedTools ?? [])];
+    if (newestServer !== undefined) {
+      newestServer.allowedTools = [];
+    }
+    await reconcileUnsyncedTools(env);
+    await reconcileUnsyncedTools(env);
+    const state = await env.DB.prepare(
+      "SELECT id, tools_unsynced_at AS at, tools_sync_failures AS failures FROM connections WHERE tools_unsynced_at IS NOT NULL OR id = ?"
+    )
+      .bind(newest)
+      .all<{ id: string; at: number | null; failures: number }>();
+    const newestNow = state.results.find(({ id }) => id === newest);
+    const stillFailing = state.results.filter(({ id }) => failing.includes(id));
+
+    expect({
+      newest: newestNow?.at ?? null,
+      newestAtComposio: newestServer?.allowedTools,
+      stillMarked: stillFailing.length,
+      // Each tried once, then put off: not again in the same minute.
+      failures: [...new Set(stillFailing.map(({ failures }) => failures))],
+    }).toStrictEqual({
+      newest: null,
+      newestAtComposio: lagging,
+      stillMarked: 20,
+      failures: [1],
     });
   });
 

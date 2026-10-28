@@ -101,12 +101,19 @@ export const connections = sqliteTable(
     composioAuthConfigId: text("composio_auth_config_id"),
     tools: text(),
     /**
-     * Since when Composio may not allow what `tools` says: a reconcile
-     * after a change didn't finish. Connect's clock reconciles it again
-     * until it does (src/composio-connections.ts); null once Composio
-     * matches.
+     * When Composio was last sent a tool list it may not have taken: set
+     * before each send, so a send cut short by a crash is still marked.
+     * Connect's clock reconciles a marked connection until Composio
+     * matches `tools` (src/composio-connections.ts); null once it does.
      */
     toolsUnsyncedAt: timestamp("tools_unsynced_at"),
+    /** Reconciles that failed in a row since Composio last matched. */
+    toolsSyncFailures: integer("tools_sync_failures").notNull().default(0),
+    /**
+     * Not before when connect's clock tries a failing reconcile again,
+     * backing off as failures add up; null for one not yet tried.
+     */
+    toolsSyncRetryAt: timestamp("tools_sync_retry_at"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
