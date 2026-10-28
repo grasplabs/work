@@ -45,6 +45,7 @@ import {
   allowedToolNames,
   offeredToolNames,
   readToolNames,
+  toolResourcesOf,
 } from "./connections.ts";
 import {
   connections,
@@ -915,6 +916,7 @@ export const listConnections = async (
       tools: allowedToolNames(row),
       offeredTools: offeredToolNames(row),
       readTools: readToolNames(row),
+      toolResources: toolResourcesOf(row),
     }),
   }));
 };

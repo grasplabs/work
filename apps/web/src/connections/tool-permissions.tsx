@@ -36,12 +36,19 @@ export const changeableConnectionOf = (
       )
     : undefined;
 
-/** What `connection` allows now, each tool with whether it only reads. */
+/**
+ * What `connection` allows now, each tool with whether it only reads and
+ * the resource property its rule names, so a change keeps it.
+ */
 export const allowedOf = (connection: ListedConnection): AllowedTool[] =>
-  (connection.tools ?? []).map((name) => ({
-    name,
-    read: connection.readTools?.includes(name) ?? false,
-  }));
+  (connection.tools ?? []).map((name) => {
+    const resource = connection.toolResources?.[name];
+    return {
+      name,
+      read: connection.readTools?.includes(name) ?? false,
+      ...(resource === undefined ? {} : { resource }),
+    };
+  });
 
 const groups: readonly {
   id: string;

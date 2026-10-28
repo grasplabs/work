@@ -189,6 +189,31 @@ describe("changing what Grasp may do in a connected app", () => {
     });
   });
 
+  it("keeps each tool's resource rule through a change of any switch or badge", async () => {
+    const scoped = {
+      ...connection,
+      toolResources: {
+        HUBSPOT_LIST_CONTACTS: "pipeline",
+        HUBSPOT_CREATE_NOTE: "pipeline",
+      },
+    };
+    const sent = await shown(scoped);
+    await press(switchOf("HUBSPOT_DELETE_NOTE"));
+    await press(badgeOf("HUBSPOT_LIST_CONTACTS"));
+
+    expect(sent.map(({ tools: chosen }) => chosen)).toStrictEqual([
+      [
+        { name: "HUBSPOT_LIST_CONTACTS", read: true, resource: "pipeline" },
+        { name: "HUBSPOT_CREATE_NOTE", resource: "pipeline" },
+        "HUBSPOT_DELETE_NOTE",
+      ],
+      [
+        { name: "HUBSPOT_LIST_CONTACTS", resource: "pipeline" },
+        { name: "HUBSPOT_CREATE_NOTE", resource: "pipeline" },
+      ],
+    ]);
+  });
+
   it("keeps the last tool allowed switched on, and lets Grasp's staff change nothing", async () => {
     const one = { ...connection, tools: ["HUBSPOT_LIST_CONTACTS"] };
     const sent = await shown(one);

@@ -343,6 +343,12 @@ export interface ConnectionSummary {
    * asking. Absent for a native connection.
    */
   readTools?: string[];
+  /**
+   * The input property naming the one resource a call of each tool acts
+   * on, for the tools the admin gave one, by tool name: kept by whatever
+   * changes the tools. Absent for a native connection.
+   */
+  toolResources?: Record<string, string>;
 }
 
 /**
