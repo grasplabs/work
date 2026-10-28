@@ -4,19 +4,14 @@
  * member the request comes from, and answers a refusal as its code
  * (`ProvisionErrorCode`), which the page words; anything else fails.
  */
-import { newClientIdSchema } from "@grasp-os/shared/router";
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
-import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import { listReleases } from "../releases/queries.ts";
 import { createClient, provisionInputSchema } from "./control.ts";
 import { ProvisionError } from "./errors.ts";
 import type { ProvisionErrorCode } from "./errors.ts";
-import { getProvisioning } from "./queries.ts";
-
-const clientSchema = z.object({ clientId: newClientIdSchema });
 
 /** What adding a client answers: the client, or why it was refused. */
 export type ChangeResult =
@@ -37,10 +32,6 @@ export const fetchNewClientOptions = createServerFn({ method: "GET" }).handler(
     };
   }
 );
-
-export const fetchProvisioning = createServerFn({ method: "GET" })
-  .validator(clientSchema)
-  .handler(async ({ data }) => await getProvisioning(env, data.clientId));
 
 export const startClient = createServerFn({ method: "POST" })
   .validator(provisionInputSchema)
