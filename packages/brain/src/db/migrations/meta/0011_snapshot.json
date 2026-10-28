@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a12dc428-d868-43fc-8cc0-ace9f0b0b5e1",
+  "id": "341aa2e5-be1a-4336-9ba2-5e98a4c867fd",
   "prevId": "2a899558-5ce1-4356-bb32-e4ae94ed396e",
   "tables": {
     "audit_outbox": {
@@ -1660,20 +1660,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "claimed_at": {
-          "name": "claimed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "claim": {
-          "name": "claim",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "updated_at": {
           "name": "updated_at",
           "type": "integer",
@@ -1772,6 +1758,20 @@
         "superseded_by": {
           "name": "superseded_by",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attempt": {
+          "name": "attempt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attempt_at": {
+          "name": "attempt_at",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

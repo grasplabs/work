@@ -5,8 +5,6 @@ CREATE TABLE `brain_purge_steps` (
 	`state` text DEFAULT 'queued' NOT NULL,
 	`reason` text,
 	`counts` text,
-	`claimed_at` integer,
-	`claim` text,
 	`updated_at` integer NOT NULL,
 	PRIMARY KEY(`purge_id`, `step`),
 	FOREIGN KEY (`purge_id`) REFERENCES `brain_purges`(`id`) ON UPDATE no action ON DELETE cascade
@@ -21,7 +19,9 @@ CREATE TABLE `brain_purges` (
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
 	`completed_at` integer,
-	`superseded_by` text
+	`superseded_by` text,
+	`attempt` text,
+	`attempt_at` integer
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `brain_purges_open_key_idx` ON `brain_purges` (`key`) WHERE "brain_purges"."completed_at" IS NULL AND "brain_purges"."superseded_by" IS NULL;--> statement-breakpoint

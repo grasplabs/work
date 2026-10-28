@@ -1,4 +1,5 @@
 import { eq, lte, ne, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import type { Brain } from "./brain.ts";
@@ -97,6 +98,36 @@ export const rebuildOwed = (
   return db
     .insert(searchRebuilds)
     .values({ id, owedAt: now, ...(writesDone ? { writesDoneAt: now } : {}) });
+};
+
+/**
+ * Owes rebuild `id` again, its writes not done, for an attempt of a purge
+ * as it takes it: only while `holds` (purge-ledger.ts `attemptHolds`). A
+ * rebuild another purge ran meanwhile may have cleared the attempt
+ * before's, and this attempt writes again.
+ */
+export const rebuildOwedWhile = (
+  db: DrizzleD1Database,
+  id: string,
+  holds: SQL
+) => {
+  const now = Date.now();
+  return db
+    .insert(searchRebuilds)
+    .select(
+      db
+        .select({
+          id: sql<string>`${id}`.as("id"),
+          owedAt: sql<number>`${now}`.as("owed_at"),
+          writesDoneAt: sql<number | null>`NULL`.as("writes_done_at"),
+        })
+        .from(sql`(SELECT 1)`)
+        .where(holds)
+    )
+    .onConflictDoUpdate({
+      target: searchRebuilds.id,
+      set: { owedAt: now, writesDoneAt: null },
+    });
 };
 
 /**

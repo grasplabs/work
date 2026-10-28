@@ -742,6 +742,9 @@ const forgetUploads = async (env: Env, scope: ErasedFiles): Promise<void> => {
   await cleanUpOriginals(env);
 };
 
+/** Scopes one count of a purge's uploads names (`uploadErasure`). */
+const scopesPerCount = 40;
+
 /**
  * The uploads as a Knowledge purge reaches them (purge.ts `OnErase`): the
  * originals of the files uploaded as the documents it purges hold the data
@@ -751,14 +754,17 @@ export const uploadErasure = (
   env: Env
 ): Pick<OnErase, "countFiles" | "forgetFiles"> => ({
   countFiles: async (scopes) => {
-    if (scopes.length === 0) {
-      return 0;
+    let total = 0;
+    // D1 binds at most 100 values a statement: two a scope.
+    for (let at = 0; at < scopes.length; at += scopesPerCount) {
+      // oxlint-disable-next-line no-await-in-loop -- one bounded count after another
+      const [found] = await drizzle(env.DB)
+        .select({ count: count() })
+        .from(uploads)
+        .where(or(...scopes.slice(at, at + scopesPerCount).map(uploadsOf)));
+      total += found?.count ?? 0;
     }
-    const [found] = await drizzle(env.DB)
-      .select({ count: count() })
-      .from(uploads)
-      .where(or(...scopes.map(uploadsOf)));
-    return found?.count ?? 0;
+    return total;
   },
   forgetFiles: async (_person, scope) => {
     await forgetUploads(env, scope);
