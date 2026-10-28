@@ -28,7 +28,6 @@ import {
   isNull,
   lt,
   lte,
-  notExists,
   or,
   sql,
 } from "drizzle-orm";
@@ -456,12 +455,16 @@ const readToolsOf = (tools: readonly (string | ComposioToolRule)[]): string[] =>
  * Whether every one of `tools` is one of `toolkit`'s, each held to a
  * resource only by one of its own input properties: a name that matches
  * nothing would be an entry that silently allows nothing, or holds
- * nothing. With the names Composio says only read (`hinted`).
+ * nothing. One of `kept`, entries the connection allows already, passes
+ * as it is though the toolkit no longer has it: it is kept, not added, so
+ * a tool Composio retired never blocks a change. With the names Composio
+ * says only read (`hinted`).
  */
 const checkedTools = async (
   key: string,
   toolkit: string,
-  tools: readonly (string | ComposioToolRule)[]
+  tools: readonly (string | ComposioToolRule)[],
+  kept: readonly (string | ComposioToolRule)[] = []
 ): Promise<{ fits: boolean; hinted: ReadonlySet<string> }> => {
   const toolkitTools = await composioTools(key, toolkit);
   const inputsOf = new Map(
@@ -470,13 +473,14 @@ const checkedTools = async (
   const hinted = new Set(
     toolkitTools.flatMap(({ name, readOnly }) => (readOnly ? [name] : []))
   );
+  const keptEntries = new Set(kept.map((tool) => JSON.stringify(tool)));
   const fits = tools.every((tool) => {
     const inputs = inputsOf.get(composioToolName(tool));
+    if (inputs === undefined) {
+      return keptEntries.has(JSON.stringify(tool));
+    }
     const resource = typeof tool === "string" ? undefined : tool.resource;
-    return (
-      inputs !== undefined &&
-      (resource === undefined || inputs.includes(resource))
-    );
+    return resource === undefined || inputs.includes(resource);
   });
   return { fits, hinted };
 };
@@ -1043,13 +1047,27 @@ const setServerTools = async (
  */
 const unansweredLandsWithinMs = 120_000;
 
+/** A send `sendTools` made. */
+interface Send {
+  /** Its count (`tools_sent_seq`). */
+  seq: number;
+  /**
+   * Whether every send before it was answered, or sent too long ago to land
+   * still, when it was counted: then none can land after it, and it may
+   * settle the connection (`settle`).
+   */
+  last: boolean;
+}
+
 /**
  * Sends Composio's server `serverId` the tool list `tools` of connection
  * `connectionId`, counted first (`tools_sent_seq`), so the connection is
  * out of sync from before the send until a reconcile settles it
  * (`settle`), whatever happens to this one. The send is kept as unanswered
  * (`composio_tool_sends`) until Composio answers it: one it never answers
- * may land there later still. Its count.
+ * may land there later still. Whether an earlier one was unanswered is
+ * read as it is counted, never later: one answered after this one went
+ * out may have landed after it.
  */
 const sendTools = async (
   db: ReturnType<typeof drizzle>,
@@ -1057,20 +1075,45 @@ const sendTools = async (
   serverId: string,
   connectionId: string,
   tools: readonly (string | ComposioToolRule)[]
-): Promise<number> => {
-  const counted = await db
-    .update(connections)
-    .set({ toolsSentSeq: sql`${connections.toolsSentSeq} + 1` })
-    .where(eq(connections.id, connectionId))
-    .returning({ seq: connections.toolsSentSeq })
-    .get();
-  if (counted === undefined) {
+): Promise<Send> => {
+  const now = Date.now();
+  // Counted, kept as unanswered, and the earlier unanswered read, in one
+  // batch: no count without its row.
+  const [counted, , earlier] = await db.batch([
+    db
+      .update(connections)
+      .set({ toolsSentSeq: sql`${connections.toolsSentSeq} + 1` })
+      .where(eq(connections.id, connectionId))
+      .returning({ seq: connections.toolsSentSeq }),
+    db.insert(composioToolSends).select(
+      db
+        .select({
+          connectionId: connections.id,
+          seq: connections.toolsSentSeq,
+          sentAt: sql<Date>`${now}`.as("sent_at"),
+        })
+        .from(connections)
+        .where(eq(connections.id, connectionId))
+    ),
+    db
+      .select({ seq: composioToolSends.seq })
+      .from(composioToolSends)
+      .where(
+        and(
+          eq(composioToolSends.connectionId, connectionId),
+          lt(
+            composioToolSends.seq,
+            sql`(SELECT ${connections.toolsSentSeq} FROM ${connections} WHERE ${connections.id} = ${connectionId})`
+          ),
+          gt(composioToolSends.sentAt, new Date(now - unansweredLandsWithinMs))
+        )
+      )
+      .limit(1),
+  ]);
+  const seq = counted[0]?.seq;
+  if (seq === undefined) {
     throw new Error("The connection is gone.");
   }
-  const { seq } = counted;
-  await db
-    .insert(composioToolSends)
-    .values({ connectionId, seq, sentAt: new Date() });
   const answered = async () => {
     await db
       .delete(composioToolSends)
@@ -1092,7 +1135,7 @@ const sendTools = async (
     throw error;
   }
   await answered();
-  return seq;
+  return { seq, last: earlier.length === 0 };
 };
 
 /** Rounds of bringing Composio to connect's list before giving up. */
@@ -1105,14 +1148,14 @@ const reconcileRounds = 3;
  * what it sent. A send overtaken by a newer change, which may have landed
  * at Composio before it, is so followed by that change's list: the last
  * send of every change is of connect's latest list, whatever the order.
- * The count of the send that told Composio the latest one, if one did.
+ * The send that told Composio the latest one, if one did.
  */
 const reconciled = async (
   db: ReturnType<typeof drizzle>,
   key: string,
   serverId: string,
   connectionId: string
-): Promise<number | undefined> => {
+): Promise<Send | undefined> => {
   const listNow = async (): Promise<string | undefined> => {
     const now = await db
       .select({ tools: connections.tools })
@@ -1127,10 +1170,10 @@ const reconciled = async (
     if (!parsed.success) {
       return undefined;
     }
-    let seq: number;
+    let send: Send;
     try {
       // oxlint-disable-next-line no-await-in-loop -- one send, then a read
-      seq = await sendTools(db, key, serverId, connectionId, parsed.data);
+      send = await sendTools(db, key, serverId, connectionId, parsed.data);
     } catch (error) {
       log.warn("composio.tools_reconcile_failed", errorFields(error));
       return undefined;
@@ -1138,7 +1181,7 @@ const reconciled = async (
     // oxlint-disable-next-line no-await-in-loop -- read after each send
     const after = await listNow();
     if (after === sent) {
-      return seq;
+      return send;
     }
     sent = after;
   }
@@ -1151,40 +1194,33 @@ const unsyncedRetryBaseMs = 60_000;
 const unsyncedRetryDoublings = 6;
 
 /**
- * Settles connection `connectionId` at send `seq`, which told Composio
+ * Settles connection `connectionId` at `send`, which told Composio
  * connect's latest list: only if no send came after it (that one's
- * reconcile, or the clock, settles), and none sent shortly before it is
- * unanswered (it may land after this one: the clock settles once it no
- * longer can). Whether it settled.
+ * reconcile, or the clock, settles), and none before it could land after
+ * it (`Send.last`; the clock settles once none can). Whether it settled.
  */
 const settle = async (
   db: ReturnType<typeof drizzle>,
   connectionId: string,
-  seq: number
+  { seq, last }: Send
 ): Promise<boolean> => {
-  const now = Date.now();
-  const mayLandLater = db
-    .select({ seq: composioToolSends.seq })
-    .from(composioToolSends)
-    .where(
-      and(
-        eq(composioToolSends.connectionId, connectionId),
-        lt(composioToolSends.seq, seq),
-        gt(composioToolSends.sentAt, new Date(now - unansweredLandsWithinMs))
-      )
-    );
-  const settled = await db
-    .update(connections)
-    .set({ toolsSettledSeq: seq, toolsSyncFailures: 0, toolsSyncRetryAt: null })
-    .where(
-      and(
-        eq(connections.id, connectionId),
-        eq(connections.toolsSentSeq, seq),
-        notExists(mayLandLater)
-      )
-    )
-    .returning({ id: connections.id })
-    .get();
+  const settled = last
+    ? await db
+        .update(connections)
+        .set({
+          toolsSettledSeq: seq,
+          toolsSyncFailures: 0,
+          toolsSyncRetryAt: null,
+        })
+        .where(
+          and(
+            eq(connections.id, connectionId),
+            eq(connections.toolsSentSeq, seq)
+          )
+        )
+        .returning({ id: connections.id })
+        .get()
+    : undefined;
   if (settled !== undefined) {
     await db
       .delete(composioToolSends)
@@ -1200,7 +1236,7 @@ const settle = async (
   // back once it no longer can. A later send's is its own to settle.
   await db
     .update(connections)
-    .set({ toolsSyncRetryAt: new Date(now + unansweredLandsWithinMs) })
+    .set({ toolsSyncRetryAt: new Date(Date.now() + unansweredLandsWithinMs) })
     .where(
       and(eq(connections.id, connectionId), eq(connections.toolsSentSeq, seq))
     );
@@ -1221,8 +1257,8 @@ const reconcileAndSettle = async (
   connectionId: string
 ): Promise<boolean> => {
   const startedAt = Date.now();
-  const seq = await reconciled(db, key, serverId, connectionId);
-  if (seq === undefined) {
+  const send = await reconciled(db, key, serverId, connectionId);
+  if (send === undefined) {
     await db
       .update(connections)
       .set({
@@ -1233,7 +1269,7 @@ const reconcileAndSettle = async (
       .where(eq(connections.id, connectionId));
     return false;
   }
-  await settle(db, connectionId, seq);
+  await settle(db, connectionId, send);
   return true;
 };
 
@@ -1339,7 +1375,8 @@ export const changeToolkitTools = async (
     await failed("connection.provider_unavailable", "failed");
     throw connectionErrors.create("connection.provider_unavailable");
   }
-  const { fits, hinted } = await checkedTools(key, toolkit, tools);
+  const previous = composioToolsSchema.parse(JSON.parse(before));
+  const { fits, hinted } = await checkedTools(key, toolkit, tools, previous);
   if (!fits) {
     await failed("connection.invalid", "refused");
     throw connectionErrors.create("connection.invalid");
@@ -1378,7 +1415,6 @@ export const changeToolkitTools = async (
     await dropUnallowed();
     return { tools: names };
   }
-  const previous = composioToolsSchema.parse(JSON.parse(before));
   // Narrowed first, widened after: before connect's write, Composio is told
   // only the tools both lists allow; the ones this adds reach it only once
   // connect holds them (the reconcile below). Composio may lag connect,
