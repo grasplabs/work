@@ -64,7 +64,7 @@ export interface RulesInput {
     /** Core's own onboarding: always carries sensitive data. */
     | { onboarding: true }
     /** Core's own upkeep of the Brain: always carries sensitive data. */
-    | { platform: "brain_upkeep" | "dashboard_widgets" };
+    | { platform: "brain_upkeep" | "dashboard_widgets" | "brain_recall" };
 }
 
 /** Why a call must stay in the EU: which rule says so. */

@@ -608,6 +608,15 @@ const sessionShape = {
        * makes such a call.
        */
       z.strictObject({ platform: z.literal("dashboard_widgets") }),
+      /**
+       * Core's own reranking of a person's recall (knowledge/rerank.ts),
+       * only when the recall asks for it: it carries the company's own
+       * words, judged as onboarding's is, and is made for them, on their
+       * budget, by the trigger that names them. A delegate's recall reranks
+       * under its own authority and context instead. Only core's own code
+       * makes such a call.
+       */
+      z.strictObject({ platform: z.literal("brain_recall") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
