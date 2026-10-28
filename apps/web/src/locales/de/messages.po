@@ -7365,7 +7365,7 @@ msgstr "Grenze für {name}"
 msgid "Limits per person"
 msgstr "Grenzen pro Person"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 #: src/engines/app-page.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/chat-accounts.tsx
@@ -7396,7 +7396,7 @@ msgid "Link out on {date}"
 msgstr "Link verschickt am {date}"
 
 #. placeholder {0}: app.name
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Link to {0}"
 msgstr "Link zu {0}"
 
@@ -7531,7 +7531,7 @@ msgstr "Niedrig"
 msgid "Low confidence"
 msgstr "Geringe Belastbarkeit"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Lower-case letters and digits, with single dashes between them; not the name of one of the workspace's pages."
 msgstr "Kleinbuchstaben und Ziffern, mit einzelnen Bindestrichen dazwischen; nicht der Name einer Seite des Workspace."
 
@@ -9349,7 +9349,7 @@ msgstr "Nur erfasst"
 msgid "Only people who may approve packages see what is approved across the workspace."
 msgstr "Nur wer Pakete genehmigen darf, sieht, was im ganzen Workspace genehmigt ist."
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Only someone signed in to the workspace opens it."
 msgstr "Nur wer im Workspace angemeldet ist, öffnet ihn."
 
@@ -9591,7 +9591,7 @@ msgstr "Ihr Gespräch wird geöffnet …"
 msgid "Opens at {threshold}%"
 msgstr "Öffnet bei {threshold} %"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Opens the App for the workspace's members who may use it, while it is published."
 msgstr "Öffnet die App für die Mitglieder des Workspace, die sie nutzen dürfen, solange sie veröffentlicht ist."
 
@@ -10622,7 +10622,7 @@ msgstr "{file} entfernen"
 msgid "Remove {name}?"
 msgstr "{name} entfernen?"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Remove link"
 msgstr "Link entfernen"
 
@@ -11174,7 +11174,7 @@ msgstr "Als geschehen angegeben: {who}."
 msgid "Said yes"
 msgstr "Hat zugestimmt"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "sales-pipeline"
 msgstr "vertriebspipeline"
 
@@ -11204,7 +11204,7 @@ msgstr "Als PDF speichern"
 msgid "Save first"
 msgstr "Zuerst speichern"
 
-#: src/engines/app-link.tsx
+#: src/engines/app-own-link.tsx
 msgid "Save link"
 msgstr "Link speichern"
 
