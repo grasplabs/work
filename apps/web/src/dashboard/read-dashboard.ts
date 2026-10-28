@@ -91,7 +91,9 @@ export const readWaiting = async (
   );
   const failed = partOf(feed, "notifications", (read) => {
     const notifications = read.items.flatMap((item) =>
-      item.kind === "failedRun" || item.kind === "openQuestion"
+      item.kind === "failedRun" ||
+      item.kind === "openQuestion" ||
+      item.kind === "stoppedSchedule"
         ? [item.notification]
         : []
     );

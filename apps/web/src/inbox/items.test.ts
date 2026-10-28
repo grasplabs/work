@@ -177,8 +177,17 @@ const waiting = (ranOut = true) =>
               at: "2026-10-13T09:00:00.000Z",
               read: false,
             },
+            {
+              id: "stopped-1",
+              type: "trigger_stopped",
+              trigger: "trigger-1",
+              workflow: "workflow-1",
+              workflowName: "Nightly report",
+              at: "2026-10-12T09:00:00.000Z",
+              read: false,
+            },
           ],
-          unread: 2,
+          unread: 3,
           more: false,
         },
       },
@@ -244,6 +253,7 @@ describe(inboxItems, () => {
         "request:request-1",
         "screens:app-invoices",
         "signIn:connection-1",
+        "stopped:stopped-1",
       ].toSorted()
     );
   });
@@ -300,7 +310,7 @@ describe(listed, () => {
   it("shows one group of kinds when asked", () => {
     expect(
       listed(items, "workflows", "urgent").map(({ kind }) => kind)
-    ).toStrictEqual(["decision", "goLive", "failedRun"]);
+    ).toStrictEqual(["decision", "goLive", "failedRun", "stoppedSchedule"]);
     expect(
       listed(items, "brain", "urgent").map(({ kind, title, about }) => ({
         kind,
@@ -314,6 +324,9 @@ describe(listed, () => {
         about: { kind: "brain" },
       },
     ]);
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 4);
+    expect(items.find(({ kind }) => kind === "stoppedSchedule")?.title).toBe(
+      "The schedule of Nightly report stopped"
+    );
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 5);
   });
 });
