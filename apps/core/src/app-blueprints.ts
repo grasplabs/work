@@ -677,6 +677,7 @@ export const createFromBlueprint = async (
       responsibleId: sql<string | null>`NULL`.as("responsible_id"),
       audienceType: sql<"person" | "team" | null>`NULL`.as("audience_type"),
       audienceId: sql<string | null>`NULL`.as("audience_id"),
+      process: sql<string | null>`NULL`.as("process"),
       blueprint: sql<string | null>`${appRow.blueprint}`.as("blueprint"),
       currentVersion: sql<number | null>`${appRow.currentVersion}`.as(
         "current_version"
