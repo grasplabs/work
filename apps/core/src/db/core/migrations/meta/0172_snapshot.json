@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "95bdb92c-2717-43d4-bb9f-4efc67cc9aa9",
-  "prevId": "3279238b-634d-49dd-b26b-9e684bf06d46",
+  "id": "76208a5c-e589-4d94-b5f1-4b01a516dc32",
+  "prevId": "3f9edf69-2ae4-4dbe-b29b-7af4b1546285",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -1925,74 +1925,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "app_visitor_grants": {
-      "name": "app_visitor_grants",
-      "columns": {
-        "app_id": {
-          "name": "app_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "function": {
-          "name": "function",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "granted_by": {
-          "name": "granted_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "granted_at": {
-          "name": "granted_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "app_visitor_grants_app_id_apps_id_fk": {
-          "name": "app_visitor_grants_app_id_apps_id_fk",
-          "tableFrom": "app_visitor_grants",
-          "tableTo": "apps",
-          "columnsFrom": [
-            "app_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "app_visitor_grants_app_id_version_function_pk": {
-          "columns": [
-            "app_id",
-            "version",
-            "function"
-          ],
-          "name": "app_visitor_grants_app_id_version_function_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "app_visitor_sessions": {
       "name": "app_visitor_sessions",
       "columns": {
@@ -2310,6 +2242,20 @@
         },
         "link": {
           "name": "link",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "removed_at": {
+          "name": "removed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "removed_by": {
+          "name": "removed_by",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

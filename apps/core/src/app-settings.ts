@@ -4,7 +4,7 @@ import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
@@ -243,7 +243,8 @@ export const updateApp = async (
     db
       .update(apps)
       .set(plan.set)
-      .where(and(eq(apps.id, found.id), ...plan.guards))
+      // Removed meanwhile (app-removal.ts), it is left as removed.
+      .where(and(eq(apps.id, found.id), isNull(apps.removedAt), ...plan.guards))
       .returning(),
     outboxedIfChanged(db, {
       actor: actorOf(by),
