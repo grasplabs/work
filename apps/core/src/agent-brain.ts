@@ -4,6 +4,8 @@ import type {
   SkillSelection,
 } from "@grasp-os/brain/contract";
 import { recallWithSources } from "@grasp-os/brain/recall";
+import { d1BrainStore } from "@grasp-os/brain/recall-store";
+import type { PinnedVersion } from "@grasp-os/brain/recall-store";
 import {
   readSkillWithSources,
   selectSkillWithSources,
@@ -17,15 +19,18 @@ import {
   chatAuthority,
   chatContext,
   endedBy,
+  recordRunReads,
   recordSources,
   recordToolCall,
   requireOpenRun,
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { brainGaps } from "./brain-rpc.ts";
+import { brainDocumentRead, brainGrantRead } from "./history-access.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { brainOf } from "./knowledge/ports.ts";
+import { citedVersions } from "./workflows/run-evidence.ts";
 
 // The company brain for a chat's code: `await env.brain.recall({ query })`
 // and `await env.brain.gaps()`. Its recall is the SDK's Brain binding
@@ -85,9 +90,36 @@ interface AgentGap {
 interface Delegated<T> {
   value: T;
   /** The collections it read from, and the documents it hands over. */
-  sources: { collections: readonly string[]; documents: readonly string[] };
+  sources: {
+    collections: readonly string[];
+    documents: readonly PinnedVersion[];
+  };
   detail: Record<string, string | number>;
 }
+
+/**
+ * Records what a Brain read of the chat's code read from, before it is
+ * handed over: its collections with the chat (`recordSources`), and with
+ * the run the agent's `brain` grant and each document handed over too
+ * (history-access.ts), pinned as its text was, so the run's result is
+ * withheld from the model once that grant is revoked or a document is
+ * erased, moved or purged, though its collection may still be read. Only ever added to: a later read that
+ * finds nothing lifts nothing.
+ */
+const recordBrainRead = async (
+  env: Env,
+  scope: AgentScope,
+  collections: readonly string[],
+  documents: readonly PinnedVersion[]
+): Promise<void> => {
+  await recordSources(env, scope, collections, [
+    ...new Set(documents.map(({ documentId }) => documentId)),
+  ]);
+  await recordRunReads(env, scope, [
+    brainGrantRead,
+    ...documents.map((pin) => brainDocumentRead(pin)),
+  ]);
+};
 
 /** The brain, as a chat's code reads it. */
 export class BrainAgentApi
@@ -121,22 +153,25 @@ export class BrainAgentApi
 
   /** The recall, read as the chat's delegate, with its sources recorded. */
   async #recalled(scope: AgentScope, input: unknown): Promise<MemoryPack> {
-    const { pack, sources } = await readAsDelegate(
+    const { pack, sources, pins } = await readAsDelegate(
       this.env,
       chatAuthority(scope),
       chatContext(scope),
       undefined,
-      async (reader) =>
-        await recallWithSources(brainOf(this.env), reader, input)
+      async (reader) => {
+        const brain = brainOf(this.env);
+        const recalled = await recallWithSources(brain, reader, input);
+        return {
+          ...recalled,
+          pins: await d1BrainStore(brain).pinsOf(
+            reader,
+            citedVersions(recalled.pack)
+          ),
+        };
+      }
     );
     // Every collection it read from, found or not, as a search records.
-    await recordSources(this.env, scope, sources, [
-      ...new Set(
-        pack.sourceVersions.flatMap((ref) =>
-          ref.kind === "document" ? [ref.documentId] : []
-        )
-      ),
-    ]);
+    await recordBrainRead(this.env, scope, sources, pins);
     return pack;
   }
 
@@ -175,8 +210,9 @@ export class BrainAgentApi
    */
   async skillsRead(input: unknown): Promise<SkillRead> {
     return await this.#delegated("brain.skills.read", async (reader) => {
+      const brain = brainOf(this.env);
       const { read, provenance } = await readSkillWithSources(
-        brainOf(this.env),
+        brain,
         reader,
         input
       );
@@ -184,7 +220,13 @@ export class BrainAgentApi
         value: read,
         sources: {
           collections: provenance.collectionIds,
-          documents: [read.skill.documentId],
+          documents: await d1BrainStore(brain).pinsOf(reader, [
+            {
+              documentId: read.skill.documentId,
+              collectionId: read.skill.collectionId,
+              version: read.skill.version,
+            },
+          ]),
         },
         detail: { version: read.skill.version },
       };
@@ -211,7 +253,7 @@ export class BrainAgentApi
         undefined,
         read
       );
-      await recordSources(
+      await recordBrainRead(
         this.env,
         scope,
         done.sources.collections,

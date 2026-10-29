@@ -73,6 +73,22 @@ import type {
   ImportSite,
   ModuleImports,
 } from "./imports.ts";
+import {
+  checkKey,
+  checkRecordOf,
+  closureFingerprint,
+  hasGlobalEffects,
+  moduleKey,
+  moduleRecordOf,
+  noIncrements,
+  screenSources,
+} from "./increments.ts";
+import type {
+  BuildMetrics,
+  Handed,
+  IncrementalBuild,
+  Increments,
+} from "./increments.ts";
 import type { CodeFolder } from "./inputs.ts";
 import {
   appCodeLimitErrors,
@@ -108,10 +124,13 @@ import type { Bundle } from "./preview-entry.ts";
 import {
   appCodeTarget,
   computeTarget,
+  diagnosticsInOrder,
   screenTarget,
   typeCheck,
+  typeProgram,
   workflowTarget,
 } from "./type-check.ts";
+import type { FileDiagnostics } from "./type-check.ts";
 
 /**
  * What a page loads to run one screen, by flat name: of the App's modules,
@@ -415,7 +434,7 @@ const screenClosure = (
  * kit modules it loads (`kitModules`).
  */
 const buildCss = async (
-  sources: string[],
+  candidates: string[],
   kitModules: string[]
 ): Promise<string> => {
   const tailwind = await compile(kit.stylesheets[kitStylesheet] ?? "", {
@@ -431,7 +450,7 @@ const buildCss = async (
   });
   return tailwind.build([
     ...kitModules.flatMap((name) => ownEntry(kit.moduleCandidates, name) ?? []),
-    ...sources.flatMap((source) => extractCandidates(source)),
+    ...candidates,
   ]);
 };
 
@@ -444,12 +463,23 @@ const screensTarget = screenTarget(
   new Set([...kit.imports, "lucide-react", "react/jsx-runtime"])
 );
 
+/** `record`'s own entry for `key`, never one it inherits. */
+const ownRecord = (record: Record<string, unknown>, key: string): unknown =>
+  Object.hasOwn(record, key) ? record[key] : undefined;
+
 /**
  * Type-checks the App's screens against the kit's types and lints them
  * against the kit's design system: `buildScreens`' last gate, once its
- * import checks pass.
+ * import checks pass. A file's check is reused from `reuse` only while
+ * every file it reads is as it was (increments.ts); each file checked now
+ * is kept in `fresh`. The lint runs over every file.
  */
-const checkScreens = (files: Record<string, string>): Diagnostic[] => {
+const checkScreens = async (
+  files: Record<string, string>,
+  reuse: Handed,
+  fresh: Increments,
+  metrics: BuildMetrics
+): Promise<Diagnostic[]> => {
   const app = buildFiles(files);
   const tooMuch = appCodeLimitErrors(app);
   if (tooMuch.length > 0) {
@@ -459,7 +489,50 @@ const checkScreens = (files: Record<string, string>): Diagnostic[] => {
   const own = Object.fromEntries(
     Object.entries(app).filter(([path]) => path !== screenReferences.path)
   );
-  return [...typeCheck(app, kit.types, screensTarget), ...lint(own, kit)];
+  const program = typeProgram(app, kit.types, screensTarget);
+  const { imports } = program;
+  const kept = new Map<string, FileDiagnostics>();
+  const keys = new Map<string, { key: string; closure: string }>();
+  if (imports !== undefined && !hasGlobalEffects(app)) {
+    const declarations = Object.keys(app).filter((path) =>
+      path.endsWith(".d.ts")
+    );
+    await Promise.all(
+      Object.entries(app).map(async ([path, source]) => {
+        const [key, closure] = await Promise.all([
+          checkKey(path, source),
+          closureFingerprint(path, app, imports, declarations),
+        ]);
+        keys.set(path, { key, closure });
+        const record = checkRecordOf(ownRecord(reuse.checks, key), path);
+        if (record?.closure === closure) {
+          kept.set(path, record);
+        }
+      })
+    );
+  }
+  const { global, files: checked } = program.diagnose(
+    new Set(Object.keys(app).filter((path) => !kept.has(path)))
+  );
+  for (const [path, diagnostics] of checked) {
+    const keyed = keys.get(path);
+    if (keyed !== undefined) {
+      fresh.checks[keyed.key] = {
+        path,
+        closure: keyed.closure,
+        ...diagnostics,
+      };
+    }
+  }
+  metrics.checked = checked.size;
+  metrics.checksReused = kept.size;
+  return [
+    ...diagnosticsInOrder(
+      global,
+      program.order.flatMap((path) => checked.get(path) ?? kept.get(path) ?? [])
+    ),
+    ...lint(own, kit),
+  ];
 };
 
 /**
@@ -482,34 +555,46 @@ const bundle: Bundle = async (options) => {
  * instrumented for React Fast Refresh, what a screen loads of the kit is
  * the preview kit's, and each screen's App modules are put together into
  * one entry too (`ScreenBuild.entries`). Every gate is the same.
+ *
+ * With `reuse`, what earlier builds kept (increments.ts): a module's
+ * transform, and a file's type check, each only where its key says it
+ * stands for what this build would make. What it makes now it hands back
+ * (`fresh`) for core to keep, with how much it reused (`metrics`).
  */
-export const buildScreens = async (
+export const buildScreensIncrementally = async (
   files: Record<string, string>,
-  { preview = false }: { preview?: boolean } = {}
-): Promise<ScreenBuild> => {
+  {
+    preview = false,
+    reuse = noIncrements(),
+  }: { preview?: boolean; reuse?: Handed } = {}
+): Promise<IncrementalBuild<ScreenBuild>> => {
+  const fresh = noIncrements();
+  const metrics: BuildMetrics = {
+    compiled: 0,
+    reused: 0,
+    checked: 0,
+    checksReused: 0,
+  };
+  const done = (built: ScreenBuild): IncrementalBuild<ScreenBuild> => ({
+    built,
+    fresh,
+    metrics,
+  });
   const app = buildFiles(files);
   const tooMuch = appCodeLimitErrors(app);
   if (tooMuch.length > 0) {
-    return { ok: false, diagnostics: tooMuch };
+    return done({ ok: false, diagnostics: tooMuch });
   }
   const strays = strayProblems(app, [componentsFolder], "screens");
   if (strays.length > 0) {
-    return { ok: false, diagnostics: strays };
+    return done({ ok: false, diagnostics: strays });
   }
   // Only screens, components and the references they import are
   // compiled, whatever else is passed: what isn't is refused above, and
   // kept out should that ever miss it. Declarations are only types.
-  const sources = Object.entries(app)
-    .filter(
-      ([path]) =>
-        screenFile.test(path) ||
-        componentsFolder.isFile(path) ||
-        path === screenReferences.path
-    )
-    .filter(([path]) => !declarationFile.test(path));
-  const paths = sources.map(([path]) => path);
+  const { sources, known: paths, typeFiles: typed } = screenSources(app);
   if (!paths.some((path) => screenFile.test(path))) {
-    return {
+    return done({
       ok: false,
       diagnostics: [
         problem(
@@ -517,23 +602,63 @@ export const buildScreens = async (
           "The App has no screens: add one as screens/<name>.tsx."
         ),
       ],
-    };
+    });
   }
   const clashes = nameClashes(paths);
   if (clashes.length > 0) {
-    return { ok: false, diagnostics: clashes };
+    return done({ ok: false, diagnostics: clashes });
   }
   const known = new Set(paths);
   // What a type may name: the build's files and its declarations.
-  const typeFiles = new Set(Object.keys(app));
+  const typeFiles = new Set(typed);
   const modules: Record<string, string> = {};
   const imports = new Map<string, ModuleImports>();
+  const candidates: string[] = [];
   const errors: Diagnostic[] = [];
-  for (const [path, source] of sources) {
+  const keyed = await Promise.all(
+    sources.map(
+      async ([path, source]) =>
+        [
+          path,
+          source,
+          await moduleKey({
+            path,
+            source,
+            known: paths,
+            typeFiles: typed,
+            preview,
+          }),
+        ] as const
+    )
+  );
+  for (const [path, source, key] of keyed) {
+    const name = appModuleName(path);
+    // A transform is reused only under the key this build works out for
+    // it: one handed over under another, or shaped otherwise, is not.
+    const kept = moduleRecordOf(ownRecord(reuse.modules, key), path);
+    if (kept !== undefined) {
+      modules[name] = kept.code;
+      imports.set(name, { app: new Set(kept.app), kit: new Set(kept.kit) });
+      candidates.push(...kept.candidates);
+      metrics.reused += 1;
+      continue;
+    }
     const result = compileFile(path, source, known, typeFiles, preview);
     if ("code" in result) {
-      modules[appModuleName(path)] = result.code;
-      imports.set(appModuleName(path), result.imported);
+      // The references' classes are the host's, never a screen's.
+      const own =
+        path === screenReferences.path ? [] : extractCandidates(source);
+      modules[name] = result.code;
+      imports.set(name, result.imported);
+      candidates.push(...own);
+      fresh.modules[key] = {
+        path,
+        code: result.code,
+        app: [...result.imported.app],
+        kit: [...result.imported.kit],
+        candidates: own,
+      };
+      metrics.compiled += 1;
     } else {
       errors.push(...result.errors);
     }
@@ -548,28 +673,23 @@ export const buildScreens = async (
   }
   // The checks would only say it again, less clearly.
   if (errors.length > 0) {
-    return { ok: false, diagnostics: errors };
+    return done({ ok: false, diagnostics: errors });
   }
-  const diagnostics = checkScreens(files);
+  const diagnostics = await checkScreens(files, reuse, fresh, metrics);
   if (diagnostics.some((diagnostic) => isError(diagnostic))) {
-    return { ok: false, diagnostics };
+    return done({ ok: false, diagnostics });
   }
   const kitModules = kitModulesFor(
     [...imports.values()].flatMap(({ kit: imported }) => [...imported])
   );
-  const css = await buildCss(
-    sources
-      .filter(([path]) => path !== screenReferences.path)
-      .map(([, source]) => source),
-    kitModules
-  );
+  const css = await buildCss(candidates, kitModules);
   const screens: Record<string, ScreenClosure> = Object.fromEntries(
     paths
       .filter((path) => screenFile.test(path))
       .map((path) => appModuleName(path))
       .map((entry) => [entry, screenClosure(entry, imports, preview)])
   );
-  return {
+  return done({
     ok: true,
     modules,
     screens,
@@ -596,7 +716,16 @@ export const buildScreens = async (
           ),
         }
       : {}),
-  };
+  });
+};
+
+/** Builds an App's screens with nothing reused (`buildScreensIncrementally`). */
+export const buildScreens = async (
+  files: Record<string, string>,
+  { preview = false }: { preview?: boolean } = {}
+): Promise<ScreenBuild> => {
+  const { built } = await buildScreensIncrementally(files, { preview });
+  return built;
 };
 
 /**
@@ -1305,6 +1434,32 @@ const knownTarget = <Target extends string>(
   return target as Target;
 };
 
+/** The targets built reusing earlier builds' parts, and whether each is a preview's. */
+const incrementalTargets = {
+  screens: false,
+  "preview-screens": true,
+} as const;
+
+/** What `buildIncrementally` builds. */
+export type IncrementalTarget = keyof typeof incrementalTargets;
+
+/**
+ * What core handed over of earlier builds, as records by key: anything
+ * else is nothing. Each record is checked again where it is used.
+ */
+const incrementsOf = (value: unknown): Handed => {
+  const records = (field: string): Record<string, unknown> => {
+    const found: unknown =
+      typeof value === "object" && value !== null && Object.hasOwn(value, field)
+        ? Reflect.get(value, field)
+        : undefined;
+    return typeof found === "object" && found !== null && !Array.isArray(found)
+      ? Object.fromEntries(Object.entries(found))
+      : {};
+  };
+  return { modules: records("modules"), checks: records("checks") };
+};
+
 /**
  * The App compiler, in an isolate of its own: it parses, checks and
  * transforms App code, and never runs it. Each method takes the target it
@@ -1325,6 +1480,26 @@ export default class AppCompiler extends WorkerEntrypoint {
     // SAFETY: `known` is `target`, which picks its own builder.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     return (await targetBuilds[known](files)) as TargetBuilds[Target];
+  }
+
+  /**
+   * Builds the screens (`target`: `screens`, or a preview's) from `files`
+   * as `build` does, every gate the same, reusing what earlier builds
+   * kept (`reuse`, increments.ts) where its key says it is what this
+   * build would make; with what it makes now, for core to keep, and how
+   * much it reused.
+   */
+  async buildIncrementally(
+    target: IncrementalTarget,
+    files: Record<string, string>,
+    reuse: unknown
+  ): Promise<IncrementalBuild<ScreenBuild>> {
+    assertNoBindings(this.env, this.ctx.props, "The App compiler");
+    const known = knownTarget(incrementalTargets, target, "buildIncrementally");
+    return await buildScreensIncrementally(files, {
+      preview: incrementalTargets[known],
+      reuse: incrementsOf(reuse),
+    });
   }
 
   /**

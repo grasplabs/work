@@ -232,6 +232,27 @@
       "when": 1793219732109,
       "tag": "0032_release_limit_evidence",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1793224292539,
+      "tag": "0033_client_run_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1793244940873,
+      "tag": "0034_remove_account_per_client",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1793251781637,
+      "tag": "0035_client_run_attempts_and_sends",
+      "breakpoints": true
     }
   ]
 }

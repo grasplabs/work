@@ -104,6 +104,9 @@ export default defineProject({
           DURABLE_OBJECT_JURISDICTION: "none",
           // Where provisioned clients are served (src/deploy/context.ts).
           CLIENT_DOMAIN: "grasp.test",
+          // Off production's hostname in wrangler.jsonc: the tests of the
+          // admin's own hostname set it themselves (src/admin-host.ts).
+          ADMIN_HOST: "",
           // Grasp's Rooms, which test/admin-proposal.test.ts stands in for.
           ROOMS_ORIGIN: "https://rooms.grasp.test",
           // Where TanStack Start answers server functions: the build sets

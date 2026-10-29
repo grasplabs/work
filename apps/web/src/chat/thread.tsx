@@ -34,6 +34,7 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from "./conversation.tsx";
+import { failureMessage } from "./failure.ts";
 import { GraspSign } from "./grasp-sign.tsx";
 import {
   Message,
@@ -367,7 +368,7 @@ const Reply = ({
     /** What the model thought before it, when it thought. */
     reasoning?: ChatReasoning;
     end?: Answer["end"];
-    error?: string;
+    failure?: Answer["failure"];
     /** A stored answer's citations; one being written has none. */
     citations?: ChatCitation[];
   };
@@ -385,7 +386,7 @@ const Reply = ({
   /** A stored answer that cites documents: its chat and message, so its row of actions can open them. */
   cited?: { chatId: string; messageId: number };
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const answer = reply.text.trim();
   const quiet = writing || sign !== undefined;
   const shown = (
@@ -430,7 +431,7 @@ const Reply = ({
             <div className="flex items-start gap-3 rounded-lg border px-3.5 py-3">
               <TriangleAlertIcon className="text-destructive mt-0.5 size-4 flex-none" />
               <p className="flex-1" role="alert">
-                {reply.error ?? t`The model call failed.`}
+                {failureMessage(reply.failure, i18n)}
               </p>
               {onRetry === undefined ? null : (
                 <Button onClick={onRetry} size="sm" variant="outline">

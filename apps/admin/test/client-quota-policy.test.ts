@@ -17,8 +17,7 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // router's route, and drift when core refused the admin's.
 
 const token = "test-deployer-token-quota-7d2e41";
-const tenantToken = "test-tenant-admin-token-quota-3b9f06";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 mockAccess();
 
 const db = adminDatabase(env.DB);
@@ -78,7 +77,7 @@ const policyOf = (
 });
 
 describe("a client's quota policy", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
 
   it("is in sync while core applies the generation the admin deployed, and drifted once core refuses a lower one, whatever else waits", async () => {
     const release = await importedRelease("feat(core): quota policy report");
@@ -185,7 +184,7 @@ describe("a client's quota policy", () => {
     // Its connect uploaded, core's upload refused: nothing of the new
     // settings live.
     cloudflare.failNext(
-      (call) => call.method === "PUT" && call.path.endsWith("-grasp-os-core"),
+      (call) => call.method === "PUT" && call.path.endsWith("-core"),
       400
     );
     const logged = vi.spyOn(console, "error").mockImplementation(() => {

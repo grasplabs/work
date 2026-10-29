@@ -73,12 +73,17 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await expect(
     page.getByRole("heading", { level: 1, name: "Microsoft 365" })
   ).toBeVisible();
-  await expect(page.getByRole("status")).toHaveCount(0);
-  // Where core's callback sends the browser once a flow finished.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  // Where core's callback sends the browser once a flow finished: the
+  // success screen, with what was chosen, until it is closed.
   await page.goto(`/integrations/native:microsoft?connection=${mine.id}`);
-  await expect(
-    page.getByRole("status").filter({ hasText: "Connected." })
-  ).toBeVisible();
+  const done = page.getByRole("dialog", {
+    name: "Microsoft 365 is connected",
+  });
+  await expect(done.getByText("Just for you")).toBeVisible();
+  await done.getByRole("button", { name: "Close" }).click();
+  await expect(done).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("connection")).toBeNull();
   // Its Overview's account card: where it stands, what it reaches, and
   // signing in again to the connection whose access ran out.
   const account = page.getByRole("region", { name: "Account" });
@@ -165,9 +170,6 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
     .click();
   await expect(expiredCard).toHaveCount(0);
   await expect(mineCard).toBeVisible();
-  // The notice was about the flow that came back, not about the page now.
-  await expect(page.getByText("Connected.", { exact: true })).toHaveCount(0);
-  expect(new URL(page.url()).searchParams.get("connection")).toBeNull();
 
   // Connecting another account: the test stack has no Microsoft tenant set
   // up, so core refuses the start, and the dialog says so.
@@ -198,8 +200,9 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await page.goto(`/connections?connection=${mine.id}`);
   await expect(page).toHaveURL(/\/integrations\?connection=/u);
   await expect(
-    page.getByRole("status").filter({ hasText: "Connected." })
+    page.getByRole("dialog", { name: "Microsoft 365 is connected" })
   ).toBeVisible();
+  await page.keyboard.press("Escape");
 
   // An integration there isn't is not found, in the frame.
   await page.goto("/integrations/native:no-such-app");
