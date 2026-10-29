@@ -35,6 +35,22 @@ export const capabilities = [
 
 export type Capability = (typeof capabilities)[number];
 
+/**
+ * What provisioning checks by itself in a Workers for Platforms
+ * destination (always this admin's own namespace, src/hosting/inventory.ts):
+ * it creates each client's D1 databases and R2 buckets there and reads
+ * back from Cloudflare the jurisdiction each one is in, stopping on any
+ * outside the policy's (src/hosting/provision.ts). Nothing else is
+ * observable from the admin: Durable Objects' jurisdiction isn't
+ * reported by Cloudflare's API, and logs, model transport and secret
+ * replication are about code and the provider, so a person vouches for
+ * those.
+ */
+export const selfCheckedCapabilities: readonly Capability[] = [
+  "d1.eu_jurisdiction",
+  "r2.eu_jurisdiction",
+];
+
 /** Where a client's data is kept. Set when a resource is created; never relabelled. */
 export type Jurisdiction = "eu";
 
@@ -93,7 +109,8 @@ export const evidenceSchema = z.strictObject({
   procedure: z.string().min(1).max(500),
   subject: subjectSchema,
   observedAt: z.iso.datetime(),
-  recordedBy: z.email(),
+  /** Who observed it: a staff member, or `system` for provisioning's own check. */
+  recordedBy: z.union([z.email(), z.literal("system")]),
   /** Where the full record is: a qualification issue, a test run. */
   record: z.url(),
 });
@@ -125,12 +142,15 @@ export type PlacementProblem =
 /**
  * Everything that keeps a destination, allowed `allowed` policies and
  * verified `verified` capabilities, from taking a client under `policy`:
- * empty when it can.
+ * empty when it can. In a destination that `checksItself`, a
+ * self-checked capability with no record yet keeps nothing out: its
+ * first provisioning observes it, and stops if it isn't so.
  */
 export const placementProblems = (
   policy: HostingPolicy,
   allowed: readonly string[],
-  verified: DestinationCapabilities
+  verified: DestinationCapabilities,
+  checksItself = false
 ): PlacementProblem[] => {
   const problems: PlacementProblem[] = [];
   if (!allowed.includes(policy.id)) {
@@ -138,6 +158,13 @@ export const placementProblems = (
   }
   for (const capability of policy.requires) {
     const status = verified[capability]?.status;
+    if (
+      status === undefined &&
+      checksItself &&
+      selfCheckedCapabilities.includes(capability)
+    ) {
+      continue;
+    }
     if (status === undefined) {
       problems.push({ kind: "capability_unknown", capability });
     } else if (status !== "verified") {
