@@ -8,6 +8,7 @@ import {
   platformWorkers,
   releasesBucketName,
   routerHostsName,
+  stageNamed,
   stages,
 } from "../src/names.ts";
 
@@ -72,5 +73,29 @@ describe("the platform's names", () => {
       upper: false,
       edge: false,
     });
+  });
+
+  it("take a stage only as exactly staging or production, never production by default", () => {
+    expect(
+      [
+        "production",
+        "staging",
+        undefined,
+        "",
+        "Production",
+        "prod",
+        "staging ",
+        "STAGING",
+      ].map(stageNamed)
+    ).toStrictEqual([
+      "production",
+      "staging",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 });
