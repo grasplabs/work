@@ -2,33 +2,45 @@ import { useSyncExternalStore } from "react";
 
 // The person's open chats in this tab: `chat`, the one Chat shows and the
 // chat dock on every other page carries on, so what is asked there goes
-// on in Chat and shows in its list; and `brain`, the brain's own, which
-// the dock carries on over the brain's atlas, a conversation apart from
-// the other (it shows in Chat's list too). Kept for the tab (session
+// on in Chat and shows in its list; `brain`, the brain's own, which the
+// dock carries on over the brain's atlas, a conversation apart from the
+// other (it shows in Chat's list too); and one for each App the person
+// changes (`app:<id>`), the App's own chat the dock holds on its page,
+// which leaves their other chats alone. Kept for the tab (session
 // storage), so a reload keeps them; nothing about the chats is kept.
 
 /** Which of the tab's open chats. */
-export type ChatSlot = "chat" | "brain";
+export type ChatSlot = "chat" | "brain" | `app:${string}`;
 
-const keys: Record<ChatSlot, string> = {
-  chat: "grasp.chat.active",
-  brain: "grasp.chat.brain",
+/** The slot of App `app`'s own chat. */
+export const appSlot = (app: string): ChatSlot => `app:${app}`;
+
+const keyOf = (slot: ChatSlot): string => {
+  if (slot === "chat") {
+    return "grasp.chat.active";
+  }
+  return slot === "brain" ? "grasp.chat.brain" : `grasp.chat.${slot}`;
 };
 
 const listeners = new Set<() => void>();
 
 const read = (slot: ChatSlot): string | undefined => {
   try {
-    return sessionStorage.getItem(keys[slot]) ?? undefined;
+    return sessionStorage.getItem(keyOf(slot)) ?? undefined;
   } catch {
     // A private window may refuse storage: the dock starts a new chat.
     return undefined;
   }
 };
 
-const active: Record<ChatSlot, string | undefined> = {
-  chat: read("chat"),
-  brain: read("brain"),
+/** Each slot's open chat, read from the tab's storage when first asked. */
+const active = new Map<ChatSlot, string | undefined>();
+
+const activeIn = (slot: ChatSlot): string | undefined => {
+  if (!active.has(slot)) {
+    active.set(slot, read(slot));
+  }
+  return active.get(slot);
 };
 
 /**
@@ -39,15 +51,15 @@ export const setActiveChat = (
   chatId: string | undefined,
   slot: ChatSlot = "chat"
 ): void => {
-  if (chatId === active[slot]) {
+  if (chatId === activeIn(slot)) {
     return;
   }
-  active[slot] = chatId;
+  active.set(slot, chatId);
   try {
     if (chatId === undefined) {
-      sessionStorage.removeItem(keys[slot]);
+      sessionStorage.removeItem(keyOf(slot));
     } else {
-      sessionStorage.setItem(keys[slot], chatId);
+      sessionStorage.setItem(keyOf(slot), chatId);
     }
   } catch {
     // See `read`: it lasts until the page reloads.
@@ -59,8 +71,23 @@ export const setActiveChat = (
 
 /** Forgets every open chat: they were the person's who signed out. */
 export const forgetActiveChats = (): void => {
-  setActiveChat(undefined, "chat");
-  setActiveChat(undefined, "brain");
+  for (const slot of new Set<ChatSlot>(["chat", "brain", ...active.keys()])) {
+    setActiveChat(undefined, slot);
+  }
+  // Apps' chats this tab kept before this page loaded, too.
+  try {
+    const kept = Array.from(
+      { length: sessionStorage.length },
+      (_, index) => sessionStorage.key(index) ?? ""
+    );
+    for (const key of kept) {
+      if (key.startsWith(keyOf(appSlot("")))) {
+        sessionStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // See `read`: nothing was kept.
+  }
 };
 
 const subscribe = (listener: () => void): (() => void) => {
@@ -72,8 +99,8 @@ const subscribe = (listener: () => void): (() => void) => {
 
 /** The open chat of `slot` in this tab, if there is one, read once. */
 export const activeChat = (slot: ChatSlot = "chat"): string | undefined =>
-  active[slot];
+  activeIn(slot);
 
 /** The open chat of `slot` in this tab, if there is one. */
 export const useActiveChat = (slot: ChatSlot = "chat"): string | undefined =>
-  useSyncExternalStore(subscribe, () => active[slot]);
+  useSyncExternalStore(subscribe, () => activeIn(slot));

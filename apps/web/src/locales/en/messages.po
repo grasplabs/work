@@ -5246,7 +5246,6 @@ msgstr "Earlier version"
 msgid "Earlier versions"
 msgstr "Earlier versions"
 
-#: src/engines/app-page.tsx
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/policies/policy-editing.tsx
@@ -11603,6 +11602,14 @@ msgstr "Say it didn't happen?"
 #: src/inbox/item-detail.tsx
 msgid "Say it happened?"
 msgstr "Say it happened?"
+
+#: src/chat/chat-dock.tsx
+msgid "Say what should change"
+msgstr "Say what should change"
+
+#: src/chat/chat-dock.tsx
+msgid "Say what should change in {name}. Every change is a new version of it."
+msgstr "Say what should change in {name}. Every change is a new version of it."
 
 #: src/dashboard/standard-widgets.tsx
 msgctxt "how far a team is with AI"

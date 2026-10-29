@@ -298,12 +298,17 @@ const Chat = () => {
   const [panel, setPanel] = useState(Route.useSearch().panel === true);
   // Whether the open chat's agent has an App to show beside it.
   const [building, setBuilding] = useState(false);
-  // The open chat: the chat dock carries it on on every other page.
+  // The open chat: the chat dock carries it on on every other page. An
+  // App's own chat stays the App's, in the dock on its page, and leaves
+  // the person's open chat as it was.
+  const forApp =
+    page.state === "ready" &&
+    page.data.chats.some(({ id, appId }) => id === open && appId !== null);
   useEffect(() => {
-    if (open !== undefined) {
+    if (open !== undefined && !forApp) {
       setActiveChat(open);
     }
-  }, [open]);
+  }, [open, forApp]);
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Chat` }]} page={page} />;
   }
