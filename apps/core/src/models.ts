@@ -146,9 +146,11 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 
 // The model gateway: every model call in a deployment goes through here,
 // and from here through the deployment's model transport
-// (model-transport.ts), never straight to a provider. Cloudflare AI Gateway
-// over the AI binding is the transport now (model-transport-cloudflare.ts):
-// core holds no provider key. Every request is audited as metadata only:
+// (model-transport.ts), never straight to a provider: Cloudflare AI Gateway
+// over the AI binding, which holds the provider keys, unless the deployment
+// set another (`MODEL_TRANSPORT`, model-routing.ts): OpenRouter, a
+// provider's own API, or an OpenAI-compatible endpoint, with keys only from
+// the `MODEL_PROVIDER_KEYS` secret. Every request is audited as metadata only:
 // who or what asked, why, the model, tokens and cost, never the prompt or
 // the answer. The event goes through the audit outbox, so a request that
 // was answered (and paid for) is recorded even when the audit log can't
@@ -409,9 +411,10 @@ export const modelEffortsOf = (ref: string): ModelEfforts => {
 
 /**
  * Whether the deployment's config keeps every call in the EU
- * (`eu.deployment`, or its transport's `residency`): for what sends data out of the Worker without being a model call,
- * such as Workers AI's document conversion (knowledge/extract.ts), which
- * then stays in the Worker. A config whose rules don't parse keeps it
+ * (`eu.deployment`, or its transport's `residency`): for what sends data
+ * out of the Worker without being a model call, such as Workers AI's
+ * document conversion (knowledge/extract.ts), which then stays in the
+ * Worker. A config whose rules don't parse keeps it
  * there too: it fails closed. The default config has no EU rule.
  */
 export const deploymentStaysInEu = (env: ModelsEnv): boolean => {
