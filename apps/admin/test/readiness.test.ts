@@ -95,7 +95,6 @@ describe("Platform's Readiness", () => {
         secrets: "ready",
         deployer: "waiting",
         model_spend: "waiting",
-        alerts: "not_configured",
         rooms: "not_configured",
         discord_bot: "ready",
       },

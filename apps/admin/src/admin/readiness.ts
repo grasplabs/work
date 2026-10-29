@@ -24,7 +24,6 @@ import { adminDatabase } from "../db/act.ts";
 import { hostingDestinations, releases } from "../db/schema.ts";
 import { clientDomain, deployerApi, storeSecret } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
-import { discordWebhookOf } from "../discord-webhook.ts";
 import { automaticChoice, destinationChoices } from "../hosting/placement.ts";
 import type { DestinationChoice } from "../hosting/placement.ts";
 import type { HostingPolicyId } from "../hosting/policy.ts";
@@ -380,28 +379,6 @@ const deployerCheck = async (
   };
 };
 
-const alertsCheck = async (envOf: Env): Promise<ReadinessCheck> => {
-  const stored = await ifStored(
-    async () => await storeSecret(envOf, "STAFF_ALERTS_WEBHOOK")
-  );
-  if (stored !== null && discordWebhookOf(stored) !== null) {
-    return {
-      id: "alerts",
-      title: "Alerts channel",
-      required: false,
-      status: "ready",
-      words: "Staff alerts are posted to the Discord channel.",
-    };
-  }
-  return {
-    id: "alerts",
-    title: "Alerts channel",
-    required: false,
-    status: "not_configured",
-    words: `${stored === null ? "No alerts channel is set" : "STAFF_ALERTS_WEBHOOK isn't a Discord webhook"}, so staff alerts aren't posted to Discord. ${secretStep(["STAFF_ALERTS_WEBHOOK"])}`,
-  };
-};
-
 const roomsCheck = async (envOf: Env): Promise<ReadinessCheck> => {
   const origin = envOf.ROOMS_ORIGIN ?? "";
   const token = await ifStored(
@@ -490,7 +467,6 @@ export const readinessOf = async (envOf: Env): Promise<Readiness> => {
       missing.includes("DEPLOYER_API_TOKEN")
     ),
     modelSpendCheck(manifest),
-    await alertsCheck(envOf),
     await roomsCheck(envOf),
     discordBotCheck(envOf),
   ];
