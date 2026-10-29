@@ -329,6 +329,7 @@ const runRowOf = async (env: Env, runId: string) =>
       invokerId: workflowStartReceipts.invokerId,
       originAppVersion: workflowStartReceipts.originAppVersion,
       bindings: workflowStartReceipts.bindings,
+      detailsRemovedAt: workflowStartReceipts.detailsRemovedAt,
       // A child's parent's workflow, read from the parent's own row.
       parentWorkflowId: sql<
         string | null
@@ -398,14 +399,17 @@ export const callingRunOf = async (
  * Run `runId` as its evidence is checked under (resource-reads.ts), ended
  * or not: a child whose output a run took and holds (`runEvidenceHolds`),
  * checked under its own workflow's authority as it stands now.
- * `undefined` once its details are gone.
+ * `undefined` once its details are gone (retention.ts): its row stays,
+ * but not the evidence its output carried, so it can't be checked.
  */
 export const heldRunOf = async (
   env: Env,
   runId: string
 ): Promise<CallingRun | undefined> => {
   const row = await runRowOf(env, runId);
-  return row === undefined ? undefined : callingRunFrom(runId, row);
+  return row === undefined || row.detailsRemovedAt !== null
+    ? undefined
+    : callingRunFrom(runId, row);
 };
 
 /**

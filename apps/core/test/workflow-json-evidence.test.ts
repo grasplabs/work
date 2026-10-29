@@ -982,7 +982,21 @@ describe("a JSON workflow's recalled evidence", () => {
         .first();
     });
 
-    expect({ kept, revoked, swept, keptForParent }).toStrictEqual({
+    // Its details gone all the same (a hold that came too late for the
+    // sweep's check, say): what its output carried can't be checked, and
+    // the parent is refused.
+    const gone = await parentRan(async ({ workflow }) => {
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE workflow_start_receipts SET input = NULL, params = NULL, details_removed_at = ? WHERE workflow_resource_id = ?"
+        ).bind(Date.now(), workflow.id),
+        env.DB.prepare(
+          "DELETE FROM run_brain_evidence WHERE run_id IN (SELECT id FROM workflow_start_receipts WHERE workflow_resource_id = ?)"
+        ).bind(workflow.id),
+      ]);
+    });
+
+    expect({ kept, revoked, swept, keptForParent, gone }).toStrictEqual({
       // What its child recalled goes on to its output.
       kept: {
         child: { status: "completed", code: null, carries: true },
@@ -999,6 +1013,10 @@ describe("a JSON workflow's recalled evidence", () => {
         parent: { status: "completed", code: null, carries: true },
       },
       keptForParent: { removed: null, pins: 1 },
+      gone: {
+        child: { status: "completed", code: null, carries: true },
+        parent: { status: "failed", code: "brain.revoked", carries: false },
+      },
     });
   });
 });

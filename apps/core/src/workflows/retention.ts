@@ -352,6 +352,18 @@ const pruneReceipts = async (
 export const startDetailsPerSweep = 500;
 
 /**
+ * That no run holding run `run`'s evidence keeps its own details at
+ * `before` (`runEvidenceHolds`), as SQL: a parent that took its output
+ * checks that evidence before each of its releases (resource-reads.ts),
+ * and a parent may outlive its child's retention by far.
+ */
+const unheldBy = (run: SQL, before: Date): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${runEvidenceHolds} AS hold
+    JOIN workflow_resource_runs AS holder ON holder.id = hold.run_id
+    WHERE hold.held_run_id = ${run}
+      AND (holder.ended_at IS NULL OR holder.ended_at >= ${before.getTime()}))`;
+
+/**
  * Removes the input and frozen parameter values of start receipts
  * admitted before `before`, with the receipts of the attempts of the
  * runs they admitted (`attemptsPruned`; the runs' lineages stay), and
@@ -397,18 +409,17 @@ export const sweepWorkflowStartDetails = async (
         // that took its output checks its evidence before each release
         // (resource-reads.ts), and a parent may outlive its child's
         // retention by far.
-        sql`NOT EXISTS (SELECT 1 FROM ${runEvidenceHolds} AS hold
-          JOIN workflow_resource_runs AS holder ON holder.id = hold.run_id
-          WHERE hold.held_run_id = ${receipts.id}
-            AND (holder.ended_at IS NULL OR holder.ended_at >= ${before.getTime()}))`
+        unheldBy(sql`${receipts.id}`, before)
       )
     )
     .orderBy(asc(receipts.createdAt), asc(receipts.id))
     .limit(startDetailsPerSweep);
-  // As one bound value, within D1's bound parameters however many.
-  const due = sql`(SELECT value FROM json_each(${JSON.stringify(
+  // As one bound value, within D1's bound parameters however many. Held
+  // again as the batch runs: a hold that landed since the read keeps its
+  // run's details (`unheldBy`), whatever this sweep read.
+  const due = sql`(SELECT due.value FROM json_each(${JSON.stringify(
     dueRows.map(({ id }) => id)
-  )}))`;
+  )}) AS due WHERE ${unheldBy(sql`due.value`, before)})`;
   // What connect still holds of their runs goes first, as an App run's
   // does (`removedElsewhere`): a run that ended while a side effect of it
   // was held leaves the action, with its exact input, until its person
