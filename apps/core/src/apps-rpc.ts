@@ -15,6 +15,7 @@ import { AppFilesRpc } from "./app-files-rpc.ts";
 import { AppIntegrationsRpc } from "./app-integrations.ts";
 import { AppMembersRpc } from "./app-members.ts";
 import { openAppLink, setAppLink } from "./app-own-links.ts";
+import { removeApp } from "./app-removal.ts";
 import { updateApp } from "./app-settings.ts";
 import { changeStatus } from "./app-status.ts";
 import type { AppTransition } from "./app-status.ts";
@@ -154,6 +155,12 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
       this.#check,
       async (by) => await updateApp(this.#env, by, app, changes)
     );
+  }
+
+  async remove(app: string): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      await removeApp(this.#env, by, app);
+    });
   }
 
   async definition(app: string): Promise<DefinitionPackage> {
