@@ -57,8 +57,12 @@ const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
  * in the same release, to that migration's own number.
  *
  * 0120 dropped `admission_topics` in the release that stopped using it.
+ * 0169 lets a revocation be every App's (a null `app_id`), which the code
+ * before it reads as one App's and fails on: a release before it would
+ * drop such rows unexpanded, and the screens they were for would never be
+ * told.
  */
-export const compatibleFromMigration = 120;
+export const compatibleFromMigration = 169;
 
 /** A person. Found by their IdP account, never by email alone. */
 export const users = sqliteTable("users", {

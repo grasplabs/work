@@ -213,8 +213,9 @@ const unreachableRevocations = (namespace: Env["APPS"]): Env["APPS"] =>
 /**
  * Adds `count` Apps owned by `ownerId`, with nothing in them, at once, each
  * ID after `prefix`; once the test finishes, removes them, with their rows,
- * and the every-App revocations of `people`, so no later test's clock runs
- * expand them, and nothing of any other test's.
+ * and every revocation of `people`, every-App or of an App made earlier in
+ * the file, so no later test's clock runs expand or retry them, and
+ * nothing of any other test's.
  */
 const manyApps = async (
   ownerId: string,
@@ -236,7 +237,7 @@ const manyApps = async (
         "delete from apps where id in (select value from json_each(?))"
       ).bind(ids),
       env.DB.prepare(
-        "delete from access_revocations where app_id is null and user_ids in (select value from json_each(?))"
+        "delete from access_revocations where user_ids in (select value from json_each(?))"
       ).bind(JSON.stringify(people.map((userId) => JSON.stringify([userId])))),
     ]);
   });
