@@ -23,6 +23,7 @@ import { defaultAc } from "better-auth/plugins/organization/access";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
@@ -178,19 +179,24 @@ export const activeAdminExists = (except?: string): SQL => sql`EXISTS (
     ${except === undefined ? sql`` : sql`AND ${members.userId} <> ${except}`}
 )`;
 
+/** `members`, as `activeMember` reads it: apart from any caller's. */
+const activeMembership = alias(members, "active_membership");
+
 /**
  * That `userId` (an ID, or a column holding one) is an active member of
  * the organization now, with one of `roles` if given, as a SQL condition.
+ * Its own read of `members` is aliased: a caller's column of `members`
+ * (a query on members itself) is that caller's row, never this read's.
  */
 export const activeMember = (
   userId: string | SQLiteColumn,
   withRoles?: readonly string[]
 ): SQL => sql`EXISTS (
-  SELECT 1 FROM ${members}
-  WHERE ${members.organizationId} = ${organizationId}
-    AND ${members.userId} = ${userId}
-    ${withRoles === undefined ? sql`` : sql`AND ${inList(members.role, withRoles)}`}
-    AND ${notRemoved(userId)}
+  SELECT 1 FROM ${members} AS ${activeMembership}
+  WHERE ${activeMembership.organizationId} = ${organizationId}
+    AND ${activeMembership.userId} = ${userId}
+    ${withRoles === undefined ? sql`` : sql`AND ${inList(activeMembership.role, withRoles)}`}
+    AND ${notRemoved(activeMembership.userId)}
 )`;
 
 /**
