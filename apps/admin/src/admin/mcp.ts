@@ -39,6 +39,9 @@
  *   that can act: its text carries ids, roles and numbers, a company's
  *   names only as data in its structured content, and no person's name
  *   or research text at all (`callAdminTool`, decision D5 on GRA-656).
+ *   The integrations to build name each app by an id nobody at a company
+ *   wrote (`integrationsToBuild`); the app's name as a company asked for
+ *   it, and why Grasp declined one, are data in the structured content.
  * - Audit. Each call is recorded as `admin.mcp.call` by the staff member,
  *   before anything is read: the tool and the identifiers it was asked
  *   about, never free text beyond the organization asked for. Each core
@@ -46,6 +49,7 @@
  */
 import { Validator } from "@cfworker/json-schema";
 import type { Schema } from "@cfworker/json-schema";
+import type { IntegrationBuild } from "@grasp-os/shared/admin/admin-integrations";
 import {
   ADMIN_MCP_INSTRUCTIONS,
   ADMIN_TOOLS,
@@ -64,10 +68,12 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
+import { allBuilds } from "../builds/builds.ts";
 import { clientAdmins } from "../clients/admin.ts";
 import type { AdminReadOptions } from "../clients/admin.ts";
 import { audit, adminDatabase } from "../db/act.ts";
 import { boundedText } from "../request-body.ts";
+import { integrationsToBuild } from "./integrations-asked.ts";
 import { organizationsOf } from "./views.ts";
 
 /** Where the admin's MCP is served. */
@@ -86,15 +92,12 @@ const schemaOf = (inputSchema: object): Schema =>
   inputSchema;
 
 /**
- * The admin's tools whose data the admin doesn't feed in yet: the
- * integrations to build and every company's platform (GRA-971). Served,
- * they would answer that there is nothing, which a model would take as
- * so; until then they aren't served at all.
+ * The admin's tools whose data the admin doesn't feed in yet: every
+ * company's platform (GRA-971). Served, it would answer that there is
+ * nothing, which a model would take as so; until then it isn't served at
+ * all.
  */
-const unfed: ReadonlySet<string> = new Set([
-  "integrations_to_build",
-  "platforms",
-]);
+const unfed: ReadonlySet<string> = new Set(["platforms"]);
 
 /** The tools this MCP serves: the admin's, but those it can't feed yet. */
 export const servedTools = ADMIN_TOOLS.filter((tool) => !unfed.has(tool.name));
@@ -150,12 +153,24 @@ const viewsNow = async (
   env: Env,
   staff: Staff,
   reads: AdminReadOptions | undefined
-): Promise<{ views: AdminView[]; unanswered: number }> => {
-  const organizations = organizationsOf(await clientAdmins(env, staff, reads));
+): Promise<{
+  views: AdminView[];
+  builds: IntegrationBuild[];
+  unanswered: number;
+}> => {
+  const [admins, recorded] = await Promise.all([
+    clientAdmins(env, staff, reads),
+    allBuilds(adminDatabase(env.DB)),
+  ]);
+  const organizations = organizationsOf(admins);
   const views = organizations.flatMap(({ view }) =>
     view === null ? [] : [view]
   );
-  return { views, unanswered: organizations.length - views.length };
+  return {
+    views,
+    builds: integrationsToBuild(admins, recorded),
+    unanswered: organizations.length - views.length,
+  };
 };
 
 /**
@@ -220,10 +235,17 @@ const serverFor = (
       target: name,
       detail: auditedArguments(input),
     });
-    const { views, unanswered } = await viewsNow(env, staff, options.reads);
+    const { views, builds, unanswered } = await viewsNow(
+      env,
+      staff,
+      options.reads
+    );
     const today = options.today?.() ?? new Date().toISOString().slice(0, 10);
     return resultOf(
-      withUnanswered(callAdminTool(name, input, views, today), unanswered)
+      withUnanswered(
+        callAdminTool(name, input, views, today, builds),
+        unanswered
+      )
     );
   });
   return mcp;

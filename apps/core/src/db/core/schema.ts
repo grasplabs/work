@@ -4546,6 +4546,37 @@ export const workflowResourceDraftInspections = sqliteTable(
 );
 
 /**
+ * Where each independent workflow is in its life (src/workflow-lifecycle.ts):
+ * one row, once something about it was set, moved on by every write
+ * (`revision`), each write only over the revision it read. `stage` is the
+ * stage a builder set; null follows the workflow (drafted, published,
+ * live). `live_version` is the version that went live last, through an
+ * approval of `go_live_version` by someone other than who asked for it.
+ * While `paused_at` is set it starts no runs (workflow-starts.ts).
+ */
+export const workflowResourceLifecycles = sqliteTable(
+  "workflow_resource_lifecycles",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .primaryKey()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    stage: text({
+      enum: ["mapped", "designed", "testing", "live", "scaling"],
+    }),
+    liveVersion: integer("live_version"),
+    liveApprovedBy: text("live_approved_by"),
+    liveApprovedAt: timestamp("live_approved_at"),
+    pausedBy: text("paused_by"),
+    pausedAt: timestamp("paused_at"),
+    goLiveVersion: integer("go_live_version"),
+    goLiveRequestedBy: text("go_live_requested_by"),
+    goLiveRequestedAt: timestamp("go_live_requested_at"),
+    updatedAt: timestamp("updated_at").notNull(),
+  }
+);
+
+/**
  * Which exact version of an independent workflow each App binds, by an
  * alias of the App's (src/app-workflow-bindings.ts). A binding pins the
  * version and grants nothing: starting it still takes the App's own
