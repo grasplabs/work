@@ -403,6 +403,9 @@ importers:
       '@grasp-os/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@grasp-os/workerflow':
+        specifier: workspace:*
+        version: link:../../packages/workerflow
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5)
