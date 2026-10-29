@@ -1012,5 +1012,55 @@ describe(
         counted: { drawings: 0, works: 0, teams: 0 },
       });
     });
+
+    it("leaves a checked difference checked anew between the purge's read and its write, and counts none it left", async () => {
+      const word = sentinelOf();
+      const { ids, tickets } = await ticketsNaming(word);
+      const difference = async (way: string) => {
+        await inStore(
+          "INSERT INTO checked_differences (work, drawn_at, way, other, at) VALUES (?, ?, ?, ?, ?)",
+          tickets.id,
+          tickets.drawnAt,
+          way,
+          "It arrives by mail.",
+          new Date().toISOString()
+        );
+      };
+      // A difference checked in the drawing, naming the word.
+      await difference(`It arrives in ${word}.`);
+      const store = onboardingStore(env);
+      const clean = "It arrives in Zendesk.";
+      const { ran, erasure } = drawingErasureWith(async () => {
+        // Drawn again from clean words, which drops the old difference, and
+        // a new one checked in the new drawing.
+        await store.drawWorkAgain(tickets.id, { type: "system" });
+        await drawAll(ids, "Zendesk", word);
+        await difference(clean);
+      });
+
+      await erasure.rewrite(
+        { actor: { type: "system" }, userId: "system" },
+        (text) => text.replaceAll(word, "(removed)")
+      );
+      const left = await runInDurableObject(store, (_object, state) =>
+        state.storage.sql
+          .exec<{ way: string }>(
+            "SELECT way FROM checked_differences WHERE work = ?",
+            tickets.id
+          )
+          .toArray()
+          .map(({ way }) => way)
+      );
+
+      expect({
+        ran: ran(),
+        left,
+        counted: await detailOf("onboarding.drawings.purged"),
+      }).toMatchObject({
+        ran: true,
+        left: [clean],
+        counted: { drawings: 0, differences: 0 },
+      });
+    });
   }
 );

@@ -1,3 +1,4 @@
+import { purgedMarker } from "@grasp-os/brain/knowledge";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import {
   factRevision,
@@ -6,6 +7,7 @@ import {
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { Roster } from "@grasp-os/shared/onboarding";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -356,5 +358,141 @@ describe("a content purge of the interviews", () => {
       redrawn,
       does: roster?.teams.map((team) => team.does),
     }).toStrictEqual({ redrawn: true, does: [fresh] });
+  });
+
+  it("takes the term out of an interview that no longer reads as one, as stored", async () => {
+    const term = `Zq${unique()}`;
+    const { lead } = await talking(term);
+    // Kept in a shape a later release no longer reads, its words in it.
+    const stored = JSON.stringify({ said: [`Yes, ${term} decides the week.`] });
+    await runInDurableObject(onboardingStore(env), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE interviews SET progress = ? WHERE person = ?",
+        stored,
+        lead
+      );
+    });
+
+    await purgeTerm(term);
+    const after = await runInDurableObject(
+      onboardingStore(env),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ progress: string }>(
+            "SELECT progress FROM interviews WHERE person = ?",
+            lead
+          )
+          .one().progress
+    );
+
+    expect(after).toBe(
+      JSON.stringify({ said: [`Yes, ${purgedMarker} decides the week.`] })
+    );
+  });
+
+  it("forgets a checked difference holding the term, and keeps its drawing", async () => {
+    const term = `Zq${unique()}`;
+    await talking(`Zq${unique()}`);
+    const work = `work-${unique()}`;
+    const at = new Date().toISOString();
+    const drawn = JSON.stringify({ steps: ["The lead signs it off."] });
+    await runInDurableObject(onboardingStore(env), (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO drawn_works (work, drawn, agreed, at) VALUES (?, ?, '{}', ?)",
+        work,
+        drawn,
+        at
+      );
+      state.storage.sql.exec(
+        "INSERT INTO checked_differences (work, drawn_at, way, other, at) VALUES (?, ?, ?, ?, ?)",
+        work,
+        at,
+        `They ask ${term} first.`,
+        "They ask the lead first.",
+        at
+      );
+    });
+
+    await purgeTerm(term);
+    const left = await runInDurableObject(
+      onboardingStore(env),
+      (_instance, state) => ({
+        differences: state.storage.sql
+          .exec("SELECT work FROM checked_differences WHERE work = ?", work)
+          .toArray().length,
+        drawings: state.storage.sql
+          .exec<{ drawn: string }>(
+            "SELECT drawn FROM drawn_works WHERE work = ?",
+            work
+          )
+          .toArray()
+          .map((row) => row.drawn),
+      })
+    );
+
+    expect(left).toStrictEqual({ differences: 0, drawings: [drawn] });
+  });
+});
+
+describe("a purge of terms in staff's own text", () => {
+  it("takes the term out of staff's notes and Stephen's setup, keeps the setup a setup, and audits no word", async () => {
+    const term = `Zq${unique()}`;
+    const store = onboardingStore(env);
+    const by = { type: "system" } as const;
+    await store.addNote(`Ask Lea about ${term}.`, by);
+    const other = `Lea is away on Friday ${unique()}.`;
+    await store.addNote(other, by);
+    await store.saveStephen(
+      {
+        languages: ["en"],
+        limits: [`Leave ${term} alone.`],
+        // Rewritten, the first becomes the second: kept once.
+        terms: [term, purgedMarker, "Salesforce"],
+      },
+      by
+    );
+
+    await purgeTerm(term);
+    const notes = await store.notes();
+    const { setup } = await store.stephen();
+    const events = await allEvents();
+    const purged = events.filter(
+      ({ action }) => action === "onboarding.staff_text.purged"
+    );
+
+    expect({
+      notesHold: JSON.stringify(notes).includes(term),
+      rewritten: notes.some(
+        ({ text }) => text === `Ask Lea about ${purgedMarker}.`
+      ),
+      other: notes.some(({ text }) => text === other),
+      setup,
+      purged: purged.length > 0,
+      auditHolds: JSON.stringify(purged).includes(term),
+    }).toStrictEqual({
+      notesHold: false,
+      rewritten: true,
+      other: true,
+      setup: {
+        languages: ["en"],
+        limits: [`Leave ${purgedMarker} alone.`],
+        terms: [purgedMarker, "Salesforce"],
+      },
+      purged: true,
+      auditHolds: false,
+    });
+  });
+
+  it("leaves staff's text alone when a purge names a document but none of its terms are in it", async () => {
+    const store = onboardingStore(env);
+    const by = { type: "system" } as const;
+    // It speaks of the purged document, not of what the purge takes out.
+    const note = `See note.md for the sales plan ${unique()}.`;
+    await store.addNote(note, by);
+
+    await purgeTerm(`Zq${unique()}`);
+    const notes = await store.notes();
+
+    expect(notes.some(({ text }) => text === note)).toBeTruthy();
   });
 });
