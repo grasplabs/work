@@ -5,18 +5,24 @@ import { z } from "zod";
 
 import {
   approvePlan,
+  buildAgentAvailable,
   buildOf,
+  closeBuild,
   confirmCredentials,
   recordMerge,
   recordPlan,
   recordPullRequest,
   requestBuild,
+  restartBuild,
   sendBackPlan,
 } from "../src/builds/builds.ts";
+import { closeBuildFn, restartBuildFn } from "../src/builds/functions.ts";
 import type { BuildPlan } from "../src/builds/plan.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, integrationBuilds } from "../src/db/schema.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
+import { mockAccess } from "./access.ts";
+import { callServerFn, page } from "./pages.ts";
 import {
   deliverAlarm,
   ended,
@@ -39,6 +45,13 @@ import {
 //   again, and the build moves once.
 // - The audit log records identifiers and counts, never the plan's or a
 //   person's words.
+// - A build that stopped for a person is stuck for good: staff restart it
+//   from the beginning, or close it so its app can be asked for again,
+//   once however many press at once, and only by staff Access vouches for.
+// - Build it, or Restart, promised while no agent exists: refused, and the
+//   page says what to do instead.
+
+mockAccess();
 
 const db = adminDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };
@@ -514,5 +527,159 @@ describe("integration builds", () => {
     } finally {
       held.lose();
     }
+  });
+
+  /** A build of a new app, named `name`, stopped for a person: its plan never came. */
+  const stoppedBuild = async (name = "Example HR"): Promise<string> => {
+    const app = newApp();
+    const runId = await requestBuild(env, staff, { app, name });
+    await timedOut(builds, runId, "plan 1");
+    await ended(builds, runId);
+    return app;
+  };
+
+  it("restarts a stopped build from the beginning, once however many press Restart at once", async () => {
+    const app = await stoppedBuild();
+    const before = await runOf(app);
+
+    const presses = await Promise.all([
+      codeOf(restartBuild(env, staff, app)),
+      codeOf(restartBuild(env, staff, app)),
+    ]);
+    const runId = await runOf(app);
+    await passed(app, "plan 1 check");
+    const restarted = await buildOf(db, app);
+    await recordPlan(env, app, planFor(app));
+    const planned = await buildOf(db, app);
+    const trail = await trailOf(app);
+    const restarts = trail.filter(({ action }) => action === "build.restart");
+
+    expect({
+      presses: presses.toSorted((a, b) => String(a).localeCompare(String(b))),
+      newRun: runId !== before,
+      restarted: {
+        stage: restarted?.stage,
+        stoppedAt: restarted?.stoppedAt,
+        reason: restarted?.reason,
+        planRound: restarted?.planRound,
+      },
+      planned: planned?.stage,
+      restarts,
+    }).toStrictEqual({
+      presses: ["resolved", "wrong_stage"],
+      newRun: true,
+      restarted: {
+        stage: "researching",
+        stoppedAt: null,
+        reason: null,
+        planRound: 0,
+      },
+      planned: "plan_ready",
+      restarts: [
+        {
+          actor: staff.email,
+          action: "build.restart",
+          detail: {
+            stage: "asked",
+            run: runId,
+            stoppedAt: "researching",
+            reason: "researching_timed_out",
+          },
+        },
+      ],
+    });
+  });
+
+  it("closes a stopped build so its app can be asked for again, and neither touches a build still going", async () => {
+    const app = await stoppedBuild();
+    const going = newApp();
+    await requestBuild(env, staff, { app: going, name: "Example HR" });
+
+    const presses = await Promise.all([
+      codeOf(closeBuild(env, staff, app)),
+      codeOf(closeBuild(env, staff, app)),
+    ]);
+    const closed = await buildOf(db, app);
+    const askedAgain = await requestBuild(env, staff, {
+      app,
+      name: "Example HR",
+    });
+    const fresh = await buildOf(db, app);
+    const restartGoing = await codeOf(restartBuild(env, staff, going));
+    const closeGoing = await codeOf(closeBuild(env, staff, going));
+    const stillGoing = await buildOf(db, going);
+    const onGoing = {
+      restart: restartGoing,
+      close: closeGoing,
+      stage: stillGoing?.stage,
+    };
+    const trail = await trailOf(app);
+    const closes = trail.filter(({ action }) => action === "build.close");
+
+    expect({
+      closedOnce: presses.filter((code) => code === "resolved").length,
+      closed,
+      fresh: { stage: fresh?.stage, runId: fresh?.runId === askedAgain },
+      onGoing,
+      closes,
+    }).toStrictEqual({
+      closedOnce: 1,
+      closed: null,
+      fresh: { stage: "asked", runId: true },
+      onGoing: {
+        restart: "wrong_stage",
+        close: "wrong_stage",
+        stage: "asked",
+      },
+      closes: [
+        {
+          actor: staff.email,
+          action: "build.close",
+          detail: { stoppedAt: "researching", reason: "researching_timed_out" },
+        },
+      ],
+    });
+  });
+
+  it("lets staff close a stopped build from the page, refuses Restart while no build agent exists, and says what to do instead", async () => {
+    const name = `Stopped HR ${crypto.randomUUID().slice(0, 6)}`;
+    const app = await stoppedBuild(name);
+
+    const { html } = await page("/integrations", staff.email);
+    const heading = html.indexOf(">Builds that stopped</h2>");
+    const stoppedPanel: string = heading === -1 ? "" : html.slice(heading);
+    const restart = await callServerFn(
+      restartBuildFn,
+      { app },
+      { email: staff.email }
+    );
+    await expect(
+      callServerFn(closeBuildFn, { app }, { email: null })
+    ).rejects.toThrow("The server function answered 403");
+    const close = await callServerFn(
+      closeBuildFn,
+      { app },
+      { email: staff.email }
+    );
+
+    expect({
+      agent: buildAgentAvailable,
+      noAgent: html.includes("Build it isn’t available yet"),
+      byHand: html.includes("write its connector by hand"),
+      listed: stoppedPanel.includes(name),
+      closeButton: stoppedPanel.includes(">Close</button>"),
+      restart,
+      close,
+      gone: await buildOf(db, app),
+    }).toStrictEqual({
+      agent: false,
+      noAgent: true,
+      byHand: true,
+      listed: true,
+      closeButton: true,
+      restart: { refused: "agent_unavailable" },
+      close: { refused: null },
+      gone: null,
+    });
   });
 });

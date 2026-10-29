@@ -59,6 +59,8 @@ export const buildErrorCodes = [
   "wrong_branch",
   /** The merge names another pull request than the build's. */
   "wrong_pull_request",
+  /** Grasp's build agent doesn't exist yet (`buildAgentAvailable`): nothing would do the work. */
+  "agent_unavailable",
 ] as const;
 export type BuildErrorCode = (typeof buildErrorCodes)[number];
 
@@ -72,6 +74,15 @@ export class BuildError extends Error {
     this.code = code;
   }
 }
+
+/**
+ * Whether Grasp's build agent exists: the sessions that research an app
+ * and write its connector (src/builds/workflow.ts). Until it does, nothing
+ * starts or restarts a build from the admin's pages: a build's run would
+ * only wait a day for a plan nobody writes, then stop for a person again.
+ * The page says so, and what to do instead (src/admin/integrations.tsx).
+ */
+export const buildAgentAvailable = false;
 
 /** The only branch a build's code may be pushed to. */
 export const buildBranch = (app: string): string => `feat/connector-${app}`;
@@ -535,3 +546,109 @@ export const stopForPerson = async (
     action: "build.stop",
     detail: { reason },
   });
+
+/**
+ * Starts the build of `app` again from `asked`, as `staff`, once it
+ * stopped for a person: a new run, its plans and the note sent back with
+ * the last cleared, audited as `build.restart` with where it had stopped
+ * and why. Refused (`wrong_stage`) unless it is at `needs_person`, so two
+ * people restarting at once start one run. Returns the new run's id.
+ */
+export const restartBuild = async (
+  env: Env,
+  staff: Staff,
+  app: string
+): Promise<string> => {
+  const db = adminDatabase(env.DB);
+  const build = await existing(db, app);
+  const runId = newRunId(app);
+  const moved = await moveBuild(db, staff, app, {
+    from: "needs_person",
+    set: {
+      stage: "asked",
+      runId,
+      stoppedAt: null,
+      reason: null,
+      plan: null,
+      planRound: 0,
+      planNote: null,
+      approvedBy: null,
+    },
+    action: "build.restart",
+    detail: {
+      run: runId,
+      stoppedAt: build.stoppedAt ?? "",
+      reason: build.reason ?? "",
+    },
+  });
+  if (!moved) {
+    throw wrongStage(app, "needs_person");
+  }
+  await buildRuns(env).create({ id: runId, params: { app } });
+  return runId;
+};
+
+/**
+ * Closes the build of `app`, as `staff`, once it stopped for a person: its
+ * row goes, audited as `build.close` with where it had stopped and why, so
+ * the app shows as asked for again and a later Build it starts afresh.
+ * Refused (`wrong_stage`) unless it is at `needs_person`.
+ */
+export const closeBuild = async (
+  env: Env,
+  staff: Staff,
+  app: string
+): Promise<void> => {
+  const db = adminDatabase(env.DB);
+  const build = await existing(db, app);
+  const closed = await actIfChanged(
+    db,
+    staff,
+    db
+      .delete(integrationBuilds)
+      .where(
+        and(
+          eq(integrationBuilds.app, app),
+          eq(integrationBuilds.stage, "needs_person")
+        )
+      ),
+    {
+      action: "build.close",
+      target: app,
+      detail: {
+        stoppedAt: build.stoppedAt ?? "",
+        reason: build.reason ?? "",
+      },
+    }
+  );
+  if (!closed) {
+    throw wrongStage(app, "needs_person");
+  }
+};
+
+/** A build that stopped for a person, as the Integrations page lists it. */
+export interface StoppedBuild {
+  app: string;
+  name: string;
+  /** The stage it stopped in, such as `researching`. */
+  stoppedAt: string | null;
+  /** Why, as a code, such as `researching_timed_out`. */
+  reason: string | null;
+  updatedAt: Date;
+}
+
+/** Every build waiting for a person, the longest waiting first. */
+export const stoppedBuilds = async (
+  db: AdminDatabase
+): Promise<StoppedBuild[]> =>
+  await db
+    .select({
+      app: integrationBuilds.app,
+      name: integrationBuilds.name,
+      stoppedAt: integrationBuilds.stoppedAt,
+      reason: integrationBuilds.reason,
+      updatedAt: integrationBuilds.updatedAt,
+    })
+    .from(integrationBuilds)
+    .where(eq(integrationBuilds.stage, "needs_person"))
+    .orderBy(integrationBuilds.updatedAt);

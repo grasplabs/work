@@ -360,7 +360,9 @@ describe("the admin's frame", () => {
         rowText("exact-online").includes(
           `Acme ${acme.clientId} and Acme ${globex.clientId}`
         ),
-        rowText("exact-online").includes("Waiting for Grasp to start it"),
+        rowText("exact-online").includes(
+          "Waiting for Grasp to build it by hand"
+        ),
       ],
       twinfield: rowText("twinfield").includes(`Acme ${acme.clientId}`),
       badge: text.includes("2 wait on Grasp"),

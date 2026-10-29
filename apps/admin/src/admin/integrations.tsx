@@ -11,11 +11,14 @@
  * the four where a person at Grasp decides. What the agent found out about
  * the app (its docs, how it signs in, each action), its work and the
  * buttons that move a build on come with the admin's record of builds
- * (GRA-689): until then nothing here starts one.
+ * (GRA-689). Until Grasp's build agent exists (`buildAgentAvailable`),
+ * nothing here starts one: the page says so, and how to add an app by
+ * hand instead. A build that stopped for a person can be closed here.
  */
 import { BUILD_STAGES } from "@grasp-os/shared/admin/admin-integrations";
 import type { BuildStep } from "@grasp-os/shared/admin/admin-integrations";
 import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Empty,
   EmptyDescription,
@@ -44,10 +47,15 @@ import {
   Link,
   rootRouteId,
   useNavigate,
+  useRouter,
 } from "@tanstack/react-router";
 import { HammerIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { buildAgentAvailable } from "../builds/builds.ts";
+import type { BuildErrorCode, StoppedBuild } from "../builds/builds.ts";
+import { closeBuildFn, restartBuildFn } from "../builds/functions.ts";
+import { thenRefresh, useAction } from "../use-action.ts";
 import { askedApps } from "./integrations-asked.ts";
 import type { AskedApp } from "./integrations-asked.ts";
 import { AdminPage } from "./page.tsx";
@@ -100,8 +108,17 @@ const personSteps: ReadonlySet<BuildStep> = new Set([
   "rollout",
 ]);
 
-/** Where an asked app stands: at the first step, waiting on Grasp to start it. */
-const waitingLine = "Waiting for Grasp to start it";
+/**
+ * Where an asked app stands: at the first step. With no build agent yet,
+ * it waits for someone at Grasp to write its connector by hand.
+ */
+const waitingLine = buildAgentAvailable
+  ? "Waiting for Grasp to start it"
+  : "Waiting for Grasp to build it by hand";
+
+/** Why nothing here starts a build yet, and what to do instead. */
+export const noAgentLine =
+  "Grasp’s build agent doesn’t exist yet, so nothing here starts a build. To add an app now, write its connector by hand in packages/connectors/<app> with @grasp-os/connector-kit and open a pull request: once merged, it reaches every company with the next release.";
 
 /** The build's steps as a short bar: the first waits on Grasp, the rest are still to come. */
 const BuildBar = ({ label }: { label: string }) => (
@@ -314,6 +331,116 @@ const BuildSheet = ({
   );
 };
 
+/** That no build agent exists yet, and how an app is added meanwhile. */
+const NoAgent = () => (
+  <Panel description={noAgentLine} title="Build it isn’t available yet">
+    {null}
+  </Panel>
+);
+
+/** Each refusal of restarting or closing a build, worded for staff. */
+const buildRefusals: Record<BuildErrorCode, string> = {
+  invalid_app: "That isn’t an app to build.",
+  unknown_build: "That build is gone already. The page is read again.",
+  note_required: "Say what the next plan should change.",
+  wrong_stage:
+    "That build isn’t stopped any more: someone acted on it first. The page is read again.",
+  invalid_plan: "That plan can’t be approved.",
+  wrong_branch: "That pull request isn’t on the build’s own branch.",
+  wrong_pull_request: "That merge isn’t of the build’s pull request.",
+  agent_unavailable: noAgentLine,
+};
+
+/** Why a build stopped, from its code, in a sentence. */
+const stoppedWords = ({ stoppedAt, reason }: StoppedBuild): string => {
+  if (reason?.endsWith("_timed_out") === true) {
+    return `It waited too long at ${stoppedAt ?? "a stage"} and stopped.`;
+  }
+  if (reason === "too_many_plans") {
+    return "No plan was approved in five rounds.";
+  }
+  return `It stopped at ${stoppedAt ?? "a stage"}${reason === null ? "" : ` (${reason})`}.`;
+};
+
+/**
+ * One build that stopped for a person: why, and what can be done. Close
+ * takes it away, so its app shows as asked for again; Restart starts it
+ * from the beginning, once the build agent exists.
+ */
+const StoppedRow = ({ build }: { build: StoppedBuild }) => {
+  const router = useRouter();
+  const { busy, failure, run } = useAction(buildRefusals);
+  const act = (fn: typeof closeBuildFn) => {
+    void run(
+      async () =>
+        await thenRefresh(
+          async () => await fn({ data: { app: build.app } }),
+          async () => {
+            await router.invalidate({ sync: true });
+          }
+        )
+    );
+  };
+  return (
+    <li className="flex flex-col gap-2 border-t px-5 py-3">
+      <span className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex min-w-0 flex-col">
+          <span className="font-medium">{build.name}</span>
+          <span className="text-muted-foreground text-xs">
+            {stoppedWords(build)}
+          </span>
+        </span>
+        <span className="flex flex-none gap-2">
+          <Button
+            disabled={busy || !buildAgentAvailable}
+            onClick={() => {
+              act(restartBuildFn);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            Restart
+          </Button>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              act(closeBuildFn);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            Close
+          </Button>
+        </span>
+      </span>
+      {failure === null ? null : (
+        <p className="text-destructive" role="alert">
+          {failure}
+        </p>
+      )}
+    </li>
+  );
+};
+
+/** Every build that stopped for a person; nothing while none did. */
+const StoppedBuilds = ({ stopped }: { stopped: readonly StoppedBuild[] }) =>
+  stopped.length === 0 ? null : (
+    <Panel
+      description={
+        buildAgentAvailable
+          ? "Each waits for someone at Grasp: restart it, or close it so its app shows as asked for again."
+          : "Each waits for someone at Grasp. Close it so its app shows as asked for again; Restart comes with the build agent."
+      }
+      title="Builds that stopped"
+    >
+      <ul className="flex flex-col">
+        {stopped.map((build) => (
+          <StoppedRow build={build} key={build.app} />
+        ))}
+      </ul>
+    </Panel>
+  );
+
 /** Where the table of builds goes, while nothing is asked for. */
 const NothingToBuild = () => (
   <section className="bg-card rounded-xl border">
@@ -373,7 +500,13 @@ const WaitingBadge = ({ count }: { count: number }) => (
 );
 
 /** The page: what it is for, the apps asked for, the one open, and how one is built. */
-export const IntegrationsToBuild = ({ open }: { open: string | undefined }) => {
+export const IntegrationsToBuild = ({
+  open,
+  stopped,
+}: {
+  open: string | undefined;
+  stopped: readonly StoppedBuild[];
+}) => {
   // The asked apps alone, until the page shows the admin's record of
   // builds (GRA-689): then it reads `integrationsToBuild`
   // (./integrations-asked.ts) with the builds, as the admin's MCP does, so
@@ -388,6 +521,8 @@ export const IntegrationsToBuild = ({ open }: { open: string | undefined }) => {
       title="Integrations to build"
     >
       <div className="flex flex-col gap-6 text-sm">
+        {buildAgentAvailable ? null : <NoAgent />}
+        <StoppedBuilds stopped={stopped} />
         {apps.length > 0 ? <BuildTable apps={apps} /> : <NothingToBuild />}
         <HowItIsBuilt />
       </div>
