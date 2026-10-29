@@ -1,14 +1,14 @@
-// Deployed only by hand, with deploy-ops (never by CI on a merge), behind
+// Deployed only by hand, with deploy-platform (never by CI on a merge), behind
 // Cloudflare Access (company sign-in + MFA).
 // The Worker verifies the Access JWT on every request itself (src/access.ts),
 // against the CF_ACCESS_AUD and CF_ACCESS_ISS vars; without them it refuses
-// everything. Deploy-ops passes them from the ops 1Password Environment
+// everything. Deploy-platform passes them from the stage's 1Password Environment
 // with `--var`, and stops if either is missing.
 // The token it reaches client accounts with lives in Secrets Store, never in
 // the database.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "grasp-os-admin",
+  "name": "grasp-admin",
   // TanStack Start's handler, behind the Access check.
   "main": "src/server.ts",
   "compatibility_date": "2026-09-15",
@@ -21,6 +21,10 @@
   "keep_vars": true,
   // No platform line per invocation, and query strings stay out of logs and
   // traces, as on every Worker (threat model R17).
+  // Which stage this Worker serves (@grasp-os/shared/names): production
+  // here, staging in `env.staging`, which repeats every binding under its
+  // staging name, as wrangler inherits none of them.
+  "vars": { "STAGE": "production" },
   "observability": {
     "enabled": true,
     "redact_query_string": true,
@@ -30,7 +34,7 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "grasp-os-admin",
+      "database_name": "grasp-admin",
       "migrations_dir": "src/db/migrations",
     },
   ],
@@ -40,13 +44,13 @@
   "r2_buckets": [
     {
       "binding": "RELEASES",
-      "bucket_name": "grasp-os-releases",
+      "bucket_name": "grasp-releases",
       "jurisdiction": "eu",
     },
   ],
   // Per-person limits on reads that reach every client's core once. The
-  // namespace ids are unique in grasp-os-ops, beside the router's 1001 to
-  // 1003.
+  // namespace ids are unique in Grasp's account, beside the router's 1001
+  // to 1003.
   "ratelimits": [
     // Tool calls of the admin's MCP (src/admin/mcp.ts), per staff member:
     // 30 a minute.
@@ -87,18 +91,19 @@
     "crons": ["*/5 * * * *", "0 6,7 * * 1-5", "15 7 * * *", "45 * * * *"],
   },
   // The router's hostname map, which a deploy writes (src/deploy/router.ts).
-  // The router's first deploy creates it as grasp-os-router-hosts; `deploy`
+  // scripts/cloudflare-account-setup.ts creates it as grasp-router-hosts
+  // (-staging in staging, @grasp-os/shared/names); `deploy`
   // fills in its id (scripts/wrangler-deploy.ts), so this placeholder only
   // reaches local runs and tests.
   "kv_namespaces": [
     { "binding": "ROUTER_HOSTS", "id": "router-hosts-namespace" },
   ],
   // The clients' Workers for Platforms namespace, as the router binds it
-  // (@grasp-os/shared/router, `clientDispatchNamespace`): how the admin
+  // (@grasp-os/shared/names, `clientsNamespace`): how the admin
   // reaches a client's core there, to check it before its hostname goes in
   // the map and to ask it what staff read (src/clients/core-address.ts).
   "dispatch_namespaces": [
-    { "binding": "DISPATCHER", "namespace": "grasp-os-clients" },
+    { "binding": "DISPATCHER", "namespace": "grasp-clients" },
   ],
   // What provisioning and releases need from the account's Secrets Store
   // (src/deploy/context.ts): the deployer's token, with deploy permissions
@@ -107,7 +112,7 @@
   // Sending edit: provisioning makes the client's sending domain,
   // src/cloudflare/email-sending.ts); the keys each client's own secrets
   // are derived from; and the secrets every client shares, which
-  // deploy-ops copies in from 1Password. The store id is the account's own: `deploy` fills it in
+  // deploy-platform copies in from 1Password. The store id is the account's own: `deploy` fills it in
   // (scripts/wrangler-deploy.ts), so this placeholder only reaches local
   // runs and tests.
   "secrets_store_secrets": [
@@ -200,4 +205,141 @@
       "secret_name": "ATTIO_READ_KEY",
     },
   ],
+  // Staging (`wrangler deploy --env staging`, deploy-platform with stage
+  // staging): every name from @grasp-os/shared/names with -staging appended,
+  // and its own rate limit namespaces. Every secret it binds has its own
+  // name in the account's Secrets Store, `_STAGING` appended
+  // (`storeSecretName`), so a staging deploy never writes or reads one
+  // production uses.
+  "env": {
+    "staging": {
+      "name": "grasp-admin-staging",
+      "vars": {
+        "STAGE": "staging",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "grasp-admin-staging",
+          "migrations_dir": "src/db/migrations",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "RELEASES",
+          "bucket_name": "grasp-releases-staging",
+          "jurisdiction": "eu",
+        },
+      ],
+      "ratelimits": [
+        {
+          "name": "ADMIN_MCP_RATE_LIMIT",
+          "namespace_id": "2004",
+          "simple": {
+            "limit": 30,
+            "period": 60,
+          },
+        },
+        {
+          "name": "DISCORD_RATE_LIMIT",
+          "namespace_id": "2005",
+          "simple": {
+            "limit": 10,
+            "period": 60,
+          },
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "CHAT_STATE",
+            "class_name": "ChatState",
+          },
+          {
+            "name": "ADMIN_RUNS",
+            "class_name": "AdminRuns",
+          },
+        ],
+      },
+      "kv_namespaces": [
+        {
+          "binding": "ROUTER_HOSTS",
+          "id": "router-hosts-namespace",
+        },
+      ],
+      "dispatch_namespaces": [
+        {
+          "binding": "DISPATCHER",
+          "namespace": "grasp-clients-staging",
+        },
+      ],
+      "secrets_store_secrets": [
+        {
+          "binding": "DEPLOYER_API_TOKEN",
+          "store_id": "account-secrets-store",
+          "secret_name": "DEPLOYER_API_TOKEN_STAGING",
+        },
+        {
+          "binding": "ROUTER_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "ROUTER_KEY_STAGING",
+        },
+        {
+          "binding": "CLIENT_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "CLIENT_KEY_STAGING",
+        },
+        {
+          "binding": "ENTRA_CLIENT_SECRET",
+          "store_id": "account-secrets-store",
+          "secret_name": "ENTRA_CLIENT_SECRET_STAGING",
+        },
+        {
+          "binding": "MICROSOFT_CLIENT_SECRET",
+          "store_id": "account-secrets-store",
+          "secret_name": "MICROSOFT_CLIENT_SECRET_STAGING",
+        },
+        {
+          "binding": "GOOGLE_CLIENT_SECRET",
+          "store_id": "account-secrets-store",
+          "secret_name": "GOOGLE_CLIENT_SECRET_STAGING",
+        },
+        {
+          "binding": "COMPOSIO_API_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "COMPOSIO_API_KEY_STAGING",
+        },
+        {
+          "binding": "APP_OAUTH_CLIENTS",
+          "store_id": "account-secrets-store",
+          "secret_name": "APP_OAUTH_CLIENTS_STAGING",
+        },
+        {
+          "binding": "STRIPE_RESTRICTED_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "STRIPE_RESTRICTED_KEY_STAGING",
+        },
+        {
+          "binding": "ROOMS_READ_TOKEN",
+          "store_id": "account-secrets-store",
+          "secret_name": "ROOMS_READ_TOKEN_STAGING",
+        },
+        {
+          "binding": "DISCORD_DIGEST_WEBHOOK",
+          "store_id": "account-secrets-store",
+          "secret_name": "DISCORD_DIGEST_WEBHOOK_STAGING",
+        },
+        {
+          "binding": "STAFF_ALERTS_WEBHOOK",
+          "store_id": "account-secrets-store",
+          "secret_name": "STAFF_ALERTS_WEBHOOK_STAGING",
+        },
+        {
+          "binding": "ATTIO_READ_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "ATTIO_READ_KEY_STAGING",
+        },
+      ],
+    },
+  },
 }

@@ -1,5 +1,5 @@
 /**
- * The admin's local Secrets Store (Miniflare's), filled as deploy-ops
+ * The admin's local Secrets Store (Miniflare's), filled as deploy-platform
  * fills it (wrangler.jsonc): for each test (test/secrets-store.ts), and for
  * the browser journeys' admin (test/e2e-seed.ts).
  */

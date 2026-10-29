@@ -776,7 +776,6 @@
   "scripts scripts/lint/no-scrollbars.test.ts": 0,
   "scripts scripts/package-definition.test.ts": 59.7,
   "scripts scripts/parity/parity.test.ts": 0,
-  "scripts scripts/release/deploy-lib.test.ts": 0,
   "scripts scripts/release/hash-lib.test.ts": 0,
   "scripts scripts/release/manifest-lib.test.ts": 0,
   "scripts scripts/release/upload-release.test.ts": 5.7,

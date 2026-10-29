@@ -6,7 +6,11 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-import { wranglerConfigErrors } from "./wrangler-config-rules.ts";
+import {
+  platformNameErrors,
+  sharedRateLimitIds,
+  wranglerConfigErrors,
+} from "./wrangler-config-rules.ts";
 
 const configs = execFileSync(
   "git",
@@ -27,6 +31,24 @@ const configs = execFileSync(
 const errors = configs.flatMap((file) =>
   wranglerConfigErrors(file, readFileSync(file, "utf-8"))
 );
+
+const texts = configs.map((file) => ({
+  file,
+  text: readFileSync(file, "utf-8"),
+}));
+const names = [
+  ...texts.flatMap(({ file, text }) => platformNameErrors(file, text)),
+  ...sharedRateLimitIds(texts).map(
+    (id) =>
+      `Rate limit namespace ${id} is used twice: each stage needs its own.`
+  ),
+];
+if (names.length > 0) {
+  console.error(
+    `Platform Workers name their resources as @grasp-os/shared/names does:\n${names.map((line) => `  ${line}`).join("\n")}`
+  );
+  process.exit(1);
+}
 
 if (errors.length > 0) {
   console.error(

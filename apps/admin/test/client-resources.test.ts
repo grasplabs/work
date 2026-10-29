@@ -1,4 +1,5 @@
-import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
+import { clientsNamespace, platformWorkerName } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 import { releaseManifestSchema } from "@grasp-os/shared/release";
 import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
@@ -43,6 +44,25 @@ const importedRelease = async () => {
   return manifest;
 };
 
+/** Whether a Workers for Platforms destination in `namespace` saves, by an admin of `stage`. */
+const saving = async (stage: Stage, namespace: string | null) =>
+  await saveDestination(
+    db,
+    staff,
+    {
+      id: `eu-stage-${crypto.randomUUID().slice(0, 8)}`,
+      kind: "workers_for_platforms",
+      accountId: null,
+      namespace,
+      policies: ["eu-storage"],
+      capabilities: verified({}, evidence),
+    },
+    stage
+  ).then(
+    () => "saved",
+    (error: unknown) => (error instanceof InventoryError ? error.code : error)
+  );
+
 /**
  * Saves a new destination of `kind` whose evidence names `subject`: the
  * code it's refused with, if it is, and whether its evidence was kept.
@@ -52,14 +72,22 @@ const save = async (
   kind: DestinationInput["kind"] = "workers_for_platforms"
 ) => {
   const id = `eu-subject-${crypto.randomUUID().slice(0, 8)}`;
-  const refused = await saveDestination(db, staff, {
-    id,
-    kind,
-    accountId: null,
-    namespace: null,
-    policies: ["eu-storage"],
-    capabilities: verified({}, { ...evidence, subject }),
-  }).then(
+  const refused = await saveDestination(
+    db,
+    staff,
+    {
+      id,
+      kind,
+      accountId: null,
+      namespace:
+        kind === "workers_for_platforms"
+          ? clientsNamespace("production")
+          : null,
+      policies: ["eu-storage"],
+      capabilities: verified({}, { ...evidence, subject }),
+    },
+    "production"
+  ).then(
     () => null,
     (error: unknown) => (error instanceof InventoryError ? error.code : error)
   );
@@ -207,6 +235,29 @@ describe("placing a client", () => {
     await expect(clientInventory(db, clientId)).resolves.toStrictEqual([]);
   });
 
+  it("records a Workers for Platforms destination only in its admin's own stage's namespace, in either direction", async () => {
+    expect({
+      stagingIntoProduction: await saving(
+        "staging",
+        clientsNamespace("production")
+      ),
+      productionIntoStaging: await saving(
+        "production",
+        clientsNamespace("staging")
+      ),
+      none: await saving("production", null),
+      own: [
+        await saving("production", clientsNamespace("production")),
+        await saving("staging", clientsNamespace("staging")),
+      ],
+    }).toStrictEqual({
+      stagingIntoProduction: "destination_other_stage",
+      productionIntoStaging: "destination_other_stage",
+      none: "destination_other_stage",
+      own: ["saved", "saved"],
+    });
+  });
+
   it("doesn't take a verification without what it was observed against", async () => {
     const { subject: _, ...unanchored } = evidence;
     await expect(
@@ -259,14 +310,19 @@ describe("placing a client", () => {
       observedAt: "2026-10-21T09:00:00.000Z",
       record: "https://ci.grasp.test/runs/42?token=not-for-the-log#step-3",
     };
-    await saveDestination(db, staff, {
-      id: destinationId,
-      kind: "workers_for_platforms",
-      accountId: null,
-      namespace: "production",
-      policies: ["eu-storage"],
-      capabilities: verified({ "logs.payload_free": "unknown" }, observed),
-    });
+    await saveDestination(
+      db,
+      staff,
+      {
+        id: destinationId,
+        kind: "workers_for_platforms",
+        accountId: null,
+        namespace: clientsNamespace("production"),
+        policies: ["eu-storage"],
+        capabilities: verified({ "logs.payload_free": "unknown" }, observed),
+      },
+      "production"
+    );
 
     const history = await capabilityEvidence(db, destinationId);
     const declared = history.filter(
@@ -620,14 +676,19 @@ describe("a client's resources", () => {
   it("stop being allocated once the destination withdraws a capability the policy needs", async () => {
     const destinationId = await destination();
     const { clientId } = await placedClient(destinationId);
-    await saveDestination(db, staff, {
-      id: destinationId,
-      kind: "workers_for_platforms",
-      accountId: null,
-      namespace: "production",
-      policies: ["eu-storage"],
-      capabilities: verified({ "r2.eu_jurisdiction": "unsupported" }),
-    });
+    await saveDestination(
+      db,
+      staff,
+      {
+        id: destinationId,
+        kind: "workers_for_platforms",
+        accountId: null,
+        namespace: clientsNamespace("production"),
+        policies: ["eu-storage"],
+        capabilities: verified({ "r2.eu_jurisdiction": "unsupported" }),
+      },
+      "production"
+    );
     await expect(
       allocateClientResources(db, staff, {
         clientId,
@@ -640,17 +701,22 @@ describe("a client's resources", () => {
     // Verified again, on the release it was observed against: the latest
     // evidence is what allocation reads, and what the history ends with.
     const { releaseId } = await importedRelease();
-    await saveDestination(db, staff, {
-      id: destinationId,
-      kind: "workers_for_platforms",
-      accountId: null,
-      namespace: "production",
-      policies: ["eu-storage"],
-      capabilities: verified(
-        {},
-        { ...evidence, subject: { kind: "release", id: releaseId } }
-      ),
-    });
+    await saveDestination(
+      db,
+      staff,
+      {
+        id: destinationId,
+        kind: "workers_for_platforms",
+        accountId: null,
+        namespace: clientsNamespace("production"),
+        policies: ["eu-storage"],
+        capabilities: verified(
+          {},
+          { ...evidence, subject: { kind: "release", id: releaseId } }
+        ),
+      },
+      "production"
+    );
     await expect(
       allocateClientResources(db, staff, {
         clientId,
@@ -829,7 +895,7 @@ describe("rendering a client's Worker", () => {
     const { core, a, b } = await setUp();
     const connectBinding = (inventory: typeof a.inventory) =>
       renderClientWorker(core, a.placement, inventory, {
-        connectGateway: true,
+        connectGateway: platformWorkerName("connect-gateway", "production"),
       }).bindings.find(({ name }) => name === "CONNECT");
     const ownConnect = a.inventory.find(
       ({ role }) => role === "worker:grasp-os-connect"
@@ -838,7 +904,7 @@ describe("rendering a client's Worker", () => {
     expect(connectBinding(a.inventory)).toStrictEqual({
       type: "service",
       name: "CONNECT",
-      service: connectGatewayScript,
+      service: platformWorkerName("connect-gateway", "production"),
       props: { script: ownConnect },
     });
     // Another client's inventory never names a script for a's core.
@@ -858,7 +924,7 @@ describe("rendering a client's Worker", () => {
         },
         a.placement,
         a.inventory,
-        { connectGateway: true }
+        { connectGateway: platformWorkerName("connect-gateway", "production") }
       )
     ).toThrow(expect.objectContaining({ code: "unsupported_binding" }));
   });
