@@ -8,6 +8,7 @@ import {
 } from "./composio-connections.ts";
 import { purgeExpiredFlows, resealFlows } from "./oauth.ts";
 import { expireHeldActions } from "./pending.ts";
+import { pruneGivenUpRevocations } from "./revocations-by-hand.ts";
 import { resealOwedRevokes, retryRevocations } from "./revocations.ts";
 import { resealTokens } from "./tokens.ts";
 
@@ -34,6 +35,8 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   },
   // Revokes at a provider a disconnect couldn't make (src/revocations.ts).
   { name: "oauth.revocations", period: "minute", run: retryRevocations },
+  // Given-up revokes listed long enough (src/revocations-by-hand.ts).
+  { name: "oauth.given_up", period: "minute", run: pruneGivenUpRevocations },
   // Held writes from a chat platform whose company's day is over.
   { name: "held.ended", period: "minute", run: expireHeldActions },
   // What a rotated key sealed, sealed again.

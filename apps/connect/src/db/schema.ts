@@ -489,6 +489,31 @@ export const tokenRevocations = sqliteTable(
 );
 
 /**
+ * Revokes connect gave up on (src/revocations.ts): its retries ran a year,
+ * or the tokens it held stopped opening. The grant may still be live at
+ * the provider, so the company's admins see it to revoke it there by hand
+ * (src/revocations-by-hand.ts), for `givenUpShownMs` after. Nothing to
+ * revoke with is kept: the row names the connection and how it ended.
+ */
+export const givenUpRevocations = sqliteTable(
+  "given_up_revocations",
+  {
+    id: text().primaryKey(),
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => connections.id),
+    owedFor: text("owed_for", {
+      enum: ["disconnected", "needs_reauth"],
+    }).notNull(),
+    reason: text({ enum: ["expired", "unreadable"] }).notNull(),
+    attempts: integer().notNull(),
+    owedAt: timestamp("owed_at").notNull(),
+    givenUpAt: timestamp("given_up_at").notNull(),
+  },
+  (table) => [index("given_up_revocations_at_idx").on(table.givenUpAt)]
+);
+
+/**
  * Audit events core hasn't appended to the audit log yet. Each call's
  * events are stored here, with the call's own result where it has one;
  * core's clock takes them and acknowledges those it appended

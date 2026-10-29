@@ -22,6 +22,7 @@ import type {
   ConnectionSummary,
   ConnectionsApi,
   ListedConnection,
+  RevocationToDo,
   OAuthProvider,
   OfferedCatalog,
   AppPointerSetting,
@@ -463,6 +464,30 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
         connection.connectedBy === null
           ? null
           : (names.get(connection.connectedBy) ?? null),
+    }));
+  }
+
+  async revocationsByHand(): Promise<RevocationToDo[]> {
+    const person = await this.#person();
+    const listed = await this.#env.CONNECT.revocationsByHand({ person });
+    const ids = [
+      ...new Set(listed.flatMap(({ ownerUserId }) => ownerUserId ?? [])),
+    ];
+    const people =
+      ids.length === 0
+        ? []
+        : await drizzle(this.#env.DB)
+            .select({ id: users.id, name: users.name })
+            .from(users)
+            .where(inList(users.id, ids));
+    const names = new Map(people.map(({ id, name }) => [id, name]));
+    // A personal connection's owner by name, as admins see members.
+    return listed.map((each) => ({
+      ...each,
+      ownerName:
+        each.ownerUserId === null
+          ? null
+          : (names.get(each.ownerUserId) ?? null),
     }));
   }
 
