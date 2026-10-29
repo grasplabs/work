@@ -39,6 +39,7 @@ import { formatDate } from "../admin/words.ts";
 import { signInOf, textOf } from "../clients/sign-in-fields.tsx";
 import type { WonDeal } from "../crm/attio.ts";
 import { fetchWonDeals } from "../crm/functions.ts";
+import { fetchRoomsConnected } from "../proposal/functions.ts";
 import { clientIdProblem } from "../provision/client-id.ts";
 import { startClient } from "../provision/functions.ts";
 import { useProvisionAction } from "../provision/use-action.ts";
@@ -148,10 +149,10 @@ const DealChoice = ({
  * what it is, its language, who decided on Grasp, and marking it a test.
  */
 const NewOrganization = () => {
-  const { won } = Route.useLoaderData();
+  const { won, roomsConnected } = Route.useLoaderData();
   const router = useRouter();
   const navigate = useNavigate();
-  const starts = startingPointsOf(won);
+  const starts = startingPointsOf(won, roomsConnected);
   const deals = won.state === "read" ? won.deals : [];
   // A deal won and not added yet is what an organization most likely
   // starts from: the latest is chosen, to change or put right.
@@ -356,7 +357,13 @@ const NewOrganization = () => {
  * organizations/, where `new` could be a client's id.
  */
 export const Route = createFileRoute("/new-organization")({
-  loader: async () => ({ won: await fetchWonDeals() }),
+  loader: async () => {
+    const [won, roomsConnected] = await Promise.all([
+      fetchWonDeals(),
+      fetchRoomsConnected(),
+    ]);
+    return { won, roomsConnected };
+  },
   head: () => ({ meta: [{ title: "New organization" }] }),
   component: NewOrganization,
 });
