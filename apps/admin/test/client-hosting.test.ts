@@ -773,6 +773,30 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
   });
 
+  it("lists every offboarded client, however many there are", async () => {
+    const destinationId = await destination();
+    const offboardedAt = new Date(Date.now() - 86_400_000);
+    // More than D1 binds in one statement (100).
+    const ids = await Promise.all(
+      Array.from({ length: 101 }, async () => {
+        const clientId = await client();
+        await placeClient(db, staff, { clientId, destinationId, policyId });
+        await db
+          .update(clients)
+          .set({ status: "offboarded", offboardedAt })
+          .where(eq(clients.id, clientId));
+        return clientId;
+      })
+    );
+
+    const { status, html } = await page("/platform/offboarded", caller);
+
+    expect({
+      status,
+      listed: ids.filter((id) => offboardedOf(html, id) !== "").length,
+    }).toStrictEqual({ status: 200, listed: 101 });
+  });
+
   it("offers deleting an offboarded client's resources once its retention is over, and says on every read which bucket is still emptying", async () => {
     const destinationId = await destination();
     const clientId = await client();
