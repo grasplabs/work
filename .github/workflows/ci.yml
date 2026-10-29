@@ -1,13 +1,13 @@
 # Trunk-based: feature branch -> pull request into main -> merge queue, which
 # tests it on top of the latest main and squash-merges it. Checks run on pull
 # requests and in the merge queue; a push to main only deploys what those
-# checks already tested: it builds the release once, deploys those bytes
-# as staging's core and connect, and once staging accepts them publishes
-# the same bytes as a release for the admin. Staging, the admin and the
-# router share Grasp's one Cloudflare account; the admin and router are
-# deployed by hand with the Deploy grasp-os-ops workflow. Jobs with secrets never run for pull
-# requests from forks. CI never deploys to a client account: the admin
-# rolls releases out.
+# checks already tested: it builds the release once and publishes those
+# bytes for the staging admin, which rolls them out to staging's clients.
+# A release staging accepted reaches production's admin only through the
+# Promote release workflow. Both stages share Grasp's one Cloudflare
+# account; the admins, routers and connect gateways are deployed by hand
+# with the Deploy platform workflow. Jobs with secrets never run for pull
+# requests from forks. CI deploys nothing: the admins roll releases out.
 name: CI
 
 on:
@@ -420,9 +420,9 @@ jobs:
   # of a release. For a pull request or the merge queue, that's all, and
   # it's the run's only build: part of the required `check` (above). On a
   # push to main it's the commit's only build too: the bundle
-  # is the run's `release` artifact, which deploy-staging deploys and
-  # publish-release publishes as it is, so the release the admin rolls
-  # out is the one staging ran and accepted, byte for byte.
+  # is the run's `release` artifact, which publish-release publishes as
+  # it is, so the release an admin rolls out is the one CI tested, byte
+  # for byte.
   release:
     name: release
     runs-on: ubuntu-latest
@@ -438,10 +438,17 @@ jobs:
           run-install: |
             - args: ["--frozen-lockfile"]
       - run: vp run release:build --out release-out
-      # The admin isn't deployed from here (see deploy-staging): check that
-      # its build is a Worker wrangler would deploy. No credentials needed.
+      # The admin isn't deployed from here (see Deploy platform): check that
+      # it builds, for each stage, into a Worker cf would deploy
+      # (cloudflare.config.ts). Vite records the stage as its mode, which
+      # the deploy names again. No credentials needed.
       - if: github.event_name != 'push'
-        run: vp run build && vp exec wrangler deploy --dry-run
+        run: |
+          set -euo pipefail
+          for stage in staging production; do
+            vp build --mode "$stage"
+            vp exec cf deploy --prebuilt --mode "$stage" --dry-run
+          done
         working-directory: apps/admin
       # The builds above regenerate the route trees, which must be committed
       # (static checks the other generated files without building).
@@ -493,27 +500,35 @@ jobs:
     steps:
       - run: echo "Stephen's eval with a real model runs by hand, from the Actions tab."
 
-  # Deploys core and connect from the release job's bundle, never from
-  # source: each Worker's modules, static files, bindings, compatibility
-  # date and flags and D1 migrations are the manifest's, every file checked
-  # against it first (scripts/release/deploy-release.ts). Then staging
-  # accepts the release, or refuses it: core must answer its health check
-  # as the version just deployed (scripts/release/accept-release.ts).
-  # Secrets and settings come from 1Password, never from GitHub: each
-  # GitHub environment's from the 1Password Environment of the same name,
-  # read with that environment's read-only service account, whose token,
-  # OP_SERVICE_ACCOUNT_TOKEN, is the only value kept in GitHub
-  # (.github/actions/load-1password).
-  deploy-staging:
-    name: deploy-staging
+  # Every merge to main is a release: built once (the release job),
+  # verified against its manifest and published to staging's releases
+  # bucket, where the staging admin imports it and rolls it out to
+  # staging's clients. It publishes the release job's bundle, never a build
+  # of its own, and deploys nothing. Production's admin never sees it until
+  # someone promotes it, once staging ran it, with the Promote release
+  # workflow. The bucket's name comes from the names module
+  # (scripts/platform-names.ts). Secrets and settings come from the staging
+  # 1Password Environment, never from GitHub: OP_SERVICE_ACCOUNT_TOKEN, the
+  # staging GitHub environment's read-only service account token, is the
+  # only value kept there (.github/actions/load-1password). The R2 key is
+  # passed only to the steps that use it; all steps share one runner, so
+  # that isn't a security boundary.
+  # Pushes to main share the workflow's concurrency group, which keeps only
+  # the newest pending run: in a burst of merges a middle commit may never
+  # be published, and its changes ship in the next release.
+  publish-release:
+    name: publish-release
     needs: release
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: grasp-os-staging
-    concurrency:
-      group: deploy-grasp-os-staging
-      cancel-in-progress: false
+    environment: staging
+    # Reads the run's jobs (its own id) and the merged pull request's
+    # reviews, for the release's limit evidence.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -524,159 +539,38 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - uses: ./.github/actions/load-1password
-        with:
-          environment: staging
-          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          secrets: CLOUDFLARE_API_TOKEN
-          settings: CLOUDFLARE_ACCOUNT_ID
-          required: CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN
+      # Staging's releases bucket and the account's R2 endpoint, by the names
+      # module, for every step after: the release before is read from the
+      # bucket, and the release goes to it.
+      - run: |
+          set -euo pipefail
+          echo "R2_BUCKET=$(vp exec node scripts/platform-names.ts staging releasesBucket)" >> "$GITHUB_ENV"
+          echo "R2_ENDPOINT=$(vp exec node scripts/platform-names.ts staging r2Endpoint)" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
           path: release-out
-      # A D1 database's jurisdiction is set only when it is created, and deploy
-      # would auto-provision a missing one outside the EU: create every
-      # database a deployed app binds (see each wrangler.jsonc) before the
-      # first deploy. One that exists outside the EU stops the deploy; it has
-      # to be recreated.
-      - name: Create the D1 databases in the EU
-        run: |
-          existing=$(vp exec wrangler d1 list --json)
-          for db in grasp-os-core grasp-os-knowledge grasp-os-connect; do
-            jurisdiction=$(jq -r --arg db "$db" '.[] | select(.name == $db) | .jurisdiction // "none"' <<< "$existing")
-            if [ -z "$jurisdiction" ]; then
-              vp exec wrangler d1 create "$db" --jurisdiction eu
-            elif [ "$jurisdiction" != "eu" ]; then
-              echo "::error::D1 database $db is not in the EU jurisdiction ($jurisdiction)"
-              exit 1
-            fi
-          done
-      # A bucket's jurisdiction, too, is set only when it is created: create
-      # the audit archive (core's AUDIT_ARCHIVE) in the EU before the first
-      # deploy.
-      - name: Create the audit archive bucket in the EU
-        run: vp exec wrangler r2 bucket info grasp-os-audit-archive --jurisdiction eu || vp exec wrangler r2 bucket create grasp-os-audit-archive --jurisdiction eu
-      # And the bucket of Knowledge's version texts (core's BRAIN_OBJECTS).
-      - name: Create the Brain objects bucket in the EU
-        run: vp exec wrangler r2 bucket info grasp-os-brain-objects --jurisdiction eu || vp exec wrangler r2 bucket create grasp-os-brain-objects --jurisdiction eu
-      # Each applies its Worker's D1 migrations from the release, then
-      # deploys it. Migrations are additive, so the running code keeps
-      # working on the new schema until the deploy after them replaces it.
-      # connect first: core's service binding points at it.
-      - run: vp run release:deploy --release release-out --worker connect
-      - id: core
-        run: vp run release:deploy --release release-out --worker core --var RUNTIME_PROFILE:cloudflare
-      # Core's router secret, loaded only for the acceptance check, the last
-      # step, as publish-release loads its R2 key right before the upload.
       - uses: ./.github/actions/load-1password
         with:
           environment: staging
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          secrets: ROUTER_SECRET
-          required: ROUTER_SECRET
-      - run: vp run release:accept --release release-out --version "$CORE_VERSION"
-        env:
-          CORE_VERSION: ${{ steps.core.outputs.version }}
-      # Nor are the admin and router: they deploy by hand, with deploy-ops,
-      # to the same account. Staging needs no router of its own (the
-      # acceptance check calls core on workers.dev), and one would share the
-      # name grasp-os-router with Grasp's. Staging core's ROUTER_SECRET is a
-      # random value set on it by hand, the same as in the staging 1Password
-      # Environment. The static job still proves the admin builds.
-
-  # Every merge to main is a release: built once (the release job), verified
-  # against its manifest and published to R2 in grasp-os-ops, where the
-  # admin imports it. It publishes the bundle staging ran, never a build
-  # of its own. Deploys nothing itself, and runs only once deploy-staging
-  # has deployed that bundle and staging accepted it: a release whose
-  # staging migrations, deploys or acceptance fail is never published, so
-  # the admin can't roll it out to a client. When deploy-staging fails,
-  # is cancelled or is skipped, this job is skipped too, and the commit's
-  # changes ship in the next release that passes staging. The R2 key is
-  # passed only to the upload step; all steps share one runner, so that
-  # isn't a security boundary. Publishes nothing until PUBLISH_RELEASES, a
-  # setting in the releases 1Password Environment, is `true`, set once the
-  # bucket, key and environment exist, and staging deploys. A job's `if`
-  # can't read 1Password, so the job runs and its steps check: first
-  # whether the environment has its service account token at all (without
-  # one, nothing is set up yet and the job passes doing nothing), then the
-  # switch.
-  # Pushes to main share the workflow's concurrency group, which keeps only
-  # the newest pending run: in a burst of merges a middle commit may never
-  # be published, and its changes ship in the next release.
-  publish-release:
-    name: publish-release
-    needs: [release, deploy-staging]
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment: grasp-os-releases
-    # Reads the run's jobs (its own id) and the merged pull request's
-    # reviews, for the release's limit evidence.
-    permissions:
-      contents: read
-      actions: read
-      pull-requests: read
-    steps:
-      - id: setup
-        run: echo "ready=$READY" >> "$GITHUB_OUTPUT"
-        env:
-          READY: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN != '' }}
-      - if: steps.setup.outputs.ready == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # The switch first: with publishing off, the R2 key needn't be in the
-      # Environment yet.
-      - if: steps.setup.outputs.ready == 'true'
-        uses: ./.github/actions/load-1password
-        with:
-          environment: releases
-          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          settings: PUBLISH_RELEASES
-      - if: env.PUBLISH_RELEASES == 'true'
-        uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
-      - if: env.PUBLISH_RELEASES == 'true'
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release
-          path: release-out
-      - if: env.PUBLISH_RELEASES == 'true'
-        uses: ./.github/actions/load-1password
-        with:
-          environment: releases
-          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          secrets: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
-          required: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+          secrets: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+          required: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
       # What the release's platform limits are raised over: the release
       # published before it. Its limit evidence goes next to its manifest,
       # and a raise without evidence (a capacity run per profile and the
       # PR's CODEOWNERS approval, GRA-942) fails here, before anything is
-      # uploaded. The release itself is the bundle staging ran, unchanged.
-      - if: env.PUBLISH_RELEASES == 'true'
-        run: vp run release:previous --out previous-manifest.json
-        env:
-          R2_BUCKET: grasp-os-releases
+      # uploaded. The release itself is the release job's bundle, unchanged.
+      - run: vp run release:previous --out previous-manifest.json
       # The capacity job for each limit the release raises, on workerd, on
       # this commit (the release's own): its workloads, or nothing when it
       # raises none. The cloudflare profile waits for a real account in CI
       # (GRA-382), so a raise reaches only on-premises clients until then.
-      - if: env.PUBLISH_RELEASES == 'true'
-        run: vp run capacity --profile workerd --release release-out --previous previous-manifest.json --out capacity-workerd.json
+      - run: vp run capacity --profile workerd --release release-out --previous previous-manifest.json --out capacity-workerd.json
       # Each passing workload, this job's id and the merged PR's CODEOWNER
       # approval, as the release's evidence (read with this job's token).
-      - if: env.PUBLISH_RELEASES == 'true'
-        run: vp run release:evidence --release release-out --previous previous-manifest.json --capacity capacity-workerd.json
+      - run: vp run release:evidence --release release-out --previous previous-manifest.json --capacity capacity-workerd.json
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CI_JOB_NAME: publish-release
-      - if: env.PUBLISH_RELEASES == 'true'
-        run: vp run release:upload --release release-out
-        env:
-          R2_BUCKET: grasp-os-releases
+      - run: vp run release:upload --release release-out

@@ -1,3 +1,5 @@
+import { clientsNamespace } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 /**
  * Hosting test setup: destinations with verified capabilities, client
  * records as provisioning makes them, and releases whose core binds as the
@@ -48,24 +50,32 @@ export const verified = (
 let destinations = 0;
 /** A new destination serving `eu-storage`, with every requirement verified unless said. */
 export const destination = async (
-  input: Partial<DestinationInput> = {}
+  input: Partial<DestinationInput> = {},
+  /** The stage of the admin that records it. */
+  stage: Stage = "production"
 ): Promise<string> => {
   destinations += 1;
   const id = `eu-${crypto.randomUUID().slice(0, 8)}-${destinations}`;
   // Verified on the runtime profile the destination runs.
   const profile = input.kind === "workerd" ? "workerd" : "cloudflare";
-  await saveDestination(db, staff, {
-    id,
-    kind: "workers_for_platforms",
-    accountId: crypto.randomUUID().replaceAll("-", ""),
-    namespace: "production",
-    policies: ["eu-storage"],
-    capabilities: verified(
-      {},
-      { ...evidence, subject: { kind: "profile", id: profile } }
-    ),
-    ...input,
-  });
+  await saveDestination(
+    db,
+    staff,
+    {
+      id,
+      kind: "workers_for_platforms",
+      accountId: crypto.randomUUID().replaceAll("-", ""),
+      // The namespace of the stage of the admin that records it.
+      namespace: clientsNamespace(stage),
+      policies: ["eu-storage"],
+      capabilities: verified(
+        {},
+        { ...evidence, subject: { kind: "profile", id: profile } }
+      ),
+      ...input,
+    },
+    stage
+  );
   return id;
 };
 
