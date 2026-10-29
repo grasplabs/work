@@ -185,12 +185,14 @@ describe("the OAuth relay", () => {
       ],
       // Another flow's MAC.
       [label, issued, otherMac, provider, own],
-      // A MAC cut short, or flipped.
+      // A MAC cut short, or flipped. The flip is in its first character:
+      // the last carries two padding bits, so a flip there can decode to
+      // the same MAC.
       [label, issued, mac?.slice(0, -1), provider, own],
       [
         label,
         issued,
-        `${mac?.slice(0, -1)}${mac?.endsWith("A") === true ? "B" : "A"}`,
+        `${mac?.startsWith("A") === true ? "B" : "A"}${mac?.slice(1)}`,
         provider,
         own,
       ],
