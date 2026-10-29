@@ -10,7 +10,11 @@ import {
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
-import type { GoLiveItem, SignInAgainItem } from "@grasp-os/shared/waiting";
+import type {
+  GoLiveItem,
+  SignInAgainItem,
+  WorkflowGoLiveItem,
+} from "@grasp-os/shared/waiting";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Waiting } from "../dashboard/to-do.tsx";
@@ -137,6 +141,20 @@ const goLive: GoLiveItem = {
   version: 4,
 };
 
+/** A version of a workflow asked to go live, waiting on an admin. */
+const workflowGoLive: WorkflowGoLiveItem = {
+  kind: "workflowGoLive",
+  id: "workflowGoLive:workflow-quotes:2",
+  at: "2026-10-12T12:00:00.000Z",
+  urgent: false,
+  waitsOn: { type: "admin" },
+  verdicts: ["approve", "reject"],
+  workflow: { id: "workflow-quotes", name: "Quotes" },
+  version: 2,
+  requestedBy: "builder-1",
+  revision: 3,
+};
+
 /** What waits, every part read. */
 const waiting = (ranOut = true) =>
   ({
@@ -232,6 +250,7 @@ const waiting = (ranOut = true) =>
         },
       ],
     },
+    workflowGoLives: { state: "ready", data: [workflowGoLive] },
   }) satisfies Waiting;
 
 const admin = { role: "admin", staff: false, name: "Ada Admin" } as const;
@@ -254,6 +273,7 @@ describe(inboxItems, () => {
         "screens:app-invoices",
         "signIn:connection-1",
         "stopped:stopped-1",
+        "workflowGoLive:workflow-quotes:2",
       ].toSorted()
     );
   });
@@ -310,7 +330,24 @@ describe(listed, () => {
   it("shows one group of kinds when asked", () => {
     expect(
       listed(items, "workflows", "urgent").map(({ kind }) => kind)
-    ).toStrictEqual(["decision", "goLive", "failedRun", "stoppedSchedule"]);
+    ).toStrictEqual([
+      "decision",
+      "goLive",
+      "failedRun",
+      "goLive",
+      "stoppedSchedule",
+    ]);
+    const quotes = items.find(({ id }) => id === workflowGoLive.id);
+    expect({
+      title: quotes?.title,
+      about: quotes?.about,
+      // It waits on an admin, not on the reader by name.
+      forWhom: quotes?.forWhom,
+    }).toStrictEqual({
+      title: "Let version 2 of Quotes go live?",
+      about: { kind: "independentWorkflow", workflow: "workflow-quotes" },
+      forWhom: undefined,
+    });
     expect(
       listed(items, "brain", "urgent").map(({ kind, title, about }) => ({
         kind,
@@ -327,6 +364,6 @@ describe(listed, () => {
     expect(items.find(({ kind }) => kind === "stoppedSchedule")?.title).toBe(
       "The schedule of Nightly report stopped"
     );
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 5);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 6);
   });
 });

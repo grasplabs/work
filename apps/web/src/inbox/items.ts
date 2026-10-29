@@ -8,7 +8,7 @@ import type {
 } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
-import type { GoLiveItem } from "@grasp-os/shared/waiting";
+import type { GoLiveItem, WorkflowGoLiveItem } from "@grasp-os/shared/waiting";
 import { i18n } from "@lingui/core";
 import { ph, plural, t } from "@lingui/core/macro";
 
@@ -60,6 +60,7 @@ export type InboxKind =
 /** Where an item can be opened: the page of what it is about. */
 export type Target =
   | { kind: "workflow"; app: string; workflow: string }
+  | { kind: "independentWorkflow"; workflow: string }
   | { kind: "engine"; engine: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
@@ -74,6 +75,7 @@ export type InboxSource =
   | { type: "packages"; request: DependencyRequest; policyGeneration: number }
   | { type: "screens"; waiting: ScreensWaiting }
   | { type: "version"; item: GoLiveItem }
+  | { type: "workflowGoLive"; item: WorkflowGoLiveItem }
   | {
       type: "failed";
       notification: RunFailedNotification;
@@ -375,6 +377,35 @@ const versionItems = (
     };
   });
 
+/**
+ * A version of a workflow a builder asked to go live, which the person
+ * approves or sends back here: as its owner, or as an admin.
+ */
+const workflowGoLiveItems = (
+  goLives: readonly WorkflowGoLiveItem[],
+  me: string
+): InboxItem[] =>
+  goLives.map((item) => {
+    const { workflow, version } = item;
+    const { name } = workflow;
+    return {
+      id: item.id,
+      kind: "goLive",
+      title: t`Let version ${version} of ${name} go live?`,
+      context: name,
+      body: [
+        t`A builder asked for this version of ${name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now.`,
+      ],
+      facts: [{ label: t`Version`, value: String(version) }],
+      about: { kind: "independentWorkflow", workflow: workflow.id },
+      // As the workflow's owner, or else as an admin.
+      ...(item.waitsOn.type === "person" ? { forWhom: { person: me } } : {}),
+      date: item.at ?? "",
+      urgent: false,
+      source: { type: "workflowGoLive", item },
+    };
+  });
+
 /** A workflow that failed while acting for the person, with a way to ask the agent to fix it. */
 const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
   failed.page.notifications.flatMap((notification): InboxItem[] => {
@@ -519,6 +550,7 @@ export const inboxItems = (
   const failed = readyOf(waiting.failed);
   const decisions = readyOf(waiting.decisions) ?? [];
   const versions = readyOf(waiting.versions) ?? [];
+  const workflowGoLives = readyOf(waiting.workflowGoLives) ?? [];
   const reconnect = (readyOf(waiting.reconnect) ?? []).map(
     ({ integration, connection }): InboxItem => {
       const app =
@@ -559,6 +591,7 @@ export const inboxItems = (
       : packageItems(dependencies.requests, dependencies.policyGeneration)),
     ...screenItems(screens, readAt),
     ...versionItems(versions, me, readAt),
+    ...workflowGoLiveItems(workflowGoLives, me),
     ...(failed === undefined ? [] : failedItems(failed, me)),
     ...(failed === undefined ? [] : askedItems(failed, me)),
     ...(failed === undefined ? [] : stoppedItems(failed, me)),
@@ -578,6 +611,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.reconnect,
     waiting.versions,
     waiting.decisions,
+    waiting.workflowGoLives,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>
