@@ -5,13 +5,15 @@ import { coreProject } from "./vite.config.ts";
 // each run takes its trials one at a time, and beside a shard's other
 // heavy core files the baseline ran four to eight times as long as alone,
 // near its 300 s timeout (GRA-698), and the scale run two to two and a
-// half times (GRA-1094). Projects run in groups, lowest first: this one
+// half times (GRA-1094). Experiment E02 (test/brain-recall-e02.test.ts)
+// times each recall it asks, one at a time, so it runs here too. Projects run in groups, lowest first: this one
 // after all the others, and in CI on shards of its own
 // (scripts/test-shards.ts).
 export default coreProject({
   name: "@grasp-os/core:brain",
   include: [
     "test/brain-baseline.test.ts",
+    "test/brain-recall-e02.test.ts",
     "test/brain-scale.test.ts",
     "test/brain-scale-agent.test.ts",
     "test/brain-scale-full-context.test.ts",

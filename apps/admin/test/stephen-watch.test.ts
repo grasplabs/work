@@ -26,23 +26,19 @@ import { z } from "zod";
 import { fetchClientSetup } from "../src/clients/functions.ts";
 import { overBars } from "../src/clients/watch-signals.ts";
 import type { WatchedSignals } from "../src/clients/watch-signals.ts";
-import { act, adminDatabase } from "../src/db/act.ts";
+import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import worker from "../src/server.ts";
 import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-watch-7a2c90";
-const tenantToken = "test-tenant-admin-token-watch-3e5b18";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 mockAccess();
 
 const db = adminDatabase(env.DB);
@@ -96,30 +92,13 @@ const liveClient = async (): Promise<{
   clientId: string;
   account: AccountState;
 }> => {
-  const release = await publishRelease({ notes: "feat(core): count Stephen" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(core): count Stephen");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const account = cloudflare.addAccount(`Acme ${clientId}`);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name: `Acme ${clientId}`,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, release.id)
-  );
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name: `Acme ${clientId}`,
+    signIn: null,
+  });
   return { clientId, account };
 };
 
@@ -150,7 +129,7 @@ const toldOf = (clientId: string): string[] =>
     .map((text) => text.split("\n")[0] ?? "");
 
 describe("the watch of Stephen", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   mockDiscord();
   beforeEach(async () => {
     await setStoreSecret(

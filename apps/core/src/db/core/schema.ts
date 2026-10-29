@@ -57,8 +57,12 @@ const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
  * in the same release, to that migration's own number.
  *
  * 0120 dropped `admission_topics` in the release that stopped using it.
+ * 0169 lets a revocation be every App's (a null `app_id`), which the code
+ * before it reads as one App's and fails on: a release before it would
+ * drop such rows unexpanded, and the screens they were for would never be
+ * told.
  */
-export const compatibleFromMigration = 120;
+export const compatibleFromMigration = 169;
 
 /** A person. Found by their IdP account, never by email alone. */
 export const users = sqliteTable("users", {
@@ -758,18 +762,21 @@ export const appIntegrations = sqliteTable(
  * Revocations an App's host couldn't be told of (src/access-revocations.ts):
  * told again by the clock until it takes them, so a host away for
  * longer than its retries still clears the screens of whoever lost a
- * role. `user_ids` is null for everyone the host knows of.
+ * role. `user_ids` is null for everyone the host knows of. A null
+ * `app_id` is a revocation for every App (an admin's role lost), kept as
+ * one row so the change's batch stays one row however many Apps there
+ * are; it is expanded into one row per App a page at a time, in App ID
+ * order, `after_app_id` the last App it has expanded to (GRA-650).
  */
 export const accessRevocations = sqliteTable(
   "access_revocations",
   {
     id: text().primaryKey(),
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id, { onDelete: "cascade" }),
+    appId: text("app_id").references(() => apps.id, { onDelete: "cascade" }),
     userIds: text("user_ids", { mode: "json" }).$type<string[] | null>(),
     attempts: integer().notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
+    afterAppId: text("after_app_id"),
   },
   // The clock tells the least tried first, oldest first among them,
   // once it dropped those a day old.
@@ -1318,16 +1325,31 @@ export const businessStoreVersions = sqliteTable(
 );
 
 /**
- * The App a store serves, claimed by the first seal that binds it and kept
- * for good: retention deletes releases and their bindings, never this. So
- * a store an App stopped using never comes to serve another App, which
- * would read what the first left behind.
+ * The one canonical owner of a store's schema and operations (spec 40.8),
+ * claimed once and kept for good: retention deletes releases and their
+ * bindings, never this. So a store its owner stopped using never comes to
+ * serve another owner, which would read what the first left behind. The
+ * owner is an App (`appId`), claimed by the first seal that binds the
+ * store, or an independent workflow (`workflowId`, GRA-682), claimed when
+ * an admin activates a version that declares it: exactly one of the two.
+ * A workflow's store has no App, so nothing that looks a store's App up
+ * ever finds one for it.
  */
-export const sdkStoreOwners = sqliteTable("sdk_store_owners", {
-  storeId: text("store_id").primaryKey(),
-  appId: text("app_id").notNull(),
-  claimedAt: timestamp("claimed_at").notNull(),
-});
+export const sdkStoreOwners = sqliteTable(
+  "sdk_store_owners",
+  {
+    storeId: text("store_id").primaryKey(),
+    appId: text("app_id"),
+    workflowId: text("workflow_id"),
+    claimedAt: timestamp("claimed_at").notNull(),
+  },
+  () => [
+    check(
+      "sdk_store_owners_one_owner",
+      sql`(app_id IS NULL) <> (workflow_id IS NULL)`
+    ),
+  ]
+);
 
 /**
  * The store an App of spec 8's layout runs on, one per App: created by the
@@ -2379,8 +2401,17 @@ export const runBrainEvidence = sqliteTable(
      * in @grasp-os/brain/recall-store): changed by a purge.
      */
     pinned: text().notNull(),
-    /** The `brain` permission of the binding that recalled it. */
+    /**
+     * The permission of the binding it came through: an App's `brain`
+     * permission, or a JSON workflow's knowledge binding's.
+     */
     permissionId: text("permission_id").notNull(),
+    /**
+     * Whether a recall cited it, so the Brain must still admit the run:
+     * a JSON workflow's knowledge search or read pins it without (GRA-299).
+     * Only ever set, never cleared, as the rest only grows.
+     */
+    recalled: integer({ mode: "boolean" }).notNull().default(true),
     recordedAt: timestamp("recorded_at").notNull(),
   },
   (table) => [
@@ -2392,6 +2423,28 @@ export const runBrainEvidence = sqliteTable(
         table.permissionId,
       ],
     }),
+  ]
+);
+
+/**
+ * The runs whose evidence a run holds (GRA-1093; workflows/resource-reads.ts):
+ * a child whose output it took (resource-runs.ts, `tellParentOfEnd`), and
+ * every run that child held, since its output may carry what they
+ * recalled. Before each of the run's releases, the host checks each held
+ * run's evidence too, under that run's own authority as it stands now. A
+ * held run's details stay while a run that holds it hasn't passed its own
+ * retention (retention.ts). Identifiers only; goes with the holding run's
+ * details.
+ */
+export const runEvidenceHolds = sqliteTable(
+  "run_evidence_holds",
+  {
+    runId: text("run_id").notNull(),
+    heldRunId: text("held_run_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.heldRunId] }),
+    index("run_evidence_holds_held_run_id_idx").on(table.heldRunId),
   ]
 );
 
@@ -4556,6 +4609,44 @@ export const workflowResourceDraftInspections = sqliteTable(
 );
 
 /**
+ * Where each independent workflow is in its life (src/workflow-lifecycle.ts):
+ * one row, once something about it was set, moved on by every write
+ * (`revision`), each write only over the revision it read. `stage` is the
+ * stage a builder set; null follows the workflow (drafted, published,
+ * live). `live_version` is the version that went live last, through an
+ * approval of `go_live_version` by someone other than who asked for it.
+ * While `paused_at` is set it starts no runs (workflow-starts.ts).
+ */
+export const workflowResourceLifecycles = sqliteTable(
+  "workflow_resource_lifecycles",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .primaryKey()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    stage: text({
+      enum: ["mapped", "designed", "testing", "live", "scaling"],
+    }),
+    liveVersion: integer("live_version"),
+    liveApprovedBy: text("live_approved_by"),
+    liveApprovedAt: timestamp("live_approved_at"),
+    /**
+     * Whether whoever asked for the live version approved it themselves,
+     * allowed only while nobody else could (GRA-1227).
+     */
+    liveSelfApproved: integer("live_self_approved", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    pausedBy: text("paused_by"),
+    pausedAt: timestamp("paused_at"),
+    goLiveVersion: integer("go_live_version"),
+    goLiveRequestedBy: text("go_live_requested_by"),
+    goLiveRequestedAt: timestamp("go_live_requested_at"),
+    updatedAt: timestamp("updated_at").notNull(),
+  }
+);
+
+/**
  * Which exact version of an independent workflow each App binds, by an
  * alias of the App's (src/app-workflow-bindings.ts). A binding pins the
  * version and grants nothing: starting it still takes the App's own
@@ -4866,6 +4957,7 @@ export const brainRecords = sqliteTable(
         "goal",
         "goalVersion",
         "goalLink",
+        "vision",
       ],
     }).notNull(),
     id: text().notNull(),
@@ -4878,6 +4970,12 @@ export const brainRecords = sqliteTable(
      * words put back.
      */
     purgedAt: timestamp("purged_at"),
+    /**
+     * When the record stopped counting (brain-records.ts
+     * `retireOnboardingRecords`): what a replaced kickoff transcript gave
+     * the brain. Kept, never deleted, and left out of `brain.read`.
+     */
+    retiredAt: timestamp("retired_at"),
   },
   // One id is one record, whatever its type.
   (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]

@@ -38,8 +38,11 @@ import { appIdSchema, workflowIdSchema } from "./ids.ts";
 // The onboarding adds records of its own (GRA-367): each roster team as a
 // team record (`team-<id>`), the statements its people agreed to, and each
 // piece of work as drawn (`workflow`, and a `workflowVersion` for each
-// drawing). It owns them: their ids start with `onb-` (or are a roster
-// team's), and nobody else adds a workflow or takes such an id.
+// drawing). From the kickoff (GRA-528) it adds the company's vision
+// (`vision`, a new one each time it changes, the newest counting) and the
+// teams the sponsor named, as team records with their sizes. It owns them:
+// their ids start with `onb-` (or are a roster team's), and nobody else
+// adds a workflow or a vision, or takes such an id.
 
 /** Most records one `brain.addRecords` call adds, each named in its audit event. */
 export const brainRecordsMaxPerCall = 50;
@@ -59,6 +62,7 @@ export const brainRecordsMaxPerType = {
   goal: 200,
   goalVersion: 2000,
   goalLink: 5000,
+  vision: 500,
 } as const;
 
 /** Longest a gap's question, or its answer, may be. */
@@ -66,6 +70,12 @@ export const brainGapTextMaxLength = 2000;
 
 /** Longest a statement's text may be. */
 export const brainStatementMaxLength = 2000;
+
+/**
+ * Longest the vision's ambition, or why now, may be: what the kickoff read
+ * and the sponsor's answer beside it.
+ */
+export const brainVisionTextMaxLength = 5000;
 
 /** Most teams, tools or other ids one record lists. */
 const listMax = 50;
@@ -91,13 +101,12 @@ export const brainRecordIdSchema = z
 const ids = z.array(brainRecordIdSchema).max(listMax).default([]);
 
 /**
- * A team's id: a team record's, or a roster team's (`team-<id>`). A
- * kickoff-only team (`team.kickoff-<n>`) takes no values: its id is its
- * place in the kickoff's reading, which reading it again moves.
+ * A team's id: a team record's (the kickoff's teams are records too), or a
+ * roster team's (`team-<id>`).
  */
 export const brainTeamIdSchema = z
   .string()
-  .regex(/^[A-Za-z0-9_.-]{1,80}$/u, "That isn't a team's id.");
+  .regex(/^[A-Za-z0-9_-]{1,80}$/u, "That isn't a team's id.");
 
 const teamIds = z.array(brainTeamIdSchema).max(listMax).default([]);
 const label = z.string().trim().min(1).max(200);
@@ -433,6 +442,21 @@ const goalLinkRecordSchema = z.strictObject({
 });
 
 /**
+ * The company's vision, as the kickoff set it: where it wants to be in one
+ * to two years (`ambition`) and why AI now (`whyNow`). Never edited: when
+ * it changes, the onboarding adds a new one, and the newest counts.
+ */
+const visionText = z.string().trim().max(brainVisionTextMaxLength);
+const visionRecordSchema = z.strictObject({
+  type: z.literal("vision"),
+  id: ownIdSchema,
+  ambition: visionText,
+  whyNow: visionText,
+  sourceId: brainRecordIdSchema,
+  date: day,
+});
+
+/**
  * What a gap may be about: the records that are notes of their own, so
  * each opens its page. A team's count or stakeholder is a value of its
  * team, a source is where it was noticed (`sourceId`), and another gap
@@ -460,6 +484,7 @@ export const brainRecordSchema = z.discriminatedUnion("type", [
   goalRecordSchema,
   goalVersionRecordSchema,
   goalLinkRecordSchema,
+  visionRecordSchema,
 ]);
 export type BrainRecordInput = z.input<typeof brainRecordSchema>;
 export type BrainRecord = z.infer<typeof brainRecordSchema>;
@@ -468,11 +493,13 @@ export type WorkflowVersionRecord = Extract<
   BrainRecord,
   { type: "workflowVersion" }
 >;
+export type VisionRecord = Extract<BrainRecord, { type: "vision" }>;
 
-/** The types only the onboarding adds: it draws the work. */
+/** The types only the onboarding adds: it draws the work and reads the kickoff. */
 const onboardingTypes: ReadonlySet<BrainRecordType> = new Set([
   "workflow",
   "workflowVersion",
+  "vision",
 ]);
 
 /**

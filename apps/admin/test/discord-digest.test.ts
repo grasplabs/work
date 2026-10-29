@@ -11,26 +11,21 @@ import {
 } from "vite-plus/test";
 import { z } from "zod";
 
-import { act, adminDatabase } from "../src/db/act.ts";
+import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import worker from "../src/server.ts";
 import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-digest-3b7e21";
-const tenantToken = "test-tenant-admin-token-digest-8c0f54";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 mockAccess();
 
 const db = adminDatabase(env.DB);
-const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 const webhook = "https://discord.com/api/webhooks/123/test-digest-token";
 const digestCron = "0 6,7 * * 1-5";
 
@@ -81,30 +76,13 @@ const liveClient = async (): Promise<{
   clientId: string;
   account: AccountState;
 }> => {
-  const release = await publishRelease({ notes: "feat(core): the digest" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(core): the digest");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const account = cloudflare.addAccount(`Acme ${clientId}`);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name: `Acme ${clientId}`,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, release.id)
-  );
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name: `Acme ${clientId}`,
+    signIn: null,
+  });
   account.admin = emptyAdminSnapshot(`Acme ${clientId}`);
   return { clientId, account };
 };
@@ -118,7 +96,7 @@ const fire = async (cron: string, at: string): Promise<void> => {
 };
 
 describe("the morning digest in Discord", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   mockDiscord();
   // Only each test's own clients have a core.
   beforeEach(async () => {

@@ -15,6 +15,7 @@ import type {
   DiagnosticCode,
 } from "./diagnostics.ts";
 import type { JsonObject, JsonValue } from "./json-text.ts";
+import type { DeclaredStore } from "./stores.ts";
 
 /**
  * Thrown once the report holds `maxDiagnostics` errors, or by a fatal
@@ -224,6 +225,8 @@ export interface Checker {
   taskIds: Set<string>;
   /** Tasks counted so far, each before its body is walked. */
   taskCount: number;
+  /** How many forks the task being walked is inside. */
+  forkDepth: number;
   tasks: TaskRecord[];
   lists: ListRecord[];
   slots: ExpressionSlot[];
@@ -232,6 +235,8 @@ export interface Checker {
   schemas: Map<string, ValueSchema<unknown, unknown>>;
   functionCalls: FunctionCall[];
   workflowInput?: ValueSchema<unknown, unknown>;
+  /** The stores the definition declares, by name (stores.ts). */
+  stores: Map<string, DeclaredStore>;
   identity?: { namespace: string; name: string; version: string };
 }
 
@@ -247,12 +252,14 @@ export const createChecker = (options: ReadOptions): Checker => ({
   reusableTimeouts: new Set(),
   taskIds: new Set(),
   taskCount: 0,
+  forkDepth: 0,
   tasks: [],
   lists: [],
   slots: [],
   slotsFull: false,
   schemas: new Map(),
   functionCalls: [],
+  stores: new Map(),
 });
 
 /** A value's own key, or `undefined`: never a prototype member. */

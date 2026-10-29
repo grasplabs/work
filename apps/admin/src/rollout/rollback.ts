@@ -17,8 +17,8 @@
  * - a secrets rollout ran the same release, so there's nothing to go back
  *   to that keeps the secrets current (`nothing_to_roll_back`).
  *
- * A rollback is a runner like the others (src/runners.ts): a Workflow
- * instance, `RollbackClient`, that claims the client, taking it from the
+ * A rollback is a runner like the others (src/runners.ts): a Workerflow
+ * run, `rollbackClientRun`, that claims the client, taking it from the
  * rollout it rolls back even while that rollout is running its operation:
  * the rollout's next check finds it lost the client and changes nothing
  * more (`runner_replaced`), and the operation it left running is
@@ -28,9 +28,9 @@
  * waits for approval).
  */
 import { log } from "@grasp-os/shared/log";
-import { WorkflowEntrypoint } from "cloudflare:workers";
-import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
+import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
 import { and, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
 
 import type { Staff } from "../access.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
@@ -52,8 +52,7 @@ import {
   clientDomain,
   deployContext,
 } from "../deploy/context.ts";
-import { assertLimitEvidence, errorCode } from "../deploy/deploy.ts";
-import { DeployError } from "../deploy/errors.ts";
+import { DeployError, errorCode } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { deployOrder } from "../deploy/versions.ts";
 import { InventoryError } from "../hosting/inventory.ts";
@@ -61,10 +60,11 @@ import {
   assertCanRollBack,
   ProvisionOperationError,
   runClientProvision,
-  settledSends,
+  sendsSettled,
   startClientRelease,
   startedAs,
 } from "../hosting/operation.ts";
+import { assertLimitEvidence } from "../releases/limits.ts";
 import {
   claimRun,
   currentRun,
@@ -72,15 +72,16 @@ import {
   instanceStatus,
   releaseRun,
   stillHolds,
+  takeAttempt,
 } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
+import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import {
-  deployStepConfig,
   guarded,
-  isEngineAbort,
   quickStep,
   stop,
   stopReason,
+  deployStepConfig,
 } from "../workflow-steps.ts";
 import { tellCore } from "./activity.ts";
 import { RolloutError } from "./errors.ts";
@@ -96,7 +97,7 @@ const reached = ["deploying", "done", "failed", "stopped"] as const;
 const wasReached = (status: string): boolean =>
   reached.some((each) => each === status);
 
-/** A new rollback's runner id: its Workflow instance's. */
+/** A new rollback's runner id: its run's. */
 const newRollbackId = (): string =>
   `rollback-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
 
@@ -276,7 +277,7 @@ export interface RollbackParams {
 /**
  * Rolls client `clientId` back from rollout `rolloutId`, as `staff`:
  * claims the client, audited as `rollout.rollback`, and starts the
- * rollback's run (`RollbackClient`), whose id it returns. Refused when the
+ * rollback's run (`rollbackClientRun`), whose id it returns. Refused when the
  * client can't be (`check`), and while a runner other than this rollout
  * has it (`client_busy`).
  */
@@ -318,7 +319,10 @@ export const rollbackClient = async (
     startedBy: { email: staff.email, sub: staff.sub },
   };
   try {
-    await env.ROLLBACK_CLIENT.create({ id: runId, params });
+    await adminWorkflow<RollbackParams>(
+      env,
+      adminWorkflows.rollbackClient
+    ).create({ id: runId, params });
   } catch (error) {
     // Its run never started: the client is free again, the error stands.
     await releaseQuietly(db, clientId, runId);
@@ -327,15 +331,95 @@ export const rollbackClient = async (
   return runId;
 };
 
+/** Where client `clientId`'s rollback from rollout `params.rolloutId` to `back` stands. */
+interface Standing {
+  /** Its own change started already (recorded on the target, still the latest). */
+  started: boolean;
+  /** The rollout's change, the client's latest while the rollback hasn't started. */
+  rolloutsChange: number | null;
+}
+
+/**
+ * Where client `clientId`'s rollback stands, by what its operation and
+ * the rollout's target recorded: its own change started (recorded on the
+ * target in the batch that started it, and still the latest, on `back`),
+ * or still to start from the rollout's change, the latest. Refused
+ * (`superseded`) once anything else changed the client.
+ */
+const standingOf = async (
+  db: AdminDatabase,
+  params: RollbackParams,
+  clientId: string,
+  back: string
+): Promise<Standing> => {
+  const [target] = await db
+    .select({
+      change: rolloutTargets.change,
+      rollbackChange: rolloutTargets.rollbackChange,
+    })
+    .from(rolloutTargets)
+    .where(
+      and(
+        eq(rolloutTargets.rolloutId, params.rolloutId),
+        eq(rolloutTargets.clientId, clientId)
+      )
+    );
+  const operation = await db
+    .select({
+      releaseId: clientProvisions.releaseId,
+      change: clientProvisions.change,
+    })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId))
+    .get();
+  const rolloutsChange = target?.change ?? null;
+  const rollbacksChange = target?.rollbackChange ?? null;
+  const started =
+    rollbacksChange !== null &&
+    operation?.change === rollbacksChange &&
+    operation.releaseId === back;
+  if (!started && operation?.change !== rolloutsChange) {
+    throw stop(
+      "superseded",
+      `${clientId} changed after rollout ${params.rolloutId}`
+    );
+  }
+  return { started, rolloutsChange };
+};
+
+/**
+ * Whether client `clientId`'s rollback may change its Workers: started
+ * already, or no call the rollout's run sent them is still on its way
+ * (`sendsSettled`). A call sent before the rollback took the client can't
+ * be stopped, only waited for, so it lands before the rollback's own and
+ * none lands after them and undoes them.
+ */
+const sendsDone = async (
+  env: Env,
+  params: RollbackParams,
+  clientId: string,
+  back: string
+): Promise<boolean> => {
+  const db = adminDatabase(env.DB);
+  const { started, rolloutsChange } = await standingOf(
+    db,
+    params,
+    clientId,
+    back
+  );
+  return started || (await sendsSettled(db, clientId, rolloutsChange ?? -1));
+};
+
 /**
  * Takes client `held.clientId`'s operation back to release `back` as
  * rollback `held`, and runs it, by what its operation recorded first, so
- * a retry after any part of it does the rest and nothing twice:
- * - the rollout's change still the latest: once any call the rollout's
- *   run sent to the client's Workers has landed (`settledSends`), the
- *   rollout's operation, if still running, is stopped (the rollout lost
- *   the client), and the rollback started, a change of its own,
- *   recorded on the target in the batch that starts it;
+ * a retry after any part of it does the rest and nothing twice
+ * (`standingOf`):
+ * - the rollout's change still the latest: the rollout's operation, if
+ *   still running, is stopped (the rollout lost the client), and the
+ *   rollback started, a change of its own, recorded on the target in the
+ *   batch that starts it. The run waited for the rollout's calls to land
+ *   first, in steps of its own (`sendsDone`);
  * - its own change, as recorded, still the latest on `back`: already
  *   started, it's run (resumed, or nothing left to do once done), a
  *   rollback that failed and is asked again included;
@@ -349,46 +433,15 @@ const runBack = async (
   back: string
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
-  const [target] = await db
-    .select({
-      change: rolloutTargets.change,
-      rollbackChange: rolloutTargets.rollbackChange,
-    })
-    .from(rolloutTargets)
-    .where(
-      and(
-        eq(rolloutTargets.rolloutId, params.rolloutId),
-        eq(rolloutTargets.clientId, held.clientId)
-      )
-    );
-  const operation = await db
-    .select({
-      releaseId: clientProvisions.releaseId,
-      change: clientProvisions.change,
-    })
-    .from(clientProvisions)
-    .where(eq(clientProvisions.clientId, held.clientId))
-    .get();
-  const rolloutsChange = target?.change ?? null;
-  // Its own change, recorded on the target in the batch that started it.
-  const rollbacksChange = target?.rollbackChange ?? null;
-  const started =
-    rollbacksChange !== null &&
-    operation?.change === rollbacksChange &&
-    operation.releaseId === back;
-  if (!started && operation?.change !== rolloutsChange) {
-    throw stop(
-      "superseded",
-      `${held.clientId} changed after rollout ${params.rolloutId}`
-    );
-  }
+  const { started, rolloutsChange } = await standingOf(
+    db,
+    params,
+    held.clientId,
+    back
+  );
   try {
     const context = await deployContext(env);
     if (!started) {
-      // A call the rollout's run sent before the rollback took the client
-      // can't be stopped, only waited for: it lands before the rollback's
-      // own, so none lands after them and undoes them.
-      await settledSends(context, held.clientId, rolloutsChange ?? -1);
       await db
         .update(clientProvisions)
         .set({ status: "failed", error: "rolled_back", updatedAt: new Date() })
@@ -492,7 +545,7 @@ export const goOnToStop = async (
   createdAt: Date
 ): Promise<void> => {
   const { instance, status } = await instanceStatus(
-    env.ROLLOUT,
+    adminWorkflow(env, adminWorkflows.rollout),
     rolloutId,
     createdAt
   );
@@ -548,7 +601,7 @@ const endIdleRollout = async (env: Env, rolloutId: string): Promise<void> => {
     return;
   }
   const { instance, status } = await instanceStatus(
-    env.ROLLOUT,
+    adminWorkflow(env, adminWorkflows.rollout),
     rolloutId,
     rollout.createdAt
   );
@@ -575,35 +628,85 @@ const coreVersionOf = async (
   return row?.versionId ?? null;
 };
 
+/** `RollbackParams`, as a run reads its payload back. */
+const rollbackParamsSchema = z.object({
+  rolloutId: z.string(),
+  clientId: z.string(),
+  startedBy: z.object({ email: z.string(), sub: z.string() }),
+});
+
+/** The longest a rollback waits between checks of the rollout's calls. */
+const settleWaitCapSeconds = 30;
+
 /**
- * Rolling a client back, as a Cloudflare Workflow: an instance per
- * rollback, a runner of the client (src/runners.ts). It checks the client
- * can go back, runs its operation for the release before (`runBack`),
- * records it, ends the rollout's run while it deploys no client
- * (`endIdleRollout`), and tells the client's core for its Activity. A
- * rollback that fails, or lost the client, releases it (if it still holds
- * it) and records nothing.
+ * Rolling a client back, as a run on Workerflow (src/workflow-runs.ts):
+ * one per rollback, a runner of the client (src/runners.ts). It checks the
+ * client can go back; waits, check by check, a step each, for any call the
+ * rollout's run sent the client's Workers to land (`sendsDone`), each wait
+ * longer than the last up to `settleWaitCapSeconds`, so a call held long
+ * takes a few steps of the run's budget, not many; runs its operation for
+ * the release before (`runBack`), each attempt taking the client for
+ * itself (`takeAttempt`); records it, ends the rollout's run while it
+ * deploys no client (`endIdleRollout`), and tells the client's core for
+ * its Activity. A rollback that fails, or lost the client, releases it
+ * (if it still holds it) and records nothing.
  */
-export class RollbackClient extends WorkflowEntrypoint<Env, RollbackParams> {
-  override async run(
-    event: WorkflowEvent<RollbackParams>,
-    step: WorkflowStep
-  ): Promise<void> {
-    const { payload: params } = event;
+export const rollbackClientRun = (env: Env): WorkflowDefinition => ({
+  run: async (event, step): Promise<void> => {
+    const params: RollbackParams = rollbackParamsSchema.parse(event.payload);
     const { rolloutId, clientId } = params;
     const held: HeldClient = { clientId, runId: event.instanceId };
-    const db = adminDatabase(this.env.DB);
+    const db = adminDatabase(env.DB);
     try {
       const back = await step.do(
         "plan",
         quickStep,
         guarded(async () => await check(db, rolloutId, clientId))
       );
+      // oxlint-disable no-await-in-loop -- one check, then one wait, in turn
+      for (let checkNumber = 0; ; checkNumber += 1) {
+        const settled = await step.do(
+          `settle ${checkNumber}`,
+          quickStep,
+          guarded(async () => await sendsDone(env, params, clientId, back))
+        );
+        if (settled) {
+          break;
+        }
+        await step.sleep(
+          `settle ${checkNumber} wait`,
+          `${Math.min(2 ** checkNumber, settleWaitCapSeconds)} seconds`
+        );
+      }
+      // oxlint-enable no-await-in-loop
       await step.do(
         "run",
         deployStepConfig,
-        guarded(async () => {
-          await runBack(this.env, params, held, back);
+        guarded(async ({ attempt, idempotencyKey }) => {
+          // Finished by this rollback already: an earlier try completed its
+          // operation, giving the claim back as an operation does, and its
+          // result was lost before the engine kept it.
+          const finished = await db
+            .select({
+              status: clientProvisions.status,
+              runId: clientProvisions.runId,
+            })
+            .from(clientProvisions)
+            .where(eq(clientProvisions.clientId, clientId))
+            .get();
+          if (finished?.status === "done" && finished.runId === held.runId) {
+            return;
+          }
+          // This attempt alone holds the client: one that timed out goes
+          // on beside its retry, and is refused once the retry takes it.
+          const attempted = { ...held, attempt, attemptKey: idempotencyKey };
+          if (!(await takeAttempt(db, attempted))) {
+            throw stop(
+              "runner_replaced",
+              `${held.runId} no longer holds ${clientId} for attempt ${attempt}`
+            );
+          }
+          await runBack(env, params, attempted, back);
         })
       );
       await step.do(
@@ -617,7 +720,7 @@ export class RollbackClient extends WorkflowEntrypoint<Env, RollbackParams> {
         "end the rollout's run",
         quickStep,
         guarded(async () => {
-          await endIdleRollout(this.env, rolloutId);
+          await endIdleRollout(env, rolloutId);
         })
       );
       // In the client's own Activity too, as the platform update it is:
@@ -627,11 +730,11 @@ export class RollbackClient extends WorkflowEntrypoint<Env, RollbackParams> {
         await tellCore(
           {
             db,
-            secrets: async () => await activityKeys(this.env),
+            secrets: async () => await activityKeys(env),
             router: {
-              hosts: this.env.ROUTER_HOSTS,
-              domain: clientDomain(this.env),
-              dispatcher: this.env.DISPATCHER,
+              hosts: env.ROUTER_HOSTS,
+              domain: clientDomain(env),
+              dispatcher: env.DISPATCHER,
             },
           },
           clientId,
@@ -645,17 +748,14 @@ export class RollbackClient extends WorkflowEntrypoint<Env, RollbackParams> {
         );
       });
     } catch (error) {
-      if (isEngineAbort(error)) {
-        throw error;
-      }
       await step.do("release", quickStep, async () => {
         log.warn("rollback.stopped", { clientId, error: stopReason(error) });
         await releaseQuietly(db, clientId, held.runId);
       });
       throw error;
     }
-  }
-}
+  },
+});
 
 /** A client's rollback in a ring's: started, or why it was refused. */
 export interface RingRollback {
@@ -716,7 +816,9 @@ const failedRuns: ReadonlySet<string> = new Set(["errored", "terminated"]);
  * still going after that isn't failed, and the page shows it as it is.
  */
 const rollbackFailed = async (env: Env, runId: string): Promise<boolean> => {
-  const instance = await env.ROLLBACK_CLIENT.get(runId);
+  const instance = await adminWorkflow(env, adminWorkflows.rollbackClient).get(
+    runId
+  );
   for (let waited = 0; waited < rollbackWaitMs; waited += rollbackPollMs) {
     // oxlint-disable-next-line no-await-in-loop -- polled until it ends
     const { status } = await instance.status();

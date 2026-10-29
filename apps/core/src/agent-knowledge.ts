@@ -1,3 +1,5 @@
+import { d1BrainStore } from "@grasp-os/brain/recall-store";
+import type { PinnedVersion } from "@grasp-os/brain/recall-store";
 import { search } from "@grasp-os/brain/search";
 import { follow, read } from "@grasp-os/brain/tools";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
@@ -27,6 +29,7 @@ import {
   requireOpenRun,
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
+import { brainDocumentRead } from "./history-access.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { catalog } from "./knowledge/catalog.ts";
@@ -93,10 +96,15 @@ export class KnowledgeApi
   /**
    * Hands over what a read returned once the chat has recorded its sources
    * and the documents it hands over (`given`), which its answers may cite.
+   * Of those, the versions whose text it hands over (`pinned`) are kept
+   * with the run too (`brainDocumentRead`, history-access.ts), so its
+   * result is withheld from the model once one is erased, moved or purged,
+   * though its collection may still be read.
    */
   async #recorded<T extends { provenance: Provenance }>(
     result: T,
-    given: readonly string[]
+    given: readonly string[],
+    pinned: readonly PinnedVersion[] = []
   ): Promise<T> {
     await recordSources(
       this.env,
@@ -104,6 +112,13 @@ export class KnowledgeApi
       result.provenance.collectionIds,
       given
     );
+    if (pinned.length > 0) {
+      await recordRunReads(
+        this.env,
+        this.ctx.props,
+        pinned.map((pin) => brainDocumentRead(pin))
+      );
+    }
     return result;
   }
 
@@ -150,13 +165,18 @@ export class KnowledgeApi
       "knowledge.search",
       (found) => ({ hits: found.hits.length }),
       async () => {
-        const found = await this.#asAgent(
-          async (reader) =>
-            await search(brainOf(this.env), reader, query, options)
-        );
+        const { found, pins } = await this.#asAgent(async (reader) => {
+          const brain = brainOf(this.env);
+          const results = await search(brain, reader, query, options);
+          return {
+            found: results,
+            pins: await d1BrainStore(brain).pinsOf(reader, results.hits),
+          };
+        });
         return await this.#recorded(
           found,
-          found.hits.map(({ documentId }) => documentId)
+          found.hits.map(({ documentId }) => documentId),
+          pins
         );
       }
     );
@@ -167,11 +187,21 @@ export class KnowledgeApi
       "knowledge.read",
       (document) => ({ document: document.id }),
       async () => {
-        const document = await this.#asAgent(
-          async (reader) =>
-            await read(brainOf(this.env), reader, documentId, options)
-        );
-        return await this.#recorded(document, [document.id]);
+        const { document, pins } = await this.#asAgent(async (reader) => {
+          const brain = brainOf(this.env);
+          const done = await read(brain, reader, documentId, options);
+          return {
+            document: done,
+            pins: await d1BrainStore(brain).pinsOf(reader, [
+              {
+                documentId: done.id,
+                collectionId: done.collectionId,
+                version: done.section?.version ?? done.currentVersion,
+              },
+            ]),
+          };
+        });
+        return await this.#recorded(document, [document.id], pins);
       }
     );
   }
