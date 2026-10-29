@@ -9,11 +9,12 @@ import {
   workflowStageSetSchema,
 } from "@grasp-os/shared/workflow-lifecycle";
 import type {
+  WorkflowGoLiveWaiting,
   WorkflowLifecycle,
   WorkflowStage,
 } from "@grasp-os/shared/workflow-lifecycle";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { z } from "zod";
 
@@ -22,6 +23,7 @@ import type { Acting } from "./auth/identity.ts";
 import {
   workflowResourceDrafts,
   workflowResourceLifecycles,
+  workflowResources,
 } from "./db/core/schema.ts";
 import { requireNotStaff } from "./sharing.ts";
 import {
@@ -509,5 +511,60 @@ export const decideGoLive = async (
       previous: row.liveVersion,
       requestedBy: row.goLiveRequestedBy,
     }
+  );
+};
+
+/**
+ * Every version waiting to go live that `by` may decide, oldest request
+ * first: as `decides` has it, on the workflows they own, or every one for
+ * the organization's admins, never Grasp staff, and never one they asked
+ * for themselves. For the waiting feed (waiting-rpc.ts).
+ */
+export const goLivesWaiting = async (
+  env: Env,
+  by: Acting
+): Promise<WorkflowGoLiveWaiting[]> => {
+  if (by.staff) {
+    return [];
+  }
+  const lifecycles = workflowResourceLifecycles;
+  const rows = await drizzle(env.DB)
+    .select({
+      workflowId: workflowResources.id,
+      name: workflowResources.name,
+      owner: workflowResources.ownerId,
+      version: lifecycles.goLiveVersion,
+      requestedBy: lifecycles.goLiveRequestedBy,
+      requestedAt: lifecycles.goLiveRequestedAt,
+      revision: lifecycles.revision,
+    })
+    .from(lifecycles)
+    .innerJoin(
+      workflowResources,
+      eq(workflowResources.id, lifecycles.workflowResourceId)
+    )
+    .where(
+      and(
+        isNull(workflowResources.deletedAt),
+        isNotNull(lifecycles.goLiveVersion),
+        ne(lifecycles.goLiveRequestedBy, by.userId),
+        isAdmin(by.role) ? undefined : eq(workflowResources.ownerId, by.userId)
+      )
+    )
+    .orderBy(asc(lifecycles.goLiveRequestedAt), asc(workflowResources.id));
+  return rows.flatMap((row): WorkflowGoLiveWaiting[] =>
+    row.version === null || row.requestedBy === null || row.requestedAt === null
+      ? []
+      : [
+          {
+            workflowId: row.workflowId,
+            name: row.name,
+            version: row.version,
+            requestedBy: row.requestedBy,
+            requestedAt: row.requestedAt.toISOString(),
+            revision: row.revision,
+            asOwner: row.owner === by.userId,
+          },
+        ]
   );
 };

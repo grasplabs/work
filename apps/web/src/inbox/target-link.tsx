@@ -20,6 +20,15 @@ export const TargetLink = ({
       />
     );
   }
+  if (destination.kind === "independentWorkflow") {
+    return (
+      <Link
+        params={{ workflow: destination.workflow }}
+        to="/workflows/$workflow"
+        {...props}
+      />
+    );
+  }
   if (destination.kind === "engine") {
     return (
       <Link
