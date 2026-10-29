@@ -62,13 +62,26 @@ const rewrittenSetup = (
     : JSON.stringify(after);
 };
 
+/**
+ * The texts of Stephen's setup a purge looks in: exactly those it rewrites
+ * (`rewrittenSetup`), its lines, never his language codes; every string of
+ * one that no longer reads as a setup. So a count never finds left what a
+ * rewrite would never take out.
+ */
+const setupTexts = (stored: string): string[] => {
+  const parsed = stephenSetupSchema.safeParse(jsonOf(stored));
+  return parsed.success
+    ? [...parsed.data.limits, ...parsed.data.terms]
+    : storedTexts(stored);
+};
+
 /** Every text a purge looks in of `said` (the store's `staffTextsSaid`). */
 const textsOf = (said: {
   notes: readonly { text: string }[];
   setup: string | null;
 }): string[] => [
   ...said.notes.map(({ text }) => text),
-  ...(said.setup === null ? [] : storedTexts(said.setup)),
+  ...(said.setup === null ? [] : setupTexts(said.setup)),
 ];
 
 /** Staff's notes and Stephen's setup, as a purge of terms reaches them. */
@@ -81,7 +94,7 @@ export const staffTextErasure = (
       const said = await store.staffTextsSaid();
       return (
         said.notes.filter(({ text }) => holds(text)).length +
-        (said.setup !== null && storedTexts(said.setup).some(holds) ? 1 : 0)
+        (said.setup !== null && setupTexts(said.setup).some(holds) ? 1 : 0)
       );
     },
     rewrite: async (by, rewrite) => {

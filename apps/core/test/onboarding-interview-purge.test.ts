@@ -16,6 +16,7 @@ import {
   interviewErasure,
 } from "../src/onboarding/interview-erasure.ts";
 import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
+import { staffTextErasure } from "../src/onboarding/staff-text-erasure.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { keepLine, keptLine } from "../src/speech-cache.ts";
 import type { SpokenKey } from "../src/speech-cache.ts";
@@ -568,6 +569,26 @@ describe("a purge of terms in staff's own text", () => {
       purged: true,
       auditHolds: false,
     });
+  });
+
+  it("counts in Stephen's setup only the lines a purge rewrites, never his language codes", async () => {
+    const store = onboardingStore(env);
+    await store.saveStephen(
+      {
+        languages: ["nl"],
+        limits: ["De plannen van de directie"],
+        terms: ["Salesforce"],
+      },
+      { type: "system" }
+    );
+    const erasure = staffTextErasure(env);
+
+    expect({
+      // A term spelled as a language code: the setup holds it nowhere a
+      // purge rewrites, so nothing is left of it there.
+      code: await erasure.count((text) => text === "nl"),
+      line: await erasure.count((text) => text === "Salesforce"),
+    }).toStrictEqual({ code: 0, line: 1 });
   });
 
   it("leaves staff's text alone when a purge names a document but none of its terms are in it", async () => {
