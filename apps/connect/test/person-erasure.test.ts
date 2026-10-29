@@ -205,7 +205,7 @@ describe("erasing a person in connect", () => {
     });
   });
 
-  it("refuses, leaving the connection and its tokens, while its provider won't revoke the grant, and finishes once it does", async () => {
+  it("refuses while its provider won't revoke the grant, the connection stopped but its sealed tokens kept, and finishes once it does", async () => {
     const person = someone();
     const { connectionId, refreshToken } = await liveConnection(person);
     const revokeAt = `https://${sampleOAuthAuthHost}/oauth/revoke`;
@@ -233,9 +233,45 @@ describe("erasing a person in connect", () => {
       revoked: apps.holds(refreshToken),
     }).toStrictEqual({
       refused: "connection.erase_pending",
-      meanwhile: { status: "active", named: true, tokens: 1, calls: [] },
+      meanwhile: { status: "disconnected", named: true, tokens: 1, calls: [] },
       finished: { connections: 1 },
       revoked: false,
+    });
+  });
+
+  it("revokes a grant whose revoke failed when they were removed, with the token kept since", async () => {
+    const person = someone();
+    const { connectionId, refreshToken } = await liveConnection(person);
+    const revokeAt = `https://${sampleOAuthAuthHost}/oauth/revoke`;
+    const through =
+      vi.mocked(globalThis.fetch).getMockImplementation() ?? globalThis.fetch;
+    let providerDown = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const { url } = new Request(input, init);
+      return providerDown && url.startsWith(revokeAt)
+        ? new Response("Down", { status: 503 })
+        : await through(input, init);
+    });
+    // Removed while the provider was down.
+    await exports.default.disconnectPersonal({
+      person: null,
+      ownerUserIds: [person.userId],
+    });
+    const removed = apps.holds(refreshToken);
+    providerDown = false;
+
+    const finished = await erase(person);
+
+    expect({
+      removed,
+      finished,
+      revoked: !apps.holds(refreshToken),
+      kept: await keptOf(connectionId),
+    }).toStrictEqual({
+      removed: true,
+      finished: { connections: 1 },
+      revoked: true,
+      kept: { status: "disconnected", named: false, tokens: 0, calls: [] },
     });
   });
 

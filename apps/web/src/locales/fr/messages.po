@@ -6030,6 +6030,10 @@ msgstr "Lacunes"
 msgid "Gave consent for a connection"
 msgstr "A donné son consentement pour une connexion"
 
+#: src/activity/audit-words.ts
+msgid "Gave up revoking a disconnected account's access at its provider"
+msgstr "A renoncé à révoquer l’accès d’un compte déconnecté chez son fournisseur"
+
 #: src/onboarding/interview-words.ts
 msgid "Gets its links once the team is told"
 msgstr "Reçoit ses liens une fois l’équipe informée"
@@ -7307,6 +7311,10 @@ msgstr "Échoue sans cesse"
 msgctxt "a proposed rule an admin kept"
 msgid "Kept"
 msgstr "Conservée"
+
+#: src/activity/audit-words.ts
+msgid "Kept access at the provider for an account connected again"
+msgstr "A conservé l’accès chez le fournisseur pour un compte reconnecté"
 
 #: src/activity/audit-words.ts
 msgid "Kept something the chat can no longer read from the model"
@@ -11223,6 +11231,10 @@ msgstr "Révoquer les paquets de {domain}"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "Révoquer les paquets de {domain} ?"
+
+#: src/activity/audit-words.ts
+msgid "Revoked a disconnected account's access at its provider"
+msgstr "A révoqué l’accès d’un compte déconnecté chez son fournisseur"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"

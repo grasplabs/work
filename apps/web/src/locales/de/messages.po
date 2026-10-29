@@ -6030,6 +6030,10 @@ msgstr "Lücken"
 msgid "Gave consent for a connection"
 msgstr "Einer Verbindung zugestimmt"
 
+#: src/activity/audit-words.ts
+msgid "Gave up revoking a disconnected account's access at its provider"
+msgstr "Den Widerruf des Zugriffs eines getrennten Kontos bei seinem Anbieter aufgegeben"
+
 #: src/onboarding/interview-words.ts
 msgid "Gets its links once the team is told"
 msgstr "Bekommt seine Links, sobald das Team informiert ist"
@@ -7307,6 +7311,10 @@ msgstr "Schlägt immer wieder fehl"
 msgctxt "a proposed rule an admin kept"
 msgid "Kept"
 msgstr "Übernommen"
+
+#: src/activity/audit-words.ts
+msgid "Kept access at the provider for an account connected again"
+msgstr "Den Zugriff beim Anbieter für ein erneut verbundenes Konto behalten"
 
 #: src/activity/audit-words.ts
 msgid "Kept something the chat can no longer read from the model"
@@ -11223,6 +11231,10 @@ msgstr "Pakete für {domain} widerrufen"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "Pakete für {domain} widerrufen?"
+
+#: src/activity/audit-words.ts
+msgid "Revoked a disconnected account's access at its provider"
+msgstr "Den Zugriff eines getrennten Kontos bei seinem Anbieter widerrufen"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
