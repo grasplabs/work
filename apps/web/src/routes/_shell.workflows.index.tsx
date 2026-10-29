@@ -15,6 +15,10 @@ import {
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
@@ -30,6 +34,7 @@ import { IndependentWorkflows } from "../workflows/independent-workflows.tsx";
 import { needsAttention } from "../workflows/lists.ts";
 import { listRuns, listWorkflows, openableApps } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
+import { TodayLanes } from "../workflows/today-lanes.tsx";
 import {
   WorkflowsOverview,
   WorkflowsTable,
@@ -45,6 +50,8 @@ import {
 
 interface WorkflowsSearch {
   tab?: "needs" | "runs";
+  /** On the Runs tab: the day's lanes, rather than the log. */
+  view?: "today";
   app?: string;
   workflow?: string;
   status?: RunFilterStatus;
@@ -217,6 +224,42 @@ const Independent = ({
     <NotLoadedState page={page} />
   );
 
+/** Today's lanes, or the log of every run, on the Runs tab. */
+const RunsView = () => {
+  const { t } = useLingui();
+  const search = Route.useSearch();
+  const navigate = useNavigate({ from: "/workflows/" });
+  return (
+    <ToggleGroup
+      aria-label={t`What to show of the runs`}
+      onValueChange={(value: unknown[]) => {
+        const [next] = value;
+        if (next === "today" || next === "log") {
+          void navigate({
+            // The log's filters are its own: Today takes none.
+            search:
+              next === "today"
+                ? { tab: "runs", view: "today" }
+                : { tab: "runs" },
+          });
+        }
+      }}
+      value={[search.view ?? "log"]}
+      variant="outline"
+    >
+      <ToggleGroupItem value="today">
+        {t({
+          message: "Today",
+          context: "the workflows' runs of today, laid out in time",
+        })}
+      </ToggleGroupItem>
+      <ToggleGroupItem value="log">
+        {t({ message: "All runs", context: "the log of every run" })}
+      </ToggleGroupItem>
+    </ToggleGroup>
+  );
+};
+
 /** The address of a tab: the lists take no filters. */
 const tabSearch = (tab: string): WorkflowsSearch => {
   if (tab === "runs" || tab === "needs") {
@@ -303,6 +346,18 @@ const Workflows = () => {
             ) : null}
           </TabsContent>
           <TabsContent value="runs">
+            <div className="mt-4">
+              <RunsView />
+            </div>
+            {page.tab === "today" ? (
+              <div className="mt-4 flex flex-col gap-4">
+                {page.today.state === "ready" ? (
+                  <TodayLanes today={page.today.data} />
+                ) : (
+                  <NotLoadedState page={page.today} />
+                )}
+              </div>
+            ) : null}
             {page.tab === "runs" ? (
               <div className="mt-4 flex flex-col gap-4">
                 <RunFilters
@@ -344,14 +399,26 @@ export const Route = createFileRoute("/_shell/workflows/")({
       ? { workflow: search.workflow }
       : {}),
     ...(isStatus(search.status) ? { status: search.status } : {}),
+    ...(search.tab === "runs" && search.view === "today"
+      ? { view: "today" as const }
+      : {}),
   }),
   loaderDeps: ({ search }) => search,
   // Each tab reads only what it shows, and each read says on its own why
   // it failed.
   loader: async ({
     context: { core },
-    deps: { tab, app, workflow, status },
+    deps: { tab, app, workflow, status, view },
   }) => {
+    if (tab === "runs" && view === "today") {
+      return {
+        tab: "today" as const,
+        today: await loadFromCore(
+          core,
+          async (session) => await session.workflows.today()
+        ),
+      };
+    }
     if (tab !== "runs") {
       const [workflows, independent] = await Promise.all([
         loadFromCore(core, listWorkflows),

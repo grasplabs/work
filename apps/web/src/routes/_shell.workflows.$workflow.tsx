@@ -47,6 +47,8 @@ import { ActivityBar } from "../workflows/activity-bar.tsx";
 import type { Names } from "../workflows/activity-bar.tsx";
 import { AskStephen } from "../workflows/ask-stephen.tsx";
 import { DefinitionEditor } from "../workflows/definition-editor.tsx";
+import { DiagramOverview } from "../workflows/diagram-overview.tsx";
+import { partsOf } from "../workflows/diagram-parts.ts";
 import { FilesAndApps } from "../workflows/files-and-apps.tsx";
 import { ResourceParams } from "../workflows/resource-params.tsx";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
@@ -267,12 +269,55 @@ const WorkflowHeader = ({
 
 /** The tabs of a workflow's page. */
 type WorkflowTab =
+  | "overview"
   | "definition"
   | "traces"
   | "runs"
   | "files"
   | "parameters"
   | "versions";
+
+/** The tabs of a workflow's page, as the reader has them. */
+const WorkflowTabs = ({
+  overview,
+  definition,
+  builder,
+}: {
+  overview: boolean;
+  definition: boolean;
+  builder: boolean;
+}) => (
+  <TabsList variant="line">
+    {overview ? (
+      <TabsTrigger value="overview">
+        <Trans context="tab of a workflow">Overview</Trans>
+      </TabsTrigger>
+    ) : null}
+    {definition ? (
+      <TabsTrigger value="definition">
+        <Trans context="tab of a workflow">Definition</Trans>
+      </TabsTrigger>
+    ) : null}
+    {builder ? (
+      <TabsTrigger value="traces">
+        <Trans context="tab of a workflow">Traces</Trans>
+      </TabsTrigger>
+    ) : (
+      <TabsTrigger value="runs">
+        <Trans context="tab listing the runs of workflows">Runs</Trans>
+      </TabsTrigger>
+    )}
+    <TabsTrigger value="files">
+      <Trans context="tab of a workflow">Files and apps</Trans>
+    </TabsTrigger>
+    <TabsTrigger value="parameters">
+      <Trans context="tab of a workflow">Parameters</Trans>
+    </TabsTrigger>
+    <TabsTrigger value="versions">
+      <Trans context="tab of a workflow">Versions</Trans>
+    </TabsTrigger>
+  </TabsList>
+);
 
 const WorkflowResourceView = ({
   resource,
@@ -313,6 +358,11 @@ const WorkflowResourceView = ({
   const saved =
     draft?.state === "ready" ? (draft.data.checkpoint?.revision ?? 0) : 0;
   const checkpoint = saved > 0 ? saved : null;
+  // Its named parts, as its builders' drawing has them: an Overview of
+  // them only for a workflow drawn in parts.
+  const drawing =
+    draft?.state === "ready" ? draft.data.checkpoint?.diagram : undefined;
+  const parts = drawing === undefined ? [] : partsOf(drawing);
   return (
     <>
       <Tabs
@@ -329,32 +379,30 @@ const WorkflowResourceView = ({
             me={names.me}
             resource={resource}
           />
-          <TabsList variant="line">
-            {draft === undefined ? null : (
-              <TabsTrigger value="definition">
-                <Trans context="tab of a workflow">Definition</Trans>
-              </TabsTrigger>
-            )}
-            {builder ? (
-              <TabsTrigger value="traces">
-                <Trans context="tab of a workflow">Traces</Trans>
-              </TabsTrigger>
-            ) : (
-              <TabsTrigger value="runs">
-                <Trans context="tab listing the runs of workflows">Runs</Trans>
-              </TabsTrigger>
-            )}
-            <TabsTrigger value="files">
-              <Trans context="tab of a workflow">Files and apps</Trans>
-            </TabsTrigger>
-            <TabsTrigger value="parameters">
-              <Trans context="tab of a workflow">Parameters</Trans>
-            </TabsTrigger>
-            <TabsTrigger value="versions">
-              <Trans context="tab of a workflow">Versions</Trans>
-            </TabsTrigger>
-          </TabsList>
+          <WorkflowTabs
+            builder={builder}
+            definition={draft !== undefined}
+            overview={parts.length > 0}
+          />
         </div>
+        {parts.length === 0 ? null : (
+          <TabsContent value="overview">
+            <div className="mx-auto w-full max-w-6xl px-6 pt-8 pb-8">
+              <DiagramOverview
+                onShow={({ n }) => {
+                  setTab("definition");
+                  // Once the drawing shows again: its frame, in view.
+                  requestAnimationFrame(() => {
+                    document
+                      .querySelector(`#workflow-part-${n}`)
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  });
+                }}
+                parts={parts}
+              />
+            </div>
+          </TabsContent>
+        )}
         {draft === undefined ? null : (
           // Kept while another tab shows: what was typed stays.
           <TabsContent keepMounted value="definition">
