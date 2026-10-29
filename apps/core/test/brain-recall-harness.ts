@@ -305,9 +305,13 @@ const lagsOf = async (
     if (marker !== undefined) {
       for (const arm of arms) {
         const first = performance.now();
+        // Lag runs from the first ask's start, not from `first`: the clock
+        // may tick between the two, and an arm the first ask finds lags 0.
+        let firstAsk: number | undefined;
         let lagMs: number | null = null;
         while (lagMs === null && performance.now() - first < lagLimitMs) {
           const asking = performance.now();
+          firstAsk ??= asking;
           // oxlint-disable-next-line no-await-in-loop -- asked until found
           const { texts } = await askedOf(
             arm,
@@ -315,7 +319,7 @@ const lagsOf = async (
             recallCase
           );
           if (texts.some((text) => text.includes(marker))) {
-            lagMs = asking - first;
+            lagMs = asking - firstAsk;
           } else {
             // oxlint-disable-next-line no-await-in-loop -- a pause before asking again
             await scheduler.wait(lagPollMs);
