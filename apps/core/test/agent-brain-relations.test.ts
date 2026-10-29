@@ -66,7 +66,7 @@ const linkedHandbook = async (
 /** A chat's code that lists `query`'s entities and reads the first's relations. */
 const readRelations = (query: string) =>
   codeStep(
-    `export default async (self, env) => { try { const [found] = await env.brain.entities({ query: ${JSON.stringify(query)} }); return await env.brain.relations({ entityId: found.id }); } catch (error) { return error.message; } };`
+    `export default async (self, env) => { try { const { entities: [found] } = await env.brain.entities({ query: ${JSON.stringify(query)} }); return await env.brain.relations({ entityId: found.id }); } catch (error) { return error.message; } };`
   );
 
 /** A chat's code that lists every entity, naming no start. */

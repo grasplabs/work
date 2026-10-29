@@ -753,9 +753,38 @@ export const entitySummarySchema = z.strictObject({
 });
 export type EntitySummary = z.infer<typeof entitySummarySchema>;
 
+/**
+ * The most document versions one entity or relation read hands a caller
+ * that isn't a person (an App's run, a chat's agent): each is pinned as
+ * evidence, and a run keeps at most 1000 (core's `runEvidenceMaxRows`), so
+ * a read cites about what a recall does and a run can make many. A read
+ * past it answers from the newest sources up to it, and says `truncated`.
+ */
+export const delegateCitesMax = 25;
+
+/**
+ * What `entities.list` answers a caller that isn't a person: the entities
+ * of its newest readable mentions, from at most `delegateCitesMax` source
+ * versions, and whether more were left out (`truncated`).
+ */
+export interface EntitiesAnswer {
+  entities: EntitySummary[];
+  truncated: boolean;
+}
+
 /** The readable sources that mention one entity. */
 export const entitySourcesInputSchema = z.strictObject({ entityId: idSchema });
 export type EntitySourcesInput = z.input<typeof entitySourcesInputSchema>;
+
+/**
+ * What `entities.sources` answers a caller that isn't a person: the newest
+ * readable sources that mention the entity, at most `delegateCitesMax`,
+ * and whether more were left out (`truncated`).
+ */
+export interface EntitySourcesAnswer {
+  sources: BrainSourceRef[];
+  truncated: boolean;
+}
 
 /**
  * The relations of one entity, as a subject or an object: those that hold
