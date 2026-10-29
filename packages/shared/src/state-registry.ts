@@ -764,6 +764,12 @@ const onboarding: DurableObjectState = {
       "Holds no link secret: a link is filled in only as its mail is sent."
     ),
   },
+  kv: {
+    purges: exported(
+      `${core}onboarding/store.ts`,
+      "How often a content purge reached or rewrote the onboarding: a kickoff read, or a drawing drawn, before one keeps nothing."
+    ),
+  },
 };
 
 const modelLedger: DurableObjectState = {
