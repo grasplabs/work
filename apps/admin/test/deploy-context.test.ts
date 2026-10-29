@@ -22,7 +22,7 @@ const answering = (error: Error): Env => ({
 // that doesn't have one yet never stops every client's deploy.
 
 describe("a deploy's shared secrets", () => {
-  useStoreSecrets({ deployer: "deployer-token", tenant: "tenant-token" });
+  useStoreSecrets({ deployer: "deployer-token" });
 
   it("give connect no app OAuth clients while the store has none, and stop on any other one missing", async () => {
     await emptyStoreSecret(env.APP_OAUTH_CLIENTS, "APP_OAUTH_CLIENTS");

@@ -21,10 +21,8 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { Link, useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
-import { Cost, usd } from "../clients/cost.tsx";
 import { formatTime } from "../releases/format.ts";
 import type { RingChecks } from "../rollout/control.ts";
-import type { RolloutCost } from "../rollout/cost.ts";
 import {
   approveRolloutFn,
   cancelRolloutFn,
@@ -266,7 +264,7 @@ const keepReason = (check: RevocationCheck, name: string): string | null => {
 const checkLines = (check: RevocationCheck): string[] => [
   ...(check.rotated.length === 0
     ? [
-        "Secrets Store held what the clients this rollout reached already ran: it hasn't changed, so deploy-ops may not have run, and there's nothing to revoke yet.",
+        "Secrets Store held what the clients this rollout reached already ran: it hasn't changed, so Deploy platform may not have copied a new value in, and there's nothing to revoke yet.",
       ]
     : []),
   ...(check.revocable.length === 0
@@ -390,60 +388,20 @@ export const Revocation = ({ rolloutId }: { rolloutId: string }) => {
   );
 };
 
-/**
- * The rollout's clients' cost: read (`RolloutCost`), still being read
- * (null), or not read (`failed`).
- */
-export type CostRead = RolloutCost | "failed" | null;
-
-/** The clients' total cost, in words: all of it, its AI share, and how many aren't in it. */
-export const totalCostWords = (cost: CostRead): string => {
-  if (cost === null) {
-    return "reading…";
-  }
-  if (cost === "failed") {
-    return "unknown";
-  }
-  const { total, unknown } = cost;
-  const left =
-    unknown === 0
-      ? ""
-      : `, ${unknown} ${unknown === 1 ? "client" : "clients"} unknown`;
-  return `${usd.format(total.workers + total.ai)} (AI ${usd.format(total.ai)}${left})`;
-};
-
-/** Client `clientId`'s cost cell. */
-const TargetCost = ({
-  cost,
-  clientId,
-}: {
-  cost: CostRead;
-  clientId: string;
-}) => {
-  if (cost === null) {
-    return <span className="text-muted-foreground">reading…</span>;
-  }
-  return (
-    <Cost cost={cost === "failed" ? null : (cost.clients[clientId] ?? null)} />
-  );
-};
-
 /** A rollback staff asked for: of one client, or of a ring. */
 type PendingRollback =
   | { clientId: string; ring?: never }
   | { ring: number; clientId?: never };
 
-/** One company in the rollout: where it stands, why, its cost, and its rollback. */
+/** One company in the rollout: where it stands, why, and its rollback. */
 const TargetRow = ({
   target,
   name,
-  cost,
   busy,
   onRollBack,
 }: {
   target: TargetView;
   name: string;
-  cost: CostRead;
   busy: boolean;
   onRollBack: () => void;
 }) => (
@@ -481,9 +439,6 @@ const TargetRow = ({
         {formatTime(target.updatedAt)}
       </span>
     </TableCell>
-    <TableCell className="hidden @xl:table-cell" variant="card">
-      <TargetCost clientId={target.clientId} cost={cost} />
-    </TableCell>
     <TableCell className="text-right" variant="card">
       {reached.has(target.status) ? (
         <Button
@@ -505,11 +460,9 @@ const TargetRow = ({
  */
 export const Targets = ({
   rollout,
-  cost,
   names,
 }: {
   rollout: RolloutView;
-  cost: CostRead;
   names: ReadonlyMap<string, string>;
 }) => {
   const { busy, failure, act } = useControl();
@@ -631,12 +584,6 @@ export const Targets = ({
                   >
                     Updated (UTC)
                   </TableHead>
-                  <TableHead
-                    className="hidden w-32 @xl:table-cell"
-                    variant="card"
-                  >
-                    Cost this month
-                  </TableHead>
                   <TableHead className="w-28" variant="card">
                     <span className="sr-only">Actions</span>
                   </TableHead>
@@ -646,7 +593,6 @@ export const Targets = ({
                 {targets.map((target) => (
                   <TargetRow
                     busy={busy}
-                    cost={cost}
                     key={target.clientId}
                     name={names.get(target.clientId) ?? target.clientId}
                     onRollBack={() => {

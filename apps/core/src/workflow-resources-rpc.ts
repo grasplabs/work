@@ -44,6 +44,7 @@ import {
   publishWorkflowDraft,
   workflowDraft,
 } from "./workflow-drafts.ts";
+import { WorkflowLifecycleRpc } from "./workflow-lifecycle-rpc.ts";
 import {
   workflowActivity,
   workflowFiles,
@@ -93,11 +94,17 @@ export class WorkflowResourcesRpc
 {
   readonly #env: Env;
   readonly #check: SessionCheck;
+  readonly #lifecycle: WorkflowLifecycleRpc;
 
   constructor(env: Env, check: SessionCheck) {
     super();
     this.#env = env;
     this.#check = check;
+    this.#lifecycle = new WorkflowLifecycleRpc(env, check);
+  }
+
+  get lifecycle(): WorkflowLifecycleRpc {
+    return this.#lifecycle;
   }
 
   async create(name: string): Promise<WorkflowResource> {
