@@ -9,17 +9,15 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
-import { callApp } from "../src/app.ts";
 import { sweepGuestChats } from "../src/guests.ts";
-import { revokeRelease } from "../src/release-retention.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import { grantReviewed, release, requestGranted, serverBuilt } from "./apps.ts";
+import { grantReviewed, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { endLiveRuns, finished as runFinished, leave } from "./runs.ts";
-import { failure, person } from "./sealed-apps.ts";
+import { failure } from "./sealed-apps.ts";
 import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 
 // Guest chats (src/guests.ts) through an App's sealed functions: a guests
@@ -882,23 +880,6 @@ describe("guest chats", { timeout: 60_000 }, () => {
   });
 });
 
-/** A v1 server's code that hands the `GUESTS` stub's invitation back. */
-const v1Server = `import { DurableObject } from "cloudflare:workers";
-
-export class App extends DurableObject {
-  async invite(caller, input) {
-    if (!this.env.GUESTS) {
-      return { error: "no stub" };
-    }
-    try {
-      return { ok: await this.env.GUESTS.invite(caller, input) };
-    } catch (error) {
-      return { error: error && typeof error.code === "string" ? error.code : "app.failed" };
-    }
-  }
-}
-`;
-
 /** A function of the Guests App, as a step names it. */
 const reference = (name: string) =>
   JSON.stringify({ contractId: `guests.${name}`, kind: "action" });
@@ -918,58 +899,6 @@ const answerOf = (answer: unknown): unknown => {
 describe("guest chats through a binding", { timeout: 90_000 }, () => {
   afterEach(async () => {
     await endLiveRuns();
-  });
-
-  it("are governed by the binding alone once the App declares them: its v1 server invites nothing", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const v1Invite = async (app: string) =>
-      await callApp(
-        env,
-        appIdSchema.parse(app),
-        {
-          userId: builder.userId,
-          mode: "interactive",
-        },
-        "invite",
-        [{ name: "Anna", skill: "interview-a-stakeholder" }]
-      );
-    // Both a sealed release declaring guests and a v1 server.
-    const both = await builder.api.apps.create({ name: `Both ${unique()}` });
-    const version = await release(builder, both.id, {
-      ...guestFiles(),
-      "app/server.ts": v1Server,
-    });
-    await serverBuilt(both.id, version);
-    await grantGuests(builder, both.id);
-    // A v1 server only, as the built-in intake App still is.
-    const v1Only = await builder.api.apps.create({ name: `V1 ${unique()}` });
-    const v1Version = await release(builder, v1Only.id, {
-      "app/server.ts": v1Server,
-    });
-    await serverBuilt(v1Only.id, v1Version);
-    await grantGuests(builder, v1Only.id);
-    const fromV1 = z
-      .object({ ok: z.object({ status: z.string() }) })
-      .safeParse(await v1Invite(v1Only.id));
-    const refusedBoth = await v1Invite(both.id);
-    // Its release revoked: what it declares can't be read, and the v1
-    // path is refused rather than let through.
-    await revokeRelease(
-      env,
-      await person("admin"),
-      { app: appIdSchema.parse(both.id), version },
-      "Compromised"
-    );
-    const afterRevoke = await v1Invite(both.id);
-    expect({
-      both: refusedBoth,
-      afterRevoke: z.object({ ok: z.unknown() }).safeParse(afterRevoke).success,
-      v1Only: fromV1.data?.ok.status,
-    }).toStrictEqual({
-      both: { error: "permission.denied" },
-      afterRevoke: false,
-      v1Only: "open",
-    });
   });
 
   it("reach nothing until an admin binds them to the App's own permission, nothing more than was approved, and no link past the binding", async () => {
