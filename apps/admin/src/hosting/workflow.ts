@@ -72,33 +72,42 @@ const asOperationStepError = (error: unknown): Error =>
 export const provisionPlacedClientRun = (env: Env): WorkflowDefinition => ({
   run: async (event, step): Promise<void> => {
     const { clientId } = provisionPlacedParamsSchema.parse(event.payload);
-    await step.do("provision", workerflowDeployStep, async ({ attempt }) => {
-      const held = { clientId, runId: event.instanceId, attempt };
-      try {
-        const context = await deployContext(env);
-        const operation = await provisionOf(context.db, clientId);
-        if (operation?.status === "done" && operation.runId === held.runId) {
-          return;
-        }
-        if (!(await takeAttempt(context.db, held))) {
-          throw new ProvisionOperationError(
-            "runner_replaced",
-            `${held.runId} no longer holds ${clientId} for attempt ${attempt}`
-          );
-        }
-        await runClientProvision(
-          {
-            ...context,
-            alert: async (alert) => {
-              await sendStaffAlert(env, alert);
+    await step.do(
+      "provision",
+      workerflowDeployStep,
+      async ({ attempt, idempotencyKey }) => {
+        const held = {
+          clientId,
+          runId: event.instanceId,
+          attempt,
+          attemptKey: idempotencyKey,
+        };
+        try {
+          const context = await deployContext(env);
+          const operation = await provisionOf(context.db, clientId);
+          if (operation?.status === "done" && operation.runId === held.runId) {
+            return;
+          }
+          if (!(await takeAttempt(context.db, held))) {
+            throw new ProvisionOperationError(
+              "runner_replaced",
+              `${held.runId} no longer holds ${clientId} for attempt ${attempt}`
+            );
+          }
+          await runClientProvision(
+            {
+              ...context,
+              alert: async (alert) => {
+                await sendStaffAlert(env, alert);
+              },
             },
-          },
-          held
-        );
-      } catch (error) {
-        throw asOperationStepError(error);
+            held
+          );
+        } catch (error) {
+          throw asOperationStepError(error);
+        }
       }
-    });
+    );
   },
 });
 

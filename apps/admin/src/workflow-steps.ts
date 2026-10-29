@@ -1,10 +1,10 @@
 /**
- * How the admin's Workflows (provisioning, src/hosting/workflow.ts,
- * and rollouts, src/rollout/workflow.ts) run their steps: their retry
- * configs, and how a step fails. A failure a retry can fix is retried;
- * any other stops the run at once (`NonRetryableError`, carrying its
- * code). Either way nothing a step returns or throws carries a token or a
- * response body: Workflows stores both (threat model R17, CO3).
+ * How the admin's runs on Workerflow (src/workflow-runs.ts: provisioning,
+ * applies, rollouts and rollbacks) run their steps: their retry configs,
+ * and how a step fails. A failure a retry can fix is retried; any other
+ * stops the run at once (`NonRetryableError`, carrying its code). Either
+ * way nothing a step returns or throws carries a token or a response body:
+ * a run's journal keeps both (threat model R17, CO3).
  */
 import { NonRetryableError } from "cloudflare:workflows";
 
@@ -22,7 +22,8 @@ export const quickStep = {
 /**
  * A deploy, or a phase of one: uploads, migrations and a smoke check of
  * up to about 80 s. A retry resumes the same deploy, so it's retried less
- * often, and later. For the workflows still on Cloudflare Workflows.
+ * often, and later. For a host whose attempts may run longer than
+ * Workerflow's (`workerflowDeployStep` on Workerflow).
  */
 export const deployStepConfig = {
   retries: { limit: 2, delay: "1 minute", backoff: "exponential" },

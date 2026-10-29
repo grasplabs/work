@@ -52,7 +52,12 @@ import {
   provisionPlacedClient,
   releasePlacedClient,
 } from "../src/hosting/workflow.ts";
-import { claimRun, currentRun, startingMs } from "../src/runners.ts";
+import {
+  claimRun,
+  currentRun,
+  startingMs,
+  takeAttempt,
+} from "../src/runners.ts";
 import type { HeldClient } from "../src/runners.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import { envelope, notFound } from "./cloudflare-api-kit.ts";
@@ -304,6 +309,14 @@ const failing = async (held: HeldClient): Promise<unknown> => {
     errors.mockRestore();
   }
 };
+
+/** A core script's upload, wherever it's put. */
+const isCoreUpload = ({ method, path }: ApiCall): boolean =>
+  method === "PUT" && path.endsWith("-grasp-os-core");
+
+/** The code an operation's failure carries, or what it was. */
+const codeFrom = (outcome: unknown): unknown =>
+  outcome instanceof Error && "code" in outcome ? outcome.code : outcome;
 
 /** The migrations each database in `account` recorded, by database name. */
 const appliedMigrations = async (
@@ -1736,6 +1749,46 @@ describe("provisioning a placed client", () => {
     }).toStrictEqual({ dispatched: 0, routed: false });
   });
 
+  it("builds a retry's Durable Object migrations from what an earlier attempt's upload left, once that upload landed", async () => {
+    const manifest = await importRelease("workers_for_platforms");
+    const { held: claim } = await setUp("workers_for_platforms", manifest);
+    // The first attempt's core upload, carrying core's migration, is held
+    // on its way when the step's retry takes the client.
+    const held = Promise.withResolvers<boolean>();
+    let uploading = false;
+    cloudflare.beforeAnswering(isCoreUpload, async () => {
+      uploading = true;
+      await held.promise;
+    });
+    const step = { attemptKey: "provision-step" };
+    const first = { ...claim, ...step, attempt: 1 };
+    await takeAttempt(db, first);
+    const firstRun = failing(first);
+    await vi.waitUntil(() => uploading, { timeout: 10_000 });
+    const retry = { ...claim, ...step, attempt: 2 };
+    await takeAttempt(db, retry);
+    const retryRun = failing(retry);
+    // A while for the retry to read what core runs, were it to read
+    // before the held upload landed; then that upload lands.
+    await scheduler.wait(1000);
+    held.resolve(true);
+    const [firstOutcome, retryOutcome] = await Promise.all([
+      firstRun,
+      retryRun,
+    ]);
+
+    expect({
+      // The one that timed out is refused once its upload answered.
+      first: codeFrom(firstOutcome),
+      // The retry's upload goes on from the migration that landed, and the
+      // run stops only where it must, at the probe.
+      retry: codeFrom(retryOutcome),
+    }).toStrictEqual({
+      first: "runner_replaced",
+      retry: "probe_unqualified",
+    });
+  });
+
   it("uploads into a Workers for Platforms namespace, and stops at the probe it can't qualify", async () => {
     const manifest = await importRelease("workers_for_platforms");
     const { account, clientId, held } = await setUp(
@@ -1820,9 +1873,7 @@ describe("provisioning a placed client", () => {
     const row = await db
       .select({
         status: clientProvisions.status,
-        sending: sql<
-          number | null
-        >`json_extract(${clientProvisions.progress}, '$.sending')`,
+        sending: clientProvisions.sending,
       })
       .from(clientProvisions)
       .where(eq(clientProvisions.clientId, clientId))
@@ -1832,8 +1883,13 @@ describe("provisioning a placed client", () => {
       outcome,
       aborted: cloudflare.abortedCalls() - abortedBefore,
       status: row?.status,
-      // Marked still: a rollback waits it out (`settledSends`).
-      marked: row?.sending !== null && row?.sending !== undefined,
+      // Marked still: a rollback waits it out (`sendsSettled`).
+      marked:
+        Object.keys(
+          z
+            .record(z.string(), z.unknown())
+            .parse(JSON.parse(row?.sending ?? "{}"))
+        ).length > 0,
     }).toStrictEqual({
       outcome: "TimeoutError",
       aborted: 1,
@@ -2753,6 +2809,14 @@ describe("provisioning a placed client", () => {
     // Core's upload runs its migration, and the answer never arrives.
     cloudflare.failNext(isUpload(core), "lost");
     await failing(await attempt(clientId));
+    // An upload with no answer may still land: its mark keeps the next
+    // attempt from sending until it ages out, as it has by now.
+    await db
+      .update(clientProvisions)
+      .set({
+        sending: sql`(SELECT json_group_object(key, json_set(value, '$.at', 0)) FROM json_each(${clientProvisions.sending}))`,
+      })
+      .where(eq(clientProvisions.clientId, clientId));
     // Resumed: core reads at the migration before, as a stale read would,
     // and the upload stops before it's sent (its module gone from the store).
     const script = account.scripts.get(core);
