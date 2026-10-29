@@ -17,7 +17,7 @@ import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { eq, lte, sql } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -35,6 +35,7 @@ import {
 import { isComposioServerUrl } from "./connections.ts";
 import type { Connection } from "./connections.ts";
 import { composioCleanups, composioFlows, connections } from "./db/schema.ts";
+import { erasureBegan } from "./erased-people.ts";
 
 // Connecting a Composio toolkit: one shared connection per toolkit, scoped
 // to the tools the admin allows. Composio holds its tokens, in its cloud,
@@ -571,20 +572,29 @@ export const startToolkitConnection = async (
         ...namesOf(namedHinted.details, true),
       ],
       [
-        db.delete(composioCleanups).where(thisCleanup),
-        db.insert(composioFlows).values({
-          stateHash,
-          flowId,
-          userId: person.userId,
-          toolkit,
-          authConfigId: authConfig.id,
-          connectedAccountId: link.connected_account_id,
-          tools: storedTools,
-          returnTo,
-          expiresAt: new Date(Date.now() + oauthFlowLifetimeMs),
-        }),
+        // Only for someone whose erasure hasn't begun, both or neither:
+        // a start under way as it began keeps its cleanup row, and the
+        // flow it would have made is never stored (person-erasure.ts).
+        db
+          .delete(composioCleanups)
+          .where(and(thisCleanup, sql`NOT ${erasureBegan(person.userId)}`)),
+        db.insert(composioFlows).select(
+          sql`SELECT ${stateHash}, ${flowId}, ${person.userId}, ${toolkit},
+            ${authConfig.id}, ${link.connected_account_id}, ${storedTools},
+            ${returnTo}, ${Date.now() + oauthFlowLifetimeMs}
+            WHERE NOT ${erasureBegan(person.userId)}`
+        ),
       ]
     );
+    const [kept] = await db
+      .select({ flowId: composioFlows.flowId })
+      .from(composioFlows)
+      .where(eq(composioFlows.stateHash, stateHash));
+    if (kept === undefined) {
+      // Their erasure began as this ran: what it made at Composio goes
+      // now, its cleanup row keeping what can't.
+      throw connectionErrors.create("connection.flow_invalid");
+    }
     return { url: link.redirect_url };
   } catch (error) {
     await carryOutCleanup(env, flowId, made, marker);

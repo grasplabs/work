@@ -1,18 +1,23 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { allEvents } from "./audit-events.ts";
+import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import { acmeTenant } from "./sign-in-config.ts";
 import {
   auditedDuring,
   googlePerson,
   openRpc,
   outcome,
+  routed,
   signIn,
   signedIn,
   signedInApi,
   staffPerson,
 } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // Erasing a person (GRA-903, GRA-1180), from its threat model first. An
 // admin erases someone they removed: their email, sign-ins and personal
@@ -93,6 +98,67 @@ const invitedOf = async (address: string): Promise<number> => {
   return row?.count ?? 0;
 };
 
+/** Connects `person`'s own Microsoft account as a personal connection. */
+const connectOwnAccount = async (person: Person): Promise<string> => {
+  const { url } = await person.api.connections.start({
+    provider: "microsoft",
+    scope: "personal",
+  });
+  const authorization = new URL(url);
+  const query = new URLSearchParams({
+    code: consentCode(authorization, acmeTenant, String(person.person.oid)),
+    state: authorization.searchParams.get("state") ?? "",
+  });
+  await routed(`/api/connections/callback?${query.toString()}`, {
+    headers: { cookie: person.session },
+  });
+  const [connection] = await person.api.connections.list();
+  if (connection === undefined) {
+    throw new Error("Not connected");
+  }
+  return connection.id;
+};
+
+/** What connect keeps of connection `id`, and its tokens and calls. */
+const keptInConnect = async (id: string) => {
+  const db = connectDb();
+  const row = await db
+    .prepare(
+      "SELECT status, account_id AS accountId, account_name AS accountName, account_email AS accountEmail, account_addresses AS addresses, account_senders AS senders FROM connections WHERE id = ?"
+    )
+    .bind(id)
+    .first<Record<string, string | null>>();
+  const count = async (table: string) => {
+    const counted = await db
+      .prepare(`SELECT count(*) AS count FROM ${table} WHERE connection_id = ?`)
+      .bind(id)
+      .first<{ count: number }>();
+    return counted?.count ?? 0;
+  };
+  return {
+    status: row?.status,
+    named: [
+      row?.accountId,
+      row?.accountName,
+      row?.accountEmail,
+      row?.addresses,
+      row?.senders,
+    ].some((value) => value !== null && value !== undefined),
+    tokens: await count("connection_tokens"),
+    calls: await count("idempotent_calls"),
+  };
+};
+
+/** A call through connection `id` for `userId`, as connect keeps it. */
+const madeCall = async (id: string, userId: string): Promise<void> => {
+  await connectDb()
+    .prepare(
+      "INSERT INTO idempotent_calls (subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key, input_hash, state, output, created_at) VALUES ('app', 'app', ?, ?, 'mail.list', ?, 'h', 'done', '{\"subject\":\"Their mail\"}', ?)"
+    )
+    .bind(userId, id, crypto.randomUUID(), Date.now())
+    .run();
+};
+
 /** An admin, and someone else they removed. */
 const removedPerson = async (): Promise<{ admin: Person; person: Person }> => {
   const admin = await signedInApi(idp, "admin");
@@ -140,6 +206,7 @@ describe("erasing a person", () => {
         areas: [
           { area: "identity", state: "complete" },
           { area: "channels", state: "complete" },
+          { area: "connect", state: "complete" },
         ],
       },
       name,
@@ -350,6 +417,7 @@ describe("erasing a person", () => {
         areas: [
           { area: "identity", state: "pending" },
           { area: "channels", state: "complete" },
+          { area: "connect", state: "complete" },
         ],
       },
       // Nothing of the area went: one statement, or none of it.
@@ -360,6 +428,7 @@ describe("erasing a person", () => {
         areas: [
           { area: "identity", state: "complete" },
           { area: "channels", state: "complete" },
+          { area: "connect", state: "complete" },
         ],
       },
       accounts: 0,
@@ -640,5 +709,44 @@ describe("erasing a person", () => {
       channels: after.erasure?.areas.find(({ area }) => area === "channels")
         ?.state,
     }).toStrictEqual({ invitations: [newOwner?.id], channels: "complete" });
+  });
+
+  it("empties their personal connections in connect, revoked at the provider, and leaves everyone else's as they were", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "builder");
+    const other = await signedInApi(idp, "user");
+    const theirs = await connectOwnAccount(person);
+    const others = await connectOwnAccount(other);
+    await madeCall(theirs, person.userId);
+    await madeCall(others, other.userId);
+    const otherBefore = await keptInConnect(others);
+    await admin.api.members.remove(person.userId);
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    // Connect's own events, once core took them from its outbox.
+    const events = await allEvents();
+
+    expect({
+      theirs: await keptInConnect(theirs),
+      others: await keptInConnect(others),
+      otherBefore,
+      erased: events
+        .filter(
+          ({ action, detail }) =>
+            action === "connection.person_erased" &&
+            detail?.ownerUserId === person.userId
+        )
+        .map(({ source, detail }) => ({ source, detail })),
+    }).toStrictEqual({
+      theirs: { status: "disconnected", named: false, tokens: 0, calls: 0 },
+      others: otherBefore,
+      otherBefore: { status: "active", named: true, tokens: 1, calls: 1 },
+      erased: [
+        {
+          source: "connect",
+          detail: { ownerUserId: person.userId, connections: 1 },
+        },
+      ],
+    });
   });
 });
