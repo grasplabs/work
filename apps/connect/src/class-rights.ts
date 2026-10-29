@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { recordEventsIf } from "./audit.ts";
 import { connections, connectionTokens } from "./db/schema.ts";
+import { oweRevoke, revocable } from "./owed-revokes.ts";
 import { classRightsProviders, holdsClassRights } from "./provider-rights.ts";
 
 // Turning a class on (core's tool-classes.ts) reaches the grants already
@@ -15,7 +16,8 @@ import { classRightsProviders, holdsClassRights } from "./provider-rights.ts";
 // in place (`needs_reauth`: the same connection, its permissions standing,
 // once the same account comes back), rather than run calls the provider
 // would refuse. Its tokens go, as for any connection that needs connecting
-// again, and the change is audited.
+// again, and the change is audited; the grant they held is still valid,
+// so it is revoked as owed (src/revocations.ts).
 
 /** Connections asked to connect again per batch: D1 caps a batch's size. */
 const reconnectBatch = 50;
@@ -77,6 +79,19 @@ export const requireClassRights = async (
           from: connections,
           where: stillActive,
           writes: [
+            // Its grant is still valid: revoked as owed, with a copy of
+            // the tokens, so it doesn't stay live with nothing to revoke
+            // it should the person never connect again (GRA-1196).
+            ...(revocable(provider)
+              ? [
+                  oweRevoke(
+                    db,
+                    id,
+                    "needs_reauth",
+                    sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
+                  ),
+                ]
+              : []),
             // Before the status changes: the same condition guards both.
             db
               .delete(connectionTokens)
