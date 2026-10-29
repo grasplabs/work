@@ -1154,6 +1154,13 @@ describe("the Google Workspace connector's calendar writes", () => {
     const marked = events
       .filter(({ action }) => action === "connection.needs_reauth")
       .map(({ detail }) => detail);
+    // Its grant is still valid: revoked as owed, should they not come back
+    // (src/revocations.ts).
+    const owed = await env.DB.prepare(
+      "SELECT reason FROM token_revocations WHERE connection_id = ?"
+    )
+      .bind(id)
+      .all<{ reason: string }>();
     const reconnected = await connectAccount(providers, person, {
       ...ownAccount(person, "google"),
       granted: `${readOnlyCalendar} https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly`,
@@ -1163,6 +1170,7 @@ describe("the Google Workspace connector's calendar writes", () => {
       refused,
       status,
       marked,
+      owed: owed.results.map(({ reason }) => reason),
       sameConnection: reconnected === id,
       again,
       made: google.made().length,
@@ -1170,6 +1178,7 @@ describe("the Google Workspace connector's calendar writes", () => {
       refused: "connect.connection_inactive",
       status: "needs_reauth",
       marked: [{ provider: "google", reason: "scopes_missing" }],
+      owed: ["needs_reauth"],
       sameConnection: true,
       again: "ok",
       made: 1,

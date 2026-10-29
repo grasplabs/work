@@ -51,11 +51,11 @@ import {
   connectionTokens,
   oauthFlows,
   pendingActions,
-  tokenRevocations,
 } from "./db/schema.ts";
 import { erasureBegan, ownerErased } from "./erased-people.ts";
 import { exchangeCode } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
+import { oweRevoke } from "./owed-revokes.ts";
 import { dropPendingActions } from "./pending.ts";
 import { rightsFor } from "./provider-rights.ts";
 import { grantedAsAsked, providerFor } from "./providers.ts";
@@ -66,7 +66,7 @@ import type {
   ProviderAccount,
   ProviderConfig,
 } from "./providers.ts";
-import { firstRevokeRetryMs, revokeAtProvider } from "./revocations.ts";
+import { revokeAtProvider } from "./revocations.ts";
 import { apiKeyExpiresAt, discardMint, firstTokens } from "./tokens.ts";
 import { resealBatchSize, vaultFor } from "./vault.ts";
 import type { Vault } from "./vault.ts";
@@ -1027,8 +1027,8 @@ export const organizationConnections = async (
  * Stops `connection`: revokes the grant where the provider can, then
  * marks it disconnected and deletes the tokens, in one write with its
  * event, then drops the actions held for it, which can no longer run. A
- * revoke the provider wouldn't take is owed instead: the tokens stay,
- * sealed, for the cron trigger to revoke with (src/revocations.ts).
+ * revoke the provider wouldn't take is owed: a sealed copy of the tokens
+ * stays with it, for the cron trigger to revoke with (src/revocations.ts).
  * Returns whether the provider revoked the grant, and whether this call
  * stopped it (a concurrent one may have first).
  *
@@ -1079,23 +1079,22 @@ const stop = async (
         .set({ status: "disconnected", updatedAt: new Date() })
         .where(stillConnected),
       // After the status, by the call that stopped it: the revoke it owes,
-      // while it holds tokens to revoke with.
+      // with a copy of the tokens to revoke with, before they go.
       ...(owed
         ? [
-            db.insert(tokenRevocations).select(
-              sql`SELECT ${connection.id}, 0, ${Date.now() + firstRevokeRetryMs}, ${Date.now()}
-                WHERE EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')
-                  AND EXISTS (SELECT 1 FROM ${connectionTokens} WHERE ${connectionTokens.connectionId} = ${connection.id})
-                  AND NOT EXISTS (SELECT 1 FROM ${tokenRevocations} WHERE ${tokenRevocations.connectionId} = ${connection.id})`
+            oweRevoke(
+              db,
+              connection.id,
+              "disconnected",
+              sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
             ),
           ]
         : []),
-      // Only a stopped connection's tokens go, and not while a revoke is
-      // owed with them.
+      // After the status: only a stopped connection's tokens go.
       db
         .delete(connectionTokens)
         .where(
-          sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected') AND NOT EXISTS (SELECT 1 FROM ${tokenRevocations} WHERE ${tokenRevocations.connectionId} = ${connection.id})`
+          sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
         ),
     ]
   );
