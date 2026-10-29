@@ -215,7 +215,7 @@ const teamInterviews = async (env: Env): Promise<CameIn[]> => {
 
 const onboardingFacts = async (
   env: Env,
-  person: Identity
+  person: Pick<Identity, "role">
 ): Promise<OnboardingFacts | null> => {
   if (!isAdmin(person.role)) {
     return null;
@@ -910,6 +910,29 @@ export const goalsFor = async (
       seen.has(`${app}/${workflow}`)
     ),
   }));
+};
+
+/**
+ * The brain's teams, what they said and its workflows, as `person` may
+ * read them, as `readBrain` reads them: what a step of a chat's thinking
+ * may name (agent-thinking.ts). What a team said is a claim five or more
+ * of its people made, or none.
+ */
+export const readThinkingBrain = async (
+  env: Env,
+  person: Pick<Identity, "role">
+): Promise<Pick<Workspace, "teams" | "statements" | "workflows">> => {
+  const [facts, held] = await Promise.all([
+    onboardingFacts(env, person),
+    readBrainRecords(env),
+  ]);
+  const onboarding = onboardingTeams(facts);
+  const records = withSuccessors(onboarding, held);
+  return {
+    teams: teamsOf(onboarding, records),
+    statements: records.statements,
+    workflows: records.workflows,
+  };
 };
 
 /** The brain's workspace, as `person` may read it. */
