@@ -1719,33 +1719,32 @@ export const stopRunsStartedBy = async (
 };
 
 /**
- * Whether an independent run App `app` started still has a stop claimed
- * for it that hasn't ended it (`stopRunsStartedBy`): one in flight, or one
- * whose sender died between the claim and the send. A restore waits for
- * these (app-status.ts).
+ * That an independent run App `app` started still has a stop claimed for
+ * it that hasn't ended it (`stopRunsStartedBy`): one in flight, or one
+ * whose sender died between the claim and the send. Read by the statement
+ * it is part of, so a write can wait for these where it lands
+ * (app-removal.ts).
+ */
+export const stopsUnsettledSql = (app: string): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} INNER JOIN ${workflowStartReceipts} ON ${workflowStartReceipts.id} = ${workflowResourceRuns.id} WHERE ${and(
+    eq(workflowStartReceipts.invokerType, "app"),
+    eq(workflowStartReceipts.invokerId, app),
+    inArray(workflowResourceRuns.status, unended),
+    isNotNull(workflowResourceRuns.stopRequestedAt)
+  )})`;
+
+/**
+ * Whether App `app` has a stop unsettled (`stopsUnsettledSql`). A restore
+ * waits for these (app-status.ts).
  */
 export const stopsUnsettled = async (
   env: Env,
   app: string
 ): Promise<boolean> => {
-  const row = await drizzle(env.DB)
-    .select({ one: sql`1` })
-    .from(workflowResourceRuns)
-    .innerJoin(
-      workflowStartReceipts,
-      eq(workflowStartReceipts.id, workflowResourceRuns.id)
-    )
-    .where(
-      and(
-        eq(workflowStartReceipts.invokerType, "app"),
-        eq(workflowStartReceipts.invokerId, app),
-        inArray(workflowResourceRuns.status, unended),
-        isNotNull(workflowResourceRuns.stopRequestedAt)
-      )
-    )
-    .limit(1)
-    .get();
-  return row !== undefined;
+  const row = await drizzle(env.DB).get<{ unsettled: number }>(
+    sql`SELECT ${stopsUnsettledSql(app)} AS unsettled`
+  );
+  return row?.unsettled === 1;
 };
 
 /**
