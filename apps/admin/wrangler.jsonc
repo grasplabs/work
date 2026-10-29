@@ -214,21 +214,21 @@
     "staging": {
       "name": "grasp-admin-staging",
       "vars": {
-        "STAGE": "staging"
+        "STAGE": "staging",
       },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "grasp-admin-staging",
-          "migrations_dir": "src/db/migrations"
-        }
+          "migrations_dir": "src/db/migrations",
+        },
       ],
       "r2_buckets": [
         {
           "binding": "RELEASES",
           "bucket_name": "grasp-releases-staging",
-          "jurisdiction": "eu"
-        }
+          "jurisdiction": "eu",
+        },
       ],
       "ratelimits": [
         {
@@ -236,109 +236,109 @@
           "namespace_id": "2004",
           "simple": {
             "limit": 30,
-            "period": 60
-          }
+            "period": 60,
+          },
         },
         {
           "name": "DISCORD_RATE_LIMIT",
           "namespace_id": "2005",
           "simple": {
             "limit": 10,
-            "period": 60
-          }
-        }
+            "period": 60,
+          },
+        },
       ],
       "durable_objects": {
         "bindings": [
           {
             "name": "CHAT_STATE",
-            "class_name": "ChatState"
+            "class_name": "ChatState",
           },
           {
             "name": "ADMIN_RUNS",
-            "class_name": "AdminRuns"
-          }
-        ]
+            "class_name": "AdminRuns",
+          },
+        ],
       },
       "kv_namespaces": [
         {
           "binding": "ROUTER_HOSTS",
-          "id": "router-hosts-namespace"
-        }
+          "id": "router-hosts-namespace",
+        },
       ],
       "dispatch_namespaces": [
         {
           "binding": "DISPATCHER",
-          "namespace": "grasp-clients-staging"
-        }
+          "namespace": "grasp-clients-staging",
+        },
       ],
       "secrets_store_secrets": [
         {
           "binding": "DEPLOYER_API_TOKEN",
           "store_id": "account-secrets-store",
-          "secret_name": "DEPLOYER_API_TOKEN_STAGING"
+          "secret_name": "DEPLOYER_API_TOKEN_STAGING",
         },
         {
           "binding": "ROUTER_KEY",
           "store_id": "account-secrets-store",
-          "secret_name": "ROUTER_KEY_STAGING"
+          "secret_name": "ROUTER_KEY_STAGING",
         },
         {
           "binding": "CLIENT_KEY",
           "store_id": "account-secrets-store",
-          "secret_name": "CLIENT_KEY_STAGING"
+          "secret_name": "CLIENT_KEY_STAGING",
         },
         {
           "binding": "ENTRA_CLIENT_SECRET",
           "store_id": "account-secrets-store",
-          "secret_name": "ENTRA_CLIENT_SECRET"
+          "secret_name": "ENTRA_CLIENT_SECRET",
         },
         {
           "binding": "MICROSOFT_CLIENT_SECRET",
           "store_id": "account-secrets-store",
-          "secret_name": "MICROSOFT_CLIENT_SECRET"
+          "secret_name": "MICROSOFT_CLIENT_SECRET",
         },
         {
           "binding": "GOOGLE_CLIENT_SECRET",
           "store_id": "account-secrets-store",
-          "secret_name": "GOOGLE_CLIENT_SECRET"
+          "secret_name": "GOOGLE_CLIENT_SECRET",
         },
         {
           "binding": "COMPOSIO_API_KEY",
           "store_id": "account-secrets-store",
-          "secret_name": "COMPOSIO_API_KEY"
+          "secret_name": "COMPOSIO_API_KEY",
         },
         {
           "binding": "APP_OAUTH_CLIENTS",
           "store_id": "account-secrets-store",
-          "secret_name": "APP_OAUTH_CLIENTS"
+          "secret_name": "APP_OAUTH_CLIENTS",
         },
         {
           "binding": "STRIPE_RESTRICTED_KEY",
           "store_id": "account-secrets-store",
-          "secret_name": "STRIPE_RESTRICTED_KEY"
+          "secret_name": "STRIPE_RESTRICTED_KEY",
         },
         {
           "binding": "ROOMS_READ_TOKEN",
           "store_id": "account-secrets-store",
-          "secret_name": "ROOMS_READ_TOKEN"
+          "secret_name": "ROOMS_READ_TOKEN",
         },
         {
           "binding": "DISCORD_DIGEST_WEBHOOK",
           "store_id": "account-secrets-store",
-          "secret_name": "DISCORD_DIGEST_WEBHOOK"
+          "secret_name": "DISCORD_DIGEST_WEBHOOK",
         },
         {
           "binding": "STAFF_ALERTS_WEBHOOK",
           "store_id": "account-secrets-store",
-          "secret_name": "STAFF_ALERTS_WEBHOOK"
+          "secret_name": "STAFF_ALERTS_WEBHOOK",
         },
         {
           "binding": "ATTIO_READ_KEY",
           "store_id": "account-secrets-store",
-          "secret_name": "ATTIO_READ_KEY"
-        }
-      ]
+          "secret_name": "ATTIO_READ_KEY",
+        },
+      ],
     },
   },
 }
