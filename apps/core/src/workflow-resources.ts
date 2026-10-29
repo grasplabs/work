@@ -10,6 +10,11 @@ import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { workflowReferenceLimits } from "@grasp-os/sdk/host";
 import { actorOf, auditDetailMaxKeys } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import {
+  businessProcessSchema,
+  storedProcessOf,
+} from "@grasp-os/shared/business-processes";
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import { dependencyErrors } from "@grasp-os/shared/dependencies";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -71,6 +76,7 @@ import {
   workflowResourceDraftModules,
   workflowResourceDrafts,
   workflowResourceMembers,
+  workflowResourceProcesses,
   workflowResources,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
@@ -413,15 +419,57 @@ export const requireWorkflowRole = async (
   return { ...workflow, role };
 };
 
-const resourceOf = (workflow: Live, role: WorkflowRole): WorkflowResource => ({
+const resourceOf = (
+  workflow: Live,
+  role: WorkflowRole,
+  process: BusinessProcess | null
+): WorkflowResource => ({
   id: workflow.id,
   namespace: workflowNamespace,
   name: workflow.name,
   owner: workflow.owner,
   currentVersion: workflow.currentVersion,
   role,
+  process,
   createdAt: workflow.createdAt.toISOString(),
 });
+
+/**
+ * The business process each of `workflows` serves, by ID, in one read: a
+ * workflow none was set for has no entry.
+ */
+const processesOf = async (
+  env: Env,
+  workflows: readonly string[]
+): Promise<Map<string, BusinessProcess>> => {
+  if (workflows.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      id: workflowResourceProcesses.workflowResourceId,
+      process: workflowResourceProcesses.process,
+    })
+    .from(workflowResourceProcesses)
+    .where(
+      sql`${workflowResourceProcesses.workflowResourceId} IN ${jsonList(workflows)}`
+    );
+  return new Map(
+    rows.flatMap(({ id, process }) => {
+      const stored = storedProcessOf(process);
+      return stored === null ? [] : [[id, stored] as const];
+    })
+  );
+};
+
+/** The business process workflow `id` serves; null for none. */
+const processOf = async (
+  env: Env,
+  id: string
+): Promise<BusinessProcess | null> => {
+  const processes = await processesOf(env, [id]);
+  return processes.get(id) ?? null;
+};
 
 const entry = (
   by: Acting,
@@ -497,7 +545,8 @@ export const createWorkflowResource = async (
   }
   return resourceOf(
     { id, name: parsed, owner: by.userId, currentVersion: null, createdAt },
-    ceilingOf(by)
+    ceilingOf(by),
+    null
   );
 };
 
@@ -508,7 +557,59 @@ export const getWorkflowResource = async (
   id: unknown
 ): Promise<WorkflowResource> => {
   const workflow = await requireWorkflowRole(env, by, id, "user");
-  return resourceOf(workflow, workflow.role);
+  return resourceOf(workflow, workflow.role, await processOf(env, workflow.id));
+};
+
+/**
+ * Sets the business process workflow `id` serves to `input`
+ * (`businessProcessSchema`), or clears it with null, for its builders: it
+ * names nobody and grants nothing, so Grasp's staff, who assign it as they
+ * map a client's work, may too. The change and its audit event are one
+ * batch; setting what is set changes and records nothing.
+ */
+export const setWorkflowProcess = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  input: unknown
+): Promise<WorkflowResource> => {
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  const process = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    businessProcessSchema.nullable(),
+    input
+  );
+  const before = await processOf(env, workflow.id);
+  if (process !== before) {
+    const db = drizzle(env.DB);
+    const processes = workflowResourceProcesses;
+    await auditedBatch(env, db, [
+      process === null
+        ? db
+            .delete(processes)
+            .where(eq(processes.workflowResourceId, workflow.id))
+        : db
+            .insert(processes)
+            .values({
+              workflowResourceId: workflow.id,
+              process,
+              setBy: by.userId,
+              setAt: new Date(),
+            })
+            .onConflictDoUpdate({
+              target: processes.workflowResourceId,
+              set: { process, setBy: by.userId, setAt: new Date() },
+            }),
+      outboxed(
+        db,
+        entry(by, "workflow.process_set", workflow.id, {
+          process,
+          previousProcess: before,
+        })
+      ),
+    ]);
+  }
+  return resourceOf(workflow, workflow.role, process);
 };
 
 /** The live workflows `by` has a role in, by name. */
@@ -539,9 +640,15 @@ export const listWorkflowResources = async (
     )
     .orderBy(asc(workflowResources.name));
   const roles = await rolesIn(env, by, rows);
+  const processes = await processesOf(
+    env,
+    rows.map(({ id }) => id)
+  );
   return rows.flatMap((row) => {
     const role = roles.get(row.id);
-    return role === undefined ? [] : [resourceOf(row, role)];
+    return role === undefined
+      ? []
+      : [resourceOf(row, role, processes.get(row.id) ?? null)];
   });
 };
 

@@ -27,6 +27,7 @@ const app = (id: string, pendingVersion: number | null): App => ({
   owner: "user-1",
   responsible: "user-1",
   audience: null,
+  process: null,
   blueprint: null,
   currentVersion: null,
   pendingVersion,

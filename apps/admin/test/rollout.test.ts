@@ -75,6 +75,19 @@ const cloudflare = mockCloudflareApi(token, tenantToken);
 const ringChecked = { evalPassed: true, demoSent: true };
 
 /** A live client in `ring` on release `releaseId`. */
+/** The account a call to the API is about, from its path. */
+const accountPath = /^\/accounts\/(?<id>[^/]+)\//u;
+
+/** The account `path`, a call to the API, is about. */
+const accountOf = (path: string): string | undefined =>
+  accountPath.exec(path)?.groups?.id;
+
+/**
+ * How long a held call waits for another client's to arrive before it
+ * goes on alone, as it would if clients were deployed one at a time.
+ */
+const serialGraceMs = 2000;
+
 const live = async (ring: number, releaseId: string): Promise<PlacedClient> =>
   await livePlacedClient(cloudflare, ring, releaseId);
 
@@ -684,6 +697,40 @@ describe("rolling a release out to placed clients", () => {
     await using run = await followRollouts();
     const rolloutId = await rollOut(release, { scope: "all" });
     await run.waitForStepResult({ name: "ring 1 approved" });
+    // The fake answers every call at once, so two clients' deploys overlap
+    // only if one is held open: the first call to a fleet client's account
+    // waits until another fleet client's call has arrived. Side by side,
+    // that comes at once; one at a time, it never does, and the held call
+    // goes on after `serialGraceMs`, alone.
+    const fleetAccounts = new Set(fleet.map(({ account }) => account.id));
+    let firstClient: string | undefined;
+    const secondArrived = Promise.withResolvers<boolean>();
+    cloudflare.beforeAnswering(
+      ({ path }) => {
+        firstClient = accountOf(path);
+        return firstClient !== undefined && fleetAccounts.has(firstClient);
+      },
+      async () => {
+        await Promise.race([
+          secondArrived.promise,
+          scheduler.wait(serialGraceMs),
+        ]);
+      }
+    );
+    cloudflare.beforeAnswering(
+      ({ path }) => {
+        const account = accountOf(path);
+        return (
+          account !== undefined &&
+          fleetAccounts.has(account) &&
+          account !== firstClient
+        );
+      },
+      async () => {
+        secondArrived.resolve(true);
+        await secondArrived.promise;
+      }
+    );
     await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStatus("complete");
     // Each client's account its own: how many had a call being answered at

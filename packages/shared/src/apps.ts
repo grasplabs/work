@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
+import { businessProcessSchema } from "./business-processes.ts";
+import type { BusinessProcess } from "./business-processes.ts";
 import type { CatalogEntryRef } from "./connect.ts";
 import type { DefinitionPackage } from "./definition-packages.ts";
 import type { DiagnosticCategory } from "./diagnostics.ts";
@@ -129,6 +131,11 @@ export interface App {
    * published; null while its builders gave it none.
    */
   link: string | null;
+  /**
+   * The business process it serves, if one was set: what the UI shows its
+   * icon for and groups it by. It grants nothing.
+   */
+  process: BusinessProcess | null;
   createdAt: string;
 }
 
@@ -577,8 +584,9 @@ export type NewAppMember = z.input<typeof newAppMemberSchema>;
 
 /**
  * What a builder changes of an App's settings (`AppsApi.update`): any of
- * its name, description, who answers for it, and whom it is made for (null
- * for nobody in particular). At least one.
+ * its name, description, who answers for it, whom it is made for (null
+ * for nobody in particular), and the business process it serves (null for
+ * none). At least one.
  */
 export const appChangesSchema = z
   .strictObject({
@@ -586,6 +594,7 @@ export const appChangesSchema = z
     description: z.string().max(appLimits.descriptionLength).optional(),
     responsible: identifierSchema.optional(),
     audience: appMemberRefSchema.nullable().optional(),
+    process: businessProcessSchema.nullable().optional(),
   })
   .refine((changes) => Object.keys(changes).length > 0, {
     message: "At least one setting",
