@@ -29,4 +29,21 @@ export const adminPlugins = (worker: PluginConfig = {}) => [
   tailwindcss(),
 ];
 
-export default defineConfig({ plugins: adminPlugins() });
+/**
+ * What a local run of the admin (`vp dev`, and the browser journeys'
+ * server) runs its Worker with beyond wrangler.jsonc: workerd implements
+ * no Durable Object jurisdictions (src/env.d.ts, src/workflow-runs.ts),
+ * as core's and connect's local runs pass too. Never in a build: a
+ * deployment keeps its objects in the EU.
+ */
+export const localVars = { DURABLE_OBJECT_JURISDICTION: "none" } as const;
+
+/** The admin's Worker as `command` runs it: local vars for `serve` alone. */
+export const adminWorker = (command: "serve" | "build"): PluginConfig =>
+  command === "serve"
+    ? { config: (worker) => ({ vars: { ...worker.vars, ...localVars } }) }
+    : {};
+
+export default defineConfig(({ command }) => ({
+  plugins: adminPlugins(adminWorker(command)),
+}));
