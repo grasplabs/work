@@ -395,8 +395,19 @@ const workflowGoLiveItems = (
       context: name,
       body: [
         t`A builder asked for this version of ${name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now.`,
+        // Their own request, as nobody else may decide it (GRA-1227).
+        ...(item.selfApproval
+          ? [
+              t`You asked for this yourself, and nobody else may approve it, so you decide it. It is recorded as self-approved.`,
+            ]
+          : []),
       ],
-      facts: [{ label: t`Version`, value: String(version) }],
+      facts: [
+        { label: t`Version`, value: String(version) },
+        ...(item.selfApproval
+          ? [{ label: t`Approval`, value: t`Self-approved` }]
+          : []),
+      ],
       about: { kind: "independentWorkflow", workflow: workflow.id },
       // As the workflow's owner, or else as an admin.
       ...(item.waitsOn.type === "person" ? { forWhom: { person: me } } : {}),

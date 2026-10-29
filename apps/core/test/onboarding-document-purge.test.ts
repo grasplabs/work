@@ -334,6 +334,27 @@ const answeringWith = async <T>(
   }
 };
 
+/**
+ * A reply naming the purged word for the first request only, the drawing
+ * already under way as the purge lands; `clean` for every one after. Any
+ * drawing after the purge (the store's own alarm, which the purge arms,
+ * may draw again while the test still answers the gateway) reads what the
+ * purge left, so a model would never give the word back: answering it
+ * with the word would put it back in the store, and the test would race
+ * that alarm.
+ */
+const namingFirst = (
+  naming: () => GatewayReply,
+  clean: () => GatewayReply
+): (() => GatewayReply) => {
+  let asked = false;
+  return () => {
+    const first = !asked;
+    asked = true;
+    return first ? naming() : clean();
+  };
+};
+
 /** Draws whatever is due, the tickets with `tool`, until nothing is; whether a request carried `word`. */
 const drawAll = async (ids: Ids, tool: string, word: string) => {
   const store = onboardingStore(env);
@@ -511,6 +532,74 @@ const ticketsOf = async (teamId: string) => {
   return works.find(({ name }) => name === "handling new tickets");
 };
 
+/**
+ * The drawing erasure, as a purge runs it, with `meanwhile` landing after
+ * it read what was drawn and before its write.
+ */
+const drawingErasureWith = (meanwhile: () => Promise<void>) => {
+  const store = onboardingStore(env);
+  let ran = false;
+  const racing = (stub: typeof store): typeof store =>
+    new Proxy(stub, {
+      get: (target, name, receiver): unknown => {
+        if (name !== "forgetDrawings") {
+          return Reflect.get(target, name, receiver);
+        }
+        return async (
+          ...args: Parameters<typeof store.forgetDrawings>
+        ): Promise<void> => {
+          if (!ran) {
+            ran = true;
+            await meanwhile();
+          }
+          await target.forgetDrawings(...args);
+        };
+      },
+    });
+  const namespace = (real: typeof env.ONBOARDING): typeof env.ONBOARDING =>
+    new Proxy(real, {
+      get: (target, name, receiver): unknown => {
+        if (name === "getByName") {
+          return (id: string) => racing(target.getByName(id));
+        }
+        if (name === "jurisdiction") {
+          return (where: DurableObjectJurisdiction) =>
+            namespace(target.jurisdiction(where));
+        }
+        return Reflect.get(target, name, receiver);
+      },
+    });
+  return {
+    ran: () => ran,
+    erasure: drawingErasure({
+      DURABLE_OBJECT_JURISDICTION: env.DURABLE_OBJECT_JURISDICTION,
+      ONBOARDING: namespace(env.ONBOARDING),
+    }),
+  };
+};
+
+/** Tickets drawn naming `word`, from what Max said: the team and the tickets. */
+const ticketsNaming = async (word: string) => {
+  const ids = await team();
+  await toldAll(ids, `Tickets arrive in Zendesk and ${word}.`);
+  await answering(
+    [ticketsReply(ids, word)],
+    async () => await onboardingStore(env).drawNext()
+  );
+  const tickets = await ticketsOf(ids.team);
+  if (tickets?.drawn === undefined || tickets.drawn === null) {
+    throw new Error("The tickets weren't drawn");
+  }
+  return { ids, tickets: { id: tickets.id, drawnAt: tickets.drawn.at } };
+};
+
+/** Runs `sql` with `values` in the onboarding store's own database. */
+const inStore = async (sql: string, ...values: SqlStorageValue[]) => {
+  await runInDurableObject(onboardingStore(env), (_object, state) => {
+    state.storage.sql.exec(sql, ...values);
+  });
+};
+
 describe(
   "a document shared in the onboarding, purged from Knowledge",
   { timeout: 180_000 },
@@ -629,13 +718,17 @@ describe(
         if (when === "brief") {
           env.DB = withHook(database, "organizations", purgeOnce);
         }
+        const reply = namingFirst(
+          () => ticketsReply(ids, word),
+          () => ticketsReply(ids, "Zendesk")
+        );
         try {
           const drew = await answeringWith(
             async () => {
               if (when === "drawing") {
                 await purgeOnce();
               }
-              return ticketsReply(ids, word);
+              return reply();
             },
             async () => await store.drawNext()
           );
@@ -675,6 +768,10 @@ describe(
       const ids = await team();
       await toldAll(ids);
       let forgotten: number | undefined;
+      const reply = namingFirst(
+        () => ticketsReply(ids, word),
+        () => ticketsReply(ids, "Zendesk")
+      );
       // The document goes while the tickets are drawn with it: as the
       // drawing's request reaches the gateway, inside the store's call.
       const drew = await answeringWith(
@@ -684,7 +781,7 @@ describe(
             [shared.upload],
             { type: "system" }
           );
-          return ticketsReply(ids, word);
+          return reply();
         },
         async () => await store.drawNext()
       );
@@ -751,10 +848,14 @@ const writers: Writer[] = [
     run: async (word, landing) => {
       const ids = await team();
       await toldAll(ids, `Tickets arrive in Zendesk and ${word}.`);
+      const reply = namingFirst(
+        () => ticketsReply(ids, word),
+        () => ticketsReply(ids, "Zendesk")
+      );
       await answeringWith(
         async () => {
           await landing.once();
-          return ticketsReply(ids, word);
+          return reply();
         },
         async () => await onboardingStore(env).drawNext()
       );
@@ -770,10 +871,14 @@ const writers: Writer[] = [
       await agree(ids.lea, [
         fact("l1", "work", `Max, Mia and Mo handle tickets about ${word}.`),
       ]);
+      const reply = namingFirst(
+        () => mapReply(ids, `Answers questions about ${word}`),
+        () => mapReply(ids, "Answers questions")
+      );
       await answeringWith(
         async () => {
           await landing.once();
-          return mapReply(ids, `Answers questions about ${word}`);
+          return reply();
         },
         async () => await store.drawNext()
       );
@@ -836,6 +941,125 @@ describe(
       expect({ purged: landing.ran(), left }).toStrictEqual({
         purged: true,
         left: [],
+      });
+    });
+  }
+);
+
+describe(
+  "what was drawn, as a purge and a new drawing cross",
+  { timeout: 120_000 },
+  () => {
+    it("drops a work's checked difference when the work is drawn again", async () => {
+      const word = sentinelOf();
+      const { ids, tickets } = await ticketsNaming(word);
+      // A difference checked in the drawing, naming the word.
+      await inStore(
+        "INSERT INTO checked_differences (work, drawn_at, way, other, at) VALUES (?, ?, ?, ?, ?)",
+        tickets.id,
+        tickets.drawnAt,
+        `It arrives in ${word}.`,
+        "It arrives by mail.",
+        new Date().toISOString()
+      );
+      const before = await storeTablesWith(word);
+
+      await onboardingStore(env).drawWorkAgain(tickets.id, { type: "system" });
+      await drawAll(ids, "Zendesk", word);
+      const after = await storeTablesWith(word);
+
+      expect({
+        before: before.includes("checked_differences"),
+        after: after.includes("checked_differences"),
+      }).toStrictEqual({ before: true, after: false });
+    });
+
+    it("leaves a drawing and a work's name as made again between the purge's read and its write, and counts nothing it left", async () => {
+      const word = sentinelOf();
+      const { ids, tickets } = await ticketsNaming(word);
+      await inStore(
+        "UPDATE works SET name = ? WHERE id = ?",
+        `handling new tickets in ${word}`,
+        tickets.id
+      );
+      const store = onboardingStore(env);
+      const { ran, erasure } = drawingErasureWith(async () => {
+        // Drawn again, and named again, from clean words.
+        await store.drawWorkAgain(tickets.id, { type: "system" });
+        await drawAll(ids, "Zendesk", word);
+        await inStore(
+          "UPDATE works SET name = ? WHERE id = ?",
+          "handling new tickets",
+          tickets.id
+        );
+      });
+
+      await erasure.rewrite(
+        { actor: { type: "system" }, userId: "system" },
+        (text) => text.replaceAll(word, "(removed)")
+      );
+      const after = await ticketsOf(ids.team);
+
+      expect({
+        ran: ran(),
+        name: after?.name,
+        tools: after?.drawn?.steps.map(({ tool }) => tool),
+        counted: await detailOf("onboarding.drawings.purged"),
+      }).toMatchObject({
+        ran: true,
+        name: "handling new tickets",
+        tools: ["Zendesk", "Zendesk"],
+        counted: { drawings: 0, works: 0, teams: 0 },
+      });
+    });
+
+    it("leaves a checked difference checked anew between the purge's read and its write, and counts none it left", async () => {
+      const word = sentinelOf();
+      const { ids, tickets } = await ticketsNaming(word);
+      const difference = async (way: string) => {
+        await inStore(
+          "INSERT INTO checked_differences (work, drawn_at, way, other, at) VALUES (?, ?, ?, ?, ?)",
+          tickets.id,
+          tickets.drawnAt,
+          way,
+          "It arrives by mail.",
+          new Date().toISOString()
+        );
+      };
+      // A difference checked in the drawing, naming the word.
+      await difference(`It arrives in ${word}.`);
+      const store = onboardingStore(env);
+      const clean = "It arrives in Zendesk.";
+      const { ran, erasure } = drawingErasureWith(async () => {
+        // Drawn again from clean words, which drops the old difference, and
+        // a new one checked in the new drawing.
+        await store.drawWorkAgain(tickets.id, { type: "system" });
+        await drawAll(ids, "Zendesk", word);
+        await difference(clean);
+      });
+
+      await erasure.rewrite(
+        { actor: { type: "system" }, userId: "system" },
+        (text) => text.replaceAll(word, "(removed)")
+      );
+      const left = await runInDurableObject(store, (_object, state) =>
+        state.storage.sql
+          .exec<{ way: string }>(
+            "SELECT way FROM checked_differences WHERE work = ?",
+            tickets.id
+          )
+          .toArray()
+          .map(({ way }) => way)
+      );
+
+      expect({
+        ran: ran(),
+        left,
+        counted: await detailOf("onboarding.drawings.purged"),
+      }).toMatchObject({
+        ran: true,
+        left: [clean],
+        counted: { drawings: 0, differences: 0 },
       });
     });
   }

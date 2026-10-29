@@ -45,6 +45,7 @@ import {
 } from "../src/hosting/offboarding.ts";
 import {
   runClientProvision,
+  sendsSettled,
   startClientProvision,
   startClientRelease,
 } from "../src/hosting/operation.ts";
@@ -1843,6 +1844,26 @@ describe("provisioning a placed client", () => {
     ).toStrictEqual([]);
   });
 
+  it("holds a rollback while marks it can't read are fresh, and lets it go once they age out", async () => {
+    const manifest = await importRelease("dedicated");
+    const { clientId } = await setUp("dedicated", manifest);
+    const operation = await operationOf(clientId);
+    const change = operation?.change ?? 0;
+    const mark = async (updatedAt: Date) => {
+      await db
+        .update(clientProvisions)
+        .set({ sending: "not json", updatedAt })
+        .where(eq(clientProvisions.clientId, clientId));
+    };
+
+    await mark(new Date());
+    const fresh = await sendsSettled(db, clientId, change);
+    await mark(new Date(Date.now() - 10 * 60_000));
+    const aged = await sendsSettled(db, clientId, change);
+
+    expect({ fresh, aged }).toStrictEqual({ fresh: false, aged: true });
+  });
+
   it("aborts an upload left unanswered past its limit, and keeps it marked sent, as it may still land", async () => {
     const manifest = await importRelease("dedicated");
     const { clientId, held } = await setUp("dedicated", manifest);
@@ -2372,7 +2393,7 @@ describe("provisioning a placed client", () => {
     }).toMatchObject({ migrations: firstMigrations, uploads });
   });
 
-  it("runs as a Workflow, and starting it again resumes the one operation", async () => {
+  it("runs as a workflow, and starting it again resumes the one operation", async () => {
     const manifest = await importRelease("dedicated");
     const account = cloudflare.addAccount();
     const destinationId = await destination({
@@ -2948,7 +2969,7 @@ describe("provisioning a placed client", () => {
     const later = await importRelease("dedicated", {
       notes: "feat(core): broken once live",
     });
-    // What staff are told, as the Workflow sends it (src/alerts.ts).
+    // What staff are told, as the run sends it (src/alerts.ts).
     const alert = vi
       .fn<(alert: StaffAlert) => Promise<void>>()
       .mockResolvedValue();
@@ -3039,7 +3060,7 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("releases a live client through its Workflow, as staff start it, and a start at the same moment that loses the claim changes nothing", async () => {
+  it("releases a live client through its run, as staff start it, and a start at the same moment that loses the claim changes nothing", async () => {
     const first = await importRelease("dedicated");
     const { clientId } = await liveClient(first);
     const later = await importRelease("dedicated", {

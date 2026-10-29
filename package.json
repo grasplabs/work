@@ -32,6 +32,7 @@
     "release:upload": "node scripts/release/upload-release.ts",
     "release:deploy": "node scripts/release/deploy-release.ts",
     "release:accept": "node scripts/release/accept-release.ts",
+    "capacity": "node scripts/capacity/run-capacity.ts",
     "release:evidence": "node scripts/release/evidence-release.ts",
     "release:previous": "node scripts/release/previous-release.ts",
     "package:definition": "node scripts/package-definition.ts",

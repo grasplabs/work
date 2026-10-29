@@ -19,9 +19,10 @@ import { useState } from "react";
 import { AppLogo } from "../connections/app-logo.tsx";
 import {
   canConnect,
-  signInAgainTarget,
   ConnectDialog,
+  signInAgainTarget,
 } from "../connections/connect-dialog.tsx";
+import { ConnectedDialog } from "../connections/connected-dialog.tsx";
 import { ConnectionList } from "../connections/connection-list.tsx";
 import type { HeldPermissions } from "../connections/connection-list.tsx";
 import { loadIntegrations } from "../connections/integrations-data.ts";
@@ -59,13 +60,16 @@ import type { Loaded } from "../load-from-core.tsx";
 // (those the person can open that use it) and Account (each connection
 // made to it: who connected it, when, signing in again and
 // disconnecting). A flow comes back here from the provider, through
-// core's callback, with `connection=<id>`.
+// core's callback, with `connection=<id>` (and `again=1` when it signed in
+// again), and opens the success screen.
 
 type Tab = "overview" | "workflows" | "account";
 
 interface IntegrationSearch {
   tab?: Tab;
   connection?: string;
+  /** The flow that made `connection` signed in again (connect-dialog.tsx). */
+  again?: true;
 }
 
 const stateText: Record<
@@ -519,7 +523,7 @@ const WhyNoConnect = ({
 const IntegrationPage = ({ integration }: { integration: Integration }) => {
   const { held, tools, catalog, uses } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { tab = "overview", connection } = Route.useSearch();
+  const { tab = "overview", connection, again = false } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const { t } = useLingui();
   // One sign-in for the page, held here so it stays as the page changes.
@@ -530,8 +534,9 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
   };
   // Only a connection the page lists: anyone can put an ID in a link.
   const connected =
-    connection !== undefined &&
-    integration.connections.some(({ id }) => id === connection);
+    connection === undefined
+      ? undefined
+      : integration.connections.find(({ id }) => id === connection);
   const count = integration.connections.length;
   return (
     <>
@@ -573,11 +578,21 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             </Trans>
           </p>
         )}
-        {connected ? (
-          <output>
-            <Trans>Connected.</Trans>
-          </output>
-        ) : null}
+        <ConnectedDialog
+          again={again}
+          app={integration.name}
+          connection={connected}
+          onClose={() => {
+            void navigate({
+              replace: true,
+              search: (last) => ({
+                ...last,
+                connection: undefined,
+                again: undefined,
+              }),
+            });
+          }}
+        />
         <Tabs
           onValueChange={(next: Tab) => {
             void navigate({
@@ -705,6 +720,7 @@ export const Route = createFileRoute("/_shell/integrations/$integration")({
         : undefined,
     connection:
       typeof search.connection === "string" ? search.connection : undefined,
+    again: search.again === 1 || search.again === "1" ? true : undefined,
   }),
   loader: async ({ context: { core, identity }, params }) => {
     const parsed = parseIntegrationKey(params.integration);

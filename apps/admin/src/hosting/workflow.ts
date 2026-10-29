@@ -27,7 +27,7 @@ import {
 } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
-import { asStepError, stop, workerflowDeployStep } from "../workflow-steps.ts";
+import { asStepError, stop, deployStepConfig } from "../workflow-steps.ts";
 import { InventoryError } from "./inventory.ts";
 import {
   ProvisionOperationError,
@@ -74,7 +74,7 @@ export const provisionPlacedClientRun = (env: Env): WorkflowDefinition => ({
     const { clientId } = provisionPlacedParamsSchema.parse(event.payload);
     await step.do(
       "provision",
-      workerflowDeployStep,
+      deployStepConfig,
       async ({ attempt, idempotencyKey }) => {
         const held = {
           clientId,

@@ -38,11 +38,10 @@ import {
 import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import {
   guarded,
-  isEngineAbort,
   quickStep,
   stop,
   stopReason,
-  workerflowDeployStep,
+  deployStepConfig,
 } from "../workflow-steps.ts";
 import { SettingsError } from "./settings.ts";
 
@@ -181,7 +180,7 @@ export const applyClient = (env: Env): WorkflowDefinition => ({
       );
       await step.do(
         "deploy",
-        workerflowDeployStep,
+        deployStepConfig,
         guarded(async ({ attempt, idempotencyKey }) => {
           // As the client's runner, this attempt of it alone: a try that
           // timed out goes on beside its retry, and once the retry takes
@@ -228,9 +227,6 @@ export const applyClient = (env: Env): WorkflowDefinition => ({
         })
       );
     } catch (error) {
-      if (isEngineAbort(error)) {
-        throw error;
-      }
       await step.do("release after failing", quickStep, async () => {
         log.warn("apply.stopped", { clientId, error: stopReason(error) });
         await releaseQuietly(db, clientId, event.instanceId);
