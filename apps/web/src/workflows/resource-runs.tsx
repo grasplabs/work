@@ -23,7 +23,9 @@ import { formatDateTime } from "../format.ts";
 // failed stays on the run itself, under its own rule for who sees it.
 
 // Each in a context of its own: a run's status, not a workflow's.
-const statusLabels: Readonly<Record<WorkflowRunStatus, MessageDescriptor>> = {
+export const runStatusLabels: Readonly<
+  Record<WorkflowRunStatus, MessageDescriptor>
+> = {
   starting: msg({ message: "Starting", context: "status of a workflow run" }),
   running: msg({ message: "Running", context: "status of a workflow run" }),
   paused: msg({ message: "Paused", context: "status of a workflow run" }),
@@ -33,7 +35,7 @@ const statusLabels: Readonly<Record<WorkflowRunStatus, MessageDescriptor>> = {
 };
 
 /** The colour of a run's dot, as the runs log has it (`runs.tsx`). */
-const dotOf = (status: WorkflowRunStatus): string => {
+export const runDotOf = (status: WorkflowRunStatus): string => {
   if (status === "completed") {
     return "bg-status-agreed";
   }
@@ -79,9 +81,9 @@ export const ResourceRuns = ({
                   <span className="inline-flex items-center gap-2">
                     <span
                       aria-hidden="true"
-                      className={`${dotOf(run.status)} size-1.75 flex-none rounded-full`}
+                      className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
                     />
-                    {t(statusLabels[run.status])}
+                    {t(runStatusLabels[run.status])}
                   </span>
                 </TableCell>
                 <TableCell variant="roomy">{run.version}</TableCell>

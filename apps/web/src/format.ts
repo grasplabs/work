@@ -74,3 +74,23 @@ export const formatEuro = (value: number): string =>
     currency: "EUR",
     maximumFractionDigits: 0,
   }).format(value);
+
+/** The largest unit `formatBytes` steps up to, and the ones under it. */
+const byteUnits = ["byte", "kilobyte", "megabyte", "gigabyte"] as const;
+const bytesPerUnit = 1024;
+
+/** A file's size as the page's language writes it: "512 bytes", "1.5 MB". */
+export const formatBytes = (bytes: number): string => {
+  let value = bytes;
+  let unit = 0;
+  while (value >= bytesPerUnit && unit < byteUnits.length - 1) {
+    value /= bytesPerUnit;
+    unit += 1;
+  }
+  return new Intl.NumberFormat(i18n.locale, {
+    style: "unit",
+    unit: byteUnits[unit],
+    unitDisplay: unit === 0 ? "long" : "short",
+    maximumFractionDigits: unit === 0 ? 0 : 1,
+  }).format(value);
+};

@@ -6,7 +6,7 @@ import type {
   WorkflowDiagram,
 } from "@grasp-os/shared/workflow-diagrams";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 
 // A workflow's diagram as core drew it from a definition that passed the
 // profile: every task in order, by its ID, with every case, branch and
@@ -74,30 +74,32 @@ const ScopeHeading = ({ scope }: { scope: DiagramScope }) => {
   );
 };
 
+/** What a run's journal says of its tasks, by ID. */
+interface Marks {
+  states: ReadonlyMap<string, TraceState>;
+  /** How many attempts each made; a task with one shows none. */
+  attempts: ReadonlyMap<string, number>;
+}
+
 const TaskList = ({
   tasks,
-  states,
+  marks,
 }: {
   tasks: readonly DiagramTask[];
-  states: ReadonlyMap<string, TraceState>;
+  marks: Marks;
 }) => (
   <ol className="flex flex-col gap-2">
     {tasks.map((task) => (
       // eslint-disable-next-line no-use-before-define -- tasks nest in tasks
-      <TaskItem key={task.pointer} states={states} task={task} />
+      <TaskItem key={task.pointer} marks={marks} task={task} />
     ))}
   </ol>
 );
 
-const TaskItem = ({
-  task,
-  states,
-}: {
-  task: DiagramTask;
-  states: ReadonlyMap<string, TraceState>;
-}) => {
+const TaskItem = ({ task, marks }: { task: DiagramTask; marks: Marks }) => {
   const { t } = useLingui();
-  const state = states.get(task.id);
+  const state = marks.states.get(task.id);
+  const attempts = marks.attempts.get(task.id) ?? 0;
   return (
     <li
       aria-label={task.id}
@@ -116,6 +118,11 @@ const TaskItem = ({
         ) : null}
         <NextText next={task.next} />
         <StateBadge state={state} />
+        {attempts > 1 ? (
+          <Badge variant="outline">
+            <Plural one="# attempt" other="# attempts" value={attempts} />
+          </Badge>
+        ) : null}
       </div>
       {task.scopes.length === 0 ? null : (
         <div className="flex flex-col gap-3 border-l pl-3">
@@ -126,7 +133,7 @@ const TaskItem = ({
             >
               <ScopeHeading scope={scope} />
               {scope.tasks.length === 0 ? null : (
-                <TaskList states={states} tasks={scope.tasks} />
+                <TaskList marks={marks} tasks={scope.tasks} />
               )}
             </div>
           ))}
@@ -138,18 +145,21 @@ const TaskItem = ({
 
 /** No run shown: no task marked. */
 const noStates: ReadonlyMap<string, TraceState> = new Map();
+const noAttempts: ReadonlyMap<string, number> = new Map();
 
 /**
- * `diagram`, with the tasks a run reached marked as `states` says: none
- * when no run is shown.
+ * `diagram`, with the tasks a run reached marked as `states` says, and
+ * the attempts each made: none when no run is shown.
  */
 export const WorkflowDiagramView = ({
   diagram,
   states = noStates,
+  attempts = noAttempts,
   label,
 }: {
   diagram: WorkflowDiagram;
   states?: ReadonlyMap<string, TraceState>;
+  attempts?: ReadonlyMap<string, number>;
   label: string;
 }) => (
   <section aria-label={label} className="flex flex-col gap-2">
@@ -158,7 +168,7 @@ export const WorkflowDiagramView = ({
         <Trans>It declares no tasks.</Trans>
       </p>
     ) : (
-      <TaskList states={states} tasks={diagram.tasks} />
+      <TaskList marks={{ states, attempts }} tasks={diagram.tasks} />
     )}
   </section>
 );
