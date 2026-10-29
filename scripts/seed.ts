@@ -324,7 +324,8 @@ const isTaken = (error: unknown): boolean =>
  * that asks a decision, its decision contract published by an admin, its
  * binding approved for the team that answers it, and its person parameter
  * set to that team; shared with the engine's teams. Returns its ID.
- * Found by name when seeded before, and then left as it is.
+ * Found by name when seeded before: left as it is once it has a version,
+ * and set up from its publication on when a seed stopped before that.
  */
 const seedWorkflow = async (
   workflow: WorkflowSeed,
@@ -337,12 +338,14 @@ const seedWorkflow = async (
   const resources = owner.api.workflowResources;
   const listed = await adminSession.api.workflowResources.list();
   const found = listed.find(({ name }) => name === workflow.id);
-  if (found !== undefined) {
+  const published =
+    found === undefined ? [] : await resources.versions(found.id);
+  if (found !== undefined && published.length > 0) {
     return found.id;
   }
   let created: { id: string; name: string };
   try {
-    created = await resources.create(workflow.id);
+    created = found ?? (await resources.create(workflow.id));
   } catch (error) {
     if (isTaken(error)) {
       throw new Error(
@@ -407,7 +410,9 @@ const startBindingOf = (alias: string): string =>
 
 /**
  * The App's permission to start each of its workflows from its screens,
- * asked by the engine's owner and granted by an admin, where it has none.
+ * asked by the engine's owner and granted by an admin, where it has none;
+ * one still requested (a seed stopped before granting it) is granted
+ * now. One someone revoked is left revoked: that was their decision.
  */
 const seedStartPermissions = async (
   engine: EngineSeed,
@@ -424,22 +429,27 @@ const seedStartPermissions = async (
   for (const { alias } of engine.workflows) {
     const workflowId = workflowIds.get(alias);
     const binding = startBindingOf(alias);
+    const had = held.find(({ binding: name }) => name === binding);
     if (
       workflowId === undefined ||
-      held.some(({ binding: name }) => name === binding)
+      (had !== undefined && had.status !== "requested")
     ) {
       continue;
     }
-    // oxlint-disable-next-line no-await-in-loop -- one request at a time
-    const { id } = await sessionFor(
-      sessions,
-      engine.owner
-    ).api.permissions.request({
-      subject: { type: "app", appId: app },
-      object: { type: "workflow", workflowId },
-      actions: ["start"],
-      binding,
-    });
+    let id = had?.id;
+    if (id === undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one request at a time
+      const requested = await sessionFor(
+        sessions,
+        engine.owner
+      ).api.permissions.request({
+        subject: { type: "app", appId: app },
+        object: { type: "workflow", workflowId },
+        actions: ["start"],
+        binding,
+      });
+      ({ id } = requested);
+    }
     // oxlint-disable-next-line no-await-in-loop -- one grant at a time
     await adminSession.api.permissions.grant(id, { version: currentVersion });
   }
@@ -507,7 +517,17 @@ const seedEngine = async (
     // workflow tests pass.
     await adminSession.api.apps.versions.setCurrent(app.id, version);
   } else if (Object.keys(screens).length > 0) {
-    await upgradeScreens(owner, adminSession, app, screens);
+    // Its screens need the engine's own App files and workflow bindings:
+    // one seeded before them keeps the screens it has (nothing has
+    // shipped, so no seed migrates it; reset local data to seed it anew).
+    const files = await owner.api.apps.files.read(app.id, app.currentVersion);
+    if (files["app.ts"] === engineFiles(seed, screens)["app.ts"]) {
+      await upgradeScreens(owner, adminSession, app, screens);
+    } else {
+      console.warn(
+        `${app.name} was seeded before its independent workflows: its screens are left as they are. Reset local data to seed it again.`
+      );
+    }
   }
   // Published, so the people it is shared with use it, once it has a
   // version current: only an App this run created. One it found is left
