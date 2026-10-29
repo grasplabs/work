@@ -1,8 +1,8 @@
 // What the admin reads from its env that wrangler.jsonc doesn't set, so
 // `wrangler types` can't see it: settings neither stage has a value for
 // yet, and what local runs and tests set. The settings wrangler.jsonc sets
-// per stage (the Access pair, CLIENT_DOMAIN, ADMIN_HOST and the OAuth
-// apps' client ids) are typed by worker-configuration.d.ts alone. Merged
+// per stage (the Access pair, CLIENT_DOMAIN, ADMIN_HOST, OAUTH_RELAY and
+// the OAuth apps' client ids) are typed by worker-configuration.d.ts alone. Merged
 // into the interface it generates.
 interface __BaseEnv_Env {
   /**
