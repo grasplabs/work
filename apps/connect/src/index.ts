@@ -1,3 +1,7 @@
+import type {
+  AiProviderKey,
+  AiProviderRoutes,
+} from "@grasp-os/shared/ai-providers";
 import type { OutboxedAuditEvent } from "@grasp-os/shared/audit";
 import {
   capabilityErrors,
@@ -69,6 +73,13 @@ import type {
 import type { ClockRegistration } from "@grasp-os/workerflow/clock";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
+import {
+  aiProviderRoutes,
+  listAiProviderKeys,
+  modelFetch,
+  removeAiProviderKey,
+  saveAiProviderKey,
+} from "./ai-providers.ts";
 import { ackAuditEvents, auditCall, takeAuditEvents } from "./audit.ts";
 import type { CallOutcome, CallRecord } from "./audit.ts";
 import { carryOut, connectionFor, heldOutcome } from "./call.ts";
@@ -445,6 +456,30 @@ export default class Connect
 
   async channelFetch(platform: unknown, request: unknown): Promise<Response> {
     return await channelFetch(this.env, platform, request);
+  }
+
+  // AI providers (src/ai-providers.ts): the organization's own keys,
+  // sealed here and never answered back, and every model request core's
+  // gateway decided, sent on with the credential its grant names.
+
+  async saveAiProviderKey(request: unknown): Promise<AiProviderKey> {
+    return await saveAiProviderKey(this.env, request);
+  }
+
+  async removeAiProviderKey(provider: unknown): Promise<boolean> {
+    return await removeAiProviderKey(this.env, provider);
+  }
+
+  async aiProviderKeys(): Promise<AiProviderKey[]> {
+    return await listAiProviderKeys(this.env);
+  }
+
+  async aiProviderRoutes(): Promise<AiProviderRoutes> {
+    return await aiProviderRoutes(this.env);
+  }
+
+  async modelFetch(request: unknown, grant: unknown): Promise<Response> {
+    return await modelFetch(this.env, signingKeys(this.env), request, grant);
   }
 
   // The catalog (src/catalog.ts): what can be connected.
