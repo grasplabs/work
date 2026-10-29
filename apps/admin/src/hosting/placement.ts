@@ -11,6 +11,12 @@
  * when no shared destination qualifies: it's an explicit choice staff
  * make, as is any destination when there's no clear one.
  */
+import {
+  clientsNamespace,
+  platformAccountId,
+  stageNamed,
+} from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -22,7 +28,12 @@ import { importedManifest } from "../deploy/release.ts";
 import { ProvisionError } from "../provision/errors.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 import type { RunStatus } from "../runners.ts";
-import { InventoryError, placeClient, placementOf } from "./inventory.ts";
+import {
+  InventoryError,
+  placeClient,
+  placementOf,
+  saveDestination,
+} from "./inventory.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
 import { ProvisionOperationError, provisionOf } from "./operation.ts";
 import type { ProvisionOperationErrorCode } from "./operation.ts";
@@ -119,6 +130,61 @@ const provisionable = (row: {
   (row.kind === "dedicated" ||
     (row.kind === "workers_for_platforms" && row.namespace !== null));
 
+/** The id of `stage`'s own shared destination, as its admin records it. */
+export const stageDestinationId = (stage: Stage): string =>
+  `workers-for-platforms-${stage}`;
+
+/**
+ * Records this admin's own stage's shared destination when it has none:
+ * Grasp's account and the stage's clients' namespace (@grasp-os/shared/names),
+ * the place every client of the stage goes. Nothing else ever records it,
+ * so without this a new admin has nowhere to put anyone.
+ *
+ * Here, ahead of every read of the destinations that placing a client
+ * depends on (the hosting view and placing itself), rather than at a
+ * deploy or a start: a Worker has no start to hook, a deploy can't write
+ * the admin's database through its audit log, and this path is the one
+ * no placement can skip. It runs once: a destination in that namespace,
+ * recorded here or by staff, is left as it is.
+ *
+ * It claims no capability: each is unknown until staff record evidence
+ * of it, as a policy requires (src/hosting/policy.ts), so nothing is
+ * placed here on the admin's word. An admin whose STAGE names no stage
+ * records nothing, and `saveDestination` refuses any namespace but the
+ * stage's own, so a staging admin never records production's.
+ */
+export const ensureStageDestination = async (
+  env: Env,
+  db: AdminDatabase
+): Promise<void> => {
+  const stage = stageNamed(env.STAGE);
+  if (stage === undefined) {
+    return;
+  }
+  const namespace = clientsNamespace(stage);
+  const existing = await db
+    .select({ id: hostingDestinations.id })
+    .from(hostingDestinations)
+    .where(eq(hostingDestinations.namespace, namespace))
+    .get();
+  if (existing !== undefined) {
+    return;
+  }
+  await saveDestination(
+    db,
+    "system",
+    {
+      id: stageDestinationId(stage),
+      kind: "workers_for_platforms",
+      accountId: platformAccountId,
+      namespace,
+      policies: ["eu-storage"],
+      capabilities: {},
+    },
+    stage
+  );
+};
+
 /** Every destination, and what keeps each from taking a client under `policyId`. */
 export const destinationChoices = async (
   db: AdminDatabase,
@@ -194,6 +260,7 @@ export const getClientHosting = async (
   if (client === undefined) {
     return null;
   }
+  await ensureStageDestination(env, db);
   const placement = await placementOf(db, clientId);
   // A placed client stays under its own policy: the one shown is that.
   const policy =
@@ -338,6 +405,7 @@ export const placeAndProvision = async (
   }
   const placed = await placementOf(db, clientId);
   if (placed === undefined) {
+    await ensureStageDestination(env, db);
     const choices = await destinationChoices(db, policyId);
     const destinationId =
       input.destinationId ?? automaticChoice(choices).destinationId;

@@ -420,6 +420,15 @@ const Offboarding = ({ view }: { view: ClientHostingView }) => {
   );
 };
 
+/** That nothing runs until staff start it, and what they start it with. */
+const NotStarted = ({ imported }: { imported: boolean }) => (
+  <p className="text-sm">
+    {imported
+      ? "Nothing runs for it yet: provisioning starts only when you choose its release and start it here."
+      : "Nothing runs for it yet, and no release is imported to provision it with: the admin imports each one CI publishes, on its schedule. Once one is in, start it here."}
+  </p>
+);
+
 /** Whether it's still to provision: not live, done, or offboarded. */
 const provisionable = (view: ClientHostingView): boolean =>
   view.operation?.status !== "done" &&
@@ -486,6 +495,9 @@ export const ClientHosting = ({
       {view.placement === null ? null : <Offboarding view={view} />}
       {provisionable(view) ? (
         <div className="flex flex-col gap-4">
+          {view.operation === null ? (
+            <NotStarted imported={releases.length > 0} />
+          ) : null}
           {view.operation === null ? (
             <Field>
               <FieldLabel htmlFor="hosting-release">Release</FieldLabel>
