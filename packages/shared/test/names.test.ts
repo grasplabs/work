@@ -7,6 +7,9 @@ import {
   deploymentIdAlphabet,
   deploymentIdLength,
   adminDatabaseName,
+  adminHost,
+  authRelayHost,
+  clientDomain,
   clientsNamespace,
   isResourceName,
   platformWorkerName,
@@ -14,11 +17,20 @@ import {
   releasesBucketName,
   routerHostsName,
   stageNamed,
+  stageOfHost,
   stages,
 } from "../src/names.ts";
 
 // The platform's Cloudflare names, as the scheme's table gives them, and
 // every one a name Cloudflare takes for each kind of resource.
+
+/** Hosts of `stage`: a client's, cased and dotted as a request may, the admin's and the relay's. */
+const hostsOf = (stage: (typeof stages)[number]): string[] => [
+  `acme.${clientDomain(stage)}`,
+  `ACME.${clientDomain(stage)}.`,
+  adminHost(stage),
+  authRelayHost(stage),
+];
 
 describe("the platform's names", () => {
   it("are grasp-<what> in production and grasp-<what>-staging in staging", () => {
@@ -102,6 +114,22 @@ describe("the platform's names", () => {
       undefined,
       undefined,
     ]);
+  });
+
+  it("serve staging below production's domain, and give every host to exactly one stage", () => {
+    expect({
+      domains: stages.map((stage) => clientDomain(stage)),
+      production: hostsOf("production").map((host) => stageOfHost(host)),
+      staging: hostsOf("staging").map((host) => stageOfHost(host)),
+      stagingDomainItself: stageOfHost(clientDomain("staging")),
+      lookalike: stageOfHost("acme.notstaging.ongrasp.app"),
+    }).toStrictEqual({
+      domains: ["ongrasp.app", "staging.ongrasp.app"],
+      production: ["production", "production", "production", "production"],
+      staging: ["staging", "staging", "staging", "staging"],
+      stagingDomainItself: "staging",
+      lookalike: "production",
+    });
   });
 });
 

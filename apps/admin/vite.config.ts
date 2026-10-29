@@ -35,10 +35,14 @@ export const adminPlugins = (worker: PluginConfig = {}) => [
  * What a local run of the admin (`vp dev`, and the browser journeys'
  * server) runs its Worker with beyond wrangler.jsonc: workerd implements
  * no Durable Object jurisdictions (src/env.d.ts, src/workflow-runs.ts),
- * as core's and connect's local runs pass too. Never in a build: a
- * deployment keeps its objects in the EU.
+ * as core's and connect's local runs pass too; and a local run answers on
+ * localhost, never moving to production's own hostname (src/admin-host.ts).
+ * Never in a build: a deployment keeps its objects in the EU.
  */
-export const localVars = { DURABLE_OBJECT_JURISDICTION: "none" } as const;
+export const localVars = {
+  DURABLE_OBJECT_JURISDICTION: "none",
+  ADMIN_HOST: "",
+} as const;
 
 /** `localVars` as the Worker's text bindings (cf's config). */
 export const localEnv = Object.fromEntries(
