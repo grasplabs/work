@@ -6,6 +6,7 @@ import {
   auditEvents,
   clientAdminReads,
   clientPlacements,
+  clientResources,
   clientProvisions,
   clients,
   clientRuns,
@@ -63,6 +64,37 @@ const importedRelease = async (): Promise<string> => {
     importedAt: now,
   });
   return manifest.releaseId;
+};
+
+/** What Platform's Offboarded page `html` shows of client `clientId` alone. */
+const offboardedOf = (html: string, clientId: string): string => {
+  const at = html.indexOf(`(${clientId})`);
+  if (at === -1) {
+    return "";
+  }
+  // Up to the next client's item.
+  const next = html.indexOf("rounded-xl", at);
+  return html.slice(at, next === -1 ? undefined : next);
+};
+
+/** Whether the button saying `label` in `html` is off. */
+const buttonOff = (html: string, label: string): boolean | null => {
+  const at = html.indexOf(`${label}</button>`);
+  if (at === -1) {
+    return null;
+  }
+  const tag = html.slice(html.lastIndexOf("<button", at), at);
+  return tag.includes("disabled");
+};
+
+/** Whether the box confirming no export was made, in `html`, is off. */
+const confirmOff = (html: string): boolean | null => {
+  const at = html.indexOf('id="no-export-');
+  if (at === -1) {
+    return null;
+  }
+  const tag = html.slice(html.lastIndexOf("<", at), html.indexOf(">", at));
+  return tag.includes("disabled");
 };
 
 /** Client `clientId`'s hosting, as its page reads it. */
@@ -715,6 +747,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     // on Platform's Offboarded page.
     const gone = await page(`/organizations/${clientId}/setup`, caller);
     const after = await page("/platform/offboarded", caller);
+    const listed = offboardedOf(after.html, clientId);
 
     expect({
       offer: live.html.includes("Offboard it"),
@@ -722,16 +755,92 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       offboarded,
       early,
       gone: gone.status,
-      deleteOffer: after.html.includes("Delete its resources"),
-      kept: after.html.includes(`${clientId})`),
+      // Offered, but off until its retention is over, saying from when.
+      deleteOff: buttonOff(listed, "Delete its resources"),
+      confirm: confirmOff(listed),
+      from: listed.includes("It can be deleted from"),
+      kept: listed !== "",
     }).toStrictEqual({
       offer: true,
       refused: [true, true],
       offboarded: { refused: null, deletion: null },
       early: { refused: "retention_running", deletion: null },
       gone: 404,
-      deleteOffer: true,
+      deleteOff: true,
+      confirm: true,
+      from: true,
       kept: true,
+    });
+  });
+
+  it("offers deleting an offboarded client's resources once its retention is over, and says on every read which bucket is still emptying", async () => {
+    const destinationId = await destination();
+    const clientId = await client();
+    await placeClient(db, staff, { clientId, destinationId, policyId });
+    await allocateClientResources(db, staff, {
+      clientId,
+      manifest: await release(),
+      operationId: "op",
+    });
+    const offboardedAt = new Date(Date.now() - 31 * 86_400_000);
+    await db
+      .update(clients)
+      .set({ status: "offboarded", offboardedAt })
+      .where(eq(clients.id, clientId));
+    const [bucket] = await db
+      .select({
+        role: clientResources.role,
+        name: clientResources.physicalName,
+      })
+      .from(clientResources)
+      .where(
+        and(
+          eq(clientResources.clientId, clientId),
+          eq(clientResources.kind, "r2_bucket")
+        )
+      );
+    if (bucket === undefined) {
+      throw new Error("The release has no bucket");
+    }
+    // As a deletion that found it holding objects records it, two hours ago.
+    const emptiedAt = new Date(Date.now() - 2 * 3_600_000);
+    await db.insert(auditEvents).values({
+      id: crypto.randomUUID(),
+      at: emptiedAt,
+      actor: caller,
+      action: "client.empty_bucket",
+      clientId,
+      target: destinationId,
+      detail: JSON.stringify({ role: bucket.role, physicalName: bucket.name }),
+    });
+
+    const whileEmptying = await page("/platform/offboarded", caller);
+    const emptying = offboardedOf(whileEmptying.html, clientId);
+    // Its objects expired, and a later deletion deleted it.
+    await db
+      .update(clientResources)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(clientResources.clientId, clientId),
+          eq(clientResources.role, bucket.role)
+        )
+      );
+    const onceDeleted = await page("/platform/offboarded", caller);
+    const deleted = offboardedOf(onceDeleted.html, clientId);
+    const note = `${bucket.name} still held objects`;
+
+    expect({
+      // Its button waits only for staff to confirm no export was made.
+      confirm: confirmOff(emptying),
+      waits: emptying.includes("It can be deleted from"),
+      emptying: emptying.includes(note),
+      deleted: deleted.includes(note),
+    }).toStrictEqual({
+      confirm: false,
+      waits: false,
+      emptying: true,
+      deleted: false,
     });
   });
 });
