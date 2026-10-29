@@ -6,6 +6,7 @@ import {
   interviewApiPath,
   interviewProgressSchema,
 } from "@grasp-os/shared/interview-links";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -15,6 +16,10 @@ import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import {
+  createWorkflowResource,
+  publishWorkflowVersion,
+} from "../src/workflow-resources.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -101,6 +106,16 @@ const storedOf = async (claims: Record<string, unknown>) => {
     .bind(String(claims.sub))
     .first<{ count: number }>();
   return { users: users?.count ?? 0, accounts: held?.count ?? 0 };
+};
+
+/** Whether run `runId` of an independent workflow was asked to stop. */
+const stopAsked = async (runId: string): Promise<boolean> => {
+  const row = await env.DB.prepare(
+    "SELECT stop_requested_at AS asked FROM workflow_resource_runs WHERE id = ?"
+  )
+    .bind(runId)
+    .first<{ asked: number | null }>();
+  return row?.asked !== null && row?.asked !== undefined;
 };
 
 /** Runs `sql` in the deployment's onboarding store: its rows. */
@@ -405,6 +420,7 @@ describe("erasing a person", () => {
           { area: "workspace", state: "complete" },
           { area: "apps", state: "complete" },
           { area: "interview", state: "complete" },
+          { area: "runs", state: "complete" },
         ],
       },
       name,
@@ -619,6 +635,7 @@ describe("erasing a person", () => {
           { area: "workspace", state: "complete" },
           { area: "apps", state: "complete" },
           { area: "interview", state: "complete" },
+          { area: "runs", state: "complete" },
         ],
       },
       // Nothing of the area went: one statement, or none of it.
@@ -633,6 +650,7 @@ describe("erasing a person", () => {
           { area: "workspace", state: "complete" },
           { area: "apps", state: "complete" },
           { area: "interview", state: "complete" },
+          { area: "runs", state: "complete" },
         ],
       },
       accounts: 0,
@@ -724,6 +742,126 @@ describe("erasing a person", () => {
         },
       ],
       text: false,
+    });
+  });
+
+  it("stops what still runs for them, and takes their decision confirmations, and leaves everyone else's", async () => {
+    const { admin, person } = await removedPerson();
+    const other = await signedInApi(idp, "builder");
+    const workflow = await createWorkflowResource(
+      env,
+      { userId: admin.userId, role: "admin", teams: [], staff: false },
+      `waits-${crypto.randomUUID().slice(0, 8)}`
+    );
+    await publishWorkflowVersion(
+      env,
+      { userId: admin.userId, role: "admin", teams: [], staff: false },
+      workflow.id,
+      {
+        definition: JSON.stringify({
+          document: {
+            dsl: "1.0.3",
+            namespace: workflowNamespace,
+            name: workflow.name,
+            version: "1.0.0",
+            title: workflow.name,
+            metadata: {
+              grasp: {
+                profile: "grasp-open-workflow/1",
+                params: {},
+                bindings: {},
+              },
+            },
+          },
+          input: {
+            schema: {
+              format: "json",
+              document: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+            },
+          },
+          output: {
+            schema: {
+              format: "json",
+              document: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+            },
+          },
+          do: [{ hold: { wait: "PT1H" } }],
+        }),
+        basedOn: null,
+      }
+    );
+    // A run for each, started while they were members, still waiting.
+    const now = Date.now();
+    const version = await env.DB.prepare(
+      "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ hash: string }>();
+    const manifest = version?.hash ?? "";
+    const runFor = async (userId: string): Promise<string> => {
+      const runId = crypto.randomUUID();
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'person', ?, ?, ?, 1, ?, ?, 1, 'h', ?)"
+        ).bind(
+          runId,
+          userId,
+          `key-${runId}`,
+          workflow.id,
+          manifest,
+          userId,
+          now
+        ),
+        env.DB.prepare(
+          "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, ?, 'b', ?, 'running', ?)"
+        ).bind(runId, workflow.id, manifest, userId, now),
+        env.DB.prepare(
+          "INSERT INTO workflow_decisions (id, resource_run_id, step, deciders, description, status, opened_at, expires_at, input) VALUES (?, ?, 'task:ask', ?, 'Approve?', 'open', ?, ?, '{}')"
+        ).bind(runId, runId, `person:${userId}`, now, now + 60_000),
+        env.DB.prepare(
+          "INSERT INTO workflow_decision_confirmations (token_hash, decision_id, user_id, context_fingerprint, response_fingerprint, created_at, expires_at) VALUES (?, ?, ?, 'c', 'r', ?, ?)"
+        ).bind(crypto.randomUUID(), runId, userId, now, now + 60_000),
+      ]);
+      return runId;
+    };
+    const theirs = await runFor(person.userId);
+    const others = await runFor(other.userId);
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    expect({
+      theirRun: await stopAsked(theirs),
+      otherRun: await stopAsked(others),
+      theirConfirmations: await rowsOf(
+        "workflow_decision_confirmations",
+        "user_id",
+        person.userId
+      ),
+      otherConfirmations: await rowsOf(
+        "workflow_decision_confirmations",
+        "user_id",
+        other.userId
+      ),
+      // Their run stays, a company record naming them.
+      theirRunKept: await rowsOf(
+        "workflow_resource_runs",
+        "principal_id",
+        person.userId
+      ),
+    }).toStrictEqual({
+      theirRun: true,
+      otherRun: false,
+      theirConfirmations: 0,
+      otherConfirmations: 1,
+      theirRunKept: 1,
     });
   });
 
