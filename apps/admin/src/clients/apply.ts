@@ -18,7 +18,7 @@ import type { Staff } from "../access.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { InventoryError } from "../hosting/inventory.ts";
 import {
   ProvisionOperationError,

@@ -7,7 +7,7 @@ import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 
 import { adminDatabase } from "../db/act.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import type { DeployErrorCode } from "../deploy/errors.ts";
 import {
   guarded,

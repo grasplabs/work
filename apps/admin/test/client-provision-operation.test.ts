@@ -818,7 +818,7 @@ const attemptEnded = async (
 };
 
 describe("provisioning a placed client", () => {
-  useStoreSecrets({ deployer: token, tenant: `${token}-tenant-admin` });
+  useStoreSecrets({ deployer: token });
 
   it("provisions a fresh client end to end, its hostname published last", async () => {
     const manifest = await importRelease("dedicated");
@@ -3493,7 +3493,7 @@ const crashedAt = async (point: CrashPoint) => {
 };
 
 describe("a release's runner crashing, and another action on the client after", () => {
-  useStoreSecrets({ deployer: token, tenant: `${token}-tenant-admin` });
+  useStoreSecrets({ deployer: token });
 
   it("keeps the worst case when core's upload gets a 4xx Cloudflare didn't write: a rollback past its new migration stays refused", async () => {
     const point = crashPoints.find(({ at }) => at === "after connect's upload");

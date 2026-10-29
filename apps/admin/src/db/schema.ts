@@ -70,19 +70,16 @@ export const releaseImportProgress = sqliteTable("release_import_progress", {
   updatedAt: timestamp("updated_at").notNull(),
 });
 
-/** A client: one deployment of Grasp OS in its own Cloudflare account. */
+/**
+ * A client: one deployment of Grasp OS, placed in a hosting destination
+ * (src/hosting/), where its operation provisions and releases it.
+ */
 export const clients = sqliteTable(
   "clients",
   {
     /** The client's slug: its subdomain, `<slug>.<domain>`. */
     id: text().primaryKey(),
     name: text().notNull(),
-    /**
-     * The Cloudflare account the admin adopted for it, under the
-     * account-per-client path; null for a client created as a placement in
-     * a hosting destination (src/hosting/), which every new client is.
-     */
-    accountId: text("account_id").unique(),
     /**
      * The generation of the client's derived secrets: each is
      * `HMAC(<master key>, "<purpose>:<id>:<generation>")`
@@ -98,11 +95,6 @@ export const clients = sqliteTable(
      * keys are kept for a window from here (src/deploy/secrets.ts).
      */
     rotationLiveAt: timestamp("rotation_live_at"),
-    /**
-     * The account's workers.dev subdomain, where its core answers
-     * (`https://<core>.<subdomain>.workers.dev`); null before the first deploy.
-     */
-    workersSubdomain: text("workers_subdomain"),
     /** The rollout ring it's in: 0 first. */
     ring: integer().notNull().default(1),
     status: text({ enum: ["provisioning", "active", "offboarded"] })
@@ -227,58 +219,6 @@ export const clientWorkers = sqliteTable(
     deployedAt: timestamp("deployed_at"),
   },
   (table) => [primaryKey({ columns: [table.clientId, table.worker] })]
-);
-
-/**
- * Making a client's account run a release (src/deploy/deploy.ts): how far
- * it got. Every step can run again, so a deploy that failed is resumed by
- * running it again from the start.
- */
-export const clientDeploys = sqliteTable(
-  "client_deploys",
-  {
-    id: text().primaryKey(),
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id),
-    releaseId: text("release_id")
-      .notNull()
-      .references(() => releases.id),
-    /**
-     * What it deploys: a release, or on the release the client runs
-     * already only new secrets (a secrets rollout, or its own rotated
-     * ones), only its settings (applied now, or by a rollout of that
-     * release), or both at once. Core records it as what changed.
-     */
-    kind: text({
-      enum: ["release", "secrets", "settings", "settings_and_secrets"],
-    })
-      .notNull()
-      .default("release"),
-    /** `superseded`: a newer deploy of the client started, so this one no longer runs. */
-    status: text({
-      enum: ["running", "done", "failed", "superseded"],
-    }).notNull(),
-    /** The last step that finished, such as `resources`; null before the first. */
-    step: text(),
-    /** Why it failed: an error code, never a token or a response body. */
-    error: text(),
-    /**
-     * The versions this deploy uploaded, each with fingerprints of what went
-     * into it and of its secrets alone: JSON, `{"byApp": {"connect":
-     * {"version": "<id>", "fingerprint": "<hex>", "secrets": "<hex>"}}}`
-     * (src/deploy/deploy.ts). A resumed deploy deploys these rather than
-     * upload again, unless what goes into one has changed since.
-     */
-    versions: text(),
-    /** The staff member who started it, or `system`. */
-    startedBy: text("started_by").notNull(),
-    createdAt: timestamp("created_at").notNull(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [
-    index("client_deploys_client_idx").on(table.clientId, table.createdAt),
-  ]
 );
 
 /** Rolling a release (or only new secrets) out to clients, ring by ring. */

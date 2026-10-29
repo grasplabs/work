@@ -71,8 +71,7 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // - a rollout that goes on while paused or after it's cancelled.
 
 const token = "test-deployer-token-rollout-5d1e7a";
-const tenantToken = "test-tenant-admin-token-rollout-9c3f20";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 /** What staff confirm of a ring before approving the next (src/rollout/control.ts). */
 const ringChecked = { evalPassed: true, demoSent: true };
 
@@ -297,7 +296,7 @@ const setAsideEarlierTests = async (): Promise<void> => {
 };
 
 describe("rolling a release out to placed clients", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   beforeEach(setAsideEarlierTests);
 
   it("runs ring 0's operations, waits for one approval, then the fleet's, ring by ring, audited", async () => {
@@ -1342,7 +1341,7 @@ const platformChangeOf = (account: PlacedClient["account"], script: string) => {
 };
 
 describe("a client's changes, counted", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   beforeEach(setAsideEarlierTests);
 
   it("refuses a rollout's rollback once anything changed the client since, even back to the rollout's release", async () => {
@@ -2152,7 +2151,7 @@ describe("a client's changes, counted", () => {
 });
 
 describe("a rollout's run dying on a client, and staff acting on the client after", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   beforeEach(setAsideEarlierTests);
 
   it.each(
@@ -2247,7 +2246,7 @@ const fleetRingOf = (index: number): number => {
 };
 
 describe("rolling out a release that raises a platform limit", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   beforeEach(setAsideEarlierTests);
 
   const raised = { ...testLimits, workflowSteps: 2000 };
@@ -2486,7 +2485,7 @@ describe("rolling out a release that raises a platform limit", () => {
 });
 
 describe("reading every client at once, as a rollout checks them", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   beforeEach(setAsideEarlierTests);
 
   it("reads each client as reading it alone does, so both skip alike", async () => {
