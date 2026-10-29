@@ -378,6 +378,7 @@ const coreDb: D1State = {
     workflow_resources: exported(`${core}workflow-resources.ts`),
     workflow_resource_versions: exported(`${core}workflow-resources.ts`),
     workflow_resource_members: exported(`${core}workflow-resources.ts`),
+    workflow_resource_processes: exported(`${core}workflow-resources.ts`),
     trigger_resources: exported(`${core}trigger-resources.ts`),
     trigger_resource_versions: exported(`${core}trigger-resources.ts`),
     connector_trigger_holds: exported(

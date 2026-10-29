@@ -74,6 +74,9 @@ const callsFor = (account: AccountState): number =>
 /** Reading live columns as the grid does, answers not kept between tests. */
 const uncached: LiveOptions = { ...defaultLiveOptions, cache: false };
 
+/** The account a call to the API is about, from its path. */
+const accountPath = /^\/accounts\/(?<id>[^/]+)\//u;
+
 /** Some usage, for an account the analytics report. */
 const someUsage = {
   monthRequests: 100,
@@ -288,11 +291,45 @@ describe("the client grid", () => {
     );
     // The slow client's account doesn't answer until the test lets it.
     const held = Promise.withResolvers<boolean>();
+    const slowArrived = Promise.withResolvers<boolean>();
     cloudflare.beforeAnswering(
       ({ path }) =>
         path.startsWith(`/accounts/${slow?.account.id ?? ""}/workers`),
       async () => {
+        slowArrived.resolve(true);
         await held.promise;
+      }
+    );
+    // The fake answers every other call at once, so two clients' reads
+    // overlap only if one is held open: the first call of another of
+    // these accounts waits until a second account's call has arrived (the
+    // slow one's, or another's), whichever order the clients are read in.
+    // Two reads at a time hold two accounts at once; one at a time never
+    // lets the second arrive, and the held row fails its deadline.
+    const accountOf = (path: string): string | undefined =>
+      accountPath.exec(path)?.groups?.id;
+    const others = new Set(
+      [unread, ...whole].map((client) => client?.account.id)
+    );
+    let firstOther: string | undefined;
+    const secondArrived = Promise.withResolvers<boolean>();
+    cloudflare.beforeAnswering(
+      ({ path }) => {
+        firstOther = accountOf(path);
+        return others.has(firstOther);
+      },
+      async () => {
+        await Promise.race([slowArrived.promise, secondArrived.promise]);
+      }
+    );
+    cloudflare.beforeAnswering(
+      ({ path }) => {
+        const account = accountOf(path);
+        return others.has(account) && account !== firstOther;
+      },
+      async () => {
+        secondArrived.resolve(true);
+        await secondArrived.promise;
       }
     );
     // Another's account refuses one Worker's deployments listing, once.

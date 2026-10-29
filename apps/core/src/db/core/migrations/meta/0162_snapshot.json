@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "dc21e34e-5ffc-42ca-b360-b41faf54445e",
+  "id": "b16b36d4-2b37-4540-a1da-78e898bbd65e",
   "prevId": "c5c238ab-ef36-483b-93e6-115eb0776209",
   "tables": {
     "access_revocations": {
@@ -1917,6 +1917,13 @@
         },
         "audience_id": {
           "name": "audience_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "process": {
+          "name": "process",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -11031,114 +11038,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "workflow_resource_lifecycles": {
-      "name": "workflow_resource_lifecycles",
-      "columns": {
-        "workflow_resource_id": {
-          "name": "workflow_resource_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "stage": {
-          "name": "stage",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "live_version": {
-          "name": "live_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "live_approved_by": {
-          "name": "live_approved_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "live_approved_at": {
-          "name": "live_approved_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "paused_by": {
-          "name": "paused_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "paused_at": {
-          "name": "paused_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "go_live_version": {
-          "name": "go_live_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "go_live_requested_by": {
-          "name": "go_live_requested_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "go_live_requested_at": {
-          "name": "go_live_requested_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "workflow_resource_lifecycles_workflow_resource_id_workflow_resources_id_fk": {
-          "name": "workflow_resource_lifecycles_workflow_resource_id_workflow_resources_id_fk",
-          "tableFrom": "workflow_resource_lifecycles",
-          "tableTo": "workflow_resources",
-          "columnsFrom": [
-            "workflow_resource_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "workflow_resource_members": {
       "name": "workflow_resource_members",
       "columns": {
@@ -11294,6 +11193,58 @@
           "name": "workflow_resource_params_workflow_resource_id_revision_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "workflow_resource_processes": {
+      "name": "workflow_resource_processes",
+      "columns": {
+        "workflow_resource_id": {
+          "name": "workflow_resource_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "process": {
+          "name": "process",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "set_by": {
+          "name": "set_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "set_at": {
+          "name": "set_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "workflow_resource_processes_workflow_resource_id_workflow_resources_id_fk": {
+          "name": "workflow_resource_processes_workflow_resource_id_workflow_resources_id_fk",
+          "tableFrom": "workflow_resource_processes",
+          "tableTo": "workflow_resources",
+          "columnsFrom": [
+            "workflow_resource_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
