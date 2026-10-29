@@ -830,6 +830,10 @@ const accountRoutes: Route[] = [
     path: /^\/ai-gateway\/gateways$/u,
     answer: ({ account, json }) => {
       const gateway = { authentication: false, ...json };
+      // One id per account: a second create of it is refused, as the API does.
+      if (account.gateways.some((each) => each.id === json?.id)) {
+        return refusal(400, 7001, "A gateway with this id already exists");
+      }
       account.gateways.push(gateway);
       return envelope(gateway);
     },
