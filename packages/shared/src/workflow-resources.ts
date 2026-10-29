@@ -7,7 +7,11 @@ import {
   storeOperationPathMaxLength,
   storeOperationPathPattern,
 } from "./operation-limits.ts";
-import type { WorkflowDiagram, WorkflowRunTrace } from "./workflow-diagrams.ts";
+import type {
+  WorkflowCandidateTrace,
+  WorkflowDiagram,
+  WorkflowRunTrace,
+} from "./workflow-diagrams.ts";
 import { workflowModulesError } from "./workflow-modules.ts";
 import type { ActionUse } from "./workflow-modules.ts";
 
@@ -240,6 +244,10 @@ export const workflowResourceErrors = defineErrorFamily({
     "This test run went on longer than a test run may, so it failed. Shorten what it waits for to test it.",
   "workflow.candidate_wait_limit":
     "This test run would wait longer than a test run may, so it failed. Shorten the wait to test it.",
+  "workflow.item_test_empty":
+    "None of your recent runs of this workflow can be tested again: a test takes runs you can see the details of, whose input is still kept.",
+  "workflow.item_test_unavailable":
+    "This test doesn't exist, or isn't one you can see.",
   "workflow.failed_after_effect":
     "The task's call took effect, then the task failed. What the call did stands.",
   "workflow.raised":
@@ -965,6 +973,52 @@ export interface WorkflowCandidateRun {
 }
 
 /**
+ * Most recent runs one test over real items takes: one test run each, all
+ * going at once, so no more than a person may have going.
+ */
+export const maxItemTestItems = maxLiveCandidateRuns;
+
+/**
+ * A test of a draft's checkpoint over recent real items (GRA-513): the
+ * checkpoint's exact revision runs once on the input of each of the
+ * tester's most recent runs whose details they may see and whose input is
+ * still kept (`items` of them, at most `maxItemTestItems`), each as a test
+ * run (`workflowCandidateStartSchema`): with the parameters given here or
+ * their defaults, and every call answered from `fixtures`, never made.
+ */
+export const workflowItemTestStartSchema = workflowCandidateStartSchema
+  .omit({ input: true })
+  .extend({ items: z.int().min(1).max(maxItemTestItems).optional() });
+
+/** One real item of a test, and how the draft did on it. */
+export interface WorkflowItemTestItem {
+  /** The run whose input it is. */
+  sourceRunId: string;
+  /** The version that run ran, and how it stands now. */
+  sourceVersion: number;
+  sourceStatus: WorkflowRunStatus;
+  sourceCreatedAt: string;
+  /**
+   * The test run of the item, as `candidateRun` reads it; null when it
+   * never started (`refusal`), or once it was removed after a week.
+   */
+  run: WorkflowCandidateRun | null;
+  /** Why the item's test run never started (its input refused, a limit). */
+  refusal: string | null;
+}
+
+/** A test of a draft's checkpoint over recent real items, item by item. */
+export interface WorkflowItemTest {
+  id: string;
+  workflowId: string;
+  draftRevision: number;
+  principal: string;
+  createdAt: string;
+  /** Newest item first, as the runs were started. */
+  items: WorkflowItemTestItem[];
+}
+
+/**
  * A workflow's draft, for its builders: its latest text and revision (0
  * while nobody has edited it: then the current version's definition, or
  * a starting one), what the profile said of it, and its latest checkpoint,
@@ -1150,6 +1204,19 @@ export interface WorkflowResourcesApi {
     id: string,
     runId: string
   ) => Promise<WorkflowCandidateRun>;
+  /** What one of its test runs did, step by step, for builders. */
+  candidateRunTrace: (
+    id: string,
+    runId: string
+  ) => Promise<WorkflowCandidateTrace>;
+  /**
+   * Tests the draft's checkpoint at an exact revision over the caller's
+   * recent real runs, one test run each, every call answered from the
+   * start's fixtures; for builders (`workflowItemTestStartSchema`).
+   */
+  startItemTest: (id: string, input: unknown) => Promise<WorkflowItemTest>;
+  /** One of its tests over real items, item by item; for its tester. */
+  itemTest: (id: string, testId: string) => Promise<WorkflowItemTest>;
   /** Its parameters' configuration, for anyone with a role. */
   params: (id: string) => Promise<WorkflowParams>;
   /** Sets parameter values, revision-checked; for builders. */
