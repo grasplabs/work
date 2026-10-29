@@ -8,7 +8,7 @@ import {
 import { recall } from "@grasp-os/brain/recall";
 import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type { VersionRef } from "@grasp-os/brain/recall-store";
-import { relationsFor } from "@grasp-os/brain/relations";
+import { relationsExplain, relationsFor } from "@grasp-os/brain/relations";
 import { readSkill, selectSkill } from "@grasp-os/brain/skills";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
@@ -735,6 +735,7 @@ const brainCallSchema = z.enum([
   "entitiesList",
   "entitySources",
   "relationsGet",
+  "relationsExplain",
 ]);
 
 /** The document versions of `refs`, once each, as `pinsOf` takes them. */
@@ -760,7 +761,7 @@ const documentVersionsOf = (refs: readonly BrainSourceRef[]): VersionRef[] => [
 /**
  * Each, as the Brain serves every caller: a recall, a skill's selection,
  * a pinned skill's read, an entity listing, an entity's sources, an
- * entity's relations; the same service and checks. With what each hands
+ * entity's relations or the paths out from it; the same service and checks. With what each hands
  * over cites (`cited`): the document versions the run's evidence pins
  * (`#callBrain`), so every way out of the run stays gated by them.
  */
@@ -807,6 +808,19 @@ const brainCalls: Record<
       value: answer,
       cited: documentVersionsOf(
         answer.relations.map(({ sourceRef }) => sourceRef)
+      ),
+    };
+  },
+  // Each path's relations, each with its passage: their source versions
+  // are pinned.
+  relationsExplain: async (brain, reader, request) => {
+    const explanation = await relationsExplain(brain, reader, request);
+    return {
+      value: explanation,
+      cited: documentVersionsOf(
+        explanation.paths.flatMap(({ relations }) =>
+          relations.map(({ sourceRef }) => sourceRef)
+        )
       ),
     };
   },
@@ -2859,8 +2873,9 @@ export class RunHost extends RpcTarget {
    * Calls the Brain through the run's Brain binding (`binding`): a recall
    * (`brain(env.BRAIN).recall(request)`), a skill's selection or pinned
    * read (`.skills.select`, `.skills.read`, GRA-310), or an entity
-   * listing, an entity's sources or its relations (`.entities.list`,
-   * `.entities.sources`, `.relations.get`), only inside a step whose code its
+   * listing, an entity's sources, its relations or the paths out from it
+   * (`.entities.list`, `.entities.sources`, `.relations.get`,
+   * `.relations.explain`), only inside a step whose code its
    * review shows calling it (`#requireReviewed`), as the run: its App on
    * behalf of its person, under the App's collection grants and `brain`
    * permission as they are now (GRA-1067; the threat model is on the

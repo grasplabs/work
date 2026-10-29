@@ -697,7 +697,7 @@ describe("a workflow's recall through the Brain binding", () => {
     });
   });
 
-  it("fails as revoked, its output never handed over, a run whose entity read, sources or relations cite what it may no longer read", async () => {
+  it("fails as revoked, its output never handed over, a run whose entity read, sources, relations or paths cite what it may no longer read", async () => {
     const admin = await signedInApi(idp, "admin");
     const { handbook, thing, said, documentId } = await linkedOwners(admin);
     const [found] = await admin.api.knowledge.entities({ query: thing });
@@ -723,6 +723,10 @@ describe("a workflow's recall through the Brain binding", () => {
       ...readThenHand(
         "relater",
         `brain(env.BRAIN).relations.get({ entityId: ${entityId} })`
+      ),
+      ...readThenHand(
+        "explainer",
+        `brain(env.BRAIN).relations.explain({ entityId: ${entityId} })`
       ),
     });
     /** Runs of each workflow, asleep after their read, then `between`. */
@@ -763,15 +767,19 @@ describe("a workflow's recall through the Brain binding", () => {
     };
 
     const [kept] = await ran(["relater"]);
-    const revoked = await ran(["lister", "sourcer", "relater"], async () => {
-      await admin.api.permissions.revoke(collectionGrant);
-    });
+    const revoked = await ran(
+      ["lister", "sourcer", "relater", "explainer"],
+      async () => {
+        await admin.api.permissions.revoke(collectionGrant);
+      }
+    );
 
     expect({ kept, revoked }).toStrictEqual({
       // Still readable: what it read leaves as its output.
       kept: { status: "completed", code: null, handed: true },
       // Each read pinned what it cites: refused before its output leaves.
       revoked: [
+        { status: "failed", code: "brain.revoked", handed: false },
         { status: "failed", code: "brain.revoked", handed: false },
         { status: "failed", code: "brain.revoked", handed: false },
         { status: "failed", code: "brain.revoked", handed: false },
@@ -799,7 +807,8 @@ describe("a workflow's recall through the Brain binding", () => {
       const entityId = listed.entities.find(({ label }) => label === ${JSON.stringify(thing)})?.id ?? "-";
       const sources = await brain(env.BRAIN).entities.sources({ entityId });
       const owners = await brain(env.BRAIN).relations.get({ entityId });
-      reads.push([listed.truncated, sources.sources.length, sources.truncated, owners.relations.length, owners.truncated]);
+      const paths = await brain(env.BRAIN).relations.explain({ entityId, hops: 1, budget: { maxPaths: 50 } });
+      reads.push([listed.truncated, sources.sources.length, sources.truncated, owners.relations.length, owners.truncated, paths.paths.length, paths.truncated]);
     }
     const pack = await brain(env.BRAIN).recall({ query: ${JSON.stringify(word)} });
     return { reads, recalled: pack.items.length > 0 } as Json;
@@ -811,7 +820,15 @@ describe("a workflow's recall through the Brain binding", () => {
 
     const run = await ranOnce(admin, app);
 
-    const cut = [true, delegateCitesMax, true, delegateCitesMax, true];
+    const cut = [
+      true,
+      delegateCitesMax,
+      true,
+      delegateCitesMax,
+      true,
+      delegateCitesMax,
+      true,
+    ];
     expect({ status: run.status, output: run.output }).toStrictEqual({
       status: "completed",
       // Each read cut to what it pins, and said so; the recall after them

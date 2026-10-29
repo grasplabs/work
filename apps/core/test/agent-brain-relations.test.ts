@@ -69,6 +69,12 @@ const readRelations = (query: string) =>
     `export default async (self, env) => { try { const { entities: [found] } = await env.brain.entities({ query: ${JSON.stringify(query)} }); return await env.brain.relations({ entityId: found.id }); } catch (error) { return error.message; } };`
   );
 
+/** A chat's code that explains how `query`'s first entity connects, as names. */
+const explainRelations = (query: string) =>
+  codeStep(
+    `export default async (self, env) => { const { entities: [found] } = await env.brain.entities({ query: ${JSON.stringify(query)} }); const { paths, truncated } = await env.brain.relationsExplain({ entityId: found.id }); return { paths: paths.map(({ relations, to }) => [...relations.map(({ evidence }) => evidence), to.name]), truncated }; };`
+  );
+
 /** A chat's code that lists every entity, naming no start. */
 const listEverything = codeStep(
   "export default async (self, env) => { try { return await env.brain.entities({}); } catch (error) { return error.code ?? error.message; } };"
@@ -172,6 +178,58 @@ describe("a chat's entity and relation reads", setUpTime, () => {
     });
   });
 
+  it("explain how an entity connects, two relations out, each with its passage", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInWithRole(idp, "user");
+    const thing = `Onboarding ${unique()}`;
+    const owns = `Anna owns ${thing}.`;
+    const uses = `${thing} uses Personio.`;
+    const { collectionId } = await linkedHandbook(admin, `${owns}\n${uses}\n`, {
+      entities: [
+        { kind: "person", name: "Anna" },
+        { kind: "process", name: thing },
+        { kind: "tool", name: "Personio" },
+      ],
+      relations: [
+        { subject: "Anna", predicate: "owns", object: thing, evidence: owns },
+        {
+          subject: thing,
+          predicate: "uses",
+          object: "Personio",
+          evidence: uses,
+        },
+      ],
+    });
+    const { stub, agent, newChat } = await personalChatsOf(
+      person.userId,
+      explainRelations("Anna"),
+      says("Anna owns onboarding, which uses Personio.")
+    );
+    await requestGranted(idp, admin, readCollection(agent, collectionId));
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const chat = await newChat();
+    await chat.ask("What does Anna touch?");
+
+    // Its last: before it, the turn's own recall for the question.
+    const results = await codeResults(stub, chat.chat.id);
+    const explained = results.at(-1);
+
+    expect(
+      JSON.parse((explained?.text ?? "").replace(/^Returned:\n/u, ""))
+    ).toStrictEqual({
+      paths: [
+        [owns, thing],
+        [owns, uses, "Personio"],
+      ],
+      truncated: false,
+    });
+  });
+
   it("answer a person only from what they may read: a team's relation is none of another member's", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
@@ -238,7 +296,12 @@ describe("a chat's entity and relation reads", setUpTime, () => {
       says("Noted."),
       reading(`env.brain.relations({ entityId: ${JSON.stringify(entityId)} })`),
       says("Noted."),
+      reading(
+        `env.brain.relationsExplain({ entityId: ${JSON.stringify(entityId)} })`
+      ),
+      says("Noted."),
       says("Still."),
+      says("Gone."),
       says("Gone."),
       says("Gone."),
       says("Gone.")
@@ -256,6 +319,8 @@ describe("a chat's entity and relation reads", setUpTime, () => {
     await sources.ask("Go.");
     const relations = await newChat();
     await relations.ask("Go.");
+    const explained = await newChat();
+    await explained.ask("Go.");
     /** Whether the next turn of `chat` still sent `handed`. */
     const nextTurn = async (chat: typeof entities, handed: string) => {
       const before = gateway.requests.length;
@@ -281,6 +346,7 @@ describe("a chat's entity and relation reads", setUpTime, () => {
       entities: await nextTurn(entities, entityId),
       sources: await nextTurn(sources, documentId),
       relations: await nextTurn(relations, said),
+      explained: await nextTurn(explained, said),
     }).toStrictEqual({
       read: true,
       // Still readable: the next turn sends what the read handed over.
@@ -289,6 +355,7 @@ describe("a chat's entity and relation reads", setUpTime, () => {
       entities: { handed: false, withheld: true },
       sources: { handed: false, withheld: true },
       relations: { handed: false, withheld: true },
+      explained: { handed: false, withheld: true },
     });
   });
 });

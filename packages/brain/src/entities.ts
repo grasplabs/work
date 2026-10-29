@@ -1655,24 +1655,36 @@ const isPerson = <C>(brain: Brain<C>, reader: C): boolean => {
  * and whether that left any out: what a caller that isn't a person is
  * answered from, so it cites no more than it pins (`delegateCitesMax`).
  */
-export const withinCites = <Row extends { source: string; version: number }>(
+export const withinCites = <Row>(
   rows: readonly Row[],
-  max: number
+  max: number,
+  citesOf: (row: Row) => readonly string[]
 ): { within: Row[]; truncated: boolean } => {
   const kept = new Set<string>();
   const within: Row[] = [];
   let truncated = false;
   for (const row of rows) {
-    const key = `${row.source}:${row.version}`;
-    if (!kept.has(key) && kept.size >= max) {
+    const added = citesOf(row).filter((key) => !kept.has(key));
+    if (kept.size + new Set(added).size > max) {
       truncated = true;
     } else {
-      kept.add(key);
+      for (const key of added) {
+        kept.add(key);
+      }
       within.push(row);
     }
   }
   return { within, truncated };
 };
+
+/** The source version a mention cites, as `withinCites` keys it. */
+const mentionCites = ({
+  source,
+  version,
+}: {
+  source: string;
+  version: number;
+}): string[] => [`${source}:${version}`];
 
 /**
  * `entitiesFor`, with the collections and documents whose mentions it
@@ -1716,7 +1728,7 @@ export const entitiesWithSources = async <C>(
   // can pin, its names and counts from those alone.
   const { within: rows, truncated } = isPerson(brain, reader)
     ? { within: read, truncated: false }
-    : withinCites(read, delegateCitesMax);
+    : withinCites(read, delegateCitesMax, mentionCites);
   // The scan's own cap may have left some out too.
   const cut = truncated || read.length >= readRowsMax;
   const byEntity = new Map<
@@ -1834,7 +1846,7 @@ export const entitySourcesRead = async <C>(
   const unique = [...new Map(rows.map((row) => [row.source, row])).values()];
   const { within, truncated } = isPerson(brain, reader)
     ? { within: unique, truncated: false }
-    : withinCites(unique, delegateCitesMax);
+    : withinCites(unique, delegateCitesMax, mentionCites);
   await noteRead(brain, reader, "entity_sources", within);
   return {
     sources: within.map(refOf),

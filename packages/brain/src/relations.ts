@@ -6,9 +6,15 @@ import type { Brain } from "./brain.ts";
 import {
   brainErrors,
   delegateCitesMax,
+  explainPathsMax,
+  relationsExplainInputSchema,
   relationsGetInputSchema,
 } from "./contract.ts";
-import type { RelationsAnswer, RelationView } from "./contract.ts";
+import type {
+  RelationsAnswer,
+  RelationsExplanation,
+  RelationView,
+} from "./contract.ts";
 import {
   brainAssertions,
   brainLinkJobs,
@@ -47,7 +53,14 @@ import { citesReadable } from "./memory-cites.ts";
 // read through today's access.
 
 /** The most relations one read returns, and reads of each kind of source. */
-const readRowsMax = 200;
+export const readRowsMax = 200;
+
+/** The most entities an explanation goes on from, at each hop. */
+const explainFanOut = 20;
+
+/** An explanation's paths and time, unless its budget says less. */
+const explainPathsDefault = 20;
+const explainDeadlineMsDefault = 2000;
 
 /**
  * The most claims of an entity, of each kind of source, a read weighs for
@@ -56,7 +69,11 @@ const readRowsMax = 200;
  */
 const claimRowsMax = 5000;
 
-export type { RelationsAnswer, RelationView } from "./contract.ts";
+export type {
+  RelationsAnswer,
+  RelationsExplanation,
+  RelationView,
+} from "./contract.ts";
 
 /** Whether two validity intervals share a day; open ends reach forever. */
 const overlaps = (
@@ -96,34 +113,36 @@ const columns = {
   supersededAt: brainAssertions.supersededAt,
 };
 
-/**
- * The relations a read answers (`relationsFor`), with where every claim
- * it weighed came from (`considered`): the answered relations' sources,
- * and those past the cap that still decided whether one is
- * `conflicting`. A caller that labels what it was handed (a chat) labels
- * it with all of them.
- */
-export const relationsRead = async <C>(
+/** What one read of relations asks: an entity and its filters. */
+export interface RelationsQuery {
+  entityId: string;
+  predicate?: string | undefined;
+  at?: string | undefined;
+  knownAt?: string | undefined;
+}
+
+/** What a reader may read through: their documents, and whose memories. */
+export interface ReadScope {
+  allowed: Awaited<ReturnType<typeof allowedFor>>;
+  owner: string | undefined;
+  /** What the owner may read now: their own records rest on only that. */
+  ownerReads: readonly string[];
+}
+
+/** A relation as read, with the source and collection it came from. */
+export interface ReadRelation {
+  view: RelationView;
+  source: string;
+  documentId: string | null;
+  collectionId: string | null;
+}
+
+/** What `reader` reads relations through, past the Brain's gate. */
+export const scopeOf = async <C>(
   brain: Brain<C>,
-  reader: C,
-  input: unknown
-): Promise<{
-  answer: RelationsAnswer;
-  considered: { collectionIds: string[]; documentIds: string[] };
-}> => {
-  const { entityId, predicate, at, knownAt } = brainErrors.parse(
-    "brain.invalid",
-    relationsGetInputSchema,
-    input
-  );
-  // Folded as the Brain keeps relations (`kindOf`): `Reports to` asks for
-  // `reports_to`.
-  const relation = predicate === undefined ? undefined : kindOf(predicate);
-  if (relation === "") {
-    throw brainErrors.create("brain.invalid");
-  }
+  reader: C
+): Promise<ReadScope> => {
   await requireBrainRead(brain, reader);
-  const { db } = brain;
   const allowed = await allowedFor(brain.ports, reader);
   let owner: string | undefined;
   try {
@@ -133,7 +152,70 @@ export const relationsRead = async <C>(
       throw error;
     }
   }
+  const ownerReads =
+    owner === undefined
+      ? []
+      : await brain.ports.memories.readableBy(reader, [owner]);
+  return { allowed, owner, ownerReads };
+};
+
+/** Where a row read came from: its document and collection, if any. */
+export interface ReadSource {
+  documentId: string | null;
+  collectionId: string | null;
+}
+
+/** Reports `read` to the host, as every read of the Brain's does. */
+const reportRead = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  read: readonly ReadSource[],
+  detail: Record<string, string | number>
+): Promise<void> => {
+  const collectionIds = [
+    ...new Set(read.flatMap(({ collectionId }) => collectionId ?? [])),
+  ];
+  const documentIds = [
+    ...new Set(read.flatMap(({ documentId }) => documentId ?? [])),
+  ];
+  await brain.ports.onRead(
+    reader,
+    {
+      action: "knowledge.read",
+      documentIds: documentIds.slice(0, 20),
+      // The count of every document read, past the 20 named.
+      detail: { ...detail, documents: documentIds.length },
+    },
+    ...collectionIds.map((id) => ({ id, sensitive: false }))
+  );
+};
+
+/**
+ * The relations of `entityId` readable through `scope`, newest first, at
+ * most `readRowsMax`, conflicts among them marked, and whether that cap
+ * left any out (`cut`): what every read of relations answers from.
+ */
+export const readable = async <C>(
+  brain: Brain<C>,
+  { allowed, owner, ownerReads }: ReadScope,
+  { entityId, predicate, at, knownAt }: RelationsQuery
+): Promise<{
+  relations: ReadRelation[];
+  cut: boolean;
+  /**
+   * Every row read, the answered and those past the cap alike: each still
+   * decided whether another is `conflicting`, so each is reported.
+   */
+  considered: ReadSource[];
+}> => {
+  const { db } = brain;
   const known = knownAt === undefined ? undefined : new Date(knownAt);
+  // Folded as the Brain keeps relations (`kindOf`): `Reports to` asks for
+  // `reports_to`.
+  const relation = predicate === undefined ? undefined : kindOf(predicate);
+  if (relation === "") {
+    throw brainErrors.create("brain.invalid");
+  }
   const where: SQL | undefined = and(
     or(
       eq(brainAssertions.subjectEntityId, entityId),
@@ -151,10 +233,6 @@ export const relationsRead = async <C>(
       ? sql`${brainAssertions.supersededAt} IS NULL AND EXISTS (SELECT 1 FROM ${brainLinkJobs} WHERE ${brainLinkJobs.source} = ${brainAssertions.source} AND ${brainLinkJobs.version} = ${brainAssertions.version})`
       : sql`${brainAssertions.recordedAt} <= ${known.getTime()} AND (${brainAssertions.supersededAt} IS NULL OR ${brainAssertions.supersededAt} > ${known.getTime()})`
   );
-  const ownerReads =
-    owner === undefined
-      ? []
-      : await brain.ports.memories.readableBy(reader, [owner]);
   // What each kind of source may give: documents in collections that
   // aren't sensitive, and the reader's own memory records resting only on
   // what they may read now (a record follows its sources' restrictions,
@@ -213,35 +291,19 @@ export const relationsRead = async <C>(
           .orderBy(newest)
           .limit(claimRowsMax + 1),
   ]);
-  const read = {
-    documents: docRows,
-    memories: ownRows,
-    cut: docRows.length > readRowsMax || ownRows.length > readRowsMax,
-  };
-  const claims = {
-    documents: docClaims,
-    memories: ownClaims,
-    cut: docClaims.length > claimRowsMax || ownClaims.length > claimRowsMax,
-  };
   // Both kinds of source together, newest first: the answer is the newest
   // `readRowsMax`.
-  const newestRows = [
-    ...read.documents.slice(0, readRowsMax),
-    ...read.memories
+  const rows = [
+    ...docRows.slice(0, readRowsMax),
+    ...ownRows
       .slice(0, readRowsMax)
       .map((row) => ({ ...row, collectionId: null })),
   ]
     .toSorted((a, b) => b.recordedAt.getTime() - a.recordedAt.getTime())
     .slice(0, readRowsMax);
-  // A caller that isn't a person (it has no memories here) is answered
-  // from the newest sources it can pin (`delegateCitesMax`).
-  const { within: rows, truncated: uncited } =
-    owner === undefined
-      ? withinCites(newestRows, delegateCitesMax)
-      : { within: newestRows, truncated: false };
   const weighed = [
-    ...claims.documents.slice(0, claimRowsMax),
-    ...claims.memories
+    ...docClaims.slice(0, claimRowsMax),
+    ...ownClaims
       .slice(0, claimRowsMax)
       .map((row) => ({ ...row, collectionId: null })),
   ];
@@ -258,9 +320,9 @@ export const relationsRead = async <C>(
     };
   };
   const others = weighed.map((claim) => ({ claim, ...placed(claim) }));
-  const answered: RelationView[] = rows.map((row) => {
+  const relations: ReadRelation[] = rows.map((row) => {
     const here = placed(row);
-    return {
+    const view: RelationView = {
       subject: { entityId: row.subjectEntityId, name: row.subjectName },
       predicate: row.predicate,
       object: { entityId: row.objectEntityId, name: row.objectName },
@@ -292,35 +354,86 @@ export const relationsRead = async <C>(
               revision: row.version,
             },
     };
+    return {
+      view,
+      source: row.source,
+      documentId: row.documentId,
+      collectionId: row.collectionId,
+    };
   });
-  // Every claim weighed is reported, not only those answered: one past the
-  // answer's end still decided whether another is `conflicting`.
-  const collectionIds = [
-    ...new Set(weighed.flatMap(({ collectionId }) => collectionId ?? [])),
-  ];
-  const documentIds = [
-    ...new Set(weighed.flatMap(({ documentId }) => documentId ?? [])),
-  ];
-  await brain.ports.onRead(
-    reader,
-    {
-      action: "knowledge.read",
-      documentIds: documentIds.slice(0, 20),
-      detail: {
-        read: "relations",
-        relations: answered.length,
-        considered: weighed.length,
-        documents: documentIds.length,
-      },
-    },
-    ...collectionIds.map((id) => ({ id, sensitive: false }))
+  return {
+    relations,
+    cut:
+      docRows.length > readRowsMax ||
+      ownRows.length > readRowsMax ||
+      docClaims.length > claimRowsMax ||
+      ownClaims.length > claimRowsMax,
+    considered: weighed.map(({ documentId, collectionId }) => ({
+      documentId,
+      collectionId,
+    })),
+  };
+};
+
+/**
+ * The relations a read answers (`relationsFor`), with where every claim
+ * it weighed came from (`considered`): the answered relations' sources,
+ * and those past the cap that still decided whether one is
+ * `conflicting`. A caller that labels what it was handed (a chat) labels
+ * it with all of them.
+ */
+/** The source version a relation cites, as `withinCites` keys it. */
+const citeOf = ({ sourceRef }: RelationView): string =>
+  sourceRef.kind === "document"
+    ? `doc:${sourceRef.documentId}:${sourceRef.version}`
+    : `memory:${sourceRef.memoryId}:${sourceRef.revision}`;
+
+/** Where `considered` came from: its collections and documents, each once. */
+const consideredIds = (considered: readonly ReadSource[]) => ({
+  collectionIds: [
+    ...new Set(considered.flatMap(({ collectionId }) => collectionId ?? [])),
+  ],
+  documentIds: [
+    ...new Set(considered.flatMap(({ documentId }) => documentId ?? [])),
+  ],
+});
+
+export const relationsRead = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<{
+  answer: RelationsAnswer;
+  considered: { collectionIds: string[]; documentIds: string[] };
+}> => {
+  const query = brainErrors.parse(
+    "brain.invalid",
+    relationsGetInputSchema,
+    input
   );
+  const scope = await scopeOf(brain, reader);
+  const {
+    relations: newest,
+    cut,
+    considered,
+  } = await readable(brain, scope, query);
+  // A caller that isn't a person (it has no memories here) is answered
+  // from the newest sources it can pin (`delegateCitesMax`).
+  const { within: read, truncated: uncited } =
+    scope.owner === undefined
+      ? withinCites(newest, delegateCitesMax, ({ view }) => [citeOf(view)])
+      : { within: newest, truncated: false };
+  await reportRead(brain, reader, considered, {
+    read: "relations",
+    relations: read.length,
+    considered: considered.length,
+  });
   return {
     answer: {
-      relations: answered,
-      truncated: read.cut || claims.cut || uncited,
+      relations: read.map(({ view }) => view),
+      truncated: cut || uncited,
     },
-    considered: { collectionIds, documentIds },
+    considered: consideredIds(considered),
   };
 };
 
@@ -338,4 +451,132 @@ export const relationsFor = async <C>(
 ): Promise<RelationsAnswer> => {
   const { answer } = await relationsRead(brain, reader, input);
   return answer;
+};
+
+/** The entity at a relation's other end from `entityId`. */
+const otherEnd = (view: RelationView, entityId: string) =>
+  view.subject.entityId === entityId ? view.object : view.subject;
+
+/**
+ * Each of `relations` read from `from`, with the entity at its other end:
+ * never back to `start`, where the path began.
+ */
+const stepsFrom = (
+  relations: readonly ReadRelation[],
+  from: string,
+  start: string
+): { view: RelationView; to: RelationView["subject"] }[] =>
+  relations.flatMap(({ view }) => {
+    const to = otherEnd(view, from);
+    return to.entityId === start || to.entityId === from ? [] : [{ view, to }];
+  });
+
+/**
+ * The paths out from `entityId` that `reader` may read (the Brain design's
+ * bounded `relations.explain`): each of its relations, then, two hops
+ * deep, each relation of the entities those reach, to an entity not yet on
+ * the path. Every hop reads as `relations.get` does, from what the reader
+ * may read now, so a relation they can't read neither shows nor decides
+ * where a path goes; nothing is scored. Bounded by paths, by
+ * `explainFanOut` entities gone on from, and by a deadline: what any of
+ * them cut is `truncated`. With where every claim it weighed came from
+ * (`considered`), as `relationsRead` answers it.
+ */
+export const relationsExplainRead = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<{
+  explanation: RelationsExplanation;
+  considered: { collectionIds: string[]; documentIds: string[] };
+}> => {
+  const {
+    entityId,
+    hops = 2,
+    budget = {},
+    ...filters
+  } = brainErrors.parse("brain.invalid", relationsExplainInputSchema, input);
+  const maxPaths = Math.min(
+    budget.maxPaths ?? explainPathsDefault,
+    explainPathsMax
+  );
+  const deadline =
+    brain.ports.clock().getTime() +
+    (budget.deadlineMs ?? explainDeadlineMsDefault);
+  const scope = await scopeOf(brain, reader);
+  const read: ReadRelation[] = [];
+  const considered: ReadSource[] = [];
+  const paths: RelationsExplanation["paths"] = [];
+  const first = await readable(brain, scope, { entityId, ...filters });
+  read.push(...first.relations);
+  considered.push(...first.considered);
+  // Cut by a cap on what was read, on entities gone on from, or the
+  // deadline; or by the paths' budget, which ends it.
+  let truncated = first.cut;
+  /** Adds `found` as far as the budget goes: whether it took them all. */
+  const add = (found: RelationsExplanation["paths"]): boolean => {
+    const space = maxPaths - paths.length;
+    paths.push(...found.slice(0, space));
+    return found.length <= space;
+  };
+  // One path per relation, to the entity at its other end; the entities
+  // reached, in the order first reached, are the next hop's starts.
+  const firstPaths = stepsFrom(first.relations, entityId, entityId);
+  let room = add(firstPaths.map(({ view, to }) => ({ relations: [view], to })));
+  // Every first-hop relation into an entity, not just the first: each is a
+  // path of its own, extended by the entity's relations, read once.
+  const reached = new Map<string, RelationView[]>();
+  for (const { view, to } of firstPaths.slice(0, paths.length)) {
+    reached.set(to.entityId, [...(reached.get(to.entityId) ?? []), view]);
+  }
+  const starts = hops === 2 && room ? [...reached.entries()] : [];
+  truncated ||= starts.length > explainFanOut;
+  for (const [via, firstSteps] of starts.slice(0, explainFanOut)) {
+    if (!room || brain.ports.clock().getTime() >= deadline) {
+      truncated ||= room;
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one hop at a time, within the deadline
+    const next = await readable(brain, scope, { entityId: via, ...filters });
+    read.push(...next.relations);
+    considered.push(...next.considered);
+    truncated ||= next.cut;
+    const onward = stepsFrom(next.relations, via, entityId);
+    room = add(
+      firstSteps.flatMap((step) =>
+        onward.map(({ view, to }) => ({ relations: [step, view], to }))
+      )
+    );
+  }
+  truncated ||= !room;
+  // A caller that isn't a person is answered the paths whose sources it
+  // can pin, first first (`delegateCitesMax`).
+  const { within: answered, truncated: uncited } =
+    scope.owner === undefined
+      ? withinCites(paths, delegateCitesMax, ({ relations }) =>
+          relations.map(citeOf)
+        )
+      : { within: paths, truncated: false };
+  await reportRead(brain, reader, considered, {
+    read: "relations.explain",
+    relations: read.length,
+    considered: considered.length,
+  });
+  return {
+    explanation: { paths: answered, truncated: truncated || uncited },
+    considered: consideredIds(considered),
+  };
+};
+
+/**
+ * The paths out from `entityId` (`relationsExplainRead`), without where
+ * what it weighed came from.
+ */
+export const relationsExplain = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<RelationsExplanation> => {
+  const { explanation } = await relationsExplainRead(brain, reader, input);
+  return explanation;
 };

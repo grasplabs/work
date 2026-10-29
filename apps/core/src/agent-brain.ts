@@ -4,6 +4,7 @@ import type {
   EntitySourcesAnswer,
   MemoryPack,
   RelationsAnswer,
+  RelationsExplanation,
   SkillRead,
   SkillSelection,
 } from "@grasp-os/brain/contract";
@@ -14,7 +15,7 @@ import {
 import { recallWithSources } from "@grasp-os/brain/recall";
 import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type { PinnedVersion, VersionRef } from "@grasp-os/brain/recall-store";
-import { relationsRead } from "@grasp-os/brain/relations";
+import { relationsExplainRead, relationsRead } from "@grasp-os/brain/relations";
 import {
   readSkillWithSources,
   selectSkillWithSources,
@@ -170,6 +171,33 @@ const citing = async (
       documents: await d1BrainStore(brainOf(env)).pinsOf(reader, versions),
     },
     detail: { sources: refs.length },
+  };
+};
+
+/**
+ * What a relations read hands over, `citing` the sources of `refs`, and
+ * labelled with every collection a claim it weighed came from
+ * (`considered`): a claim past the answer's cap still decided whether one
+ * is `conflicting`, so revoking any of them withholds the answer.
+ */
+const weighing = async (
+  env: Env,
+  reader: Reader,
+  refs: readonly BrainSourceRef[],
+  considered: { collectionIds: readonly string[] }
+): Promise<Pick<Delegated<unknown>, "sources" | "detail">> => {
+  const handed = await citing(env, reader, refs);
+  return {
+    ...handed,
+    sources: {
+      ...handed.sources,
+      collections: [
+        ...new Set([
+          ...handed.sources.collections,
+          ...considered.collectionIds,
+        ]),
+      ],
+    },
   };
 };
 
@@ -336,27 +364,39 @@ export class BrainAgentApi
         reader,
         input
       );
-      const handed = await citing(
-        this.env,
-        reader,
-        answer.relations.map(({ sourceRef }) => sourceRef)
-      );
       return {
         value: answer,
-        ...handed,
-        // Labelled with every collection a claim it weighed came from, not
-        // only the answered ones': a claim past the cap still decided
-        // whether one is `conflicting`, so revoking any of them withholds
-        // the answer.
-        sources: {
-          ...handed.sources,
-          collections: [
-            ...new Set([
-              ...handed.sources.collections,
-              ...considered.collectionIds,
-            ]),
-          ],
-        },
+        ...(await weighing(
+          this.env,
+          reader,
+          answer.relations.map(({ sourceRef }) => sourceRef),
+          considered
+        )),
+      };
+    });
+  }
+
+  /**
+   * The paths out from one entity through the chat's readable sources, one
+   * or two relations long, each relation with its passage.
+   */
+  async relationsExplain(input: unknown): Promise<RelationsExplanation> {
+    return await this.#delegated("brain.relationsExplain", async (reader) => {
+      const { explanation, considered } = await relationsExplainRead(
+        brainOf(this.env),
+        reader,
+        input
+      );
+      return {
+        value: explanation,
+        ...(await weighing(
+          this.env,
+          reader,
+          explanation.paths.flatMap(({ relations }) =>
+            relations.map(({ sourceRef }) => sourceRef)
+          ),
+          considered
+        )),
       };
     });
   }
@@ -515,6 +555,8 @@ brain: {
   entitySources(input: { entityId: string }): Promise<{ sources: Relation["sourceRef"][]; truncated: boolean }>;
   /** What its sources say relates one entity to others (who owns or leads what), each with the source's own sentence: \`at\` (YYYY-MM-DD) for who held it on a date, \`knownAt\` (ISO instant) for what was known then. Quote the evidence; when relations conflict, say so and show both. \`truncated\`: more relations exist than came back, so say what you show isn't all of them. */
   relations(input: { entityId: string; predicate?: string; at?: string; knownAt?: string }): Promise<{ relations: Relation[]; truncated: boolean }>;
+  /** How one entity connects to others, one or two relations out (\`hops\`, default 2), each path with every relation's passage, within \`budget\` (at most 50 paths); \`truncated\` when it was cut. Quote the evidence along the path. */
+  relationsExplain(input: { entityId: string; hops?: 1 | 2; predicate?: string; at?: string; knownAt?: string; budget?: { maxPaths?: number; deadlineMs?: number } }): Promise<{ paths: { relations: Relation[]; to: { entityId: string; name: string } }[]; truncated: boolean }>;
   /** Its open questions. Bring one up when the person could answer it, and say who can; you can't answer or close one yourself. */
   gaps(): Promise<BrainGap[]>;
   /** The skill that applies to a task, by its type and traits, or none: use none when none applies, never a skill that only seems close. */

@@ -9,6 +9,7 @@ import {
   memoriesProposeChangeInputSchema,
   receiptsGetInputSchema,
   recallInputSchema,
+  relationsExplainInputSchema,
   relationsGetInputSchema,
   rememberInputSchema,
   skillsReadInputSchema,
@@ -31,6 +32,8 @@ import type {
   ReceiptsGetInput,
   RecallInput,
   RelationsAnswer,
+  RelationsExplainInput,
+  RelationsExplanation,
   RelationsGetInput,
   RememberInput,
   SkillRead,
@@ -57,6 +60,8 @@ export type {
   MemoryRecord,
   RecallInput,
   RelationsAnswer,
+  RelationsExplainInput,
+  RelationsExplanation,
   RelationsGetInput,
   RelationView,
   RememberInput,
@@ -98,6 +103,9 @@ export interface BrainBinding {
   entitiesList?: (input: EntitiesListInput) => Promise<EntitiesAnswer>;
   entitySources?: (input: EntitySourcesInput) => Promise<EntitySourcesAnswer>;
   relationsGet?: (input: RelationsGetInput) => Promise<RelationsAnswer>;
+  relationsExplain?: (
+    input: RelationsExplainInput
+  ) => Promise<RelationsExplanation>;
 }
 
 /** The Brain, as a caller uses it. */
@@ -152,6 +160,11 @@ export interface Brain {
      * cap left some out, so what came back isn't all there is.
      */
     get: (input: RelationsGetInput) => Promise<RelationsAnswer>;
+    /**
+     * The paths out from one entity, one or two relations long, through
+     * what the caller may read, within a budget of paths and time.
+     */
+    explain: (input: RelationsExplainInput) => Promise<RelationsExplanation>;
   };
 }
 
@@ -259,6 +272,12 @@ export const brain = (binding: BrainBinding): Brain => ({
         binding,
         "relationsGet",
         checked(relationsGetInputSchema, input)
+      ),
+    explain: async (input) =>
+      await call(
+        binding,
+        "relationsExplain",
+        checked(relationsExplainInputSchema, input)
       ),
   },
 });

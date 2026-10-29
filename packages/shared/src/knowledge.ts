@@ -18,6 +18,8 @@ import type {
   MemoryRecord,
   ReceiptsGetInput,
   RelationsAnswer,
+  RelationsExplainInput,
+  RelationsExplanation,
   RelationsGetInput,
   RecallInput,
   RememberInput,
@@ -333,6 +335,13 @@ export interface KnowledgeApi {
    * (GRA-306): what a source says, never an accepted fact.
    */
   relations: (input: RelationsGetInput) => Promise<RelationsAnswer>;
+  /**
+   * The paths out from one entity, one or two relations long, through what
+   * the person may read, within a budget of paths and time (GRA-306).
+   */
+  relationsExplain: (
+    input: RelationsExplainInput
+  ) => Promise<RelationsExplanation>;
   /**
    * Asks the Brain to remember something of the person's own (brain-api.ts):
    * retry with the same key after a lost reply. Admitted, it is kept as a

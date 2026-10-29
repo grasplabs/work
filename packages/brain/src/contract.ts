@@ -845,6 +845,50 @@ export const relationsAnswerSchema = z.strictObject({
 });
 export type RelationsAnswer = z.infer<typeof relationsAnswerSchema>;
 
+/** The most paths one explanation returns, and its default. */
+export const explainPathsMax = 50;
+
+/**
+ * An explanation's question: the paths out from one entity, one hop (its
+ * relations) or two (theirs too), of one predicate or any, holding on `at`
+ * and known at `knownAt` as `relations.get` reads them, within a budget of
+ * paths and time. No graph expression: a start, a depth and filters.
+ */
+export const relationsExplainInputSchema = z.strictObject({
+  entityId: idSchema,
+  hops: z.int().min(1).max(2).optional(),
+  predicate: z.string().min(1).max(40).optional(),
+  at: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+  knownAt: instantSchema.optional(),
+  budget: z
+    .strictObject({
+      maxPaths: z.int().min(1).max(explainPathsMax).optional(),
+      deadlineMs: z.int().min(100).max(5000).optional(),
+    })
+    .optional(),
+});
+export type RelationsExplainInput = z.input<typeof relationsExplainInputSchema>;
+
+/**
+ * The paths out from an entity, each one or two relations long, to the
+ * entity it reaches, nearest first; `truncated` when a budget, a fan-out
+ * cap or the deadline cut it. Only what the reader may read: a relation
+ * they can't read neither shows nor shapes which paths are found.
+ */
+export const relationsExplanationSchema = z.strictObject({
+  paths: z.array(
+    z.strictObject({
+      relations: z.array(relationViewSchema).min(1).max(2),
+      to: relationEndSchema,
+    })
+  ),
+  truncated: z.boolean(),
+});
+export type RelationsExplanation = z.infer<typeof relationsExplanationSchema>;
+
 // --- operations and errors --------------------------------------------------
 
 /**
@@ -868,6 +912,7 @@ export const brainOperationSchema = z.enum([
   "entities.list",
   "entities.sources",
   "relations.get",
+  "relations.explain",
 ]);
 export type BrainOperation = z.infer<typeof brainOperationSchema>;
 
@@ -889,6 +934,7 @@ export const brainOperations = {
   "entities.list": "query",
   "entities.sources": "query",
   "relations.get": "query",
+  "relations.explain": "query",
 } as const satisfies Record<BrainOperation, "query" | "mutation" | "action">;
 
 /**
