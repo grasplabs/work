@@ -315,22 +315,9 @@ export const requireCallAuthority = async (
   }
 };
 
-/**
- * Run `runId` of workflow `workflowId` as its calls know it, from its row
- * and its start's receipt; `undefined` when there is no such run, or it
- * has ended. Every host of a run (resource-runs.ts) and every App call of
- * one builds it here. A paused run is one that hasn't ended: whether
- * anything of it runs is the engine's to say, which runs nothing of a
- * paused run, and its row follows the engine late. Read `paused` as
- * refusing, a run resumed would fail its next activation, and the calls
- * it makes, until its row heard of the resume.
- */
-export const callingRunOf = async (
-  env: Env,
-  workflowId: string,
-  runId: string
-): Promise<CallingRun | undefined> => {
-  const row = await drizzle(env.DB)
+/** Run `runId`'s row and its start's receipt, as a run's calls read them. */
+const runRowOf = async (env: Env, runId: string) =>
+  await drizzle(env.DB)
     .select({
       workflowId: workflowResourceRuns.workflowResourceId,
       version: workflowResourceRuns.version,
@@ -356,6 +343,45 @@ export const callingRunOf = async (
     )
     .where(eq(workflowResourceRuns.id, runId))
     .get();
+
+/** Run `runId` as its calls know it, from `row` (`runRowOf`). */
+const callingRunFrom = (
+  runId: string,
+  row: NonNullable<Awaited<ReturnType<typeof runRowOf>>>
+): CallingRun => ({
+  runId,
+  rootRunId: row.rootRunId ?? runId,
+  workflowId: row.workflowId,
+  version: row.version,
+  principal: row.principal,
+  invoker: {
+    type: row.invokerType,
+    id: row.invokerId,
+    appVersion: row.originAppVersion,
+    parentWorkflowId: row.parentWorkflowId,
+  },
+  bindings: frozenBindingsOf(row.bindings),
+  workflows: frozenWorkflowsOf(row.bindings),
+  restricted: row.restricted,
+  paused: row.status === "paused",
+});
+
+/**
+ * Run `runId` of workflow `workflowId` as its calls know it, from its row
+ * and its start's receipt; `undefined` when there is no such run, or it
+ * has ended. Every host of a run (resource-runs.ts) and every App call of
+ * one builds it here. A paused run is one that hasn't ended: whether
+ * anything of it runs is the engine's to say, which runs nothing of a
+ * paused run, and its row follows the engine late. Read `paused` as
+ * refusing, a run resumed would fail its next activation, and the calls
+ * it makes, until its row heard of the resume.
+ */
+export const callingRunOf = async (
+  env: Env,
+  workflowId: string,
+  runId: string
+): Promise<CallingRun | undefined> => {
+  const row = await runRowOf(env, runId);
   if (
     row === undefined ||
     row.workflowId !== workflowId ||
@@ -365,23 +391,21 @@ export const callingRunOf = async (
   ) {
     return undefined;
   }
-  return {
-    runId,
-    rootRunId: row.rootRunId ?? runId,
-    workflowId: row.workflowId,
-    version: row.version,
-    principal: row.principal,
-    invoker: {
-      type: row.invokerType,
-      id: row.invokerId,
-      appVersion: row.originAppVersion,
-      parentWorkflowId: row.parentWorkflowId,
-    },
-    bindings: frozenBindingsOf(row.bindings),
-    workflows: frozenWorkflowsOf(row.bindings),
-    restricted: row.restricted,
-    paused: row.status === "paused",
-  };
+  return callingRunFrom(runId, row);
+};
+
+/**
+ * Run `runId` as its evidence is checked under (resource-reads.ts), ended
+ * or not: a child whose output a run took and holds (`runEvidenceHolds`),
+ * checked under its own workflow's authority as it stands now.
+ * `undefined` once its details are gone.
+ */
+export const heldRunOf = async (
+  env: Env,
+  runId: string
+): Promise<CallingRun | undefined> => {
+  const row = await runRowOf(env, runId);
+  return row === undefined ? undefined : callingRunFrom(runId, row);
 };
 
 /**

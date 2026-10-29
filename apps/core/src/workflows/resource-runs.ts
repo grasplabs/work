@@ -47,6 +47,7 @@ import {
 import type { Acting } from "../auth/identity.ts";
 import { tellOfferedRunEnd } from "../channels/offered-runs.ts";
 import {
+  runEvidenceHolds,
   workflowResourceRunControls,
   workflowResourceRunTerminations,
   workflowResourceVersions,
@@ -1212,11 +1213,36 @@ const childEndOf = async (env: Env, row: RunRow): Promise<ChildEnd> => {
   return { status: "failed", code: "workflow.child_output_too_large" };
 };
 
+/**
+ * Has run `parentRunId` hold child run `childRunId`'s evidence, and every
+ * run the child held (`runEvidenceHolds`): an output it takes may carry
+ * what any of them recalled, so before each of its releases the parent is
+ * checked against theirs too (resource-reads.ts). Kept before the parent
+ * is told, so no parent holds the output without them. Again, it adds
+ * nothing.
+ */
+const holdChildEvidence = async (
+  env: Env,
+  parentRunId: string,
+  childRunId: string
+): Promise<void> => {
+  await drizzle(env.DB).run(
+    sql`INSERT INTO ${runEvidenceHolds} (run_id, held_run_id)
+      SELECT ${parentRunId}, ${childRunId}
+      UNION SELECT ${parentRunId}, ${runEvidenceHolds.heldRunId}
+        FROM ${runEvidenceHolds} WHERE ${runEvidenceHolds.runId} = ${childRunId}
+      ON CONFLICT DO NOTHING`
+  );
+};
+
 export const tellParentOfEnd = async (env: Env, row: RunRow): Promise<void> => {
   if (row.parentRunId === null || unended.includes(row.status)) {
     return;
   }
   const end = await childEndOf(env, row);
+  if (end.status === "completed") {
+    await holdChildEvidence(env, row.parentRunId, row.id);
+  }
   const tell = async (told: ChildEnd) =>
     await runEngine(env).admitEvent(row.parentRunId ?? "", {
       type: childEndType(row.id),

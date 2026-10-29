@@ -12,6 +12,7 @@ import {
   workflowStartReceipts,
   runLineageChildren,
   runBrainEvidence,
+  runEvidenceHolds,
   resourceRunMailCalls,
   runMailCalls,
   runMailStampClaims,
@@ -391,7 +392,15 @@ export const sweepWorkflowStartDetails = async (
         // retention counts from its end, as an App run's does.
         sql`NOT EXISTS (SELECT 1 FROM workflow_resource_runs AS run
           WHERE run.id = ${receipts.id}
-            AND (run.ended_at IS NULL OR run.ended_at >= ${before.getTime()}))`
+            AND (run.ended_at IS NULL OR run.ended_at >= ${before.getTime()}))`,
+        // Nor while a run holding its evidence keeps its own: a parent
+        // that took its output checks its evidence before each release
+        // (resource-reads.ts), and a parent may outlive its child's
+        // retention by far.
+        sql`NOT EXISTS (SELECT 1 FROM ${runEvidenceHolds} AS hold
+          JOIN workflow_resource_runs AS holder ON holder.id = hold.run_id
+          WHERE hold.held_run_id = ${receipts.id}
+            AND (holder.ended_at IS NULL OR holder.ended_at >= ${before.getTime()}))`
       )
     )
     .orderBy(asc(receipts.createdAt), asc(receipts.id))
@@ -460,6 +469,8 @@ export const sweepWorkflowStartDetails = async (
     runFilesRemoved(db, due),
     // What its recalls cited (resource-reads.ts): no new call of its to gate.
     db.delete(runBrainEvidence).where(inArray(runBrainEvidence.runId, due)),
+    // And whose evidence it held: no release of its left to check.
+    db.delete(runEvidenceHolds).where(inArray(runEvidenceHolds.runId, due)),
     // What its decisions asked, about what, and what was answered
     // (GRA-941), as an App run's go with its details (`marked`): who
     // answered, when and how stay.

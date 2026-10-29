@@ -16,13 +16,14 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { permissions } from "../db/core/schema.ts";
+import { permissions, runEvidenceHolds } from "../db/core/schema.ts";
 import type { Reader } from "../knowledge/access.ts";
 import { readAsDelegate } from "../knowledge/binding.ts";
 import { brainOf } from "../knowledge/ports.ts";
 import { pinnedTemplate } from "../resource-templates.ts";
 import {
   callingRunOf,
+  heldRunOf,
   runAuthority,
   runContext,
 } from "./resource-authority.ts";
@@ -472,6 +473,32 @@ const requireOwnEvidenceReadable = async (
 const ancestorsMax = 64;
 
 /**
+ * `requireOwnEvidenceReadable` for each run `run` holds (`runEvidenceHolds`):
+ * a child whose output it took, and every run that child held, each under
+ * its own workflow's authority as it stands now, ended or not. One whose
+ * details are gone is refused as `brain.revoked`: what its output carried
+ * can no longer be checked.
+ */
+const requireHeldEvidenceReadable = async (
+  env: Env,
+  run: CallingRun
+): Promise<void> => {
+  const held = await drizzle(env.DB)
+    .select({ runId: runEvidenceHolds.heldRunId })
+    .from(runEvidenceHolds)
+    .where(eq(runEvidenceHolds.runId, run.runId));
+  for (const { runId } of held) {
+    // oxlint-disable-next-line no-await-in-loop -- one held run after another, few
+    const heldRun = await heldRunOf(env, runId);
+    if (heldRun === undefined) {
+      throw brainErrors.create("brain.revoked");
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one held run after another, few
+    await requireOwnEvidenceReadable(env, heldRun);
+  }
+};
+
+/**
  * `requireRunEvidenceReadable` for a run of a JSON workflow
  * (resource-host.ts, GRA-299): its recalls are each through a knowledge
  * binding, one collection under one permission of the workflow's, so each
@@ -487,6 +514,12 @@ const ancestorsMax = 64;
  * live child: a parent that ends stops its children, every call a child
  * makes already asks that its parent is still going (run-children.ts),
  * and retention removes only ended runs' records.
+ *
+ * A run that took a child's output holds that child's evidence, and the
+ * evidence of every run the child held (`runEvidenceHolds`, kept as its
+ * parent is told of its end): each checked too, under that run's own
+ * authority as it stands now, so a child's output loses none of its
+ * protection in its parent's hands.
  *
  * The walk follows workflow parents alone. A JSON run an App's run
  * started went through that run's App function call, which its own gate
@@ -510,6 +543,9 @@ export const requireResourceRunEvidenceReadable = async (
   for (let depth = 0; depth <= ancestorsMax; depth += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one run after its parent
     await requireOwnEvidenceReadable(env, current);
+    // What it took from its children carries their evidence too.
+    // oxlint-disable-next-line no-await-in-loop -- one run after its parent
+    await requireHeldEvidenceReadable(env, current);
     const { invoker } = current;
     if (invoker.type !== "workflow") {
       return;

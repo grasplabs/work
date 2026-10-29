@@ -30,6 +30,7 @@ import { startWorkflow } from "../src/workflow-starts.ts";
 import { callingRunOf } from "../src/workflows/resource-authority.ts";
 import { callKnowledge } from "../src/workflows/resource-reads.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -527,6 +528,65 @@ const purgeLead = async (admin: Admin, { documentId, lead }: Made) => {
   await admin.api.knowledge.purge(input, plan.token);
 };
 
+/**
+ * A workflow of `by`'s that runs `made` as its child, takes the child's
+ * output, waits, then gives it as its own: it recalls nothing itself.
+ */
+const takingParent = async (by: Identity, admin: Identity, made: Made) => {
+  const parent = await createWorkflowResource(env, by, `taker-${unique()}`);
+  await granted(by, admin, {
+    subject: { type: "workflow", workflowId: parent.id },
+    object: { type: "workflow", workflowId: made.workflow.id },
+    actions: ["start"],
+    binding: "CHILD",
+  });
+  await publishWorkflowVersion(env, by, parent.id, {
+    definition: JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name: parent.name,
+        version: "1.0.0",
+        title: parent.name,
+        metadata: {
+          grasp: {
+            profile: "grasp-open-workflow/1",
+            params: {},
+            bindings: {
+              child: {
+                kind: "workflow",
+                contract: `${workflowNamespace}/${made.workflow.name}/1.0.0`,
+              },
+            },
+          },
+        },
+      },
+      input: { schema: objectSchema({ who: { type: "string" } }) },
+      output: { schema: objectSchema({ status: { type: "string" } }) },
+      do: [
+        {
+          ask: {
+            run: {
+              workflow: {
+                namespace: workflowNamespace,
+                name: made.workflow.name,
+                version: "1.0.0",
+                input: { who: made.who },
+              },
+            },
+            metadata: { grasp: { binding: "child" } },
+            export: { as: "${ {taken: .status} }" },
+          },
+        },
+        { hold: { wait: "PT3S" } },
+        { finish: { set: { status: "${ $context.taken }" } } },
+      ],
+    }),
+    basedOn: null,
+  });
+  return parent;
+};
+
 describe("a JSON workflow's recalled evidence", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -863,6 +923,82 @@ describe("a JSON workflow's recalled evidence", () => {
       purged: true,
       // Read again once the purge crossed it: the purged text, pinned.
       handedOver: false,
+    });
+  });
+
+  it("holds a parent to what its child recalled once it took the child's output: refused once the child may no longer read it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    /** A parent's run that took its child's output, `between` its child's end and its own. */
+    const parentRan = async (between?: (made: Made) => Promise<void>) => {
+      const made = await recallingWorkflow(ada, admin, "output");
+      const parent = await takingParent(ada, admin, made);
+      const { runId } = await startWorkflow(
+        env,
+        { type: "person", person: ada },
+        parent.id,
+        { version: 1, input: { who: made.who }, key: unique() }
+      );
+      if (runId === null) {
+        throw new Error("The start admitted no run");
+      }
+      const child = await vi.waitFor(
+        async () => {
+          const row = await env.DB.prepare(
+            "SELECT id FROM workflow_resource_runs WHERE parent_run_id = ?"
+          )
+            .bind(runId)
+            .first<{ id: string }>();
+          expect(row).not.toBeNull();
+          return row?.id ?? "";
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+      const childEnd = await ended(ada, made.workflow.id, child);
+      // The parent took the output, and waits in its hold.
+      await holding(runId);
+      await between?.(made);
+      const parentEnd = await ended(ada, parent.id, runId);
+      return {
+        child: endOf(made, childEnd),
+        parent: endOf(made, parentEnd),
+      };
+    };
+
+    const kept = await parentRan();
+    const revoked = await parentRan(async ({ collectionGrant }) => {
+      await revokePermission(env, admin, collectionGrant);
+    });
+    // Retention sweeps while the parent still holds the output: the
+    // child's details, its evidence among them, stay for the parent.
+    let keptForParent: unknown;
+    const swept = await parentRan(async ({ workflow }) => {
+      const now = new Date();
+      await sweepWorkflowStartDetails(env, new Date(now.getTime() + 1000), now);
+      keptForParent = await env.DB.prepare(
+        "SELECT receipt.details_removed_at AS removed, (SELECT count(*) FROM run_brain_evidence AS pin WHERE pin.run_id = receipt.id) AS pins FROM workflow_start_receipts AS receipt WHERE receipt.workflow_resource_id = ?"
+      )
+        .bind(workflow.id)
+        .first();
+    });
+
+    expect({ kept, revoked, swept, keptForParent }).toStrictEqual({
+      // What its child recalled goes on to its output.
+      kept: {
+        child: { status: "completed", code: null, carries: true },
+        parent: { status: "completed", code: null, carries: true },
+      },
+      // The child's collection revoked once the parent held its output:
+      // the parent may not give it out, though it recalled nothing itself.
+      revoked: {
+        child: { status: "completed", code: null, carries: true },
+        parent: { status: "failed", code: "brain.revoked", carries: false },
+      },
+      swept: {
+        child: { status: "completed", code: null, carries: true },
+        parent: { status: "completed", code: null, carries: true },
+      },
+      keptForParent: { removed: null, pins: 1 },
     });
   });
 });
