@@ -2427,11 +2427,6 @@ msgctxt "activity filter: everyone"
 msgid "All"
 msgstr "Todos"
 
-#: src/routes/_shell.domains.index.tsx
-msgctxt "filter: every domain"
-msgid "All"
-msgstr "Todos"
-
 #: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: every integration"
 msgid "All"
@@ -6108,10 +6103,6 @@ msgstr "Para {0}"
 msgid "For {0}, who was asked"
 msgstr "Para {0}, a quien ya se preguntó"
 
-#: src/routes/_shell.domains.index.tsx
-msgid "For {audience}"
-msgstr "Para {audience}"
-
 #: src/inbox/item-detail.tsx
 msgid "For {person}"
 msgstr "Para {person}"
@@ -8743,6 +8734,7 @@ msgstr "Ninguna aplicación"
 msgid "No apps match these filters."
 msgstr "Ninguna aplicación coincide con estos filtros."
 
+#: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "No apps yet"
 msgstr "Aún no hay aplicaciones"
@@ -8808,20 +8800,25 @@ msgid "No domain has a model bound to it."
 msgstr "Ningún dominio tiene un modelo vinculado."
 
 #: src/routes/_shell.domains.index.tsx
-msgid "No domain is called “{asked}”"
-msgstr "Ningún dominio se llama «{asked}»"
+msgid "No domain is published yet: publish one from its page, and the people it is shared with can open it."
+msgstr "Aún no hay ningún dominio publicado: publica uno desde su página y las personas con quienes se comparte podrán abrirlo."
 
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "No domain or workflow has approved packages."
 msgstr "Ningún dominio ni flujo de trabajo tiene paquetes aprobados."
 
 #: src/chat/side-panel.tsx
+#: src/routes/_shell.domains.index.tsx
 msgid "No domains yet"
 msgstr "Aún no hay dominios"
 
 #: src/dashboard/widget-board.tsx
 msgid "No domains yet. Domains are made in chat."
 msgstr "Aún no hay dominios. Los dominios se crean en el chat."
+
+#: src/routes/_shell.domains.index.tsx
+msgid "No drafts."
+msgstr "No hay borradores."
 
 #: src/landscape/audit-trail.tsx
 msgid "No events in the latest stretch of the log"
@@ -9636,6 +9633,10 @@ msgstr "Notas"
 msgctxt "onboarding area section"
 msgid "Notes"
 msgstr "Notas"
+
+#: src/routes/_shell.domains.index.tsx
+msgid "Nothing archived."
+msgstr "Nada archivado."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
@@ -12109,7 +12110,6 @@ msgstr "Programación detenida"
 msgid "Screens"
 msgstr "Pantallas"
 
-#: src/routes/_shell.domains.index.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Search"
 msgstr "Buscar"
@@ -12137,10 +12137,6 @@ msgstr "Buscar por nombre o tipo"
 #: src/landscape/audit-trail.tsx
 msgid "Search events"
 msgstr "Buscar eventos"
-
-#: src/routes/_shell.domains.index.tsx
-msgid "Search for another name, or look under another tab."
-msgstr "Busque otro nombre o mire en otra pestaña."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search integrations"
@@ -12170,10 +12166,6 @@ msgstr "Buscar personas y dispositivos"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La búsqueda lee todas las colecciones que puedes leer. Prueba con otras palabras, o con menos."
-
-#: src/routes/_shell.domains.index.tsx
-msgid "Search the domains"
-msgstr "Buscar en los dominios"
 
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
@@ -15997,7 +15989,6 @@ msgid "What should Grasp do there?"
 msgstr "¿Qué debe hacer Grasp allí?"
 
 #: src/engines/new-app.tsx
-#: src/routes/_shell.domains.$engine.index.tsx
 msgid "What should the app show, and for whom?"
 msgstr "¿Qué debe mostrar la aplicación y para quién?"
 
@@ -16312,10 +16303,6 @@ msgstr "Qué entrevistas mostrar"
 #: src/interview/before.tsx
 msgid "Which language do you want to do this interview in?"
 msgstr "¿En qué idioma quieres hacer esta entrevista?"
-
-#: src/routes/_shell.domains.index.tsx
-msgid "Which part of your work should a domain run?"
-msgstr "¿Qué parte de su trabajo debería llevar un dominio?"
 
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "Which teams to show"

@@ -6,7 +6,6 @@ import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
 import type { SurfaceSummary } from "@grasp-os/shared/screens";
 import type { RunsPage, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { buttonVariants } from "@grasp-os/ui/components/button";
-import { PaintedField } from "@grasp-os/ui/components/painted-field";
 import {
   Table,
   TableBody,
@@ -51,7 +50,6 @@ import { PackageApprovals } from "../engines/package-approvals.tsx";
 import { ResourceBindings } from "../engines/resource-bindings.tsx";
 import type { ResourcesPage } from "../engines/resource-bindings.tsx";
 import { ScreenApproval } from "../engines/screen-approval.tsx";
-import { screenTitles } from "../engines/screen-titles.ts";
 import { readStoreChanges, StoreChanges } from "../engines/store-changes.tsx";
 import {
   LoadingLines,
@@ -213,20 +211,8 @@ const Workflows = ({
   );
 };
 
-/**
- * One app (core's screen) of the engine, as the prototype's app card, by
- * the title its builders gave it (engines/screen-titles.ts): it opens the
- * app in the frame.
- */
-const AppCard = ({
-  engine,
-  screen,
-  title,
-}: {
-  engine: string;
-  screen: string;
-  title: string;
-}) => (
+/** One app (core's screen) of the engine, as the prototype's app card: it opens the app in the frame. */
+const AppCard = ({ engine, screen }: { engine: string; screen: string }) => (
   <li className="bg-card hover:border-faint relative flex min-w-0 items-center gap-3 rounded-xl border p-4 transition-colors">
     <span
       aria-hidden="true"
@@ -239,75 +225,24 @@ const AppCard = ({
       params={{ engine, screen }}
       to="/domains/$engine/apps/$screen"
     >
-      {title}
+      {screen}
     </Link>
   </li>
-);
-
-/** No screen has a title yet. */
-const noTitles: ReadonlyMap<string, string> = new Map();
-
-/** The way to make a new app: the page's one main action, in lime. */
-const NewApp = ({ className }: { className?: string }) => (
-  <Link
-    className={cn(buttonVariants({ variant: "highlight" }), className)}
-    to="/apps/new"
-  >
-    <PlusIcon data-icon="inline-start" />
-    <Trans>New app</Trans>
-  </Link>
-);
-
-/**
- * No app yet: the studio's question on a painted field, as the
- * prototype's first app (`components/apps/apps-overview.tsx`), why there
- * is none, and for who builds the way to answer it.
- */
-const FirstApp = ({
-  released,
-  builds,
-}: {
-  released: boolean;
-  builds: boolean;
-}) => (
-  <PaintedField
-    className="flex min-h-72 flex-col items-center justify-center gap-6 rounded-xl px-6 py-14 text-center"
-    painting="sage"
-    pattern="horizon"
-  >
-    <h2 className="type-display max-w-xl">
-      <Trans>What should the app show, and for whom?</Trans>
-    </h2>
-    <p className="text-muted-foreground max-w-md">
-      {released ? (
-        <Trans>
-          An app is what this domain&apos;s team works in, standing on its
-          workflows and integrations. Ask Grasp in chat to build one.
-        </Trans>
-      ) : (
-        <Trans>This domain has no version to run yet.</Trans>
-      )}
-    </p>
-    {builds ? <NewApp /> : null}
-  </PaintedField>
 );
 
 /**
  * The engine's apps, or why there are none, and for someone who builds
  * (`builds`) the way to make a new one; for an admin, with whether their
- * code is approved for the engine's data (`approval`). Each app goes by
- * the title of a surface that opens it (`surfaces`), or else by its file.
+ * code is approved for the engine's data (`approval`).
  */
 const Apps = ({
   engine,
   contents,
-  surfaces,
   approval,
   builds,
 }: {
   engine: string;
   contents: AppContents;
-  surfaces: Deferred<SurfaceSummary[]>;
   approval: Deferred<ScreenTrustReview> | undefined;
   builds: boolean;
 }) => {
@@ -315,34 +250,52 @@ const Apps = ({
   const none = contents.version === null || contents.screens.length === 0;
   return (
     <div className="flex flex-col gap-6">
+      {builds ? (
+        <Link
+          className={cn(
+            buttonVariants({ size: "sm", variant: "outline" }),
+            "self-end"
+          )}
+          to="/apps/new"
+        >
+          <PlusIcon data-icon="inline-start" />
+          <Trans>New app</Trans>
+        </Link>
+      ) : null}
       {none ? (
-        <FirstApp builds={builds} released={contents.version !== null} />
+        <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed p-6">
+          <span
+            aria-hidden="true"
+            className="bg-tile flex size-7 items-center justify-center rounded-md border"
+          >
+            <LayoutGridIcon className="size-4" />
+          </span>
+          <div className="flex max-w-prose flex-col gap-1">
+            <span className="font-medium">
+              <Trans>No apps yet</Trans>
+            </span>
+            <p className="text-muted-foreground">
+              {contents.version === null ? (
+                <Trans>This domain has no version to run yet.</Trans>
+              ) : (
+                <Trans>
+                  An app is what this domain&apos;s team works in, standing on
+                  its workflows and integrations. Ask Grasp in chat to build
+                  one.
+                </Trans>
+              )}
+            </p>
+          </div>
+        </div>
       ) : (
-        <>
-          {/* With no app yet, the field below asks for the first one instead. */}
-          {builds ? <NewApp className="self-end" /> : null}
-          <Await fallback={<LoadingLines />} promise={surfaces}>
-            {(loaded) => {
-              const titles =
-                loaded.state === "ready" ? screenTitles(loaded.data) : noTitles;
-              return (
-                <ul
-                  aria-label={t`Apps`}
-                  className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
-                >
-                  {contents.screens.map((screen) => (
-                    <AppCard
-                      engine={engine}
-                      key={screen}
-                      screen={screen}
-                      title={titles.get(screen) ?? screen}
-                    />
-                  ))}
-                </ul>
-              );
-            }}
-          </Await>
-        </>
+        <ul
+          aria-label={t`Apps`}
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
+          {contents.screens.map((screen) => (
+            <AppCard engine={engine} key={screen} screen={screen} />
+          ))}
+        </ul>
       )}
       {/* Also with no apps now: earlier versions' approvals can still be
           taken back. Not before a first version, which has nothing. */}
@@ -664,7 +617,6 @@ const EngineView = ({ page }: { page: EnginePage }) => {
               builds={canBuild(identity.role)}
               contents={contents}
               engine={app.id}
-              surfaces={surfaces}
             />
           </div>
         </TabsContent>
