@@ -51,9 +51,10 @@ const caller = "ops@grasp.test";
 const policyId = "eu-storage";
 
 /**
- * A release imported for a placed client. Its core binds Workers AI, as
- * the real one does, so an attempt stops at validation
- * (`model_spend_undecided`) before it reaches Cloudflare.
+ * A release imported for a placed client. Its core has a cron trigger,
+ * which Workers for Platforms doesn't document for user Workers, so an
+ * attempt in a shared destination stops at validation
+ * (`wfp_schedule_unqualified`) before it reaches Cloudflare.
  */
 const importedRelease = async (): Promise<string> => {
   const manifest = await release();
@@ -206,7 +207,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       operation: {
         releaseId,
         status: "failed",
-        error: "model_spend_undecided",
+        error: "wfp_schedule_unqualified",
         startedBy: caller,
       },
       placedBy: [caller],
@@ -386,7 +387,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       operation: {
         releaseId,
         status: "failed",
-        error: "model_spend_undecided",
+        error: "wfp_schedule_unqualified",
       },
       run: "errored",
       going: false,
