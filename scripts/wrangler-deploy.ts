@@ -32,6 +32,7 @@ import path from "node:path";
 
 import { routerHostsName, stageOf } from "@grasp-os/shared/names";
 
+import { optionalSecrets } from "./optional-secrets.ts";
 import { filledConfig } from "./wrangler-deploy-config.ts";
 
 /**
@@ -49,19 +50,6 @@ const wranglerArgs = process.argv
 const hostsTitle = routerHostsName(stage);
 /** Where the Cloudflare Vite plugin's build says its config is. */
 const buildRedirect = ".wrangler/deploy/config.json";
-/**
- * Secrets a Worker runs without, until someone puts them in the store: the
- * admin's apps' OAuth clients, Stripe, Rooms, Attio and its Discord
- * webhooks (apps/admin/wrangler.jsonc).
- */
-const optionalSecrets: ReadonlySet<string> = new Set([
-  "APP_OAUTH_CLIENTS",
-  "STRIPE_RESTRICTED_KEY",
-  "ROOMS_READ_TOKEN",
-  "ATTIO_READ_KEY",
-  "DISCORD_DIGEST_WEBHOOK",
-  "STAFF_ALERTS_WEBHOOK",
-]);
 
 const required = (name: string): string => {
   const value = process.env[name];

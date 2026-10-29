@@ -8,7 +8,6 @@
     "dev": "vp dev",
     "build": "vp build",
     "preview": "vp preview",
-    "deploy": "vp build && node ../../scripts/wrangler-deploy.ts",
     "typegen": "wrangler types --include-runtime=false",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply DB --remote"
@@ -36,7 +35,7 @@
   },
   "devDependencies": {
     "@babel/core": "catalog:",
-    "@cloudflare/vite-plugin": "catalog:",
+    "@cloudflare/vite-plugin": "catalog:cf",
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@rolldown/plugin-babel": "catalog:",
@@ -45,6 +44,7 @@
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "babel-plugin-react-compiler": "catalog:",
+    "cf": "catalog:cf",
     "drizzle-kit": "catalog:",
     "seroval": "catalog:",
     "tailwindcss": "catalog:",
