@@ -1,8 +1,9 @@
 /**
  * The vars a placed client's core is uploaded with (src/hosting/operation.ts):
  * what the admin derives for it (src/deploy/core-config.ts), each replaced
- * by the client's setting of the same name, its other settings, and the
- * change core records, checked as core would take them.
+ * by the client's setting of the same name, its other settings, how it
+ * reaches its models (src/deploy/model-transport.ts), and the change core
+ * records, checked as core would take them.
  */
 import { deploymentConfigVars } from "@grasp-os/shared/deployment-config";
 import type { PlatformChange } from "@grasp-os/shared/platform-change";
@@ -12,6 +13,11 @@ import type { AdminDatabase } from "../db/act.ts";
 import { clients, settings } from "../db/schema.ts";
 import { checkDeployedConfig, onboardingSender } from "./core-config.ts";
 import { DeployError } from "./errors.ts";
+import {
+  clientModelResidency,
+  platformModelTransport,
+  withModelTransport,
+} from "./model-transport.ts";
 
 const configVarNames: ReadonlySet<string> = new Set(deploymentConfigVars);
 
@@ -84,8 +90,10 @@ const settingValue = (key: string, value: string): unknown => {
 /**
  * Client `clientId`'s core vars from its `derived` config: each replaced
  * by the client's setting of the same name, its other settings, and
- * `change` as `PLATFORM_CHANGE`, its model spend ceiling as its gateway's
- * deployment budget (`withSpendCeiling`), checked as `coreVars` says, its
+ * `change` as `PLATFORM_CHANGE`, its model transport for its jurisdiction's
+ * residency (`withModelTransport`), its model spend ceiling as its
+ * gateway's deployment budget (`withSpendCeiling`), checked as
+ * `checkDeployedConfig` says, its
  * `MAIL_FROM` against `mailSender`, the address its mail is locked to.
  */
 export const configuredCoreVars = async (
@@ -114,17 +122,25 @@ export const configuredCoreVars = async (
   if (client === undefined) {
     throw new Error(`No client ${clientId}`);
   }
+  const residency = await clientModelResidency(db, clientId);
   const vars = withSpendCeiling(
-    {
-      ...derived,
-      ...Object.fromEntries(
-        rows.map(({ key, value }): [string, unknown] => [
-          key,
-          settingValue(key, value),
-        ])
-      ),
-      PLATFORM_CHANGE: change,
-    },
+    withModelTransport(
+      {
+        ...derived,
+        ...Object.fromEntries(
+          rows.map(({ key, value }): [string, unknown] => [
+            key,
+            settingValue(key, value),
+          ])
+        ),
+        PLATFORM_CHANGE: change,
+      },
+      {
+        residency,
+        platformDefault: await platformModelTransport(db, residency),
+        gatewaySet: rows.some(({ key }) => key === "MODEL_GATEWAY"),
+      }
+    ),
     client.ceiling
   );
   // The config that goes out, settings included: never a SIGN_IN no admin

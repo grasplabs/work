@@ -32,6 +32,7 @@ import type {
   SignInConfig,
 } from "@grasp-os/shared/deployment-config";
 import { memoryLimitsSchema } from "@grasp-os/shared/memory";
+import { modelTransportConfigSchema } from "@grasp-os/shared/model-transport";
 import { clientDomain } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 import { oauthRelayOrigin } from "@grasp-os/shared/oauth-relay";
@@ -303,6 +304,7 @@ const configSchemas: Readonly<Record<string, readonly z.ZodType[]>> = {
     modelGatewayConfigSchema(modelRefShape),
     modelRulesConfigSchema(modelRefShape),
   ],
+  MODEL_TRANSPORT: [modelTransportConfigSchema],
   MEMORY_LIMITS: [memoryLimitsSchema],
   AUDIT_RETENTION_DAYS: [auditRetentionSchema],
   AUDIT_ARCHIVE_RETENTION_DAYS: [auditArchiveRetentionSchema],

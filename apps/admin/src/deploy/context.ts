@@ -8,6 +8,9 @@
  * running in a run's step never returns it from the step, whose result
  * is stored (threat model R17, CO3).
  */
+import { log } from "@grasp-os/shared/log";
+import { modelProviderKeysSchema } from "@grasp-os/shared/model-transport";
+import type { ModelProviderKeys } from "@grasp-os/shared/model-transport";
 import { clientsNamespace, stageNamed } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 
@@ -127,18 +130,18 @@ const optionalSharedSecrets: Readonly<Partial<Record<SharedSecret, string>>> = {
 const notInStore = /not found/iu;
 
 /**
- * A shared secret's value, or its stand-in while the store has none: not
- * there at all, or empty, or left unbound because the store didn't have
- * it at deploy time (scripts/wrangler-deploy.ts). A read that failed any
- * other way stops the deploy as a missing required secret does, so a
- * store that answered badly once never deploys connect without the apps'
- * clients it has.
+ * An optional store secret's value, or `standIn` while the store has
+ * none: not there at all, or empty, or left unbound because the store
+ * didn't have it at deploy time (scripts/wrangler-deploy.ts). A read that
+ * failed any other way stops the caller as a missing required secret
+ * does, so a store that answered badly once never deploys without what
+ * it has.
  */
-const sharedSecret = async (env: Env, name: SharedSecret): Promise<string> => {
-  const standIn = optionalSharedSecrets[name];
-  if (standIn === undefined) {
-    return await storeSecret(env, name);
-  }
+const optionalStoreSecret = async (
+  env: Env,
+  name: StoreSecret,
+  standIn: string
+): Promise<string> => {
   const binding: SecretsStoreSecret | undefined = env[name];
   if (binding === undefined) {
     return standIn;
@@ -152,6 +155,43 @@ const sharedSecret = async (env: Env, name: SharedSecret): Promise<string> => {
     }
   }
   return value === "" ? standIn : value;
+};
+
+/**
+ * A shared secret's value, or its stand-in while the store has none
+ * (`optionalStoreSecret`), so a store that answered badly once never
+ * deploys connect without the apps' clients it has.
+ */
+const sharedSecret = async (env: Env, name: SharedSecret): Promise<string> => {
+  const standIn = optionalSharedSecrets[name];
+  return standIn === undefined
+    ? await storeSecret(env, name)
+    : await optionalStoreSecret(env, name, standIn);
+};
+
+/**
+ * The model providers' keys in Secrets Store (`MODEL_PROVIDER_KEYS`), by
+ * name: none while the store has none (`optionalStoreSecret`). One that
+ * isn't JSON of keys by name gives none either, logged by name only: no
+ * client gets a key from it, so a transport naming one says it's missing
+ * in Setup, rather than every client's deploy stopping.
+ */
+export const storeProviderKeys = async (
+  env: Env
+): Promise<ModelProviderKeys> => {
+  const value = await optionalStoreSecret(env, "MODEL_PROVIDER_KEYS", "{}");
+  let json: unknown = undefined;
+  try {
+    json = JSON.parse(value);
+  } catch {
+    // Refused below, as keys that don't parse.
+  }
+  const parsed = modelProviderKeysSchema.safeParse(json);
+  if (!parsed.success) {
+    log.warn("model_provider_keys.invalid", { secret: "MODEL_PROVIDER_KEYS" });
+    return {};
+  }
+  return parsed.data;
 };
 
 /** Each app's shared secrets, by name, read from Secrets Store. */
@@ -293,7 +333,10 @@ export const deployContext = async (env: Env): Promise<DeployContext> => {
     api: await deployerApi(env),
     db: adminDatabase(env.DB),
     store: env.RELEASES,
-    secrets: await deploySecrets(env),
+    secrets: {
+      ...(await deploySecrets(env)),
+      providerKeys: await storeProviderKeys(env),
+    },
     signInApps: signInApps(env),
     router: {
       hosts: env.ROUTER_HOSTS,

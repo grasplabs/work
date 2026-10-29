@@ -1,7 +1,8 @@
 /**
  * Secrets a Worker runs without, until someone puts them in the store, by
- * binding name in either stage: the admin's apps' OAuth clients, Stripe,
- * Rooms, Attio and its Discord webhooks (apps/admin/wrangler.jsonc).
+ * binding name in either stage: the admin's apps' OAuth clients, the
+ * model providers' keys, Stripe, Rooms, Attio and its Discord webhooks
+ * (apps/admin/wrangler.jsonc).
  *
  * A module of its own that imports nothing, so a config loaded by Vite's
  * Cloudflare plugin (apps/admin/cloudflare.config.ts) pulls in nothing the
@@ -10,6 +11,7 @@
  */
 export const optionalSecrets: ReadonlySet<string> = new Set([
   "APP_OAUTH_CLIENTS",
+  "MODEL_PROVIDER_KEYS",
   "STRIPE_RESTRICTED_KEY",
   "ROOMS_READ_TOKEN",
   "ATTIO_READ_KEY",

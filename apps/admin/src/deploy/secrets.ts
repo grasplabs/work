@@ -28,6 +28,7 @@ import type { WorkerEntry } from "@grasp-os/shared/release";
 
 import type { Secret } from "../cloudflare/workers.ts";
 import { DeployError } from "./errors.ts";
+import { providerKeysSecret } from "./model-transport.ts";
 import { sealedSecretNames } from "./sealed-secrets.ts";
 import { secretsFingerprint } from "./upload.ts";
 
@@ -49,6 +50,12 @@ export interface DeploySecrets {
    * by name. Never a reserved name (`reservedSecretNames`).
    */
   shared: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /**
+   * `MODEL_PROVIDER_KEYS` from Secrets Store, by name: what a deploy picks
+   * each client's own entries from (src/deploy/model-transport.ts), never
+   * given whole. None unless the deploy read them.
+   */
+  providerKeys?: Readonly<Record<string, string>>;
 }
 
 /** One of a client's secrets, derived for it. */
@@ -141,8 +148,9 @@ export const clientAuthSecret = async (
 
 /**
  * Every name a derived secret or its previous value takes, or a sealed
- * one, on any Worker: none can be given as a shared secret, so a client's
- * own is never replaced by what every client shares.
+ * one, or core's provider keys, on any Worker: none can be given as a
+ * shared secret, so a client's own is never replaced by what every
+ * client shares.
  */
 export const reservedSecretNames: ReadonlySet<string> = new Set([
   ...Object.values(derivedSecrets).flatMap((secrets) =>
@@ -151,6 +159,7 @@ export const reservedSecretNames: ReadonlySet<string> = new Set([
     )
   ),
   ...sealedSecretNames,
+  providerKeysSecret,
 ]);
 
 /**
@@ -225,9 +234,10 @@ export const derivedSecretApps: readonly string[] = Object.keys(derivedSecrets);
 
 /**
  * Every secret the Worker `app` runs with: its derived ones for the client
- * (`derivedWorkerSecrets`), the client's sealed ones for it, opened
- * (`sealedWorkerSecrets`, src/deploy/sealed-secrets.ts), and the shared
- * ones given for it. Throws
+ * (`derivedWorkerSecrets`), the client's own ones for it (`own`: its
+ * sealed ones, opened, `sealedWorkerSecrets` in src/deploy/sealed-secrets.ts,
+ * and on core its provider keys, src/deploy/model-transport.ts), and the
+ * shared ones given for it. Throws
  * `reserved_secret_name` for a shared secret under a reserved name, and
  * `missing_secret` for a required one it has no value for, so nothing is
  * uploaded without it.
@@ -238,7 +248,7 @@ export const workerSecrets = async (
   secrets: DeploySecrets,
   client: ClientGeneration,
   now: Date,
-  sealed: ReadonlyMap<string, string>
+  own: ReadonlyMap<string, string>
 ): Promise<Secret[]> => {
   const values = new Map(Object.entries(secrets.shared[app] ?? {}));
   const reserved = [...values.keys()].find((name) =>
@@ -258,7 +268,7 @@ export const workerSecrets = async (
   )) {
     values.set(name, value);
   }
-  for (const [name, value] of sealed) {
+  for (const [name, value] of own) {
     values.set(name, value);
   }
   const missing = worker.requiredSecrets.find((name) => !values.has(name));

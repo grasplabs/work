@@ -466,13 +466,15 @@ export const mailFromSchema = z.strictObject({
 export type MailFrom = z.infer<typeof mailFromSchema>;
 
 /**
- * The names of the deployment config vars above, the only settings the
- * admin sets on core as vars. `PLATFORM_CHANGE` is the admin's own, set
- * on every version it deploys, never a setting.
+ * The names of the deployment config vars above, and `MODEL_TRANSPORT`
+ * (./model-transport.ts), the only settings the admin sets on core as
+ * vars. `PLATFORM_CHANGE` is the admin's own, set on every version it
+ * deploys, never a setting.
  */
 export const deploymentConfigVars = [
   "SIGN_IN",
   "MODEL_GATEWAY",
+  "MODEL_TRANSPORT",
   "MEMORY_LIMITS",
   "AUDIT_RETENTION_DAYS",
   "AUDIT_ARCHIVE_RETENTION_DAYS",

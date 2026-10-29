@@ -348,6 +348,21 @@ export const settings = sqliteTable(
 );
 
 /**
+ * The platform's own settings, one row per key, such as the model
+ * transport every client of a residency takes until staff set one of its
+ * own (`model_transport.eu`, `model_transport.global`,
+ * src/deploy/model-transport.ts). Never a secret: a transport names its
+ * keys, whose values are in Secrets Store.
+ */
+export const platformSettings = sqliteTable("platform_settings", {
+  key: text().primaryKey(),
+  /** JSON. */
+  value: text().notNull(),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
  * A secret of a client's own that can't be derived, such as its Teams
  * bot's client secret, minted in the client's own Entra
  * (src/deploy/sealed-secrets.ts): sealed with a key derived from

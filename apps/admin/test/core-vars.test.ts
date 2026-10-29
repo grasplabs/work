@@ -1,3 +1,8 @@
+import {
+  defaultModelTransport,
+  euGatewayModels,
+  euModelTransport,
+} from "@grasp-os/shared/model-transport";
 import { clientDomain, stages } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
 import { and, eq, sql } from "drizzle-orm";
@@ -5,13 +10,19 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { setModelSpendCeiling } from "../src/clients/settings.ts";
-import { auditEvents, clients, settings } from "../src/db/schema.ts";
+import {
+  auditEvents,
+  clients,
+  platformSettings,
+  settings,
+} from "../src/db/schema.ts";
 import { oauthRelayOf, signInApps } from "../src/deploy/context.ts";
 import {
   derivedCoreConfig,
   onboardingSender,
 } from "../src/deploy/core-config.ts";
 import { configuredCoreVars } from "../src/deploy/core-vars.ts";
+import { withModelTransport } from "../src/deploy/model-transport.ts";
 import { db, staff } from "./hosting.ts";
 
 // A placed client's core vars (src/deploy/core-vars.ts), as its operation
@@ -371,4 +382,176 @@ describe("a client's model spend ceiling, as its gateway's budget", () => {
       });
     }
   );
+});
+
+/** Sets the platform's default for `residency` as stored, as Platform's AI page saves it. */
+const platformDefault = async (
+  residency: "eu" | "global",
+  value: unknown
+): Promise<void> => {
+  const now = new Date();
+  await db
+    .insert(platformSettings)
+    .values({
+      key: `model_transport.${residency}`,
+      value: JSON.stringify(value),
+      updatedBy: staff.email,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: platformSettings.key,
+      set: { value: JSON.stringify(value), updatedAt: now },
+    });
+};
+
+/** Takes the platform's defaults away again. */
+const noPlatformDefaults = async (): Promise<void> => {
+  await db.delete(platformSettings);
+};
+
+describe("a client's model transport, as core's vars", () => {
+  it("reaches an EU organization's models through Claude in Bedrock's EU profile by default, its gateway allowing only those, every call held to the EU", async () => {
+    await noPlatformDefaults();
+    // Not placed yet: it takes the first policy's jurisdiction, the EU.
+    const clientId = await clientWith({});
+
+    const vars = await varsOf(clientId);
+
+    expect({
+      transport: vars.MODEL_TRANSPORT,
+      gateway: vars.MODEL_GATEWAY,
+    }).toStrictEqual({
+      transport: euModelTransport,
+      gateway: {
+        gateway: "grasp-os",
+        models: [...euGatewayModels],
+        roles: {
+          quick: "bedrock-eu/claude-haiku-5-5",
+          careful: "bedrock-eu/claude-sonnet-5-5",
+        },
+        eu: { models: [...euGatewayModels], deployment: true },
+        budgets: { deployment: { limit: 250, alertAt: 80 } },
+      },
+    });
+  });
+
+  it("takes the platform's EU default over the built-in one, and a client's own over both, always within the EU", async () => {
+    const azure = {
+      kind: "openai-compatible",
+      name: "acme-azure",
+      baseUrl: "https://acme.openai.azure.com/openai/v1",
+      key: "acme-azure",
+      models: { "openai/gpt-5": "gpt-5-eu" },
+    };
+    await platformDefault("eu", {
+      primary: { kind: "openrouter", key: "openrouter" },
+      failover: [],
+    });
+    const fallsBack = await clientWith({});
+    const own = await clientWith({
+      // Asks for global residency and a private host: neither goes out.
+      MODEL_TRANSPORT: JSON.stringify({
+        primary: azure,
+        failover: [{ kind: "cloudflare-ai-gateway" }],
+        residency: "global",
+        privateHosts: ["models.acme.internal"],
+      }),
+    });
+
+    const [platform, setting] = await Promise.all([
+      varsOf(fallsBack),
+      varsOf(own),
+    ]);
+    await noPlatformDefaults();
+
+    expect({
+      platform: platform.MODEL_TRANSPORT,
+      setting: setting.MODEL_TRANSPORT,
+    }).toStrictEqual({
+      platform: {
+        primary: { kind: "openrouter", key: "openrouter" },
+        failover: [],
+        residency: "eu",
+        privateHosts: [],
+      },
+      setting: {
+        primary: azure,
+        failover: [{ kind: "cloudflare-ai-gateway" }],
+        residency: "eu",
+        privateHosts: [],
+      },
+    });
+  });
+
+  it("leaves an EU organization's own MODEL_GATEWAY as it set it", async () => {
+    const gateway = {
+      gateway: "grasp-os",
+      models: ["anthropic/claude-sonnet-4-5"],
+    };
+    const clientId = await clientWith({
+      MODEL_GATEWAY: JSON.stringify(gateway),
+    });
+
+    const vars = await varsOf(clientId);
+
+    expect(vars.MODEL_GATEWAY).toStrictEqual({
+      ...gateway,
+      budgets: { deployment: { limit: 250, alertAt: 80 } },
+    });
+  });
+
+  it("refuses a MODEL_TRANSPORT setting core wouldn't take", async () => {
+    const clientId = await clientWith({
+      MODEL_TRANSPORT: JSON.stringify({ primary: { kind: "carrier-pigeon" } }),
+    });
+
+    await expect(refusalOf(clientId)).resolves.toBe("setting_invalid");
+  });
+
+  it("gives an organization whose policy allows AI anywhere the platform's default or AI Gateway, and keeps one it asked to be EU-only in the EU", () => {
+    const derived = {
+      MODEL_GATEWAY: { gateway: "grasp-os", models: ["workers-ai/@cf/a"] },
+    };
+    const openrouter = { kind: "openrouter", key: "openrouter" } as const;
+
+    const builtIn = withModelTransport(derived, {
+      residency: "global",
+      platformDefault: null,
+      gatewaySet: false,
+    });
+    const platform = withModelTransport(derived, {
+      residency: "global",
+      platformDefault: { primary: openrouter, failover: [] },
+      gatewaySet: false,
+    });
+    const stricter = withModelTransport(
+      {
+        ...derived,
+        MODEL_TRANSPORT: { primary: openrouter, residency: "eu" },
+      },
+      { residency: "global", platformDefault: null, gatewaySet: false }
+    );
+
+    expect({ builtIn, platform, stricter }).toStrictEqual({
+      builtIn: { ...derived, MODEL_TRANSPORT: defaultModelTransport },
+      platform: {
+        ...derived,
+        MODEL_TRANSPORT: {
+          primary: openrouter,
+          failover: [],
+          residency: "global",
+          privateHosts: [],
+        },
+      },
+      stricter: {
+        ...derived,
+        MODEL_TRANSPORT: {
+          primary: openrouter,
+          failover: [],
+          residency: "eu",
+          privateHosts: [],
+        },
+      },
+    });
+  });
 });

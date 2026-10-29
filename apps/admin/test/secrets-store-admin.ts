@@ -43,6 +43,17 @@ export const adminSecrets = (tokens: {
   [env.GOOGLE_CLIENT_SECRET, "google-secret"],
   [env.COMPOSIO_API_KEY, "composio-key"],
   [env.APP_OAUTH_CLIENTS, "{}"],
+  // The keys of the transports the tests' clients take: Bedrock's, which
+  // an EU organization's built-in one names, and others no client names
+  // unless its test sets a transport that does.
+  [
+    env.MODEL_PROVIDER_KEYS,
+    JSON.stringify({
+      "bedrock-eu": "test-bedrock-eu-key",
+      openrouter: "test-openrouter-key",
+      "other-client-azure": "test-other-client-key",
+    }),
+  ],
   // Empty, as a store nobody put Stripe's key in reads: a test that
   // reads Stripe sets it (test/admin-billing.test.ts).
   [env.STRIPE_RESTRICTED_KEY, ""],

@@ -260,6 +260,13 @@
       "when": 1793292063151,
       "tag": "0036_client_model_spend_ceiling",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1793306691433,
+      "tag": "0037_platform_settings",
+      "breakpoints": true
     }
   ]
 }

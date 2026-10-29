@@ -180,6 +180,17 @@
       "store_id": "account-secrets-store",
       "secret_name": "APP_OAUTH_CLIENTS",
     },
+    // The model providers' keys clients' transports name, as JSON by name
+    // (src/deploy/model-transport.ts): each client's core is given only
+    // the entries its own transport names, as its MODEL_PROVIDER_KEYS
+    // Worker secret, never the whole. Optional: until it's in the store,
+    // a transport that names a key says so in Setup, and its calls are
+    // refused.
+    {
+      "binding": "MODEL_PROVIDER_KEYS",
+      "store_id": "account-secrets-store",
+      "secret_name": "MODEL_PROVIDER_KEYS",
+    },
     // A restricted Stripe key that can only read customers, subscriptions
     // and invoices, for the admin's Billing under Contract
     // (src/billing/stripe.ts). The admin's alone: never copied to a
@@ -350,6 +361,11 @@
           "binding": "APP_OAUTH_CLIENTS",
           "store_id": "account-secrets-store",
           "secret_name": "APP_OAUTH_CLIENTS_STAGING",
+        },
+        {
+          "binding": "MODEL_PROVIDER_KEYS",
+          "store_id": "account-secrets-store",
+          "secret_name": "MODEL_PROVIDER_KEYS_STAGING",
         },
         {
           "binding": "STRIPE_RESTRICTED_KEY",

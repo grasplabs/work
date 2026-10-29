@@ -159,6 +159,7 @@ import type { SignInApps } from "../deploy/core-config.ts";
 import { configuredCoreVars, mailSenderOf } from "../deploy/core-vars.ts";
 import { DeployError, errorCode } from "../deploy/errors.ts";
 import { migrateDatabases } from "../deploy/migrations.ts";
+import { clientProviderKeys } from "../deploy/model-transport.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { sendsMail } from "../deploy/resources.ts";
 import {
@@ -1498,7 +1499,36 @@ const varsOf = (
   ...teamsBotVars(app, teamsBotOf(loaded.client.teamsBot)),
 });
 
-/** The secrets Worker `app` runs with: the client's derived and sealed ones, and the shared ones it needs. */
+/**
+ * The client's own secrets Worker `app` runs with besides its derived
+ * ones: its sealed ones, and on core the provider keys its transport
+ * names, from the store's (`clientProviderKeys`), never another's.
+ */
+const ownSecretsOf = async (
+  context: ProvisionContext,
+  loaded: Loaded,
+  app: App
+): Promise<Map<string, string>> => {
+  const own = await sealedWorkerSecrets(
+    context.db,
+    context.secrets.clientKey,
+    loaded.held.clientId,
+    app
+  );
+  if (app !== "core") {
+    return own;
+  }
+  const vars = await coreVarsOf(context, loaded);
+  for (const [name, value] of clientProviderKeys(
+    vars.MODEL_TRANSPORT,
+    context.secrets.providerKeys ?? {}
+  )) {
+    own.set(name, value);
+  }
+  return own;
+};
+
+/** The secrets Worker `app` runs with: the client's derived and own ones, and the shared ones it needs. */
 const secretsOf = async (context: ProvisionContext, loaded: Loaded, app: App) =>
   await workerSecrets(
     app,
@@ -1510,12 +1540,7 @@ const secretsOf = async (context: ProvisionContext, loaded: Loaded, app: App) =>
       rotationLiveAt: loaded.client.rotationLiveAt,
     },
     context.now?.() ?? new Date(),
-    await sealedWorkerSecrets(
-      context.db,
-      context.secrets.clientKey,
-      loaded.held.clientId,
-      app
-    )
+    await ownSecretsOf(context, loaded, app)
   );
 
 /**
