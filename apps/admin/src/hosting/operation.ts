@@ -7,8 +7,6 @@
  *    (`incompatibility`, as deploys check it), the destination can run
  *    every binding it uses, the client's secrets and core config can be
  *    made, and its resources are allocated in its inventory.
- *    Then `models`: the AI Gateway its model calls take, for a release
- *    that makes them, before anything names it.
  * 2. `resources`: its databases and buckets exist, each id recorded
  *    (`ensureClientResources`).
  * 4. `migrations`: the release's D1 migrations, applied to the inventory's
@@ -320,7 +318,6 @@ export const operationErrorCode = (error: unknown): string =>
 /** The steps of an operation, in order; the row records the last that finished. */
 export const provisionSteps = [
   "validated",
-  "models",
   "resources",
   "migrations",
   "connect",
@@ -2933,16 +2930,13 @@ const runOperation = async (
     };
     await validate(context, loaded);
 
+    step = "resources";
+    const inventory = await ensureClientResources(api, db, "system", held);
     // Before core goes live naming it: the gateway its model calls take.
-    step = "models";
     if (bindsModels(loaded.manifest)) {
       await assertHolds(db, held);
       await ensureAiGateway(api, loaded.accountId, modelGatewayOf(loaded));
     }
-    await recordStep(db, loaded, "models");
-
-    step = "resources";
-    const inventory = await ensureClientResources(api, db, "system", held);
     await recordStep(db, loaded, "resources", { resources: inventory.length });
 
     step = "migrations";

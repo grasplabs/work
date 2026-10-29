@@ -145,7 +145,6 @@ describe("the company pages, in the admin", () => {
       status,
       steps: [
         `Reserving ${client.id}.grasp.test`,
-        "Setting up AI",
         "Installing Grasp",
         "Inviting admins",
       ].every((line) => html.includes(line)),

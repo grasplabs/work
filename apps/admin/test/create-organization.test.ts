@@ -269,7 +269,6 @@ describe("creating an organization", () => {
       release: manifest.releaseId,
       midway: [
         "reserve",
-        "models",
         "storage",
         "install",
         "sign_in",
@@ -283,7 +282,6 @@ describe("creating an organization", () => {
         admins: ["ada@acme.test"],
         lines: [
           [`Reserving ${clientId}.grasp.test`, "done"],
-          ["Setting up AI", "done"],
           ["Creating its databases and file storage", "done"],
           ["Installing Grasp", "done"],
           ["Setting up sign-in with Google Workspace", "done"],

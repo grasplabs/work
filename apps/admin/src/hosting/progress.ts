@@ -44,7 +44,6 @@ export interface ProgressLine {
 interface LineContext {
   hostname: string;
   releaseId: string | null;
-  ceiling: number;
   /** Its sign-in providers in words (`signInProvidersOf`); null when none is known. */
   signIn: string | null;
   jurisdiction: Jurisdiction;
@@ -66,15 +65,6 @@ export const cloudLines: readonly CloudLine[] = [
     label: ({ hostname }) => `Reserving ${hostname}`,
     details: ({ releaseId }) => [
       `Release ${releaseId ?? "not chosen yet"} checked, and the organization's resources named`,
-    ],
-  },
-  {
-    id: "models",
-    steps: ["models"],
-    label: () => "Setting up AI",
-    details: ({ ceiling }) => [
-      "Its model calls go through Grasp's AI gateway",
-      `Monthly limit €${ceiling}, editable on Setup`,
     ],
   },
   {
@@ -307,7 +297,6 @@ export const provisioningProgress = async (
     .select({
       status: clients.status,
       signIn: clients.signIn,
-      ceiling: clients.modelSpendCeiling,
       createdAt: clients.createdAt,
     })
     .from(clients)
@@ -328,7 +317,6 @@ export const provisioningProgress = async (
   const context: LineContext = {
     hostname: hostname ?? clientId,
     releaseId: operation?.releaseId ?? null,
-    ceiling: client.ceiling,
     signIn: signInProvidersOf(client.signIn),
     jurisdiction,
   };

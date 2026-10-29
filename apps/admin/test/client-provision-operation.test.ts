@@ -582,7 +582,7 @@ interface Stop {
 const stops: Stop[] = [
   {
     step: "resources",
-    stopped: "models",
+    stopped: "validated",
     code: "cloudflare_0",
     plan: () => {
       cloudflare.failNext(
@@ -943,7 +943,6 @@ describe("provisioning a placed client", () => {
     await expect(actionsOf(clientId)).resolves.toStrictEqual([
       "provision.start",
       "provision.validated",
-      "provision.models",
       "provision.resources",
       "provision.migrations",
       "provision.worker_live",
