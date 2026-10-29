@@ -141,3 +141,47 @@ export const tableAs = (rows: string[][], format: TableFormat): string => {
     "\n"
   );
 };
+
+/** How a word lands while Grasp writes: it fades in where it lands. */
+const landing = [
+  "animate-in",
+  "fade-in",
+  "duration-300",
+  "motion-reduce:animate-none",
+];
+
+/** A run of whitespace, kept between the words it parts. */
+const spaces = /(?<space>\s+)/u;
+
+/**
+ * Puts each word under `node` in a span of its own that fades in, so only
+ * a word new to an answer being written does: the words already there keep
+ * their spans, and their place. Code, in a block or inline, stays as it
+ * is, a whole.
+ */
+export const landWords = (node: { children: Element["children"] }): void => {
+  node.children = node.children.flatMap((child): Element["children"] => {
+    if (child.type === "element") {
+      if (child.tagName !== "pre" && child.tagName !== "code") {
+        landWords(child);
+      }
+      return [child];
+    }
+    if (child.type !== "text" || child.value === "") {
+      return [child];
+    }
+    return child.value
+      .split(spaces)
+      .filter((piece) => piece !== "")
+      .map((piece) =>
+        piece.trim() === ""
+          ? { type: "text", value: piece }
+          : {
+              type: "element",
+              tagName: "span",
+              properties: { className: landing },
+              children: [{ type: "text", value: piece }],
+            }
+      );
+  });
+};
