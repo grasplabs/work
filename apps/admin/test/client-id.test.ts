@@ -19,7 +19,7 @@ describe("a client id the form checks", () => {
       edgeDash: shape,
       tooLong: shape,
       reserved:
-        "www is reserved for the platform's own hostnames (admin, console, internal, staging, www, api): pick another.",
+        "www is reserved for the platform's own hostnames (admin, auth, console, internal, staging, www, api): pick another.",
       fine: null,
     });
   });
