@@ -2,13 +2,14 @@ import type { Workspace } from "@grasp-os/shared/brain";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import type { ThinkingStep } from "@grasp-os/shared/thinking";
 import type { I18n } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import type { Atlas } from "../brain-atlas.ts";
 import type { Brain } from "../brain.ts";
 import { beatsEnd } from "./beats.ts";
 import type { BeatSay, ThinkingBeat } from "./beats.ts";
+import { roundHours } from "./hours.ts";
 import { later } from "./later.ts";
 import { thinkingIn, thinkingSchedule } from "./play.ts";
 import { beatsOf, figureAt, paceOf, thinkingTeaches } from "./shapes.ts";
@@ -243,6 +244,43 @@ export const beatWords = (said: BeatSay, i18n: I18n): string => {
     case "other": {
       const { team } = said;
       return i18n._(msg`Not the same in ${team}`);
+    }
+    case "readingAll": {
+      const { count } = said;
+      return i18n._(
+        msg`${plural(count, { one: "Reading # workflow", other: "Reading # workflows" })}`
+      );
+    }
+    case "weighingAll": {
+      const { count } = said;
+      return i18n._(
+        msg`${plural(count, { one: "Adding up the hours of # workflow", other: "Adding up the hours of # workflows" })}`
+      );
+    }
+    case "weighing": {
+      const { name } = said;
+      const hours = roundHours(said.hours);
+      return i18n._(
+        msg`${name}: ${plural(hours, { one: "# hour a week", other: "# hours a week" })}`
+      );
+    }
+    case "unknown": {
+      const { count } = said;
+      return i18n._(msg`${plural(count, { other: "# not counted yet" })}`);
+    }
+    case "total": {
+      const hours = roundHours(said.hours);
+      return i18n._(
+        msg`${plural(hours, { one: "# hour a week in all that Grasp can count", other: "# hours a week in all that Grasp can count" })}`
+      );
+    }
+    case "share": {
+      const whole = new Intl.NumberFormat(i18n.locale, {
+        maximumFractionDigits: 0,
+      });
+      const hours = whole.format(said.hours);
+      const all = whole.format(said.of);
+      return i18n._(msg`${hours} of the ${all} hours a week`);
     }
     default: {
       return "";

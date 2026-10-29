@@ -1,5 +1,7 @@
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { cn } from "@grasp-os/ui/lib/utils";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
@@ -26,6 +28,7 @@ import {
   viewProjection,
 } from "./dive-scene.ts";
 import type { DiveClear, Pose, Screen } from "./dive-scene.ts";
+import { roundHours } from "./hours.ts";
 import { NAME } from "./layout.ts";
 import type { ThinkingMap, ThinkingNeuron } from "./layout.ts";
 import { markShared } from "./same-pain.ts";
@@ -69,6 +72,55 @@ interface Latest {
   choose: (at: number) => void;
 }
 
+/** A workflow's hours a week under its name, as the brain counts them; or that they are not known yet. */
+export const WorkHours = ({ hours }: { hours: number | null }) => {
+  const { t } = useLingui();
+  const each = hours === null ? 0 : roundHours(hours);
+  return (
+    <span className="text-muted-foreground font-normal tabular-nums">
+      {hours === null
+        ? t`Hours not known yet`
+        : t`${plural(each, { one: "# hour a week", other: "# hours a week" })}`}
+    </span>
+  );
+};
+
+/** What a neuron's name says: what was said, its shared words underlined and who said it; a workflow, with its hours a week once weighed; or its name. */
+const NameWords = ({ neuron }: { neuron: ThinkingNeuron }) => {
+  if (neuron.hours !== undefined) {
+    return (
+      <span className="flex flex-col">
+        <span className="line-clamp-2">{neuron.label}</span>
+        <WorkHours hours={neuron.hours} />
+      </span>
+    );
+  }
+  if (neuron.by === undefined) {
+    return neuron.label;
+  }
+  return (
+    <>
+      <span className="line-clamp-4 pb-1 text-balance">
+        {markShared(neuron.label, neuron.marks ?? []).map((piece, index) =>
+          piece.shared ? (
+            <span
+              className="decoration-muted-foreground underline underline-offset-4"
+              key={index}
+            >
+              {piece.text}
+            </span>
+          ) : (
+            piece.text
+          )
+        )}
+      </span>
+      <span className="text-muted-foreground line-clamp-2 text-balance">
+        {neuron.by}
+      </span>
+    </>
+  );
+};
+
 /** A neuron's name under it, ink on the canvas with nothing round it: what was said, its shared words underlined and who said it; or its name. */
 const Name = ({
   neuron,
@@ -100,7 +152,7 @@ const Name = ({
       className={cn(
         "focus-visible:ring-ring/50 pointer-events-auto max-w-(--cell) -translate-x-1/2 rounded-md px-1 py-0.5 text-center leading-tight font-medium outline-none group-data-[shown=false]:pointer-events-none focus-visible:ring-3",
         neuron.by === undefined
-          ? "line-clamp-2"
+          ? neuron.hours === undefined && "line-clamp-2"
           : "flex w-(--said) max-w-(--said) flex-col gap-0.5 px-1.5 py-1 font-normal",
         small && "text-xs",
         neuron.state === "waiting" && "text-muted-foreground"
@@ -117,29 +169,7 @@ const Name = ({
       title={neuron.title}
       type="button"
     >
-      {neuron.by === undefined ? (
-        neuron.label
-      ) : (
-        <>
-          <span className="line-clamp-4 pb-1 text-balance">
-            {markShared(neuron.label, neuron.marks ?? []).map((piece, index) =>
-              piece.shared ? (
-                <span
-                  className="decoration-muted-foreground underline underline-offset-4"
-                  key={index}
-                >
-                  {piece.text}
-                </span>
-              ) : (
-                piece.text
-              )
-            )}
-          </span>
-          <span className="text-muted-foreground line-clamp-2 text-balance">
-            {neuron.by}
-          </span>
-        </>
-      )}
+      <NameWords neuron={neuron} />
     </button>
   </div>
 );

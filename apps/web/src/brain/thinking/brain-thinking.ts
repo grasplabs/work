@@ -8,7 +8,7 @@ import { useFollowedChat } from "../../chat/chat-watch.ts";
 import type { Atlas, RegionId } from "../brain-atlas.ts";
 import type { Brain } from "../brain.ts";
 import { liveThinking, thinkingIn } from "./play.ts";
-import { aboutRegion, samePainTitle } from "./shapes.ts";
+import { aboutRegion, thinkingTitle } from "./shapes.ts";
 import type { Thought } from "./shapes.ts";
 import {
   noteThinking,
@@ -137,9 +137,10 @@ export const useBrainThinking = ({
     to,
   ]);
   const about = key === undefined ? undefined : aboutRegion(steps, atlas);
+  const title = key === undefined ? undefined : thinkingTitle(steps);
   return {
     ...(thought === undefined ? {} : { thought }),
-    ...(key === undefined ? {} : { title: i18n._(samePainTitle) }),
+    ...(title === undefined ? {} : { title: i18n._(title) }),
     ...(about === undefined ? {} : { about }),
     learned,
     putAway: () => {

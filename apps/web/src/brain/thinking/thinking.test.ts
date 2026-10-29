@@ -6,6 +6,7 @@ import { atlasOf } from "../brain-atlas.ts";
 import { buildBrain } from "../brain.ts";
 import { testWorkspace } from "../test-workspace.ts";
 import { BEAT, readFor, sayLength } from "./beats.ts";
+import { cardView, linesOf, printed, VIEW } from "./card-print.ts";
 import {
   DIVE,
   flightPose,
@@ -14,15 +15,20 @@ import {
   standing,
   viewProjection,
 } from "./dive-scene.ts";
+import { hoursAt, hoursBeats, hoursMap } from "./hours.ts";
+import type { FigureWork, HoursFigure } from "./hours.ts";
 import { liveThinking, thinkingIn, thinkingSchedule } from "./play.ts";
 import { markShared, samePainBeats } from "./same-pain.ts";
+import type { SamePainFigure } from "./same-pain.ts";
 import {
   aboutRegion,
   figureAt,
   paceOf,
   thinkingMap,
   thinkingTeaches,
+  thinkingTitle,
 } from "./shapes.ts";
+import type { ThinkingFigure } from "./shapes.ts";
 
 // Grasp's thinking in the brain, as pure numbers: the same-pain shape
 // from a company's brain (its teams, what they said, in the brain's order,
@@ -54,8 +60,14 @@ const trace: ThinkingStep[] = [
     "st-email-mortgage",
   ]),
 ];
+/** A figure of the same pain, or nothing. */
+const samePain = (
+  figure: ThinkingFigure | undefined
+): SamePainFigure | undefined =>
+  figure?.shape === "same-pain" ? figure : undefined;
+
 const [teams, said, together] = trace.map((_, at) =>
-  figureAt(trace, at, ws, brain, atlas)
+  samePain(figureAt(trace, at, ws, brain, atlas))
 );
 
 /** Rooms from a phone's to a large monitor's. */
@@ -70,7 +82,7 @@ const ROOMS = [
 describe("the same pain in more than one team", () => {
   it("looks only at what is in the brain", () => {
     const made = [step("said", ["team-finance", "made-up", "st-approvals"])];
-    const shown = figureAt(made, 0, ws, brain, atlas);
+    const shown = samePain(figureAt(made, 0, ws, brain, atlas));
     expect({
       teams: shown?.teams.map(({ id }) => id),
       words: shown?.words.map(({ id }) => id),
@@ -196,6 +208,181 @@ describe("the same pain in more than one team", () => {
 
   it("leads back from the picture to the part of the brain that holds the teams it found", () => {
     expect(aboutRegion(trace, atlas)).toBe(atlas.home.get("team-service"));
+  });
+});
+
+const work = (id: string, hours: number | null): FigureWork => ({
+  id,
+  name: `Workflow ${id}`,
+  hours,
+});
+const works = [
+  work("a", 40),
+  work("b", 10),
+  work("c", null),
+  work("d", 100),
+  work("e", 4.5),
+  work("f", null),
+];
+const weighed = (
+  move: HoursFigure["move"],
+  most: string[] = []
+): HoursFigure => ({ shape: "hours", move, works, most, lit: [] });
+
+describe("where the hours go", () => {
+  it("reads the brain's workflows, each with its note and its hours as the brain counts them", () => {
+    const reading: ThinkingStep = {
+      text: "Reading the work",
+      notes: ["email-triage", "client-onboarding"],
+      shape: "hours",
+      move: "work",
+    };
+    const steps = [reading];
+    expect({
+      figure: hoursAt(steps, 0, ws, brain),
+      none: hoursAt([{ ...reading, notes: ["made-up"] }], 0, ws, brain),
+      title: thinkingTitle(steps)?.message,
+      about: aboutRegion(steps, atlas),
+    }).toStrictEqual({
+      figure: {
+        shape: "hours",
+        move: "work",
+        works: [
+          {
+            id: "email-triage",
+            noteId: "cand-email",
+            name: "Email triage",
+            hours: null,
+          },
+          {
+            id: "client-onboarding",
+            noteId: "cand-onboarding",
+            name: "Client onboarding",
+            hours: null,
+          },
+        ],
+        most: [],
+        lit: ["email-triage", "client-onboarding"],
+      },
+      none: undefined,
+      title: "Where the hours go",
+      about: undefined,
+    });
+  });
+
+  it("weighs each, a thread from the one before, then says what isn't counted and the hours in all; found, the share the most take", () => {
+    const adding = hoursBeats(weighed("hours"));
+    const found = hoursBeats(weighed("most", ["d", "a"]));
+    expect({
+      adding: adding.map(({ say }) => say),
+      threads: adding.map(({ thread }) => thread),
+      found: found.at(-1)?.say,
+      lit: found.map(({ lit }) => lit),
+    }).toStrictEqual({
+      adding: [
+        { kind: "weighing", name: "Workflow a", hours: 40 },
+        { kind: "weighing", name: "Workflow b", hours: 10 },
+        { kind: "weighing", name: "Workflow d", hours: 100 },
+        { kind: "weighing", name: "Workflow e", hours: 4.5 },
+        { kind: "unknown", count: 2 },
+        { kind: "total", hours: 154.5 },
+      ],
+      threads: [
+        undefined,
+        ["a", "b"],
+        ["b", "d"],
+        ["d", "e"],
+        undefined,
+        undefined,
+      ],
+      found: { kind: "share", hours: 140, of: 154.5 },
+      lit: [["a"], ["a", "d"], ["a", "d"]],
+    });
+  });
+
+  it("grows each to its hours, steps what isn't known down to a quiet row at the foot, and stands in rows of three where a ring would crowd", () => {
+    const phone = hoursMap(weighed("hours"), { width: 336, height: 484 });
+    const wide = hoursMap(weighed("hours"), { width: 1600, height: 900 });
+    const sized = (id: string): number =>
+      wide.neurons.find((neuron) => neuron.id === id)?.r ?? 0;
+    const foot = wide.neurons.filter((neuron) => neuron.quiet === true);
+    expect({
+      grows: sized("d") > sized("a") && sized("a") > sized("e"),
+      foot: foot.map(({ id, state }) => [id, state]),
+      under:
+        Math.max(...foot.map(({ y }) => y)) <
+        Math.min(
+          ...wide.neurons
+            .filter((neuron) => neuron.quiet !== true)
+            .map(({ y }) => y)
+        ),
+      rows: new Set(
+        phone.neurons
+          .filter((neuron) => neuron.quiet !== true)
+          .map(({ x }) => Math.round(x))
+      ).size,
+    }).toStrictEqual({
+      grows: true,
+      foot: [
+        ["c", "waiting"],
+        ["f", "waiting"],
+      ],
+      under: true,
+      rows: 3,
+    });
+  });
+
+  it("keeps every workflow inside the room, from a phone's to a large monitor's", () => {
+    const outside = ROOMS.flatMap((room) =>
+      [
+        weighed("work"),
+        weighed("hours"),
+        weighed("most", ["d", "a", "b"]),
+      ].flatMap((figure) =>
+        hoursMap(figure, room).neurons.filter(
+          (neuron) =>
+            Math.abs(neuron.x) + neuron.r > room.width / 2 ||
+            Math.abs(neuron.y) + neuron.r > room.height / 2
+        )
+      )
+    );
+    expect(outside).toStrictEqual([]);
+  });
+});
+
+describe("the card in an answer", () => {
+  it("names the finding under its neurons, a name on at most two lines, and only the hours where a name has no room", () => {
+    const found = hoursMap(weighed("most", ["d", "a"]), {
+      width: 720,
+      height: 420,
+    });
+    const reading = hoursMap(weighed("work"), { width: 720, height: 420 });
+    expect({
+      finding: cardView(found, VIEW.width).naming,
+      reading: cardView(reading, VIEW.width).naming,
+      phone: cardView(found, 120).letters,
+      lines: linesOf("Handing a signed mortgage file to onboarding", 18),
+    }).toStrictEqual({
+      finding: true,
+      reading: false,
+      phone: 0,
+      lines: ["Handing a signed", "mortgage file to…"],
+    });
+  });
+
+  it("prints a neuron from the brain's own designs, the same each time, its soma hollow while it waits", () => {
+    const {
+      neurons: [neuron],
+    } = hoursMap(weighed("hours"), { width: 720, height: 420 });
+    if (neuron === undefined) {
+      throw new Error("The shape shows nothing");
+    }
+    const known = printed({ ...neuron, state: "known", bare: true }, 24);
+    const waiting = printed({ ...neuron, state: "waiting", bare: true }, 24);
+    expect({
+      same: printed({ ...neuron, state: "known", bare: true }, 24),
+      hollow: waiting.length < known.length,
+    }).toStrictEqual({ same: known, hollow: true });
   });
 });
 

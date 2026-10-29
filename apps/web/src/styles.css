@@ -1379,3 +1379,24 @@
     color: var(--muted-foreground);
   }
 }
+
+/*
+ * A beat's thread in the small picture of Grasp's thinking in an answer
+ * (chat/thinking-card.tsx): it grows from the one before to the one the
+ * beat names.
+ */
+@keyframes draw-thread {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@utility draw-thread {
+  animation: draw-thread 300ms ease-out both;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}

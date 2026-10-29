@@ -1,5 +1,9 @@
 import type { Workspace } from "@grasp-os/shared/brain";
-import type { ThinkingStep } from "@grasp-os/shared/thinking";
+import type {
+  ThinkingMove,
+  ThinkingShape,
+  ThinkingStep,
+} from "@grasp-os/shared/thinking";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 
@@ -8,6 +12,8 @@ import type { Atlas, RegionId } from "../brain-atlas.ts";
 import type { Brain } from "../brain.ts";
 import { beatsEnd, readFor } from "./beats.ts";
 import type { ThinkingBeat } from "./beats.ts";
+import { hoursAt, hoursBeats, hoursMap } from "./hours.ts";
+import type { HoursFigure } from "./hours.ts";
 import type { ThinkingMap } from "./layout.ts";
 import { samePainAt, samePainBeats, samePainMap } from "./same-pain.ts";
 import type { SamePainFigure } from "./same-pain.ts";
@@ -19,10 +25,10 @@ import type { SamePainFigure } from "./same-pain.ts";
 // at and the shape the brain takes (@grasp-os/shared/thinking); each shape
 // is a module of pure numbers: the steps and the brain in, where every
 // neuron sits out (same-pain.ts), and what the brain does beat by beat.
-// The same pain is the first shape here; where the hours go comes next.
+// and where the hours go (hours.ts).
 
-/** What the brain shows at a step. */
-export type ThinkingFigure = SamePainFigure;
+/** What the brain shows at a step, in whichever shape. */
+export type ThinkingFigure = SamePainFigure | HoursFigure;
 
 /** Grasp's thinking as a view draws it: the shape, what Grasp does now, whether it is still at it, and when the step and its nerve began (ms since 1970). */
 export interface Thought {
@@ -35,14 +41,32 @@ export interface Thought {
   beat?: { lit: string[]; thread?: [string, string]; since: number };
 }
 
-/** What a picture of the same pain is of, as the way back from it names it. */
-export const samePainTitle: MessageDescriptor = msg`The same pain in more than one team`;
+/** What a picture of each shape is of, as the way back from it names it. */
+const TITLES: Record<ThinkingShape, MessageDescriptor> = {
+  "same-pain": msg`The same pain in more than one team`,
+  hours: msg`Where the hours go`,
+};
 
-/** How long each move is shown at the least, however few its beats: looking takes longest, while threads are tried and let go. */
-const PACE: Record<string, number> = {
+/** What the picture of a thinking is of, by its first step's shape. */
+export const thinkingTitle = (
+  steps: readonly ThinkingStep[]
+): MessageDescriptor | undefined => {
+  const [first] = steps;
+  return first === undefined ? undefined : TITLES[first.shape];
+};
+
+/**
+ * How long each move is shown at the least, however few its beats:
+ * looking takes longest, while threads are tried and let go; weighing the
+ * hours takes a little longer than reading.
+ */
+const PACE: Record<ThinkingMove, number> = {
   teams: 2600,
   said: 4600,
   together: 2600,
+  work: 2600,
+  hours: 3600,
+  most: 2600,
 };
 
 /** What the brain shows at step `at`, its own sentence up as long as it takes to read before the first beat; nothing when it has nothing to show. */
@@ -55,7 +79,9 @@ export const figureAt = (
 ): ThinkingFigure | undefined => {
   const step = steps[at];
   const figure =
-    step === undefined ? undefined : samePainAt(steps, at, ws, brain, atlas);
+    step?.shape === "hours"
+      ? hoursAt(steps, at, ws, brain)
+      : samePainAt(steps, at, ws, brain, atlas);
   return figure === undefined || step === undefined
     ? figure
     : { ...figure, lead: readFor(step.text.length) };
@@ -65,19 +91,20 @@ export const figureAt = (
 export const thinkingMap = (
   figure: ThinkingFigure,
   room: MapRoom
-): ThinkingMap => samePainMap(figure, room);
+): ThinkingMap =>
+  figure.shape === "hours" ? hoursMap(figure, room) : samePainMap(figure, room);
 
 /** What the brain does, beat by beat, while a step is shown. */
 export const beatsOf = (figure: ThinkingFigure): ThinkingBeat[] =>
-  samePainBeats(figure);
+  figure.shape === "hours" ? hoursBeats(figure) : samePainBeats(figure);
 
 /** How long a step is shown: its move's own pace, or as long as its beats take, the last line read. */
 export const paceOf = (
   step: ThinkingStep,
   beats: readonly ThinkingBeat[]
-): number => Math.max(PACE[step.move] ?? 0, beatsEnd(beats));
+): number => Math.max(PACE[step.move], beatsEnd(beats));
 
-/** The part of the brain a thinking is about, where the way back leads: the part that holds the teams it found, when one part holds them all; none for the whole brain. */
+/** The part of the brain a thinking is about, where the way back leads: the part that holds the teams it found, when one part holds them all; none for the whole brain, as for the hours, which span all the work. */
 export const aboutRegion = (
   steps: readonly ThinkingStep[],
   atlas: Atlas
