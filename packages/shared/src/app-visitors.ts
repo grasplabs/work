@@ -148,6 +148,4 @@ export const appVisitorErrors = defineErrorFamily({
   "visitor.too_many":
     "Too many codes were asked for. Wait a while, then ask again.",
   "visitor.unavailable": "No code could be sent now. Try again later.",
-  "visitor.no_functions":
-    "Visitors open this App's screens, but its screens can't do anything for them yet.",
 });
