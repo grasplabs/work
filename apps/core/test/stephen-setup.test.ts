@@ -62,7 +62,8 @@ const reading: KickoffReading = {
 const kickoffIn = async (): Promise<void> => {
   await onboardingStore(env).saveKickoff(
     { transcript: "Het gesprek.", fileName: null, reading },
-    { type: "system" }
+    { type: "system" },
+    await onboardingStore(env).purgeMark()
   );
 };
 

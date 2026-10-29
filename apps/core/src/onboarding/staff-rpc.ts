@@ -482,6 +482,8 @@ export class OnboardingStaffRpc
   /**
    * Brings the kickoff's transcript in and reads it, before anything is
    * kept: a transcript that can't be read leaves the one before in place.
+   * Then gives the brain its vision and teams (kickoff-records.ts), in
+   * place of what the transcript before gave.
    */
   async saveKickoff(input: KickoffInput): Promise<KickoffView> {
     return await withPerson(this.#check, async (person) => {
@@ -491,15 +493,19 @@ export class OnboardingStaffRpc
         kickoffInputSchema,
         input
       );
+      const store = onboardingStore(this.#env);
+      // As the reading begins: a purge of the kickoff since refuses it.
+      const mark = await store.purgeMark();
       const { text, fileName } = await transcriptOf(this.#env, transcript);
       const by = actorOf(person);
       const reading = await readKickoff(this.#env, text, locale, by);
       // The reading takes a while: the company may have ended Grasp's
       // access meanwhile. Nothing is kept unless they are still in.
       requireStaff(await this.#check());
-      return await onboardingStore(this.#env).saveKickoff(
+      return await store.saveKickoff(
         { transcript: text, fileName, reading },
-        by
+        by,
+        mark
       );
     });
   }
