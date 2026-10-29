@@ -48,6 +48,7 @@ import { isRestricted } from "./restricted.ts";
 import { approvalServing, requireTargetServes } from "./workflow-bindings.ts";
 import { buildOf } from "./workflow-builds.ts";
 import type { SealedBuild } from "./workflow-builds.ts";
+import { isPaused } from "./workflow-lifecycle.ts";
 import { frozenParams } from "./workflow-params.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import { workflowRoleSql } from "./workflow-roles.ts";
@@ -113,6 +114,9 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   admitting statement, not from the session's list of teams.
 // - A person who left: every principal must be an active member when the
 //   statement runs.
+// - A paused workflow (workflow-lifecycle.ts): a new start is refused
+//   (`workflow.paused`), and a pause moves the policy generation on, so
+//   one decided before it is refused as it is admitted.
 // - The same start sent twice: one receipt per invoker, person acted for
 //   and idempotency key; the same key with the same version, input and
 //   App or trigger version is the same start, with another is refused
@@ -1209,6 +1213,19 @@ export const decideWorkflowStart = async (
   // A new start only: one admitted before, retried under its key, answers
   // what it admitted, whatever was revoked since (its run, if it hasn't
   // ended, stops at its next call).
+  // Paused (workflow-lifecycle.ts): nothing starts. A pause moves the
+  // policy generation on, so a start decided before it is refused as it
+  // is admitted.
+  if (await isPaused(env, id)) {
+    await refusedStart(
+      env,
+      rule.actor,
+      id,
+      { ...base, inputHash },
+      "workflow.paused"
+    );
+    throw workflowResourceErrors.create("workflow.paused");
+  }
   const packages = await packagesHolding(env, rule.actor, id, graphHash, {
     ...base,
     inputHash,

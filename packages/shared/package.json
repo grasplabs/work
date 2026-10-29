@@ -155,6 +155,7 @@
     "./waiting": "./src/waiting.ts",
     "./widgets": "./src/widgets.ts",
     "./workflow-diagrams": "./src/workflow-diagrams.ts",
+    "./workflow-lifecycle": "./src/workflow-lifecycle.ts",
     "./workflow-modules": "./src/workflow-modules.ts",
     "./workflow-resources": "./src/workflow-resources.ts",
     "./workflows": "./src/workflows.ts"
