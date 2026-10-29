@@ -9,7 +9,8 @@ import { agree, fact, mapped, team } from "./onboarding-team.ts";
 // When someone says the work they were asked about isn't theirs
 // (GRA-1285, src/onboarding/referral.ts): once they agree to it, Grasp
 // moves them onto the work they do, puts the colleague they named on the
-// other and asks that colleague about it; the log says who named whom.
+// other and asks that colleague about it, without a word of what was
+// said about them; the log says who named whom.
 // AI Gateway is faked behind the AI binding.
 
 /** The model's reading of who does what: by id, or "none". */
@@ -55,6 +56,11 @@ describe("work someone says isn't theirs", () => {
         "said the work they were asked about is not theirs"
       ),
       pimAsked: pimContext?.work,
+      pimHearsMax: [
+        "Pim handles the new tickets",
+        "Max plans the rota",
+        "not theirs",
+      ].filter((words) => (pimContext?.known ?? "").includes(words)),
       logged: entries.map(({ person, named }) => [person?.id, named?.id]),
     }).toStrictEqual({
       read: 1,
@@ -63,6 +69,7 @@ describe("work someone says isn't theirs", () => {
       maxAsked: rota.local,
       maxKnows: true,
       pimAsked: tickets.local,
+      pimHearsMax: [],
       logged: [[ids.max, ids.pim]],
     });
   });
