@@ -461,6 +461,27 @@ const Requirements = ({ view }: { view: ClientHostingView }) => {
   );
 };
 
+/**
+ * Whether it runs, or would run, in a shared destination (Workers for
+ * Platforms), where its core sends no mail until GRA-965 qualifies it
+ * (`withoutMail`, src/hosting/operation.ts).
+ */
+const sharedHosting = (view: ClientHostingView): boolean => {
+  const id = view.placement?.destinationId ?? view.automatic.destinationId;
+  return view.destinations.some(
+    (choice) => choice.id === id && choice.kind === "workers_for_platforms"
+  );
+};
+
+/** That its core sends no mail, where its hosting gives it none yet. */
+const MailNotice = ({ view }: { view: ClientHostingView }) =>
+  sharedHosting(view) ? (
+    <p className="text-sm">
+      Mail: not available on this hosting yet (GRA-965). Its core sends none, so
+      its people get their interview links by hand.
+    </p>
+  ) : null;
+
 /** Whether it's still to provision: not live, done, or offboarded. */
 const provisionable = (view: ClientHostingView): boolean =>
   view.operation?.status !== "done" &&
@@ -519,6 +540,7 @@ export const ClientHosting = ({
         </p>
       )}
       <Requirements view={view} />
+      <MailNotice view={view} />
       {view.operation === null ? null : (
         <Operation operation={view.operation} run={view.run} />
       )}
