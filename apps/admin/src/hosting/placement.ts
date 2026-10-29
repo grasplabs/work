@@ -11,18 +11,29 @@
  * when no shared destination qualifies: it's an explicit choice staff
  * make, as is any destination when there's no clear one.
  */
-import { asc, eq } from "drizzle-orm";
+import {
+  clientsNamespace,
+  platformAccountId,
+  stageNamed,
+} from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
+import { asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { adminDatabase } from "../db/act.ts";
+import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients, hostingDestinations } from "../db/schema.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { ProvisionError } from "../provision/errors.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 import type { RunStatus } from "../runners.ts";
-import { InventoryError, placeClient, placementOf } from "./inventory.ts";
+import {
+  checksItself,
+  InventoryError,
+  placeClient,
+  placementOf,
+} from "./inventory.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
 import { ProvisionOperationError, provisionOf } from "./operation.ts";
 import type { ProvisionOperationErrorCode } from "./operation.ts";
@@ -31,8 +42,14 @@ import {
   hostingPolicies,
   hostingPolicyIdSchema,
   placementProblems,
+  selfCheckedCapabilities,
 } from "./policy.ts";
-import type { HostingPolicyId, PlacementProblem } from "./policy.ts";
+import type {
+  Capability,
+  DestinationCapabilities,
+  HostingPolicyId,
+  PlacementProblem,
+} from "./policy.ts";
 import { provisionPlacedClient } from "./workflow.ts";
 
 type DestinationKind = (typeof hostingDestinations.kind.enumValues)[number];
@@ -48,6 +65,49 @@ export type DestinationProblem =
   | PlacementProblem
   | { kind: "not_provisionable" };
 
+/**
+ * Where one requirement of a policy stands in a destination: checked and
+ * found so, or not; still to be checked by a person; or to be checked by
+ * provisioning itself, the first time it runs there.
+ */
+export interface CapabilityCheck {
+  capability: Capability;
+  state: "verified" | "unsupported" | "needs_checking" | "checked_on_provision";
+  /** Who observed it (a staff member's email, or `system`), when, how and where it is recorded; null until someone has. */
+  evidence: {
+    recordedBy: string;
+    observedAt: string;
+    procedure: string;
+    record: string;
+  } | null;
+}
+
+/** Every requirement of `policyId` in a destination of `kind` with `capabilities`, as a checklist. */
+export const capabilityChecks = (
+  policyId: HostingPolicyId,
+  kind: DestinationKind,
+  capabilities: DestinationCapabilities
+): CapabilityCheck[] =>
+  hostingPolicies[policyId].requires.map((capability) => {
+    const entry = capabilities[capability];
+    if (entry === undefined) {
+      return {
+        capability,
+        state:
+          checksItself(kind) && selfCheckedCapabilities.includes(capability)
+            ? "checked_on_provision"
+            : "needs_checking",
+        evidence: null,
+      };
+    }
+    const { recordedBy, observedAt, procedure, record } = entry.evidence;
+    return {
+      capability,
+      state: entry.status,
+      evidence: { recordedBy, observedAt, procedure, record },
+    };
+  });
+
 /** A destination as staff choose among them. */
 export interface DestinationChoice {
   id: string;
@@ -56,6 +116,8 @@ export interface DestinationChoice {
   shared: boolean;
   /** Empty when it can take the client. */
   problems: DestinationProblem[];
+  /** Each requirement of the policy, and where it stands. */
+  checks: CapabilityCheck[];
 }
 
 /**
@@ -119,6 +181,60 @@ const provisionable = (row: {
   (row.kind === "dedicated" ||
     (row.kind === "workers_for_platforms" && row.namespace !== null));
 
+/** The id of `stage`'s own shared destination, as its admin records it. */
+export const stageDestinationId = (stage: Stage): string =>
+  `workers-for-platforms-${stage}`;
+
+/**
+ * Records this admin's own stage's shared destination when it has none:
+ * Grasp's account and the stage's clients' namespace (@grasp-os/shared/names),
+ * the place every client of the stage goes. Nothing else ever records it,
+ * so without this a new admin has nowhere to put anyone.
+ *
+ * Here, ahead of every read of the destinations that placing a client
+ * depends on (the hosting view and placing itself), rather than at a
+ * deploy or a start: a Worker has no start to hook, a deploy can't write
+ * the admin's database through its audit log, and this path is the one
+ * no placement can skip. It runs once: a destination in that namespace,
+ * recorded here or by staff, is left as it is.
+ *
+ * It claims no capability: each is unknown until staff record evidence
+ * of it, as a policy requires (src/hosting/policy.ts), so nothing is
+ * placed here on the admin's word. An admin whose STAGE names no stage
+ * records nothing, and the namespace is the stage's own, so a staging
+ * admin never records production's.
+ */
+export const ensureStageDestination = async (
+  env: Env,
+  db: AdminDatabase
+): Promise<void> => {
+  const stage = stageNamed(env.STAGE);
+  if (stage === undefined) {
+    return;
+  }
+  const namespace = clientsNamespace(stage);
+  const id = stageDestinationId(stage);
+  const now = Date.now();
+  // Insert only, in one statement: while no destination is in the
+  // namespace, and never over one with its id. Two reads at once create
+  // it once, audited once; nothing already there is ever overwritten.
+  await actIfChanged(
+    db,
+    "system",
+    db
+      .insert(hostingDestinations)
+      .select(
+        sql`SELECT ${id}, ${"workers_for_platforms"}, ${platformAccountId}, ${namespace}, ${JSON.stringify(["eu-storage"])}, ${"{}"}, ${now}, ${now} WHERE NOT EXISTS (SELECT 1 FROM ${hostingDestinations} WHERE ${hostingDestinations.namespace} = ${namespace})`
+      )
+      .onConflictDoNothing(),
+    {
+      action: "destination.create",
+      target: id,
+      detail: { namespace, policies: "eu-storage" },
+    }
+  );
+};
+
 /** Every destination, and what keeps each from taking a client under `policyId`. */
 export const destinationChoices = async (
   db: AdminDatabase,
@@ -131,10 +247,14 @@ export const destinationChoices = async (
     .all();
   return rows
     .map((row) => {
+      const capabilities = destinationCapabilitiesSchema.parse(
+        JSON.parse(row.capabilities)
+      );
       const problems: DestinationProblem[] = placementProblems(
         hostingPolicies[policyId],
         z.array(z.string()).parse(JSON.parse(row.policies)),
-        destinationCapabilitiesSchema.parse(JSON.parse(row.capabilities))
+        capabilities,
+        checksItself(row.kind)
       );
       if (!provisionable(row)) {
         problems.push({ kind: "not_provisionable" });
@@ -144,6 +264,74 @@ export const destinationChoices = async (
         kind: row.kind,
         shared: row.kind === "workers_for_platforms",
         problems,
+        checks: capabilityChecks(policyId, row.kind, capabilities),
+      };
+    })
+    .toSorted((a, b) => kindOrder[a.kind] - kindOrder[b.kind]);
+};
+
+/** A destination as Platform's Destinations page shows it. */
+export interface DestinationOverview {
+  id: string;
+  kind: DestinationKind;
+  accountId: string | null;
+  namespace: string | null;
+  /** The policies it serves. */
+  policies: string[];
+  /** For each policy there is, what keeps it out, and each requirement's check. */
+  byPolicy: {
+    policyId: HostingPolicyId;
+    description: string;
+    problems: DestinationProblem[];
+    checks: CapabilityCheck[];
+  }[];
+}
+
+/**
+ * Every destination, with where each stands under every policy, for
+ * Platform's Destinations page: this admin's own recorded first, so a
+ * new admin's page shows it before any client is added.
+ */
+export const destinationsOverview = async (
+  env: Env
+): Promise<DestinationOverview[]> => {
+  const db = adminDatabase(env.DB);
+  await ensureStageDestination(env, db);
+  const rows = await db
+    .select()
+    .from(hostingDestinations)
+    .orderBy(asc(hostingDestinations.id))
+    .all();
+  const policyIds = hostingPolicyIdSchema.options;
+  return rows
+    .map((row) => {
+      const capabilities = destinationCapabilitiesSchema.parse(
+        JSON.parse(row.capabilities)
+      );
+      const policies = z.array(z.string()).parse(JSON.parse(row.policies));
+      return {
+        id: row.id,
+        kind: row.kind,
+        accountId: row.accountId,
+        namespace: row.namespace,
+        policies,
+        byPolicy: policyIds.map((policyId) => {
+          const problems: DestinationProblem[] = placementProblems(
+            hostingPolicies[policyId],
+            policies,
+            capabilities,
+            checksItself(row.kind)
+          );
+          if (!provisionable(row)) {
+            problems.push({ kind: "not_provisionable" });
+          }
+          return {
+            policyId,
+            description: hostingPolicies[policyId].description,
+            problems,
+            checks: capabilityChecks(policyId, row.kind, capabilities),
+          };
+        }),
       };
     })
     .toSorted((a, b) => kindOrder[a.kind] - kindOrder[b.kind]);
@@ -194,6 +382,7 @@ export const getClientHosting = async (
   if (client === undefined) {
     return null;
   }
+  await ensureStageDestination(env, db);
   const placement = await placementOf(db, clientId);
   // A placed client stays under its own policy: the one shown is that.
   const policy =
@@ -338,6 +527,7 @@ export const placeAndProvision = async (
   }
   const placed = await placementOf(db, clientId);
   if (placed === undefined) {
+    await ensureStageDestination(env, db);
     const choices = await destinationChoices(db, policyId);
     const destinationId =
       input.destinationId ?? automaticChoice(choices).destinationId;

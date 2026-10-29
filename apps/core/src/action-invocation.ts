@@ -24,8 +24,8 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { operationRoles } from "./app-access.ts";
+import type { StaffMarked, FunctionRequest } from "./app-functions.ts";
 import { invokeAppAction, refusalOf } from "./app-functions.ts";
-import type { FunctionRequest } from "./app-functions.ts";
 import { actionInvocations } from "./db/core/schema.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
@@ -94,8 +94,11 @@ import { requireNotRevoked } from "./release-runner.ts";
 
 /** What a start or an attach names, besides the call itself. */
 export interface InvocationOpen {
-  /** Who runs it, as core identified them: never from the request. */
-  readonly by: Pick<Identity, "userId" | "role" | "teams">;
+  /**
+   * Who runs it, as core identified them: never from the request. With
+   * their session's staff mark, when core read one (GRA-1088).
+   */
+  readonly by: StaffMarked;
   /** The fingerprint of `by`'s access as core admitted it (`accessOf`). */
   readonly access: string;
   readonly app: AppId;
