@@ -10,8 +10,7 @@ import { NonRetryableError } from "cloudflare:workflows";
 
 import { CloudflareApiError, isRefused } from "./cloudflare/api.ts";
 import { MissingStoreSecretError } from "./deploy/context.ts";
-import { errorCode } from "./deploy/deploy.ts";
-import { DeployError } from "./deploy/errors.ts";
+import { errorCode, DeployError } from "./deploy/errors.ts";
 import type { DeployErrorCode } from "./deploy/errors.ts";
 
 /** Quick steps: a few API calls or a row. */
@@ -91,10 +90,10 @@ export const asStepError = (error: unknown): Error => {
 
 /** `task` as a step runs it, its failures as `asStepError` makes them. */
 export const guarded =
-  <T>(task: () => Promise<T>) =>
-  async (): Promise<T> => {
+  <T, Args extends unknown[]>(task: (...args: Args) => Promise<T>) =>
+  async (...args: Args): Promise<T> => {
     try {
-      return await task();
+      return await task(...args);
     } catch (error) {
       throw asStepError(error);
     }

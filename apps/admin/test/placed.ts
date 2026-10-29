@@ -9,7 +9,12 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 
 import { act } from "../src/db/act.ts";
-import { clientRuns, clients, releases } from "../src/db/schema.ts";
+import {
+  clientRuns,
+  clients,
+  clientWorkers,
+  releases,
+} from "../src/db/schema.ts";
 import { deployContext } from "../src/deploy/context.ts";
 import { placeClient } from "../src/hosting/inventory.ts";
 import {
@@ -73,6 +78,16 @@ export const placedRelease = async (
   return manifest.releaseId;
 };
 
+/** What a placed client is recorded as, beyond its ring. */
+export interface PlacedClientOptions {
+  /** Its id; a new one when not given. */
+  id?: string;
+  /** Its name; `Acme <id>` when not given. */
+  name?: string;
+  /** How its people sign in, as staff give it; Acme's when not given, none for null. */
+  signIn?: Record<string, unknown> | null;
+}
+
 /** A live placed client, and the account its dedicated destination is on. */
 export interface PlacedClient {
   clientId: string;
@@ -88,15 +103,23 @@ export interface PlacedClient {
 export const placedClientRecord = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
   ring: number,
-  name = `client-${crypto.randomUUID().slice(0, 8)}`
+  {
+    id = `client-${crypto.randomUUID().slice(0, 8)}`,
+    name = `Acme ${id}`,
+    signIn = {
+      domains: ["acme.test"],
+      admins: ["ada@acme.test"],
+      googleHostedDomain: "acme.test",
+    },
+  }: PlacedClientOptions = {}
 ): Promise<PlacedClient> => {
-  const account = cloudflare.addAccount(`Acme ${name}`);
+  const account = cloudflare.addAccount(name);
   const destinationId = await destination({
     kind: "dedicated",
     accountId: account.id,
     namespace: null,
   });
-  const clientId = name;
+  const clientId = id;
   const now = new Date();
   await act(
     db,
@@ -104,13 +127,9 @@ export const placedClientRecord = async (
     [
       db.insert(clients).values({
         id: clientId,
-        name: `Acme ${clientId}`,
+        name,
         ring,
-        signIn: JSON.stringify({
-          domains: ["acme.test"],
-          admins: ["ada@acme.test"],
-          googleHostedDomain: "acme.test",
-        }),
+        signIn: signIn === null ? null : JSON.stringify(signIn),
         createdAt: now,
         updatedAt: now,
       }),
@@ -175,9 +194,9 @@ export const livePlacedClient = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
   ring: number,
   releaseId: string,
-  name?: string
+  options?: PlacedClientOptions
 ): Promise<PlacedClient> => {
-  const client = await placedClientRecord(cloudflare, ring, name);
+  const client = await placedClientRecord(cloudflare, ring, options);
   await deployPlaced(client.clientId, releaseId);
   const [row] = await db
     .select({ status: clients.status })
@@ -187,4 +206,20 @@ export const livePlacedClient = async (
     throw new Error(`${client.clientId} isn't live after provisioning`);
   }
   return client;
+};
+
+/** Client `clientId`'s scripts in its destination, by Worker, as its operation recorded them. */
+export const scriptsOf = async (
+  clientId: string
+): Promise<{ core: string; connect: string }> => {
+  const rows = await db
+    .select({ worker: clientWorkers.worker, script: clientWorkers.scriptName })
+    .from(clientWorkers)
+    .where(eq(clientWorkers.clientId, clientId));
+  const core = rows.find(({ worker }) => worker === "core")?.script;
+  const connect = rows.find(({ worker }) => worker === "connect")?.script;
+  if (core === undefined || connect === undefined) {
+    throw new Error(`${clientId} has no scripts recorded`);
+  }
+  return { core, connect };
 };

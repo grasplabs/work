@@ -52,8 +52,7 @@ import {
   clientDomain,
   deployContext,
 } from "../deploy/context.ts";
-import { assertLimitEvidence, errorCode } from "../deploy/deploy.ts";
-import { DeployError } from "../deploy/errors.ts";
+import { DeployError, errorCode } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { deployOrder } from "../deploy/versions.ts";
 import { InventoryError } from "../hosting/inventory.ts";
@@ -65,6 +64,7 @@ import {
   startClientRelease,
   startedAs,
 } from "../hosting/operation.ts";
+import { assertLimitEvidence } from "../releases/limits.ts";
 import {
   claimRun,
   currentRun,
