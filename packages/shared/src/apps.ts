@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
-import type { AppVisitorEntry } from "./app-visitors.ts";
+import type { AppVisitorEntry, AppVisitorGrants } from "./app-visitors.ts";
 import { businessProcessSchema } from "./business-processes.ts";
 import type { BusinessProcess } from "./business-processes.ts";
 import type { CatalogEntryRef } from "./connect.ts";
@@ -804,6 +804,23 @@ export interface AppsApi {
     app: string,
     list: AppVisitorEntry[]
   ) => Promise<AppVisitorEntry[]>;
+  /**
+   * The functions the App's current version grants its visitors, by path,
+   * for its builders: visitors call these as the App itself, and nothing
+   * else.
+   */
+  visitorGrants: (app: string) => Promise<AppVisitorGrants>;
+  /**
+   * Grants visitors these functions of the App's current version, the
+   * whole set at once, for its builders: public queries and mutations
+   * only (`visitor.invalid` otherwise). Audited. A version starts with
+   * none, and taking one away stops calls already running before they
+   * commit.
+   */
+  setVisitorGrants: (
+    app: string,
+    functions: string[]
+  ) => Promise<AppVisitorGrants>;
   /**
    * Takes a published App back to a draft, for its builders: the people
    * it is shared with as users lose it, their open screens cleared.
