@@ -154,7 +154,7 @@ describe("the Brain's hybrid recall", () => {
     );
     const down = await recall(
       brain,
-      reader,
+      { ...reader, userId: "ann-down" },
       { query },
       undefined,
       withIndex(async () => {
@@ -164,7 +164,7 @@ describe("the Brain's hybrid recall", () => {
     );
     const slow = await recall(
       brain,
-      reader,
+      { ...reader, userId: "ann-slow" },
       { query, budget: { deadlineMs: 200 } },
       undefined,
       withIndex(async () => {
