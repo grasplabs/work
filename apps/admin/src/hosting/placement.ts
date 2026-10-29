@@ -28,31 +28,28 @@ import { importedManifest } from "../deploy/release.ts";
 import { ProvisionError } from "../provision/errors.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 import type { RunStatus } from "../runners.ts";
-import {
-  checksItself,
-  InventoryError,
-  placeClient,
-  placementOf,
-} from "./inventory.ts";
+import { InventoryError, placeClient, placementOf } from "./inventory.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
 import { ProvisionOperationError, provisionOf } from "./operation.ts";
 import type { ProvisionOperationErrorCode } from "./operation.ts";
 import {
   destinationCapabilitiesSchema,
-  hostingPolicies,
   hostingPolicyIdSchema,
+  hostingPolicyOf,
   placementProblems,
-  selfCheckedCapabilities,
+  requirementState,
 } from "./policy.ts";
 import type {
   Capability,
-  DestinationCapabilities,
+  DestinationKind,
+  HostingPolicy,
   HostingPolicyId,
+  JudgedDestination,
   PlacementProblem,
+  RequirementState,
+  VerificationMethod,
 } from "./policy.ts";
 import { provisionPlacedClient } from "./workflow.ts";
-
-type DestinationKind = (typeof hostingDestinations.kind.enumValues)[number];
 
 /**
  * What keeps a destination from taking a client: a requirement of the
@@ -65,15 +62,18 @@ export type DestinationProblem =
   | PlacementProblem
   | { kind: "not_provisionable" };
 
-/**
- * Where one requirement of a policy stands in a destination: checked and
- * found so, or not; still to be checked by a person; or to be checked by
- * provisioning itself, the first time it runs there.
- */
+/** Where one requirement of a policy stands in a destination, as its checklist shows it. */
 export interface CapabilityCheck {
   capability: Capability;
-  state: "verified" | "unsupported" | "needs_checking" | "checked_on_provision";
-  /** Who observed it (a staff member's email, or `system`), when, how and where it is recorded; null until someone has. */
+  state: RequirementState;
+  /** How it is verified in this destination (`methodIn`). */
+  method: VerificationMethod;
+  /**
+   * Whether a person records it, with the form: what is verified by hand,
+   * and a check found not to hold, to put right once fixed.
+   */
+  byHand: boolean;
+  /** Who observed it (a staff member's email, `system` or `platform`), when, how and where it is recorded; null until someone has. */
   evidence: {
     recordedBy: string;
     observedAt: string;
@@ -82,31 +82,40 @@ export interface CapabilityCheck {
   } | null;
 }
 
-/** Every requirement of `policyId` in a destination of `kind` with `capabilities`, as a checklist. */
+/** Every requirement of `policy` in `destination`, as a checklist. */
 export const capabilityChecks = (
-  policyId: HostingPolicyId,
-  kind: DestinationKind,
-  capabilities: DestinationCapabilities
+  policy: HostingPolicy,
+  destination: JudgedDestination
 ): CapabilityCheck[] =>
-  hostingPolicies[policyId].requires.map((capability) => {
-    const entry = capabilities[capability];
-    if (entry === undefined) {
-      return {
-        capability,
-        state:
-          checksItself(kind) && selfCheckedCapabilities.includes(capability)
-            ? "checked_on_provision"
-            : "needs_checking",
-        evidence: null,
-      };
-    }
-    const { recordedBy, observedAt, procedure, record } = entry.evidence;
+  policy.requires.map((capability) => {
+    const { state, method, entry } = requirementState(capability, destination);
     return {
       capability,
-      state: entry.status,
-      evidence: { recordedBy, observedAt, procedure, record },
+      state,
+      method,
+      byHand: method === "manual" || state === "unsupported",
+      evidence:
+        entry === undefined
+          ? null
+          : {
+              recordedBy: entry.evidence.recordedBy,
+              observedAt: entry.evidence.observedAt,
+              procedure: entry.evidence.procedure,
+              record: entry.evidence.record,
+            },
     };
   });
+
+/** A destination row as policies judge it. */
+const judged = (
+  row: typeof hostingDestinations.$inferSelect
+): JudgedDestination => ({
+  kind: row.kind,
+  policies: z.array(z.string()).parse(JSON.parse(row.policies)),
+  capabilities: destinationCapabilitiesSchema.parse(
+    JSON.parse(row.capabilities)
+  ),
+});
 
 /** A destination as staff choose among them. */
 export interface DestinationChoice {
@@ -132,7 +141,12 @@ export type AutomaticChoice =
 /** A client's hosting, as its page shows it. */
 export interface ClientHostingView {
   clientId: string;
-  policy: { id: HostingPolicyId; description: string };
+  /** Its policy: its name, and exactly what it verifies. */
+  policy: {
+    id: HostingPolicyId;
+    name: string;
+    description: string;
+  };
   placement: {
     destinationId: string;
     policyId: string;
@@ -198,9 +212,9 @@ export const stageDestinationId = (stage: Stage): string =>
  * no placement can skip. It runs once: a destination in that namespace,
  * recorded here or by staff, is left as it is.
  *
- * It claims no capability: each is unknown until staff record evidence
- * of it, as a policy requires (src/hosting/policy.ts), so nothing is
- * placed here on the admin's word. An admin whose STAGE names no stage
+ * It claims no capability: each is verified by provisioning's own checks
+ * or the platform's record (src/hosting/policy.ts), never on the admin's
+ * word. An admin whose STAGE names no stage
  * records nothing, and the namespace is the stage's own, so a staging
  * admin never records production's.
  */
@@ -240,6 +254,7 @@ export const destinationChoices = async (
   db: AdminDatabase,
   policyId: HostingPolicyId
 ): Promise<DestinationChoice[]> => {
+  const policy = hostingPolicyOf(policyId);
   const rows = await db
     .select()
     .from(hostingDestinations)
@@ -247,14 +262,10 @@ export const destinationChoices = async (
     .all();
   return rows
     .map((row) => {
-      const capabilities = destinationCapabilitiesSchema.parse(
-        JSON.parse(row.capabilities)
-      );
+      const destination = judged(row);
       const problems: DestinationProblem[] = placementProblems(
-        hostingPolicies[policyId],
-        z.array(z.string()).parse(JSON.parse(row.policies)),
-        capabilities,
-        checksItself(row.kind)
+        policy,
+        destination
       );
       if (!provisionable(row)) {
         problems.push({ kind: "not_provisionable" });
@@ -264,7 +275,7 @@ export const destinationChoices = async (
         kind: row.kind,
         shared: row.kind === "workers_for_platforms",
         problems,
-        checks: capabilityChecks(policyId, row.kind, capabilities),
+        checks: capabilityChecks(policy, destination),
       };
     })
     .toSorted((a, b) => kindOrder[a.kind] - kindOrder[b.kind]);
@@ -281,6 +292,8 @@ export interface DestinationOverview {
   /** For each policy there is, what keeps it out, and each requirement's check. */
   byPolicy: {
     policyId: HostingPolicyId;
+    /** The policy's name, and exactly what it verifies. */
+    name: string;
     description: string;
     problems: DestinationProblem[];
     checks: CapabilityCheck[];
@@ -305,31 +318,28 @@ export const destinationsOverview = async (
   const policyIds = hostingPolicyIdSchema.options;
   return rows
     .map((row) => {
-      const capabilities = destinationCapabilitiesSchema.parse(
-        JSON.parse(row.capabilities)
-      );
-      const policies = z.array(z.string()).parse(JSON.parse(row.policies));
+      const destination = judged(row);
       return {
         id: row.id,
         kind: row.kind,
         accountId: row.accountId,
         namespace: row.namespace,
-        policies,
+        policies: [...destination.policies],
         byPolicy: policyIds.map((policyId) => {
+          const policy = hostingPolicyOf(policyId);
           const problems: DestinationProblem[] = placementProblems(
-            hostingPolicies[policyId],
-            policies,
-            capabilities,
-            checksItself(row.kind)
+            policy,
+            destination
           );
           if (!provisionable(row)) {
             problems.push({ kind: "not_provisionable" });
           }
           return {
             policyId,
-            description: hostingPolicies[policyId].description,
+            name: policy.name,
+            description: policy.description,
             problems,
-            checks: capabilityChecks(policyId, row.kind, capabilities),
+            checks: capabilityChecks(policy, destination),
           };
         }),
       };
@@ -385,17 +395,19 @@ export const getClientHosting = async (
   await ensureStageDestination(env, db);
   const placement = await placementOf(db, clientId);
   // A placed client stays under its own policy: the one shown is that.
-  const policy =
-    hostingPolicies[
-      hostingPolicyIdSchema.parse(placement?.policyId ?? policyId)
-    ];
-  const destinations = await destinationChoices(db, policy.id);
+  const shownId = hostingPolicyIdSchema.parse(placement?.policyId ?? policyId);
+  const policy = hostingPolicyOf(shownId);
+  const destinations = await destinationChoices(db, shownId);
   const operation = await provisionOf(db, clientId);
   const current = await currentRun(env, clientId);
   const attempt = current?.kind === "provision_placed" ? current.status : null;
   return {
     clientId,
-    policy: { id: policy.id, description: policy.description },
+    policy: {
+      id: shownId,
+      name: policy.name,
+      description: policy.description,
+    },
     placement:
       placement === undefined
         ? null

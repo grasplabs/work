@@ -85,6 +85,8 @@ export const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
   runner_replaced: "Another attempt took the client over.",
   evidence_subject_unknown:
     "Evidence names a release, commit, candidate or runtime profile the admin can't check.",
+  checks_itself:
+    "Grasp's own hosting checks this itself: a person only puts right a check found not to hold.",
 };
 
 /** Why an operation stopped, by its own code. */
@@ -131,6 +133,12 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "A private binding the release gives core didn't answer the probe.",
   probe_clock_unarmed:
     "Core's clock or connect's isn't armed with tasks after the probe.",
+  durable_objects_outside_jurisdiction:
+    "Core made Durable Object ids outside the policy's jurisdiction: the destination is marked, and takes no one until someone looks.",
+  probe_jurisdiction_unreported:
+    "Core didn't say where its Durable Objects are made, and nothing recent verified it: provision it with a newer release.",
+  release_check_failed:
+    "The release turns invocation logs on, or doesn't declare approved model transport: provision it with a release that does.",
   runner_replaced: "Another attempt took the client over.",
   operation_gone: "The operation's record was gone before it was done.",
   client_not_active:

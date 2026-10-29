@@ -73,6 +73,15 @@ export const provisionProbeSchema = z.strictObject({
    * Connect's own are `connect.<name>`, as connect answered core.
    */
   bindings: z.record(z.string(), z.boolean()),
+  /**
+   * Each Durable Object namespace of core's, by binding name: the
+   * jurisdiction of an object id core made in it as it makes every one
+   * (`DurableObjectId.jurisdiction`), null when the id names none or the
+   * namespace didn't answer. What the admin records as the destination's
+   * evidence for Durable Objects in the EU. Absent from a core of a
+   * release from before it.
+   */
+  durableObjects: z.record(z.string(), z.string().nullable()).optional(),
   /** Core's clock and connect's, each armed if it wasn't; null for one that didn't answer. */
   clocks: z.strictObject({
     core: clockRegistrationSchema.nullable(),

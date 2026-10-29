@@ -30,7 +30,6 @@ import {
   recordedOf,
   sharedRelease,
   vouch,
-  vouched,
 } from "./own-destination.ts";
 import { callServerFn, page } from "./pages.ts";
 import { ended, startsOf } from "./runs.ts";
@@ -42,11 +41,12 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // - Nothing records it, so a new admin places no one (staging's first
 //   organization had nowhere to go).
 // - It is taken on the admin's word: a capability counted as checked
-//   that nobody, and no check, observed.
-// - Its first client waits for a check only its own provisioning runs.
+//   that no check observed and the platform doesn't record.
+// - Its first client waits for a person, or for a check only its own
+//   provisioning runs.
 // - Provisioning finds a database outside the EU and carries on, or
 //   records nothing, so the next client is placed there too.
-// - A person's check recorded as someone else's, or unaudited.
+// - A person recording a check it makes itself.
 // - It is recorded again on every read, in the other stage's namespace,
 //   or by an admin whose STAGE names no stage.
 
@@ -67,13 +67,12 @@ describe("a new admin's own shared destination", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it("is recorded on its own stage's namespace claiming nothing, and Platform's Destinations page shows its checklist and records a check as the one who made it", async () => {
+  it("is recorded on its own stage's namespace claiming nothing, and Platform's Destinations page shows a checklist nobody has to fill in", async () => {
     const fresh = await db.select().from(hostingDestinations);
 
     const before = await page("/platform/destinations", staff.email);
     await callServerFn(fetchDestinations, undefined, { email: staff.email });
-    await vouch("logs.payload_free", "ops@grasp.test");
-    const after = await page("/platform/destinations", staff.email);
+    const refused = await vouch("logs.payload_free", "ops@grasp.test");
     const audited = await db
       .select({ actor: auditEvents.actor, action: auditEvents.action })
       .from(auditEvents)
@@ -86,18 +85,19 @@ describe("a new admin's own shared destination", () => {
           kind: hostingDestinations.kind,
           accountId: hostingDestinations.accountId,
           namespace: hostingDestinations.namespace,
+          policies: hostingDestinations.policies,
         })
         .from(hostingDestinations),
       status: before.status,
-      firstTime: before.html.includes(
-        "Grasp&#x27;s own hosting checks itself when you provision the first client"
+      itself: before.html.includes(
+        "Grasp&#x27;s own hosting checks itself when it provisions a client"
       ),
+      platform: before.html.includes("By platform (reviewed in code)"),
       needsChecking: before.html.includes("Needs checking"),
       form: before.html.includes("Record a check"),
-      byWhom: after.html.includes("By ops@grasp.test"),
+      refused: refused.refused,
       recorded: await recordedOf(),
-      // Recorded once by the admin however often it was read, the check as
-      // the one who made it.
+      // Recorded once by the admin however often it was read.
       audited: audited.map(({ actor, action }) => `${action} by ${actor}`),
     }).toStrictEqual({
       fresh: [],
@@ -106,22 +106,21 @@ describe("a new admin's own shared destination", () => {
           kind: "workers_for_platforms",
           accountId: platformAccountId,
           namespace: "grasp-clients",
+          policies: JSON.stringify(["eu-storage"]),
         },
       ],
       status: 200,
-      firstTime: true,
-      needsChecking: true,
-      form: true,
-      byWhom: true,
-      recorded: { "logs.payload_free": "verified by ops@grasp.test" },
-      audited: [
-        "destination.create by system",
-        "destination.evidence by ops@grasp.test",
-      ],
+      itself: true,
+      platform: true,
+      needsChecking: false,
+      form: false,
+      refused: "checks_itself",
+      recorded: {},
+      audited: ["destination.create by system"],
     });
   });
 
-  it("places the first client once a person vouched for what no check observes, and its provisioning records its own check", async () => {
+  it("places the first client with no person's check, and its provisioning records its own", async () => {
     const releaseId = await sharedRelease();
     const clientId = await added();
 
@@ -130,14 +129,6 @@ describe("a new admin's own shared destination", () => {
       { clientId, policyId: "eu-storage" },
       { email: staff.email }
     );
-    const unvouched = await place(clientId, releaseId);
-    for (const capability of vouched.filter(
-      (each) => each !== "logs.payload_free"
-    )) {
-      // oxlint-disable-next-line no-await-in-loop -- one form after another
-      await vouch(capability);
-    }
-
     // Its first migration fails, so the attempt waits to try again after
     // the resources, and is ended there: what comes after needs
     // Cloudflare's own dispatch namespace.
@@ -167,7 +158,6 @@ describe("a new admin's own shared destination", () => {
           ({ capability, state }) => [capability, state]
         )
       ),
-      unvouched: unvouched.refused,
       placed: placed.refused,
       placement: await db
         .select({ destinationId: clientPlacements.destinationId })
@@ -181,23 +171,21 @@ describe("a new admin's own shared destination", () => {
         `Automatic check during provisioning, run ${runId}:`
       ),
     }).toStrictEqual({
-      // Before it: two its first provisioning checks, four a person does.
+      // Before it: five its provisioning checks, one the platform records.
       states: {
         "d1.eu_jurisdiction": "checked_on_provision",
         "r2.eu_jurisdiction": "checked_on_provision",
-        "durable_objects.eu_jurisdiction": "needs_checking",
-        "logs.payload_free": "verified",
-        "models.approved_transport": "needs_checking",
-        "secrets.replication_recorded": "needs_checking",
+        "durable_objects.eu_jurisdiction": "checked_on_provision",
+        "logs.payload_free": "checked_on_provision",
+        "models.approved_transport": "checked_on_provision",
+        "secrets.replication_recorded": "verified",
       },
-      unvouched: "no_automatic_destination",
       placed: null,
       placement: { destinationId: ownId },
+      // Durable Objects once core answers its probe, past where this ends.
       recorded: {
-        "logs.payload_free": "verified by ops@grasp.test",
-        "durable_objects.eu_jurisdiction": `verified by ${staff.email}`,
-        "models.approved_transport": `verified by ${staff.email}`,
-        "secrets.replication_recorded": `verified by ${staff.email}`,
+        "logs.payload_free": "verified by system",
+        "models.approved_transport": "verified by system",
         "d1.eu_jurisdiction": "verified by system",
         "r2.eu_jurisdiction": "verified by system",
       },

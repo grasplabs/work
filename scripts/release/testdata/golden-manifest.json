@@ -51,6 +51,11 @@
   "compatibilityDate": "2026-09-15",
   "createdAt": "2026-01-01T00:00:00.000Z",
   "manifestVersion": 1,
+  "modelTransport": {
+    "cache": false,
+    "payloadLogging": false,
+    "via": "ai_gateway"
+  },
   "notes": "feat(core): a fixture",
   "packages": {
     "zod": "0.0.0-fixture"

@@ -42,13 +42,14 @@ import type { HeldClient } from "../runners.ts";
 import {
   capabilities,
   destinationCapabilitiesSchema,
-  hostingPolicies,
+  hostingPolicyOf,
   hostingPolicyIdSchema,
   placementProblems,
 } from "./policy.ts";
 import type {
   Capability,
   DestinationCapabilities,
+  DestinationKind,
   Evidence,
   HostingPolicyId,
   Jurisdiction,
@@ -101,6 +102,12 @@ export const inventoryErrorCodes = [
    * from, a candidate, or a runtime profile the destination doesn't run.
    */
   "evidence_subject_unknown",
+  /**
+   * A person recording a check of this admin's own destination, which
+   * checks every requirement itself (`verificationMethods`,
+   * `platformFacts`): only one found not to hold is theirs to put right.
+   */
+  "checks_itself",
 ] as const;
 
 export type InventoryErrorCode = (typeof inventoryErrorCodes)[number];
@@ -125,8 +132,6 @@ export class InventoryError extends Error {
 export type ResourceKind = (typeof clientResources.kind.enumValues)[number];
 export type ClientResource = typeof clientResources.$inferSelect;
 export type ClientPlacement = typeof clientPlacements.$inferSelect;
-
-type DestinationKind = (typeof hostingDestinations.kind.enumValues)[number];
 
 /** A destination as staff record it. */
 export interface DestinationInput {
@@ -375,16 +380,6 @@ export const destinationOf = async (db: AdminDatabase, id: string) => {
 };
 
 /**
- * Whether provisioning checks a destination of `kind` itself
- * (`selfCheckedCapabilities`): a Workers for Platforms destination, which
- * is always this admin's own stage's namespace (`saveDestination`), where
- * the admin creates every client's databases and buckets and reads back
- * where Cloudflare put them.
- */
-export const checksItself = (kind: DestinationKind): boolean =>
-  kind === "workers_for_platforms";
-
-/**
  * Throws unless `destinationId` satisfies every requirement of `policyId`,
  * one its provisioning checks itself and hasn't yet aside
  * (`placementProblems`).
@@ -395,12 +390,7 @@ export const assertPlaceable = async (
   policyId: HostingPolicyId
 ): Promise<void> => {
   const destination = await destinationOf(db, destinationId);
-  const problems = placementProblems(
-    hostingPolicies[policyId],
-    destination.policies,
-    destination.capabilities,
-    checksItself(destination.kind)
-  );
+  const problems = placementProblems(hostingPolicyOf(policyId), destination);
   if (problems.length > 0) {
     throw new InventoryError(
       "placement_refused",
@@ -414,7 +404,7 @@ export const assertPlaceable = async (
  * Records what was observed of some of destination `destinationId`'s
  * capabilities (`observed`), as `actor`: staff checking one through the
  * form (src/hosting/capability-checks.tsx), or provisioning's own check
- * (`selfCheckedCapabilities`). Evidence must name a subject the admin
+ * (`verificationMethods`). Evidence must name a subject the admin
  * knows, as `saveDestination`'s does.
  *
  * Each capability is written on its own, in one statement that sets only
@@ -747,7 +737,7 @@ export const allocateClientResources = async (
   }
   const policyId = hostingPolicyIdSchema.parse(placement.policyId);
   await assertPlaceable(db, placement.destinationId, policyId);
-  const jurisdiction = hostingPolicies[policyId].storageJurisdiction;
+  const jurisdiction = hostingPolicyOf(policyId).storageJurisdiction;
 
   const scripts = new Map<string, string>();
   for (const worker of Object.values(manifest.workers)) {

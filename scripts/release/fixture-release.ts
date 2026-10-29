@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+import { declaredModelTransport } from "@grasp-os/shared/model-transport";
 import { z } from "zod";
 
 import { parseJsonc } from "../wrangler-config-rules.ts";
@@ -60,6 +61,7 @@ export const info: ReleaseInfo = {
     sdkProtocols: { min: 2, max: 2 },
   },
   platformLimits: { authoringFiles: 200, workflowSteps: 1000 },
+  modelTransport: declaredModelTransport(),
 };
 
 export const builds = async (): Promise<WorkerBuild[]> =>

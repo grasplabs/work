@@ -13,6 +13,8 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+import { destinationKinds } from "../hosting/policy.ts";
+
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /** A release CI built and published, imported once its blobs checked out. */
@@ -433,9 +435,7 @@ export const auditEvents = sqliteTable(
 export const hostingDestinations = sqliteTable("hosting_destinations", {
   /** Staff's name for it, such as `eu-production`. */
   id: text().primaryKey(),
-  kind: text({
-    enum: ["workers_for_platforms", "dedicated", "workerd"],
-  }).notNull(),
+  kind: text({ enum: destinationKinds }).notNull(),
   /** Its Cloudflare account; null for workerd. */
   accountId: text("account_id"),
   /** Its Workers for Platforms dispatch namespace; null otherwise. */

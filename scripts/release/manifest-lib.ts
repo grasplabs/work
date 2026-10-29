@@ -19,6 +19,7 @@ import {
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import type { ModelTransport } from "@grasp-os/shared/model-transport";
 import {
   assetKey,
   bindingNameSchema as bindingName,
@@ -315,6 +316,11 @@ export interface ReleaseInfo {
    * evidence for it, are written at publish (evidence-release.ts).
    */
   platformLimits: PlatformLimits;
+  /**
+   * How core reaches models: what the headers core's model gateway sends
+   * mean (@grasp-os/shared/model-transport), read from the same object.
+   */
+  modelTransport: ModelTransport;
 }
 
 // Migrations are numbered from 0000 in the order they're applied, as

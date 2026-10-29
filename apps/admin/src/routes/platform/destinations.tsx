@@ -31,7 +31,7 @@ const Destination = ({ destination }: { destination: DestinationOverview }) => (
       );
       return (
         <section className="flex flex-col gap-2" key={policy.policyId}>
-          <h2 className="font-medium">{policy.policyId}</h2>
+          <h2 className="font-medium">{policy.name}</h2>
           <p className="text-muted-foreground">{policy.description}</p>
           {others.length === 0 ? null : (
             <ul className="text-muted-foreground flex list-disc flex-col gap-1 pl-5">

@@ -11,7 +11,10 @@ import {
   placeAndProvisionFn,
   recordCapabilityCheckFn,
 } from "../src/hosting/functions.ts";
-import { destinationOf } from "../src/hosting/inventory.ts";
+import {
+  destinationOf,
+  recordCapabilityEvidence,
+} from "../src/hosting/inventory.ts";
 import { stageDestinationId } from "../src/hosting/placement.ts";
 import type { Capability } from "../src/hosting/policy.ts";
 import { startClient } from "../src/provision/functions.ts";
@@ -39,13 +42,32 @@ export const sharedRelease = async (): Promise<string> =>
     bindings: core.bindings.filter(({ type }) => documented.has(type)),
   }));
 
-/** What no provisioning observes, so a person vouches for each. */
-export const vouched: readonly Capability[] = [
-  "durable_objects.eu_jurisdiction",
-  "logs.payload_free",
-  "models.approved_transport",
-  "secrets.replication_recorded",
-];
+/**
+ * Something recorded of `capability` straight into the record, as
+ * `recordedBy` observed it: what a person found before, or a check.
+ */
+export const recordAs = async (
+  capability: Capability,
+  recordedBy: string,
+  holds = true
+) =>
+  await recordCapabilityEvidence(
+    db,
+    recordedBy === "system" ? "system" : { ...staff, email: recordedBy },
+    ownId,
+    {
+      [capability]: {
+        status: holds ? "verified" : "unsupported",
+        evidence: {
+          procedure: `Read ${capability} back on a test client`,
+          subject: { kind: "profile", id: "cloudflare" },
+          observedAt: new Date().toISOString(),
+          recordedBy,
+          record: "https://linear.app/grasp-os/issue/GRA-430",
+        },
+      },
+    }
+  );
 
 /** Staff recording, through the form, that they checked `capability`. */
 export const vouch = async (

@@ -25,6 +25,10 @@ import {
   connectInterfacesCoreCalls,
   connectInterfaceVersion,
 } from "@grasp-os/shared/connect";
+import {
+  declaredModelTransport,
+  modelGatewayTransportHeaders,
+} from "@grasp-os/shared/model-transport";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { ReleaseCompatibility } from "@grasp-os/shared/release";
 import {
@@ -235,6 +239,9 @@ const manifest = generateManifest(
     packages: packageVersions([...RELEASED_APPS, FRONTEND]),
     compatibility,
     platformLimits: { ...platformLimits },
+    // From the headers core sends with every model call, so the
+    // declaration is what core does.
+    modelTransport: declaredModelTransport(modelGatewayTransportHeaders),
   },
   workers
 );

@@ -529,7 +529,7 @@ export const ClientHosting = ({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1 text-sm">
-        <p>{`Policy: ${view.policy.id}`}</p>
+        <p>{`Policy: ${view.policy.name}`}</p>
         <p className="text-muted-foreground">{view.policy.description}</p>
       </div>
       {view.placement === null ? (

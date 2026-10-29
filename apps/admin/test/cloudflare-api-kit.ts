@@ -148,6 +148,12 @@ export interface AccountState {
         clocksDown?: readonly ("core" | "connect")[];
         /** As a core from before connect's version: neither in its probe nor asked for. */
         noConnectVersion?: boolean;
+        /**
+         * The jurisdiction each Durable Object namespace makes its ids in:
+         * `eu` unless given, as Cloudflare's restricted namespace does;
+         * `absent` for a core from before it answered them.
+         */
+        durableObjects?: Readonly<Record<string, string | null>> | "absent";
       };
   /**
    * The platform update notices its core took, signed with the key its

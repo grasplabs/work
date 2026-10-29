@@ -34,7 +34,7 @@ import {
   placeInputSchema,
 } from "./placement.ts";
 import type { PlaceRefusal } from "./placement.ts";
-import { capabilities, hostingPolicyIdSchema } from "./policy.ts";
+import { checksItself, capabilities, hostingPolicyIdSchema } from "./policy.ts";
 import type { PlacementProblem } from "./policy.ts";
 import { releasePlacedClient } from "./workflow.ts";
 
@@ -203,7 +203,9 @@ export const capabilityCheckInputSchema = z.object({
 /**
  * Records that the signed-in staff member checked one capability of a
  * destination: as theirs, against the hosting it runs on, audited
- * (`recordCapabilityEvidence`). Answers a refusal as its code.
+ * (`recordCapabilityEvidence`). Refused for this admin's own destination,
+ * which checks every requirement itself (`checks_itself`), but to put
+ * right a check found not to hold. Answers a refusal as its code.
  */
 export const recordCapabilityCheckFn = createServerFn({ method: "POST" })
   .validator(capabilityCheckInputSchema)
@@ -215,6 +217,17 @@ export const recordCapabilityCheckFn = createServerFn({ method: "POST" })
       const db = adminDatabase(env.DB);
       try {
         const destination = await destinationOf(db, data.destinationId);
+        // Grasp's own checks itself: a person only puts right a check
+        // found not to hold, once they fixed what it found.
+        if (
+          checksItself(destination.kind) &&
+          destination.capabilities[data.capability]?.status !== "unsupported"
+        ) {
+          throw new InventoryError(
+            "checks_itself",
+            `${data.destinationId} checks ${data.capability} itself`
+          );
+        }
         await recordCapabilityEvidence(db, context.staff, data.destinationId, {
           [data.capability]: {
             status: data.holds ? "verified" : "unsupported",

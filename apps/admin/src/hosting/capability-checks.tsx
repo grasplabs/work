@@ -1,10 +1,11 @@
 /**
  * A destination's requirements as a plain checklist, in Setup's Hosting
  * section and on Platform's Destinations page: each one checked (by whom,
- * or by provisioning's own check, when, and where it is recorded), still
- * to be checked by a person, or to be checked by provisioning itself the
- * first time it runs there. A person records what they checked with one
- * form, as themselves, also over a record already there (to put a failed
+ * by provisioning's own check or by the platform's record, when, and
+ * where it is recorded), still to be checked by a person, or to be
+ * checked by provisioning itself the first time it runs there. In any
+ * destination but Grasp's own, a person records what they checked with
+ * one form, as themselves, also over a record already there (to put a failed
  * check right, or withdraw one that no longer holds); every record is
  * audited
  * (src/hosting/functions.ts, `recordCapabilityCheckFn`).
@@ -42,12 +43,25 @@ const stateWords: Readonly<Record<CapabilityCheck["state"], string>> = {
   verified: "Checked",
   unsupported: "Doesn't hold",
   needs_checking: "Needs checking",
-  checked_on_provision: "Checked when you provision",
+  checked_on_provision: "Checked when it provisions",
 };
 
-/** Who checked it, in words: a staff member, or provisioning's own check. */
-const byWhom = (recordedBy: string): string =>
-  recordedBy === "system" ? "an automatic check" : recordedBy;
+/** How it is verified, in words, beside its state. */
+const methodWords: Readonly<Record<CapabilityCheck["method"], string>> = {
+  read_back: "read back from Cloudflare",
+  probe: "asked of core once deployed",
+  release: "read from the release",
+  platform: "platform fact, reviewed in code",
+  manual: "checked by a person",
+};
+
+/** Who checked it, in words: a staff member, provisioning's own check, or the platform's record. */
+const byWhom = (recordedBy: string): string => {
+  if (recordedBy === "system") {
+    return "an automatic check";
+  }
+  return recordedBy === "platform" ? "platform (reviewed in code)" : recordedBy;
+};
 
 /** Field `name` of `form`, as text. */
 const textOf = (form: FormData, name: string): string => {
@@ -201,6 +215,7 @@ const CheckItem = ({
         {stateWords[check.state]}
       </Badge>
       <span>{capabilityWords[check.capability]}</span>
+      <span className="text-muted-foreground">{`(${methodWords[check.method]})`}</span>
     </div>
     {check.evidence === null ? null : (
       <p className="text-muted-foreground text-sm">
@@ -216,12 +231,15 @@ const CheckItem = ({
       </p>
     )}
     {/* Also once recorded: to put a failed check right, or withdraw one
-        that no longer holds, as a new record that replaces it, audited. */}
-    <RecordCheck
-      again={check.evidence !== null}
-      capability={check.capability}
-      destinationId={destinationId}
-    />
+        that no longer holds, as a new record that replaces it, audited.
+        Only where a person checks it: Grasp's own hosting checks itself. */}
+    {check.byHand ? (
+      <RecordCheck
+        again={check.evidence !== null}
+        capability={check.capability}
+        destinationId={destinationId}
+      />
+    ) : null}
   </li>
 );
 
@@ -236,9 +254,10 @@ export const CapabilityChecklist = ({
   <div className="flex flex-col gap-2">
     {checks.some(({ state }) => state === "checked_on_provision") ? (
       <p className="text-sm">
-        Grasp&apos;s own hosting checks itself when you provision the first
-        client: it reads back from Cloudflare where each database and bucket was
-        put, and stops if any is outside the policy.
+        Grasp&apos;s own hosting checks itself when it provisions a client: it
+        reads back from Cloudflare where each database and bucket was put, asks
+        core where its Durable Objects are made, reads logs and model transport
+        from the release, and stops if anything is outside the policy.
       </p>
     ) : null}
     <ul className="flex flex-col">

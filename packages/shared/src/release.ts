@@ -451,6 +451,13 @@ export const releaseCompatibilitySchema = z.strictObject({
 
 export type ReleaseCompatibility = z.infer<typeof releaseCompatibilitySchema>;
 
+/** A release's model transport (@grasp-os/shared/model-transport `ModelTransport`). */
+export const modelTransportSchema = z.strictObject({
+  via: z.literal("ai_gateway"),
+  payloadLogging: z.boolean(),
+  cache: z.boolean(),
+});
+
 /** The release manifest (see the header comment). */
 export const releaseManifestSchema = z.strictObject({
   manifestVersion: z.literal(MANIFEST_VERSION),
@@ -483,6 +490,14 @@ export const releaseManifestSchema = z.strictObject({
    * those live (src/releases/limits.ts).
    */
   platformLimits: platformLimitsSchema.optional(),
+  /**
+   * How core's model gateway reaches models, as the release build reads
+   * it from the headers core sends (@grasp-os/shared/model-transport).
+   * Releases built before it was declared have none, and the admin
+   * provisions none of those under a policy that requires approved model
+   * transport (apps/admin/src/hosting/release-checks.ts).
+   */
+  modelTransport: modelTransportSchema.optional(),
 });
 
 export type ReleaseManifest = z.infer<typeof releaseManifestSchema>;

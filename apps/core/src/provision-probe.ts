@@ -45,22 +45,27 @@ import { callSandboxed } from "./sandboxed.ts";
 /** What a bucket is asked for: a key nothing writes, so the answer is "none". */
 const absentKey = "platform/probe";
 
-/** Whether `call` settled; why it didn't is logged, by its error's kind only. */
-const answers = async (
+/** What `call` answers, as `{ value }`; null, logged by its error's kind only, when it throws. */
+const answered = async <T>(
   binding: string,
-  call: () => Promise<unknown>
-): Promise<boolean> => {
+  call: () => Promise<T>
+): Promise<{ value: T } | null> => {
   try {
-    await call();
-    return true;
+    return { value: await call() };
   } catch (error) {
     log.warn("probe.binding_failed", {
       binding,
       errorName: error instanceof Error ? error.name : typeof error,
     });
-    return false;
+    return null;
   }
 };
+
+/** Whether `call` settled; why it didn't is logged, by its error's kind only. */
+const answers = async (
+  binding: string,
+  call: () => Promise<unknown>
+): Promise<boolean> => (await answered(binding, call)) !== null;
 
 /**
  * Connect's private bindings, each as connect answered its no-op; none
@@ -169,17 +174,22 @@ const objectNamespaces = (
   CHAT_STATE: env.CHAT_STATE,
 });
 
-/** A namespace's no-op: an object's ID in core's jurisdiction, made but never used. */
+/**
+ * A namespace's no-op: an object's ID in core's jurisdiction, made but
+ * never used. Answers the jurisdiction the ID names, null for none (a
+ * deployment that turned jurisdictions off), so the admin sees where
+ * core's objects are made rather than take it on trust.
+ */
 const objects =
   (
     env: Env,
     namespace: DurableObjectNamespace<Rpc.DurableObjectBranded | undefined>
   ) =>
-  async (): Promise<void> => {
+  async (): Promise<string | null> => {
     // A namespace the deploy didn't bind, or can't restrict to the EU,
     // throws here.
-    inJurisdiction(env, namespace).idFromName("platform/probe");
-    await Promise.resolve();
+    const id = inJurisdiction(env, namespace).idFromName("platform/probe");
+    return await Promise.resolve(id.jurisdiction ?? null);
   };
 
 /** A database's no-op: `SELECT 1`. */
@@ -196,6 +206,11 @@ const r2 = (bucket: R2Bucket) => async () => await bucket.head(absentKey);
  */
 const probed = async (env: Env): Promise<ProvisionProbe> => {
   const namespaces = Object.entries(objectNamespaces(env));
+  const asked = Promise.all(
+    namespaces.map(
+      async ([name, namespace]) => await answered(name, objects(env, namespace))
+    )
+  );
   const [
     db,
     knowledge,
@@ -207,7 +222,6 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     connectAnswering,
     connect,
     core,
-    ...namespaced
   ] = await Promise.all([
     answers("DB", d1(env.DB)),
     answers("KNOWLEDGE", d1(env.KNOWLEDGE)),
@@ -219,10 +233,8 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     connectVersion(env),
     registration("connect", async () => await env.CONNECT.ensureClock()),
     registration("core", async () => await clock(env).ensureRegistered()),
-    ...namespaces.map(
-      async ([name, namespace]) => await answers(name, objects(env, namespace))
-    ),
   ]);
+  const namespaced = await asked;
   return {
     version: env.CF_VERSION_METADATA?.id ?? null,
     connectVersion: connectAnswering,
@@ -236,18 +248,24 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
       LOADER: loader,
       CONNECT: connect !== null,
       ...Object.fromEntries(
-        namespaces.map(([name], index) => [name, namespaced[index] === true])
+        namespaces.map(([name], index) => [name, namespaced[index] !== null])
       ),
       // Connect's own, as connect answered for them; its clock, as it
       // armed it.
       ...Object.fromEntries(
-        Object.entries(connectBindings).map(([name, answered]) => [
+        Object.entries(connectBindings).map(([name, ok]) => [
           `connect.${name}`,
-          answered,
+          ok,
         ])
       ),
       "connect.CLOCK": connect !== null,
     },
+    durableObjects: Object.fromEntries(
+      namespaces.map(([name], index) => [
+        name,
+        namespaced[index]?.value ?? null,
+      ])
+    ),
     clocks: { core, connect },
   };
 };

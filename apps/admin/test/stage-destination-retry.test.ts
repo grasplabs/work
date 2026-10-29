@@ -16,8 +16,6 @@ import {
   place,
   recordedOf,
   sharedRelease,
-  vouch,
-  vouched,
 } from "./own-destination.ts";
 import { ended, startsOf } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
@@ -40,10 +38,6 @@ describe("provisioning's own check, tried again", () => {
     graspAccount(cloudflare);
     vi.spyOn(console, "error").mockImplementation(() => {});
     await ensureStageDestination(env, db);
-    for (const capability of vouched) {
-      // oxlint-disable-next-line no-await-in-loop -- one form after another
-      await vouch(capability);
-    }
     const releaseId = await sharedRelease();
     const clientId = await added();
     // The bucket's create is refused once, after the database was made:
@@ -92,7 +86,8 @@ describe("provisioning's own check, tried again", () => {
       attempts: attempts.started.length,
       d1: recorded["d1.eu_jurisdiction"],
       r2: recorded["r2.eu_jurisdiction"],
-      // One record each, however many tries and resources of each kind.
+      // One record each, however many tries and resources of each kind:
+      // D1 and R2 read back, logs and models read from the release.
       written: evidence.filter(({ actor }) => actor === "system").length,
     }).toStrictEqual({
       // Recorded by the try that made it, before the bucket failed.
@@ -101,7 +96,7 @@ describe("provisioning's own check, tried again", () => {
       attempts: 2,
       d1: "verified by system",
       r2: "verified by system",
-      written: 2,
+      written: 4,
     });
   });
 

@@ -129,6 +129,35 @@ const down = <T extends object>(binding: T, reason: string): T =>
     },
   });
 
+/** Core's Durable Object namespace bindings, as the probe names them. */
+const namespaceBindings = [
+  "WORKSPACES",
+  "APPS",
+  "AUDIT_LOG",
+  "BUILTINS",
+  "CLOCK",
+  "ONBOARDING",
+  "MODEL_LEDGER",
+  "DATA_STORES",
+  "WORKFLOW_RUNS",
+  "ACTION_INVOCATIONS",
+  "CHAT_STATE",
+] as const;
+
+/**
+ * `namespace` as Cloudflare restricts one to a jurisdiction, which
+ * workerd doesn't: the ids it makes in `jurisdiction` name it.
+ */
+const restrictable = <T extends object>(namespace: T): T =>
+  new Proxy(namespace, {
+    get: (target, property): unknown =>
+      property === "jurisdiction"
+        ? (jurisdiction: string) => ({
+            idFromName: (name: string) => ({ name, jurisdiction }),
+          })
+        : Reflect.get(target, property),
+  });
+
 /** Clears core's clock's alarm, as anything that lost it would. */
 const disarm = async (): Promise<void> => {
   await runInDurableObject(clock(env), async (_, state) => {
@@ -194,6 +223,11 @@ describe("the console's provisioning probe", () => {
           "connect.LOADER": true,
           "connect.CLOCK": true,
         },
+        // Jurisdictions are off in workerd (durable-objects.ts), so no id
+        // names one.
+        durableObjects: Object.fromEntries(
+          namespaceBindings.map((name) => [name, null])
+        ),
       },
       core: { armed: true, tasks: clockTasks.map(({ name }) => name) },
       connect: true,
@@ -309,6 +343,29 @@ describe("the console's provisioning probe", () => {
     expect(text).not.toContain("9b3e7d10aa");
     expect(text).not.toContain("51c2e9");
     expect(text).not.toContain("deployed");
+  });
+
+  it("says the jurisdiction each Durable Object namespace makes core's ids in, and none for one that didn't answer", async () => {
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const inEu: Env = {
+      ...deployed,
+      // As deployed: jurisdictions on, so every id is made in the EU.
+      DURABLE_OBJECT_JURISDICTION: undefined,
+      ...Object.fromEntries(
+        namespaceBindings.map((name) => [name, restrictable(env[name])])
+      ),
+      APPS: down(env.APPS, "namespace 9b3e7d10aa isn't bound"),
+    };
+
+    const response = await probe(inEu);
+    warnings.mockRestore();
+
+    expect(
+      provisionProbeSchema.parse(await response.json()).durableObjects
+    ).toStrictEqual({
+      ...Object.fromEntries(namespaceBindings.map((name) => [name, "eu"])),
+      APPS: null,
+    });
   });
 
   it("says when it runs as no client the console deployed", async () => {

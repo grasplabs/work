@@ -14,7 +14,8 @@
  * adopted because its name matches (spec 39.2). Nothing here deletes.
  *
  * In a destination that checks itself (`checksItself`), what it reads
- * back is also the destination's evidence (`selfCheckedCapabilities`):
+ * back is also the destination's evidence, where the policy verifies it
+ * by `read_back`:
  * each kind it observed in the policy's jurisdiction is recorded as
  * verified by the system, the first time, and one it observed outside it
  * as unsupported, which stops this run and keeps every later placement
@@ -36,7 +37,6 @@ import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import {
   assertPlaceable,
-  checksItself,
   clientInventory,
   destinationOf,
   InventoryError,
@@ -45,17 +45,72 @@ import {
   recordProviderId,
 } from "./inventory.ts";
 import type { ClientResource } from "./inventory.ts";
-import { hostingPolicyIdSchema } from "./policy.ts";
-import type { Capability, DestinationCapabilities } from "./policy.ts";
+import { checksItself, hostingPolicyIdSchema, methodIn } from "./policy.ts";
+import type {
+  Capability,
+  DestinationKind,
+  HostingPolicy,
+  VerificationMethod,
+} from "./policy.ts";
 
-/** What provisioning's own check is recorded against: the release it runs, and where to read about the run. */
+/**
+ * What provisioning's own check is recorded against: the release it runs,
+ * the run, where to read about it, and the policy the client is placed
+ * under.
+ */
 export interface SelfCheck {
   releaseId: string;
   /** The run that observed it. */
   runId: string;
   /** A page in the admin where the run's client and its operation are. */
   record: string;
+  policy: HostingPolicy;
 }
+
+/**
+ * Records, as the system, what provisioning observed of `capability` in
+ * `destination` by `method`: only where the policy verifies it so there
+ * (`methodIn`) and the client's policy requires it. A verification is
+ * written only where there is no record yet (`recordCapabilityEvidence`),
+ * so a retry or the next client writes nothing again; one found not to hold is always written, and keeps
+ * every later placement out until a person looks.
+ */
+export const recordSelfCheck = async (
+  db: AdminDatabase,
+  destination: { id: string; kind: DestinationKind },
+  check: SelfCheck,
+  observed: {
+    capability: Capability;
+    method: VerificationMethod;
+    status: "verified" | "unsupported";
+    procedure: string;
+  }
+): Promise<void> => {
+  if (
+    !check.policy.requires.includes(observed.capability) ||
+    methodIn(observed.capability, destination.kind) !== observed.method
+  ) {
+    return;
+  }
+  await recordCapabilityEvidence(
+    db,
+    "system",
+    destination.id,
+    {
+      [observed.capability]: {
+        status: observed.status,
+        evidence: {
+          procedure: observed.procedure,
+          subject: { kind: "release", id: check.releaseId },
+          observedAt: new Date().toISOString(),
+          recordedBy: "system",
+          record: check.record,
+        },
+      },
+    },
+    { unrecordedOnly: observed.status === "verified" }
+  );
+};
 
 /** The capability a kind of resource's jurisdiction shows. */
 const capabilityOf: Partial<Record<ClientResource["kind"], Capability>> = {
@@ -63,27 +118,17 @@ const capabilityOf: Partial<Record<ClientResource["kind"], Capability>> = {
   r2_bucket: "r2.eu_jurisdiction",
 };
 
-/** Provisioning's observations of `observed`, each `status`, as evidence. */
-const observations = (
+/** Provisioning's read-back of a resource of `capability`, as evidence. */
+const readBack = (
   check: SelfCheck,
-  observed: readonly Capability[],
+  capability: Capability,
   status: "verified" | "unsupported"
-): DestinationCapabilities =>
-  Object.fromEntries(
-    observed.map((capability) => [
-      capability,
-      {
-        status,
-        evidence: {
-          procedure: `Automatic check during provisioning, run ${check.runId}: read back from Cloudflare the jurisdiction of each ${capability.startsWith("d1") ? "D1 database" : "R2 bucket"} it created or found for the client.`,
-          subject: { kind: "release", id: check.releaseId },
-          observedAt: new Date().toISOString(),
-          recordedBy: "system",
-          record: check.record,
-        },
-      },
-    ])
-  );
+) => ({
+  capability,
+  method: "read_back" as const,
+  status,
+  procedure: `Automatic check during provisioning, run ${check.runId}: read back from Cloudflare the jurisdiction of each ${capability.startsWith("d1") ? "D1 database" : "R2 bucket"} it created or found for the client.`,
+});
 
 /**
  * Records, in a destination that checks itself, that the resource just
@@ -92,18 +137,18 @@ const observations = (
  */
 const refuseOutside = async (
   db: AdminDatabase,
-  destinationId: string,
+  destination: { id: string; kind: DestinationKind },
   check: SelfCheck | undefined,
   resource: ClientResource,
   jurisdiction: string | null | undefined
 ): Promise<never> => {
   const capability = capabilityOf[resource.kind];
   if (check !== undefined && capability !== undefined) {
-    await recordCapabilityEvidence(
+    await recordSelfCheck(
       db,
-      "system",
-      destinationId,
-      observations(check, [capability], "unsupported")
+      destination,
+      check,
+      readBack(check, capability, "unsupported")
     );
   }
   throw new InventoryError(
@@ -120,30 +165,25 @@ const refuseOutside = async (
  * the recorded one, it stops the run (`refuseOutside`); in it, in a
  * destination that checks itself, it is recorded as the capability's
  * evidence there and then, before the next resource, so a run that
- * fails later has recorded it already. Written only where the capability
- * has no record yet (`unrecordedOnly`), in the statement that writes it:
- * a retry, or the next resource of the same kind, writes nothing again,
- * and it never replaces what a person or an earlier check found, a
- * capability found not to hold above all.
+ * fails later has recorded it already (`recordSelfCheck`).
  */
 const judge = async (
   db: AdminDatabase,
-  destinationId: string,
+  destination: { id: string; kind: DestinationKind },
   check: SelfCheck | undefined,
   resource: ClientResource,
   jurisdiction: string | null | undefined
 ): Promise<void> => {
   if (jurisdiction !== resource.jurisdiction) {
-    await refuseOutside(db, destinationId, check, resource, jurisdiction);
+    await refuseOutside(db, destination, check, resource, jurisdiction);
   }
   const capability = capabilityOf[resource.kind];
   if (check !== undefined && capability !== undefined) {
-    await recordCapabilityEvidence(
+    await recordSelfCheck(
       db,
-      "system",
-      destinationId,
-      observations(check, [capability], "verified"),
-      { unrecordedOnly: true }
+      destination,
+      check,
+      readBack(check, capability, "verified")
     );
   }
 };
@@ -158,14 +198,14 @@ const judge = async (
  */
 const checkJurisdiction = async (
   db: AdminDatabase,
-  destinationId: string,
+  destination: { id: string; kind: DestinationKind },
   check: SelfCheck,
   resource: ClientResource,
   provider: Provider
 ): Promise<void> => {
   const observed = await provider.find(resource);
   if (observed !== undefined && observed.id === resource.providerId) {
-    await judge(db, destinationId, check, resource, observed.jurisdiction);
+    await judge(db, destination, check, resource, observed.jurisdiction);
   }
 };
 
@@ -338,7 +378,7 @@ export const ensureClientResources = async (
       // resource the client has, not only the ones it made itself.
       if (check !== undefined) {
         // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
-        await checkJurisdiction(db, destination.id, check, resource, provider);
+        await checkJurisdiction(db, destination, check, resource, provider);
       }
       continue;
     }
@@ -359,7 +399,7 @@ export const ensureClientResources = async (
     // Whichever call answered, only what the provider reports in the
     // recorded jurisdiction is used: one set at creation isn't relabelled.
     // oxlint-disable-next-line no-await-in-loop -- recorded before the next
-    await judge(db, destination.id, check, resource, observed.jurisdiction);
+    await judge(db, destination, check, resource, observed.jurisdiction);
     // oxlint-disable-next-line no-await-in-loop -- persisted before the next
     await recordProviderId(
       db,

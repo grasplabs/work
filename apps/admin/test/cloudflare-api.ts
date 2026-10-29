@@ -292,6 +292,18 @@ const answerProbe = async (
         .filter(({ type }) => probedKinds.has(type))
         .map(({ answers }) => [answers, !down.has(answers)])
     ),
+    ...(probe.durableObjects === "absent"
+      ? {}
+      : {
+          durableObjects: {
+            ...Object.fromEntries(
+              bindings
+                .filter(({ type }) => type === "durable_object_namespace")
+                .map(({ name }) => [name, "eu"])
+            ),
+            ...probe.durableObjects,
+          },
+        }),
     clocks: { core: clock("core"), connect: clock("connect") },
   } satisfies ProvisionProbe);
 };

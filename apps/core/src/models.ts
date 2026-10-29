@@ -50,6 +50,7 @@ import {
   identifierSchema,
 } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { modelGatewayTransportHeaders } from "@grasp-os/shared/model-transport";
 import {
   defaultModelEffort,
   modelEfforts,
@@ -828,12 +829,12 @@ const gatewayHeaders = (call: Session): ProviderHeaders => ({
   "cf-aig-authorization": `Bearer ${CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL}`,
   Authorization: null,
   "x-api-key": null,
-  // The gateway logs metadata, never prompts or answers.
-  "cf-aig-collect-log-payload": "false",
-  // Never an answer from the gateway's cache, whatever the gateway is set
-  // to (one the admin adopted keeps its settings): a cached answer is
-  // one person's, and would be served to another.
-  "cf-aig-skip-cache": "true",
+  // The gateway logs metadata, never prompts or answers, and never
+  // answers from its cache, whatever the gateway is set to (one the admin
+  // adopted keeps its settings): a cached answer is one person's, and
+  // would be served to another. The release declares the same, read from
+  // the same object, and the admin verifies it before provisioning.
+  ...modelGatewayTransportHeaders,
   // So the gateway's log can be searched by why and for what kind of
   // caller; identifiers only, like the audit event.
   "cf-aig-metadata": JSON.stringify({

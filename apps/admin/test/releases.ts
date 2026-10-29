@@ -4,6 +4,8 @@
  * then the limit evidence (with the SHA-256 R2 checks on write), then
  * `releases/<id>/manifest.json`.
  */
+import { declaredModelTransport } from "@grasp-os/shared/model-transport";
+import type { ModelTransport } from "@grasp-os/shared/model-transport";
 import {
   assetContentKey,
   assetKey,
@@ -60,6 +62,11 @@ export interface ReleaseSpec {
    * without it, none, as releases built before that did.
    */
   compatibleFrom?: Record<string, number>;
+  /**
+   * How core reaches models: as core does by default
+   * (@grasp-os/shared/model-transport), none declared when null.
+   */
+  modelTransport?: ModelTransport | null;
   /** Its platform limits: {@link testLimits} by default, none when null. */
   platformLimits?: PlatformLimits | null;
   /** The release before it, as its evidence file names it: none by default. */
@@ -160,7 +167,8 @@ const worker = (
   keepVars: true,
   workersDev: false,
   previewUrls: false,
-  observability: { enabled: true },
+  // As the real ones: invocation logs off (src/hosting/release-checks.ts).
+  observability: { enabled: true, logs: { invocation_logs: false } },
 });
 
 /**
@@ -348,6 +356,9 @@ export const buildRelease = async (
           },
         }),
     ...limits.manifest,
+    ...(spec.modelTransport === null
+      ? {}
+      : { modelTransport: spec.modelTransport ?? declaredModelTransport() }),
   });
   return {
     id,

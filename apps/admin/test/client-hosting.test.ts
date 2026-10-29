@@ -148,7 +148,9 @@ describe("placing a client and provisioning it, through the admin's entry", () =
   it("picks the one shared destination that meets the policy, lists what blocks every other, and places the client there", async () => {
     const shared = await destination();
     const blocked = await destination({
-      capabilities: verified({ "logs.payload_free": "unknown" }),
+      capabilities: verified({
+        "durable_objects.eu_jurisdiction": "unsupported",
+      }),
     });
     const dedicated = await destination({
       kind: "dedicated",
@@ -183,7 +185,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       problems: {
         [shared]: [],
         [blocked]: [
-          { kind: "capability_unknown", capability: "logs.payload_free" },
+          {
+            kind: "capability_unsupported",
+            capability: "durable_objects.eu_jurisdiction",
+          },
         ],
         [dedicated]: [],
         [workerd]: [{ kind: "not_provisionable" }],
@@ -243,7 +248,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     const blocked = await destination({
       capabilities: verified({
         "d1.eu_jurisdiction": "unsupported",
-        "models.approved_transport": "unknown",
+        "durable_objects.eu_jurisdiction": "unsupported",
       }),
     });
     const clientId = await client();
@@ -254,7 +259,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       refused: "placement_refused",
       problems: [
         { kind: "capability_unsupported", capability: "d1.eu_jurisdiction" },
-        { kind: "capability_unknown", capability: "models.approved_transport" },
+        {
+          kind: "capability_unsupported",
+          capability: "durable_objects.eu_jurisdiction",
+        },
       ],
     });
     expect({

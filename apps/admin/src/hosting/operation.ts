@@ -196,13 +196,21 @@ import type {
   RenderOptions,
 } from "./inventory.ts";
 import {
+  hostingPolicyIdSchema,
+  hostingPolicyOf,
+  methodIn,
+  requirementState,
+} from "./policy.ts";
+import {
   connectVersionOf,
   privateBindings,
   probeCore,
   probeFault,
 } from "./probe.ts";
 import type { ProbeRequest } from "./probe.ts";
-import { ensureClientResources } from "./provision.ts";
+import { ensureClientResources, recordSelfCheck } from "./provision.ts";
+import type { SelfCheck } from "./provision.ts";
+import { releaseFindings } from "./release-checks.ts";
 
 export const provisionOperationErrorCodes = [
   /** The client has no record. */
@@ -262,6 +270,23 @@ export const provisionOperationErrorCodes = [
   "probe_binding_unanswered",
   /** Core's clock or connect's isn't armed with tasks after the probe. */
   "probe_clock_unarmed",
+  /**
+   * Core's probe made a Durable Object id outside the policy's storage
+   * jurisdiction: the destination is marked so, and takes no one until a
+   * person looks.
+   */
+  "durable_objects_outside_jurisdiction",
+  /**
+   * Core's probe answered no Durable Object jurisdictions (a core from
+   * before it), where the destination has no fresh verification of them.
+   */
+  "probe_jurisdiction_unreported",
+  /**
+   * The release doesn't show what the client's policy requires of it:
+   * invocation logs on, or no approved model transport declared
+   * (src/hosting/release-checks.ts).
+   */
+  "release_check_failed",
   /** Another runner holds the client: this one changes nothing more. */
   "runner_replaced",
   /** The operation's row is gone before it could be recorded done. */
@@ -1572,12 +1597,47 @@ const load = async (
 };
 
 /**
+ * Throws `release_check_failed` unless the release shows everything the
+ * client's policy requires of a release (src/hosting/release-checks.ts),
+ * before anything of it is deployed; what it shows is recorded as the
+ * destination's evidence where the policy verifies it so
+ * (`recordSelfCheck`).
+ */
+const checkRelease = async (
+  db: AdminDatabase,
+  loaded: Loaded,
+  check: SelfCheck
+): Promise<void> => {
+  const required = new Set(check.policy.requires);
+  const findings = releaseFindings(loaded.manifest).filter(({ capability }) =>
+    required.has(capability)
+  );
+  const failing = findings.filter(({ holds }) => !holds);
+  if (failing.length > 0) {
+    throw new ProvisionOperationError(
+      "release_check_failed",
+      `Release ${loaded.manifest.releaseId} doesn't show ${failing.map(({ capability }) => capability).join(", ")}`
+    );
+  }
+  for (const finding of findings) {
+    // oxlint-disable-next-line no-await-in-loop -- one capability at a time
+    await recordSelfCheck(db, loaded.destination, check, {
+      capability: finding.capability,
+      method: "release",
+      status: "verified",
+      procedure: finding.procedure,
+    });
+  }
+};
+
+/**
  * Step 1: everything checked before the client's destination is changed,
  * then its resources allocated in its inventory.
  */
 const validate = async (
   context: ProvisionContext,
-  loaded: Loaded
+  loaded: Loaded,
+  check: SelfCheck
 ): Promise<void> => {
   const { db } = context;
   const { manifest, held } = loaded;
@@ -1620,6 +1680,7 @@ const validate = async (
       `Release ${manifest.releaseId} raises ${raise.limit} to ${raise.raisedTo ?? "unbounded"} without capacity and security evidence for ${clientRuntimeProfile}`
     );
   }
+  await checkRelease(db, loaded, check);
   const vars = await coreVarsOf(context, loaded);
   for (const app of order) {
     const worker = workerOf(manifest, app);
@@ -2312,6 +2373,64 @@ const reachableCore = async (
 };
 
 /**
+ * Where the policy verifies Durable Objects by `probe` (Grasp's own
+ * destination), judges the jurisdictions core's probe answered for its
+ * namespaces (`answered`): every one in the policy's storage
+ * jurisdiction is recorded as the destination's evidence; any other
+ * is recorded as not holding and stops the run
+ * (`durable_objects_outside_jurisdiction`). A core that answered none
+ * (from before it) passes only where the destination has it verified
+ * already (`probe_jurisdiction_unreported` otherwise), so a rollback to
+ * it still runs.
+ */
+const checkDurableObjects = async (
+  db: AdminDatabase,
+  loaded: Loaded,
+  check: SelfCheck,
+  answered: Record<string, string | null> | undefined
+): Promise<void> => {
+  const { policy } = check;
+  const capability = "durable_objects.eu_jurisdiction";
+  if (
+    !policy.requires.includes(capability) ||
+    methodIn(capability, loaded.destination.kind) !== "probe"
+  ) {
+    return;
+  }
+  const namespaces = Object.entries(answered ?? {});
+  if (namespaces.length === 0) {
+    const destination = await destinationOf(db, loaded.destination.id);
+    const { state } = requirementState(capability, destination);
+    if (state !== "verified") {
+      throw new ProvisionOperationError(
+        "probe_jurisdiction_unreported",
+        `Core of ${loaded.manifest.releaseId} answered no Durable Object jurisdictions`
+      );
+    }
+    return;
+  }
+  const outside = namespaces
+    .filter(([, jurisdiction]) => jurisdiction !== policy.storageJurisdiction)
+    .map(([name]) => name);
+  const status = outside.length === 0 ? "verified" : "unsupported";
+  await recordSelfCheck(db, loaded.destination, check, {
+    capability: "durable_objects.eu_jurisdiction",
+    method: "probe",
+    status,
+    procedure:
+      outside.length === 0
+        ? `Automatic check during provisioning, run ${check.runId}: core's probe made an object id in each of its ${namespaces.length} Durable Object namespaces, as it makes every one, and each id names the ${policy.storageJurisdiction} jurisdiction.`
+        : `Automatic check during provisioning, run ${check.runId}: core's probe made object ids outside the ${policy.storageJurisdiction} jurisdiction in ${outside.join(", ")}.`,
+  });
+  if (outside.length > 0) {
+    throw new ProvisionOperationError(
+      "durable_objects_outside_jurisdiction",
+      `Core's ${outside.join(", ")} made ids outside ${policy.storageJurisdiction}`
+    );
+  }
+};
+
+/**
  * Step 7: core answers its health check, as the version live, to the
  * router secret the router will send, then the admin's signed probe as
  * this client at that version, each of its private bindings answering
@@ -2321,7 +2440,8 @@ const reachableCore = async (
 const probe = async (
   context: ProvisionContext,
   loaded: Loaded,
-  inventory: readonly ClientResource[]
+  inventory: readonly ClientResource[],
+  check: SelfCheck
 ): Promise<RouterTarget> => {
   const { api, db } = context;
   const { held } = loaded;
@@ -2395,6 +2515,7 @@ const probe = async (
   if (fault !== null) {
     throw new ProvisionOperationError(fault.code, fault.message);
   }
+  await checkDurableObjects(db, loaded, check, answer.durableObjects);
   const before = await progressNow(db, loaded.operation.id);
   const connect =
     target.namespace === null
@@ -2703,14 +2824,24 @@ const runOperation = async (
       ...(await load(db, held, operation)),
       ownNamespace,
     };
-    await validate(context, loaded);
-
-    step = "resources";
-    const inventory = await ensureClientResources(api, db, "system", held, {
+    const check: SelfCheck = {
       releaseId: loaded.operation.releaseId,
       runId: held.runId,
       record: `https://${adminHost(ownStage)}/organizations/${held.clientId}/setup`,
-    });
+      policy: hostingPolicyOf(
+        hostingPolicyIdSchema.parse(loaded.placement.policyId)
+      ),
+    };
+    await validate(context, loaded, check);
+
+    step = "resources";
+    const inventory = await ensureClientResources(
+      api,
+      db,
+      "system",
+      held,
+      check
+    );
     await recordStep(db, loaded, "resources", { resources: inventory.length });
 
     step = "migrations";
@@ -2737,7 +2868,7 @@ const runOperation = async (
     await deliverSecrets(context, loaded, inventory);
 
     step = "probe";
-    const target = await probe(context, loaded, inventory);
+    const target = await probe(context, loaded, inventory, check);
 
     step = "mail";
     await setUpMail(context, loaded);
@@ -2751,7 +2882,10 @@ const runOperation = async (
     // Provisioning's own check found a resource outside the policy's
     // jurisdiction: the destination is marked so (src/hosting/provision.ts),
     // and a person needs to look before anyone is placed there again.
-    if (code === "resource_outside_jurisdiction") {
+    if (
+      code === "resource_outside_jurisdiction" ||
+      code === "durable_objects_outside_jurisdiction"
+    ) {
       await tellStaff(context, {
         clientId: held.clientId,
         kind: "hosting_check_failed",

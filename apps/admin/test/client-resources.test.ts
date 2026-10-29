@@ -199,8 +199,12 @@ const codeOf = (render: () => unknown): string | null => {
 
 describe("placing a client", () => {
   it("is refused unless the destination verified every requirement of the policy", async () => {
+    // A person records what a client's own account does: unknown there
+    // is unsupported.
     const unknown = await destination({
-      capabilities: verified({ "logs.payload_free": "unknown" }),
+      kind: "dedicated",
+      namespace: null,
+      capabilities: verified({ "durable_objects.eu_jurisdiction": "unknown" }),
     });
     const unsupported = await destination({
       capabilities: verified({ "d1.eu_jurisdiction": "unsupported" }),
@@ -217,7 +221,10 @@ describe("placing a client", () => {
     await expect(place(unknown)).resolves.toMatchObject({
       code: "placement_refused",
       problems: [
-        { kind: "capability_unknown", capability: "logs.payload_free" },
+        {
+          kind: "capability_unknown",
+          capability: "durable_objects.eu_jurisdiction",
+        },
       ],
     });
     await expect(place(unsupported)).resolves.toMatchObject({

@@ -12,7 +12,7 @@ import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import { placeClient, saveDestination } from "../src/hosting/inventory.ts";
 import type { DestinationInput } from "../src/hosting/inventory.ts";
-import { hostingPolicies } from "../src/hosting/policy.ts";
+import { hostingPolicyOf } from "../src/hosting/policy.ts";
 import type {
   Capability,
   DestinationCapabilities,
@@ -39,8 +39,8 @@ export const verified = (
   observed: Evidence = evidence
 ): DestinationCapabilities =>
   Object.fromEntries(
-    hostingPolicies["eu-storage"].requires
-      .filter((capability) => except[capability] !== "unknown")
+    hostingPolicyOf("eu-storage")
+      .requires.filter((capability) => except[capability] !== "unknown")
       .map((capability) => [
         capability,
         { status: except[capability] ?? "verified", evidence: observed },

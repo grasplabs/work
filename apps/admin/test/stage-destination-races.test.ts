@@ -20,9 +20,9 @@ import {
   ownId,
   place,
   recordedOf,
+  recordAs,
   sharedRelease,
   vouch,
-  vouched,
 } from "./own-destination.ts";
 import { page } from "./pages.ts";
 import { startsOf } from "./runs.ts";
@@ -65,7 +65,7 @@ describe("a new admin's own destination, written at once", () => {
         await ensureStageDestination(env, db);
       })
     );
-    await vouch("logs.payload_free");
+    await recordAs("logs.payload_free", staff.email);
     await ensureStageDestination(env, db);
     const rows = await db.select().from(hostingDestinations);
     const creations = await created();
@@ -85,13 +85,17 @@ describe("a new admin's own destination, written at once", () => {
     });
   });
 
-  it("keeps every check two people record at once", async () => {
+  it("keeps every check recorded at once", async () => {
     await Promise.all(
-      vouched
-        .filter((capability) => capability !== "logs.payload_free")
-        .map(async (capability, at) => {
-          await vouch(capability, `ops${at}@grasp.test`);
-        })
+      (
+        [
+          "durable_objects.eu_jurisdiction",
+          "models.approved_transport",
+          "secrets.replication_recorded",
+        ] as const
+      ).map(async (capability, at) => {
+        await recordAs(capability, `ops${at}@grasp.test`);
+      })
     );
 
     await expect(recordedOf()).resolves.toStrictEqual({
@@ -109,7 +113,7 @@ describe("a new admin's own destination, written at once", () => {
     cloudflare.beforeAnswering(
       (call) => call.method === "POST" && call.path.endsWith("/d1/database"),
       async () => {
-        await vouch("d1.eu_jurisdiction", "ops@grasp.test", false);
+        await recordAs("d1.eu_jurisdiction", "ops@grasp.test", false);
       }
     );
     // Its first migration fails, so the attempt waits after the resources,
@@ -147,7 +151,7 @@ describe("a new admin's own destination, written at once", () => {
     });
   });
 
-  it("lets staff put a recorded check right with a new one, kept in its history and audited", async () => {
+  it("lets staff put right a check found not to hold, with a new one kept in its history and audited, and nothing else", async () => {
     const before = await page("/platform/destinations", staff.email);
     await vouch("d1.eu_jurisdiction", "ops@grasp.test", true);
     const history = await db
@@ -164,8 +168,11 @@ describe("a new admin's own destination, written at once", () => {
       .where(eq(auditEvents.action, "destination.evidence"));
 
     const recorded = await recordedOf();
+    // What holds is the destination's own to check.
+    const refused = await vouch("r2.eu_jurisdiction", "ops@grasp.test");
 
     expect({
+      refused: refused.refused,
       offered: before.html.includes("Record a new check"),
       now: recorded["d1.eu_jurisdiction"],
       history,
@@ -173,6 +180,7 @@ describe("a new admin's own destination, written at once", () => {
         (detail ?? "").includes("evidence.d1.eu_jurisdiction")
       ).length,
     }).toStrictEqual({
+      refused: "checks_itself",
       offered: true,
       now: "verified by ops@grasp.test",
       history: [
