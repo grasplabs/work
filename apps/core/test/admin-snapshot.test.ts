@@ -586,7 +586,8 @@ describe("the admin snapshot", () => {
           teams: [{ name: sentinel, does: sentinel }],
         },
       },
-      by
+      by,
+      await onboardingStore(env).purgeMark()
     );
     await store.answerKickoff("pain", sentinel, by);
 

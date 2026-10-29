@@ -27,7 +27,6 @@ import {
   startRollout,
   startRolloutSchema,
 } from "./control.ts";
-import { rolloutCost } from "./cost.ts";
 import { driftOf } from "./drift.ts";
 import type { ClientDrift } from "./drift.ts";
 import { RolloutError } from "./errors.ts";
@@ -74,16 +73,6 @@ export const fetchRollouts = createServerFn({ method: "GET" }).handler(
 export const fetchRollout = createServerFn({ method: "GET" })
   .validator(rolloutSchema)
   .handler(async ({ data }) => await getRollout(env, data.rolloutId));
-
-/**
- * Rollout `rolloutId`'s clients' cost this month and its total, read from
- * their accounts after its page shows (`rolloutCost`).
- */
-export const fetchRolloutCost = createServerFn({ method: "GET" })
-  .validator(rolloutSchema)
-  .handler(
-    async ({ data }) => await rolloutCost(env, data.rolloutId, new Date())
-  );
 
 export const startRolloutFn = createServerFn({ method: "POST" })
   .validator(startRolloutSchema)
@@ -207,7 +196,7 @@ export const fetchDrift = createServerFn({ method: "GET" })
       await deployerApi(env),
       db,
       data.clientId,
-      store === null ? undefined : { fetch, routerKey: store.routerKey }
+      store === null ? undefined : { fetch, secrets: store }
     );
     if (drift === null) {
       return null;

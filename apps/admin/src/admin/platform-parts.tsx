@@ -11,7 +11,6 @@ import { CheckIcon, LoaderCircleIcon, PauseIcon, XIcon } from "lucide-react";
 import type { TargetView } from "../rollout/queries.ts";
 import type { StaffEvent } from "./platform-data.ts";
 import type { PlatformNeed, RingState, Standing } from "./platform.ts";
-import { formatPercent } from "./words.ts";
 
 /** A ring, as the admin says it: Alpha, Beta, Production, then by number past those. */
 export const ringWords = (ring: number): string => ringName(ring);
@@ -56,9 +55,6 @@ export const needWords = (need: PlatformNeed): string => {
     }
     case "drift": {
       return `${driftWords[need.drift]}.`;
-    }
-    case "errors": {
-      return `${formatPercent(need.rate)} of yesterday's requests ended in an error.`;
     }
     case "behind": {
       return `${need.releases} releases behind the newest.`;

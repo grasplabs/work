@@ -61,6 +61,7 @@ import {
   appIdSchema,
   chatIdSchema,
   identifierSchema,
+  storeIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
@@ -147,6 +148,7 @@ import {
 import type { CodeRunStatus } from "./code-run-statuses.ts";
 import { keptWidgetOf } from "./custom-widgets.ts";
 import type { KeptWidget } from "./custom-widgets.ts";
+import { discardFixtureStore } from "./data-stores.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/workspace/migrations/migrations.js";
 import {
@@ -169,6 +171,7 @@ import {
   dashboardWidgets,
   dashboards,
   emailPreferences,
+  previewStores,
 } from "./db/workspace/schema.ts";
 import { DraftVersions } from "./draft-versions.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
@@ -795,6 +798,16 @@ export class Workspace extends DurableObject<Env> {
    */
   readonly #sent = new Set<Promise<void>>();
 
+  /** The deliveries of capture intents under way (`#deliverCaptures`). */
+  readonly #delivering = new Set<Promise<void>>();
+
+  /**
+   * Set once its person's erasure began (`erasePerson`): from then on no
+   * capture of a turn is delivered to the Brain, so none lands after the
+   * erasure took out what the Brain held of their chats.
+   */
+  #erasing = false;
+
   /**
    * Bumped whenever a chat's sources or restricted mode change, so a
    * watcher reads them again only then. In memory: a watcher starts with
@@ -1227,8 +1240,19 @@ export class Workspace extends DurableObject<Env> {
 
   /** Delivers the turns' pending intents; the alarm tries again if any are left. */
   async #deliverCaptures(): Promise<void> {
-    if (await drainCaptures(this.env, this.#captures())) {
-      await this.#alarmBy(Date.now() + captureRetryMs);
+    if (this.#erasing) {
+      return;
+    }
+    const delivering = (async () => {
+      if (await drainCaptures(this.env, this.#captures())) {
+        await this.#alarmBy(Date.now() + captureRetryMs);
+      }
+    })();
+    this.#delivering.add(delivering);
+    try {
+      await delivering;
+    } finally {
+      this.#delivering.delete(delivering);
     }
   }
 
@@ -3587,6 +3611,110 @@ export class Workspace extends DurableObject<Env> {
     } finally {
       this.#deleting.delete(id);
     }
+  }
+
+  /**
+   * Erases everything this object holds, as core asks once an admin erased
+   * the person it is for (GRA-903, GRA-1181; core's person-erasure.ts):
+   * it is theirs alone (`personalWorkspaceId`), and nobody else's data is
+   * ever in it. Actions held for them in connect are connect's erasure
+   * step's (`erasePersonal` drops every one made for them), not this. First what lives outside it: what the Brain captured of
+   * their chats' turns, any connection granted in those chats, and the
+   * stores their drafts' previews wrote to. Then its own storage, all of
+   * it, once its audit outbox is delivered (an event never goes with it),
+   * and the object restarts empty. Refused (`agent.busy`) while a turn
+   * runs; asking again finishes what a failure left. Answers how many
+   * chats it held.
+   */
+  async erasePerson(personId: string): Promise<{ chats: number }> {
+    if (this.ctx.id.name !== `person:${personId}`) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    if (this.#turns.size > 0) {
+      throw agentErrors.create("agent.busy");
+    }
+    // No capture of their turns reaches the Brain from now on: none
+    // pending is delivered, and any delivery under way ends before the
+    // Brain's copies of their chats are erased, so nothing lands after.
+    this.#erasing = true;
+    this.#db
+      .delete(brainCaptureIntents)
+      .where(eq(brainCaptureIntents.state, "pending"))
+      .run();
+    await Promise.allSettled([...this.#sent, ...this.#delivering]);
+    const held = this.#db.select({ id: chats.id }).from(chats).all();
+    const ids = held.map(({ id }) => id);
+    for (const id of ids) {
+      this.#terminateJobs(this.#jobs.cancelRunning(id));
+    }
+    if (ids.length > 0) {
+      await eraseCaptured(this.env, ids);
+    }
+    for (const id of ids) {
+      // oxlint-disable-next-line no-await-in-loop -- one chat at a time
+      await revokeChatPermissions(
+        this.env,
+        { chatId: id },
+        { userId: null, actor: { type: "system" } },
+        "person_removed"
+      );
+    }
+    const drafted = this.#db
+      .select({ chatId: chatDrafts.chatId, appId: chatDrafts.appId })
+      .from(chatDrafts)
+      .all();
+    for (const { chatId, appId } of drafted) {
+      this.#dropPreview(chatId, appId);
+    }
+    const stores = this.#db
+      .select({ storeId: previewStores.storeId })
+      .from(previewStores)
+      .all();
+    for (const { storeId } of stores) {
+      // One the weekly sweep discarded first (sealed-previews.ts) is gone
+      // with core's record of it: discarded already, and its row here
+      // goes with the rest of the object's storage below.
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const recorded = await this.env.DB.prepare(
+        "SELECT 1 AS found FROM preview_fixture_stores WHERE store_id = ?"
+      )
+        .bind(storeId)
+        .first<{ found: number }>();
+      if (recorded !== null) {
+        // oxlint-disable-next-line no-await-in-loop -- one store at a time
+        await discardFixtureStore(this.env, storeIdSchema.parse(storeId));
+      }
+    }
+    // Every event of what it did is in the log before its outbox goes.
+    if ((await drainObjectOutbox(this.env, this.ctx.storage.sql)) > 0) {
+      throw internalErrors.create("internal.unexpected");
+    }
+    for (const watchers of this.#watchers.values()) {
+      for (const watch of watchers.values()) {
+        watch[Symbol.dispose]();
+      }
+    }
+    this.#watchers.clear();
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    // Its tables went with its storage: they are made again, empty, as for
+    // a new object, and nothing it held in memory of a chat stays. Its
+    // previews were dropped above (`#dropPreview`, for every draft); the
+    // preview updates it waits on hold only tokens, and end on their own.
+    migrateOnWake(this.ctx, migrations);
+    for (const kept of [
+      this.#partials,
+      this.#stopped,
+      this.#outputs,
+      this.#provenanceVersions,
+      this.#heldVersions,
+      this.#draftVersions,
+      this.#builds,
+    ]) {
+      kept.clear();
+    }
+    this.#codeRuns.clear();
+    return { chats: ids.length };
   }
 
   /**

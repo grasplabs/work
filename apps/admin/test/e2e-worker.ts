@@ -5,7 +5,7 @@
  *
  * - Cloudflare's API, and client Workers on workers.dev, answer from the
  *   fake the tests use (test/cloudflare-api.ts), in place of `fetch` in this
- *   isolate, where the Workflows' steps run too. Requests to this machine
+ *   isolate, where the runs' steps run too. Requests to this machine
  *   (Vite's dev server) go out as usual; anything else is refused.
  * - Each Worker upload takes seconds, as a real one may: a journey sees
  *   a rollout run before it's done.
@@ -22,17 +22,11 @@ import { fakeCloudflareApi } from "./cloudflare-api.ts";
 import { seed, seedPlaced } from "./e2e-seed.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
-export { ApplyClient } from "../src/clients/apply.ts";
-export { ProvisionPlacedClient } from "../src/hosting/workflow.ts";
-export { RolloutClient } from "../src/rollout/fleet-client.ts";
-export { RollbackClient } from "../src/rollout/rollback.ts";
 export { AdminRuns } from "../src/run-object.ts";
-export { Rollout } from "../src/rollout/workflow.ts";
 
 /** The tokens the fake lets in, which the seed puts in Secrets Store. */
 const tokens = {
   deployer: "e2e-deployer-token",
-  tenant: "e2e-tenant-admin-token",
 };
 
 type Fake = ReturnType<typeof fakeCloudflareApi>;
@@ -53,8 +47,7 @@ const fakeKey = Symbol.for("grasp-os.admin-e2e.cloudflare");
 const held: unknown = Reflect.get(globalThis, fakeKey);
 // SAFETY: only this module sets the key, to a fake it made.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-const cloudflare = (held ??
-  fakeCloudflareApi(tokens.deployer, tokens.tenant)) as Fake;
+const cloudflare = (held ?? fakeCloudflareApi(tokens.deployer)) as Fake;
 if (held === undefined) {
   Reflect.set(globalThis, fakeKey, cloudflare);
   const outbound = globalThis.fetch;
