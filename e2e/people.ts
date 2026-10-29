@@ -272,7 +272,7 @@ const cast = {
   notesLanguage: { builder: "builder" },
   signOutFailure: { member: "user" },
   workflowEditor: { builder: "builder" },
-  workflowDiagram: { builder: "builder" },
+  workflowDiagram: { builder: "builder", admin: "admin" },
   workflowModules: { builder: "builder" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },

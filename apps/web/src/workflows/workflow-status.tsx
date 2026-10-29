@@ -44,6 +44,10 @@ import { useCore } from "../use-core.ts";
 // After the yes it waits `graceSeconds` in the same place with Undo; only
 // then is core asked. Leaving the page in those seconds pauses it at once:
 // the yes was given.
+//
+// The version waiting to go live is approved or sent back on the page too
+// (`GoLiveDecision`), by whoever core lets decide it (`canDecide`), as in
+// the inbox: the page's one highlighted action.
 
 /** How long a pause can be taken back before core is asked, in seconds. */
 const graceSeconds = 5;
@@ -413,6 +417,115 @@ export const WorkflowStatus = ({
         }}
         open={asking}
       />
+    </div>
+  );
+};
+
+/** The decision on the version waiting to go live, as the reader has it. */
+export interface GoLiveChoice {
+  version: number;
+  /** Whether another version is live: approving it changes that one. */
+  change: boolean;
+  /** Whether the reader asked for it and decides it as nobody else may. */
+  selfApproval: boolean;
+}
+
+/**
+ * What `me` may decide of the version waiting in `lifecycle`: nothing
+ * unless one waits and core lets them decide it (`canDecide`).
+ */
+export const goLiveChoiceOf = (
+  lifecycle: WorkflowLifecycle,
+  me: string
+): GoLiveChoice | null => {
+  const { goLive } = lifecycle;
+  if (!lifecycle.canDecide || goLive === null) {
+    return null;
+  }
+  return {
+    version: goLive.version,
+    change: lifecycle.live !== null,
+    selfApproval: goLive.onlyApprover && goLive.requestedBy === me,
+  };
+};
+
+/**
+ * The version waiting to go live, approved or sent back by whoever core
+ * lets decide it (`canDecide`): the workflow's owner, an admin, or whoever
+ * asked for it while nobody else may, recorded as self-approved. The same
+ * decision as the inbox's (`lifecycle.decideGoLive`), at the revision this
+ * page read, so a change made meanwhile is refused rather than overruled.
+ * Approving a version while another is live approves a change to it.
+ */
+export const GoLiveDecision = ({
+  workflow,
+  name,
+  me,
+  lifecycle,
+  onChange,
+}: {
+  workflow: string;
+  name: string;
+  me: string;
+  lifecycle: WorkflowLifecycle;
+  onChange: (lifecycle: WorkflowLifecycle) => void;
+}) => {
+  const { t } = useLingui();
+  const { busy, failure, run } = useCoreAction();
+  const choice = goLiveChoiceOf(lifecycle, me);
+  if (choice === null) {
+    return null;
+  }
+  const { version } = choice;
+  const who = name;
+  const decide = async (verdict: "approve" | "reject"): Promise<void> => {
+    const changed = await run(
+      async (session) =>
+        await session.workflowResources.lifecycle.decideGoLive(workflow, {
+          version,
+          verdict,
+          revision: lifecycle.revision,
+        })
+    );
+    if (changed !== undefined) {
+      onChange(changed);
+    }
+  };
+  return (
+    <div className="flex max-w-sm flex-col items-start gap-2">
+      <fieldset
+        aria-label={t`Let version ${version} of ${who} go live`}
+        className="flex flex-wrap gap-2"
+      >
+        <Button
+          disabled={busy}
+          onClick={() => {
+            void decide("approve");
+          }}
+          variant="highlight"
+        >
+          {choice.change ? (
+            <Trans>Approve the change</Trans>
+          ) : (
+            <Trans>Approve and go live</Trans>
+          )}
+        </Button>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            void decide("reject");
+          }}
+          variant="outline"
+        >
+          <Trans>Send back</Trans>
+        </Button>
+      </fieldset>
+      {choice.selfApproval ? (
+        <p className="text-muted-foreground">
+          {t`You asked for this yourself, and nobody else may approve it, so you decide it. It is recorded as self-approved.`}
+        </p>
+      ) : null}
+      <ErrorText>{failure}</ErrorText>
     </div>
   );
 };

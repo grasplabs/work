@@ -3023,9 +3023,9 @@
   --icon-wait: 0.26s;
 }
 
-/* The business processes (the prototype's components/process-icon.tsx; no
-   page here draws one yet). Each `data-moves` is the process's id, and
-   parts are counted in the order that file draws them. */
+/* The business processes (workflows/business-process.tsx, from the
+   prototype's components/process-icon.tsx). Each `data-moves` is the
+   process's id, and parts are counted in the order that file draws them. */
 
 /* Cash lands in the till: the coin drops in. */
 [data-moves="o2c"] > :nth-child(1) {

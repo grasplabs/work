@@ -1,3 +1,4 @@
+import { isAdmin } from "@grasp-os/shared/roles";
 import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
   SteeredWrite,
@@ -46,18 +47,23 @@ import type { Loaded } from "../load-from-core.tsx";
 import { ActivityBar } from "../workflows/activity-bar.tsx";
 import type { Names } from "../workflows/activity-bar.tsx";
 import { AskStephen } from "../workflows/ask-stephen.tsx";
+import { ProcessBadge, ProcessPicker } from "../workflows/business-process.tsx";
 import { DefinitionEditor } from "../workflows/definition-editor.tsx";
 import { DiagramOverview } from "../workflows/diagram-overview.tsx";
 import { partsOf } from "../workflows/diagram-parts.ts";
 import { FilesAndApps } from "../workflows/files-and-apps.tsx";
 import { ResourceParams } from "../workflows/resource-params.tsx";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
+import { SavedAgo } from "../workflows/saved-ago.tsx";
 import { TestRun } from "../workflows/test-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
 import { workflowAppsOf } from "../workflows/workflow-apps.ts";
 import type { WorkflowApps } from "../workflows/workflow-apps.ts";
-import { WorkflowStatus } from "../workflows/workflow-status.tsx";
+import {
+  GoLiveDecision,
+  WorkflowStatus,
+} from "../workflows/workflow-status.tsx";
 
 // One independent workflow (platform specification 13): for its builders,
 // its definition as a draft they edit, check and publish; for everyone
@@ -68,11 +74,16 @@ import { WorkflowStatus } from "../workflows/workflow-status.tsx";
 // and, for one that asks a model, the writes its answers may steer
 // (GRA-718), which no reviewer should have to piece together. Its
 // parameters, which its builders set, and its runs, as core lists them for
-// the reader (GRA-674). Beside its name, whether it runs, with Pause and
-// Resume (`workflow-status.tsx`); for its builders, Traces: each run's
-// steps over its diagram, and a test of the draft on recent real items;
-// for everyone, the files its runs wrote, the Knowledge it reads and the
-// apps it works in; and under the page, what happened to it lately.
+// the reader (GRA-674), each opened beside the page with what it returned
+// or why it failed. Beside its name, whether it runs, with Pause and
+// Resume (`workflow-status.tsx`); under it, the business process it
+// serves (its builders set it), who owns it and, for its builders, when
+// its draft was saved; beside them, for whoever may decide it, the
+// version waiting to go live, approved or sent back. For its builders,
+// Traces: each run's steps over its diagram, and a test of the draft on
+// recent real items; for everyone, the files its runs wrote, the
+// Knowledge it reads and the apps it works in; and under the page, what
+// happened to it lately.
 
 /**
  * One use whose writes a model's answers may steer (GRA-718), as its
@@ -198,25 +209,37 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
 };
 
 /**
- * Its name with whether it runs beside it, its version, and what its
- * builders and owner reach from here.
+ * Its name with whether it runs beside it; under them the process it
+ * serves, its version, its owner, when its draft was saved, and what its
+ * builders and owner reach from here; and, for whoever may decide it, the
+ * version waiting to go live.
  */
 const WorkflowHeader = ({
   resource,
   lifecycle,
   askable,
-  me,
+  names,
+  savedAt,
 }: {
   resource: WorkflowResource;
   lifecycle: Loaded<WorkflowLifecycle>;
   askable: Loaded<boolean>;
-  me: string;
+  names: Names;
+  /** When its draft was last saved, for its builders; null otherwise. */
+  savedAt: string | null;
 }) => {
   const router = useRouter();
+  const { t } = useLingui();
   const { currentVersion } = resource;
+  const { me } = names;
+  const owner = names.people.get(resource.owner) ?? resource.owner;
   // As core answered the last change made here, until a later read of
   // it is loaded: whichever is at the later revision.
   const [changed, setChanged] = useState<WorkflowLifecycle>();
+  const onChange = (next: WorkflowLifecycle): void => {
+    setChanged(next);
+    void router.invalidate();
+  };
   const loaded = lifecycle.state === "ready" ? lifecycle.data : undefined;
   const status =
     changed === undefined ||
@@ -224,45 +247,77 @@ const WorkflowHeader = ({
       ? loaded
       : changed;
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <h1 className="type-title">{resource.name}</h1>
-        {status === undefined ? null : (
-          <WorkflowStatus
-            lifecycle={status}
-            name={resource.name}
-            onChange={(next) => {
-              setChanged(next);
-              void router.invalidate();
-            }}
-            workflow={resource.id}
-          />
-        )}
-      </div>
-      <div className="text-muted-foreground flex flex-wrap items-center gap-2">
-        <Badge variant="outline">
-          {currentVersion === null ? (
-            <Trans>Not published</Trans>
-          ) : (
-            <Trans>Version {currentVersion}</Trans>
+    <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+      <div className="flex min-w-0 grow basis-96 flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h1 className="type-title">{resource.name}</h1>
+          {status === undefined ? null : (
+            <WorkflowStatus
+              lifecycle={status}
+              name={resource.name}
+              onChange={onChange}
+              workflow={resource.id}
+            />
           )}
-        </Badge>
-        {status === undefined ? null : <SelfApprovedBadge lifecycle={status} />}
-        {/* Its approved packages, for its builders: read there, and
+        </div>
+        <div className="text-muted-foreground flex flex-wrap items-center gap-2">
+          {/* Its builders set the process it serves; everyone sees it. */}
+          {resource.role === "builder" ? (
+            <ProcessPicker
+              name={resource.name}
+              onChange={() => {
+                void router.invalidate();
+              }}
+              process={resource.process}
+              workflow={resource.id}
+            />
+          ) : null}
+          {resource.role !== "builder" && resource.process !== null ? (
+            <ProcessBadge process={resource.process} />
+          ) : null}
+          <Badge variant="outline">
+            {currentVersion === null ? (
+              <Trans>Not published</Trans>
+            ) : (
+              <Trans>Version {currentVersion}</Trans>
+            )}
+          </Badge>
+          {status === undefined ? null : (
+            <SelfApprovedBadge lifecycle={status} />
+          )}
+          <span className="text-xs">
+            {resource.owner === me ? t`Owned by you` : t`Owned by ${owner}`}
+          </span>
+          {savedAt === null ? null : (
+            <span className="text-xs">
+              <SavedAgo at={savedAt} />
+            </span>
+          )}
+          {/* Its approved packages, for its builders: read there, and
             retired or revoked by whoever may approve packages. */}
-        {resource.role === "builder" ? (
-          <Link
-            className="hover:underline focus-visible:underline"
-            params={{ workflow: resource.id }}
-            to="/settings/packages/workflows/$workflow"
-          >
-            <Trans>Packages</Trans>
-          </Link>
+          {resource.role === "builder" ? (
+            <Link
+              className="hover:underline focus-visible:underline"
+              params={{ workflow: resource.id }}
+              to="/settings/packages/workflows/$workflow"
+            >
+              <Trans>Packages</Trans>
+            </Link>
+          ) : null}
+        </div>
+        {resource.owner === me && askable.state === "ready" ? (
+          <AskStephen askable={askable.data} workflow={resource.id} />
         ) : null}
       </div>
-      {resource.owner === me && askable.state === "ready" ? (
-        <AskStephen askable={askable.data} workflow={resource.id} />
-      ) : null}
+      {status === undefined ? null : (
+        <GoLiveDecision
+          lifecycle={status}
+          me={me}
+          name={resource.name}
+          onChange={onChange}
+          workflow={resource.id}
+        />
+      )}
     </div>
   );
 };
@@ -319,6 +374,26 @@ const WorkflowTabs = ({
   </TabsList>
 );
 
+/**
+ * The checkpoint a test on recent items runs: none before the draft's
+ * first edit (revision 0 is the current version's definition).
+ */
+const checkpointOf = (
+  draft: Loaded<WorkflowDraft> | undefined
+): number | null => {
+  const saved =
+    draft?.state === "ready" ? (draft.data.checkpoint?.revision ?? 0) : 0;
+  return saved > 0 ? saved : null;
+};
+
+/** The later of two ISO times, either of which may be missing. */
+const laterOf = (a: string | null, b: string | null): string | null => {
+  if (a === null || (b !== null && b > a)) {
+    return b;
+  }
+  return a;
+};
+
 const WorkflowResourceView = ({
   resource,
   draft,
@@ -332,6 +407,7 @@ const WorkflowResourceView = ({
   files,
   apps,
   names,
+  admin,
 }: {
   resource: WorkflowResource;
   draft: Loaded<WorkflowDraft> | undefined;
@@ -345,19 +421,24 @@ const WorkflowResourceView = ({
   files: Loaded<WorkflowFile[]>;
   apps: Loaded<WorkflowApps>;
   names: Names;
+  /** Whether the reader is one of the organization's admins. */
+  admin: boolean;
 }) => {
   const router = useRouter();
   const { currentVersion } = resource;
   const builder = resource.role === "builder";
+  // When its draft was saved: as loaded, or as a save here answered,
+  // whichever is later.
+  const [savedHere, setSavedHere] = useState<string | null>(null);
+  const savedAt = laterOf(
+    draft?.state === "ready" ? draft.data.editedAt : null,
+    savedHere
+  );
   const [tab, setTab] = useState<WorkflowTab>(
     draft === undefined ? "versions" : "definition"
   );
   const [part, setPart] = useState<TracesPart>("runs");
-  // A test on recent items runs a saved checkpoint: none before the
-  // draft's first edit (revision 0 is the current version's definition).
-  const saved =
-    draft?.state === "ready" ? (draft.data.checkpoint?.revision ?? 0) : 0;
-  const checkpoint = saved > 0 ? saved : null;
+  const checkpoint = checkpointOf(draft);
   // Its named parts, as its builders' drawing has them: an Overview of
   // them only for a workflow drawn in parts.
   const drawing =
@@ -376,8 +457,9 @@ const WorkflowResourceView = ({
           <WorkflowHeader
             askable={askable}
             lifecycle={lifecycle}
-            me={names.me}
+            names={names}
             resource={resource}
+            savedAt={savedAt}
           />
           <WorkflowTabs
             builder={builder}
@@ -411,6 +493,9 @@ const WorkflowResourceView = ({
                 <DefinitionEditor
                   currentVersion={currentVersion}
                   loaded={draft.data}
+                  onDraftRead={({ editedAt }) => {
+                    setSavedHere(editedAt);
+                  }}
                   onVersionMoved={() => {
                     void router.invalidate();
                   }}
@@ -436,6 +521,7 @@ const WorkflowResourceView = ({
             <div className="mx-auto w-full max-w-5xl px-6 pt-6 pb-8">
               <Traces
                 activity={activity}
+                admin={admin}
                 checkpoint={checkpoint}
                 names={names}
                 onPartChange={setPart}
@@ -449,7 +535,12 @@ const WorkflowResourceView = ({
           <TabsContent value="runs">
             <div className="mx-auto w-full max-w-5xl px-6 pt-6 pb-8">
               {runs.state === "ready" ? (
-                <ResourceRuns me={names.me} runs={runs.data} />
+                <ResourceRuns
+                  admin={admin}
+                  names={names}
+                  runs={runs.data}
+                  workflow={resource.id}
+                />
               ) : (
                 <NotLoadedState page={runs} />
               )}
@@ -574,6 +665,7 @@ const WorkflowResourcePage = () => {
           // one keeps what is typed in its editor.
           key={resource.data.id}
           activity={activity}
+          admin={isAdmin(identity.role)}
           apps={apps}
           askable={askable}
           draft={draft}

@@ -231,7 +231,7 @@ const routing = (name: string): string =>
 test("a builder sees every declared branch of the checked definition, and a test run marks only the tasks it reached", async ({
   pageOf,
 }) => {
-  const { builder } = peopleIn("workflowDiagram");
+  const { builder, admin } = peopleIn("workflowDiagram");
   const page = await pageOf(builder);
   const name = `routed-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
@@ -302,15 +302,17 @@ test("a builder sees every declared branch of the checked definition, and a test
     })
   ).toBeVisible();
 
-  // Traces: the run of version 1, opened beside the page, with each step
-  // its journal recorded laid over its version's diagram.
+  // Traces: the run of version 1, opened beside the page, with what it
+  // returned to whoever started it, and each step its journal recorded
+  // laid over its version's diagram.
   await page.getByRole("tab", { name: "Traces" }).click();
   await page
     .getByRole("tabpanel")
-    .getByRole("button", { name: /^Steps of the run started/u })
+    .getByRole("button", { name: /^Open the run started/u })
     .last()
     .click();
   const steps = page.getByRole("dialog");
+  await expect(steps.getByText("What it returned")).toBeVisible(pageRead);
   await expect(steps.getByText("Step by step")).toBeVisible(pageRead);
   await expect(
     steps
@@ -331,6 +333,20 @@ test("a builder sees every declared branch of the checked definition, and a test
   await expect(page.getByText("Version 2 waits to go live")).toBeVisible(
     pageRead
   );
+
+  // An admin finds it among what needs them, and lets it go live from
+  // its page: it is live, and nothing waits any more.
+  const decides = await pageOf(admin);
+  await decides.goto("/workflows?tab=needs");
+  await decides
+    .getByRole("region", { name: "Waiting for you to let them go live" })
+    .getByRole("link", { name })
+    .click();
+  await decides.getByRole("button", { name: "Approve and go live" }).click();
+  await expect(
+    decides.getByRole("button", { name: /^Live since .*\. Change whether/u })
+  ).toBeVisible(pageRead);
+  await expect(decides.getByText("Version 2 waits to go live")).toBeHidden();
 });
 
 /** A module whose `total` sums whole numbers, as a calculation. */
