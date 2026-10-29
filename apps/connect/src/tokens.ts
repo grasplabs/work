@@ -6,10 +6,14 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { recordEventIf } from "./audit.ts";
-import { connections, connectionTokens } from "./db/schema.ts";
+import {
+  connections,
+  connectionTokens,
+  tokenRevocations,
+} from "./db/schema.ts";
 import { isInvalidGrant, refreshTokens, revokeToken } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
-import { endOwedRevoke } from "./owed-revokes.ts";
+import { oweRevoke, revocable } from "./owed-revokes.ts";
 import {
   bearer,
   grantedAsAsked,
@@ -227,6 +231,11 @@ const releaseLease = async (db: D1Database, row: TokenRow): Promise<void> => {
  * and that connection is fine. Recorded only when it changed something.
  * Whether it did.
  */
+/** Whether a connection marked for `reason` still holds a valid grant. */
+const grantStillValid = (
+  reason: "invalid_grant" | "unreadable" | "scopes_changed" | "scopes_missing"
+): boolean => reason === "scopes_changed" || reason === "scopes_missing";
+
 const markDead = async (
   env: Env,
   provider: string,
@@ -242,13 +251,28 @@ const markDead = async (
       target: { type: "connection", id: row.connectionId },
       detail: { provider, reason },
     },
-    // Never a disconnected connection's: its tokens are kept only for a
-    // revoke still owed (src/revocations.ts), which ends that itself.
+    // Never a disconnected connection's: a stopped connection's tokens are
+    // the disconnect's to end.
     {
       from: connectionTokens,
       where: sql`${unchanged(row)} AND ${notDisconnected(row)}`,
     },
     [
+      // A grant still valid that loses its tokens here is revoked as owed
+      // (src/revocations.ts, GRA-1196), with a copy of them, so it doesn't
+      // stay live with nothing left to revoke it, should the person never
+      // connect again; one the provider refused, or that won't open, has
+      // nothing to revoke.
+      ...(grantStillValid(reason) && revocable(provider)
+        ? [
+            oweRevoke(
+              db,
+              row.connectionId,
+              "needs_reauth",
+              sql`${unchanged(row)} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${row.connectionId} AND ${connections.status} = 'active')`
+            ),
+          ]
+        : []),
       db
         .update(connections)
         .set({ status: "needs_reauth", updatedAt: new Date() })
@@ -314,8 +338,8 @@ interface RefreshContext {
 /**
  * Stores what a refresh got, only if `row` is still the current
  * generation of a connection not disconnected. If a disconnect came first
- * (the row is gone, or kept for a revoke still owed, src/revocations.ts),
- * the minted tokens are revoked (threat model CN14), and the call goes no
+ * (the row is gone, or the connection disconnected), the minted tokens
+ * are revoked (threat model CN14), and the call goes no
  * further; if another refresh did (its lease had lapsed), they are dropped
  * and the stored ones stand.
  */
@@ -435,7 +459,7 @@ const refreshed = async (
   while (Date.now() < deadline) {
     // oxlint-disable-next-line no-await-in-loop -- waits for the lease holder
     const row = await readRow(context.env.DB, connectionId);
-    // Gone, or kept only for a revoke still owed (src/revocations.ts).
+    // Gone, or its connection stopped meanwhile.
     const stopped =
       row === undefined ||
       // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
@@ -548,6 +572,86 @@ export const credentialFor = async (
 };
 
 /**
+ * The refresh token an owed revoke holds (`token_revocations.sealed`,
+ * sealed for connection `connectionId`), to revoke with: `none` when it
+ * holds none; `unavailable` while the key it was sealed under isn't held
+ * (tried again); `unreadable` only when a held key fails to open it.
+ */
+export const owedRefreshToken = async (
+  env: Env,
+  connectionId: string,
+  sealed: string
+): Promise<
+  { refreshToken: string } | "none" | "unavailable" | "unreadable"
+> => {
+  const vault = await vaultFor(env);
+  if (vault === undefined) {
+    log.error("vault.unavailable", { connection: connectionId });
+    return "unavailable";
+  }
+  try {
+    const tokens = await openTokens(vault, { connectionId, sealed });
+    return "refreshToken" in tokens
+      ? { refreshToken: tokens.refreshToken }
+      : "none";
+  } catch (error) {
+    log.error("vault.open_failed", errorFields(error));
+    return error instanceof VaultError && error.reason === "unknown_key"
+      ? "unavailable"
+      : "unreadable";
+  }
+};
+
+/**
+ * Seals again with the current key what owed revokes hold under the
+ * previous one, as `resealTokens` does for connections' tokens: whatever
+ * won't open is answered for `abandon` to end, so the previous key can go.
+ */
+export const resealOwedTokens = async (
+  env: Env,
+  abandon: (owed: { id: string; connectionId: string }) => Promise<void>
+): Promise<void> => {
+  const vault = await vaultFor(env);
+  if (vault?.sealedWithPrevious === undefined) {
+    return;
+  }
+  const db = drizzle(env.DB);
+  const rows = await db
+    .select({
+      id: tokenRevocations.id,
+      connectionId: tokenRevocations.connectionId,
+      sealed: tokenRevocations.sealed,
+    })
+    .from(tokenRevocations)
+    .where(like(tokenRevocations.sealed, vault.sealedWithPrevious))
+    .limit(resealBatchSize);
+  for (const owed of rows) {
+    let tokens: StoredTokens;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+      tokens = await openTokens(vault, owed);
+    } catch (error) {
+      log.error("vault.open_failed", errorFields(error));
+      // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+      await abandon(owed);
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+    const sealed = await sealTokens(vault, owed.connectionId, tokens);
+    // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+    await db
+      .update(tokenRevocations)
+      .set({ sealed })
+      .where(
+        and(
+          eq(tokenRevocations.id, owed.id),
+          eq(tokenRevocations.sealed, owed.sealed)
+        )
+      );
+  }
+};
+
+/**
  * The connection's refresh token, for revoking it: `none` when it has
  * none; `unavailable` while the key it was sealed under isn't held (the
  * vault unset, or its key not among the current and previous ones), which
@@ -610,21 +714,7 @@ export const resealTokens = async (env: Env): Promise<void> => {
     } catch (error) {
       log.error("vault.open_failed", errorFields(error));
       // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
-      const marked = await markDead(env, provider, row, "unreadable");
-      // A disconnected connection's, kept for a revoke still owed: it can
-      // never be revoked with, so the revoke is given up, on record.
-      if (!marked) {
-        // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
-        await endOwedRevoke(
-          env,
-          row.connectionId,
-          "connection.revoke_abandoned",
-          {
-            provider,
-            reason: "unreadable",
-          }
-        );
-      }
+      await markDead(env, provider, row, "unreadable");
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn

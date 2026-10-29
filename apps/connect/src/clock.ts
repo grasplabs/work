@@ -8,7 +8,7 @@ import {
 } from "./composio-connections.ts";
 import { purgeExpiredFlows, resealFlows } from "./oauth.ts";
 import { expireHeldActions } from "./pending.ts";
-import { retryRevocations } from "./revocations.ts";
+import { resealOwedRevokes, retryRevocations } from "./revocations.ts";
 import { resealTokens } from "./tokens.ts";
 
 // The client's clock for connect (spec 43.5, @grasp-os/workerflow/clock):
@@ -39,6 +39,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // What a rotated key sealed, sealed again.
   { name: "vault.tokens", period: "minute", run: resealTokens },
   { name: "vault.flows", period: "minute", run: resealFlows },
+  { name: "vault.owed", period: "minute", run: resealOwedRevokes },
 ];
 
 /** How connect logs a task that failed: its name and the error, nothing it worked on. */
