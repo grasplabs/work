@@ -15,13 +15,13 @@ import {
   skillsSelectInputSchema,
 } from "@grasp-os/brain/contract";
 import type {
-  BrainSourceRef,
   ChangeOptions,
   CommandOptions,
   CommandReceipt,
+  EntitiesAnswer,
   EntitiesListInput,
+  EntitySourcesAnswer,
   EntitySourcesInput,
-  EntitySummary,
   MemoriesGetInput,
   MemoriesListInput,
   MemoriesProposeChangeInput,
@@ -46,7 +46,9 @@ export type {
   CommandOptions,
   CommandReceipt,
   Coverage,
+  EntitiesAnswer,
   EntitiesListInput,
+  EntitySourcesAnswer,
   EntitySourcesInput,
   EntitySummary,
   MemoryItem,
@@ -93,8 +95,8 @@ export interface BrainBinding {
   ) => Promise<CommandReceipt>;
   skillsSelect?: (input: SkillsSelectInput) => Promise<SkillSelection>;
   skillsRead?: (input: SkillsReadInput) => Promise<SkillRead>;
-  entitiesList?: (input: EntitiesListInput) => Promise<EntitySummary[]>;
-  entitySources?: (input: EntitySourcesInput) => Promise<BrainSourceRef[]>;
+  entitiesList?: (input: EntitiesListInput) => Promise<EntitiesAnswer>;
+  entitySources?: (input: EntitySourcesInput) => Promise<EntitySourcesAnswer>;
   relationsGet?: (input: RelationsGetInput) => Promise<RelationsAnswer>;
 }
 
@@ -132,11 +134,15 @@ export interface Brain {
   entities: {
     /**
      * The entities readable sources mention, by a name's start: at least
-     * two characters for a caller that isn't a person.
+     * two characters for a caller that isn't a person. `truncated`: they
+     * come from the newest sources only, so some may be left out.
      */
-    list: (input: EntitiesListInput) => Promise<EntitySummary[]>;
-    /** The readable sources that mention one entity, at their versions. */
-    sources: (input: EntitySourcesInput) => Promise<BrainSourceRef[]>;
+    list: (input: EntitiesListInput) => Promise<EntitiesAnswer>;
+    /**
+     * The newest readable sources that mention one entity, at their
+     * versions. `truncated`: more mention it than came back.
+     */
+    sources: (input: EntitySourcesInput) => Promise<EntitySourcesAnswer>;
   };
   relations: {
     /**

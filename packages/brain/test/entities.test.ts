@@ -282,7 +282,7 @@ describe("entity linking", () => {
     await save(host, wiki, "ben.md", `${ben.name} owns it.`);
     await settle(host, new Set());
 
-    const { entities, sources } = await entitiesWithSources(
+    const { entities, sources, truncated } = await entitiesWithSources(
       host.brain,
       reader,
       {
@@ -293,6 +293,7 @@ describe("entity linking", () => {
     expect({
       labels: entities.map(({ label }) => label),
       sources,
+      truncated,
     }).toStrictEqual({
       labels: [anna.name],
       sources: {
@@ -301,6 +302,7 @@ describe("entity linking", () => {
           { documentId: named.id, collectionId: handbook.id, version: 1 },
         ],
       },
+      truncated: false,
     });
   });
 

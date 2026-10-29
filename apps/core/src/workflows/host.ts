@@ -1,7 +1,10 @@
 import type { Brain } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
 import type { BrainSourceRef } from "@grasp-os/brain/contract";
-import { entitiesWithSources, entitySources } from "@grasp-os/brain/entities";
+import {
+  entitiesWithSources,
+  entitySourcesRead,
+} from "@grasp-os/brain/entities";
 import { recall } from "@grasp-os/brain/recall";
 import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type { VersionRef } from "@grasp-os/brain/recall-store";
@@ -782,18 +785,22 @@ const brainCalls: Record<
     cited: [],
   }),
   entitiesList: async (brain, reader, request) => {
-    const { entities, sources } = await entitiesWithSources(
+    const { entities, sources, truncated } = await entitiesWithSources(
       brain,
       reader,
       request
     );
-    return { value: entities, cited: sources.documents };
+    return { value: { entities, truncated }, cited: sources.documents };
   },
   entitySources: async (brain, reader, request) => {
-    const refs = await entitySources(brain, reader, request);
-    return { value: refs, cited: documentVersionsOf(refs) };
+    const answer = await entitySourcesRead(brain, reader, request);
+    return { value: answer, cited: documentVersionsOf(answer.sources) };
   },
   // Each relation's passage is handed over: its source version is pinned.
+  // Only the answered relations' are: a claim weighed for `conflicting`
+  // alone isn't (up to 5000, past the run's evidence cap), so a revoke of
+  // its collection may leave a recorded answer's `conflicting` as it was.
+  // One bit, no content: a chat labels those collections too.
   relationsGet: async (brain, reader, request) => {
     const answer = await relationsFor(brain, reader, request);
     return {

@@ -1,5 +1,6 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { createBrain } from "@grasp-os/brain/brain";
+import { delegateCitesMax } from "@grasp-os/brain/contract";
 import { runLinking } from "@grasp-os/brain/entities";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
@@ -212,6 +213,55 @@ const linkedOwners = async (admin: Admin) => {
     { do: async (_name, _config, fn) => await fn() }
   );
   return { handbook, thing, said, documentId: saved.id };
+};
+
+/**
+ * More owners of one process (`thing`) than a run's read cites, each in a
+ * document of its own that also holds `word`, linked as `linkedOwners`.
+ */
+const manyOwners = async (admin: Admin, word: string) => {
+  const thing = `Payroll ${crypto.randomUUID().slice(0, 8)}`;
+  const { id: handbook } = await admin.api.knowledge.createCollection({
+    name: `Handbook ${crypto.randomUUID()}`,
+    access: "everyone",
+  });
+  const linking = (owner: string, said: string) =>
+    createBrain(env.KNOWLEDGE, {
+      ...portsOf(env),
+      extractEntities: async () =>
+        await Promise.resolve({
+          entities: [
+            { kind: "person", name: owner },
+            { kind: "process", name: thing },
+          ],
+          relations: [
+            {
+              subject: owner,
+              predicate: "owns",
+              object: thing,
+              evidence: said,
+            },
+          ],
+        }),
+    });
+  for (let index = 0; index < delegateCitesMax + 5; index += 1) {
+    const owner = `Owner ${index}`;
+    const said = `${owner} owns ${thing}.`;
+    // oxlint-disable-next-line no-await-in-loop -- one document after another
+    const saved = await admin.api.knowledge.saveDocument({
+      collectionId: handbook,
+      path: `owner-${index}.md`,
+      text: `# ${word}\n${said}`,
+      ifVersion: 0,
+    });
+    // oxlint-disable-next-line no-await-in-loop -- one document after another
+    await runLinking(
+      linking(owner, said),
+      { source: `doc:${saved.id}`, version: 1 },
+      { do: async (_name, _config, fn) => await fn() }
+    );
+  }
+  return { handbook, thing };
 };
 
 /**
@@ -630,7 +680,7 @@ describe("a workflow's recall through the Brain binding", () => {
         workflowFiles(
           "recaller",
           `  return await step.do("relations", { description: "Who owns it" }, async () => {
-    const [found] = await brain(env.BRAIN).entities.list({ query: ${JSON.stringify(thing)} });
+    const { entities: [found] } = await brain(env.BRAIN).entities.list({ query: ${JSON.stringify(thing)} });
     const { relations } = await brain(env.BRAIN).relations.get({ entityId: found?.id ?? "-" });
     return relations.map(({ subject, predicate, evidence }) => ({ owner: subject.name, predicate, evidence })) as Json;
   });`,
@@ -726,6 +776,47 @@ describe("a workflow's recall through the Brain binding", () => {
         { status: "failed", code: "brain.revoked", handed: false },
         { status: "failed", code: "brain.revoked", handed: false },
       ],
+    });
+  });
+
+  it("cites no more than a recall does from each entity or relations read, so a run that makes many still recalls", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const word = rareWord();
+    const { handbook, thing } = await manyOwners(admin, word);
+    const { id: app } = await admin.api.apps.create({ name: "Relations" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    await requestGranted(idp, admin, readCollection(app_, handbook));
+    await requestGranted(idp, admin, brainFor(app));
+    await release(admin, app, {
+      ...sampleApp(),
+      ...withBrain(
+        workflowFiles(
+          "recaller",
+          `  return await step.do("reads", { description: "Read and recall" }, async () => {
+    const reads = [];
+    for (let round = 0; round < 3; round += 1) {
+      const listed = await brain(env.BRAIN).entities.list({ query: ${JSON.stringify(thing)} });
+      const entityId = listed.entities.find(({ label }) => label === ${JSON.stringify(thing)})?.id ?? "-";
+      const sources = await brain(env.BRAIN).entities.sources({ entityId });
+      const owners = await brain(env.BRAIN).relations.get({ entityId });
+      reads.push([listed.truncated, sources.sources.length, sources.truncated, owners.relations.length, owners.truncated]);
+    }
+    const pack = await brain(env.BRAIN).recall({ query: ${JSON.stringify(word)} });
+    return { reads, recalled: pack.items.length > 0 } as Json;
+  });`,
+          { reads: { reads: [], recalled: false } }
+        )
+      ),
+    });
+
+    const run = await ranOnce(admin, app);
+
+    const cut = [true, delegateCitesMax, true, delegateCitesMax, true];
+    expect({ status: run.status, output: run.output }).toStrictEqual({
+      status: "completed",
+      // Each read cut to what it pins, and said so; the recall after them
+      // all still fits the run's evidence.
+      output: { reads: [cut, cut, cut], recalled: true },
     });
   });
 });
