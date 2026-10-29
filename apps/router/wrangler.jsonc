@@ -83,5 +83,16 @@
       "namespace_id": "1006",
       "simple": { "limit": 600, "period": 60 },
     },
+    // A visitor's endpoint (/api/app-visitor), where someone who isn't a
+    // member asks for a code and signs in to a published App, per
+    // hostname and client address: 20 a minute, for a person asking,
+    // typing a code and opening the App, while a flood of asked codes or
+    // guessed ones is cut to one every three seconds. Core limits codes
+    // per address, per App, and tries per code too.
+    {
+      "name": "VISITOR_RATE_LIMIT",
+      "namespace_id": "1007",
+      "simple": { "limit": 20, "period": 60 },
+    },
   ],
 }

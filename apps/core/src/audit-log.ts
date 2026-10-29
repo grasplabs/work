@@ -345,6 +345,11 @@ export const actorIdsOf = (actor: AuditActor): string[] => {
     case "guest": {
       return [actor.chatId, actor.appId, actor.invitedBy];
     }
+    case "visitor": {
+      return actor.sessionId === undefined
+        ? [actor.appId]
+        : [actor.sessionId, actor.appId];
+    }
     case "system": {
       return [];
     }

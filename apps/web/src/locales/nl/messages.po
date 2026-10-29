@@ -14774,6 +14774,10 @@ msgstr "Visiepagina"
 msgid "Vision page confirmed"
 msgstr "Visiepagina bevestigd"
 
+#: src/activity/audit-log.tsx
+msgid "Visitor of {domain}"
+msgstr "Bezoeker van {domain}"
+
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgctxt "model: Stephen's voice"
 msgid "Voice"
