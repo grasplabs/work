@@ -18,10 +18,13 @@ import { adminReader } from "./admin.ts";
 import { applySettings } from "./apply.ts";
 import { clientGrid, defaultLiveOptions, gridLive } from "./grid.ts";
 import type { LiveStatus } from "./grid.ts";
+import { clientModelSpend } from "./model-spend.ts";
 import { clientQuotaPolicy } from "./quota-policy.ts";
 import {
+  modelSpendCeilingInputSchema,
   ringInputSchema,
   sealedSecretInputSchema,
+  setModelSpendCeiling,
   setRing,
   setSealedSecret,
   setSignIn,
@@ -104,11 +107,32 @@ export const fetchClientQuotaPolicy = createServerFn({ method: "GET" })
   .validator(clientSchema)
   .handler(async ({ data }) => await clientQuotaPolicy(env, data.clientId));
 
+/**
+ * A client's model spend this month as its core's ledger counts it, read
+ * live; null when unknown.
+ */
+export const fetchClientModelSpend = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(async ({ data }) => await clientModelSpend(env, data.clientId));
+
 export const setRingFn = createServerFn({ method: "POST" })
   .validator(ringInputSchema)
   .handler(
     async ({ data, context }) =>
       await change(async () => await setRing(env, context.staff, data))
+  );
+
+/**
+ * Sets a client's monthly model spend ceiling, in whole euros, audited:
+ * its core's gateway holds it to it from its next deploy.
+ */
+export const setModelSpendCeilingFn = createServerFn({ method: "POST" })
+  .validator(modelSpendCeilingInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(
+        async () => await setModelSpendCeiling(env, context.staff, data)
+      )
   );
 
 /** Applies a client's settings now: a deploy of the release it runs, live at once. */
