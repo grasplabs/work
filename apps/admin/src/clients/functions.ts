@@ -22,9 +22,11 @@ import { clientModelSpend } from "./model-spend.ts";
 import { clientQuotaPolicy } from "./quota-policy.ts";
 import {
   modelSpendCeilingInputSchema,
+  modelTransportInputSchema,
   ringInputSchema,
   sealedSecretInputSchema,
   setModelSpendCeiling,
+  setModelTransport,
   setRing,
   setSealedSecret,
   setSignIn,
@@ -132,6 +134,19 @@ export const setModelSpendCeilingFn = createServerFn({ method: "POST" })
     async ({ data, context }) =>
       await change(
         async () => await setModelSpendCeiling(env, context.staff, data)
+      )
+  );
+
+/**
+ * Sets a client's model transport, or takes it away (back to the
+ * platform's default), audited: its core takes it with its next deploy.
+ */
+export const setModelTransportFn = createServerFn({ method: "POST" })
+  .validator(modelTransportInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(
+        async () => await setModelTransport(env, context.staff, data)
       )
   );
 

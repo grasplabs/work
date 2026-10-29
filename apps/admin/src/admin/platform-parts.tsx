@@ -92,6 +92,9 @@ export const eventWords = (
     "client.create": `added ${company}`,
     "client.ring": `moved ${company} to another ring`,
     "client.model_spend_ceiling": `changed ${company}'s model spend ceiling`,
+    "client.model_transport": `changed how ${company} reaches its models`,
+    "platform.model_transport":
+      "changed how clients reach their models by default",
     "client.pin": `pinned ${company} to ${target}`,
     "client.unpin": `unpinned ${company}`,
     "client.rotate_secrets": `rotated ${company}'s secrets`,

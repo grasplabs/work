@@ -946,6 +946,7 @@ const plainEventWords: Readonly<Record<string, string>> = {
   "client.rotate_secrets": "Rotated its secrets.",
   "client.sign_in": "Changed how its people sign in.",
   "client.teams_bot": "Changed its Teams bot.",
+  "client.model_transport": "Changed how it reaches its models.",
 };
 
 /** A change of its model spend ceiling, in a sentence. */

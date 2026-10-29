@@ -1,8 +1,10 @@
 /**
  * A client's settings, as staff change them on its page: its ring, its
  * sign-in (its record's `signIn`, which every deploy makes core's
- * `SIGN_IN` from), its Teams bot (src/clients/teams-bot.ts) and its sealed
- * secrets, such as its Teams bot's (src/deploy/sealed-secrets.ts). Each change is audited in the same batch
+ * `SIGN_IN` from), its model spend ceiling and transport
+ * (src/deploy/model-transport.ts), its Teams bot (src/clients/teams-bot.ts)
+ * and its sealed secrets, such as its Teams bot's
+ * (src/deploy/sealed-secrets.ts). Each change is audited in the same batch
  * as the change, and only when it changes something.
  *
  * None of it reaches the client's account at once. The ring decides which
@@ -13,13 +15,21 @@
  * the release already (src/rollout/targets.ts).
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
+import { modelTransportConfigSchema } from "@grasp-os/shared/model-transport";
+import type { ModelTransportConfig } from "@grasp-os/shared/model-transport";
 import { and, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clientRuns, clients, clientSealedSecrets } from "../db/schema.ts";
+import {
+  clientRuns,
+  clients,
+  clientSealedSecrets,
+  settings,
+} from "../db/schema.ts";
 import {
   MissingStoreSecretError,
   signInApps,
@@ -30,6 +40,12 @@ import {
   clientSignInSchema,
   missingSignInApp,
 } from "../deploy/core-config.ts";
+import {
+  AttestationError,
+  attestationsOf,
+  stampAttestations,
+  transportSummary,
+} from "../deploy/model-transport.ts";
 import { sealSecret } from "../deploy/sealed-secrets.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { keyedHash } from "../deploy/upload.ts";
@@ -60,6 +76,12 @@ export const settingsErrorCodes = [
   "teams_bot_invalid",
   /** Others kept changing the setting while this change was made: read it again. */
   "changed_meanwhile",
+  /** A model transport that isn't one: a field missing or malformed. */
+  "model_transport_invalid",
+  /** A model transport that names private hosts, which only an on-prem deployment has. */
+  "private_hosts_on_prem_only",
+  /** An EU attestation made as someone other than the staff member saving it. */
+  "attestation_not_yours",
 ] as const;
 export type SettingsErrorCode = (typeof settingsErrorCodes)[number];
 
@@ -87,6 +109,17 @@ export const modelSpendCeilingInputSchema = z.object({
   clientId: clientIdSchema,
   /** Whole euros a month, at least one. */
   euros: z.int().min(1).max(modelSpendCeilingMost),
+});
+
+/**
+ * A model transport as the page sends it (core's `MODEL_TRANSPORT`, the
+ * shared package's model-transport.ts), checked here rather than by the
+ * server function's validator, so a refusal comes back as its code. Null
+ * takes the client's own away: it takes the platform's default again.
+ */
+export const modelTransportInputSchema = z.object({
+  clientId: clientIdSchema,
+  transport: z.unknown(),
 });
 
 /**
@@ -199,6 +232,177 @@ export const setModelSpendCeiling = async (
   throw new SettingsError(
     "changed_meanwhile",
     `${clientId}'s model spend ceiling kept changing while it was set`
+  );
+};
+
+/** How often setting a transport reads it again when another save got in between. */
+const transportTries = 3;
+
+/** Client `clientId`'s `MODEL_TRANSPORT` setting as stored; undefined without one. */
+const storedTransport = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<string | undefined> => {
+  const row = await db
+    .select({ value: settings.value })
+    .from(settings)
+    .where(
+      and(eq(settings.clientId, clientId), eq(settings.key, "MODEL_TRANSPORT"))
+    )
+    .get();
+  return row?.value;
+};
+
+/** A stored setting's transport; null for none, or one that doesn't parse. */
+const parsedTransport = (
+  value: string | undefined
+): ModelTransportConfig | null => {
+  if (value === undefined) {
+    return null;
+  }
+  try {
+    const parsed = modelTransportConfigSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * `input` as the transport client `clientId` may be given by `staff`, as
+ * stored: refused as `model_transport_invalid` for one that isn't a
+ * transport, `private_hosts_on_prem_only` for one naming private hosts
+ * (every client the admin deploys is hosted), and `attestation_not_yours`
+ * for an EU attestation made as someone else. A new attestation is
+ * stamped with `staff` and now (`stampAttestations`); one it had stays.
+ */
+const transportToSet = (
+  clientId: string,
+  staff: Staff,
+  input: unknown,
+  had: ModelTransportConfig | null
+): ModelTransportConfig => {
+  let stamped: unknown = undefined;
+  try {
+    stamped = stampAttestations(input, attestationsOf(had), {
+      email: staff.email,
+      now: new Date(),
+    });
+  } catch (error) {
+    if (error instanceof AttestationError) {
+      throw new SettingsError(
+        "attestation_not_yours",
+        `An EU attestation for ${clientId} can only be made as yourself`
+      );
+    }
+    throw error;
+  }
+  const parsed = modelTransportConfigSchema.safeParse(stamped);
+  if (!parsed.success) {
+    throw new SettingsError(
+      "model_transport_invalid",
+      `That isn't a model transport ${clientId} can have`
+    );
+  }
+  if (parsed.data.privateHosts.length > 0) {
+    throw new SettingsError(
+      "private_hosts_on_prem_only",
+      `${clientId} is hosted: private hosts are on-prem only`
+    );
+  }
+  return parsed.data;
+};
+
+/**
+ * Sets client `clientId`'s model transport (its `MODEL_TRANSPORT`
+ * setting), or with null takes it away, so it takes the platform's
+ * default for its residency again (src/deploy/model-transport.ts), as
+ * `staff`: audited (`client.model_transport`, the transport before and
+ * after by kinds and names, never a key, which no transport holds
+ * anyway) and marking its config changed (`configChangedAt`) when it
+ * changes. Its core takes it with its next deploy; whatever it says, core
+ * keeps to the client's policy's residency. Refused as `transportToSet`
+ * says. Returns whether it changed.
+ */
+export const setModelTransport = async (
+  env: Env,
+  staff: Staff,
+  input: z.input<typeof modelTransportInputSchema>
+): Promise<boolean> => {
+  const db = adminDatabase(env.DB);
+  const { clientId, transport } = modelTransportInputSchema.parse(input);
+  await assertClient(db, clientId);
+  // Compare and set, as the spend ceiling is: the write holds only while
+  // the setting is still the one read, so the audited `from` is what it
+  // replaced.
+  for (let tried = 0; tried < transportTries; tried += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- read again after a save in between
+    const had = await storedTransport(db, clientId);
+    const hadTransport = parsedTransport(had);
+    const next =
+      transport === null
+        ? null
+        : transportToSet(clientId, staff, transport, hadTransport);
+    const value = next === null ? undefined : JSON.stringify(next);
+    if (value === had) {
+      return false;
+    }
+    const now = new Date();
+    const ofThis = and(
+      eq(settings.clientId, clientId),
+      eq(settings.key, "MODEL_TRANSPORT")
+    );
+    let statement: BatchItem<"sqlite">;
+    if (value === undefined) {
+      statement = db
+        .delete(settings)
+        .where(and(ofThis, eq(settings.value, had ?? "")));
+    } else if (had === undefined) {
+      statement = db
+        .insert(settings)
+        .values({
+          clientId,
+          key: "MODEL_TRANSPORT",
+          value,
+          updatedBy: staff.email,
+          updatedAt: now,
+        })
+        .onConflictDoNothing();
+    } else {
+      statement = db
+        .update(settings)
+        .set({ value, updatedBy: staff.email, updatedAt: now })
+        .where(and(ofThis, eq(settings.value, had)));
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one try at a time
+    const changed = await actIfChanged(
+      db,
+      staff,
+      statement,
+      {
+        action: "client.model_transport",
+        clientId,
+        detail: {
+          from:
+            hadTransport === null ? "default" : transportSummary(hadTransport),
+          to: next === null ? "default" : transportSummary(next),
+        },
+      },
+      [
+        // Only once the event is recorded: `changes()` reads its insert.
+        db
+          .update(clients)
+          .set({ configChangedAt: now, updatedAt: now })
+          .where(and(eq(clients.id, clientId), sql`changes() > 0`)),
+      ]
+    );
+    if (changed) {
+      return true;
+    }
+  }
+  throw new SettingsError(
+    "changed_meanwhile",
+    `${clientId}'s model transport kept changing while it was set`
   );
 };
 

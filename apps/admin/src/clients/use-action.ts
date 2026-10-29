@@ -24,6 +24,12 @@ const refusals: Readonly<Record<SettingsErrorCode, string>> = {
     "That isn't a Teams bot: give its app id and tenant as the GUIDs Entra shows, and the day its secret expires.",
   changed_meanwhile:
     "Someone else changed it at the same moment: the page shows it as it is now, so look and save again.",
+  model_transport_invalid:
+    "That isn't a way to reach models: check each field, such as the endpoint's URL and its models.",
+  private_hosts_on_prem_only:
+    "Private hosts are for on-prem deployments only: this client is hosted.",
+  attestation_not_yours:
+    "You can only attest an endpoint yourself: tick the box and give the basis as you.",
 };
 
 /** A staff change to a client's settings (`useAction`), its refusals worded. */

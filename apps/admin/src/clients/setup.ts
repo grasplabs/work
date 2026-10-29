@@ -138,6 +138,7 @@ const byHand: ReadonlySet<string> = new Set([
   "client.provision_placed",
   "client.ring",
   "client.model_spend_ceiling",
+  "client.model_transport",
   "client.pin",
   "client.unpin",
   "client.rotate_secrets",
