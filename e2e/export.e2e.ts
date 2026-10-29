@@ -131,8 +131,8 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   expect(await textOf(file)).toContain("Sixteen weeks, **paid**.");
 
   // The page to print: the title, then the text rendered, in a frame of
-  // this origin that keeps its policy, styled by the app's own stylesheets
-  // and set in Geist.
+  // this origin that keeps its policy, styled by the app's own stylesheets:
+  // the title in Newsreader (`type-title`), the text in Geist.
   await countPrints(page);
   await choose(page, "Export", "PDF");
   await expect
@@ -150,7 +150,12 @@ test("a document and a chat each export as Markdown and as a page to print", asy
           return `${style.fontSize} ${style.fontFamily}`;
         })
     )
-    .toMatch(/^24px .*Geist/u);
+    .toMatch(/^28px "Newsreader Variable"/u);
+  expect(
+    await printed
+      .getByText("paid", { exact: true })
+      .evaluate((element) => getComputedStyle(element).fontFamily)
+  ).toMatch(/^"Geist Variable"/u);
   // Once the dialog closes, the page to print goes.
   await closePrint(page, "Leave");
   await expect(page.locator('iframe[title="Leave"]')).toHaveCount(0);
