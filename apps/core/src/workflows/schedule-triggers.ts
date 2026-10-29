@@ -84,7 +84,9 @@ const minuteMs = 60_000;
  * next occurrence. `start_denied` is a trigger whose person left or lost
  * their role, whose `start` grant was revoked, or whose workflow is gone;
  * `start_invalid` an input the version no longer takes; `packages_revoked`
- * an approval of the version's packages withdrawn. A trigger disabled,
+ * an approval of the version's packages withdrawn; `paused` a workflow
+ * paused (workflow-lifecycle.ts), whose occurrences are skipped and never
+ * counted toward stopping. A trigger disabled,
  * deleted or moved meanwhile (`trigger_unavailable`) is read as due no
  * more, so it is let be.
  */
@@ -92,6 +94,7 @@ const refusedForGood: ReadonlySet<string> = new Set([
   "workflow.start_denied",
   "workflow.start_invalid",
   "workflow.packages_revoked",
+  "workflow.paused",
 ]);
 
 /** The most times a failed try's wait doubles: 2^6 minutes, capped at an hour. */
@@ -188,7 +191,8 @@ type Failure =
  * goes on from its next occurrence after `now`; otherwise the same
  * occurrence stays due, tried again later. Refusals and the workflow's
  * own failures count: at `maxFailedStarts` it stops, audited once, its
- * owner told. Core's own failures only back off.
+ * owner told. Core's own failures only back off, and a paused workflow's
+ * occurrence is skipped without counting: pausing it never stops it.
  */
 const recordFailure = async (
   env: Env,
@@ -196,9 +200,13 @@ const recordFailure = async (
   now: Date,
   failure: Failure
 ): Promise<void> => {
-  const failedStarts =
-    failure.kind === "core" ? schedule.failedStarts : schedule.failedStarts + 1;
-  const stops = failure.kind !== "core" && failedStarts >= maxFailedStarts;
+  const counts =
+    failure.kind === "failed" ||
+    (failure.kind === "refused" && failure.code !== "workflow.paused");
+  const failedStarts = counts
+    ? schedule.failedStarts + 1
+    : schedule.failedStarts;
+  const stops = counts && failedStarts >= maxFailedStarts;
   let nextAt: Date | null = schedule.nextAt;
   let attempts = schedule.attempts + 1;
   let lastAttemptAt: Date | null = now;
