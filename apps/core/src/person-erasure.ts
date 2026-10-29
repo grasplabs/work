@@ -1,6 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { identifierSchema } from "@grasp-os/shared/ids";
+import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type { Erasure, ErasurePreview } from "@grasp-os/shared/members";
@@ -24,13 +24,16 @@ import {
   invitations,
   notifications,
   chatAudiences,
+  businessStores,
+  knowledgeSignals,
+  screenSubmissions,
   personErasureAreas,
   personErasures,
   sessions,
   teamMembers,
   users,
 } from "./db/core/schema.ts";
-import { workspace } from "./durable-objects.ts";
+import { workspace, inJurisdiction } from "./durable-objects.ts";
 import {
   emailHashOf,
   emailKeyVersion,
@@ -297,6 +300,44 @@ const workspaceArea: ErasureStep = {
 };
 
 /**
+ * What they left in the company's Apps that is theirs alone (GRA-1184):
+ * their preferences in every App's store (`sdk_preferences`, a host-owned
+ * table no App code reaches), what their screens kept to recover their
+ * submissions, and the usage signals computed for them as the owner of
+ * Knowledge collections (what others asked there, counted, and what they
+ * haven't read or reviewed), which the daily computation no longer makes
+ * for anyone erased (knowledge/signals.ts). The Apps' records they own are
+ * the company's (`_ownerId` names them), and stay. Every store is asked,
+ * whether or not they were a member of its App now: a store's row is never
+ * deleted (a deleted store keeps it, `deleted_at` set), so every store
+ * there ever was is listed; one never set up holds nothing. Draft
+ * previews' stores are their workspace's (GRA-1181).
+ */
+const apps: ErasureStep = {
+  area: "apps",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const stores = await db
+      .select({ id: businessStores.id })
+      .from(businessStores);
+    for (const { id } of stores) {
+      const storeId = storeIdSchema.parse(id);
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      await inJurisdiction(env, env.DATA_STORES)
+        .getByName(storeId)
+        .forgetPreferences(storeId, userId);
+    }
+    await db.batch([
+      db
+        .delete(screenSubmissions)
+        .where(eq(screenSubmissions.personId, userId)),
+      db.delete(knowledgeSignals).where(eq(knowledgeSignals.owner, userId)),
+      completed(db, userId, "apps"),
+    ]);
+  },
+};
+
+/**
  * The erasure's areas, in the order they run. Each area's own leaf of
  * GRA-903 adds its step here.
  */
@@ -305,6 +346,7 @@ const steps: readonly ErasureStep[] = [
   channels,
   connect,
   workspaceArea,
+  apps,
 ];
 
 /** Refuses anyone but one of the client's admins, as members.ts does. */

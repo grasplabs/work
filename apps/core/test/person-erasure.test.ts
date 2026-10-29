@@ -1,13 +1,16 @@
+import { storeIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { setCurrentVersion } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { workspace, inJurisdiction } from "../src/durable-objects.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import { appWith, seal } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -181,6 +184,54 @@ const envOf = (instance: object): object => {
   return objectEnv;
 };
 
+/** An App with preferences, sealed, current, and its store's ID. */
+const appWithPreferences = async () => {
+  const fixture = await appWith(
+    {
+      "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
+      "app.ts": `import { app, v } from "@grasp-os/sdk";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Desk",
+  schema,
+  access: { tables: {} },
+  operations: {},
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+  preferences: v.object({ theme: v.enum(["light", "dark"]).default("light") }),
+  uses: [],
+});
+`,
+      "screens/desk.tsx": `export default function Desk() {
+  return <main>Desk</main>;
+}
+`,
+    },
+    "Desk"
+  );
+  const release = await seal(fixture);
+  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  return {
+    app: fixture.app,
+    storeId: storeIdSchema.parse(release.store?.storeId),
+  };
+};
+
+/** Runs `run` on store `storeId`'s own SQL. */
+const inStore = async <T>(
+  storeId: string,
+  run: (sql: SqlStorage) => T
+): Promise<T> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.DATA_STORES).getByName(
+      storeIdSchema.parse(storeId)
+    ),
+    (_instance, state) => run(state.storage.sql)
+  );
+
 /** An admin, and someone else they removed. */
 const removedPerson = async (): Promise<{ admin: Person; person: Person }> => {
   const admin = await signedInApi(idp, "admin");
@@ -230,6 +281,7 @@ describe("erasing a person", () => {
           { area: "channels", state: "complete" },
           { area: "connect", state: "complete" },
           { area: "workspace", state: "complete" },
+          { area: "apps", state: "complete" },
         ],
       },
       name,
@@ -442,6 +494,7 @@ describe("erasing a person", () => {
           { area: "channels", state: "complete" },
           { area: "connect", state: "complete" },
           { area: "workspace", state: "complete" },
+          { area: "apps", state: "complete" },
         ],
       },
       // Nothing of the area went: one statement, or none of it.
@@ -454,6 +507,7 @@ describe("erasing a person", () => {
           { area: "channels", state: "complete" },
           { area: "connect", state: "complete" },
           { area: "workspace", state: "complete" },
+          { area: "apps", state: "complete" },
         ],
       },
       accounts: 0,
@@ -890,6 +944,92 @@ describe("erasing a person", () => {
       chats: 0,
       // Delivered, once, never dropped.
       created: 1,
+    });
+  });
+
+  it("forgets their preferences in every App's store, their screens' submissions and their own Knowledge signals, and leaves everyone else's", async () => {
+    const { admin, person } = await removedPerson();
+    const other = await signedInApi(idp, "user");
+    const { app, storeId } = await appWithPreferences();
+    await inStore(storeId, (sql) => {
+      for (const who of [person.userId, other.userId]) {
+        sql.exec(
+          "INSERT INTO sdk_preferences (person_id, revision, value_json, updated_at) VALUES (?, 1, ?, ?)",
+          who,
+          JSON.stringify({ theme: "dark" }),
+          Date.now()
+        );
+      }
+    });
+    const now = Date.now();
+    for (const who of [person.userId, other.userId]) {
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      await env.DB.prepare(
+        "INSERT INTO screen_submissions (id, person_id, app_id, kind, contract_id, fingerprint, app_version, path, attempt, idempotency_key, created_at, expires_at) VALUES (?, ?, ?, 'mutation', 'notes.add', 'f', 1, '/', 1, ?, ?, ?)"
+      )
+        .bind(
+          crypto.randomUUID(),
+          who,
+          app,
+          crypto.randomUUID(),
+          now,
+          now + 60_000
+        )
+        .run();
+    }
+
+    // The usage signals of a Knowledge collection of each, its searches'
+    // keys being what they asked.
+    const computation = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO knowledge_signal_computations (id, day, started_at, finished_at) VALUES (?, '2026-10-27', ?, ?)"
+    )
+      .bind(computation, now, now)
+      .run();
+    for (const who of [person.userId, other.userId]) {
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      await env.DB.prepare(
+        "INSERT INTO knowledge_signals (computation, id, kind, collection_id, subject, owner, value, evidence) VALUES (?, ?, 'unanswered_question', ?, 'what they asked', ?, 1, '{}')"
+      )
+        .bind(computation, crypto.randomUUID(), `collection-${who}`, who)
+        .run();
+    }
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    const preferencesOf = async (who: string) =>
+      await inStore(
+        storeId,
+        (sql) =>
+          sql
+            .exec<{ count: number }>(
+              "SELECT count(*) AS count FROM sdk_preferences WHERE person_id = ?",
+              who
+            )
+            .one().count
+      );
+    expect({
+      theirs: await preferencesOf(person.userId),
+      others: await preferencesOf(other.userId),
+      theirSubmissions: await rowsOf(
+        "screen_submissions",
+        "person_id",
+        person.userId
+      ),
+      otherSubmissions: await rowsOf(
+        "screen_submissions",
+        "person_id",
+        other.userId
+      ),
+      theirSignals: await rowsOf("knowledge_signals", "owner", person.userId),
+      otherSignals: await rowsOf("knowledge_signals", "owner", other.userId),
+    }).toStrictEqual({
+      theirs: 0,
+      others: 1,
+      theirSubmissions: 0,
+      otherSubmissions: 1,
+      theirSignals: 0,
+      otherSignals: 1,
     });
   });
 });

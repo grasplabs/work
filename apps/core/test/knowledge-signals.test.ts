@@ -48,6 +48,16 @@ const newOwner = async (): Promise<Person> => await signedInApi(idp, "admin");
 /** Someone who reads and searches Knowledge. */
 const newReader = async (): Promise<Person> => await signedInApi(idp, "user");
 
+/** How many signals there are for `userId` as an owner, in every computation. */
+const ownedBy = async (userId: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS count FROM knowledge_signals WHERE owner = ?"
+  )
+    .bind(userId)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+};
+
 /** A collection of `owner`'s for everyone; returns its ID. */
 const newCollection = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.knowledge.createCollection({
@@ -467,6 +477,31 @@ describe("Knowledge usage signals", () => {
       next: [],
       signals: "number",
     });
+  });
+
+  it("tell no owner who was erased, whatever their collections still hold", async () => {
+    const erased = await newOwner();
+    const kept = await newOwner();
+    for (const owner of [erased, kept]) {
+      // oxlint-disable-next-line no-await-in-loop -- one owner at a time
+      const collectionId = await newCollection(owner);
+      // oxlint-disable-next-line no-await-in-loop -- one owner at a time
+      await newDocument(owner, collectionId, "old.md", {
+        review: "2020-01-01",
+      });
+    }
+    await env.DB.prepare(
+      "INSERT INTO person_erasures (user_id, name, email_hash, email_key_version, requested_by, requested_at) VALUES (?, 'Erased', ?, 1, ?, ?)"
+    )
+      .bind(erased.userId, `hash-${erased.userId}`, kept.userId, Date.now())
+      .run();
+
+    await refreshDailySignals(env, nextDay());
+
+    expect({
+      erased: await ownedBy(erased.userId),
+      kept: await ownedBy(kept.userId),
+    }).toStrictEqual({ erased: 0, kept: 1 });
   });
 
   it("tell the owner about documents nobody read or changed for 90 days, memory files' reads included, listed skills not", async () => {

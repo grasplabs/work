@@ -2634,6 +2634,38 @@ export class StoreHost {
   }
 
   /**
+   * Forgets `personId`'s preferences in this store, as core asks once an
+   * admin erased them (GRA-903, core's person-erasure.ts): their row, its
+   * value and its last write's receipt. A store never set up holds none,
+   * and is set up by nothing here. Answers how many rows went (0 or 1).
+   */
+  forgetPreferences(storeId: StoreId, personId: string): { forgotten: number } {
+    const id = storeIdSchema.parse(storeId);
+    const person = dataErrors.parse("data.invalid", personIdOf, personId);
+    if (this.ctx.id.name !== id) {
+      throw new Error("This object holds another store");
+    }
+    return this.ctx.storage.transactionSync(() => {
+      const bound = this.#db
+        .select({ storeId: store.storeId })
+        .from(store)
+        .get();
+      if (bound === undefined) {
+        return { forgotten: 0 };
+      }
+      if (bound.storeId !== id) {
+        throw new Error("This object holds another store");
+      }
+      const gone = this.#db
+        .delete(preferences)
+        .where(eq(preferences.personId, person))
+        .returning({ personId: preferences.personId })
+        .all();
+      return { forgotten: gone.length };
+    });
+  }
+
+  /**
    * Plans `preferencesText` (a version's preferences, a strict object's
    * descriptor as JSON) onto the store's preferences contract
    * (`planPreferenceChange`): refused (`migration.preference_changed`,
