@@ -4887,6 +4887,7 @@ export const brainRecords = sqliteTable(
         "goal",
         "goalVersion",
         "goalLink",
+        "vision",
       ],
     }).notNull(),
     id: text().notNull(),
@@ -4899,6 +4900,12 @@ export const brainRecords = sqliteTable(
      * words put back.
      */
     purgedAt: timestamp("purged_at"),
+    /**
+     * When the record stopped counting (brain-records.ts
+     * `retireOnboardingRecords`): what a replaced kickoff transcript gave
+     * the brain. Kept, never deleted, and left out of `brain.read`.
+     */
+    retiredAt: timestamp("retired_at"),
   },
   // One id is one record, whatever its type.
   (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]

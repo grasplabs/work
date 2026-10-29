@@ -8,12 +8,19 @@ import type {
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import type { SessionApi } from "@grasp-os/shared/rpc";
+import { speechPath } from "@grasp-os/shared/voice";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import {
+  drawingErasure,
+  interviewErasure,
+} from "../src/onboarding/interview-erasure.ts";
+import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { keptLine } from "../src/speech-cache.ts";
 import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
 import type { Answer, GatewayReply } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
@@ -193,9 +200,13 @@ const fact = (id: string, tag: FactTag, record: string): InterviewFact => ({
   agreed: true,
 });
 
-/** Saves someone's interview as agreed to, with `facts`. */
-const agree = async (person: string, facts: InterviewFact[]) => {
-  const link = await openLink(person);
+/** Saves someone's interview as agreed to, with `facts`, on `link` (opened anew unless given). */
+const agree = async (
+  person: string,
+  facts: InterviewFact[],
+  opened?: Awaited<ReturnType<typeof openLink>>
+) => {
+  const link = opened ?? (await openLink(person));
   const progress: InterviewProgress = {
     person: "completed",
     told: true,
@@ -219,10 +230,13 @@ const agree = async (person: string, facts: InterviewFact[]) => {
   return saved.version;
 };
 
-/** The map: tickets, by Max, Mia and Mo, and the rota, Lea's own. */
-const mapReply = (ids: Ids): GatewayReply => ({
+/** The map: tickets, by Max, Mia and Mo, and the rota, Lea's own; the team said to do `does`. */
+const mapReply = (
+  ids: Ids,
+  does = "Answers customers' questions"
+): GatewayReply => ({
   text: JSON.stringify({
-    does: "Answers customers' questions",
+    does,
     works: [
       {
         name: "handling new tickets",
@@ -280,8 +294,11 @@ const rotaReply = (ids: Ids): GatewayReply => ({
   outputTokens: 1,
 });
 
-/** Lea's map drawn and the rota out of the way, then Max, Mia, Mo, Noor and Pim agree to what they told about tickets. */
-const toldAll = async (ids: Ids) => {
+/**
+ * Lea's map drawn and the rota out of the way, then Max, Mia, Mo, Noor and
+ * Pim agree to what they told about tickets, Max that `maxSays`.
+ */
+const toldAll = async (ids: Ids, maxSays = "Tickets arrive in Zendesk.") => {
   const store = onboardingStore(env);
   await store.releaseDue();
   await agree(ids.lea, [
@@ -290,7 +307,7 @@ const toldAll = async (ids: Ids) => {
   await answering([mapReply(ids)], async () => await store.drawNext());
   await store.releaseDue();
   await answering([rotaReply(ids)], async () => await store.drawNext());
-  await agree(ids.max, [fact("m1", "system", "Tickets arrive in Zendesk.")]);
+  await agree(ids.max, [fact("m1", "system", maxSays)]);
   await agree(ids.mia, [fact("i1", "system", "Tickets arrive in Zendesk.")]);
   await agree(ids.mo, [
     fact("o1", "wait", "A ticket waits days for the customer's reply."),
@@ -448,6 +465,46 @@ const detailOf = async (action: string) => {
   return events.findLast((event) => event.action === action)?.detail;
 };
 
+/**
+ * `database`, but a statement reading `table` first runs `hook`: what
+ * happens as a read of it is under way.
+ */
+const withHook = (
+  database: D1Database,
+  table: string,
+  hook: () => Promise<void>
+): D1Database => {
+  const statement = (prepared: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(prepared, {
+      get: (target, name, receiver): unknown => {
+        if (name === "bind") {
+          return (...values: unknown[]) => statement(target.bind(...values));
+        }
+        if (name === "all" || name === "raw" || name === "first") {
+          const run: unknown = Reflect.get(target, name, target);
+          return async (...args: unknown[]): Promise<unknown> => {
+            await hook();
+            return typeof run === "function"
+              ? await Reflect.apply(run, target, args)
+              : undefined;
+          };
+        }
+        return Reflect.get(target, name, receiver);
+      },
+    });
+  return new Proxy(database, {
+    get: (target, name, receiver): unknown => {
+      if (name === "prepare") {
+        return (query: string) => {
+          const prepared = target.prepare(query);
+          return query.includes(`"${table}"`) ? statement(prepared) : prepared;
+        };
+      }
+      return Reflect.get(target, name, receiver);
+    },
+  });
+};
+
 /** The tickets of `team` as the store holds them now. */
 const ticketsOf = async (teamId: string) => {
   const works = await onboardingStore(env).teamWorks(teamId);
@@ -497,7 +554,10 @@ describe(
           shown: { documents: true, brief: true, brain: true },
         },
         stillFound: 0,
-        purgedDetail: { documents: 1, drawings: 2, records: 1 },
+        // The drawing that named the word went with the interviews'
+        // drawings, before the readings; the other drawn with the
+        // document goes with it.
+        purgedDetail: { documents: 1, drawings: 1, records: 1 },
         records: 1,
         drewAgainWith: false,
         after: {
@@ -543,6 +603,70 @@ describe(
       });
     });
 
+    it("throws away a drawing under way as a purge rewrites what its people said, while its brief is read or its drawing asked for, and draws it again", async () => {
+      const store = onboardingStore(env);
+      /**
+       * Tickets drawn from what Max said, naming a word, while a content
+       * purge of it reaches the interviews `when`: as the brief reads the
+       * company's name, or as the drawing's request reaches the gateway,
+       * each inside the store's call.
+       */
+      const purgedWhile = async (when: "brief" | "drawing") => {
+        const word = sentinelOf();
+        const ids = await team();
+        await toldAll(ids, `Tickets arrive in Zendesk and ${word}.`);
+        let purged = false;
+        const purgeOnce = async () => {
+          if (!purged) {
+            purged = true;
+            await interviewErasure(env).rewrite(
+              { actor: { type: "system" }, userId: "system" },
+              (text) => text.replaceAll(word, "(removed)")
+            );
+          }
+        };
+        const database = env.DB;
+        if (when === "brief") {
+          env.DB = withHook(database, "organizations", purgeOnce);
+        }
+        try {
+          const drew = await answeringWith(
+            async () => {
+              if (when === "drawing") {
+                await purgeOnce();
+              }
+              return ticketsReply(ids, word);
+            },
+            async () => await store.drawNext()
+          );
+          const tickets = await ticketsOf(ids.team);
+          env.DB = database;
+          return {
+            drew: drew?.startsWith("work:"),
+            purged,
+            // The drawing made from what Max said before: thrown away.
+            thrown: JSON.stringify(tickets?.drawn ?? null).includes(word),
+            left: await storeTablesWith(word),
+            drewAgainWith: await drawAll(ids, "Zendesk", word),
+          };
+        } finally {
+          env.DB = database;
+        }
+      };
+      const whole = {
+        drew: true,
+        purged: true,
+        thrown: false,
+        left: [],
+        drewAgainWith: false,
+      };
+
+      expect({
+        brief: await purgedWhile("brief"),
+        drawing: await purgedWhile("drawing"),
+      }).toStrictEqual({ brief: whole, drawing: whole });
+    });
+
     it("throws away a drawing under way as its document goes, and draws it again", async () => {
       const { api: admin } = await signedInApi(idp, "admin");
       const store = onboardingStore(env);
@@ -579,6 +703,139 @@ describe(
         thrown: null,
         left: [],
         drewAgainWith: false,
+      });
+    });
+  }
+);
+
+/**
+ * The onboarding's part of a content purge of `word`, once, however often
+ * it's asked: the interviews rewritten, then what was drawn from them. A
+ * stub of its own each time: it runs inside another call's I/O context.
+ */
+const purgeOnce = (word: string) => {
+  let ran = false;
+  return {
+    ran: () => ran,
+    once: async () => {
+      if (ran) {
+        return;
+      }
+      ran = true;
+      const by = { actor: { type: "system" }, userId: "system" } as const;
+      const rewrite = (text: string) => text.replaceAll(word, "(removed)");
+      await interviewErasure(env).rewrite(by, rewrite);
+      await drawingErasure(env).rewrite(by, rewrite);
+    },
+  };
+};
+
+/** One way the onboarding writes what it made from what people said. */
+interface Writer {
+  name: string;
+  /**
+   * Starts writing from something naming `word`, with a purge (`landing`)
+   * while it's under way, and returns where `word` is left after.
+   */
+  run: (
+    word: string,
+    landing: ReturnType<typeof purgeOnce>
+  ) => Promise<unknown>;
+}
+
+// Every writer whose output rests on interview or kickoff text, each made
+// to run while a purge lands (the kickoff's reading: brain.test.ts).
+const writers: Writer[] = [
+  {
+    name: "a piece of work's drawing",
+    run: async (word, landing) => {
+      const ids = await team();
+      await toldAll(ids, `Tickets arrive in Zendesk and ${word}.`);
+      await answeringWith(
+        async () => {
+          await landing.once();
+          return ticketsReply(ids, word);
+        },
+        async () => await onboardingStore(env).drawNext()
+      );
+      return await storeTablesWith(word);
+    },
+  },
+  {
+    name: "a team's map",
+    run: async (word, landing) => {
+      const ids = await team();
+      const store = onboardingStore(env);
+      await store.releaseDue();
+      await agree(ids.lea, [
+        fact("l1", "work", `Max, Mia and Mo handle tickets about ${word}.`),
+      ]);
+      await answeringWith(
+        async () => {
+          await landing.once();
+          return mapReply(ids, `Answers questions about ${word}`);
+        },
+        async () => await store.drawNext()
+      );
+      return await storeTablesWith(word);
+    },
+  },
+  {
+    name: "a line Stephen says, kept in the speech cache",
+    run: async (word, landing) => {
+      const ids = await team();
+      await onboardingStore(env).releaseDue();
+      // The lead: the first whose link is out.
+      const told = fact("l1", "work", `Tickets arrive in ${word}.`);
+      const link = await openLink(ids.lea);
+      await agree(ids.lea, [told], link);
+      const gateway = answeringGateway(async () => {
+        await landing.once();
+        return { speech: { audio: "mp3 bytes" } };
+      });
+      const before = env.MODEL_GATEWAY;
+      const ai: AiBinding = env.AI;
+      const spy = vi
+        .spyOn(ai, "fetch")
+        .mockImplementation(gateway.binding.fetch);
+      env.MODEL_GATEWAY = {
+        gateway: "grasp-os-test",
+        models: [voiceModels.said, voiceModels.quick],
+      };
+      try {
+        await routed(speechPath, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: told.text, language: "en", link }),
+        });
+      } finally {
+        env.MODEL_GATEWAY = before;
+        spy.mockRestore();
+      }
+      const kept = await keptLine(env, {
+        spoken: told.text,
+        voice: speakerVoices.stephen,
+        model: voiceModels.said,
+        language: "en",
+      });
+      return kept === undefined ? [] : ["speech cache"];
+    },
+  },
+];
+
+describe(
+  "a writer under way as a content purge lands",
+  { timeout: 60_000 },
+  () => {
+    it.each(writers)("keeps nothing purged: $name", async ({ run }) => {
+      const word = sentinelOf();
+      const landing = purgeOnce(word);
+
+      const left = await run(word, landing);
+
+      expect({ purged: landing.ran(), left }).toStrictEqual({
+        purged: true,
+        left: [],
       });
     });
   }
