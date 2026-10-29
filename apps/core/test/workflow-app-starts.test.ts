@@ -17,11 +17,7 @@ import {
   sdkProtocolVersion,
 } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import {
-  appIdSchema,
-  chatIdSchema,
-  workspaceIdSchema,
-} from "@grasp-os/shared/ids";
+import { appIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -46,6 +42,7 @@ import {
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
+import { personOf } from "../src/connections.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { appHost, workspace } from "../src/durable-objects.ts";
@@ -1303,18 +1300,24 @@ const detailsOf = async (name: string, target: string) => {
     .map(({ detail }) => detail);
 };
 
-/** An agent of a chat of its own, granted `write` on the fixture's App. */
+/**
+ * An agent of a real chat of Bob's, of its own, granted `write` on the
+ * fixture's App: a start its call makes is held to what that chat read.
+ */
 const agentOf = async (
   fx: Fixture
 ): Promise<{
   agent: CallingAgent;
   permissionId: string;
 }> => {
-  const agent: CallingAgent = {
-    agentId: `agent-${unique()}`,
-    workspaceId: workspaceIdSchema.parse(crypto.randomUUID()),
-    chatId: chatIdSchema.parse(crypto.randomUUID()),
-  };
+  const agentId = `agent-${unique()}`;
+  const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+  const chat = await workspace(env, workspaceId).createChat(
+    "Questions",
+    fx.bob.userId,
+    agentId
+  );
+  const agent: CallingAgent = { agentId, workspaceId, chatId: chat.id };
   const asked = await requestPermission(
     env,
     fx.ada,
@@ -1336,15 +1339,9 @@ const agentOf = async (
  * (`readId`).
  */
 const chatThatRead = async (fx: Fixture) => {
-  const { agent: granted } = await agentOf(fx);
-  const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
-  const stub = workspace(env, workspaceId);
-  const created = await stub.createChat(
-    "Questions",
-    fx.bob.userId,
-    workspaceId
-  );
-  const agent: CallingAgent = { ...granted, workspaceId, chatId: created.id };
+  const { agent } = await agentOf(fx);
+  const stub = workspace(env, agent.workspaceId);
+  const created = { id: agent.chatId };
   const handbook = await createCollection(env, fx.admin, {
     name: `Handbook ${unique()}`,
     access: "everyone",
@@ -1463,6 +1460,52 @@ describe("what a start rechecks, and records", () => {
       refusedAgents: [agent.agentId],
       outbox: [
         { settled: true, undeliverable: "workflow.start_denied" },
+        { settled: true, undeliverable: "workflow.start_denied" },
+      ],
+      receipts: 1,
+    });
+  });
+
+  it("delivers no start an agent's call staged once its chat is deleted, as its sources went with it", async () => {
+    const fx = await fixture();
+    const { agent } = await agentOf(fx);
+    const kept = await call(
+      fx,
+      fx.bob,
+      "requests.submit",
+      { who: "Bob" },
+      { agent }
+    );
+    await runDurableObjectAlarm(objectOf(fx.store));
+    const before = await settledOf(fx.store);
+    const staged = await call(
+      fx,
+      fx.bob,
+      "requests.submit",
+      { who: "Bob" },
+      { agent }
+    );
+    // Deleted by its person between the commit and the start's delivery.
+    await workspace(env, agent.workspaceId).deleteChat(
+      agent.chatId,
+      fx.bob.userId,
+      await personOf(env, fx.bob),
+      { type: "person", userId: fx.bob.userId }
+    );
+    await runDurableObjectAlarm(objectOf(fx.store));
+
+    expect({
+      calls: [kept.ok, staged.ok],
+      before,
+      after: await settledOf(fx.store),
+      receipts: await receiptCount(fx.app),
+    }).toStrictEqual({
+      calls: [true, true],
+      // Its chat still there: delivered.
+      before: [{ settled: true, undeliverable: null }],
+      // Gone since: refused, never admitted unheld.
+      after: [
+        { settled: true, undeliverable: null },
         { settled: true, undeliverable: "workflow.start_denied" },
       ],
       receipts: 1,

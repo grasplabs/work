@@ -1064,10 +1064,20 @@ const restrictedStart = async (
  * agent's chat's. Its run is held to them (workflows/resource-reads.ts),
  * as its input may carry any. None for any other start. More than a run
  * keeps is refused (`brain.budget_exceeded`), never cut short.
+ *
+ * Refused (`workflow.start_denied`, recorded by `refuse`) once that chat
+ * is deleted, or being deleted. A start its
+ * agent's call staged in an App's outbox is delivered later, its input
+ * still carrying what the chat had read, while the chat's sources went
+ * with it: the start is refused rather than admitted unheld. Refused, not
+ * held to a copy taken as it was staged: what a run is held to is always
+ * read from the chat as the start is admitted, one place and one time,
+ * and a deleted chat's starts go with it, as its held writes do.
  */
 const chatPinsOf = async (
   env: Env,
-  invoker: StartInvoker
+  invoker: StartInvoker,
+  refuse: () => Promise<void>
 ): Promise<ChatPins | undefined> => {
   if (
     invoker.type !== "app" ||
@@ -1080,6 +1090,10 @@ const chatPinsOf = async (
   const sources = await workspace(env, agent.workspaceId).heldSourcesOf(
     agent.chatId
   );
+  if (sources === null) {
+    await refuse();
+    throw denied();
+  }
   if (sources.length > runEvidenceMaxRows) {
     throw brainErrors.create("brain.budget_exceeded");
   }
@@ -1307,7 +1321,15 @@ export const decideWorkflowStart = async (
   const restricted = await restrictedStart(env, invoker);
   // And what the chat behind it had read, copied onto its run as it is
   // admitted (`chatPinsOf`).
-  const pins = await chatPinsOf(env, invoker);
+  const pins = await chatPinsOf(env, invoker, async () => {
+    await refusedStart(
+      env,
+      rule.actor,
+      id,
+      { ...base, inputHash },
+      "workflow.start_denied"
+    );
+  });
   // Frozen now, from what was read above: the parameter values of the
   // revision in force, and what serves each binding.
   const params = await frozenParams(env, id, version, configRevision);
