@@ -2369,8 +2369,17 @@ export const runBrainEvidence = sqliteTable(
      * in @grasp-os/brain/recall-store): changed by a purge.
      */
     pinned: text().notNull(),
-    /** The `brain` permission of the binding that recalled it. */
+    /**
+     * The permission of the binding it came through: an App's `brain`
+     * permission, or a JSON workflow's knowledge binding's.
+     */
     permissionId: text("permission_id").notNull(),
+    /**
+     * Whether a recall cited it, so the Brain must still admit the run:
+     * a JSON workflow's knowledge search or read pins it without (GRA-299).
+     * Only ever set, never cleared, as the rest only grows.
+     */
+    recalled: integer({ mode: "boolean" }).notNull().default(true),
     recordedAt: timestamp("recorded_at").notNull(),
   },
   (table) => [
@@ -2382,6 +2391,28 @@ export const runBrainEvidence = sqliteTable(
         table.permissionId,
       ],
     }),
+  ]
+);
+
+/**
+ * The runs whose evidence a run holds (GRA-1093; workflows/resource-reads.ts):
+ * a child whose output it took (resource-runs.ts, `tellParentOfEnd`), and
+ * every run that child held, since its output may carry what they
+ * recalled. Before each of the run's releases, the host checks each held
+ * run's evidence too, under that run's own authority as it stands now. A
+ * held run's details stay while a run that holds it hasn't passed its own
+ * retention (retention.ts). Identifiers only; goes with the holding run's
+ * details.
+ */
+export const runEvidenceHolds = sqliteTable(
+  "run_evidence_holds",
+  {
+    runId: text("run_id").notNull(),
+    heldRunId: text("held_run_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.heldRunId] }),
+    index("run_evidence_holds_held_run_id_idx").on(table.heldRunId),
   ]
 );
 
