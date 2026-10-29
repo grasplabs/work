@@ -5,7 +5,7 @@ import type { KnowledgeSignalKind } from "./knowledge-signals.ts";
 import type { OnboardingProgress, Programme } from "./onboarding.ts";
 import type { SignalKind } from "./signals.ts";
 import { customWidgetIdSchema, customWidgetsMax } from "./widgets.ts";
-import type { CustomWidget, WidgetMade } from "./widgets.ts";
+import type { CustomWidget, WidgetMade, WidgetProgress } from "./widgets.ts";
 import type { RunActivity } from "./workflows.ts";
 
 // Each person's own dashboard: which of the widget board's widgets are on
@@ -148,10 +148,23 @@ export interface DashboardApi {
    * model gateway, on their own model budget, and puts it last on their
    * board. Refused as `dashboard.widget_unreadable` when no answer would
    * read as one after being sent back to be put right twice.
+   * `onProgress`, when given, is told each stage as it comes and what can
+   * be read of the widget while it is written; a page that stops taking
+   * it doesn't stop the widget.
    */
-  makeWidget: (request: string) => Promise<WidgetMade>;
-  /** Has Grasp change widget `id` as they ask; it keeps its place. */
-  changeWidget: (id: string, request: string) => Promise<WidgetMade>;
+  makeWidget: (
+    request: string,
+    onProgress?: (progress: WidgetProgress) => void
+  ) => Promise<WidgetMade>;
+  /**
+   * Has Grasp change widget `id` as they ask; it keeps its place.
+   * `onProgress` as for `makeWidget`.
+   */
+  changeWidget: (
+    id: string,
+    request: string,
+    onProgress?: (progress: WidgetProgress) => void
+  ) => Promise<WidgetMade>;
   /** Takes widget `id` off their board, for good. */
   removeWidget: (id: string) => Promise<void>;
   /**
