@@ -36,6 +36,12 @@ import {
 import { createContext, Fragment, use, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+import type { ThinkingOf } from "../brain/thinking/play.ts";
+import {
+  SeeInBrain,
+  ThinkingLine,
+  useAnswerThinking,
+} from "./answer-thinking.tsx";
 import {
   Conversation,
   ConversationContent,
@@ -223,8 +229,23 @@ const CopyAnswer = ({ text }: { text: string }) => {
   );
 };
 
-/** The trace's first line, over an answer Grasp works on: what it does now, as a light runs through the words. */
-const Working = ({ doing }: { doing: WorkState }) => {
+/** No step of thinking has arrived. */
+const noArrivals: readonly (number | undefined)[] = [];
+
+/**
+ * The trace's first line, over an answer Grasp works on: what it does now,
+ * as a light runs through the words; the step of its thinking it is at,
+ * while it shows that in the brain.
+ */
+const Working = ({
+  doing,
+  thinking,
+  arrivals = noArrivals,
+}: {
+  doing: WorkState;
+  thinking?: ThinkingOf;
+  arrivals?: readonly (number | undefined)[];
+}) => {
   const { t } = useLingui();
   const label = {
     reading: t`Reading the workspace`,
@@ -232,6 +253,11 @@ const Working = ({ doing }: { doing: WorkState }) => {
     writing: t`Writing`,
     working: t`Working on it`,
   }[doing];
+  if (thinking !== undefined) {
+    return (
+      <ThinkingLine arrivals={arrivals} fallback={label} thinking={thinking} />
+    );
+  }
   return (
     <TraceLine>
       <TraceIcon>
@@ -275,6 +301,28 @@ const WorkedFor = ({ seconds }: { seconds: number }) => {
     </TraceLine>
   );
 };
+
+/**
+ * The trace's first lines over a finished answer: how long Grasp worked,
+ * and, when it showed its thinking in the brain, the way to see it there
+ * again.
+ */
+const FinishedTop = ({
+  chatId,
+  seconds,
+  thinking,
+}: {
+  chatId: string;
+  seconds: number | undefined;
+  thinking: ThinkingOf | undefined;
+}) => (
+  <>
+    {seconds === undefined ? null : <WorkedFor seconds={seconds} />}
+    {thinking === undefined ? null : (
+      <SeeInBrain chatId={chatId} thinking={thinking} />
+    )}
+  </>
+);
 
 /**
  * What the model thought before a response, a step of the trace: open
@@ -641,12 +689,23 @@ export const ChatThread = ({
     running,
     results
   );
+  const answerThinking = useAnswerThinking(messages, running);
   const topOf = (id: number): ReactNode => {
+    const thinking = answerThinking.byReply.get(id);
     if (doing !== undefined && replies[0]?.id === id) {
-      return <Working doing={doing} />;
+      return (
+        <Working
+          doing={doing}
+          {...(thinking === undefined
+            ? {}
+            : { thinking, arrivals: answerThinking.arrivals(thinking) })}
+        />
+      );
     }
     const seconds = worked.get(id);
-    return seconds === undefined ? undefined : <WorkedFor seconds={seconds} />;
+    return seconds === undefined && thinking === undefined ? undefined : (
+      <FinishedTop chatId={chatId} seconds={seconds} thinking={thinking} />
+    );
   };
   return (
     <ChatTools value={tools}>

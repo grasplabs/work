@@ -1357,9 +1357,17 @@ msgstr "{team} ha estado callado hasta ahora. Un mensaje breve de {lead}, su res
 msgid "{team} interviewed"
 msgstr "Equipo entrevistado: {team}"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "{team} says the same"
+msgstr "{team} dice lo mismo"
+
 #: src/brain/brain.ts
 msgid "{team}, {total} interviewed: {who}."
 msgstr "{team}, {total} entrevistados: {who}."
+
+#: src/brain/thinking/use-thinking.ts
+msgid "{team}: “{words}”"
+msgstr "{team}: «{words}»"
 
 #: src/onboarding/review-parts.tsx
 msgid "{team}: some do a step another way, and nobody could say why. I keep both ways until you decide."
@@ -9250,6 +9258,10 @@ msgstr "Sin empezar"
 msgid "Not started yet."
 msgstr "Aún no ha empezado."
 
+#: src/brain/thinking/use-thinking.ts
+msgid "Not the same in {team}"
+msgstr "No es lo mismo en {team}"
+
 #: src/activity/audit-log.tsx
 msgid "Not verified"
 msgstr "No verificado"
@@ -10777,6 +10789,10 @@ msgctxt "what AI was used for"
 msgid "Reading"
 msgstr "Lectura"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "Reading {name}"
+msgstr "Leyendo {name}"
+
 #: src/interview/words.ts
 msgid "Reading it back"
 msgstr "Repaso"
@@ -11711,6 +11727,10 @@ msgstr "Ver"
 #: src/onboarding/setup-steps.tsx
 msgid "See an example"
 msgstr "Ver un ejemplo"
+
+#: src/chat/answer-thinking.tsx
+msgid "See it in the brain"
+msgstr "Verlo en el cerebro"
 
 #: src/onboarding/interview-people.tsx
 msgid "See the interview"
@@ -13634,6 +13654,10 @@ msgstr "La ejecución se está iniciando."
 #: src/workflows/test-run.tsx
 msgid "The run was stopped."
 msgstr "La ejecución se ha detenido."
+
+#: src/brain/thinking/shapes.ts
+msgid "The same pain in more than one team"
+msgstr "El mismo problema en más de un equipo"
 
 #: src/inbox/items.ts
 msgid "The schedule of {workflowName} stopped"
