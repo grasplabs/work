@@ -1051,6 +1051,19 @@
   --icon-move: icon-pop;
 }
 
+/* The door swings a little on its hinge, and the knob comes after it. */
+.lucide-door-open > :nth-child(4) {
+  --icon-move: icon-swing;
+  --icon-turn: -8deg;
+  --icon-origin: 10px 12px;
+  --icon-box: view-box;
+  --icon-time: 0.6s;
+}
+.lucide-door-open > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.3s;
+}
+
 /* The arrow falls into the tray. */
 .lucide-download > :is(:nth-child(1), :nth-child(3)) {
   --icon-move: icon-land;
@@ -1268,6 +1281,17 @@
   --icon-move: icon-from;
   --icon-tall: 0;
   --icon-wait: 0.12s;
+}
+
+/* The branch is drawn from the trunk, and the dot it leads to comes up. */
+.lucide-git-branch > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 28 100;
+  --icon-from: -29.5;
+}
+.lucide-git-branch > :nth-child(2) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.3s;
 }
 
 /* Each line runs from its dot to its arrow, and the heads come in. */
