@@ -143,12 +143,8 @@ import {
   derivedCoreConfig,
 } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
-import {
-  configuredCoreVars,
-  errorCode,
-  mailSenderOf,
-} from "../deploy/deploy.ts";
-import { DeployError } from "../deploy/errors.ts";
+import { configuredCoreVars, mailSenderOf } from "../deploy/core-vars.ts";
+import { DeployError, errorCode } from "../deploy/errors.ts";
 import { migrateDatabases } from "../deploy/migrations.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { sendsMail } from "../deploy/resources.ts";
@@ -1792,12 +1788,25 @@ const upload = async (
   }
   if (target.namespace === null) {
     // An account's own Worker: its cron triggers, and whether it's on
-    // workers.dev (how the probe reaches core). Each a PUT or a set.
-    await assertHolds(db, held);
-    await putSchedules(api, target.accountId, target.scriptName, worker.crons);
-    await setScriptSubdomain(api, target.accountId, target.scriptName, {
-      enabled: worker.workersDev,
-      previewsEnabled: false,
+    // workers.dev (how the probe reaches core). Each a PUT or a set, sent
+    // marked as an upload is (`sendHolding`).
+    await sendHolding(context, loaded, async (signal) => {
+      await putSchedules(
+        api,
+        target.accountId,
+        target.scriptName,
+        worker.crons,
+        { signal }
+      );
+    });
+    await sendHolding(context, loaded, async (signal) => {
+      await setScriptSubdomain(
+        api,
+        target.accountId,
+        target.scriptName,
+        { enabled: worker.workersDev, previewsEnabled: false },
+        { signal }
+      );
     });
   }
   if (app === "core") {

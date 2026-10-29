@@ -3,26 +3,22 @@ import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { formatDate } from "../src/admin/words.ts";
-import { act, adminDatabase } from "../src/db/act.ts";
+import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
 import { setRoomsProjectFn } from "../src/proposal/functions.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn, page } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { fakeRooms, roomsOrigin } from "./rooms-fake.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-admin-proposal-5b8c20";
-const tenantToken = "test-tenant-admin-token-admin-proposal-c41e9a";
 /** Rooms' service token; never a real one. */
 const roomsToken = "rooms-read-token-admin-proposal-fake-0a9d7e3b";
 
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 mockAccess();
 const rooms = fakeRooms(roomsToken);
 
@@ -53,31 +49,14 @@ const eachTest = ({ withKey }: { withKey: boolean }): void => {
 
 /** An active client running a new release, as a deploy made it live, whose core answers an empty snapshot. */
 const liveClient = async () => {
-  const release = await publishRelease({ notes: "feat(core): proposal" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(core): proposal");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const name = `Noordkade ${clientId}`;
-  const account = cloudflare.addAccount(name);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, release.id)
-  );
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name,
+    signIn: null,
+  });
   account.admin = emptyAdminSnapshot("Noordkade");
   return clientId;
 };
@@ -170,7 +149,7 @@ const signedRoom = (projectId: string) => {
 };
 
 describe("an organization's proposal, with Rooms' token", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   eachTest({ withKey: true });
 
   it("shows a linked company's room, who signed it and when, read only", async () => {
@@ -280,7 +259,7 @@ describe("an organization's proposal, with Rooms' token", () => {
 });
 
 describe("an organization's proposal, without Rooms' token", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   eachTest({ withKey: false });
 
   it("says Rooms isn't connected and asks Rooms nothing", async () => {

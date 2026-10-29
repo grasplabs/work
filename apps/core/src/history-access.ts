@@ -1,9 +1,14 @@
+import { brainErrors } from "@grasp-os/brain/contract";
+import { d1BrainStore } from "@grasp-os/brain/recall-store";
+import type { BrainStore, PinnedVersion } from "@grasp-os/brain/recall-store";
 import { collections } from "@grasp-os/brain/schema";
 import type { AppRole } from "@grasp-os/shared/apps";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { Permission } from "@grasp-os/shared/permissions";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { connectionGrants } from "./agent-connections.ts";
 import { chatAuthority, chatContext, connectionReadOf } from "./agent-scope.ts";
@@ -14,6 +19,8 @@ import { connectionOwnersOf } from "./connections.ts";
 import { inList } from "./db/d1.ts";
 import { collectionsAllowed } from "./knowledge/access.ts";
 import { appsCollectionId } from "./knowledge/app-entries.ts";
+import { readAsDelegate } from "./knowledge/binding.ts";
+import { brainOf } from "./knowledge/ports.ts";
 import { grantedPermissions } from "./permissions.ts";
 
 // What a chat's earlier code results may still send to the model (GRA-690).
@@ -27,6 +34,119 @@ import { grantedPermissions } from "./permissions.ts";
 // agent.ts): a person who left a team or an App, an agent whose grant was
 // revoked (the one a connection call was made under, whatever other grant
 // on that connection stays), a collection or App deleted.
+//
+// What a run read of the Brain is pinned too (GRA-299; the threat model is
+// on the issue): beside its collections, the agent's `brain` grant it read
+// under (`brainGrantRead`) and each document it was handed
+// (`brainDocumentRead`), at its version, pinned as its text was
+// (`PinnedVersion`), so its results are withheld once that grant is
+// revoked, or once a document it was handed is erased, moved or purged,
+// though its collection may still be read.
+
+/** The source a run's read of the Brain under the agent's `brain` grant is recorded as. */
+export const brainGrantRead = "brain-grant";
+
+const brainDocumentPrefix = "brain-document:";
+
+/** The source a document version handed to a run is recorded as: pinned. */
+export const brainDocumentRead = ({
+  collectionId,
+  documentId,
+  version,
+  text,
+}: PinnedVersion): string =>
+  `${brainDocumentPrefix}${JSON.stringify([collectionId, documentId, version, text])}`;
+
+const pinnedSourceSchema = z.tuple([
+  z.string().min(1),
+  z.string().min(1),
+  z.int().min(1),
+  z.string().min(1),
+]);
+
+/** The pinned version a `brainDocumentRead` source names, if it is one. */
+const brainDocumentOf = (source: string): PinnedVersion | undefined => {
+  if (!source.startsWith(brainDocumentPrefix)) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source.slice(brainDocumentPrefix.length));
+  } catch {
+    return undefined;
+  }
+  const pin = pinnedSourceSchema.safeParse(parsed);
+  if (!pin.success) {
+    return undefined;
+  }
+  const [collectionId, documentId, version, text] = pin.data;
+  return { collectionId, documentId, version, text };
+};
+
+/** Whether `error` refuses the Brain's read, rather than failing it. */
+const isBrainRefusal = (error: unknown): boolean =>
+  brainErrors.codeOf(error) === "brain.denied" ||
+  permissionErrors.codeOf(error) === "permission.denied";
+
+/** Whether the Brain's recall admits `reader` now. */
+const holdsBrainGrant = async <C>(
+  store: BrainStore<C>,
+  reader: C
+): Promise<boolean> => {
+  try {
+    await store.requireBrainGrant(reader);
+    return true;
+  } catch (error) {
+    if (isBrainRefusal(error)) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/**
+ * Of the Brain reads in `sources`, those the agent may make for its person
+ * now, read as its delegate as a recall is: the grant, while the Brain's
+ * recall admits the agent; each document version, while it is in its
+ * collection, the agent may read it there, and no purge rewrote it since
+ * it was pinned (one query, whatever their number).
+ */
+const readableBrain = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[]
+): Promise<string[]> => {
+  const grant = sources.includes(brainGrantRead);
+  const refs = sources.flatMap((source) => {
+    const pin = brainDocumentOf(source);
+    return pin === undefined ? [] : [{ source, pin }];
+  });
+  if (!grant && refs.length === 0) {
+    return [];
+  }
+  const store = d1BrainStore(brainOf(env));
+  return await readAsDelegate(
+    env,
+    chatAuthority(scope),
+    chatContext(scope),
+    undefined,
+    async (reader) => {
+      const [granted, unchanged] = await Promise.all([
+        grant ? holdsBrainGrant(store, reader) : false,
+        store.unchangedPins(
+          reader,
+          refs.map(({ pin }) => pin)
+        ),
+      ]);
+      return [
+        ...(granted ? [brainGrantRead] : []),
+        ...refs.flatMap(({ source, pin }) =>
+          unchanged.includes(pin) ? [source] : []
+        ),
+      ];
+    }
+  );
+};
 
 /** How a run read an App, each checked as a read made now would be. */
 const appReads = {
@@ -216,7 +336,9 @@ const readableApps = async (
  * readable by the person: `collectionsAllowed`); a connection call a
  * grant the agent holds in this chat now covers, on a connection not
  * disconnected that the person may use themselves; an App read the
- * agent's grants and the person's role in the App allow now. Anything
+ * agent's grants and the person's role in the App allow now; a Brain
+ * read, while the Brain's recall admits the agent and each document it
+ * was handed is still in its collection for it to read, unpurged. Anything
  * else, an unknown source or a bare connection included, is not. Throws
  * what the reads throw (a person who left, a database away): the caller
  * withholds everything then.
@@ -242,13 +364,15 @@ export const readableSources = async (
     })
     .from(collections)
     .where(inList(collections.id, sourceIds));
-  const [apps, connections] = await Promise.all([
+  const [apps, connections, brain] = await Promise.all([
     readableApps(env, scope, sourceIds),
     readableConnections(env, scope, sourceIds),
+    readableBrain(env, scope, sourceIds),
   ]);
   return new Set([
     ...known.flatMap(({ id, readable }) => (readable === 1 ? [id] : [])),
     ...apps,
     ...connections,
+    ...brain,
   ]);
 };

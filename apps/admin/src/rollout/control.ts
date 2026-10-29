@@ -44,8 +44,7 @@ import {
   MissingStoreSecretError,
 } from "../deploy/context.ts";
 import { clientRuntimeProfile } from "../deploy/core-config.ts";
-import { errorCode } from "../deploy/deploy.ts";
-import { DeployError } from "../deploy/errors.ts";
+import { DeployError, errorCode } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { limitRaiseCheck } from "../releases/limits.ts";
 import type { LimitRaiseCheck } from "../releases/limits.ts";

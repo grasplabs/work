@@ -72,7 +72,6 @@ const row = (id: string, input: Partial<GridRow> = {}): GridRow => ({
   name: id,
   status: "active",
   ring: 1,
-  accountId: `account-${id}`,
   hostname: null,
   release: "r3",
   pinnedReleaseId: null,
@@ -84,8 +83,6 @@ const live = (input: Partial<LiveStatus> = {}): LiveStatus => ({
   drift: "in_sync",
   sharedSecretsCurrent: true,
   reach: "reachable",
-  day: { requests: 1000, errors: 1 },
-  costUsd: null,
   onboarding: null,
   ...input,
 });
@@ -209,7 +206,7 @@ describe("the Platform page's model", () => {
     ]);
   });
 
-  it("lists the companies that need a look first: a failed deploy, drift, errors, or two releases behind unpinned, older than every listed one included; one not read never as healthy", () => {
+  it("lists the companies that need a look first: a failed deploy, drift, or two releases behind unpinned, older than every listed one included; one not read never as healthy", () => {
     const releases = [release("r1", 1), release("r2", 2), release("r3", 3)];
     const companies = companiesOf(
       [
@@ -218,7 +215,6 @@ describe("the Platform page's model", () => {
           lastDeploy: { releaseId: "r3", status: "failed", at: day(3) },
         }),
         row("split"),
-        row("noisy"),
         row("behind", { release: "r1" }),
         row("older", { release: "r0" }),
         row("pinned", { release: "r1", pinnedReleaseId: "r1" }),
@@ -231,11 +227,10 @@ describe("the Platform page's model", () => {
         zeta: live(),
         failed: live(),
         split: live({ drift: "split" }),
-        noisy: live({ day: { requests: 100, errors: 1 } }),
         behind: live(),
         older: live(),
         pinned: live(),
-        timedout: live({ drift: "unknown", day: null, reach: "unknown" }),
+        timedout: live({ drift: "unknown", reach: "unknown" }),
       },
       releases
     );
@@ -249,7 +244,6 @@ describe("the Platform page's model", () => {
     ).toStrictEqual([
       { id: "behind", standing: "attention", needs: ["behind"] },
       { id: "failed", standing: "attention", needs: ["failed"] },
-      { id: "noisy", standing: "attention", needs: ["errors"] },
       { id: "older", standing: "attention", needs: ["behind"] },
       { id: "split", standing: "attention", needs: ["drift"] },
       { id: "new", standing: "setup", needs: [] },
@@ -281,7 +275,6 @@ describe("the Platform page's data", () => {
       clientIds.map((id, ring) => ({
         id,
         name: id,
-        accountId: `account-${id}`,
         ring,
         status: "active" as const,
         createdAt: now,

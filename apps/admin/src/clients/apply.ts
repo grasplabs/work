@@ -7,42 +7,54 @@
  * It's a runner like the others (src/runners.ts): it claims the client
  * with the same conditional write, audited (`client.apply_settings`), so
  * it never runs beside a rollout, a rollback or provisioning, and its
- * Workflow (`ApplyClient`) runs the operation as that runner and releases
- * the client when it's done, whether it worked or not.
+ * workflow (`applyClient`, on Workerflow: src/workflow-runs.ts) runs the
+ * operation as that runner and releases the client when it's done,
+ * whether it worked or not.
  */
 import { log } from "@grasp-os/shared/log";
-import { WorkflowEntrypoint } from "cloudflare:workers";
-import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
+import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
+import { z } from "zod";
 
 import type { Staff } from "../access.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { InventoryError } from "../hosting/inventory.ts";
 import {
   ProvisionOperationError,
+  provisionOf,
   runClientProvision,
   startClientRelease,
 } from "../hosting/operation.ts";
 import { runningRelease, targetClient } from "../rollout/targets.ts";
-import { claimRun, currentRun, hasEnded, releaseRun } from "../runners.ts";
 import {
-  deployStepConfig,
+  claimRun,
+  currentRun,
+  hasEnded,
+  releaseRun,
+  takeAttempt,
+} from "../runners.ts";
+import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
+import {
   guarded,
   isEngineAbort,
   quickStep,
   stop,
   stopReason,
+  workerflowDeployStep,
 } from "../workflow-steps.ts";
 import { SettingsError } from "./settings.ts";
 
-/** What an apply's run is started with: identifiers only. */
-export interface ApplyParams {
-  clientId: string;
-  /** The staff member who asked for it. */
-  startedBy: Staff;
-}
+/**
+ * What an apply's run is started with: identifiers only, the client and
+ * the staff member who asked for it.
+ */
+const applyParamsSchema = z.object({
+  clientId: z.string(),
+  startedBy: z.object({ email: z.string(), sub: z.string() }),
+});
+export type ApplyParams = z.infer<typeof applyParamsSchema>;
 
 /** A new apply run's instance id. */
 const newApplyId = (): string =>
@@ -115,7 +127,10 @@ export const applySettings = async (
     startedBy: { email: staff.email, sub: staff.sub },
   };
   try {
-    await env.APPLY_CLIENT.create({ id: runId, params });
+    await adminWorkflow<ApplyParams>(env, adminWorkflows.applyClient).create({
+      id: runId,
+      params,
+    });
   } catch (error) {
     // Its run never started: the client is free again, the error stands.
     await releaseQuietly(db, clientId, runId);
@@ -130,13 +145,10 @@ export const applySettings = async (
  * releases the client, whether it worked or not. The release is read in
  * the run, which holds the client: no other runner changes it after.
  */
-export class ApplyClient extends WorkflowEntrypoint<Env, ApplyParams> {
-  override async run(
-    event: WorkflowEvent<ApplyParams>,
-    step: WorkflowStep
-  ): Promise<void> {
-    const { clientId, startedBy } = event.payload;
-    const db = adminDatabase(this.env.DB);
+export const applyClient = (env: Env): WorkflowDefinition => ({
+  run: async (event, step): Promise<void> => {
+    const { clientId, startedBy } = applyParamsSchema.parse(event.payload);
+    const db = adminDatabase(env.DB);
     try {
       await step.do(
         "start",
@@ -169,17 +181,36 @@ export class ApplyClient extends WorkflowEntrypoint<Env, ApplyParams> {
       );
       await step.do(
         "deploy",
-        deployStepConfig,
-        guarded(async () => {
-          // As the client's runner: it stops if another takes the client.
+        workerflowDeployStep,
+        guarded(async ({ attempt }) => {
+          // As the client's runner, this attempt of it alone: a try that
+          // timed out goes on beside its retry, and once the retry takes
+          // the client every check and write of the older one is refused
+          // (`takeAttempt`). It stops too if another runner takes it.
+          const held = { clientId, runId: event.instanceId, attempt };
           try {
+            const context = await deployContext(env);
+            // An earlier try finished the operation, and gave the client
+            // back, but its result was lost before the engine kept it:
+            // done already, so this try succeeds at once.
+            const operation = await provisionOf(context.db, clientId);
+            if (
+              operation?.status === "done" &&
+              operation.runId === held.runId
+            ) {
+              return;
+            }
+            if (!(await takeAttempt(context.db, held))) {
+              throw stop(
+                "runner_replaced",
+                `${held.runId} no longer holds ${clientId} for attempt ${attempt}`
+              );
+            }
             // The release it runs, again: going back a release wouldn't
             // undo a setting that broke it.
-            await runClientProvision(
-              await deployContext(this.env),
-              { clientId, runId: event.instanceId },
-              { rollBackOnProbe: false }
-            );
+            await runClientProvision(context, held, {
+              rollBackOnProbe: false,
+            });
           } catch (error) {
             if (
               error instanceof ProvisionOperationError ||
@@ -204,5 +235,5 @@ export class ApplyClient extends WorkflowEntrypoint<Env, ApplyParams> {
     await step.do("release", quickStep, async () => {
       await releaseRun(db, clientId, event.instanceId);
     });
-  }
-}
+  },
+});

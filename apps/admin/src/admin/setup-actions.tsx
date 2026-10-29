@@ -38,7 +38,6 @@ import type { ReactNode } from "react";
 import { z } from "zod";
 
 import type { AlertOutcome } from "../alerts.ts";
-import { usd } from "../clients/cost.tsx";
 import {
   applySettingsFn,
   fetchClientLive,
@@ -844,22 +843,6 @@ const liveDriftWords: Record<ClientDriftState, string> = {
   unknown: "Not known",
 };
 
-const percent = new Intl.NumberFormat("en", {
-  style: "percent",
-  maximumFractionDigits: 1,
-});
-
-/** The last day's errors, in words: unknown, none asked, or their share. */
-const errorsWords = (day: LiveStatus["day"]): string => {
-  if (day === null) {
-    return "Not known";
-  }
-  if (day.requests === 0) {
-    return "No requests";
-  }
-  return `${percent.format(day.errors / day.requests)} of ${day.requests}`;
-};
-
 /** Whether it runs the shared secrets in Secrets Store now, in words. */
 const sharedWords = (current: boolean | null): string => {
   if (current === null) {
@@ -867,12 +850,6 @@ const sharedWords = (current: boolean | null): string => {
   }
   return current ? "Current" : "Behind: a secrets rollout brings it up";
 };
-
-/** What it cost this month so far, with its AI Gateway share. */
-const costWords = (cost: LiveStatus["costUsd"]): string =>
-  cost === null
-    ? "Not known"
-    : `${usd.format(cost.workers + cost.ai)} (AI ${usd.format(cost.ai)})`;
 
 /** Its account read live, or not: still reading (null), or it failed. */
 type LiveRead = LiveStatus | "failed" | null;
@@ -886,7 +863,6 @@ const liveRows = (
     value: reachWords[live.reach],
     attention: live.reach === "unreachable" || live.reach === "no_route",
   },
-  { label: "Errors, last 24 h", value: errorsWords(live.day) },
   {
     label: "Drift",
     value: liveDriftWords[live.drift],
@@ -897,7 +873,6 @@ const liveRows = (
     value: sharedWords(live.sharedSecretsCurrent),
     attention: live.sharedSecretsCurrent === false,
   },
-  { label: "Cost this month", value: costWords(live.costUsd) },
 ];
 
 /** Client `clientId`'s live numbers, or `failed` when they couldn't be read. Never throws. */
