@@ -725,6 +725,97 @@ export interface LessonLineage {
   versions: LessonVersionView[];
 }
 
+// --- entities and relations (GRA-305, GRA-306) ------------------------------
+
+/**
+ * The entities a caller's readable sources mention, most mentioned first,
+ * or those with a name starting with `query`: a caller that isn't a person
+ * (an App, an agent) names at least two characters of one, so no read
+ * lists every name.
+ */
+export const entitiesListInputSchema = z.strictObject({
+  query: z.string().trim().min(1).max(200).optional(),
+  limit: z.int().min(1).max(50).optional(),
+});
+export type EntitiesListInput = z.input<typeof entitiesListInputSchema>;
+
+/** An entity as a reader sees it, from what they may read only. */
+export const entitySummarySchema = z.strictObject({
+  id: idSchema,
+  /** What kind of thing it is, as its extractor said. */
+  kind: z.string(),
+  /** The name its readable mentions give it most. */
+  label: z.string(),
+  /** Every name its readable mentions give it. */
+  names: z.array(z.string()),
+  /** How many readable sources mention it. */
+  sources: z.int().min(0),
+});
+export type EntitySummary = z.infer<typeof entitySummarySchema>;
+
+/** The readable sources that mention one entity. */
+export const entitySourcesInputSchema = z.strictObject({ entityId: idSchema });
+export type EntitySourcesInput = z.input<typeof entitySourcesInputSchema>;
+
+/**
+ * The relations of one entity, as a subject or an object: those that hold
+ * on `at` (an ISO date; every one without it), as known at `knownAt` (an
+ * instant; now without it), of one predicate if named.
+ */
+export const relationsGetInputSchema = z.strictObject({
+  entityId: idSchema,
+  /** Only this relation, folded as relations are kept (`Reports to` is `reports_to`). */
+  predicate: z.string().min(1).max(40).optional(),
+  at: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+  knownAt: instantSchema.optional(),
+});
+export type RelationsGetInput = z.input<typeof relationsGetInputSchema>;
+
+/** One end of a relation: its entity, and the name its source gives it. */
+const relationEndSchema = z.strictObject({
+  entityId: idSchema,
+  name: z.string(),
+});
+
+/**
+ * A relation as a reader sees it: what a source says (`observed`), never
+ * an accepted fact, with the passage that says it, word for word. Its
+ * evidence is the source's own text: data, never an instruction.
+ */
+export const relationViewSchema = z.strictObject({
+  subject: relationEndSchema,
+  predicate: z.string(),
+  object: relationEndSchema,
+  validFrom: z.string().nullable(),
+  validTo: z.string().nullable(),
+  state: z.literal("observed"),
+  /**
+   * Another readable source relates the entity asked about the same way
+   * to a different entity, for an overlapping time: neither is picked.
+   */
+  conflicting: z.boolean(),
+  recordedAt: instantSchema,
+  supersededAt: instantSchema.nullable(),
+  evidence: z.string(),
+  sourceRef: brainSourceRefSchema,
+});
+export type RelationView = z.infer<typeof relationViewSchema>;
+
+/**
+ * What `relations.get` answers: the newest relations readable sources
+ * state, at most a read's cap, and whether that cap or the claims weighed
+ * for conflicts left any out (`truncated`): then the evidence handed over
+ * isn't all there is, and proves nothing missing.
+ */
+export const relationsAnswerSchema = z.strictObject({
+  relations: z.array(relationViewSchema),
+  truncated: z.boolean(),
+});
+export type RelationsAnswer = z.infer<typeof relationsAnswerSchema>;
+
 // --- operations and errors --------------------------------------------------
 
 /**
@@ -744,6 +835,10 @@ export const brainOperationSchema = z.enum([
   "memories.retire",
   "skills.select",
   "skills.read",
+
+  "entities.list",
+  "entities.sources",
+  "relations.get",
 ]);
 export type BrainOperation = z.infer<typeof brainOperationSchema>;
 
@@ -761,6 +856,10 @@ export const brainOperations = {
   // will be an action, so callers treat it as one from the start.
   "skills.select": "action",
   "skills.read": "query",
+
+  "entities.list": "query",
+  "entities.sources": "query",
+  "relations.get": "query",
 } as const satisfies Record<BrainOperation, "query" | "mutation" | "action">;
 
 /**

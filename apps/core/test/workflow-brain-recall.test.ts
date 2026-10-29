@@ -1,4 +1,6 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
+import { createBrain } from "@grasp-os/brain/brain";
+import { runLinking } from "@grasp-os/brain/entities";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
@@ -8,6 +10,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appVersions } from "../src/db/core/schema.ts";
+import { portsOf } from "../src/knowledge/ports.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -172,6 +175,59 @@ const recallsOf = async (run: string): Promise<number> => {
       detail.run === run
   ).length;
 };
+
+/**
+ * A handbook everyone reads, saying who owns a process (`thing`) in one
+ * document, linked as core's linking job does, the model's answer faked.
+ */
+const linkedOwners = async (admin: Admin) => {
+  const thing = `Onboarding ${crypto.randomUUID().slice(0, 8)}`;
+  const said = `Anna owns ${thing}.`;
+  const { id: handbook } = await admin.api.knowledge.createCollection({
+    name: `Handbook ${crypto.randomUUID()}`,
+    access: "everyone",
+  });
+  const saved = await admin.api.knowledge.saveDocument({
+    collectionId: handbook,
+    path: "owners.md",
+    text: said,
+    ifVersion: 0,
+  });
+  const linking = createBrain(env.KNOWLEDGE, {
+    ...portsOf(env),
+    extractEntities: async () =>
+      await Promise.resolve({
+        entities: [
+          { kind: "person", name: "Anna" },
+          { kind: "process", name: thing },
+        ],
+        relations: [
+          { subject: "Anna", predicate: "owns", object: thing, evidence: said },
+        ],
+      }),
+  });
+  await runLinking(
+    linking,
+    { source: `doc:${saved.id}`, version: 1 },
+    { do: async (_name, _config, fn) => await fn() }
+  );
+  return { handbook, thing, said, documentId: saved.id };
+};
+
+/**
+ * A workflow `id` that reads `read` in one step, sleeps a day, then
+ * returns what it read: its output leaves only after the sleep.
+ */
+const readThenHand = (id: string, read: string): Record<string, string> =>
+  withBrain(
+    workflowFiles(
+      id,
+      `  const read = await step.do("read", { description: "Read" }, async () => JSON.stringify(await ${read}) as Json);
+  await step.sleep("go", { description: "Wait", duration: "1 day" });
+  return await step.do("hand", { description: "Hand it over" }, async () => read);`,
+      { read: "", hand: "" }
+    )
+  );
 
 describe("a workflow's recall through the Brain binding", () => {
   it("recalls as the run from the collections its App was granted, refuses a wider filter, and is recorded with the run", async () => {
@@ -558,6 +614,118 @@ describe("a workflow's recall through the Brain binding", () => {
       status: "failed",
       code: "brain.revoked",
       recalledText: false,
+    });
+  });
+
+  it("reads what its App's collections say relate an entity, each with its passage, through the same binding", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { handbook, thing, said } = await linkedOwners(admin);
+    const { id: app } = await admin.api.apps.create({ name: "Relations" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    await requestGranted(idp, admin, readCollection(app_, handbook));
+    await requestGranted(idp, admin, brainFor(app));
+    await release(admin, app, {
+      ...sampleApp(),
+      ...withBrain(
+        workflowFiles(
+          "recaller",
+          `  return await step.do("relations", { description: "Who owns it" }, async () => {
+    const [found] = await brain(env.BRAIN).entities.list({ query: ${JSON.stringify(thing)} });
+    const { relations } = await brain(env.BRAIN).relations.get({ entityId: found?.id ?? "-" });
+    return relations.map(({ subject, predicate, evidence }) => ({ owner: subject.name, predicate, evidence })) as Json;
+  });`,
+          { relations: [] }
+        )
+      ),
+    });
+
+    const run = await ranOnce(admin, app);
+
+    expect({ status: run.status, output: run.output }).toStrictEqual({
+      status: "completed",
+      output: [{ owner: "Anna", predicate: "owns", evidence: said }],
+    });
+  });
+
+  it("fails as revoked, its output never handed over, a run whose entity read, sources or relations cite what it may no longer read", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { handbook, thing, said, documentId } = await linkedOwners(admin);
+    const [found] = await admin.api.knowledge.entities({ query: thing });
+    const entityId = JSON.stringify(found?.id ?? "-");
+    const { id: app } = await admin.api.apps.create({ name: "Relations" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    const collectionGrant = await requestGranted(
+      idp,
+      admin,
+      readCollection(app_, handbook)
+    );
+    await requestGranted(idp, admin, brainFor(app));
+    await release(admin, app, {
+      ...sampleApp(),
+      ...readThenHand(
+        "lister",
+        `brain(env.BRAIN).entities.list({ query: ${JSON.stringify(thing)} })`
+      ),
+      ...readThenHand(
+        "sourcer",
+        `brain(env.BRAIN).entities.sources({ entityId: ${entityId} })`
+      ),
+      ...readThenHand(
+        "relater",
+        `brain(env.BRAIN).relations.get({ entityId: ${entityId} })`
+      ),
+    });
+    /** Runs of each workflow, asleep after their read, then `between`. */
+    const ran = async (
+      workflows: readonly string[],
+      between?: () => Promise<void>
+    ) => {
+      const ids = await Promise.all(
+        workflows.map(async (name) => {
+          const { id } = await admin.api.workflows.start(app, name);
+          return id;
+        })
+      );
+      await Promise.all(
+        ids.map(async (id) => {
+          await sleeping(id, "go");
+          await stopped(id);
+        })
+      );
+      await between?.();
+      const ended = await Promise.all(
+        ids.map(async (id) => {
+          await woken(id);
+          await finished(id);
+          const { status, output, failure } =
+            await admin.api.workflows.status(id);
+          const shown = JSON.stringify([output ?? null, failure ?? null]);
+          return {
+            status,
+            code: failure?.error.code ?? null,
+            handed: [thing, said, documentId].some((text) =>
+              shown.includes(text)
+            ),
+          };
+        })
+      );
+      return ended;
+    };
+
+    const [kept] = await ran(["relater"]);
+    const revoked = await ran(["lister", "sourcer", "relater"], async () => {
+      await admin.api.permissions.revoke(collectionGrant);
+    });
+
+    expect({ kept, revoked }).toStrictEqual({
+      // Still readable: what it read leaves as its output.
+      kept: { status: "completed", code: null, handed: true },
+      // Each read pinned what it cites: refused before its output leaves.
+      revoked: [
+        { status: "failed", code: "brain.revoked", handed: false },
+        { status: "failed", code: "brain.revoked", handed: false },
+        { status: "failed", code: "brain.revoked", handed: false },
+      ],
     });
   });
 });
