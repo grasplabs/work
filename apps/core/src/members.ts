@@ -57,12 +57,13 @@ import {
   memberRemovals,
   members,
   notifications,
+  personErasures,
   sessions,
   teamMembers,
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { isErasedEmail } from "./erased-people.ts";
+import { emailHashOf, erasedAddress } from "./erased-people.ts";
 import {
   erasePerson,
   erasurePreview,
@@ -661,18 +662,21 @@ const listInvitations = async (
 const inviteRefusal = async (
   env: Env,
   email: string,
+  erased: SQL,
   now: Date
 ): Promise<CodedError> => {
   const row = await drizzle(env.DB).get<{
     member: number;
     removed: number;
+    erased: number;
     invited: number;
   }>(
     sql`SELECT ${isMemberEmail(email)} AS member,
       ${isRemovedEmail(email)} AS removed,
+      ${erased} AS erased,
       ${isInvitedEmail(email, now)} AS invited`
   );
-  if (row.removed === 1) {
+  if (row.removed === 1 || row.erased === 1) {
     return memberErrors.create("member.invite_removed");
   }
   if (row.member === 1) {
@@ -709,11 +713,14 @@ const inviteMember = async (
     throw refusal(by, memberErrors.create("member.invite_email"));
   }
   // Someone erased: their address is gone from `users`, but they were
-  // removed, and stay out (person-erasure.ts).
-  if (await isErasedEmail(env, address.data)) {
-    throw refusal(by, memberErrors.create("member.invite_removed"));
-  }
+  // removed, and stay out (person-erasure.ts). Checked by the insert
+  // itself, as an erasure that finishes after a read would let the
+  // address in again: once erased, it is no longer a removed member's.
   const db = drizzle(env.DB);
+  const erased = sql`EXISTS (
+    SELECT 1 FROM ${personErasures}
+    WHERE ${erasedAddress(await emailHashOf(env, address.data))}
+  )`;
   const id = crypto.randomUUID();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + invitationLifetimeMs);
@@ -725,6 +732,7 @@ const inviteMember = async (
           NULL, 'pending', ${expiresAt.getTime()}, ${now.getTime()}, ${by.userId}
           WHERE NOT ${isMemberEmail(address.data)}
             AND NOT ${isRemovedEmail(address.data)}
+            AND NOT ${erased}
             AND NOT ${isInvitedEmail(address.data, now)}
             AND ${isActiveAdmin(by.userId)}`
       )
@@ -737,7 +745,7 @@ const inviteMember = async (
     }),
   ]);
   if (inserted.length === 0) {
-    throw refusal(by, await inviteRefusal(env, address.data, now));
+    throw refusal(by, await inviteRefusal(env, address.data, erased, now));
   }
   const [inviter] = await db
     .select({ name: users.name })
