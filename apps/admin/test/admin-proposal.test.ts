@@ -187,6 +187,17 @@ describe("an organization's proposal, with Rooms' token", () => {
     });
   });
 
+  it("starts no organization from Rooms yet, saying it can't list signed proposals, not that it isn't connected", async () => {
+    const { html } = await page("/new-organization");
+    expect({
+      cantList: html.includes("Rooms can&#x27;t list its signed proposals."),
+      notConnected: html.includes(
+        "Not yet: the admin isn&#x27;t connected to Rooms."
+      ),
+      requests: rooms.requests,
+    }).toStrictEqual({ cantList: true, notConnected: false, requests: 0 });
+  });
+
   it("says when Rooms has no such room, and still offers the link", async () => {
     const clientId = await liveClient();
     await link(clientId, crypto.randomUUID());
@@ -270,5 +281,15 @@ describe("an organization's proposal, without Rooms' token", () => {
       line: contract.includes("Once Rooms is connected"),
       requests: rooms.requests,
     }).toStrictEqual({ line: true, requests: 0 });
+  });
+
+  it("says on a new organization that the admin isn't connected to Rooms", async () => {
+    const { html } = await page("/new-organization");
+    expect({
+      notConnected: html.includes(
+        "Not yet: the admin isn&#x27;t connected to Rooms."
+      ),
+      cantList: html.includes("Rooms can&#x27;t list its signed proposals."),
+    }).toStrictEqual({ notConnected: true, cantList: false });
   });
 });
