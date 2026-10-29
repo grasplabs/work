@@ -35,6 +35,7 @@ const app: ViewedApp = {
   owner: "user-1",
   responsible: "user-1",
   audience: null,
+  process: null,
   blueprint: null,
   currentVersion: 1,
   pendingVersion: null,
