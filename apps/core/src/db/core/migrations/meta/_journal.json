@@ -1195,8 +1195,15 @@
     {
       "idx": 170,
       "version": "6",
-      "when": 1793285232276,
-      "tag": "0170_brain_forget",
+      "when": 1793283306190,
+      "tag": "0170_removed_apps",
+      "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "6",
+      "when": 1793290229872,
+      "tag": "0171_brain_forget",
       "breakpoints": true
     }
   ]
