@@ -154,6 +154,33 @@ describe("the admin's Worker for cf", () => {
     ).toThrow("Secrets Store doesn't have DEPLOYER_API_TOKEN");
   });
 
+  it("deploys each stage when the store lacks only the other stage's keys", () => {
+    const without = (names: readonly string[]): string =>
+      everySecret
+        .split(",")
+        .filter((name) => !names.includes(name))
+        .join(",");
+    const stagingKeys = [
+      "DEPLOYER_API_TOKEN_STAGING",
+      "ROUTER_KEY_STAGING",
+      "CLIENT_KEY_STAGING",
+    ];
+    const productionKeys = ["DEPLOYER_API_TOKEN", "ROUTER_KEY", "CLIENT_KEY"];
+    expect({
+      production: cfWorker(wranglerText, "production", {
+        ...deployed,
+        STORED_SECRETS: without(stagingKeys),
+      }).name,
+      staging: cfWorker(wranglerText, "staging", {
+        ...deployed,
+        STORED_SECRETS: without(productionKeys),
+      }).name,
+    }).toStrictEqual({
+      production: "grasp-admin",
+      staging: "grasp-admin-staging",
+    });
+  });
+
   it("adds the admin's settings from the deploy, each only when it's set", () => {
     const worker = cfWorker(wranglerText, "staging", {
       ...deployed,
