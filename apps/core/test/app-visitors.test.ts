@@ -11,7 +11,7 @@ import {
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { sweepAppVisitors } from "../src/app-visitors.ts";
@@ -185,8 +185,8 @@ const toOf = (message: EmailMessageBuilder): string => {
 /** Who each mail went to, in order. */
 const recipients = (mail: CapturedMail): string[] => mail.sent.map(toOf);
 
-/** The code in the last mail to `address`. */
-const lastCode = (mail: CapturedMail, address: string): string => {
+/** The code in the last mail to `address` sent so far. */
+const codeIn = (mail: CapturedMail, address: string): string => {
   const message = mail.sent.findLast(
     (each) => toOf(each) === address.toLowerCase()
   );
@@ -197,6 +197,13 @@ const lastCode = (mail: CapturedMail, address: string): string => {
   }
   return found.replace(" ", "");
 };
+
+/**
+ * The code in the last mail to `address`, once it went out: core sends it
+ * after answering (`waitUntil`).
+ */
+const lastCode = async (mail: CapturedMail, address: string): Promise<string> =>
+  await vi.waitFor(() => codeIn(mail, address));
 
 /** A code that isn't `code`, of the same length. */
 const otherCode = (code: string): string =>
@@ -244,6 +251,9 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
         ask(link, stranger),
         ask(newLink(), listed),
       ]);
+    });
+    await vi.waitFor(() => {
+      expect(recipients(mail)).toHaveLength(2);
     });
     await builder.api.apps.unpublish(app);
     const asDraft = await ask(link, listed);
@@ -324,6 +334,9 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
       ].map(async (address) => await ask(link, address))
     );
     const caseOnly = await ask(link, boss.toUpperCase());
+    await vi.waitFor(() => {
+      expect(recipients(mail)).toHaveLength(1);
+    });
 
     expect({
       notListed,
@@ -352,7 +365,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
 
     // Four wrong tries, then the right one: in.
     await ask(link, lucky);
-    const luckyCode = lastCode(mail, lucky);
+    const luckyCode = await lastCode(mail, lucky);
     const wrong = await Promise.all(
       Array.from(
         { length: 4 },
@@ -365,7 +378,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
 
     // Five wrong tries: the right code then opens nothing.
     await ask(link, unlucky);
-    const unluckyCode = lastCode(mail, unlucky);
+    const unluckyCode = await lastCode(mail, unlucky);
     // At once: tries at the same time take no more than 5 between them.
     await Promise.all(
       Array.from(
@@ -377,7 +390,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
 
     // Past its 10 minutes.
     await ask(link, late);
-    const lateCode = lastCode(mail, late);
+    const lateCode = await lastCode(mail, late);
     await env.DB.prepare(
       "UPDATE app_visitor_codes SET expires_at = ? WHERE app_id = ? AND address = ?"
     )
@@ -418,6 +431,9 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
           async () => await ask(link, flooded)
         )
       );
+    });
+    await vi.waitFor(() => {
+      expect(recipients(mail)).toHaveLength(appVisitorCodesPerAddressPerHour);
     });
     const toFlooded = recipients(mail).length;
 
@@ -462,7 +478,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     const visitor = `vi@${domain}`;
 
     await ask(first.link, visitor);
-    const code = lastCode(mail, visitor);
+    const code = await lastCode(mail, visitor);
     // The first App's code, for the second App: refused.
     const elsewhere = await signIn(second.link, visitor, code);
     const token = await signIn(first.link, visitor, code);
@@ -533,7 +549,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     const visitor = `vo@${domain}`;
     const signedInAs = async (): Promise<string> => {
       await ask(link, visitor);
-      return await signIn(link, visitor, lastCode(mail, visitor));
+      return await signIn(link, visitor, await lastCode(mail, visitor));
     };
 
     let unpublished: unknown;
@@ -662,7 +678,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     const mail = await mailbox();
     const visitor = `sw@${domain}`;
     await ask(link, visitor);
-    const token = await signIn(link, visitor, lastCode(mail, visitor));
+    const token = await signIn(link, visitor, await lastCode(mail, visitor));
     const count = async () =>
       await env.DB.prepare(
         "SELECT (SELECT count(*) FROM app_visitor_codes WHERE app_id = ?1) AS codes, (SELECT count(*) FROM app_visitor_sessions WHERE app_id = ?1) AS sessions"

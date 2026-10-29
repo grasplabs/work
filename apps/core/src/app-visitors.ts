@@ -316,12 +316,15 @@ const audited = async (
 
 /**
  * Sends a code to `address` for the App at `link`, if it is listed and
- * the hour's limits allow. Answers nothing either way.
+ * the hour's limits allow. Answers nothing either way; the mail goes out
+ * after the answer (`later`), so how long asking takes tells nothing of
+ * whether a code was sent.
  */
 const askForCode = async (
   env: Env,
   link: string,
-  raw: string
+  raw: string,
+  later: (work: Promise<unknown>) => void
 ): Promise<void> => {
   const parsed = appVisitorAddressSchema.safeParse(raw);
   if (!parsed.success) {
@@ -387,11 +390,15 @@ const askForCode = async (
     });
     return;
   }
-  const sent = await sendMail(env, codeMail(address, found.name, code));
-  if (sent.outcome !== "sent") {
-    // Never the address or the code: only that one wasn't sent.
-    log.error("visitor.code_not_sent", { reason: sent.reason });
-  }
+  later(
+    (async () => {
+      const sent = await sendMail(env, codeMail(address, found.name, code));
+      if (sent.outcome !== "sent") {
+        // Never the address or the code: only that one wasn't sent.
+        log.error("visitor.code_not_sent", { reason: sent.reason });
+      }
+    })()
+  );
 };
 
 /** The refusal of a code, the same whatever was wrong. */
@@ -583,7 +590,8 @@ const statusFor: Record<string, number> = {
 export const appVisitorResponse = async (
   request: Request,
   env: Env,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response> => {
   if (request.method !== "POST") {
     return errorResponse(
@@ -608,7 +616,9 @@ export const appVisitorResponse = async (
     const body = parsed.data;
     switch (body.action) {
       case "ask": {
-        await askForCode(env, body.link, body.address);
+        await askForCode(env, body.link, body.address, (work) => {
+          ctx.waitUntil(work);
+        });
         return Response.json({ asked: true }, { status: 202 });
       }
       case "sign_in": {
