@@ -714,6 +714,20 @@ const workflowStep = (
       }
     : undefined;
 
+/**
+ * Whether `scope` is one (a scope the step's name gave) that is, in each
+ * fork around `task`, only the branch it was sealed in: a module never
+ * runs a branch's task as another branch's.
+ */
+const inSealedBranches = (
+  task: { branches: readonly (number | null)[] },
+  scope: readonly { index: number }[] | undefined
+): scope is readonly { id: string; index: number }[] =>
+  scope !== undefined &&
+  task.branches.every(
+    (branch, depth) => branch === null || scope[depth]?.index === branch
+  );
+
 /** The step of `build` that `name` names, as a `do` (`sleep` false) or a
  * sleeping task's sleep; `undefined` when the build has no such step.
  */
@@ -741,7 +755,7 @@ const sealedStep = (
     groups?.scope,
     kind.data === "item" ? [...task.scope, task.id] : task.scope
   );
-  if (!fits || scope === undefined) {
+  if (!fits || !inSealedBranches(task, scope)) {
     return undefined;
   }
   const outer = kind.data === "item" ? scope.slice(0, -1) : scope;

@@ -186,6 +186,12 @@ const taskBase = {
    * `GeneratedTask.scope`).
    */
   scope: z.array(sealedTaskIdSchema).max(maxTaskScopes),
+  /**
+   * Beside `scope`: for each `fork` around it, the branch it is in, and
+   * null for each `for` (generate.ts, `GeneratedTask.branches`). The host
+   * runs its steps only in that branch of each fork.
+   */
+  branches: z.array(z.int().min(0).max(63).nullable()).max(maxTaskScopes),
   /** The descriptors of its input, output and export schemas. */
   schemas: z.strictObject({
     input: descriptorSchema.optional(),
@@ -680,6 +686,7 @@ export const compileWorkflow = async (
             steps,
             schemas,
             scope,
+            branches,
             loop,
             fork,
           }) => ({
@@ -688,6 +695,7 @@ export const compileWorkflow = async (
             pointer,
             steps,
             scope: [...scope],
+            branches: [...branches],
             ...(loop === undefined
               ? {}
               : { loop: z.json().parse(structuredClone(loop)) }),

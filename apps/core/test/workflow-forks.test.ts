@@ -295,6 +295,11 @@ describe("a run's host, against a forged module's fork", () => {
       otherBranchTask: await forged("task:right", {
         output: { status: "right" },
       }),
+      // The second branch's task, run as the first branch's: a later
+      // branch's calls never run before the earlier branch fails.
+      asAnotherBranch: await forged("task:right@pick.0", {
+        output: { status: "right" },
+      }),
       winner: await forged("task:pick", { output: { status: "x" }, branch: 0 }),
       noSuchWinner: await forged("task:pick", {
         output: { status: "x" },
@@ -305,6 +310,7 @@ describe("a run's host, against a forged module's fork", () => {
       first: "ok",
       pastBranches: "workflow.invalid",
       otherBranchTask: "workflow.invalid",
+      asAnotherBranch: "workflow.invalid",
       winner: "ok",
       noSuchWinner: "workflow.invalid",
       noWinner: "workflow.invalid",
