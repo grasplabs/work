@@ -390,7 +390,7 @@ export const carryOnAfterConnecting = async (
   if (kept?.platform !== "teams") {
     return;
   }
-  const adapter = teamsAdapter(env);
+  const adapter = await teamsAdapter(env);
   const conversation: Conversation = {
     id: kept.threadId,
     post: async (message) => await adapter.postMessage(kept.threadId, message),

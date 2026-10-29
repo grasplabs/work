@@ -9,6 +9,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
+  decisionPollStepPrefix,
   executionErrors,
   maxAttemptTimeoutMs,
   stepIdempotencyKey,
@@ -48,11 +49,21 @@ import { emitEvent } from "./emitted-events.ts";
 import {
   childEndSchema,
   childEndType,
+  attributesOf,
   envelopeOf,
   eventTypeKey,
   storedEventSchema,
 } from "./event-envelopes.ts";
+import type { StoredEvent } from "./event-envelopes.ts";
 import { takesExactly } from "./exact-values.ts";
+import { fixtureCall } from "./fixture-calls.ts";
+import type { FixtureDecisionRun } from "./fixture-decisions.ts";
+import {
+  fixtureDecisionLookMs,
+  fixtureDecisionOutcome,
+  openFixtureDecision,
+  takeFixtureDecision,
+} from "./fixture-decisions.ts";
 import {
   busyMarker,
   loadRound,
@@ -99,6 +110,7 @@ import {
   raisedCode,
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
+import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
 import { heldWakeType } from "./wakes.ts";
 
@@ -242,7 +254,9 @@ import { heldWakeType } from "./wakes.ts";
 //   decision itself, never from the event that wakes the run; its call
 //   answers that outcome, its authority decided again, and its record,
 //   output.as and export.as are held to it as any call's are. A decision
-//   nobody answered fails the call: no outcome is made up for it.
+//   nobody answered fails the call: no outcome is made up for it. A run an
+//   App's test started waits the same way for a decision of its test's
+//   own, which only its fixture's principal answers (fixture-decisions.ts).
 
 /** The main module of a run of a sealed build (`openRunMain`). */
 export const openRunModule = "grasp-open-run.js";
@@ -317,6 +331,18 @@ export class Run extends WorkerEntrypoint {
   }
 }
 `;
+
+/**
+ * The named calls a run an App's test started makes (`fixture`): its own
+ * calculations, its decisions (fixture-decisions.ts), and the model and
+ * store calls its test serves (fixture-calls.ts). Every other is refused.
+ */
+const fixtureCalls: ReadonlySet<string> = new Set([
+  "grasp.compute",
+  "grasp.decision",
+  "grasp.model",
+  "grasp.operation",
+]);
 
 /** The run a host serves, as the dispatcher loaded it. */
 export interface HostedResourceRun {
@@ -432,9 +458,12 @@ export interface ResourceHostHooks {
   /**
    * A run an App's test started (fixture-runs.ts): it acts for a fixture's
    * principal, no member of the organization, and reaches nothing outside
-   * its own code and sealed modules. Every call that would (an App's, a
-   * store's, a model's, a connection's, Knowledge's, a template's, an
-   * action's) is refused (`resource.unavailable`) before it is built.
+   * its own code, its sealed modules and its test. Its decisions are its
+   * test's own (fixture-decisions.ts); its model calls are answered by its
+   * test's fixture and its store calls run on its test's own store
+   * (fixture-calls.ts). Every other call that would leave it (a
+   * connection's, Knowledge's, a template's, a file's, an action's) is
+   * refused (`resource.unavailable`) before it is built.
    */
   fixture?: true;
 }
@@ -1500,6 +1529,14 @@ export class ResourceRunHost
    */
   readonly #listens = new Map<string, ResolvedListen>();
   /**
+   * The value of each correlation the run's listens took an event under,
+   * by its name (GRA-947): the attribute's value on the first event a
+   * filter correlating under that name took, as this activation reached
+   * it, replays included, so the same on every replay. A later filter's
+   * correlation without an `expect` matches only that value.
+   */
+  readonly #correlated = new Map<string, string>();
+  /**
    * The input each listen or run task's enter step recorded, as
    * transformed, by place: what its leave step's transformations read as
    * `$input`.
@@ -2551,50 +2588,73 @@ export class ResourceRunHost
     if (decision === undefined) {
       return this.#refuse(`Task "${task.id}" takes the decision it opened.`);
     }
-    // Its people asked once, the ask a step of its own: a replay asks
-    // nobody again.
-    await this.#step.do(
-      `${stepName}:decision:asked`,
-      {},
-      async () => await askDeciders(this.#env, this.#run.calling, decision)
-    );
+    // A test's run asks its fixture's principal, who answers through its
+    // test (fixture-decisions.ts): nobody is told of it.
+    const fixture = this.#hooks.fixture === true;
+    if (!fixture) {
+      // Its people asked once, the ask a step of its own: a replay asks
+      // nobody again.
+      await this.#step.do(
+        `${stepName}:decision:asked`,
+        {},
+        async () => await askDeciders(this.#env, this.#run.calling, decision)
+      );
+    }
     const run = decisionRunOf(this.#run.calling);
+    const outcomeOf = async (close: boolean): Promise<DecisionOutcome> =>
+      fixture
+        ? await fixtureDecisionOutcome(
+            this.#env,
+            this.#run.runId,
+            decision,
+            close
+          )
+        : await decisionOutcome(this.#env, run, decision, close);
     const look = async (name: string) =>
       lookSchema.parse(
         await this.#step.do(name, {}, async () => {
           const at = Date.now();
-          const { answered } = await decisionOutcome(
-            this.#env,
-            run,
-            decision,
-            false
-          );
+          const { answered } = await outcomeOf(false);
           return { at, answered };
         })
       );
     let seen = await look(`${stepName}:decision:reached`);
+    // Its waits and the looks after them are core's steps, counted against
+    // none of the run's: a decision is one step however long it waits, and
+    // how often it looks (a test's run every second) costs the run nothing.
+    // Under core's prefix, which no step of the run's own can take.
+    const pollStep = (part: "wait" | "woken", round: number) =>
+      `${decisionPollStepPrefix}${stepName}:${part}:${round}`;
     for (let round = 0; !seen.answered && seen.at < deadline; round += 1) {
+      // A test's run looks again every so often as well: its answer keeps
+      // no wake owed (fixture-decisions.ts), so one lost on the way is
+      // read from the decision at the next look, within its test.
+      const timeout = fixture
+        ? Math.min(deadline - seen.at, fixtureDecisionLookMs)
+        : deadline - seen.at;
       try {
         // oxlint-disable-next-line no-await-in-loop -- one wait at a time
-        await this.#step.waitForEvent(`${stepName}:decision:wait:${round}`, {
+        await this.#step.waitForEvent(pollStep("wait", round), {
           type: decisionEventType(decision),
-          timeout: deadline - seen.at,
+          timeout,
         });
       } catch (error) {
         if (!isTimeout(error)) {
           throw error;
         }
-        break;
+        if (!fixture) {
+          break;
+        }
       }
       // oxlint-disable-next-line no-await-in-loop -- one look per wake
-      seen = await look(`${stepName}:decision:woken:${round}`);
+      seen = await look(pollStep("woken", round));
     }
     // Recorded: an answer after it can't change what a replay hears.
     return outcomeSchema.parse(
       await this.#step.do(
         `${stepName}:decision:outcome`,
         {},
-        async () => await decisionOutcome(this.#env, run, decision, true)
+        async () => await outcomeOf(true)
       )
     );
   }
@@ -2748,13 +2808,19 @@ export class ResourceRunHost
               index === 0 ? listening.name : `${listening.name}:${index + 1}`;
             // One at a time, in the filters' order: waits come one at a time.
             // oxlint-disable-next-line no-await-in-loop -- see above
-            const taken = await this.#taken(
-              wait,
-              match,
-              deadline,
-              task.listen.read
+            const taken = await this.#taken(wait, match, deadline);
+            events.push(
+              task.listen.read === "data"
+                ? taken.stored.data
+                : z.json().parse(envelopeOf(taken.stored, taken.timestamp))
             );
-            events.push(taken);
+            // oxlint-disable-next-line no-await-in-loop -- one event at a time
+            await this.#correlate(
+              task,
+              resolved,
+              taken.stored,
+              task.listen.strategy === "all" ? index : undefined
+            );
           }
           this.#takenOutputs.set(listening.place, events);
           return events;
@@ -2837,9 +2903,8 @@ export class ResourceRunHost
   async #taken(
     wait: string,
     match: ResolvedListen,
-    deadline: number,
-    read: "data" | "envelope"
-  ): Promise<Json> {
+    deadline: number
+  ): Promise<{ stored: StoredEvent; timestamp: Date }> {
     let event: { payload: unknown; timestamp: Date };
     try {
       event = await this.#step.waitForMatch(wait, { match, until: deadline });
@@ -2849,10 +2914,56 @@ export class ResourceRunHost
       }
       throw error;
     }
-    const stored = storedEventSchema.parse(event.payload);
-    return read === "data"
-      ? stored.data
-      : z.json().parse(envelopeOf(stored, event.timestamp));
+    return {
+      stored: storedEventSchema.parse(event.payload),
+      timestamp: event.timestamp,
+    };
+  }
+
+  /**
+   * Records the correlations of the filter of listen task `task` that
+   * took `stored`: `taker` (an `all` listen's, which waits on one filter at
+   * a time), or the first of its filters, as resolved (`resolved`, in the
+   * build's order), whose type and attributes it has. Each of that
+   * filter's correlations not yet held takes the event's attribute. An
+   * event that lacks one (an event with no subject) fails the listen
+   * (`workflow.call_invalid`): holding nothing would let a sender turn the
+   * correlation off, and later listens match any value. The same on every
+   * replay, as the event is.
+   */
+  async #correlate(
+    task: Extract<SealedTask, { kind: "listen" }>,
+    resolved: ResolvedListen,
+    stored: StoredEvent,
+    taker?: number
+  ): Promise<void> {
+    const type = await eventTypeKey(task.listen.binding, stored.type);
+    const attributes = attributesOf(stored);
+    // An `all` listen waits on one filter at a time, so `taker` is the one
+    // that took it; `one` and `any` wait on all, the first matching took it.
+    const index =
+      taker ??
+      resolved.findIndex(
+        (filter) =>
+          filter.type === type &&
+          Object.entries(filter.attributes).every(
+            ([name, value]) => attributes[name] === value
+          )
+      );
+    for (const { name, attribute } of task.listen.filters[index]?.correlate ??
+      []) {
+      const value = attributes[attribute];
+      if (value === undefined) {
+        throw workflowResourceErrors.create("workflow.call_invalid", {
+          issues: [
+            `listen: An event the listen took has no ${attribute}, which correlation ${name} reads.`,
+          ],
+        });
+      }
+      if (!this.#correlated.has(name)) {
+        this.#correlated.set(name, value);
+      }
+    }
   }
 
   /**
@@ -3648,8 +3759,12 @@ export class ResourceRunHost
     if (call.name === "grasp.sleepUntil") {
       return this.#refuse(`Task "${task.id}" makes no call.`);
     }
-    // A test's run reaches only its own sealed modules (`fixture`).
-    if (this.#hooks.fixture === true && call.name !== "grasp.compute") {
+    // A test's run reaches only its own sealed modules (`fixture`), its
+    // decisions, which its test answers (fixture-decisions.ts), and its
+    // model and store calls, which its test's fixture serves
+    // (fixture-calls.ts): never a connection, Knowledge, a template, a
+    // file or an action.
+    if (this.#hooks.fixture === true && !fixtureCalls.has(call.name)) {
       throw operationErrors.create("resource.unavailable");
     }
     if (call.name === "grasp.model") {
@@ -3668,8 +3783,6 @@ export class ResourceRunHost
       // its attempt begins (`#attemptOf`), and again before each of its
       // calls (`#action`).
       await this.#packagesAdmitted();
-    }
-    if (call.name === "grasp.compute") {
       // A calculation of the workflow's own sealed modules: no binding of
       // the catalog, no authority to decide again, nothing outside core's
       // sandbox (resource-compute.ts).
@@ -3692,13 +3805,19 @@ export class ResourceRunHost
       return await this.#emitted(attempt, task, call, passed);
     }
     const built = await this.#builtCall(attempt, call, passed);
-    return await makeCall(this.#env, this.#run.calling, task.id, built, {
+    const effect = {
       key: stepIdempotencyKey(this.#run.runId, attempt.step.name),
       deadline: attempt.deadline,
       requireHolds: () => {
         this.#requireCurrent(attempt);
       },
-    });
+    };
+    // Built and counted as a real call is, then served by its test: a
+    // model's answer from its fixture, a store's on its test's own store.
+    if (this.#hooks.fixture === true) {
+      return await fixtureCall(this.#env, this.#fixtureRun(), built, effect);
+    }
+    return await makeCall(this.#env, this.#run.calling, task.id, built, effect);
   }
 
   /**
@@ -3723,7 +3842,7 @@ export class ResourceRunHost
     if (this.#run.calling.candidate !== undefined) {
       return frame.input;
     }
-    this.#requireCurrent(attempt);
+    await this.#requireEvidenceReadable(attempt);
     await emitEvent(
       this.#env,
       this.#run.calling,
@@ -3971,6 +4090,12 @@ export class ResourceRunHost
     }
   }
 
+  /** The run, as a test's run's decisions take it (fixture-decisions.ts). */
+  #fixtureRun(): FixtureDecisionRun {
+    const { runId, workflowId, version, principal, createdAt } = this.#run;
+    return { runId, workflowId, version, principal, createdAt };
+  }
+
   /**
    * What decision task `task`'s call answers in `attempt` of its call
    * step: its decision's outcome, as the host waited for it before the
@@ -3989,6 +4114,13 @@ export class ResourceRunHost
       answer = await candidateDecision(this.#env, candidate, call.binding);
     } else if (attempt.decided === undefined) {
       return this.#refuse(`Task "${task.id}" takes its decision's outcome.`);
+    } else if (this.#hooks.fixture === true) {
+      answer = await takeFixtureDecision(
+        this.#env,
+        this.#fixtureRun(),
+        call.binding,
+        attempt.decided
+      );
     } else {
       answer = await takeDecision(
         this.#env,
@@ -4047,15 +4179,25 @@ export class ResourceRunHost
       attempt.until = Date.now();
       return attempt.until;
     }
-    this.#requireCurrent(attempt);
-    const opened = await openRunDecision(
-      this.#env,
-      { ...this.#run.calling, createdAt: this.#run.createdAt },
-      task.id,
-      // Its call step's name, in its scope: one decision per item of a loop.
-      attempt.step.name.replace(/^enter:/u, "task:"),
-      built
-    );
+    await this.#requireEvidenceReadable(attempt);
+    // Its call step's name, in its scope: one decision per item of a loop.
+    const decisionStep = attempt.step.name.replace(/^enter:/u, "task:");
+    const opened =
+      this.#hooks.fixture === true
+        ? await openFixtureDecision(
+            this.#env,
+            this.#fixtureRun(),
+            task.id,
+            decisionStep,
+            built
+          )
+        : await openRunDecision(
+            this.#env,
+            { ...this.#run.calling, createdAt: this.#run.createdAt },
+            task.id,
+            decisionStep,
+            built
+          );
     this.#requireCurrent(attempt);
     attempt.decision = opened.decision;
     attempt.until = opened.deadline;
@@ -4241,6 +4383,14 @@ export class ResourceRunHost
         }
         attributes[name] = value;
       }
+      // A correlation without an `expect` matches what the run's listens
+      // took under its name before: nothing yet, any value.
+      for (const { name, attribute } of filter.correlate ?? []) {
+        const held = this.#correlated.get(name);
+        if (held !== undefined && !Object.hasOwn(attributes, attribute)) {
+          attributes[attribute] = held;
+        }
+      }
       resolved.push({
         // oxlint-disable-next-line no-await-in-loop -- one hash per filter
         type: await eventTypeKey(task.listen.binding, filter.type),
@@ -4248,6 +4398,18 @@ export class ResourceRunHost
       });
     }
     return resolved;
+  }
+
+  /**
+   * Refuses, as `brain.revoked`, anything leaving this run (an event it
+   * emits, a decision it opens, a child it starts) once it may no longer
+   * read what it recalled (`requireResourceRunEvidenceReadable`), its lease
+   * asked again after: a stale attempt sends nothing.
+   */
+  async #requireEvidenceReadable(attempt: StepAttempt): Promise<void> {
+    this.#requireCurrent(attempt);
+    await requireResourceRunEvidenceReadable(this.#env, this.#run.calling);
+    this.#requireCurrent(attempt);
   }
 
   /**
@@ -4271,6 +4433,8 @@ export class ResourceRunHost
     // nothing.
     this.#requireCurrent(attempt);
     await ResourceRunHost.#hostCall(attempt);
+    // Its input may carry what it recalled (resource-reads.ts).
+    await this.#requireEvidenceReadable(attempt);
     // Keyed by its step's name, not its task's: a step the same task runs
     // again under another name (a loop's item, a retry of its scope) starts
     // a child of its own.

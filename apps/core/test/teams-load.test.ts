@@ -17,7 +17,7 @@ import {
 // to the fake Bot Connector. The model echoes each question's own mark,
 // so an answer that reached the wrong person, or none, shows.
 //
-// 500 people's turns at once are for grasp-os-staging, with budgets and
+// 500 people's turns at once are for a staging client, with budgets and
 // limits on: workerd runs one isolate here, and signing in 500 people
 // would take the suite's whole budget.
 

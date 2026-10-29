@@ -1,4 +1,8 @@
+import { z } from "zod";
+
+import { allowedFor } from "./authorize.ts";
 import type { Brain, BrainPorts } from "./brain.ts";
+import { readableCollection } from "./collections.ts";
 import {
   brainContractVersion,
   brainErrors,
@@ -13,13 +17,23 @@ import type {
   RecallBudget,
 } from "./contract.ts";
 import { toHex } from "./encoding.ts";
+import { exactTermsOf } from "./exact.ts";
+import { fused, fusionPolicy } from "./fusion.ts";
+import type { Lane, LaneRanking } from "./fusion.ts";
 import type { CollectionId } from "./ids.ts";
 import { knowledgeErrors, searchMaxLimit } from "./knowledge.ts";
 import type { Provenance } from "./knowledge.ts";
+import { log } from "./log.ts";
 import { searchMemories } from "./memories.ts";
 import type { MemoryAudience } from "./memories.ts";
+import {
+  recallCacheKey,
+  recallCacheOf,
+  recallGeneration,
+} from "./recall-cache.ts";
 import { d1BrainStore } from "./recall-store.ts";
 import type { BrainStore, EvidenceQuery } from "./recall-store.ts";
+import { termsOf } from "./search.ts";
 import type { FoundSection } from "./search.ts";
 import { tokensOf } from "./tokens.ts";
 
@@ -32,28 +46,29 @@ import { tokensOf } from "./tokens.ts";
 // memory pack of the sections that match, each cited at its exact
 // version, with how far the read got.
 //
-// This policy reads full text only, any of the question's words ranked by
-// BM25 (search.ts): document sections; and memory records (GRA-298) the
+// This policy (GRA-304) reads in lanes, in parallel, each bounded by the
+// recall's deadline: the exact lane, the sections that hold what the
+// question names exactly (identifiers, dates, phrases in quotes; exact.ts);
+// full text, any of the question's words in document sections, ranked by
+// the words each holds (search.ts), and memory records (GRA-298) the
 // host's memory audience may read, ranked by how many of the words each
 // holds, never by statistics over others' records (memories.ts), kept or
-// dropped by the host as a chat's memory is. A recall narrowed to collections, or bound to some, reads no
-// memory record: none is in a collection, so no narrowing widens into
-// memory. Semantic routes are reported as
-// not enabled, and no model is used, so no source text reaches one here;
-// the recheck before model use comes with reranking (GRA-304).
+// dropped by the host as a chat's memory is; and vectors, through the
+// store's `findSimilar` where one has it (none does yet, GRA-303: the
+// route is reported as not enabled). Every lane reads only what its
+// reader may read, and their candidates are fused by rank, each source
+// version once (fusion.ts). A recall narrowed to collections, or bound to
+// some, reads no memory record: none is in a collection, so no narrowing
+// widens into memory. Only a recall whose budget asks for it reranks
+// (`reranked`): the best of the fused candidates, their access checked
+// again first, ordered by the deployment's model through the host's
+// gateway; otherwise no model is used, and no source text reaches one.
 
-/**
- * The retrieval policy this service follows: full text, version 3, which
- * matches any of a question's words rather than all of them, in document
- * sections and memory records.
- */
-export const recallPolicyVersion = "fulltext@3";
+/** The retrieval policy this service follows: lanes fused by rank (fusion.ts). */
+export const recallPolicyVersion = fusionPolicy.version;
 
 /** The search indexes a recall reads: Knowledge's and memory's FTS5 tables. */
 const indexGeneration = "knowledge-fts@2";
-
-/** Routes this policy doesn't read yet, and why. */
-const omittedRoutes = [{ route: "semantic", reason: "not_enabled" }];
 
 /** What a read of no collection read: nothing. */
 const noProvenance: Provenance = {
@@ -78,6 +93,7 @@ export const clampBudget = (
   maxItems: budget?.maxItems ?? recallDefaults.maxItems,
   maxTokens: budget?.maxTokens ?? recallDefaults.maxTokens,
   deadlineMs: budget?.deadlineMs ?? recallDefaults.deadlineMs,
+  rerank: budget?.rerank ?? false,
 });
 
 /** A refusal from a read below, as the Brain's stable code. */
@@ -98,12 +114,10 @@ export const asBrainError = <C>(brain: Brain<C>, error: unknown): unknown => {
 };
 
 /** One section as a pack's item: its text, cited at its exact version. */
-const itemOf = ({
-  hit,
-  version,
-  updatedAt,
-  text,
-}: FoundSection): MemoryItem => {
+const itemOf = (
+  { hit, version, updatedAt, text }: FoundSection,
+  applicability: string
+): MemoryItem => {
   const ref: BrainSourceRef = {
     kind: "document",
     documentId: hit.documentId,
@@ -121,10 +135,13 @@ const itemOf = ({
     validFrom: null,
     validTo: null,
     recordedAt: new Date(updatedAt).toISOString(),
-    applicability: "Its words match the question's (full text).",
+    applicability,
     citationLocator: [hit.title, ...hit.headings].slice(0, 16),
   };
 };
+
+/** A memory record as memory's search found it, before the host kept it. */
+type FoundMemory = Awaited<ReturnType<typeof searchMemories>>[number];
 
 /** A memory record the host kept, as the Brain hands it over. */
 type KeptMemory = Awaited<
@@ -135,18 +152,21 @@ type KeptMemory = Awaited<
  * One memory record as a pack's item, cited as itself at its revision:
  * where it is, for a person, its scope and who published it.
  */
-const memoryItemOf = ({
-  id,
-  revision,
-  kind,
-  scope,
-  statement,
-  state,
-  validFrom,
-  validTo,
-  recordedAt,
-  by,
-}: KeptMemory): MemoryItem => ({
+const memoryItemOf = (
+  {
+    id,
+    revision,
+    kind,
+    scope,
+    statement,
+    state,
+    validFrom,
+    validTo,
+    recordedAt,
+    by,
+  }: KeptMemory,
+  applicability: string
+): MemoryItem => ({
   id,
   revision,
   kind,
@@ -156,39 +176,84 @@ const memoryItemOf = ({
   validFrom,
   validTo,
   recordedAt,
-  applicability: "Its words match the question's (full text).",
+  applicability,
   citationLocator: [
     `Memory record (${scope})`,
     ...(by === null ? [] : [`by ${by}`]),
   ],
 });
 
-/**
- * Sections and memory records, best first in each, taken in turn: their
- * scores come from different indexes, so one is never ranked against the
- * other.
- */
-const alternated = (
-  sections: readonly FoundSection[],
-  memories: readonly KeptMemory[]
-): { item: MemoryItem; memory?: KeptMemory }[] => {
-  const taken: { item: MemoryItem; memory?: KeptMemory }[] = [];
-  for (
-    let index = 0;
-    index < Math.max(sections.length, memories.length);
-    index += 1
-  ) {
-    const section = sections[index];
-    const memory = memories[index];
-    if (section !== undefined) {
-      taken.push({ item: itemOf(section) });
-    }
-    if (memory !== undefined) {
-      taken.push({ item: memoryItemOf(memory), memory });
-    }
-  }
-  return taken;
+/** Why an item applies, in the words of each lane that found it. */
+const laneWords: Record<Lane, string> = {
+  exact: "It holds what the question names exactly.",
+  fulltext: "Its words match the question's (full text).",
+  semantic: "Its meaning is close to the question's (vectors).",
 };
+
+/** A candidate of a recall: a section, or a memory record. */
+type Candidate =
+  | { kind: "section"; section: FoundSection }
+  | { kind: "memory"; memory: KeptMemory };
+
+/** A section's candidate, by the source version it is. */
+const sectionCandidates = (
+  sections: readonly FoundSection[]
+): LaneRanking<Candidate>["candidates"] =>
+  sections.map((section) => ({
+    key: `section:${section.hit.documentId}@${section.version}#${section.hit.section}`,
+    value: { kind: "section", section },
+  }));
+
+/**
+ * The lanes' candidates fused (fusion.ts), as a pack's items, best first,
+ * each source version once, with the memory records among them. Sections
+ * and memory records of the full-text lane are ranked apart (their scores
+ * come from different indexes), so the fusion takes them in turn.
+ */
+const fusedItems = (
+  read: LanesRead
+): { item: MemoryItem; memory?: KeptMemory }[] =>
+  fused<Candidate>([
+    ...(read.exact.state === "read"
+      ? [
+          {
+            lane: "exact" as const,
+            candidates: sectionCandidates(read.exact.sections),
+          },
+        ]
+      : []),
+    ...(read.fulltext.state === "read"
+      ? [
+          {
+            lane: "fulltext" as const,
+            candidates: sectionCandidates(read.fulltext.sections),
+          },
+          {
+            lane: "fulltext" as const,
+            candidates: read.fulltext.memories.map((memory) => ({
+              key: `memory:${memory.id}@${memory.revision}`,
+              value: { kind: "memory" as const, memory },
+            })),
+          },
+        ]
+      : []),
+    ...(read.semantic.state === "read"
+      ? [
+          {
+            lane: "semantic" as const,
+            candidates: sectionCandidates(read.semantic.sections),
+          },
+        ]
+      : []),
+  ]).map(({ value, lanes }) => {
+    const applicability = lanes.map((lane) => laneWords[lane]).join(" ");
+    return value.kind === "section"
+      ? { item: itemOf(value.section, applicability) }
+      : {
+          item: memoryItemOf(value.memory, applicability),
+          memory: value.memory,
+        };
+  });
 
 /**
  * As many of `found`, in order, as the budget holds: no more items than it
@@ -230,25 +295,51 @@ const sourcesOf = (items: readonly MemoryItem[]): BrainSourceRef[] => {
 };
 
 /**
- * How far the read got: the full-text route timed out (`degraded`, which
- * proves nothing missing), a budget cut it (`bounded`), or it finished its
- * bounded read (`complete`, never exhaustive).
+ * How far the read got: a lane that timed out or failed (`degraded`, which
+ * proves nothing missing), a budget cut it (`bounded`), or every lane it
+ * asked finished its bounded read (`complete`, never exhaustive). The
+ * vector lane is reported as not enabled where the store has none.
  */
-const coverageOf = (timedOut: boolean, truncated: boolean): Coverage => {
-  if (timedOut) {
-    return {
-      state: "degraded",
-      queriedRoutes: [],
-      omittedRoutes: [
-        { route: "fulltext", reason: "deadline" },
-        ...omittedRoutes,
-      ],
-    };
+const coverageOf = (
+  read: LanesRead,
+  truncated: boolean,
+  rerank: RerankOutcome
+): Coverage => {
+  const routes: [Lane, LaneRead][] = [
+    ["exact", read.exact],
+    ["fulltext", read.fulltext],
+    ["semantic", read.semantic],
+  ];
+  const omitted = routes.flatMap(([route, lane]) =>
+    lane.state === "read" || lane.state === "not_asked"
+      ? []
+      : [{ route, reason: lane.state }]
+  );
+  const failed = omitted.some(
+    ({ reason }) => reason === "deadline" || reason === "failed"
+  );
+  let state: Coverage["state"] = truncated ? "bounded" : "complete";
+  if (failed) {
+    state = "degraded";
   }
+  // A rerank that didn't happen leaves the fused order: nothing read is
+  // missing, so the read's state stands; why is said.
   return {
-    state: truncated ? "bounded" : "complete",
-    queriedRoutes: ["fulltext"],
-    omittedRoutes,
+    state,
+    queriedRoutes: [
+      ...routes.flatMap(([route, lane]) =>
+        lane.state === "read" ? [route] : []
+      ),
+      ...(rerank === "reranked" ? ["rerank"] : []),
+    ],
+    omittedRoutes: [
+      ...omitted,
+      ...(rerank === "reranked" ||
+      rerank === "not_asked" ||
+      rerank === "unneeded"
+        ? []
+        : [{ route: "rerank", reason: rerank }]),
+    ],
   };
 };
 
@@ -311,9 +402,9 @@ const memoriesFound = async <C>(
   readers: MemoryReaders | undefined,
   query: string,
   limit: number
-): Promise<KeptMemory[]> => {
+): Promise<{ found: FoundMemory[]; kept: KeptMemory[] }> => {
   if (readers === undefined) {
-    return [];
+    return { found: [], kept: [] };
   }
   const found = await searchMemories(
     brain,
@@ -322,38 +413,246 @@ const memoriesFound = async <C>(
     limit,
     readers.readable
   );
-  return found.length === 0
-    ? []
-    : await brain.ports.memories.keep(reader, readers.people, found);
+  return {
+    found,
+    kept:
+      found.length === 0
+        ? []
+        : await brain.ports.memories.keep(reader, readers.people, found),
+  };
+};
+
+/** The reranking policy, its version added to the pack's policy when it reranked. */
+export const rerankPolicyVersion = "rerank@1";
+
+/** Most candidates one rerank reads: the best of the fused ones. */
+const rerankCandidatesMax = 20;
+
+/** Characters of each candidate's statement the reranker reads. */
+const rerankTextMax = 800;
+
+/** How a rerank went: done, not asked for, or why not. */
+type RerankOutcome =
+  | "reranked"
+  | "not_asked"
+  /** Asked, but fewer than two candidates: nothing to order. */
+  | "unneeded"
+  | "not_enabled"
+  | "deadline"
+  | "failed"
+  | "access_changed";
+
+/** What a reranker answers: the candidates' IDs, best first. */
+const rerankAnswerSchema = z
+  .array(z.string().max(200))
+  .max(rerankCandidatesMax);
+
+/**
+ * `found` ordered again by the host's reranker, when `asked`: the best
+ * `rerankCandidatesMax` of it, each document's version checked as still
+ * readable by `reader` before any of its text reaches a model, within
+ * `remaining` milliseconds. The reranker's answer only orders what it was
+ * given: an ID it invents, or repeats, is ignored, and one it leaves out
+ * follows in fused order, as does everything past the best. Otherwise,
+ * or when it fails, `found` as it was, and why.
+ */
+const reranked = async <C>(
+  brain: Brain<C>,
+  store: BrainStore<C>,
+  reader: C,
+  question: string,
+  found: readonly { item: MemoryItem; memory?: KeptMemory }[],
+  { asked, remaining }: { asked: boolean; remaining: number }
+): Promise<{
+  found: { item: MemoryItem; memory?: KeptMemory }[];
+  outcome: RerankOutcome;
+}> => {
+  const kept = [...found];
+  const { rerank } = brain.ports;
+  if (!asked) {
+    return { found: kept, outcome: "not_asked" };
+  }
+  if (rerank === undefined) {
+    return { found: kept, outcome: "not_enabled" };
+  }
+  if (remaining <= 0) {
+    return { found: kept, outcome: "deadline" };
+  }
+  if (kept.length < 2) {
+    return { found: kept, outcome: "unneeded" };
+  }
+  const best = kept.slice(0, rerankCandidatesMax);
+  const documents = best.flatMap(({ item }) =>
+    item.sourceRefs.flatMap((ref) =>
+      ref.kind === "document"
+        ? [
+            {
+              documentId: ref.documentId,
+              collectionId: ref.collectionId,
+              version: ref.version,
+            },
+          ]
+        : []
+    )
+  );
+  try {
+    // Before any text reaches a model: what the lanes read a moment ago
+    // may have been taken from the reader since.
+    await store.pinsOf(reader, documents);
+  } catch {
+    return { found: kept, outcome: "access_changed" };
+  }
+  const started = brain.ports.clock().getTime();
+  let answer: unknown;
+  try {
+    answer = await Promise.race([
+      rerank(reader, {
+        question,
+        candidates: best.map(({ item }) => ({
+          id: item.id,
+          text: item.statement.slice(0, rerankTextMax),
+        })),
+        provenance: [
+          ...new Set(documents.map(({ collectionId }) => collectionId)),
+        ],
+        deadlineMs: remaining,
+      }),
+      timeout(remaining),
+    ]);
+  } catch {
+    return { found: kept, outcome: "failed" };
+  }
+  if (answer === undefined) {
+    return {
+      found: kept,
+      outcome:
+        brain.ports.clock().getTime() - started >= remaining
+          ? "deadline"
+          : "failed",
+    };
+  }
+  const ranking = rerankAnswerSchema.safeParse(answer);
+  if (!ranking.success) {
+    return { found: kept, outcome: "failed" };
+  }
+  const byId = new Map(best.map((entry) => [entry.item.id, entry]));
+  const ordered = [...new Set(ranking.data)].flatMap((id) => {
+    const entry = byId.get(id);
+    byId.delete(id);
+    return entry === undefined ? [] : [entry];
+  });
+  return {
+    found: [...ordered, ...byId.values(), ...kept.slice(best.length)],
+    outcome: "reranked",
+  };
+};
+
+/** What one lane read, or why it read nothing. */
+type LaneRead =
+  | {
+      state: "read";
+      sections: FoundSection[];
+      memories: KeptMemory[];
+      /** The full-text lane's memory records as found, before the host kept them. */
+      memoryFound?: FoundMemory[];
+      provenance: Provenance;
+    }
+  /** It had nothing to ask: no exact term in the question. */
+  | { state: "not_asked" }
+  /** The store has no such lane (vectors, until GRA-303). */
+  | { state: "not_enabled" }
+  | { state: "deadline" }
+  | { state: "failed" };
+
+/** What each lane of a recall read. */
+interface LanesRead {
+  exact: LaneRead;
+  fulltext: LaneRead;
+  semantic: LaneRead;
+}
+
+/** What `read` finds within `remaining` milliseconds, or that it ran out. */
+const inTime = async (
+  read: Promise<Omit<Extract<LaneRead, { state: "read" }>, "state">>,
+  remaining: number
+): Promise<LaneRead> => {
+  const found = await Promise.race([read, timeout(remaining)]);
+  return found === undefined
+    ? { state: "deadline" }
+    : { state: "read", ...found };
 };
 
 /**
- * What `store` finds for `query` in `remaining` milliseconds, and the
- * memory records `readers` may read, or undefined once they run out.
- * Bound to no collection it may read, it searches nothing and finds
- * nothing, as a search of them would answer.
+ * What each lane finds for `query` in `remaining` milliseconds, the
+ * memory records `readers` may read with the full text. A lane's refusal
+ * refuses the recall, as one read's would; the vector lane, an index
+ * outside the store, failing only degrades it. Bound to no collection it
+ * may read, it searches nothing and finds nothing, as a search of them
+ * would answer.
  */
-const evidenceWithin = async <C>(
+const lanesWithin = async <C>(
   brain: Brain<C>,
   store: BrainStore<C>,
   reader: C,
   readers: MemoryReaders | undefined,
   { remaining, ...query }: EvidenceQuery & { remaining: number }
-): Promise<
-  | { sections: FoundSection[]; memories: KeptMemory[]; provenance: Provenance }
-  | undefined
-> => {
-  if (query.collectionIds?.length === 0) {
-    return { sections: [], memories: [], provenance: noProvenance };
+): Promise<LanesRead> => {
+  const exactTerms = exactTermsOf(query.query);
+  if (query.collectionIds?.length === 0 || remaining <= 0) {
+    const none: LaneRead =
+      remaining <= 0
+        ? { state: "deadline" }
+        : {
+            state: "read",
+            sections: [],
+            memories: [],
+            provenance: noProvenance,
+          };
+    return {
+      exact: exactTerms.length === 0 ? { state: "not_asked" } : none,
+      fulltext: none,
+      semantic:
+        store.findSimilar === undefined ? { state: "not_enabled" } : none,
+    };
   }
-  const read = async () => {
-    const [{ sections, provenance }, memories] = await Promise.all([
-      store.findEvidence(reader, query),
-      memoriesFound(brain, reader, readers, query.query, query.limit),
-    ]);
-    return { sections, memories, provenance };
-  };
-  return await Promise.race([read(), timeout(remaining)]);
+  const similar = store.findSimilar;
+  const [exact, fulltext, semantic] = await Promise.all([
+    exactTerms.length === 0
+      ? ({ state: "not_asked" } as const)
+      : inTime(
+          store
+            .findEvidence(reader, { ...query, exact: exactTerms })
+            .then(({ sections, provenance }) => ({
+              sections,
+              memories: [],
+              provenance,
+            })),
+          remaining
+        ),
+    inTime(
+      Promise.all([
+        store.findEvidence(reader, query),
+        memoriesFound(brain, reader, readers, query.query, query.limit),
+      ]).then(([{ sections, provenance }, memories]) => ({
+        sections,
+        memories: memories.kept,
+        memoryFound: memories.found,
+        provenance,
+      })),
+      remaining
+    ),
+    similar === undefined
+      ? ({ state: "not_enabled" } as const)
+      : inTime(
+          similar(reader, query).then(({ sections, provenance }) => ({
+            sections,
+            memories: [],
+            provenance,
+          })),
+          remaining
+        ).catch((): LaneRead => ({ state: "failed" })),
+  ]);
+  return { exact, fulltext, semantic };
 };
 
 /**
@@ -380,18 +679,17 @@ const memoryReadersOf = async <C>(
 };
 
 /**
- * Whether a read stopped at a limit: the section search at its most, or
- * memory at the one more than asked for that tells a full pack from a cut
- * one. A cut there may have left out evidence that applied.
+ * Whether a lane's read stopped at a limit: a section search at its most,
+ * or memory at the one more than asked for that tells a full pack from a
+ * cut one. A cut there may have left out evidence that applied.
  */
-const readFull = (
-  read:
-    | { sections: readonly unknown[]; memories: readonly unknown[] }
-    | undefined,
-  limit: number
-): boolean =>
-  read !== undefined &&
-  (read.sections.length === searchMaxLimit || read.memories.length === limit);
+const readFull = (read: LanesRead, limit: number): boolean =>
+  [read.exact, read.fulltext, read.semantic].some(
+    (lane) =>
+      lane.state === "read" &&
+      (lane.sections.length === searchMaxLimit ||
+        lane.memories.length === limit)
+  );
 
 /**
  * Before memory records are handed over: a read of them, and of the
@@ -434,6 +732,238 @@ const joined = (
   sensitive: sections.sensitive || memories.sensitive,
   restricted: sections.restricted || memories.restricted,
 });
+
+/** The provenance of what every lane read. */
+const lanesProvenance = (read: LanesRead): Provenance => {
+  let all = noProvenance;
+  for (const lane of [read.exact, read.fulltext, read.semantic]) {
+    if (lane.state === "read") {
+      all = joined(all, lane.provenance, []);
+    }
+  }
+  return all;
+};
+
+/** What a recall keeps of itself (recall-cache.ts): its answer, and what checking it again needs. */
+interface KeptAnswer {
+  items: MemoryItem[];
+  tokenCount: number;
+  truncated: boolean;
+  coverage: Coverage;
+  gaps: MemoryPack["gaps"];
+  policy: string;
+  /** The memory records among the items, as found before the host kept them. */
+  memoryFound: FoundMemory[];
+}
+
+/** The isolate's kept recalls (recall-cache.ts). */
+const answers = recallCacheOf<KeptAnswer>();
+
+/** A memory record, by its ID at its revision. */
+const memoryKey = ({ id, revision }: { id: string; revision: number }) =>
+  `${id}@${revision}`;
+
+/** The document versions `items` cite. */
+const documentRefsOf = (items: readonly MemoryItem[]) =>
+  items.flatMap(({ sourceRefs }) =>
+    sourceRefs.flatMap((ref) =>
+      ref.kind === "document"
+        ? [
+            {
+              documentId: ref.documentId,
+              collectionId: ref.collectionId,
+              version: ref.version,
+            },
+          ]
+        : []
+    )
+  );
+
+/**
+ * A kept answer's current use, checked again for `reader`: every document
+ * version it cites still readable by them, every memory record it holds
+ * still kept for them by the host, at the same revision; and the read
+ * recorded and noted, as the read it stands for was (`searchRecord`,
+ * `memoriesRead`). Its provenance, or nothing when it no longer holds.
+ */
+const usedAgain = async <C>(
+  brain: Brain<C>,
+  store: BrainStore<C>,
+  reader: C,
+  readers: MemoryReaders | undefined,
+  question: string,
+  told: readonly CollectionId[],
+  answer: KeptAnswer
+): Promise<Provenance | undefined> => {
+  const documents = documentRefsOf(answer.items);
+  let memories: KeptMemory[] = [];
+  try {
+    await store.pinsOf(reader, documents);
+    if (answer.memoryFound.length > 0) {
+      if (readers === undefined) {
+        return undefined;
+      }
+      memories = await brain.ports.memories.keep(
+        reader,
+        readers.people,
+        answer.memoryFound
+      );
+    }
+  } catch {
+    return undefined;
+  }
+  const keptNow = memories.map(memoryKey).toSorted();
+  const keptThen = answer.items
+    .flatMap(({ sourceRefs }) =>
+      sourceRefs.flatMap((ref) =>
+        ref.kind === "memory"
+          ? [memoryKey({ id: ref.memoryId, revision: ref.revision })]
+          : []
+      )
+    )
+    .toSorted();
+  if (JSON.stringify(keptNow) !== JSON.stringify(keptThen)) {
+    return undefined;
+  }
+  const allowed = await allowedFor(brain.ports, reader);
+  let sources: Awaited<ReturnType<typeof readableCollection>>[];
+  try {
+    sources = await Promise.all(
+      [
+        ...new Set([
+          ...told,
+          ...documents.map(({ collectionId }) => collectionId),
+        ]),
+      ].map(
+        async (id) =>
+          await readableCollection(brain.db, allowed.collections, id)
+      )
+    );
+  } catch {
+    return undefined;
+  }
+  const documentIds = [
+    ...new Set(documents.map(({ documentId }) => documentId)),
+  ];
+  const sections = await brain.ports.onRead(
+    reader,
+    {
+      action: "knowledge.search",
+      documentIds,
+      detail: {
+        terms: termsOf(question).length,
+        hits: documentIds.length,
+        via: "recall",
+        cache: "hit",
+      },
+    },
+    ...sources
+  );
+  return joined(sections, await memoriesRead(brain, reader, memories), told);
+};
+
+/**
+ * The answer kept under `cacheKey`, as a new pack of `accessRevision`, once
+ * its use is checked again (`usedAgain`); nothing when none is kept or it
+ * no longer holds, which then goes.
+ */
+const answeredFromCache = async <C>(
+  brain: Brain<C>,
+  store: BrainStore<C>,
+  reader: C,
+  readers: MemoryReaders | undefined,
+  question: string,
+  told: readonly CollectionId[],
+  {
+    cacheKey,
+    accessRevision,
+    startedAt,
+  }: { cacheKey: string; accessRevision: string; startedAt: number }
+): Promise<
+  | { pack: MemoryPack; sources: CollectionId[]; provenance: Provenance }
+  | undefined
+> => {
+  const cached = answers.lookUp(cacheKey, brain.ports.clock().getTime());
+  if (cached === undefined) {
+    return undefined;
+  }
+  const provenance = await usedAgain(
+    brain,
+    store,
+    reader,
+    readers,
+    question,
+    told,
+    cached
+  );
+  if (provenance === undefined) {
+    answers.forget(cacheKey);
+    return undefined;
+  }
+  log.info("brain.recall", {
+    cache: "hit",
+    policy: cached.policy,
+    ms: brain.ports.clock().getTime() - startedAt,
+  });
+  return {
+    pack: {
+      id: crypto.randomUUID(),
+      contractVersion: brainContractVersion,
+      retrievalPolicyVersion: cached.policy,
+      items: cached.items,
+      sourceVersions: sourcesOf(cached.items),
+      conflicts: [],
+      gaps: cached.gaps,
+      coverage: cached.coverage,
+      truncated: cached.truncated,
+      warnings: [],
+      tokenCount: cached.tokenCount,
+      accessRevision,
+      indexGeneration,
+      createdAt: brain.ports.clock().toISOString(),
+    },
+    sources: provenance.collectionIds,
+    provenance,
+  };
+};
+
+/**
+ * Keeps `pack`'s answer under `cacheKey` at `now`: never a degraded read,
+ * nor a rerank asked for that didn't happen, so the next recall reads, or
+ * reranks, again.
+ */
+const keepAnswer = (
+  cacheKey: string,
+  pack: MemoryPack,
+  read: LanesRead,
+  memories: readonly KeptMemory[],
+  outcome: RerankOutcome,
+  now: Date
+): void => {
+  const rerankStands =
+    outcome === "reranked" || outcome === "not_asked" || outcome === "unneeded";
+  if (pack.coverage.state === "degraded" || !rerankStands) {
+    return;
+  }
+  const inPack = new Set(memories.map(memoryKey));
+  answers.keep(
+    cacheKey,
+    {
+      items: pack.items,
+      tokenCount: pack.tokenCount,
+      truncated: pack.truncated,
+      coverage: pack.coverage,
+      gaps: pack.gaps,
+      policy: pack.retrievalPolicyVersion,
+      memoryFound: (read.fulltext.state === "read"
+        ? (read.fulltext.memoryFound ?? [])
+        : []
+      ).filter((each) => inPack.has(memoryKey(each))),
+    },
+    pack.items.reduce((sum, { statement }) => sum + statement.length, 0),
+    now.getTime()
+  );
+};
 
 /**
  * `recall`, with every collection it read from: those its search reported
@@ -489,41 +1019,80 @@ export const recallWithSources = async <C>(
       brain,
       JSON.stringify([await store.accessKey(reader), readers ?? null])
     );
+    // A recall kept a moment ago, under everything its answer rests on,
+    // is used again once its use is checked again (recall-cache.ts).
+    const cacheKey = await recallCacheKey(brain, [
+      recallPolicyVersion,
+      rerankPolicyVersion,
+      indexGeneration,
+      accessRevision,
+      await recallGeneration(brain),
+      // The lanes the store reads: a vector index added changes answers.
+      store.findSimilar === undefined ? "no-vectors" : "vectors",
+      query,
+      collectionIds?.toSorted() ?? null,
+      limits,
+    ]);
+    const hit = await answeredFromCache(
+      brain,
+      store,
+      reader,
+      readers,
+      query,
+      collectionIds ?? [],
+      { cacheKey, accessRevision, startedAt }
+    );
+    if (hit !== undefined) {
+      return hit;
+    }
     const remaining =
       limits.deadlineMs - (brain.ports.clock().getTime() - startedAt);
     // One more than asked, to tell a full pack from a cut one.
     const limit = Math.min(limits.maxItems + 1, searchMaxLimit);
-    const read =
-      remaining <= 0
-        ? undefined
-        : await evidenceWithin(brain, store, reader, readers, {
-            query,
-            limit,
-            remaining,
-            ...(collectionIds === undefined ? {} : { collectionIds }),
-          });
-    const found = alternated(read?.sections ?? [], read?.memories ?? []);
+    const read = await lanesWithin(brain, store, reader, readers, {
+      query,
+      limit,
+      remaining,
+      ...(collectionIds === undefined ? {} : { collectionIds }),
+    });
+    const { found, outcome } = await reranked(
+      brain,
+      store,
+      reader,
+      query,
+      fusedItems(read),
+      {
+        asked: limits.rerank,
+        remaining:
+          limits.deadlineMs - (brain.ports.clock().getTime() - startedAt),
+      }
+    );
     const { items, memories, tokenCount } = packed(found, limits);
     const truncated = items.length < found.length || readFull(read, limit);
     const provenance = joined(
-      read?.provenance ?? noProvenance,
+      lanesProvenance(read),
       await memoriesRead(brain, reader, memories),
       collectionIds ?? []
     );
+    const coverage = coverageOf(read, truncated, outcome);
     const pack: MemoryPack = {
       id: crypto.randomUUID(),
       contractVersion: brainContractVersion,
-      retrievalPolicyVersion: recallPolicyVersion,
+      retrievalPolicyVersion:
+        outcome === "reranked"
+          ? `${recallPolicyVersion}+${rerankPolicyVersion}`
+          : recallPolicyVersion,
       items,
       sourceVersions: sourcesOf(items),
       conflicts: [],
-      // Only a finished read that matched nothing is a gap: one the
-      // deadline stopped proves nothing, and one a budget cut matched.
+      // Only finished reads that matched nothing are a gap: one the
+      // deadline stopped, or a lane that failed, proves nothing, and one a
+      // budget cut matched.
       gaps:
-        found.length === 0 && read !== undefined
+        found.length === 0 && coverage.state !== "degraded"
           ? [{ about: "No evidence the caller may read matched the question." }]
           : [],
-      coverage: coverageOf(read === undefined, truncated),
+      coverage,
       truncated,
       warnings: [],
       tokenCount,
@@ -531,6 +1100,12 @@ export const recallWithSources = async <C>(
       indexGeneration,
       createdAt: brain.ports.clock().toISOString(),
     };
+    keepAnswer(cacheKey, pack, read, memories, outcome, brain.ports.clock());
+    log.info("brain.recall", {
+      cache: "miss",
+      policy: pack.retrievalPolicyVersion,
+      ms: brain.ports.clock().getTime() - startedAt,
+    });
     return { pack, sources: provenance.collectionIds, provenance };
   } catch (error) {
     throw asBrainError(brain, error);

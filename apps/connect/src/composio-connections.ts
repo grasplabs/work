@@ -17,7 +17,7 @@ import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { eq, lte, sql } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -35,6 +35,7 @@ import {
 import { isComposioServerUrl } from "./connections.ts";
 import type { Connection } from "./connections.ts";
 import { composioCleanups, composioFlows, connections } from "./db/schema.ts";
+import { erasureBegan } from "./erased-people.ts";
 
 // Connecting a Composio toolkit: one shared connection per toolkit, scoped
 // to the tools the admin allows. Composio holds its tokens, in its cloud,
@@ -55,7 +56,7 @@ import { composioCleanups, composioFlows, connections } from "./db/schema.ts";
 //
 // Whatever goes wrong after something was made at Composio, it is deleted
 // there again. What Composio doesn't take, or what can't be deleted while
-// connect has no key, is recorded and tried again by the cron trigger,
+// connect has no key, is recorded and tried again by the clock,
 // waiting longer each time, until it is gone: a flow that didn't finish, or
 // a disconnected connection, leaves no account behind for long.
 
@@ -263,7 +264,7 @@ const idsOf = (left: readonly Target[]) => {
 const firstRetryMs = 60 * 1000;
 
 /**
- * When the cron trigger may start on a cleanup recorded while a start or a
+ * When the clock may start on a cleanup recorded while a start or a
  * finish is still under way (a few Composio requests of at most ten
  * seconds each): long after either is done, so it never deletes what one
  * of them is about to keep.
@@ -283,7 +284,7 @@ const retryDelayMs = (attempts: number): number =>
 // connection disconnected), so neither is ever kept without the other.
 // Only then is Composio asked to delete it, and only once it has is the
 // row cleared. Whatever happens in between (no key, Composio failing, a
-// crash), the row is there for the cron trigger (`retryComposioCleanups`).
+// crash), the row is there for the clock (`retryComposioCleanups`).
 
 // A flow's cleanup row is written before anything is made at Composio
 // (intent first), and everything made there carries the flow's marker
@@ -293,7 +294,7 @@ const retryDelayMs = (attempts: number): number =>
 /**
  * Carries out the recorded cleanup `id` of `made` (and, with a `marker`,
  * of everything carrying it): deletes it at Composio, then clears the row,
- * or keeps in it what is left for the cron trigger. Never throws: it runs
+ * or keeps in it what is left for the clock. Never throws: it runs
  * where another error may be on its way, and a row it fails to clear is
  * only tried again. Whether the account `made` names, if any, is deleted.
  */
@@ -332,13 +333,13 @@ const carryOutCleanup = async (
  */
 const stuckAttempts = 10;
 
-/** Most cleanups one cron run tries: a few requests each. */
+/** Most cleanups one clock run tries: a few requests each. */
 const cleanupBatchSize = 10;
 
 /**
  * Tries again the cleanups at Composio that are due, waiting longer after
  * each failed try, and forgets each once everything of it is gone. Nothing
- * is tried while connect has no Composio key. The cron trigger calls it.
+ * is tried while connect has no Composio key. The clock calls it.
  */
 export const retryComposioCleanups = async (env: Env): Promise<void> => {
   const key = composioKey(env);
@@ -506,7 +507,7 @@ export const startToolkitConnection = async (
   const db = drizzle(env.DB);
   const thisCleanup = eq(composioCleanups.id, flowId);
   // Intent first: should anything after this fail, or the isolate go, the
-  // cron trigger finds what was made by its marker (`underWayMs` from now,
+  // clock finds what was made by its marker (`underWayMs` from now,
   // long after this start is done). If this fails, nothing is made.
   await db.insert(composioCleanups).values({
     id: flowId,
@@ -571,20 +572,29 @@ export const startToolkitConnection = async (
         ...namesOf(namedHinted.details, true),
       ],
       [
-        db.delete(composioCleanups).where(thisCleanup),
-        db.insert(composioFlows).values({
-          stateHash,
-          flowId,
-          userId: person.userId,
-          toolkit,
-          authConfigId: authConfig.id,
-          connectedAccountId: link.connected_account_id,
-          tools: storedTools,
-          returnTo,
-          expiresAt: new Date(Date.now() + oauthFlowLifetimeMs),
-        }),
+        // Only for someone whose erasure hasn't begun, both or neither:
+        // a start under way as it began keeps its cleanup row, and the
+        // flow it would have made is never stored (person-erasure.ts).
+        db
+          .delete(composioCleanups)
+          .where(and(thisCleanup, sql`NOT ${erasureBegan(person.userId)}`)),
+        db.insert(composioFlows).select(
+          sql`SELECT ${stateHash}, ${flowId}, ${person.userId}, ${toolkit},
+            ${authConfig.id}, ${link.connected_account_id}, ${storedTools},
+            ${returnTo}, ${Date.now() + oauthFlowLifetimeMs}
+            WHERE NOT ${erasureBegan(person.userId)}`
+        ),
       ]
     );
+    const [kept] = await db
+      .select({ flowId: composioFlows.flowId })
+      .from(composioFlows)
+      .where(eq(composioFlows.stateHash, stateHash));
+    if (kept === undefined) {
+      // Their erasure began as this ran: what it made at Composio goes
+      // now, its cleanup row keeping what can't.
+      throw connectionErrors.create("connection.flow_invalid");
+    }
     return { url: link.redirect_url };
   } catch (error) {
     await carryOutCleanup(env, flowId, made, marker);
@@ -679,7 +689,7 @@ export const abandonToolkitFlow = async (
 /**
  * Hands every Composio flow of the people `userIds` over to cleanup rows
  * due now, in one transaction, however many there are: someone removed
- * can finish none. The cron trigger deletes them at Composio, a bounded
+ * can finish none. The clock deletes them at Composio, a bounded
  * number a run.
  */
 export const dropToolkitFlowsOf = async (
@@ -696,7 +706,7 @@ export const dropToolkitFlowsOf = async (
 
 /**
  * Hands the Composio flows nobody finished in time over to cleanup rows
- * due now, for the cron trigger to delete at Composio. It calls this.
+ * due now, for the clock to delete at Composio. It calls this.
  */
 export const purgeExpiredToolkitFlows = async (env: Env): Promise<void> => {
   const now = Date.now();

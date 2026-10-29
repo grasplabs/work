@@ -59,7 +59,7 @@ const QueuedFor = ({ queued }: { queued: RunQueue }) => {
   const time = formatDateTime(queued.retryAt);
   switch (queued.waitingFor) {
     case "app": {
-      return t`Waiting for a share of this App's runs; tries again by ${ph({ time })}`;
+      return t`Waiting for a share of this domain's runs; tries again by ${ph({ time })}`;
     }
     case "person": {
       return t`Waiting for a share of this person's runs; tries again by ${ph({ time })}`;

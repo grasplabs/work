@@ -4,24 +4,20 @@
  * and `platform-words.ts`): how a company stands, the rollout's rings as
  * steps, and the admin's own records in words staff read.
  */
+import { RINGS, ringName } from "@grasp-os/shared/admin/admin-platform";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { CheckIcon, LoaderCircleIcon, PauseIcon, XIcon } from "lucide-react";
 
 import type { TargetView } from "../rollout/queries.ts";
 import type { StaffEvent } from "./platform-data.ts";
 import type { PlatformNeed, RingState, Standing } from "./platform.ts";
-import { formatPercent } from "./words.ts";
 
-/** A ring, as the admin says it: the first three by what they are for. */
-export const ringWords = (ring: number): string => {
-  if (ring === 0) {
-    return "Ring 0, first";
-  }
-  if (ring === 1) {
-    return "Ring 1, early";
-  }
-  return ring === 2 ? "Ring 2, everyone" : `Ring ${ring}`;
-};
+/** A ring, as the admin says it: Alpha, Beta, Production, then by number past those. */
+export const ringWords = (ring: number): string => ringName(ring);
+
+/** The rings staff pick from: the three named ones, and `current` when it is past them. */
+export const ringChoices = (current: number): number[] =>
+  RINGS.some((ring) => ring === current) ? [...RINGS] : [...RINGS, current];
 
 /** A company in a rollout. */
 export const targetWords: Record<TargetView["status"], string> = {
@@ -59,9 +55,6 @@ export const needWords = (need: PlatformNeed): string => {
     }
     case "drift": {
       return `${driftWords[need.drift]}.`;
-    }
-    case "errors": {
-      return `${formatPercent(need.rate)} of yesterday's requests ended in an error.`;
     }
     case "behind": {
       return `${need.releases} releases behind the newest.`;

@@ -43,12 +43,12 @@
  * One kind of call keeps what it writes, bounded, for whom core says: a
  * draft's sealed preview, whose lines go to the agent's next check of
  * that draft, as `AppTail` hands them over on Cloudflare
- * (server-logs.ts, GRA-689). The only other isolates core gives a tail
- * are a v1 App server's and its draft preview's (app.ts, preview.ts).
- * They never reach this host: on-prem refuses them unless
- * SANDBOX_IN_PROCESS=unbounded, which runs them in core's own Loader with
- * their tail and without the quiet module. The v1 server is being
- * removed (GRA-789). A sealed preview's isolate is loaded with the quiet module
+ * (server-logs.ts, GRA-689). Core loading one in its own Loader off
+ * Cloudflare (SANDBOX_IN_PROCESS=unbounded) captures it the same way
+ * (quiet-loader.ts, `capturedCode`, GRA-919). The only other isolate core
+ * gives a tail is a v1 App server's (app.ts), on Cloudflare alone: off it,
+ * it is silenced, and it is being removed (GRA-789). A sealed preview's
+ * isolate is loaded with the quiet module
  * recording instead (`capturedModules`): the first `maxCapturedLines`
  * lines of the call, each held to `maxCapturedMessage` characters, with
  * their level and time, still printing nothing. A module of the host's

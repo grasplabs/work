@@ -173,8 +173,22 @@
     {
       "idx": 24,
       "version": "6",
-      "when": 1793113680921,
-      "tag": "0024_chat_files",
+      "when": 1793126740416,
+      "tag": "0024_custom_widgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1793143856788,
+      "tag": "0025_chat_app",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1793287321179,
+      "tag": "0026_chat_files",
       "breakpoints": true
     }
   ]

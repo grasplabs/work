@@ -19,13 +19,16 @@ import {
   mailIngressRequest,
   mailRejectedStatus,
 } from "@grasp-os/shared/mail-ingress";
+import { stageNamed, stageOfHost } from "@grasp-os/shared/names";
 import {
   deriveRouterSecret,
   routerHostKey,
   routerClientIpHeader,
   routerHostSchema,
   routerSecretHeader,
+  routerTargetOf,
 } from "@grasp-os/shared/router";
+import type { RouterTarget } from "@grasp-os/shared/router";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
 import { clientAddress } from "./client-address.ts";
@@ -33,7 +36,7 @@ import { routeCache } from "./route-cache.ts";
 
 /** Where one hostname goes, and the secret its core expects. */
 interface Route {
-  origin: string;
+  target: RouterTarget;
   secret: string;
 }
 
@@ -53,9 +56,10 @@ const routes = routeCache<Route | null>(maxCachedHosts, routeCacheMs);
 
 /**
  * Reads a host's entry from the map and derives its secret. An entry that
- * doesn't parse, or names anything but an https `*.workers.dev` origin,
- * routes nowhere. Throws when the router key can't be read, so nothing is
- * forwarded (and nothing cached) without the right secret.
+ * doesn't parse (a script that isn't a script's name, an origin that isn't
+ * https `*.workers.dev`, both or neither) routes nowhere. Throws when the
+ * router key can't be read, so nothing is forwarded (and nothing cached)
+ * without the right secret.
  */
 const loadRoute = async (host: string, env: Env): Promise<Route | null> => {
   const stored = await env.HOSTS.get(host, "json");
@@ -67,15 +71,26 @@ const loadRoute = async (host: string, env: Env): Promise<Route | null> => {
     log.error("router.host_refused", { host });
     return null;
   }
-  const { clientId, coreUrl, generation } = parsed.data;
+  const { clientId, generation } = parsed.data;
   const routerKey = await env.ROUTER_KEY.get();
   return {
-    origin: new URL(coreUrl).origin,
+    target: routerTargetOf(parsed.data),
     secret: await deriveRouterSecret(routerKey, clientId, generation),
   };
 };
 
+/**
+ * The route of `host`, or null for none. A host of the other stage is
+ * never this router's, whatever its map holds: staging's clients are
+ * below production's domain (@grasp-os/shared/names, `stageOfHost`). A
+ * router whose STAGE names neither stage routes nothing: it never takes
+ * itself for production's.
+ */
 const routeFor = async (host: string, env: Env): Promise<Route | null> => {
+  const stage = stageNamed(env.STAGE);
+  if (stage === undefined || stageOfHost(host) !== stage) {
+    return null;
+  }
   const cached = routes.get(host, Date.now());
   if (cached !== undefined) {
     return cached.value;
@@ -84,6 +99,31 @@ const routeFor = async (host: string, env: Env): Promise<Route | null> => {
   routes.set(host, route, Date.now());
   return route;
 };
+
+/**
+ * Sends `request` to `route`'s core and answers what core answers: into its
+ * user Worker through the dispatch namespace (`DISPATCHER`) for a script,
+ * never over the internet; over the internet only to an https
+ * `*.workers.dev` origin. Either way to that one core alone: a script the
+ * namespace doesn't have throws, as a failed fetch does, and nothing is
+ * tried in its place (GRA-283).
+ */
+const toCore = async (
+  route: Route,
+  request: Request,
+  env: Env
+): Promise<Response> =>
+  route.target.kind === "dispatch"
+    ? await env.DISPATCHER.get(route.target.script).fetch(request)
+    : await fetch(request);
+
+/**
+ * The URL a request for `host` goes to: on its hostname for a script, so
+ * its core sees the address it was asked at; on its core's own origin for
+ * an origin.
+ */
+const coreUrlFor = (route: Route, host: string, path: string): string =>
+  `${route.target.kind === "dispatch" ? `https://${host}` : route.target.origin}${path}`;
 
 /** The most of core's reason for a bounce the sender is told. */
 const maxBounceReason = 500;
@@ -216,8 +256,10 @@ const limiterFor = (pathname: string, env: Env): RateLimit | undefined => {
 };
 
 /**
- * Forwards each request on a client's hostname to that client's core, with
- * the router secret so a client's workers.dev address is no back door.
+ * Forwards each request on a client's hostname to that client's core (its
+ * user Worker through the dispatch namespace, or its workers.dev origin:
+ * `toCore`), with the router secret so a core is reached through the
+ * router alone.
  * Pass-through only: the method, path, query, headers and body go as they
  * came (but for Host, the router secret and the client-IP header),
  * WebSocket upgrades included, and core's response comes back as it
@@ -267,15 +309,20 @@ export default {
       headers.set(routerClientIpHeader, clientIp);
     }
     try {
-      return await fetch(`${route.origin}${url.pathname}${url.search}`, {
-        method: request.method,
-        headers,
-        body: request.body,
-        redirect: "manual",
-      });
+      return await toCore(
+        route,
+        new Request(coreUrlFor(route, host, `${url.pathname}${url.search}`), {
+          method: request.method,
+          headers,
+          body: request.body,
+          redirect: "manual",
+        }),
+        env
+      );
     } catch (error) {
       // The error's kind only: a failed fetch's message or stack can carry
-      // the target URL, and with it an OAuth callback's code and state.
+      // the target URL, and with it an OAuth callback's code and state; a
+      // dispatch's names the client's script.
       log.error("router.forward_failed", {
         host,
         errorName: error instanceof Error ? error.name : typeof error,
@@ -316,7 +363,7 @@ export default {
       return;
     }
     const { mail, request } = await mailIngressRequest(
-      route.origin,
+      coreUrlFor(route, host, ""),
       route.secret,
       {
         to: message.to,
@@ -325,7 +372,7 @@ export default {
         sentAt: new Date().toISOString(),
       }
     );
-    const response = await fetch(request);
+    const response = await toCore(route, request, env);
     const fields = {
       host,
       message: mail.sha256,

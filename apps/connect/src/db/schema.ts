@@ -401,7 +401,7 @@ export const composioFlows = sqliteTable(
  * What connect made at Composio and still has to delete there: a flow
  * that didn't finish, or a connection that was disconnected, while
  * Composio didn't take the deletion or connect had no Composio key. The
- * cron trigger tries again at `retry_at`, waiting longer after each failed
+ * clock tries again at `retry_at`, waiting longer after each failed
  * `attempts`, until everything is gone. An account left there may hold
  * tokens, so nothing is forgotten.
  */
@@ -457,9 +457,31 @@ export const connectionTokens = sqliteTable("connection_tokens", {
 });
 
 /**
+ * A revoke at its provider still owed for a disconnected connection
+ * (GRA-1191): the provider was down, or refused, when it was
+ * disconnected. Its sealed tokens stay in `connection_tokens` until the
+ * revoke goes through, so the cron trigger can try again
+ * (`retryRevocations`, src/revocations.ts); the connection is
+ * disconnected, so nothing calls with them meanwhile. `attempts` counts
+ * the failed tries, each waiting longer, until `retry_at`.
+ */
+export const tokenRevocations = sqliteTable(
+  "token_revocations",
+  {
+    connectionId: text("connection_id")
+      .primaryKey()
+      .references(() => connections.id),
+    attempts: integer().notNull().default(0),
+    retryAt: timestamp("retry_at").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("token_revocations_retry_idx").on(table.retryAt)]
+);
+
+/**
  * Audit events core hasn't appended to the audit log yet. Each call's
  * events are stored here, with the call's own result where it has one;
- * core's cron trigger takes them and acknowledges those it appended
+ * core's clock takes them and acknowledges those it appended
  * (src/audit.ts). `event` is the event as JSON.
  */
 export const auditOutbox = sqliteTable("audit_outbox", {
@@ -585,3 +607,14 @@ export const connectorEvents = sqliteTable(
     index("connector_events_connection_idx").on(table.connectionId),
   ]
 );
+
+/**
+ * People whose erasure has begun (person-erasure.ts), by their user ID:
+ * connect makes nothing new of theirs once it has, so nothing a flow or a
+ * call still under way finishes after the erasure emptied what was theirs
+ * comes back. Never removed: an erasure is final.
+ */
+export const erasedPeople = sqliteTable("erased_people", {
+  userId: text("user_id").primaryKey(),
+  beganAt: timestamp("began_at").notNull(),
+});

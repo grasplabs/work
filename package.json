@@ -21,7 +21,6 @@
     "check:playwright-image": "node scripts/check-playwright-image.ts",
     "github:setup": "node scripts/github-setup.ts",
     "check:branch": "node scripts/check-branch-name.ts",
-    "stephen:changed": "node scripts/stephen-eval.ts changed",
     "stephen:report": "node scripts/stephen-eval.ts report",
     "build:jq-wasm": "node scripts/jq-wasm/build.ts",
     "check:secrets": "secretlint \"**/*\"",
@@ -29,8 +28,9 @@
     "e2e:durations": "node scripts/e2e-durations.ts",
     "release:build": "node scripts/release/build-release.ts",
     "release:upload": "node scripts/release/upload-release.ts",
-    "release:deploy": "node scripts/release/deploy-release.ts",
-    "release:accept": "node scripts/release/accept-release.ts",
+    "capacity": "node scripts/capacity/run-capacity.ts",
+    "release:evidence": "node scripts/release/evidence-release.ts",
+    "release:previous": "node scripts/release/previous-release.ts",
     "package:definition": "node scripts/package-definition.ts",
     "parity": "node scripts/parity/run.ts",
     "discord:commands": "node scripts/discord-commands.ts",
@@ -68,7 +68,7 @@
   "devEngines": {
     "runtime": {
       "name": "node",
-      "version": "^24.11.0",
+      "version": "^24.22.0",
       "onFail": "error"
     }
   },

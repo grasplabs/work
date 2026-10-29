@@ -1,4 +1,5 @@
 import {
+  canSignInAgain,
   composioConsentText,
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
@@ -11,6 +12,7 @@ import type {
 import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { AutoHeight, FadeIn } from "@grasp-os/ui/components/auto-height";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -45,8 +47,12 @@ import type { AllowedTool } from "./tool-choices.ts";
 // for its provider and scope. Core and connect check every step: the page
 // offers only what the role can do.
 
-/** Where a flow sends the browser back to: the integration's own page. */
-export const returnToOf = (key: string): string => `/integrations/${key}`;
+/**
+ * Where a flow sends the browser back to: the integration's own page, which
+ * says the app is connected again when `again`.
+ */
+export const returnToOf = (key: string, again = false): string =>
+  again ? `/integrations/${key}?again=1` : `/integrations/${key}`;
 
 /** Sends the browser to the provider, once core started the flow. */
 export const goTo = (started: { url: string } | undefined): void => {
@@ -74,21 +80,12 @@ export const canConnect = (
   return isAdmin(identity.role);
 };
 
-/**
- * Whether this person can sign in again to `connection`: whoever may
- * disconnect it (its owner, or an admin for a shared one), never Grasp
- * staff, only a native one, and only while its entry is offered.
- */
+/** Whether this person can sign in again to `connection`, as core decides it. */
 export const canReconnect = (
   connection: ListedConnection,
   offered: boolean,
   identity: Pick<Identity, "role" | "staff">
-): boolean =>
-  connection.source === "native" &&
-  oauthProviderSchema.safeParse(connection.provider).success &&
-  offered &&
-  (connection.scope === "personal" || isAdmin(identity.role)) &&
-  !identity.staff;
+): boolean => canSignInAgain(connection, offered, identity);
 
 /**
  * The connection an integration's page offers to sign in to again: the
@@ -298,17 +295,23 @@ const Actions = ({
   onStart: () => void;
   children: ReactNode;
 }) =>
+  // Each state its own key, so the one that comes in fades in (and each
+  // attempt's waiting row starts over), rather than swapping in place.
   busy ? (
-    <Starting app={app} disabled={disabled} key={attempt} onRetry={onStart} />
+    <FadeIn key={`starting-${attempt}`}>
+      <Starting app={app} disabled={disabled} onRetry={onStart} />
+    </FadeIn>
   ) : (
-    <div className="flex items-center gap-2">
-      <Button disabled={disabled} onClick={onStart}>
-        {children}
-      </Button>
-      <Button onClick={onClose} variant="outline">
-        <Trans>Cancel</Trans>
-      </Button>
-    </div>
+    <FadeIn key="ready">
+      <div className="flex items-center gap-2">
+        <Button disabled={disabled} onClick={onStart}>
+          {children}
+        </Button>
+        <Button onClick={onClose} variant="outline">
+          <Trans>Cancel</Trans>
+        </Button>
+      </div>
+    </FadeIn>
   );
 
 /**
@@ -662,26 +665,32 @@ const ComposioFlow = ({
           {listed === undefined ? undefined : notLoadedText(listed, i18n)}
         </ErrorText>
         {tools === undefined ? null : (
-          <fieldset className="flex flex-col gap-2">
-            <legend className="sr-only">
-              <Trans>Tools to allow</Trans>
-            </legend>
-            <ul className="flex max-h-64 flex-col overflow-y-auto rounded-lg border">
-              {tools.map((tool) => (
-                <ToolChoice
-                  choice={allowed.find((choice) => choice.name === tool.name)}
-                  key={tool.name}
-                  onAllow={(allow) => {
-                    setAllowed((current) => withAllowed(current, tool, allow));
-                  }}
-                  onRead={(read) => {
-                    setAllowed((current) => withRead(current, tool.name, read));
-                  }}
-                  tool={tool}
-                />
-              ))}
-            </ul>
-          </fieldset>
+          <FadeIn>
+            <fieldset className="flex flex-col gap-2">
+              <legend className="sr-only">
+                <Trans>Tools to allow</Trans>
+              </legend>
+              <ul className="flex max-h-64 flex-col overflow-y-auto rounded-lg border">
+                {tools.map((tool) => (
+                  <ToolChoice
+                    choice={allowed.find((choice) => choice.name === tool.name)}
+                    key={tool.name}
+                    onAllow={(allow) => {
+                      setAllowed((current) =>
+                        withAllowed(current, tool, allow)
+                      );
+                    }}
+                    onRead={(read) => {
+                      setAllowed((current) =>
+                        withRead(current, tool.name, read)
+                      );
+                    }}
+                    tool={tool}
+                  />
+                ))}
+              </ul>
+            </fieldset>
+          </FadeIn>
         )}
       </Step>
       <Step
@@ -757,27 +766,37 @@ export const ConnectDialog = ({
             </DialogDescription>
           </div>
         </header>
-        {/* Only while open, so each opening starts from its first step. */}
-        {open && integration.source === "native" ? (
-          <NativeFlow
-            again={again}
-            identity={identity}
-            integration={integration}
-            returnTo={returnTo ?? returnToOf(integration.key)}
-            onClose={() => {
-              onOpenChange(false);
-            }}
-          />
-        ) : null}
-        {open && integration.source === "composio" ? (
-          <ComposioFlow
-            integration={integration}
-            returnTo={returnTo ?? returnToOf(integration.key)}
-            onClose={() => {
-              onOpenChange(false);
-            }}
-          />
-        ) : null}
+        {/* Only while open, so each opening starts from its first step.
+            The height eases as a step's content changes, and the steps
+            fade in (still, with reduced motion). */}
+        <AutoHeight>
+          {open && integration.source === "native" ? (
+            <FadeIn>
+              <NativeFlow
+                again={again}
+                identity={identity}
+                integration={integration}
+                onClose={() => {
+                  onOpenChange(false);
+                }}
+                returnTo={
+                  returnTo ?? returnToOf(integration.key, again !== undefined)
+                }
+              />
+            </FadeIn>
+          ) : null}
+          {open && integration.source === "composio" ? (
+            <FadeIn>
+              <ComposioFlow
+                integration={integration}
+                onClose={() => {
+                  onOpenChange(false);
+                }}
+                returnTo={returnTo ?? returnToOf(integration.key)}
+              />
+            </FadeIn>
+          ) : null}
+        </AutoHeight>
       </DialogContent>
     </Dialog>
   );

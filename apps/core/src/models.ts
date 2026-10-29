@@ -16,14 +16,11 @@ import {
   clampThinkingLevel,
   getSupportedThinkingLevels,
 } from "@earendil-works/pi-ai";
-import { streamSimple as anthropicMessages } from "@earendil-works/pi-ai/api/anthropic-messages";
 import {
   CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL,
   createAiBindingFetch,
 } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import { streamSimple as openaiCompletions } from "@earendil-works/pi-ai/api/openai-completions";
-import { streamSimple as openaiResponses } from "@earendil-works/pi-ai/api/openai-responses";
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
 import { CLOUDFLARE_WORKERS_AI_MODELS } from "@earendil-works/pi-ai/providers/cloudflare-workers-ai.models";
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models";
@@ -60,7 +57,11 @@ import {
   modelErrors,
   overBudgetMessage,
 } from "@grasp-os/shared/models";
-import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
+import type {
+  ModelEffort,
+  ModelEfforts,
+  ModelErrorCode,
+} from "@grasp-os/shared/models";
 import {
   authoritySchema,
   permissionErrors,
@@ -189,6 +190,33 @@ const bedrockEuModels: Readonly<Record<string, Model<"anthropic-messages">>> =
       ];
     })
   );
+
+/*
+ * pi's adapter for each API, loaded the first time a model is called: they
+ * bring the providers' SDKs, which would cost every isolate's startup
+ * (Cloudflare caps the CPU a Worker's startup may use).
+ */
+const anthropicMessages = async (): Promise<
+  StreamFunction<"anthropic-messages", SimpleStreamOptions>
+> => {
+  const { streamSimple } =
+    await import("@earendil-works/pi-ai/api/anthropic-messages");
+  return streamSimple;
+};
+const openaiResponses = async (): Promise<
+  StreamFunction<"openai-responses", SimpleStreamOptions>
+> => {
+  const { streamSimple } =
+    await import("@earendil-works/pi-ai/api/openai-responses");
+  return streamSimple;
+};
+const openaiCompletions = async (): Promise<
+  StreamFunction<"openai-completions", SimpleStreamOptions>
+> => {
+  const { streamSimple } =
+    await import("@earendil-works/pi-ai/api/openai-completions");
+  return streamSimple;
+};
 
 /**
  * The providers the gateway offers, by their AI Gateway path: the pi adapter
@@ -576,6 +604,30 @@ const sessionShape = {
        * Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("brain_upkeep") }),
+      /**
+       * Core's own making of a person's dashboard widget
+       * (dashboard-widgets.ts): it carries the names of their engines and
+       * workflows, judged as onboarding's is, and is made for them, on
+       * their budget, by the trigger that names them. Only core's own code
+       * makes such a call.
+       */
+      z.strictObject({ platform: z.literal("dashboard_widgets") }),
+      /**
+       * Core's own reranking of a person's recall (knowledge/rerank.ts),
+       * only when the recall asks for it: it carries the company's own
+       * words, judged as onboarding's is, and is made for them, on their
+       * budget, by the trigger that names them. A delegate's recall reranks
+       * under its own authority and context instead. Only core's own code
+       * makes such a call.
+       */
+      z.strictObject({ platform: z.literal("brain_recall") }),
+      /**
+       * Core's own reading of a policy the company uploaded (policies.ts):
+       * its text, judged as onboarding's is, as carrying sensitive data,
+       * made for the admin who uploaded it, on their budget. Only core's
+       * own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("policy_reading") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
@@ -693,6 +745,13 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    * share stops waiting, and one under way is cut off.
    */
   signal?: AbortSignal;
+  /**
+   * Told the answer's text so far each time it grows, as it streams in:
+   * for a caller that shows it being written (dashboard-widgets.ts). An
+   * answer asked for again starts afresh. A failure of it never fails the
+   * call.
+   */
+  onText?: (text: string) => void;
   /**
    * Whether a request the provider refused for a moment (429 or 5xx), or
    * that didn't connect, is sent again (the default, `maxRetries`). False
@@ -956,6 +1015,8 @@ interface Route extends Admitted {
   reauthorize?: () => Promise<void>;
   /** Told while the call waits for a share (`ModelCall.onQueued`). */
   onQueued?: QueuedHook;
+  /** Told the answer's text as it streams (`ModelCall.onText`). */
+  onText?: (text: string) => void;
   /** The call's notes of its wait, one after another (`told`). */
   notes: Promise<void>;
   /** Whether a refused request is sent again (`ModelCall.providerRetries`). */
@@ -1798,7 +1859,7 @@ const withRequestId = (
  * in, and the gateway's response once it came. pi reports a failed request
  * as a final error event instead of throwing.
  */
-const open = (
+const open = async (
   route: Route,
   context: TranscriptContext,
   { signal, endsAt }: { signal: AbortSignal; endsAt: number }
@@ -1883,7 +1944,7 @@ const open = (
   // SAFETY: the provider picks both the adapter and the catalog the model
   // comes from, so the model always speaks the adapter's API.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const adapter = providers[ref.provider].stream as StreamFunction<
+  const adapter = (await providers[ref.provider].stream()) as StreamFunction<
     Api,
     SimpleStreamOptions
   >;
@@ -1907,11 +1968,23 @@ const open = (
 /** Sends one request through the gateway and waits for the whole answer. */
 const send = async (request: Request): Promise<Sent> => {
   const { system, messages, signal, endsAt } = request;
-  const { events, response } = open(
+  const { events, response } = await open(
     request,
     normalizeContext({ systemPrompt: system, messages }),
     { signal, endsAt }
   );
+  const { onText } = request;
+  if (onText !== undefined) {
+    for await (const event of events) {
+      if (event.type === "text_delta") {
+        try {
+          onText(answerText(event.partial));
+        } catch (error) {
+          log.warn("model.on_text_failed", errorFields(error));
+        }
+      }
+    }
+  }
   const answer = await events.result();
   return { answer, ...response };
 };
@@ -2018,6 +2091,22 @@ const failureMessage = ({ status, errorType }: Failure): string => {
     ? "The model call failed."
     : `The model call failed (${cause.join(" ")}).`;
 };
+
+/** The model error code a failed answer's message names, as "(model.over_budget)". */
+const namedFailure = /\((?<code>model\.[a-z_]+)\)/u;
+
+/**
+ * Why a model call failed, from the message the gateway put on its failed
+ * answer: the code of {@link modelErrors} it names, or `model.failed` for
+ * one that names none (the provider failed it). Never the message itself,
+ * which may hold a provider's status and error type.
+ */
+export const modelFailureOf = (
+  errorMessage: string | undefined
+): ModelErrorCode =>
+  modelErrors.codeOf({
+    code: namedFailure.exec(errorMessage ?? "")?.groups?.code,
+  }) ?? "model.failed";
 
 /** How one request ended, as the audit log records it. */
 type Outcome =
@@ -2807,6 +2896,7 @@ const callModel = async <Output>(
     beforeSend,
     reauthorize,
     onQueued,
+    onText,
     signal,
     providerRetries = true,
     ...fields
@@ -2818,6 +2908,7 @@ const callModel = async <Output>(
     ...(beforeSend === undefined ? {} : { beforeSend }),
     ...(reauthorize === undefined ? {} : { reauthorize }),
     ...(onQueued === undefined ? {} : { onQueued }),
+    ...(onText === undefined ? {} : { onText }),
     providerRetries,
   };
   const { model } = route;
@@ -2914,7 +3005,7 @@ export const contextWindowOf = (model: string): number | undefined => {
 const relayEvents = async (
   env: ModelsEnv,
   route: Route,
-  { events, response }: ReturnType<typeof open>,
+  { events, response }: Awaited<ReturnType<typeof open>>,
   out: AssistantMessageEventStream,
   limit: Deadline
 ): Promise<void> => {
@@ -2953,7 +3044,7 @@ const relayEvents = async (
       const rateLimited =
         response.rateLimited === undefined || stopped !== undefined
           ? undefined
-          : `The model's provider is taking no more requests for now. Try again in ${response.rateLimited} seconds.`;
+          : `The model's provider is taking no more requests for now (model.rate_limited). Try again in ${response.rateLimited} seconds.`;
       out.push({
         ...event,
         error: {
@@ -3034,7 +3125,13 @@ const relay = async (
   }
   const limit = deadline(session.timeoutMs ?? defaultTimeoutMs, caller);
   try {
-    await relayEvents(env, route, open(route, context, limit), out, limit);
+    await relayEvents(
+      env,
+      route,
+      await open(route, context, limit),
+      out,
+      limit
+    );
   } finally {
     limit.clear();
   }

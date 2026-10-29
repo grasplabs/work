@@ -318,7 +318,7 @@ const moduleIntegrity = async (bytes: Uint8Array): Promise<string> =>
 const day = 24 * 60 * 60 * 1000;
 
 /**
- * How long a staged build is kept after it was last staged: the cron's
+ * How long a staged build is kept after it was last staged: the clock's
  * sweep deletes what is older (`sweepScreenFrames`).
  */
 export const frameKeepMs = 30 * day;
@@ -467,7 +467,7 @@ export const deleteExpired = async (
 
 /**
  * Deletes staged builds' manifests and modules last staged more than
- * `frameKeepMs` before `now`, from the cron: in code, not a bucket rule,
+ * `frameKeepMs` before `now`, from the clock: in code, not a bucket rule,
  * so it runs wherever core does. One page of one prefix a run, at most
  * `sweepBatch` objects, from where the last run stopped; once a prefix is
  * done, the next run starts the other.
@@ -560,9 +560,52 @@ export const screenModuleResponse = async (
   });
 };
 
+// The bootstrap also tells the page each time the person acts in this
+// frame (a click, a tap, a key), over a port of its own: the page counts a
+// screen's navigation as the person's only on such an act
+// (screen-host.ts), never on activation the frame may have focused itself
+// into. The screen's code shares this realm, so what reports runs before
+// any of it, and keeps what it needs where that code never reaches:
+// - the port, and the intrinsics it reports and listens with, are taken
+//   as this script starts, before any module loads, and held in its
+//   closure only, never on a global or a prototype; patching
+//   `MessagePort.prototype` or `EventTarget.prototype` later changes
+//   nothing here;
+// - its listeners are the window's first, in the capture phase, so no
+//   listener of the screen's runs before them or stops them;
+// - it reports only an event the browser made (`isTrusted`, each event's
+//   own property that no script can redefine), never one a script
+//   dispatched;
+// - one gesture is one act: a pointer's press (never its release, nor the
+//   mouse and touch events the same gesture fires too) and a key's first
+//   press (never its repeats while held, read with the getter taken at
+//   start), so a screen can't turn one click or one held key into many
+//   navigations;
+// - the report carries nothing: what counts is that it came over this
+//   port, which only this script holds. The screen's ports and the page's
+//   window are its own to post on, and the page reads no act from them.
 const bootstrap = `"use strict";
+const apply = Reflect.apply;
+const listen = EventTarget.prototype.addEventListener;
+const unlisten = EventTarget.prototype.removeEventListener;
+const post = MessagePort.prototype.postMessage;
+const repeatOf = Object.getOwnPropertyDescriptor(KeyboardEvent.prototype, "repeat").get;
 const load = new URLSearchParams(location.search).get("load");
 const screen = JSON.parse(document.getElementById("screen").textContent);
+const reportActs = (port) => {
+  const pressed = (event) => {
+    if (event.isTrusted === true) {
+      apply(post, port, [null]);
+    }
+  };
+  const keyed = (event) => {
+    if (event.isTrusted === true && apply(repeatOf, event, []) !== true) {
+      apply(post, port, [null]);
+    }
+  };
+  apply(listen, window, ["pointerdown", pressed, true]);
+  apply(listen, window, ["keydown", keyed, true]);
+};
 const start = (event) => {
   const { data, ports } = event;
   if (
@@ -570,11 +613,12 @@ const start = (event) => {
     data?.type !== "${screenFrameMessage}" ||
     data.load !== load ||
     data.artifact !== screen.artifact ||
-    ports.length !== 3
+    ports.length !== 4
   ) {
     return;
   }
-  removeEventListener("message", start);
+  apply(unlisten, window, ["message", start]);
+  reportActs(ports[3]);
   const style = document.createElement("style");
   style.textContent = screen.css;
   document.head.append(style);
@@ -588,7 +632,7 @@ const start = (event) => {
     )
   );
 };
-addEventListener("message", start);
+apply(listen, window, ["message", start]);
 parent.postMessage({ type: "${screenFrameReady}", load }, "*");`;
 
 /**

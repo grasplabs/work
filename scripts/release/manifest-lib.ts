@@ -31,6 +31,7 @@ import {
   verifyReleaseBlobs,
 } from "@grasp-os/shared/release";
 import type {
+  PlatformLimits,
   ReleaseCompatibility,
   ReleaseManifest,
   WorkerEntry,
@@ -308,6 +309,12 @@ export interface ReleaseInfo {
    * build), but for its databases' schemas, which come from the build.
    */
   compatibility: Omit<ReleaseCompatibility, "databases">;
+  /**
+   * The platform limits core and connect were built with
+   * (@grasp-os/shared/platform-limits). What they're raised over, and the
+   * evidence for it, are written at publish (evidence-release.ts).
+   */
+  platformLimits: PlatformLimits;
 }
 
 // Migrations are numbered from 0000 in the order they're applied, as

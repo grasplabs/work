@@ -104,6 +104,9 @@ export default defineProject({
           DURABLE_OBJECT_JURISDICTION: "none",
           // Where provisioned clients are served (src/deploy/context.ts).
           CLIENT_DOMAIN: "grasp.test",
+          // Off production's hostname in wrangler.jsonc: the tests of the
+          // admin's own hostname set it themselves (src/admin-host.ts).
+          ADMIN_HOST: "",
           // Grasp's Rooms, which test/admin-proposal.test.ts stands in for.
           ROOMS_ORIGIN: "https://rooms.grasp.test",
           // Where TanStack Start answers server functions: the build sets
@@ -118,12 +121,17 @@ export default defineProject({
         },
         // Where the fake Cloudflare API runs client D1 queries, one for
         // each database it holds at once (test/cloudflare-api-workers.ts).
-        d1Databases: Object.fromEntries(
-          Array.from({ length: 24 }, (_, slot) => [
-            `CLIENT_D1_${slot}`,
-            `client-d1-${slot}`,
-          ])
-        ),
+        d1Databases: {
+          ...Object.fromEntries(
+            Array.from({ length: 24 }, (_, slot) => [
+              `CLIENT_D1_${slot}`,
+              `client-d1-${slot}`,
+            ])
+          ),
+          // An empty admin database a migration test brings up step by
+          // step, with rows in it (test/admin-migrations.test.ts).
+          MIGRATION_D1: "migration-d1",
+        },
       },
     }),
   ],

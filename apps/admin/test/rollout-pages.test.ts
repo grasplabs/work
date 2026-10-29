@@ -1,4 +1,3 @@
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq, inArray } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
@@ -11,20 +10,21 @@ import {
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
+import { placeClient } from "../src/hosting/inventory.ts";
 import { importReleases } from "../src/releases/import.ts";
-import { fetchRolloutCost, startRolloutFn } from "../src/rollout/functions.ts";
+import { startRolloutFn } from "../src/rollout/functions.ts";
 import { startRequestOf } from "../src/rollout/start-request.ts";
 import type { StartChoices } from "../src/rollout/start-request.ts";
+import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
-import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { destination } from "./hosting.ts";
 import { callServerFn, page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-rollout-pages-3c9e17";
-const tenantToken = "test-tenant-admin-token-rollout-pages-7f2a64";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -38,26 +38,13 @@ const importedRelease = async (): Promise<string> => {
   return release.id;
 };
 
-/** Each client's account in the fake, by client id. */
-const accounts = new Map<string, AccountState>();
-
-/** Client `clientId`'s account in the fake. */
-const accountOf = (clientId: string): AccountState => {
-  const account = accounts.get(clientId);
-  if (account === undefined) {
-    throw new Error(`${clientId} has no account in the fake`);
-  }
-  return account;
-};
-
 /**
- * An active client in `ring`, on a new account in the fake, pinned to
- * `pinnedReleaseId` if given.
+ * An active client in `ring`, placed in a destination of its own on a new
+ * account in the fake, pinned to `pinnedReleaseId` if given.
  */
 const recordClient = async (ring: number, pinnedReleaseId?: string) => {
   const id = `client-${crypto.randomUUID().slice(0, 8)}`;
   const account = cloudflare.addAccount();
-  accounts.set(id, account);
   const now = new Date();
   await act(
     db,
@@ -66,7 +53,6 @@ const recordClient = async (ring: number, pinnedReleaseId?: string) => {
       db.insert(clients).values({
         id,
         name: `Acme ${id}`,
-        accountId: account.id,
         ring,
         status: "active",
         pinnedReleaseId: pinnedReleaseId ?? null,
@@ -76,6 +62,16 @@ const recordClient = async (ring: number, pinnedReleaseId?: string) => {
     ],
     { action: "client.create", clientId: id }
   );
+  // Rollouts reach only placed clients.
+  await placeClient(db, staff, {
+    clientId: id,
+    destinationId: await destination({
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+    }),
+    policyId: "eu-storage",
+  });
   return id;
 };
 
@@ -128,7 +124,7 @@ const count = (html: string, text: string): number =>
   html.split(text).length - 1;
 
 describe("the rollout pages", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
 
   it("list rollouts, with the form to start one on the newest release", async () => {
     const release = await importedRelease();
@@ -177,9 +173,9 @@ describe("the rollout pages", () => {
         choice: withRingTwo.html.includes("One ring"),
         // The scope and the ring, each server-rendered with its choice.
         selects: count(withRingTwo.html, 'data-slot="select-trigger"'),
-        ringTwo: withRingTwo.html.includes("Ring 2 (1 client)"),
-        // Ring 0 comes first whatever's chosen, so it isn't offered.
-        ringZero: withRingTwo.html.includes("Ring 0 ("),
+        ringTwo: withRingTwo.html.includes("Production (1 client)"),
+        // Alpha comes first whatever's chosen, so it isn't offered.
+        ringZero: withRingTwo.html.includes("Alpha ("),
       },
     }).toStrictEqual({
       ringZeroOnly: { says: true, choice: false, selects: 0 },
@@ -201,8 +197,6 @@ describe("the rollout pages", () => {
       .set({ status: "cancelled" })
       .where(inArray(rollouts.status, ["running", "waiting"]));
     const target = await recordClient(2);
-    // The runs it starts go nowhere: the test reads what was started.
-    await using runs = await introspectWorkflow(env.ROLLOUT);
     const choices: StartChoices = {
       what: "release",
       releaseId: release,
@@ -228,7 +222,11 @@ describe("the rollout pages", () => {
           eq(auditEvents.target, rolloutId)
         )
       );
-    const startedRuns = await runs.get();
+    // Its run, started with it: then ended, as the test reads no more of it.
+    const run = await adminWorkflow(env, adminWorkflows.rollout).get(rolloutId);
+    const { status: runStatus } = await run.status();
+    const runs = runStatus === undefined ? 0 : 1;
+    await run.terminate();
     const targets = await db
       .select({ clientId: rolloutTargets.clientId, ring: rolloutTargets.ring })
       .from(rolloutTargets)
@@ -242,7 +240,7 @@ describe("the rollout pages", () => {
       },
       // Past ring 0, only the client named.
       pastRingZero: targets.filter(({ ring }) => ring !== 0),
-      runs: startedRuns.length,
+      runs,
     }).toMatchObject({
       refused: null,
       started: { releaseId: release, kind: "release" },
@@ -270,10 +268,10 @@ describe("the rollout pages", () => {
 
     expect({
       status,
-      waiting: html.includes("Ring 0 passed: waiting for approval"),
+      waiting: html.includes("Alpha passed: waiting for approval"),
       approve: html.includes("Approve every other client"),
       cancel: html.includes("Cancel"),
-      rings: html.includes("Ring 0") && html.includes("Ring 1"),
+      rings: html.includes("Alpha") && html.includes("Beta"),
       // Each named, opening its Setup in the admin.
       clients:
         html.includes(`href="/organizations/${reached}/setup"`) &&
@@ -282,14 +280,10 @@ describe("the rollout pages", () => {
       // Only the client the rollout reached, and its ring, can be rolled back.
       rollBackClient: count(html, ">Roll back<"),
       rollBackRing: [
-        html.includes("Roll back ring 0"),
-        html.includes("Roll back ring 1"),
+        html.includes("Roll back Alpha"),
+        html.includes("Roll back Beta"),
       ],
       // Each client's cost, and their total, read once the page shows.
-      cost: [
-        html.includes("Cost this month"),
-        html.includes("Its clients&#x27; cost this month"),
-      ],
     }).toStrictEqual({
       status: 200,
       waiting: true,
@@ -299,45 +293,6 @@ describe("the rollout pages", () => {
       clients: true,
       rollBackClient: 1,
       rollBackRing: [true, false],
-      cost: [true, true],
-    });
-  });
-
-  it("read each of a rollout's clients' cost this month and their total, a client whose account doesn't answer unknown on its own", async () => {
-    const release = await importedRelease();
-    const reached = await recordClient(0);
-    const pending = await recordClient(1);
-    const unreported = await recordClient(1);
-    const rolloutId = await waitingRollout(release, reached, pending, [
-      unreported,
-    ]);
-    // The client grid's usage (test/client-grid.test.ts): $5.80 of
-    // Workers and $1.25 of AI; then the Workers Paid base alone.
-    accountOf(reached).usage = {
-      monthRequests: 12_000_000,
-      monthCpuTimeUs: 40_000_000_000,
-      monthAiCost: 1.25,
-      dayRequests: 1000,
-      dayErrors: 20,
-    };
-    accountOf(pending).usage = {
-      monthRequests: 100,
-      monthCpuTimeUs: 1000,
-      monthAiCost: 0,
-      dayRequests: 0,
-      dayErrors: 0,
-    };
-
-    const cost = await callServerFn(fetchRolloutCost, { rolloutId });
-
-    expect(cost).toStrictEqual({
-      clients: {
-        [reached]: { workers: 5.8, ai: 1.25 },
-        [pending]: { workers: 5, ai: 0 },
-        [unreported]: null,
-      },
-      total: { workers: 10.8, ai: 1.25 },
-      unknown: 1,
     });
   });
 

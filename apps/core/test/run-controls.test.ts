@@ -12,8 +12,8 @@ import {
   repairStarts,
 } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import {
   aroundEngine,
   endLiveRuns,
@@ -369,7 +369,7 @@ describe(
       )
         .bind(Date.now() - 60_000, run)
         .run();
-      await runCron();
+      await runMinuteTasks();
       await until(async () => (await shown(builder, app, run)) === "paused");
 
       expect({
@@ -579,7 +579,7 @@ describe(
       )
         .bind(Date.now() - 60_000, run)
         .run();
-      await runCron();
+      await runMinuteTasks();
       await until(async () => (await shown(builder, app, run)) === "paused");
 
       expect({

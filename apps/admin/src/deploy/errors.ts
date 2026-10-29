@@ -1,3 +1,5 @@
+import { CloudflareApiError } from "../cloudflare/api.ts";
+
 /**
  * Why a deploy stopped, as its `client_deploys` row and audit event record
  * it: a fixed code, never a message or a response body (threat model R17).
@@ -7,6 +9,23 @@ export const deployErrorCodes = [
   "release_not_imported",
   /** The release declares nothing of what its code works with. */
   "release_undeclared",
+  /**
+   * The release raises a platform limit over what the client runs without
+   * capacity and security evidence for the client's runtime profile
+   * (src/releases/limits.ts).
+   */
+  "limit_evidence_missing",
+  /**
+   * The release records no platform limits: it was built before they
+   * were, and isn't made live (src/releases/limits.ts).
+   */
+  "release_without_limits",
+  /**
+   * A release on the way to the one deployed, named by the next as the one
+   * before it, isn't imported: its evidence can't be read
+   * (src/releases/limits.ts).
+   */
+  "release_history_incomplete",
   /**
    * The release doesn't work with what the client runs: a Worker would
    * call one of its Workers, or one of its Workers another, at a version
@@ -29,8 +48,6 @@ export const deployErrorCodes = [
   "bucket_outside_eu",
   /** A D1 migration failed to apply. */
   "d1_migration_failed",
-  /** A newer deploy of the same client started: this one no longer runs. */
-  "deploy_superseded",
   /** Another runner took the client over while the deploy ran: a rollback. */
   "runner_replaced",
   /** The account's script ran a Durable Object migration the release doesn't have. */
@@ -67,8 +84,6 @@ export const deployErrorCodes = [
   "unknown_worker",
   /** The release's Workers bind each other as services in a cycle. */
   "service_binding_cycle",
-  /** The client's id can't be its hostname: not a lowercase DNS label, or reserved. */
-  "invalid_client_id",
   /** No free workers.dev subdomain was found for the account. */
   "subdomain_unavailable",
   /** Core's address isn't an `https://*.workers.dev` origin. */
@@ -95,3 +110,18 @@ export class DeployError extends Error {
     this.code = code;
   }
 }
+
+/**
+ * A failure as the admin records it: a code, never a message. A step's own
+ * failure has its `DeployError` code; the API's is `cloudflare_<status>`
+ * and its error codes; anything else is `unexpected`.
+ */
+export const errorCode = (error: unknown): string => {
+  if (error instanceof DeployError) {
+    return error.code;
+  }
+  if (error instanceof CloudflareApiError) {
+    return ["cloudflare", error.status, ...error.codes].join("_");
+  }
+  return "unexpected";
+};

@@ -4,17 +4,20 @@ import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import type {
   GapAskedNotification,
   RunFailedNotification,
+  TriggerStoppedNotification,
 } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
+import type { GoLiveItem, WorkflowGoLiveItem } from "@grasp-os/shared/waiting";
 import { i18n } from "@lingui/core";
 import { ph, plural, t } from "@lingui/core/macro";
 
 import { objectOf, subjectOf } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
+import { integrationKey } from "../connections/integrations.ts";
 import { targetNames } from "../dashboard/dependency-requests.tsx";
 import type { NotificationsPage } from "../dashboard/failed-workflows.tsx";
-import { decidesRequests, toReconnect } from "../dashboard/to-do.tsx";
+import { decidesRequests } from "../dashboard/to-do.tsx";
 import type { Viewer, Waiting } from "../dashboard/to-do.tsx";
 import { formatDateTime, formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
@@ -27,8 +30,8 @@ import type { Loaded } from "../load-from-core.tsx";
 // kinds of its own: a change an agent wants to make, a change sent for
 // the person whose answer was lost, a permission an App
 // or agent asked for, packages proposed for an engine, an engine's apps
-// whose code nobody approved, a workflow that failed while acting for the
-// person. Core keeps nothing the inbox adds (put away until a date, given
+// whose code nobody approved, a version of an App the person answers for
+// up for review, a workflow that failed while acting for the person. Core keeps nothing the inbox adds (put away until a date, given
 // to someone, dismissed with why), so none of that is here. Pure.
 
 export type InboxKind =
@@ -51,11 +54,13 @@ export type InboxKind =
   | "packages"
   | "appApproval"
   | "failedRun"
+  | "stoppedSchedule"
   | "decision";
 
 /** Where an item can be opened: the page of what it is about. */
 export type Target =
   | { kind: "workflow"; app: string; workflow: string }
+  | { kind: "independentWorkflow"; workflow: string }
   | { kind: "engine"; engine: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
@@ -69,6 +74,8 @@ export type InboxSource =
   | { type: "request"; request: Permission; pending: PendingRequests }
   | { type: "packages"; request: DependencyRequest; policyGeneration: number }
   | { type: "screens"; waiting: ScreensWaiting }
+  | { type: "version"; item: GoLiveItem }
+  | { type: "workflowGoLive"; item: WorkflowGoLiveItem }
   | {
       type: "failed";
       notification: RunFailedNotification;
@@ -76,6 +83,7 @@ export type InboxSource =
     }
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
+  | { type: "stopped"; notification: TriggerStoppedNotification }
   | { type: "decision"; decision: DecisionView };
 
 export interface InboxItem {
@@ -125,6 +133,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   packages: "apps",
   appApproval: "apps",
   failedRun: "workflows",
+  stoppedSchedule: "workflows",
   decision: "workflows",
 };
 
@@ -276,7 +285,7 @@ const packageItems = (
   requests.map((request) => {
     // An App or a workflow, in one queue: only an App has a page to go to.
     const engine = request.subject.name;
-    const kind = request.subject.type === "workflow" ? t`Workflow` : t`App`;
+    const kind = request.subject.type === "workflow" ? t`Workflow` : t`Domain`;
     const targets = formatList(
       request.targets.map((target) => i18n._(targetNames[target]))
     );
@@ -341,6 +350,73 @@ const screenItems = (
     };
   });
 
+/** A version of an App the person answers for, up for review: made current on the App's page. */
+const versionItems = (
+  versions: readonly GoLiveItem[],
+  me: string,
+  readAt: string
+): InboxItem[] =>
+  versions.map((item) => {
+    const { app, version } = item;
+    const { name } = app;
+    return {
+      id: item.id,
+      kind: "goLive",
+      title: t`Make version ${version} of ${name} live?`,
+      context: name,
+      body: [
+        t`A new version of ${name} is up for review, and you answer for it. It runs once it is made current, on the domain's page.`,
+      ],
+      facts: [{ label: t`Version`, value: String(version) }],
+      about: { kind: "engine", engine: app.id },
+      forWhom: { person: me },
+      // Core says what waits now, not since when: as of the read.
+      date: readAt,
+      urgent: false,
+      source: { type: "version", item },
+    };
+  });
+
+/**
+ * A version of a workflow a builder asked to go live, which the person
+ * approves or sends back here: as its owner, or as an admin.
+ */
+const workflowGoLiveItems = (
+  goLives: readonly WorkflowGoLiveItem[],
+  me: string
+): InboxItem[] =>
+  goLives.map((item) => {
+    const { workflow, version } = item;
+    const { name } = workflow;
+    return {
+      id: item.id,
+      kind: "goLive",
+      title: t`Let version ${version} of ${name} go live?`,
+      context: name,
+      body: [
+        t`A builder asked for this version of ${name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now.`,
+        // Their own request, as nobody else may decide it (GRA-1227).
+        ...(item.selfApproval
+          ? [
+              t`You asked for this yourself, and nobody else may approve it, so you decide it. It is recorded as self-approved.`,
+            ]
+          : []),
+      ],
+      facts: [
+        { label: t`Version`, value: String(version) },
+        ...(item.selfApproval
+          ? [{ label: t`Approval`, value: t`Self-approved` }]
+          : []),
+      ],
+      about: { kind: "independentWorkflow", workflow: workflow.id },
+      // As the workflow's owner, or else as an admin.
+      ...(item.waitsOn.type === "person" ? { forWhom: { person: me } } : {}),
+      date: item.at ?? "",
+      urgent: false,
+      source: { type: "workflowGoLive", item },
+    };
+  });
+
 /** A workflow that failed while acting for the person, with a way to ask the agent to fix it. */
 const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
   failed.page.notifications.flatMap((notification): InboxItem[] => {
@@ -395,6 +471,31 @@ const askedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
         date: at,
         urgent: false,
         source: { type: "asked", notification },
+      },
+    ];
+  });
+
+/** A schedule trigger of the person's that stopped after its starts kept failing, until they enable it again. */
+const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "trigger_stopped") {
+      return [];
+    }
+    const { workflowName, at } = notification;
+    return [
+      {
+        id: `stopped:${notification.id}`,
+        kind: "stoppedSchedule",
+        title: t`The schedule of ${workflowName} stopped`,
+        context: workflowName,
+        body: [
+          t`Its runs kept failing to start, so it starts no more. Fix what stopped them, then enable the trigger again: it goes on from its next time.`,
+        ],
+        facts: [{ label: t`Stopped`, value: formatDateTime(at) }],
+        forWhom: { person: me },
+        date: at,
+        urgent: false,
+        source: { type: "stopped", notification },
       },
     ];
   });
@@ -459,32 +560,38 @@ export const inboxItems = (
   const screens = readyOf(waiting.screens) ?? [];
   const failed = readyOf(waiting.failed);
   const decisions = readyOf(waiting.decisions) ?? [];
-  const integrations = readyOf(waiting.integrations);
-  const reconnect = (
-    integrations === undefined ? [] : toReconnect(integrations, viewer)
-  ).map(({ integration, connection }): InboxItem => {
-    // Named as its card on the integration's page is: the account too.
-    const app =
-      connection.accountName === null
-        ? integration.name
-        : `${integration.name} (${connection.accountName})`;
-    return {
-      id: `signIn:${connection.id}`,
-      kind: "signInAgain",
-      title: t`Sign in to ${app} again`,
-      context: app,
-      logo: { name: integration.name },
-      body: [
-        t`The connection stopped working. Workflows that use it wait until someone signs in again.`,
-      ],
-      facts: [],
-      about: { kind: "integration", integration: integration.key },
-      forWhom: { person: me },
-      date: readAt,
-      urgent: true,
-      source: { type: "reconnect", integration: integration.key },
-    };
-  });
+  const versions = readyOf(waiting.versions) ?? [];
+  const workflowGoLives = readyOf(waiting.workflowGoLives) ?? [];
+  const reconnect = (readyOf(waiting.reconnect) ?? []).map(
+    ({ integration, connection }): InboxItem => {
+      const app =
+        connection.accountName === null
+          ? integration.name
+          : `${integration.name} (${connection.accountName})`;
+      return {
+        id: `signIn:${connection.id}`,
+        kind: "signInAgain",
+        title: t`Sign in to ${app} again`,
+        context: app,
+        logo: { name: integration.name },
+        body: [
+          t`The connection stopped working. Workflows that use it wait until someone signs in again.`,
+        ],
+        facts: [],
+        about: {
+          kind: "integration",
+          integration: integrationKey(integration.source, integration.id),
+        },
+        forWhom: { person: me },
+        date: readAt,
+        urgent: true,
+        source: {
+          type: "reconnect",
+          integration: integrationKey(integration.source, integration.id),
+        },
+      };
+    }
+  );
   return [
     ...decisionItems(decisions, me, readAt),
     ...heldItems(held, me),
@@ -494,8 +601,11 @@ export const inboxItems = (
       ? []
       : packageItems(dependencies.requests, dependencies.policyGeneration)),
     ...screenItems(screens, readAt),
+    ...versionItems(versions, me, readAt),
+    ...workflowGoLiveItems(workflowGoLives, me),
     ...(failed === undefined ? [] : failedItems(failed, me)),
     ...(failed === undefined ? [] : askedItems(failed, me)),
+    ...(failed === undefined ? [] : stoppedItems(failed, me)),
     ...reconnect,
   ].toSorted(order);
 };
@@ -509,8 +619,10 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.dependencies,
     waiting.screens,
     waiting.failed,
-    waiting.integrations,
+    waiting.reconnect,
+    waiting.versions,
     waiting.decisions,
+    waiting.workflowGoLives,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>

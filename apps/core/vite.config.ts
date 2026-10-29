@@ -15,6 +15,7 @@ import { testVersionModule } from "./test/compiler-version.ts";
 import {
   connectClient,
   connectProvidersScript,
+  connectVersionMetadata,
   directoryClient,
   documentsClient,
   gmailAccount,
@@ -337,6 +338,9 @@ export const coreProject = (
               ],
               bindings: {
                 DURABLE_OBJECT_JURISDICTION: "none",
+                // Its version metadata, as Cloudflare gives a deployed
+                // connect: the version core names for it.
+                CF_VERSION_METADATA: connectVersionMetadata,
                 CAPABILITY_SIGNING_KEY: capabilitySigningKey,
                 TOKEN_ENCRYPTION_KEY: btoa("test-token-key-of-exactly-32-b!!"),
                 MICROSOFT_CLIENT_ID: connectClient.id,
@@ -406,9 +410,13 @@ export default coreProject({
     // The Brain baseline against a real model, which costs money, on
     // request only: vite.brain-model.config.ts.
     "test/brain-real-model.test.ts",
-    // The Brain baseline and its CI scale size, in a group of their own:
-    // vite.brain.config.ts.
+    // Experiment E02 against a real reranking model, likewise:
+    // vite.brain-recall-model.config.ts.
+    "test/brain-recall-real-model.test.ts",
+    // The Brain baseline, its CI scale size and experiment E02, in a group
+    // of their own: vite.brain.config.ts.
     "test/brain-baseline.test.ts",
+    "test/brain-recall-e02.test.ts",
     "test/brain-scale.test.ts",
     "test/brain-scale-agent.test.ts",
     "test/brain-scale-full-context.test.ts",

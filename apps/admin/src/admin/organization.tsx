@@ -9,8 +9,10 @@
  * has its title, what it is for, and where its figures come from, and
  * under that what the section's own route shows.
  *
- * A client whose core didn't answer has no sections: nothing of it is
- * read now, so its page says only why.
+ * A client whose core didn't answer opens the same way, its column and
+ * every section in it: its Setup shows what the admin itself recorded,
+ * and every other section, which needs what its core answers, says why
+ * it isn't read now and where to see to it.
  *
  * Not here yet, as the prototype has it: the day stepper at the column's
  * foot (the admin reads a real company, whose day is core's own), and
@@ -45,7 +47,7 @@ import { createContext, Fragment, use, useState } from "react";
 import type { ComponentProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
-import { AdminHeader, AdminPage, PageHeading } from "./page.tsx";
+import { AdminHeader, PageHeading } from "./page.tsx";
 import { KnowledgeDots } from "./parts.tsx";
 import {
   needSection,
@@ -228,6 +230,53 @@ const FoldButton = ({
   );
 };
 
+/** How much is known, and whether it is ready to open: in sight on every section. */
+const Knowing = ({ clientId, view }: { clientId: string; view: AdminView }) => {
+  const opens = stageLines(view).open;
+  const waits = view.knowledge.ready && view.knowledge.opened === null;
+  return (
+    <SectionLink
+      className="hover:bg-muted/60 focus-visible:ring-ring/50 mb-2 flex flex-none flex-col gap-1.5 rounded-md px-2 py-1.5 outline-none focus-visible:ring-3"
+      clientId={clientId}
+      section="steps"
+    >
+      <KnowledgeDots
+        count={knowledgeDots}
+        knowledge={view.knowledge}
+        label={opens}
+      />
+      <span
+        aria-hidden
+        className={cn(
+          "text-xs",
+          waits ? "text-status-attention" : "text-muted-foreground"
+        )}
+      >
+        {opens}
+      </span>
+    </SectionLink>
+  );
+};
+
+/** The day the interviews are on, which is not today once they are over. */
+const InterviewDay = ({ view }: { view: AdminView }) => {
+  const date = formatDate(dateOn(view.org, view.day));
+  // The last day the links worked: the plan's days count from day 0.
+  const lastDay = formatDate(dateOn(view.org, listenDays(view.org) - 1));
+  return (
+    <div className="text-muted-foreground flex flex-none flex-col gap-1 border-t px-5 py-3 text-xs">
+      <span>
+        {view.closed
+          ? `The interviews closed on ${lastDay}`
+          : `The interviews, on ${date}`}
+      </span>
+      <span className="text-foreground tabular-nums">
+        Day {view.day} of {listenDays(view.org)}
+      </span>
+    </div>
+  );
+};
+
 /**
  * The column beside the organization: its name and how much Grasp knows
  * on top, then every section in its groups, and once the team is told,
@@ -240,15 +289,11 @@ const OrgColumn = ({
 }: {
   name: string;
   clientId: string;
-  view: AdminView;
+  /** Null when its core isn't read now: the column then says so on top. */
+  view: AdminView | null;
 }) => {
   const [folded, setFolded] = useState(false);
-  const waiting = new Set(view.needs.map(needSection));
-  const opens = stageLines(view).open;
-  const waits = view.knowledge.ready && view.knowledge.opened === null;
-  const date = formatDate(dateOn(view.org, view.day));
-  // The last day the links worked: the plan's days count from day 0.
-  const lastDay = formatDate(dateOn(view.org, listenDays(view.org) - 1));
+  const waiting = new Set(view?.needs.map(needSection));
 
   if (folded) {
     return (
@@ -290,27 +335,18 @@ const OrgColumn = ({
         <FoldButton folded={false} onFold={setFolded} />
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 pt-0.5 pb-3">
-        {/* How much is known, and whether it is ready to open: in sight on every section. */}
-        <SectionLink
-          className="hover:bg-muted/60 focus-visible:ring-ring/50 mb-2 flex flex-none flex-col gap-1.5 rounded-md px-2 py-1.5 outline-none focus-visible:ring-3"
-          clientId={clientId}
-          section="steps"
-        >
-          <KnowledgeDots
-            count={knowledgeDots}
-            knowledge={view.knowledge}
-            label={opens}
-          />
-          <span
-            aria-hidden
-            className={cn(
-              "text-xs",
-              waits ? "text-status-attention" : "text-muted-foreground"
-            )}
+        {view === null ? (
+          // Nothing of it is known now: where to see why, in sight on every section.
+          <SectionLink
+            className="text-status-attention hover:bg-muted/60 focus-visible:ring-ring/50 mb-2 flex-none rounded-md px-2 py-1.5 text-xs outline-none focus-visible:ring-3"
+            clientId={clientId}
+            section="setup"
           >
-            {opens}
-          </span>
-        </SectionLink>
+            Not read now: see its Setup
+          </SectionLink>
+        ) : (
+          <Knowing clientId={clientId} view={view} />
+        )}
         <SectionItem
           clientId={clientId}
           section="overview"
@@ -333,19 +369,7 @@ const OrgColumn = ({
           </Fragment>
         ))}
       </div>
-      {view.told ? (
-        // The day the interviews are on, which is not today once they are over.
-        <div className="text-muted-foreground flex flex-none flex-col gap-1 border-t px-5 py-3 text-xs">
-          <span>
-            {view.closed
-              ? `The interviews closed on ${lastDay}`
-              : `The interviews, on ${date}`}
-          </span>
-          <span className="text-foreground tabular-nums">
-            Day {view.day} of {listenDays(view.org)}
-          </span>
-        </div>
-      ) : null}
+      {view?.told === true ? <InterviewDay view={view} /> : null}
     </nav>
   );
 };
@@ -423,13 +447,7 @@ const SourceNote = ({ origins }: { origins: readonly Origin[] }) => {
   ];
   return (
     <p className="text-muted-foreground text-xs" data-slot="source-note">
-      {lines.join(" ")}{" "}
-      <Link
-        className="hover:text-foreground underline underline-offset-4"
-        to="/sources"
-      >
-        Sources
-      </Link>
+      {lines.join(" ")}
     </p>
   );
 };
@@ -490,32 +508,52 @@ const AnsweredPage = ({
 };
 
 /**
- * The page of an organization whose core didn't answer: its name and why.
- * Its Setup still shows, from what the admin itself recorded: setting it
- * up, or seeing why its core doesn't answer, is done there. Every other
- * section needs what its core answers.
+ * The page of an organization whose core didn't answer, laid out as one
+ * that did: its column, and the section it is on. Its Setup shows, from
+ * what the admin itself recorded: setting it up, or seeing why its core
+ * doesn't answer, is done there. Every other section needs what its core
+ * answers, so it says why that isn't read now.
  */
 const UnreadPage = ({ admin }: { admin: ClientAdmin }) => {
   const { id: clientId, name } = admin.client;
-  const onSetup = useSection(clientId) === "setup";
+  const section = useSection(clientId);
+  const { title, about } = sectionWords[section];
+  const why = admin.state === "answered" ? "" : unreadWhy(admin);
   return (
-    <AdminPage
-      action={
-        onSetup ? undefined : (
-          <Button
-            nativeButton={false}
-            render={<Link params={{ clientId }} to={sectionTo.setup} />}
-            variant="outline"
-          >
-            Its platform
-          </Button>
-        )
-      }
-      description={admin.state === "answered" ? undefined : unreadWhy(admin)}
-      title={name}
-    >
-      {onSetup ? <Outlet /> : null}
-    </AdminPage>
+    <>
+      <AdminHeader page={name} />
+      <div className="flex min-h-0 flex-1 text-sm">
+        <OrgColumn clientId={clientId} name={name} view={null} />
+        <div className="relative min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 pt-7 pb-6 md:px-9">
+            <SectionSelect clientId={clientId} section={section} />
+            <PageHeading
+              description={section === "overview" ? why : about}
+              title={section === "overview" ? name : title}
+            />
+            {section === "setup" ? (
+              <Outlet />
+            ) : (
+              <div className="border-border flex flex-col items-center gap-3 rounded-xl border border-dashed px-5 py-8 text-center">
+                <p className="text-muted-foreground max-w-xl text-pretty">
+                  {section === "overview"
+                    ? "Everything else about it comes from its own Grasp, which the admin can’t read now. Its Setup shows what the admin itself knows, and what to do."
+                    : why}
+                </p>
+                <Button
+                  nativeButton={false}
+                  render={<Link params={{ clientId }} to={sectionTo.setup} />}
+                  size="sm"
+                  variant="outline"
+                >
+                  Its platform
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </>
   );
 };
 

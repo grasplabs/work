@@ -49,6 +49,7 @@ import { canonicalJson } from "./json.ts";
 import type { Json } from "./json.ts";
 import { keyed } from "./keyed.ts";
 import { forgetPersonLessons } from "./lessons.ts";
+import { citesReadable } from "./memory-cites.ts";
 import { forgetPersonOutcomes } from "./outcomes.ts";
 import { asWord, termsOf } from "./search.ts";
 
@@ -177,14 +178,42 @@ const citesWrite = (
     .onConflictDoNothing();
 
 /**
- * That a record rests on nothing but `readable` (`brain_memory_cites`), as
- * a condition of a query of `brain_memories`: the collections everyone
- * reading may read now, which the host names (`memories.readableBy`). A
- * record resting on any other is never fetched, so it shapes no page,
- * cursor or rank (GRA-1085).
+ * `records`, read by their owner (`ownerOf(reader)`: callers pass only
+ * the reader's own), with those resting on a collection the reader can't
+ * read now, as the host decides it (`memories.readableBy`), withheld: what
+ * came from there is theirs no more than anyone's (GRA-1177), so each is
+ * shown without its statement or what it cites, to be retired. Applied
+ * to any record passed, it only ever withholds more.
  */
-export const citesReadable = (readable: readonly string[]): SQL =>
-  sql`NOT EXISTS (SELECT 1 FROM ${brainMemoryCites} WHERE ${brainMemoryCites.memoryId} = ${brainMemories.id} AND ${brainMemoryCites.collectionId} NOT IN (SELECT value FROM json_each(${JSON.stringify(readable)})))`;
+export const withheldOwn = async <C, R extends MemoryRecord>(
+  brain: Brain<C>,
+  reader: C,
+  records: readonly R[]
+): Promise<R[]> => {
+  if (records.length === 0) {
+    return [];
+  }
+  const ownerId = brain.ports.ownerOf(reader);
+  const readable = await brain.ports.memories.readableBy(reader, [ownerId]);
+  const rows = await brain.db
+    .selectDistinct({ id: brainMemoryCites.memoryId })
+    .from(brainMemoryCites)
+    .where(
+      and(
+        inList(
+          brainMemoryCites.memoryId,
+          records.map(({ id }) => id)
+        ),
+        sql`${brainMemoryCites.collectionId} NOT IN (SELECT value FROM json_each(${JSON.stringify(readable)}))`
+      )
+    );
+  const withheld = new Set(rows.map(({ id }) => id));
+  return records.map((record) =>
+    withheld.has(record.id)
+      ? { ...record, statement: "", sourceRefs: [], withheld: true as const }
+      : record
+  );
+};
 
 /**
  * The statements that delete `userId`'s records and receipts, and the
@@ -824,7 +853,8 @@ export const memoriesGet = async <C>(
   if (row === undefined) {
     throw brainErrors.create("brain.not_found");
   }
-  return recordOf(row);
+  const [record] = await withheldOwn(brain, reader, [recordOf(row)]);
+  return record ?? recordOf(row);
 };
 
 /** Where a page ends: its last record's time and ID, and their seal. */
@@ -1081,10 +1111,12 @@ export const memoriesList = async <C>(
   }
   return {
     // What another's record rests on is shown in its lineage, as far as
-    // the reader may see it (memory-lineage.ts), never listed here.
-    records: page.map((row) =>
-      among === "shared" ? { ...recordOf(row), sourceRefs: [] } : recordOf(row)
-    ),
+    // the reader may see it (memory-lineage.ts), never listed here. One of
+    // their own resting on what they can't read now, withheld.
+    records:
+      among === "shared"
+        ? page.map((row) => ({ ...recordOf(row), sourceRefs: [] }))
+        : await withheldOwn(brain, reader, page.map(recordOf)),
     cursor: next === undefined ? null : await writeCursor(brain, scope, next),
   };
 };
@@ -1101,12 +1133,19 @@ export const turnMemoryLimits = { records: 20, chars: 4000 } as const;
 export const memoriesFor = async <C>(
   { db }: Brain<C>,
   audience: MemoryAudience,
+  /**
+   * The collections everyone reading may read (`citesReadable`): a record
+   * resting on any other is never fetched, so it takes no place under
+   * `limits` (GRA-1123).
+   */
+  readable: readonly string[],
   limits: { records: number; chars: number } = turnMemoryLimits
 ): Promise<(MemoryRecord & { ownerId: string })[]> => {
-  const scope = audienceScope(audience);
-  if (scope === undefined) {
+  const audienceWhere = audienceScope(audience);
+  if (audienceWhere === undefined) {
     return [];
   }
+  const scope = and(audienceWhere, citesReadable(readable));
   const rows = await db
     .select()
     .from(brainMemories)
@@ -1534,7 +1573,8 @@ export const memoriesProposeChange = async <C>(
 /**
  * Retires one of the shared records (GRA-298): a team's, the company's or
  * a chat's, by whoever the host lets (`mayRetire`: its publisher or an
- * admin). It is kept, retired, so its history stays, and never reaches a
+ * admin); or one of the caller's own, by them alone (GRA-1177: one they
+ * may no longer read, withheld, is retired so). It is kept, retired, so its history stays, and never reaches a
  * prompt again. Retry-safe under `options`' key; a stale revision is
  * `brain.revision_conflict`.
  */
@@ -1574,7 +1614,12 @@ export const memoriesRetire = async <C>(
     .from(brainMemories)
     .where(eq(brainMemories.id, memoryId))
     .get();
-  if (row === undefined || row.scope === "person") {
+  // A person's own record only by them: never by an admin, who reads no
+  // one's own records.
+  if (
+    row === undefined ||
+    (row.scope === "person" && row.ownerId !== callerId)
+  ) {
     throw brainErrors.create("brain.not_found");
   }
   await brain.ports.mayRetire(reader, {

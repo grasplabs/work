@@ -18,7 +18,7 @@ import { landscapeProviderSchema } from "./landscape.ts";
 import type { PackageRegistryApi } from "./packages.ts";
 import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
 import type { CodeSubject, WorkContext } from "./permissions.ts";
-import { roleSchema } from "./roles.ts";
+import { isAdmin, roleSchema } from "./roles.ts";
 import type { StephenReachApi } from "./stephen-reach.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
@@ -308,6 +308,15 @@ export const disconnectPersonalSchema = z.strictObject({
 });
 export type DisconnectPersonal = z.input<typeof disconnectPersonalSchema>;
 
+/**
+ * Erases everything of `ownerUserId`'s in connect (GRA-903): for core
+ * only, once an admin erased someone they removed.
+ */
+export const erasePersonalSchema = z.strictObject({
+  ownerUserId: identifierSchema,
+});
+export type ErasePersonal = z.input<typeof erasePersonalSchema>;
+
 /** One connection, as people see it: never its tokens. */
 export interface ConnectionSummary {
   id: string;
@@ -378,6 +387,22 @@ export interface ListedConnection extends ConnectionSummary {
   /** `connectedBy`'s name, while core knows them. */
   connectedByName: string | null;
 }
+
+/**
+ * Whether a person can sign in again to `connection`: whoever may
+ * disconnect it (its owner, or an admin for a shared one), never Grasp
+ * staff, only a native one, and only while its catalog entry is offered.
+ */
+export const canSignInAgain = (
+  connection: Pick<ListedConnection, "source" | "provider" | "scope">,
+  offered: boolean,
+  person: { role: string; staff: boolean }
+): boolean =>
+  connection.source === "native" &&
+  oauthProviderSchema.safeParse(connection.provider).success &&
+  offered &&
+  (connection.scope === "personal" || isAdmin(person.role)) &&
+  !person.staff;
 
 /** Most connections one `connectionOwners` call takes. */
 export const connectionOwnersMax = 100;
@@ -1709,6 +1734,15 @@ export interface ConnectApi extends PackageRegistryApi, ChannelApi {
     request: DisconnectPersonal
   ) => Promise<{ disconnected: number }>;
   /**
+   * Erases everything of a person's in connect, for core only, once an
+   * admin erased someone they removed (GRA-903): their personal
+   * connections disconnected again first, then emptied of who their
+   * accounts were, with what calls through them returned and changed, and
+   * their flows and held actions. Safe to ask again. Answers how many of
+   * their connections it emptied.
+   */
+  erasePersonal: (request: ErasePersonal) => Promise<{ connections: number }>;
+  /**
    * Spends a flow that came back but can't finish (no session, say), so its
    * code can't be brought back to finish it later.
    */
@@ -1941,6 +1975,8 @@ export const connectionErrors = defineErrorFamily({
     "The provider granted more or less access than this connection asks for, so it wasn't kept. Connect it again, granting exactly what it asks.",
   "connection.own_auth_required":
     "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
+  "connection.erase_pending":
+    "Their connections aren't all revoked at their providers yet. Erasing them goes on once they are.",
 });
 
 /** Which App's held actions of which binding to drop. */

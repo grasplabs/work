@@ -2,26 +2,21 @@ import { env } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { act, adminDatabase } from "../src/db/act.ts";
+import { adminDatabase } from "../src/db/act.ts";
 import { clients, rollouts, rolloutTargets } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-admin-platform-4e9a17";
-const tenantToken = "test-tenant-admin-token-admin-platform-7c2b58";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
 const db = adminDatabase(env.DB);
-const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 const tags = /<[^>]*>/gu;
 const spaces = /\s+/gu;
 
@@ -40,34 +35,17 @@ const panelOf = (text: string, title: string, next: string): string =>
 /** An active client in ring `ring` running `releaseId`, as a deploy made it live. */
 const liveClient = async (name: string, ring: number, releaseId: string) => {
   const clientId = `${name.toLowerCase()}-${crypto.randomUUID().slice(0, 8)}`;
-  const account = cloudflare.addAccount(name);
+  const { account } = await livePlacedClient(cloudflare, ring, releaseId, {
+    id: clientId,
+    name,
+    signIn: null,
+  });
   account.admin = emptyAdminSnapshot(name);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name,
-        accountId: account.id,
-        ring,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, releaseId)
-  );
   return clientId;
 };
 
 describe("the admin's Platform page", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   beforeEach(async () => {
     await db
       .update(clients)
@@ -75,20 +53,19 @@ describe("the admin's Platform page", () => {
       .where(ne(clients.status, "offboarded"));
   });
 
-  it("shows the rollout waiting after ring 0 with its approval, who runs which release, and every company with the one on an old release needing a look first", async () => {
-    const oldest = await publishRelease({ notes: "feat(core): the oldest" });
-    const older = await publishRelease({ notes: "feat(core): the older" });
-    const newest = await publishRelease({ notes: "feat(core): the newest" });
-    await importReleases(env.RELEASES, db);
-    const first = await liveClient("Firstco", 0, newest.id);
-    const early = await liveClient("Earlyco", 1, older.id);
-    await liveClient("Laggard", 2, oldest.id);
+  it("shows the rollout waiting after Alpha with its approval of Beta, who runs which release, and every company with the one on an old release needing a look first", async () => {
+    const oldest = await placedRelease("feat(core): the oldest");
+    const older = await placedRelease("feat(core): the older");
+    const newest = await placedRelease("feat(core): the newest");
+    const first = await liveClient("Firstco", 0, newest);
+    const early = await liveClient("Earlyco", 1, older);
+    await liveClient("Laggard", 2, oldest);
     const rolloutId = crypto.randomUUID();
     const now = new Date();
     await db.insert(rollouts).values({
       id: rolloutId,
       kind: "release",
-      releaseId: newest.id,
+      releaseId: newest,
       status: "waiting",
       ring: 0,
       startedBy: "ops@grasp.test",
@@ -117,12 +94,12 @@ describe("the admin's Platform page", () => {
 
     expect({
       status,
-      release: goingOut.includes(`Going out now: ${newest.id}`),
+      release: goingOut.includes(`Going out now: ${newest}`),
       // A waiting rollout is approved from here, as on its own page.
-      approve: goingOut.includes("Approve ring 1"),
-      ring0: goingOut.includes("Ring 0, first"),
-      firstOnIt: goingOut.includes("Firstco Ring 0, first On it"),
-      earlyWaits: goingOut.includes("Earlyco Ring 1, early Waits"),
+      approve: goingOut.includes("Approve Beta"),
+      ring0: goingOut.includes("Alpha"),
+      firstOnIt: goingOut.includes("Firstco Alpha On it"),
+      earlyWaits: goingOut.includes("Earlyco Beta Waits"),
       laggardBehind: companies.includes("2 releases behind the newest."),
       // The one that needs a look comes before the healthy ones.
       laggardFirst:
@@ -131,7 +108,7 @@ describe("the admin's Platform page", () => {
       opensSetup: html.includes(`href="/organizations/${first}/setup"`),
       // The rollout, each release and starting one open their own pages under Platform.
       opensRollout: html.includes(`href="/platform/rollouts/${rolloutId}"`),
-      opensRelease: html.includes(`href="/platform/releases/${older.id}"`),
+      opensRelease: html.includes(`href="/platform/releases/${older}"`),
       startsRollout: html.includes('href="/platform/rollouts#start-a-rollout"'),
       // Its releases and rollouts, under it in the sidebar and the page.
       underPlatform: [
@@ -141,7 +118,7 @@ describe("the admin's Platform page", () => {
       // What staff did, as the audit log keeps it: adding a company, never a deploy's steps.
       doneHere: text
         .slice(text.indexOf("Done here"))
-        .includes("ops@grasp.test added Laggard"),
+        .includes("staff@grasp.test added Laggard"),
       // Beside Platform in the sidebar: the laggard, and the waiting rollout.
       sidebarCount: text.includes(
         "1 company needs a look; a rollout waits for approval"
@@ -164,9 +141,9 @@ describe("the admin's Platform page", () => {
       sidebarCount: true,
     });
     const [a, b, c] = [
-      spread.indexOf(newest.id),
-      spread.indexOf(older.id),
-      spread.indexOf(oldest.id),
+      spread.indexOf(newest),
+      spread.indexOf(older),
+      spread.indexOf(oldest),
     ];
     // The newest release first.
     expect(a >= 0 && a < b && b < c).toBeTruthy();

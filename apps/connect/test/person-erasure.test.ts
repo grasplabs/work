@@ -1,0 +1,660 @@
+import type { ConnectionPerson } from "@grasp-os/shared/connect";
+import { agentIdSchema, connectionIdSchema } from "@grasp-os/shared/ids";
+import { env, exports } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { keptChange } from "../src/changes.ts";
+import {
+  callChanges,
+  composioCleanups,
+  connections,
+  connectionTokens,
+  connectorEvents,
+  erasedPeople,
+  eventSources,
+  idempotentCalls,
+} from "../src/db/schema.ts";
+import { idempotencyStore } from "../src/idempotency.ts";
+import { connectApp, fakeApps, startApp } from "./app-provider.ts";
+import { auditEvents, outcome, someone, stateOf } from "./connect.ts";
+import { sampleOAuthAuthHost } from "./fixtures/sample-oauth-connector.ts";
+import { fakeProviders } from "./oauth-provider.ts";
+
+// Erasing a person in connect (GRA-903, GRA-1183), from its threat model:
+// - a grant of theirs left live at its provider behind an erasure: a live
+//   connection (a sign-in that finished after they were removed) whose
+//   revoke fails, or a Composio deletion still outstanding;
+// - their provider's data left in what calls through their connections
+//   returned;
+// - someone else's touched: another person's connection, or a call made
+//   for them through the company's shared connection;
+// - an erasure with no record of it.
+
+fakeProviders();
+const apps = fakeApps();
+const audit = auditEvents();
+
+/** Erases `person` in connect, as core asks. */
+const erase = async (person: ConnectionPerson) =>
+  await exports.default.erasePersonal({ ownerUserId: person.userId });
+
+/** A connection of the OAuth app, live, for `person`, as a late sign-in leaves one. */
+const liveConnection = async (
+  person: ConnectionPerson,
+  scope: "personal" | "shared" = "personal"
+) => {
+  const account = apps.account("sample-oauth", person.email);
+  const connectionId = await connectApp(apps, person, account, scope);
+  const refreshToken = apps.issued.findLast((token) =>
+    token.startsWith("app-refresh-")
+  );
+  return { connectionId, refreshToken: refreshToken ?? "" };
+};
+
+/** What connect keeps of connection `id`. */
+const keptOf = async (id: string) => {
+  const db = drizzle(env.DB);
+  const row = await db
+    .select()
+    .from(connections)
+    .where(eq(connections.id, id))
+    .get();
+  const tokens = await db
+    .select()
+    .from(connectionTokens)
+    .where(eq(connectionTokens.connectionId, id));
+  const calls = await db
+    .select()
+    .from(idempotentCalls)
+    .where(eq(idempotentCalls.connectionId, id));
+  return {
+    status: row?.status,
+    named: [
+      row?.accountId,
+      row?.accountName,
+      row?.accountEmail,
+      row?.accountAddresses,
+      row?.accountSenders,
+    ].some((value) => value !== null && value !== undefined),
+    tokens: tokens.length,
+    calls: calls.map(({ onBehalfOf }) => onBehalfOf),
+  };
+};
+
+/** A call through connection `id` made for `userId`, as connect keeps it. */
+const madeCall = async (id: string, userId: string): Promise<void> => {
+  await drizzle(env.DB)
+    .insert(idempotentCalls)
+    .values({
+      subjectType: "app",
+      subjectId: "app",
+      onBehalfOf: userId,
+      connectionId: id,
+      action: "items.list",
+      idempotencyKey: crypto.randomUUID(),
+      inputHash: "h",
+      state: "done",
+      output: JSON.stringify({ items: ["Their item"] }),
+      createdAt: new Date(),
+    });
+};
+
+/**
+ * A mailbox of theirs that connection `id` reads for a workflow, with an
+ * item read from it still to deliver.
+ */
+const readsFor = async (id: string, address: string): Promise<void> => {
+  const now = new Date();
+  await drizzle(env.DB).batch([
+    drizzle(env.DB).insert(eventSources).values({
+      id: crypto.randomUUID(),
+      connectionId: id,
+      type: "mail.received",
+      resource: address,
+      pollAt: now,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    drizzle(env.DB)
+      .insert(connectorEvents)
+      .values({
+        id: crypto.randomUUID(),
+        key: crypto.randomUUID(),
+        connectionId: id,
+        event: JSON.stringify({ from: address, subject: "Their mail" }),
+        retryAt: now,
+        createdAt: now,
+      }),
+  ]);
+};
+
+/** How many of what connection `id` read are still kept. */
+const readOf = async (id: string) => {
+  const db = drizzle(env.DB);
+  const [sources, events] = await Promise.all([
+    db.select().from(eventSources).where(eq(eventSources.connectionId, id)),
+    db
+      .select()
+      .from(connectorEvents)
+      .where(eq(connectorEvents.connectionId, id)),
+  ]);
+  return { sources: sources.length, events: events.length };
+};
+
+/** How many changes calls through connection `id` kept. */
+const changesOf = async (id: string): Promise<number> => {
+  const kept = await drizzle(env.DB)
+    .select({ id: callChanges.id })
+    .from(callChanges)
+    .where(eq(callChanges.connectionId, id));
+  return kept.length;
+};
+
+/** That `person`'s erasure began: the mark connect makes before anything. */
+const markErasure = async (person: ConnectionPerson): Promise<void> => {
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO erased_people (user_id, began_at) VALUES (?, ?)"
+  )
+    .bind(person.userId, Date.now())
+    .run();
+};
+
+/** How many rows of `table` match `where`, with `value` bound. */
+const countWhere = async (
+  table: string,
+  where: string,
+  value: string
+): Promise<number> => {
+  const row = await env.DB.prepare(
+    `SELECT count(*) AS count FROM ${table} WHERE ${where}`
+  )
+    .bind(value)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+};
+
+/** How many rows of `table` hold `value` in `column`. */
+const countOf = async (
+  table: string,
+  column: string,
+  value: string
+): Promise<number> => await countWhere(table, `${column} = ?`, value);
+
+describe("erasing a person in connect", () => {
+  it("revokes a grant still live at its provider before anything is emptied, and empties their connection", async () => {
+    const person = someone();
+    const { connectionId, refreshToken } = await liveConnection(person);
+    await madeCall(connectionId, person.userId);
+    await readsFor(connectionId, person.email);
+    expect(apps.holds(refreshToken)).toBeTruthy();
+
+    await expect(erase(person)).resolves.toStrictEqual({ connections: 1 });
+
+    expect({
+      revoked: apps.holds(refreshToken),
+      asked: apps.revocations().length > 0,
+      kept: await keptOf(connectionId),
+      read: await readOf(connectionId),
+    }).toStrictEqual({
+      revoked: false,
+      asked: true,
+      kept: { status: "disconnected", named: false, tokens: 0, calls: [] },
+      read: { sources: 0, events: 0 },
+    });
+  });
+
+  it("refuses while its provider won't revoke the grant, the connection stopped but its sealed tokens kept, and finishes once it does", async () => {
+    const person = someone();
+    const { connectionId, refreshToken } = await liveConnection(person);
+    const revokeAt = `https://${sampleOAuthAuthHost}/oauth/revoke`;
+    // The fake apps answer every request through fetch's mock already:
+    // the provider is made to fail its revocations only, on top of it.
+    const through =
+      vi.mocked(globalThis.fetch).getMockImplementation() ?? globalThis.fetch;
+    let providerDown = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const { url } = new Request(input, init);
+      return providerDown && url.startsWith(revokeAt)
+        ? new Response("Down", { status: 503 })
+        : await through(input, init);
+    });
+
+    const refused = await outcome(erase(person));
+    const meanwhile = await keptOf(connectionId);
+    providerDown = false;
+    const finished = await erase(person);
+
+    expect({
+      refused,
+      meanwhile,
+      finished,
+      revoked: apps.holds(refreshToken),
+    }).toStrictEqual({
+      refused: "connection.erase_pending",
+      meanwhile: { status: "disconnected", named: true, tokens: 1, calls: [] },
+      finished: { connections: 1 },
+      revoked: false,
+    });
+  });
+
+  it("revokes a grant whose revoke failed when they were removed, with the token kept since", async () => {
+    const person = someone();
+    const { connectionId, refreshToken } = await liveConnection(person);
+    const revokeAt = `https://${sampleOAuthAuthHost}/oauth/revoke`;
+    const through =
+      vi.mocked(globalThis.fetch).getMockImplementation() ?? globalThis.fetch;
+    let providerDown = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const { url } = new Request(input, init);
+      return providerDown && url.startsWith(revokeAt)
+        ? new Response("Down", { status: 503 })
+        : await through(input, init);
+    });
+    // Removed while the provider was down.
+    await exports.default.disconnectPersonal({
+      person: null,
+      ownerUserIds: [person.userId],
+    });
+    const removed = apps.holds(refreshToken);
+    providerDown = false;
+
+    const finished = await erase(person);
+
+    expect({
+      removed,
+      finished,
+      revoked: !apps.holds(refreshToken),
+      kept: await keptOf(connectionId),
+    }).toStrictEqual({
+      removed: true,
+      finished: { connections: 1 },
+      revoked: true,
+      kept: { status: "disconnected", named: false, tokens: 0, calls: [] },
+    });
+  });
+
+  it("refuses while Composio's deletion of one of their connections is outstanding", async () => {
+    const person = someone();
+    const { connectionId } = await liveConnection(person);
+    await exports.default.disconnectPersonal({
+      person: null,
+      ownerUserIds: [person.userId],
+    });
+    const db = drizzle(env.DB);
+    const serverId = `server-${crypto.randomUUID()}`;
+    await db
+      .update(connections)
+      .set({ composioServerId: serverId })
+      .where(eq(connections.id, connectionId));
+    const cleanupId = crypto.randomUUID();
+    await db.insert(composioCleanups).values({
+      id: cleanupId,
+      serverId,
+      attempts: 0,
+      retryAt: new Date(),
+      createdAt: new Date(),
+    });
+
+    const refused = await outcome(erase(person));
+    const meanwhile = await keptOf(connectionId);
+    await db.delete(composioCleanups).where(eq(composioCleanups.id, cleanupId));
+    const finished = await erase(person);
+
+    expect({ refused, named: meanwhile.named, finished }).toStrictEqual({
+      refused: "connection.erase_pending",
+      named: true,
+      finished: { connections: 1 },
+    });
+  });
+
+  it("leaves everyone else's as it was: another person's connection, and a call made for them through the company's shared connection", async () => {
+    const person = someone();
+    const other = someone();
+    const admin = someone("admin");
+    const theirs = await liveConnection(person);
+    const others = await liveConnection(other);
+    const shared = await liveConnection(admin, "shared");
+    await madeCall(theirs.connectionId, person.userId);
+    await madeCall(others.connectionId, other.userId);
+    await madeCall(shared.connectionId, person.userId);
+    const otherBefore = await keptOf(others.connectionId);
+    const sharedBefore = await keptOf(shared.connectionId);
+
+    await erase(person);
+
+    expect({
+      theirs: await keptOf(theirs.connectionId),
+      others: await keptOf(others.connectionId),
+      shared: await keptOf(shared.connectionId),
+      othersHeld: apps.holds(others.refreshToken),
+      sharedHeld: apps.holds(shared.refreshToken),
+    }).toStrictEqual({
+      theirs: { status: "disconnected", named: false, tokens: 0, calls: [] },
+      others: otherBefore,
+      shared: sharedBefore,
+      othersHeld: true,
+      sharedHeld: true,
+    });
+    expect(sharedBefore.calls).toStrictEqual([person.userId]);
+  });
+
+  it("is recorded each time it erases, by IDs only, even for someone with no connection", async () => {
+    const person = someone();
+
+    await expect(erase(person)).resolves.toStrictEqual({ connections: 0 });
+
+    const events = await audit.events();
+    const erased = events.filter(
+      ({ action }) => action === "connection.person_erased"
+    );
+    expect(erased).toMatchObject([
+      {
+        source: "connect",
+        actor: { type: "system" },
+        detail: { ownerUserId: person.userId, connections: 0 },
+      },
+    ]);
+    expect(JSON.stringify(erased)).not.toContain(person.email);
+  });
+
+  it("refuses when a sign-in of theirs finishes as it erases, and stops that connection on the next try", async () => {
+    const person = someone();
+    const late = `connection-${crypto.randomUUID()}`;
+    const trigger = `late_${crypto.randomUUID().replaceAll("-", "_")}`;
+    // As its batch lands, a flow of theirs finishes: a live connection,
+    // named for their account, there by the time it looks again.
+    await env.DB.prepare(
+      `CREATE TRIGGER ${trigger} AFTER INSERT ON audit_outbox
+       WHEN NEW.event LIKE '%connection.person_erased%' AND NEW.event LIKE '%${person.userId}%'
+       BEGIN
+         INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, account_id, account_email, created_at, updated_at)
+         VALUES ('${late}', 'sample-oauth', 'personal', '${person.userId}', 'active', 'native', 'sample-oauth', 'late-account', 'late@acme.test', 0, 0);
+       END`
+    ).run();
+
+    const refused = await outcome(erase(person));
+    await env.DB.prepare(`DROP TRIGGER ${trigger}`).run();
+    const finished = await erase(person);
+
+    expect({
+      refused,
+      finished,
+      late: await keptOf(late),
+    }).toStrictEqual({
+      refused: "connection.erase_pending",
+      finished: { connections: 1 },
+      late: { status: "disconnected", named: false, tokens: 0, calls: [] },
+    });
+  });
+
+  it("connects nothing of theirs once their erasure began, even from a sign-in already under way, and drops its grant", async () => {
+    const person = someone();
+    const account = apps.account("sample-oauth", person.email);
+    // Started before their erasure began, back after it: the mark it
+    // makes first lands in between.
+    const url = await startApp(person);
+    await drizzle(env.DB)
+      .insert(erasedPeople)
+      .values({ userId: person.userId, beganAt: new Date() });
+
+    const refused = await outcome(
+      exports.default.finishConnection({
+        person,
+        state: stateOf(url),
+        code: apps.authorize(url.href, account),
+      })
+    );
+
+    const theirs = await drizzle(env.DB)
+      .select({ id: connections.id })
+      .from(connections)
+      .where(eq(connections.ownerUserId, person.userId));
+    const minted = apps.issued.findLast((token) =>
+      token.startsWith("app-refresh-")
+    );
+    expect({
+      refused,
+      connections: theirs.length,
+      held: minted === undefined ? false : apps.holds(minted),
+    }).toStrictEqual({
+      refused: "connection.flow_invalid",
+      connections: 0,
+      held: false,
+    });
+  });
+
+  it("keeps no change a call through their connection made, once their erasure began, and keeps everyone else's", async () => {
+    const person = someone();
+    const other = someone();
+    const { connectionId } = await liveConnection(person);
+    const { connectionId: others } = await liveConnection(other);
+    await erase(person);
+    // Calls through each still under way as it ran, finishing after it.
+    const change = { before: { amount: 1 }, after: { amount: 2 } };
+    const finished = async (id: string, userId: string) => {
+      const { writes } = await keptChange(
+        env,
+        { jti: crypto.randomUUID(), authority: { onBehalfOf: userId } },
+        {
+          connectionId: connectionIdSchema.parse(id),
+          action: "items.update",
+          resource: "item-1",
+        },
+        change
+      );
+      const [first, ...rest] = writes;
+      if (first !== undefined) {
+        await drizzle(env.DB).batch([first, ...rest]);
+      }
+    };
+    await finished(connectionId, person.userId);
+    await finished(others, other.userId);
+
+    expect({
+      theirs: await changesOf(connectionId),
+      others: await changesOf(others),
+    }).toStrictEqual({ theirs: 0, others: 1 });
+  });
+
+  it("empties every connection of theirs, however many they had", async () => {
+    const person = someone();
+    const now = new Date();
+    const ids = Array.from({ length: 150 }, () => crypto.randomUUID());
+    // One statement each: one inserting them all would pass D1's limit
+    // on bound values itself.
+    await env.DB.batch(
+      ids.map((id) =>
+        env.DB.prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, account_id, account_email, created_at, updated_at) VALUES (?, 'sample-oauth', 'personal', ?, 'disconnected', 'native', 'sample-oauth', ?, 'theirs@acme.test', ?, ?)"
+        ).bind(id, person.userId, `account-${id}`, now.getTime(), now.getTime())
+      )
+    );
+    await Promise.all(
+      ids.map(async (id) => {
+        await madeCall(id, person.userId);
+      })
+    );
+
+    const erased = await erase(person);
+
+    const named = await drizzle(env.DB)
+      .select({ id: connections.id })
+      .from(connections)
+      .where(eq(connections.accountEmail, "theirs@acme.test"));
+    const calls = await Promise.all(ids.map(async (id) => await keptOf(id)));
+    expect({
+      erased,
+      named: named.length,
+      calls: calls.flatMap(({ calls: made }) => made).length,
+    }).toStrictEqual({ erased: { connections: 150 }, named: 0, calls: 0 });
+  });
+
+  it("claims no call through their connection once their erasure began, so nothing it answers is kept", async () => {
+    const person = someone();
+    const { connectionId } = await liveConnection(person);
+    // A call checked before the erasure began claims its key after:
+    // their connection is still live, but the mark is there.
+    await drizzle(env.DB)
+      .insert(erasedPeople)
+      .values({ userId: person.userId, beganAt: new Date() });
+    const store = idempotencyStore(
+      env.DB,
+      {
+        subject: {
+          type: "agent",
+          agentId: agentIdSchema.parse(crypto.randomUUID()),
+        },
+        onBehalfOf: person.userId,
+        connectionId,
+        action: "items.update",
+        idempotencyKey: crypto.randomUUID(),
+        resource: null,
+      },
+      "input-hash"
+    );
+
+    const claimed = await outcome(store.claim());
+    const kept = await keptOf(connectionId);
+
+    expect({ claimed, kept: kept.calls }).toStrictEqual({
+      claimed: "connect.connection_inactive",
+      kept: [],
+    });
+  });
+
+  /**
+   * Every writer of something of a person's that a request already under
+   * way may reach after their erasure began, each with what of theirs it
+   * would leave: in flight as the erasure's mark lands, it leaves nothing.
+   * (A read of their mailbox: events.test.ts; a held action on a shared
+   * connection: pending.test.ts; a Composio flow: composio-connections.test.ts.)
+   */
+  const inFlight: {
+    writer: string;
+    act: (person: ConnectionPerson) => Promise<unknown>;
+    left: (person: ConnectionPerson) => Promise<number>;
+  }[] = [
+    {
+      writer: "starting a sign-in",
+      act: async (person) => {
+        await markErasure(person);
+        return await startApp(person);
+      },
+      left: async (person) =>
+        await countOf("oauth_flows", "user_id", person.userId),
+    },
+    {
+      writer: "finishing a sign-in",
+      act: async (person) => {
+        // Started before the erasure began, back after.
+        const url = await startApp(person);
+        await markErasure(person);
+        return await exports.default.finishConnection({
+          person,
+          state: stateOf(url),
+          code: apps.authorize(
+            url.href,
+            apps.account("sample-oauth", person.email)
+          ),
+        });
+      },
+      left: async (person) =>
+        await countOf("connections", "owner_user_id", person.userId),
+    },
+    {
+      writer: "signing in again to a connection that needs it",
+      act: async (person) => {
+        const { connectionId } = await liveConnection(person);
+        await env.DB.prepare(
+          "UPDATE connections SET status = 'needs_reauth' WHERE id = ?"
+        )
+          .bind(connectionId)
+          .run();
+        await markErasure(person);
+        return await connectApp(
+          apps,
+          person,
+          apps.account("sample-oauth", person.email)
+        );
+      },
+      left: async (person) =>
+        await countWhere(
+          "connections",
+          "owner_user_id = ? AND status != 'needs_reauth'",
+          person.userId
+        ),
+    },
+    {
+      writer: "a call claiming its key",
+      act: async (person) => {
+        const { connectionId } = await liveConnection(person);
+        await markErasure(person);
+        return await idempotencyStore(
+          env.DB,
+          {
+            subject: {
+              type: "agent",
+              agentId: agentIdSchema.parse(crypto.randomUUID()),
+            },
+            onBehalfOf: person.userId,
+            connectionId,
+            action: "items.update",
+            idempotencyKey: crypto.randomUUID(),
+            resource: null,
+          },
+          "input-hash"
+        ).claim();
+      },
+      left: async (person) =>
+        await countWhere(
+          "idempotent_calls",
+          "connection_id IN (SELECT id FROM connections WHERE owner_user_id = ?)",
+          person.userId
+        ),
+    },
+    {
+      writer: "a call keeping what it changed",
+      act: async (person) => {
+        const { connectionId } = await liveConnection(person);
+        await markErasure(person);
+        const { writes } = await keptChange(
+          env,
+          {
+            jti: crypto.randomUUID(),
+            authority: { onBehalfOf: person.userId },
+          },
+          {
+            connectionId: connectionIdSchema.parse(connectionId),
+            action: "items.update",
+            resource: "item-1",
+          },
+          { before: { amount: 1 }, after: { amount: 2 } }
+        );
+        const [first, ...rest] = writes;
+        return first === undefined
+          ? undefined
+          : await drizzle(env.DB).batch([first, ...rest]);
+      },
+      left: async (person) =>
+        await countWhere(
+          "call_changes",
+          "connection_id IN (SELECT id FROM connections WHERE owner_user_id = ?)",
+          person.userId
+        ),
+    },
+  ];
+
+  it.each(inFlight)(
+    "leaves nothing of theirs from $writer under way as their erasure began",
+    async ({ act, left }) => {
+      const person = someone();
+
+      // Each marks the erasure where a request under way meets it.
+      await outcome(act(person));
+
+      await expect(left(person)).resolves.toBe(0);
+    }
+  );
+});

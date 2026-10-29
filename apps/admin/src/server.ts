@@ -23,13 +23,12 @@
  * bot secrets about to expire (src/clients/teams-bot-expiry.ts), and the
  * watch's reads how Stephen fares at every client every hour
  * (src/clients/watch.ts).
- * `ProvisionClient` is the Workflow that onboards a client
- * (src/provision/workflow.ts), `Rollout` the one that rolls a release
- * out to clients (src/rollout/workflow.ts), `RolloutClient` deploys one
- * fleet client of a rollout, `RollbackClient` rolls a
- * client back from one, and `ApplyClient` applies a client's settings
- * now (src/clients/apply.ts). `ProvisionPlacedClient` provisions a client
- * placed in a hosting destination (src/hosting/workflow.ts).
+ * `AdminRuns` holds the admin's runs on Workerflow (src/workflow-runs.ts):
+ * builds of integrations, applying a client's settings now
+ * (src/clients/apply.ts), attempts at provisioning a client placed in a
+ * hosting destination (src/hosting/workflow.ts), rollouts and the runs
+ * that deploy their fleet clients (src/rollout/workflow.ts,
+ * src/rollout/fleet-client.ts), and rollbacks (src/rollout/rollback.ts).
  *
  * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
  * behind the same Access check.
@@ -56,13 +55,7 @@ import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
-export { IntegrationBuild } from "./builds/workflow.ts";
-export { ApplyClient } from "./clients/apply.ts";
-export { ProvisionPlacedClient } from "./hosting/workflow.ts";
-export { ProvisionClient } from "./provision/workflow.ts";
-export { RollbackClient } from "./rollout/rollback.ts";
-export { RolloutClient } from "./rollout/fleet-client.ts";
-export { Rollout } from "./rollout/workflow.ts";
+export { AdminRuns } from "./run-object.ts";
 
 declare module "@tanstack/react-start" {
   interface Register {

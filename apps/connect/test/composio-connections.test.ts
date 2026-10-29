@@ -16,6 +16,7 @@ import {
   clientOrigin,
   connectWith,
   outcome,
+  runMaintenance,
   someone,
 } from "./connect.ts";
 
@@ -211,6 +212,55 @@ const composioWrites = () =>
   composio.state.requests.filter(({ method }) => method !== "GET");
 
 describe("connecting a Composio toolkit", () => {
+  it("keeps no flow of someone whose erasure began as they connected, and deletes what it made at Composio", async () => {
+    const admin = someone("admin");
+    // Their erasure began (person-erasure.ts marks it first) while the
+    // start was under way at Composio.
+    await env.DB.prepare(
+      "INSERT INTO erased_people (user_id, began_at) VALUES (?, ?)"
+    )
+      .bind(admin.userId, Date.now())
+      .run();
+
+    const started = await outcome(start(admin));
+
+    const flows = await env.DB.prepare(
+      "SELECT count(*) AS n FROM composio_flows WHERE user_id = ?"
+    )
+      .bind(admin.userId)
+      .first<{ n: number }>();
+    // Nothing is lost on the way: what it made is gone at Composio, or
+    // its cleanup row is still there to delete it.
+    expect({
+      started,
+      flows: flows?.n,
+      gone:
+        JSON.stringify(heldAtComposio()) === JSON.stringify(nothingHeld) ||
+        (await cleanupsLeft()) > 0,
+    }).toStrictEqual({
+      started: "connection.flow_invalid",
+      flows: 0,
+      gone: true,
+    });
+  });
+
+  it("hands the unfinished flows of someone erased over to their cleanup, never just deletes them", async () => {
+    const admin = someone("admin");
+    await start(admin);
+
+    await exports.default.erasePersonal({ ownerUserId: admin.userId });
+
+    const flows = await env.DB.prepare(
+      "SELECT count(*) AS n FROM composio_flows WHERE user_id = ?"
+    )
+      .bind(admin.userId)
+      .first<{ n: number }>();
+    expect({ flows: flows?.n, cleanups: await cleanupsLeft() }).toStrictEqual({
+      flows: 0,
+      cleanups: 1,
+    });
+  });
+
   it("sends the admin to Composio's auth link, to come back to this deployment's callback", async () => {
     const admin = someone("admin");
     const url = await start(admin);
@@ -453,7 +503,7 @@ describe("connecting a Composio toolkit", () => {
     // The admin connected at Composio, and never came back.
     const { state } = composio.authorize(await start(admin));
     await expireFlowsOf(admin);
-    await exports.default.scheduled();
+    await runMaintenance();
     expect(heldAtComposio()).toStrictEqual({
       authConfigs: 0,
       accounts: 0,
@@ -480,9 +530,9 @@ describe("connecting a Composio toolkit", () => {
       flows: await flowsOf(admin),
       cleanups: await cleanupsLeft(),
     };
-    // The cron trigger deletes them at Composio, ten a run.
-    await exports.default.scheduled();
-    await exports.default.scheduled();
+    // The clock deletes them at Composio, ten a run.
+    await runMaintenance();
+    await runMaintenance();
     expect({
       handedOver,
       held: heldAtComposio(),
@@ -524,7 +574,7 @@ describe("connecting a Composio toolkit", () => {
     composio.state.failing = undefined;
     const kept = { held: heldAtComposio(), cleanups: await cleanupsLeft() };
     await afterMinutes(6, async () => {
-      await exports.default.scheduled();
+      await runMaintenance();
     });
     expect({
       failed: failed !== "ok",
@@ -548,7 +598,7 @@ describe("connecting a Composio toolkit", () => {
     composio.state.failing = undefined;
     const kept = heldAtComposio();
     await afterMinutes(6, async () => {
-      await exports.default.scheduled();
+      await runMaintenance();
     });
     expect({
       failed: failed !== "ok",
@@ -581,14 +631,14 @@ describe("connecting a Composio toolkit", () => {
     });
   });
 
-  it("leaves a taken flow's cleanup for the cron trigger when nothing gets to act on it", async () => {
+  it("leaves a taken flow's cleanup for the clock when nothing gets to act on it", async () => {
     const admin = someone("admin");
     const { state } = composio.authorize(await start(admin));
     // As if the isolate went right after taking it: no key to act with.
     await connectWith({ COMPOSIO_API_KEY: undefined }).abandonFlow(state);
     const kept = await cleanupsLeft();
     await afterMinutes(6, async () => {
-      await exports.default.scheduled();
+      await runMaintenance();
     });
     expect({
       kept,
@@ -649,11 +699,11 @@ describe("connecting a Composio toolkit", () => {
     const kept = { held: heldAtComposio(), cleanups: await cleanupsLeft() };
     // Due once the finish would long be done.
     await afterMinutes(6, async () => {
-      await withoutKey.scheduled();
+      await runMaintenance({ COMPOSIO_API_KEY: undefined });
     });
     const stillKept = await cleanupsLeft();
     await afterMinutes(6, async () => {
-      await exports.default.scheduled();
+      await runMaintenance();
     });
     expect({
       finished,
@@ -675,10 +725,10 @@ describe("connecting a Composio toolkit", () => {
     const admin = someone("admin");
     composio.authorize(await start(admin));
     await expireFlowsOf(admin);
-    await connectWith({ COMPOSIO_API_KEY: undefined }).scheduled();
+    await runMaintenance({ COMPOSIO_API_KEY: undefined });
     await expect(cleanupsLeft()).resolves.toBe(1);
     await afterMinutes(2, async () => {
-      await exports.default.scheduled();
+      await runMaintenance();
     });
     expect(heldAtComposio()).toStrictEqual(nothingHeld);
   });
@@ -761,16 +811,16 @@ describe("a Composio connection", () => {
     expect(heldAtComposio()).toStrictEqual({ ...nothingHeld, accounts: 1 });
     // Tried again after a minute, and failing, not again a minute later.
     await afterMinutes(2, async () => {
-      await exports.default.scheduled();
+      await runMaintenance();
     });
     const tried = composio.state.requests.length;
     await afterMinutes(3, async () => {
-      await exports.default.scheduled();
+      await runMaintenance();
     });
     expect(composio.state.requests).toHaveLength(tried);
     composio.state.failing = undefined;
     await afterMinutes(10, async () => {
-      await exports.default.scheduled();
+      await runMaintenance();
     });
     expect(heldAtComposio()).toStrictEqual(nothingHeld);
     await expect(cleanupsLeft()).resolves.toBe(0);
@@ -787,7 +837,7 @@ describe("a Composio connection", () => {
       errors.push(args);
     });
     await afterMinutes(2, async () => {
-      await exports.default.scheduled();
+      await runMaintenance();
     });
     expect(JSON.stringify(errors)).toContain("composio.cleanup_stuck");
     expect(JSON.stringify(errors)).not.toContain(connectionId);
@@ -806,7 +856,7 @@ describe("a Composio connection", () => {
     );
     const kept = await cleanupsLeft();
     await afterMinutes(2, async () => {
-      await exports.default.scheduled();
+      await runMaintenance();
     });
     expect({
       revoked,

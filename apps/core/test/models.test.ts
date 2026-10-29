@@ -12,8 +12,8 @@ import type { ModelCall, ModelsEnv } from "../src/models.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // AI Gateway is the outside system here: a fake behind the AI binding
@@ -974,8 +974,8 @@ describe("model gateway", { timeout: 30_000 }, () => {
     });
 
     expect(result.text).toBe("Hello, Ada.");
-    // The cron trigger drains what the log couldn't take.
-    await runCron();
+    // The clock drains what the log couldn't take.
+    await runMinuteTasks();
     const [event] = await auditedFor(trigger.userId, 1);
     expect(event).toMatchObject({ action: "model.call", actor: trigger });
   });

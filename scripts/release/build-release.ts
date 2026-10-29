@@ -25,6 +25,7 @@ import {
   connectInterfacesCoreCalls,
   connectInterfaceVersion,
 } from "@grasp-os/shared/connect";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { ReleaseCompatibility } from "@grasp-os/shared/release";
 import {
   journalSchemaVersion,
@@ -143,7 +144,7 @@ const buildWorker = async (
     path.relative(ROOT, configFile),
     parseJsonc(readFileSync(configFile, "utf-8"))
   );
-  // Each app's own build step, as its deploy script runs it.
+  // Each app's own build step.
   runVisibly("vp", ["run", "build"], dir);
   const outDir = path.join(bundleDir, app);
   runVisibly("wrangler", ["deploy", "--dry-run", "--outdir", outDir], dir);
@@ -233,6 +234,7 @@ const manifest = generateManifest(
     wranglerVersion,
     packages: packageVersions([...RELEASED_APPS, FRONTEND]),
     compatibility,
+    platformLimits: { ...platformLimits },
   },
   workers
 );

@@ -20,8 +20,8 @@ import {
 import { connectDb } from "./test-env.ts";
 
 // An App's settings besides its code: its name and description, who
-// answers for it, whom it is made for, and the integrations added to it
-// by hand. What could go wrong: someone without the right changes them (a
+// answers for it, whom it is made for, the business process it serves,
+// and the integrations added to it by hand. What could go wrong: someone without the right changes them (a
 // user of the App, someone it isn't shared with, Grasp staff naming
 // people); someone answers for it who can't open it, or isn't in the
 // organization; it is made for a team or person who isn't the
@@ -440,6 +440,73 @@ describe("whom an App is made for", slow, () => {
     expect({ refused, audience }).toStrictEqual({
       refused: "app.conflict",
       audience: null,
+    });
+  });
+});
+
+describe("the business process an App serves", slow, () => {
+  it("is set and cleared by its builders, Grasp staff among them, shown to everyone who opens it, audited, and only one of the list", async () => {
+    const [owner, builder, user] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("user"),
+    ]);
+    const { core } = await openRpc(
+      await signedIn(idp, "grasp-staff", staffPerson())
+    );
+    const staff = core.authenticate();
+    const app = await newApp(owner);
+    await share(owner, app, builder, "builder");
+    await share(owner, app, user, "user");
+
+    const before = await user.api.apps.get(app);
+    const set = await auditedDuring(
+      async () => await builder.api.apps.update(app, { process: "o2c" })
+    );
+    const listed = await user.api.apps.list();
+    const unchanged = await auditedDuring(
+      async () => await owner.api.apps.update(app, { process: "o2c" })
+    );
+    const refused = {
+      user: await outcome(user.api.apps.update(app, { process: "p2p" })),
+      unknown: await outcome(
+        // @ts-expect-error: a process the list doesn't hold, as a client could ask
+        owner.api.apps.update(app, { process: "x2y" })
+      ),
+    };
+    const byStaff = await outcome(staff.apps.update(app, { process: "r2r" }));
+    const cleared = await auditedDuring(
+      async () => await owner.api.apps.update(app, { process: null })
+    );
+    const after = await user.api.apps.get(app);
+
+    expect({
+      before: before.process,
+      listed: listed.find(({ id }) => id === app)?.process,
+      audited: said([...set, ...cleared]),
+      unchanged: unchanged.length,
+      refused,
+      byStaff,
+      after: after.process,
+    }).toStrictEqual({
+      before: null,
+      listed: "o2c",
+      audited: [
+        {
+          action: "app.updated",
+          actor: { type: "person", userId: builder.userId },
+          detail: { process: "o2c", previousProcess: null },
+        },
+        {
+          action: "app.updated",
+          actor: { type: "person", userId: owner.userId },
+          detail: { process: null, previousProcess: "r2r" },
+        },
+      ],
+      unchanged: 0,
+      refused: { user: "role.forbidden", unknown: "app.invalid" },
+      byStaff: "ok",
+      after: null,
     });
   });
 });

@@ -27,6 +27,7 @@ export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
 export type {
   AppCodeBuild,
   CompileTarget,
+  IncrementalTarget,
   ComputeModulesBuild,
   InspectTarget,
   OpenWorkflowBuild,
@@ -67,8 +68,23 @@ export {
   computePackagesFile,
   kitModuleName,
   packageModuleName,
+  packageModulePrefix,
+  previewRuntime,
   screenRuntime,
 } from "./kit.ts";
+export {
+  checkRecordOf,
+  incrementSchema,
+  moduleRecordOf,
+  screenIncrementKeys,
+} from "./increments.ts";
+export type {
+  BuildMetrics,
+  CheckRecord,
+  IncrementalBuild,
+  Increments,
+  ModuleRecord,
+} from "./increments.ts";
 export { platformPeers, platformScope } from "./packages/platform.ts";
 /** Part of every build's cache key: a new compiler or kit builds again. */
 export { version as compilerVersion } from "#version";
@@ -168,6 +184,22 @@ const memoiser = <T>() => {
 /** Loader isolates' code, read once per isolate (`memoiser`). */
 const memoisedWorker = memoiser<WorkerLoaderWorkerCode>();
 
+/** esbuild's WebAssembly, read once per isolate (`memoiser`). */
+const memoisedWasm = memoiser<ArrayBuffer>();
+
+/**
+ * esbuild's WebAssembly, as the compiler (for a preview's entries) and the
+ * package builder both load it: read once per isolate for both, as it is
+ * the largest file either reads.
+ */
+const esbuildWasmOf = async (assets: Fetcher): Promise<ArrayBuffer> =>
+  await memoisedWasm(
+    assets,
+    compilerAssets.esbuildWasm,
+    async () =>
+      await readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm")
+  );
+
 /** The module sets every App imports, read once per isolate (`memoiser`). */
 const memoisedModules = memoiser<KitModules>();
 
@@ -189,6 +221,14 @@ const readModules = async (
 /** The kit's modules, which every App's modules import: one set per release. */
 export const kitModules = async (assets: Fetcher): Promise<KitModules> =>
   await readModules(assets, compilerAssets.kitModules);
+
+/**
+ * The preview kit's modules (spec 19.2.1), which a chat's preview of a
+ * draft loads in place of the kit's: React's development builds and
+ * React Fast Refresh. One set per release.
+ */
+export const kitPreviewModules = async (assets: Fetcher): Promise<KitModules> =>
+  await readModules(assets, compilerAssets.kitPreviewModules);
 
 /**
  * The workflow SDK's modules, which every App's workflows import
@@ -226,9 +266,10 @@ const compilerWorker = async (
   assets: Fetcher
 ): Promise<WorkerLoaderWorkerCode> =>
   await memoisedWorker(assets, `compiler:${version}`, async () => {
-    const [source, kitJson] = await Promise.all([
+    const [source, kitJson, wasm] = await Promise.all([
       readCompilerFile(assets, compilerAssets.source, "javascript"),
       readCompilerFile(assets, compilerAssets.kit, "json"),
+      esbuildWasmOf(assets),
     ]);
     const kit: unknown = JSON.parse(kitJson);
     return {
@@ -237,6 +278,9 @@ const compilerWorker = async (
       modules: {
         "compiler.js": source,
         [kitModule]: { json: kit },
+        // Compiled as the isolate loads; the isolate itself can't. What
+        // bundles a preview's entries (preview-entry.ts).
+        "esbuild.wasm": { wasm },
       },
     };
   });
@@ -298,15 +342,17 @@ const memoisedCode = memoiser<PlatformCode>();
  */
 export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
   await memoisedCode(assets, `compiler:${version}`, async () => {
-    const [source, kit] = await Promise.all([
+    const [source, kit, wasm] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.source, "javascript"),
       readCompilerBytes(assets, compilerAssets.kit, "json"),
+      esbuildWasmOf(assets),
     ]);
     return {
       mainModule: "compiler.js",
       modules: {
         "compiler.js": { type: "js", bytes: new Uint8Array(source) },
         [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
+        "esbuild.wasm": { type: "wasm", bytes: new Uint8Array(wasm) },
       },
       nodejsCompat: true,
       cpuMs: isolateSettings.limits.cpuMs,
@@ -343,7 +389,7 @@ export const startPackageBuilder = async (
     async () => {
       const [source, wasm] = await Promise.all([
         readCompilerFile(assets, compilerAssets.packageBuilder, "javascript"),
-        readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
+        esbuildWasmOf(assets),
       ]);
       return {
         ...packageBuilderSettings,
@@ -370,7 +416,7 @@ export const packageBuilderCode = async (
   await memoisedCode(assets, `package-builder:${version}`, async () => {
     const [source, wasm] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.packageBuilder, "javascript"),
-      readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
+      esbuildWasmOf(assets),
     ]);
     return {
       mainModule: "package-builder.js",

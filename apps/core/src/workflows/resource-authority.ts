@@ -158,6 +158,12 @@ export interface CallingRun {
    * holds) waits for its resume (pending-actions.ts).
    */
   readonly paused?: boolean;
+  /**
+   * For a run an App's test started (fixture-runs.ts): it calls nothing
+   * real. Its host answers its model and store calls from its test
+   * (fixture-calls.ts), and `makeCall` refuses every call of it.
+   */
+  readonly fixture?: true;
 }
 
 /** A binding of a test run's checkpoint, and the answer its start gave it. */
@@ -309,6 +315,58 @@ export const requireCallAuthority = async (
   }
 };
 
+/** Run `runId`'s row and its start's receipt, as a run's calls read them. */
+const runRowOf = async (env: Env, runId: string) =>
+  await drizzle(env.DB)
+    .select({
+      workflowId: workflowResourceRuns.workflowResourceId,
+      version: workflowResourceRuns.version,
+      principal: workflowResourceRuns.principalId,
+      status: workflowResourceRuns.status,
+      restricted: workflowResourceRuns.restricted,
+      rootRunId: workflowResourceRuns.rootRunId,
+      invokerType: workflowStartReceipts.invokerType,
+      invokerId: workflowStartReceipts.invokerId,
+      originAppVersion: workflowStartReceipts.originAppVersion,
+      bindings: workflowStartReceipts.bindings,
+      detailsRemovedAt: workflowStartReceipts.detailsRemovedAt,
+      // A child's parent's workflow, read from the parent's own row.
+      parentWorkflowId: sql<
+        string | null
+      >`(SELECT parent_run.workflow_resource_id FROM workflow_resource_runs AS parent_run
+        WHERE ${workflowStartReceipts.invokerType} = 'workflow'
+          AND parent_run.id = ${workflowStartReceipts.invokerId})`,
+    })
+    .from(workflowResourceRuns)
+    .innerJoin(
+      workflowStartReceipts,
+      eq(workflowStartReceipts.id, workflowResourceRuns.id)
+    )
+    .where(eq(workflowResourceRuns.id, runId))
+    .get();
+
+/** Run `runId` as its calls know it, from `row` (`runRowOf`). */
+const callingRunFrom = (
+  runId: string,
+  row: NonNullable<Awaited<ReturnType<typeof runRowOf>>>
+): CallingRun => ({
+  runId,
+  rootRunId: row.rootRunId ?? runId,
+  workflowId: row.workflowId,
+  version: row.version,
+  principal: row.principal,
+  invoker: {
+    type: row.invokerType,
+    id: row.invokerId,
+    appVersion: row.originAppVersion,
+    parentWorkflowId: row.parentWorkflowId,
+  },
+  bindings: frozenBindingsOf(row.bindings),
+  workflows: frozenWorkflowsOf(row.bindings),
+  restricted: row.restricted,
+  paused: row.status === "paused",
+});
+
 /**
  * Run `runId` of workflow `workflowId` as its calls know it, from its row
  * and its start's receipt; `undefined` when there is no such run, or it
@@ -324,32 +382,7 @@ export const callingRunOf = async (
   workflowId: string,
   runId: string
 ): Promise<CallingRun | undefined> => {
-  const row = await drizzle(env.DB)
-    .select({
-      workflowId: workflowResourceRuns.workflowResourceId,
-      version: workflowResourceRuns.version,
-      principal: workflowResourceRuns.principalId,
-      status: workflowResourceRuns.status,
-      restricted: workflowResourceRuns.restricted,
-      rootRunId: workflowResourceRuns.rootRunId,
-      invokerType: workflowStartReceipts.invokerType,
-      invokerId: workflowStartReceipts.invokerId,
-      originAppVersion: workflowStartReceipts.originAppVersion,
-      bindings: workflowStartReceipts.bindings,
-      // A child's parent's workflow, read from the parent's own row.
-      parentWorkflowId: sql<
-        string | null
-      >`(SELECT parent_run.workflow_resource_id FROM workflow_resource_runs AS parent_run
-        WHERE ${workflowStartReceipts.invokerType} = 'workflow'
-          AND parent_run.id = ${workflowStartReceipts.invokerId})`,
-    })
-    .from(workflowResourceRuns)
-    .innerJoin(
-      workflowStartReceipts,
-      eq(workflowStartReceipts.id, workflowResourceRuns.id)
-    )
-    .where(eq(workflowResourceRuns.id, runId))
-    .get();
+  const row = await runRowOf(env, runId);
   if (
     row === undefined ||
     row.workflowId !== workflowId ||
@@ -359,23 +392,24 @@ export const callingRunOf = async (
   ) {
     return undefined;
   }
-  return {
-    runId,
-    rootRunId: row.rootRunId ?? runId,
-    workflowId: row.workflowId,
-    version: row.version,
-    principal: row.principal,
-    invoker: {
-      type: row.invokerType,
-      id: row.invokerId,
-      appVersion: row.originAppVersion,
-      parentWorkflowId: row.parentWorkflowId,
-    },
-    bindings: frozenBindingsOf(row.bindings),
-    workflows: frozenWorkflowsOf(row.bindings),
-    restricted: row.restricted,
-    paused: row.status === "paused",
-  };
+  return callingRunFrom(runId, row);
+};
+
+/**
+ * Run `runId` as its evidence is checked under (resource-reads.ts), ended
+ * or not: a child whose output a run took and holds (`runEvidenceHolds`),
+ * checked under its own workflow's authority as it stands now.
+ * `undefined` once its details are gone (retention.ts): its row stays,
+ * but not the evidence its output carried, so it can't be checked.
+ */
+export const heldRunOf = async (
+  env: Env,
+  runId: string
+): Promise<CallingRun | undefined> => {
+  const row = await runRowOf(env, runId);
+  return row === undefined || row.detailsRemovedAt !== null
+    ? undefined
+    : callingRunFrom(runId, row);
 };
 
 /**

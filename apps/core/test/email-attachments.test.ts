@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { allEvents } from "./audit-events.ts";
-import { runQuarterHourCron } from "./cron.ts";
 import {
   addedSince,
   deliver,
@@ -16,6 +15,7 @@ import {
   storedObjects,
 } from "./email-triggers.ts";
 import { mockIdp } from "./idp.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
 import { aroundEngine, endLiveRuns, finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith } from "./workflow-apps.ts";
@@ -275,13 +275,16 @@ describe("attachments of mail", () => {
       (await env.FILES.head(key)) !== null;
 
     // Up to 30 days after its day ended, it stays.
-    await runQuarterHourCron(
+    await runQuarterHourTasks(
       {},
       new Date(dayEnded + 30 * 24 * 60 * 60 * 1000 - 1)
     );
     await expect(kept()).resolves.toBeTruthy();
     // Then the next run deletes it.
-    await runQuarterHourCron({}, new Date(dayEnded + 30 * 24 * 60 * 60 * 1000));
+    await runQuarterHourTasks(
+      {},
+      new Date(dayEnded + 30 * 24 * 60 * 60 * 1000)
+    );
     await expect(kept()).resolves.toBeFalsy();
   });
 

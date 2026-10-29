@@ -22,7 +22,7 @@ const answering = (error: Error): Env => ({
 // that doesn't have one yet never stops every client's deploy.
 
 describe("a deploy's shared secrets", () => {
-  useStoreSecrets({ deployer: "deployer-token", tenant: "tenant-token" });
+  useStoreSecrets({ deployer: "deployer-token" });
 
   it("give connect no app OAuth clients while the store has none, and stop on any other one missing", async () => {
     await emptyStoreSecret(env.APP_OAUTH_CLIENTS, "APP_OAUTH_CLIENTS");
@@ -45,5 +45,12 @@ describe("a deploy's shared secrets", () => {
       deploySecrets(answering(new Error("Secrets Store is unavailable")))
     ).rejects.toBeInstanceOf(MissingStoreSecretError);
     expect(absent.shared.connect).toMatchObject({ APP_OAUTH_CLIENTS: "{}" });
+  });
+
+  it("stand in for app OAuth clients when the deploy left them unbound, the store not having them", async () => {
+    const unbound: Env = { ...env };
+    Reflect.deleteProperty(unbound, "APP_OAUTH_CLIENTS");
+    const { shared } = await deploySecrets(unbound);
+    expect(shared.connect).toMatchObject({ APP_OAUTH_CLIENTS: "{}" });
   });
 });

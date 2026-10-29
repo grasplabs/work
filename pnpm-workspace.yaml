@@ -6,14 +6,6 @@ packages:
 # Supply-chain defaults: new versions wait 3 days, exotic sub-dependencies are
 # blocked, and only the packages listed here may run install scripts.
 minimumReleaseAge: 4320
-# One-off exception Nick approved on 2026-10-22: pi 1.4.0 before its 3-day wait,
-# to test DeepSeek V4.1 Flash, which only 1.4.0's catalogue has. pi-agent-core
-# and pi-telemetry pin pi-ai's exact version, so they come along. Remove after
-# 2026-10-24, when 1.4.0 is past the wait.
-minimumReleaseAgeExclude:
-  - "@earendil-works/pi-agent-core@1.4.0"
-  - "@earendil-works/pi-ai@1.4.0"
-  - "@earendil-works/pi-telemetry@1.4.0"
 blockExoticSubdeps: true
 strictDepBuilds: true
 allowBuilds:
@@ -169,6 +161,9 @@ catalog:
   react-is: 19.3.0
   # Knowledge documents, rendered in the frontend: no raw HTML.
   react-markdown: 10.1.0
+  # Fast Refresh in a chat's preview frame (spec 19.2.1): the runtime the
+  # preview kit carries and the Babel plugin preview builds instrument with.
+  react-refresh: 0.19.0
   # The kit's resizable panels.
   react-resizable-panels: 4.14.2
   # The kit's charts.
@@ -188,6 +183,12 @@ catalog:
 catalogs:
   typescript6:
     typescript: 6.0.3
+  # The admin deploys with Cloudflare's cf CLI, whose Vite builds need the
+  # Cloudflare Vite plugin's v2, still in beta (apps/admin/cloudflare.config.ts).
+  # Core, connect and the web stay on the catalog's v1 until v2 is stable.
+  cf:
+    "@cloudflare/vite-plugin": 2.0.0-beta.v.4
+    cf: 1.0.0-beta.21
 
 # Vite+ replaces Vite and pins Vitest for every package in the workspace.
 overrides:
@@ -220,3 +221,4 @@ peerDependencyRules:
 patchedDependencies:
   "@cloudflare/vitest-pool-workers@0.22.0": patches/@cloudflare__vitest-pool-workers@0.22.0.patch
   jq-wasm@3.0.0-jq-1.8.2: patches/jq-wasm@3.0.0-jq-1.8.2.patch
+  miniflare@5.20261012.0-beta: patches/miniflare@5.20261012.0-beta.patch

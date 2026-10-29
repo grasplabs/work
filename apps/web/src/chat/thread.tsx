@@ -11,6 +11,7 @@ import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { Link } from "@tanstack/react-router";
 import {
   BrainIcon,
   CheckCircleIcon,
@@ -20,11 +21,12 @@ import {
   ClockIcon,
   CodeIcon,
   CopyIcon,
+  LayoutDashboardIcon,
   RefreshCcwIcon,
   TriangleAlertIcon,
   XCircleIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { createContext, Fragment, use, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { FileCards } from "./chat-files.tsx";
@@ -33,6 +35,7 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from "./conversation.tsx";
+import { failureMessage } from "./failure.ts";
 import { GraspSign } from "./grasp-sign.tsx";
 import {
   Message,
@@ -43,8 +46,9 @@ import {
 } from "./message.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
-import { AnswerSources } from "./sources.tsx";
+import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
+import { widgetLinesOf } from "./widget-lines.ts";
 
 // A chat as the person reads it, in the prototype's look
 // (grasplabs/prototype `components/chat/chat-thread.tsx` and
@@ -312,14 +316,52 @@ const ReplyActions = ({
 }: {
   cited?: { chatId: string; messageId: number };
   children: ReactNode;
-}) =>
-  cited === undefined ? (
+}) => {
+  const sources = useCitedDocuments();
+  return cited === undefined ? (
     <MessageActions>{children}</MessageActions>
   ) : (
-    <AnswerSources chatId={cited.chatId} messageId={cited.messageId}>
-      {children}
-    </AnswerSources>
+    <AnswerSources cited={sources}>{children}</AnswerSources>
   );
+};
+
+/** An answer's words, each span that cites a document an inline citation. */
+const ReplyText = ({
+  text,
+  citations,
+}: {
+  text: string;
+  citations?: ChatCitation[];
+}) => (
+  <MessageResponse
+    cited={citations?.map(({ documentId }) => documentId)}
+    sources={useCitedDocuments()}
+    text={text}
+  />
+);
+
+/** The calls the chat's code made, as the thread was given them. */
+const ChatTools = createContext<readonly ChatToolEvent[]>([]);
+
+/** Under a code step: each widget it made or changed on the dashboard, with the way there. */
+const WidgetLines = ({ callId }: { callId: string }) => {
+  const lines = widgetLinesOf(use(ChatTools), callId);
+  return lines.map(({ id, done }) => (
+    <p className="text-muted-foreground flex items-center gap-2" key={id}>
+      <LayoutDashboardIcon aria-hidden="true" className="size-4 flex-none" />
+      <span>
+        {done === "made" ? (
+          <Trans>Grasp added a widget to your dashboard.</Trans>
+        ) : (
+          <Trans>Grasp changed a widget on your dashboard.</Trans>
+        )}{" "}
+        <Link className="text-foreground underline" to="/dashboard">
+          <Trans>Open the dashboard</Trans>
+        </Link>
+      </span>
+    </p>
+  ));
+};
 
 /** One response of the agent's, stored or being written. */
 const Reply = ({
@@ -337,7 +379,7 @@ const Reply = ({
     /** What the model thought before it, when it thought. */
     reasoning?: ChatReasoning;
     end?: Answer["end"];
-    error?: string;
+    failure?: Answer["failure"];
     /** A stored answer's citations; one being written has none. */
     citations?: ChatCitation[];
   };
@@ -355,10 +397,10 @@ const Reply = ({
   /** A stored answer that cites documents: its chat and message, so its row of actions can open them. */
   cited?: { chatId: string; messageId: number };
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const answer = reply.text.trim();
   const quiet = writing || sign !== undefined;
-  return (
+  const shown = (
     <div className="flex w-full min-w-0 flex-col gap-3">
       {top}
       <Message from="assistant">
@@ -370,20 +412,21 @@ const Reply = ({
             />
           )}
           {answer === "" ? null : (
-            <MessageResponse
-              cited={reply.citations?.map(({ documentId }) => documentId)}
-              text={reply.text}
-            />
+            <ReplyText citations={reply.citations} text={reply.text} />
           )}
           {reply.code.map((code) => (
-            <CodeStep
-              code={code}
-              key={code.callId}
-              output={output?.callId === code.callId ? output.text : undefined}
-              result={results.get(code.callId)}
-              running={running}
-              writing={writing}
-            />
+            <Fragment key={code.callId}>
+              <CodeStep
+                code={code}
+                output={
+                  output?.callId === code.callId ? output.text : undefined
+                }
+                result={results.get(code.callId)}
+                running={running}
+                writing={writing}
+              />
+              <WidgetLines callId={code.callId} />
+            </Fragment>
           ))}
           {reply.end === "cancelled" ? (
             <p className="text-muted-foreground">
@@ -399,7 +442,7 @@ const Reply = ({
             <div className="flex items-start gap-3 rounded-lg border px-3.5 py-3">
               <TriangleAlertIcon className="text-destructive mt-0.5 size-4 flex-none" />
               <p className="flex-1" role="alert">
-                {reply.error ?? t`The model call failed.`}
+                {failureMessage(reply.failure, i18n)}
               </p>
               {onRetry === undefined ? null : (
                 <Button onClick={onRetry} size="sm" variant="outline">
@@ -425,6 +468,12 @@ const Reply = ({
         )}
       </Message>
     </div>
+  );
+  // Only an answer that cites documents asks core what it cites.
+  return cited === undefined ? (
+    shown
+  ) : (
+    <AnswerCited cited={cited}>{shown}</AnswerCited>
   );
 };
 
@@ -501,7 +550,10 @@ export const ChatThread = ({
   partial: ChatPartial | null;
   /** Whether the agent is working on the chat now. */
   running: boolean;
-  /** The calls the chat's code made: what it reads, while it reads it. */
+  /**
+   * The calls the chat's code made: what it did to the dashboard, under its
+   * step, and what it reads, while it reads it.
+   */
   tools?: readonly ChatToolEvent[];
   /** Asks the last question again. */
   onRetry: () => void;
@@ -537,94 +589,96 @@ export const ChatThread = ({
     return seconds === undefined ? undefined : <WorkedFor seconds={seconds} />;
   };
   return (
-    <Conversation>
-      <ConversationContent label={t`Messages`}>
-        <ol
-          aria-label={t`Messages`}
-          className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
-        >
-          {loaded ? null : (
-            <li className="flex justify-center py-8">
-              <Spinner aria-label={t`Loading…`} />
-            </li>
-          )}
-          {messages.map((message) => {
-            if (message.role === "user") {
-              return (
-                <li key={message.id}>
-                  <Message from="user">
-                    {message.files === undefined ||
-                    message.files.length === 0 ? null : (
-                      <FileCards files={message.files} />
-                    )}
-                    <MessageContent>{message.text}</MessageContent>
-                  </Message>
-                </li>
-              );
-            }
-            if (message.role === "assistant") {
-              return (
-                <li key={message.id}>
-                  <Reply
-                    onRetry={
-                      !running && message === lastAnswer && answersLast
-                        ? onRetry
-                        : undefined
-                    }
-                    output={output}
-                    reply={message}
-                    results={results}
-                    running={running}
-                    sign={
-                      shown === null && message === replies.at(-1)
-                        ? doing
-                        : undefined
-                    }
-                    cited={
-                      message.citations.length === 0
+    <ChatTools value={tools}>
+      <Conversation>
+        <ConversationContent label={t`Messages`}>
+          <ol
+            aria-label={t`Messages`}
+            className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
+          >
+            {loaded ? null : (
+              <li className="flex justify-center py-8">
+                <Spinner aria-label={t`Loading…`} />
+              </li>
+            )}
+            {messages.map((message) => {
+              if (message.role === "user") {
+                return (
+                  <li key={message.id}>
+                    <Message from="user">
+                      {message.files === undefined ||
+                      message.files.length === 0 ? null : (
+                        <FileCards files={message.files} />
+                      )}
+                      <MessageContent>{message.text}</MessageContent>
+                    </Message>
+                  </li>
+                );
+              }
+              if (message.role === "assistant") {
+                return (
+                  <li key={message.id}>
+                    <Reply
+                      onRetry={
+                        !running && message === lastAnswer && answersLast
+                          ? onRetry
+                          : undefined
+                      }
+                      output={output}
+                      reply={message}
+                      results={results}
+                      running={running}
+                      sign={
+                        shown === null && message === replies.at(-1)
+                          ? doing
+                          : undefined
+                      }
+                      cited={
+                        message.citations.length === 0
+                          ? undefined
+                          : { chatId, messageId: message.id }
+                      }
+                      top={topOf(message.id)}
+                      writing={false}
+                    />
+                  </li>
+                );
+              }
+              return null;
+            })}
+            {shown === null ? null : (
+              <li aria-busy="true">
+                <Reply
+                  output={output}
+                  reply={{
+                    ...shown,
+                    reasoning:
+                      shown.reasoning === ""
                         ? undefined
-                        : { chatId, messageId: message.id }
-                    }
-                    top={topOf(message.id)}
-                    writing={false}
-                  />
-                </li>
-              );
-            }
-            return null;
-          })}
-          {shown === null ? null : (
-            <li aria-busy="true">
-              <Reply
-                output={output}
-                reply={{
-                  ...shown,
-                  reasoning:
-                    shown.reasoning === ""
-                      ? undefined
-                      : { text: shown.reasoning, ms: null },
-                }}
-                results={results}
-                running={running}
-                sign={doing}
-                top={
-                  doing !== undefined && replies.length === 0 ? (
-                    <Working doing={doing} file={file} />
-                  ) : undefined
-                }
-                writing
-              />
-            </li>
-          )}
-          {doing === "reading" ? (
-            <li aria-busy="true">
-              <Reading />
-            </li>
-          ) : null}
-          {children === undefined ? null : <li>{children}</li>}
-        </ol>
-      </ConversationContent>
-      <ConversationScrollButton label={t`Jump to the newest message`} />
-    </Conversation>
+                        : { text: shown.reasoning, ms: null },
+                  }}
+                  results={results}
+                  running={running}
+                  sign={doing}
+                  top={
+                    doing !== undefined && replies.length === 0 ? (
+                      <Working doing={doing} file={file} />
+                    ) : undefined
+                  }
+                  writing
+                />
+              </li>
+            )}
+            {doing === "reading" ? (
+              <li aria-busy="true">
+                <Reading />
+              </li>
+            ) : null}
+            {children === undefined ? null : <li>{children}</li>}
+          </ol>
+        </ConversationContent>
+        <ConversationScrollButton label={t`Jump to the newest message`} />
+      </Conversation>
+    </ChatTools>
   );
 };

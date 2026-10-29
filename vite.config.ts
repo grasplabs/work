@@ -1,5 +1,3 @@
-import { setFlagsFromString } from "node:v8";
-
 import ultracite from "ultracite/oxfmt";
 import antiSlop from "ultracite/oxlint/anti-slop";
 import core from "ultracite/oxlint/core";
@@ -10,18 +8,6 @@ import vitest from "ultracite/oxlint/vitest";
 import { defineConfig } from "vite-plus";
 
 import DurationSequencer from "./scripts/test-sequencer.ts";
-
-// Node 24's V8 has a Sparkplug bug that segfaults the Vitest process
-// mid-run (exit 139) in GC: BaselineOutOfLinePrologue pushes a stale
-// register that the GC reads as a pointer
-// (https://github.com/nodejs/node/issues/62393). `vp test` starts Vitest
-// itself and NODE_OPTIONS rejects V8 flags, so switch the baseline tier off
-// here, where Vitest loads its config. That covers `vp test` from the repo
-// root, and only code compiled from here on: what Node compiled while
-// starting stays baseline, so this makes the crash rare, not impossible.
-// Drop this once the Node release in devEngines carries the backport
-// (https://github.com/nodejs/node/pull/65753).
-setFlagsFromString("--no-sparkplug");
 
 const generated = [
   "**/routeTree.gen.ts",
@@ -283,6 +269,7 @@ export default defineConfig({
             "scripts/**/*.test.ts",
             "apps/core/build-blueprints.test.ts",
             "apps/core/host-json.bundle.test.ts",
+            "apps/admin/vite.config.test.ts",
           ],
           environment: "node",
         },

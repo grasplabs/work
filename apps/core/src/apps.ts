@@ -20,11 +20,13 @@ import type {
   AppFiles,
   AppRole,
   AppVersion,
+  ViewedApp,
   CommittedVersion,
   FileDiff,
 } from "@grasp-os/shared/apps";
 import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { storedProcessOf } from "@grasp-os/shared/business-processes";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, BlueprintId, WorkflowId } from "@grasp-os/shared/ids";
@@ -45,6 +47,7 @@ import { z } from "zod";
 
 import { versionMadeCurrent } from "./access-revocations.ts";
 import {
+  appsBuiltBy,
   appsFoundBy,
   requireAppRole,
   requireNotArchived,
@@ -172,6 +175,7 @@ export const toApp = (row: AppRow): App => ({
   currentVersion: row.currentVersion,
   pendingVersion: row.pendingVersion,
   status: row.status,
+  process: storedProcessOf(row.process),
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -578,6 +582,7 @@ export const createApp = async (
     responsibleId: null,
     audienceType: null,
     audienceId: null,
+    process: null,
     blueprint: blueprint ?? null,
     currentVersion: null,
     pendingVersion: null,
@@ -601,20 +606,38 @@ export const createApp = async (
 };
 
 /** The Apps `by` has a role in (app-access.ts), oldest first. */
-export const listApps = async (env: Env, by: Member): Promise<App[]> => {
+/**
+ * The Apps `by` has a role in, oldest first, each with that role
+ * (`appsBuiltBy` decides the builders, as `requireAppRole` does for one).
+ */
+export const listApps = async (env: Env, by: Member): Promise<ViewedApp[]> => {
   const rows = await drizzle(env.DB)
     .select()
     .from(apps)
     .where(appsFoundBy(env, by))
     .orderBy(asc(apps.createdAt), asc(apps.id));
-  return rows.map(toApp);
+  const found = rows.map(toApp);
+  const builds = await appsBuiltBy(
+    env,
+    by,
+    found.map(({ id }) => id)
+  );
+  return found.map((app) => ({
+    ...app,
+    role: builds.has(app.id) ? "builder" : "user",
+  }));
 };
 
+/** The App `app` names, for anyone with a role in it, with that role. */
 export const getApp = async (
   env: Env,
   by: Identity,
   app: unknown
-): Promise<App> => await appFor(env, by, app, "user");
+): Promise<ViewedApp> => {
+  const found = await findApp(env, app);
+  const role = await requireAppRole(env, by, found, "user");
+  return { ...found, role };
+};
 
 /** The names `nameOf` finds in `paths`, in their order. */
 const namesIn = (

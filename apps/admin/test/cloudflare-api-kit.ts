@@ -6,6 +6,10 @@ import type {
   AdminAskAnswer,
   AdminAskRequest,
 } from "@grasp-os/shared/admin-ask";
+import type {
+  AdminKickoffRequest,
+  AdminKickoffView,
+} from "@grasp-os/shared/admin-kickoff";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
 
@@ -64,6 +68,13 @@ export interface AccountState {
   /** Buckets by jurisdiction: a name is unique only within one. */
   buckets: { name: string; jurisdiction: string }[];
   /**
+   * The buckets with objects in them, by name, which R2 refuses to delete
+   * (409) until a lifecycle rule has expired them.
+   */
+  fullBuckets: Set<string>;
+  /** Each bucket's lifecycle rules, by name, as the last PUT set them. */
+  lifecycles: Map<string, Json>;
+  /**
    * The jurisdiction R2 reports for every bucket, whatever it's in: a test
    * of an API that answers other than asked.
    */
@@ -96,6 +107,25 @@ export interface AccountState {
   /** The version its Workers' health checks name, as an old version still answering would. */
   answeringVersion?: string;
   /**
+   * What its Workers' health checks name first, one answer per check,
+   * before their live version (or `answeringVersion`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  healthAnswersFirst?: string[];
+  /**
+   * The version its cores name for their connect instead of its live one
+   * (@grasp-os/shared/provision-probe), as an isolate of an old version
+   * still answering would; null as a connect that doesn't answer, or has
+   * no version metadata.
+   */
+  connectAnswering?: string | null;
+  /**
+   * What its cores name for their connect first, one answer per ask, before
+   * they name its live one (or `connectAnswering`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  connectAnswersFirst?: (string | null)[];
+  /**
    * Where its Workers redirect every request (307, to the same path), as a
    * core or a hop in front of it gone wrong or hostile would. The fake
    * follows the redirect as fetch does, unless the request says
@@ -116,6 +146,8 @@ export interface AccountState {
         asClient?: string;
         down?: readonly string[];
         clocksDown?: readonly ("core" | "connect")[];
+        /** As a core from before connect's version: neither in its probe nor asked for. */
+        noConnectVersion?: boolean;
       };
   /**
    * The platform update notices its core took, signed with the key its
@@ -165,17 +197,14 @@ export interface AccountState {
   /** The questions its core took, as each signed request sent them. */
   asked: AdminAskRequest[];
   /**
-   * What the analytics API reports for it (`/graphql`): its Workers'
-   * requests and CPU time this month, its AI Gateway's spend, and its
-   * requests and errors over the last day. Unset, it reports nothing.
+   * What its core answers the admin's signed kickoff request with
+   * (@grasp-os/shared/admin-kickoff): the kickoff as the admin shows it,
+   * or `shut_out` for a company that keeps Grasp's staff out (403). Unset,
+   * a kickoff with nothing brought in.
    */
-  usage?: {
-    monthRequests: number;
-    monthCpuTimeUs: number;
-    monthAiCost: number;
-    dayRequests: number;
-    dayErrors: number;
-  };
+  kickoff?: AdminKickoffView | "shut_out";
+  /** The kickoff requests its core took, as each signed request sent them. */
+  kickoffAsks: AdminKickoffRequest[];
 }
 
 /** A call the fake got. */

@@ -6,7 +6,7 @@
  * Nth call answers 429 or 500) and read every call it got.
  *
  * It answers in place of `fetch` in the isolate the admin runs in, which
- * is also where its Workflow steps run: the tests' isolate, for each test
+ * is also where its runs' steps run: the tests' isolate, for each test
  * (test/cloudflare-api-mock.ts), and the browser journeys' admin, for its
  * whole run (test/e2e-worker.ts). D1 queries run on real D1 databases, one
  * for each database the fake holds at once (`CLIENT_D1_<n>`,
@@ -18,14 +18,26 @@ import {
   adminAskRequestSchema,
 } from "@grasp-os/shared/admin-ask";
 import {
+  adminKickoffPath,
+  adminKickoffPurpose,
+  adminKickoffRequestSchema,
+} from "@grasp-os/shared/admin-kickoff";
+import type { AdminKickoffView } from "@grasp-os/shared/admin-kickoff";
+import {
   adminSnapshotPath,
   adminSnapshotPurpose,
   adminSnapshotRequestSchema,
 } from "@grasp-os/shared/admin-snapshot";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
+import { gatewayScriptOf } from "@grasp-os/shared/connect-gateway";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { toHex } from "@grasp-os/shared/encoding";
+import {
+  clientsNamespace,
+  platformWorkerName,
+  stages,
+} from "@grasp-os/shared/names";
 import {
   onboardingSummaryPath,
   onboardingSummaryPurpose,
@@ -39,6 +51,8 @@ import {
   platformUpdateSignatureHeader,
 } from "@grasp-os/shared/platform-change";
 import {
+  connectVersionPath,
+  connectVersionPurpose,
   provisionProbePath,
   provisionProbePurpose,
   provisionProbeRequestSchema,
@@ -130,13 +144,84 @@ const frontendPage = (): Response =>
     headers: { "content-type": "text/html" },
   });
 
-/** The binding kinds core's probe asks (core's src/provision-probe.ts). */
-const probedKinds = new Set(["d1", "r2_bucket", "service"]);
+/** The binding kinds core's probe asks, of core and of connect (core's src/provision-probe.ts). */
+const probedKinds = new Set([
+  "d1",
+  "r2_bucket",
+  "durable_object_namespace",
+  "worker_loader",
+  "service",
+]);
+
+const bindingsSchema = z.array(
+  z
+    .object({
+      type: z.string(),
+      name: z.string(),
+      json: z.unknown().optional(),
+      service: z.string().optional(),
+    })
+    .loose()
+);
 
 /** A few of each clock's tasks, as core's and connect's src/clock.ts name them. */
 const clockTaskNames = {
   core: ["audit.drain", "workflows.schedules", "connect.clock"],
   connect: ["oauth.flows", "vault.tokens"],
+};
+
+/**
+ * The connect script core's `CONNECT` binding reaches: the script it names
+ * in the account's own Workers, or, bound to the connect gateway, the
+ * script its props name in the clients' dispatch namespace, as the gateway
+ * forwards to it (@grasp-os/shared/connect-gateway). A core with no
+ * `CONNECT` binding reaches no connect.
+ */
+const connectOf = (
+  account: AccountState,
+  binding: z.infer<typeof bindingsSchema>[number] | undefined
+): ScriptState | undefined => {
+  // A stage's gateway forwards into its stage's clients' namespace.
+  const stage = stages.find(
+    (each) => binding?.service === platformWorkerName("connect-gateway", each)
+  );
+  if (stage === undefined) {
+    return binding?.service === undefined
+      ? undefined
+      : account.scripts.get(binding.service);
+  }
+  const script = gatewayScriptOf(binding?.props);
+  return script === undefined
+    ? undefined
+    : account.namespaces.get(clientsNamespace(stage))?.get(script);
+};
+
+/**
+ * The version a core whose live version is `live` names for its connect:
+ * the version all of its connect's traffic goes to (`connectOf`), unless
+ * the account says otherwise (`connectAnswersFirst`, `connectAnswering`);
+ * null with no connect.
+ */
+const connectAnswering = (
+  account: AccountState,
+  live: VersionState
+): string | null => {
+  const [early, ...later] = account.connectAnswersFirst ?? [];
+  if (early !== undefined) {
+    account.connectAnswersFirst = later;
+    return early;
+  }
+  if (account.connectAnswering !== undefined) {
+    return account.connectAnswering;
+  }
+  const connect = connectOf(
+    account,
+    bindingsSchema
+      .parse(live.metadata.bindings ?? [])
+      .find(({ name }) => name === "CONNECT")
+  );
+  const [only] = connect?.deployments[0]?.versions ?? [];
+  return only?.percentage === 100 ? only.version_id : null;
 };
 
 /**
@@ -174,17 +259,15 @@ const answerProbe = async (
   ) {
     return frontendPage();
   }
-  const bindings = z
-    .array(
-      z
-        .object({
-          type: z.string(),
-          name: z.string(),
-          json: z.unknown().optional(),
-        })
-        .loose()
-    )
-    .parse(live.metadata.bindings ?? []);
+  const bindings = bindingsSchema.parse(live.metadata.bindings ?? []);
+  // Connect's own, as core asks connect for them: the script its CONNECT
+  // binding names, at its latest version.
+  const connectBindings = bindingsSchema.parse(
+    connectOf(
+      account,
+      bindings.find(({ name }) => name === "CONNECT")
+    )?.versions.at(-1)?.metadata.bindings ?? []
+  );
   const clientId = bindings.find(({ name }) => name === "CLIENT_ID")?.json;
   const down = new Set(probe.down);
   const clock = (name: "core" | "connect") =>
@@ -193,15 +276,65 @@ const answerProbe = async (
       : { armed: true, tasks: clockTaskNames[name] };
   return Response.json({
     version: account.answeringVersion ?? live.id,
+    ...(probe.noConnectVersion === true
+      ? {}
+      : { connectVersion: connectAnswering(account, live) }),
     clientId:
       probe.asClient ?? (typeof clientId === "string" ? clientId : null),
     bindings: Object.fromEntries(
-      bindings
+      [
+        ...bindings.map((binding) => ({ ...binding, answers: binding.name })),
+        ...connectBindings.map((binding) => ({
+          ...binding,
+          answers: `connect.${binding.name}`,
+        })),
+      ]
         .filter(({ type }) => probedKinds.has(type))
-        .map(({ name }) => [name, !down.has(name)])
+        .map(({ answers }) => [answers, !down.has(answers)])
     ),
     clocks: { core: clock("core"), connect: clock("connect") },
   } satisfies ProvisionProbe);
+};
+
+/**
+ * What a client's core answers the admin's signed request for its
+ * connect's version with, as core does (core's src/provision-probe.ts):
+ * the version its connect answers as (`connectAnswering`), or 503 when it
+ * names none, once the signature checks out with the key its live
+ * version's auth secret gives for this purpose and the request parses.
+ * Anything else, the router's secret alone included, gets its frontend's
+ * page, as any path core has no route for.
+ */
+const answerConnectVersion = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const probe = account.coreProbe ?? {};
+  if (probe === "absent" || probe.noConnectVersion === true) {
+    return frontendPage();
+  }
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    connectVersionPurpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  if (
+    request.headers.get(platformUpdateSignatureHeader) !== expected ||
+    !provisionProbeRequestSchema.safeParse(JSON.parse(body)).success
+  ) {
+    return frontendPage();
+  }
+  const version = connectAnswering(account, live);
+  return version === null
+    ? Response.json({ ok: false }, { status: 503 })
+    : Response.json({ ok: true, version });
 };
 
 /** None begun: what a core answers that has no onboarding. */
@@ -480,6 +613,73 @@ const answerAsk = async (
   return Response.json(account.ask ?? { text: "An answer.", truncated: false });
 };
 
+/** A kickoff with nothing brought in yet, as core answers it. */
+export const emptyKickoff = (): AdminKickoffView => ({
+  transcript: null,
+  read: false,
+  fields: [],
+  teams: 0,
+});
+
+/**
+ * What a client's core answers the admin's kickoff request with, as core
+ * does (core's src/admin-kickoff.ts): the account's kickoff once the
+ * signature checks out, with the key its live version's auth secret gives
+ * for the kickoff's purpose, and the request parses, keeping it; 401 for
+ * a request signed otherwise, 403 for one that doesn't parse or a company
+ * that keeps Grasp's staff out.
+ */
+const answerKickoff = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    adminKickoffPurpose,
+    ["verify"]
+  );
+  const signature = request.headers.get(platformUpdateSignatureHeader) ?? "";
+  const signed = await crypto.subtle.verify(
+    "HMAC",
+    key,
+    Uint8Array.from(signature.match(hexPair) ?? [], (pair) =>
+      Number.parseInt(pair, 16)
+    ),
+    new TextEncoder().encode(body)
+  );
+  if (!signed) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const asked = adminKickoffRequestSchema.safeParse(JSON.parse(body));
+  if (!asked.success) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  account.kickoffAsks.push(asked.data);
+  if (account.kickoff === "shut_out") {
+    return Response.json({ code: "onboarding.staff_only" }, { status: 403 });
+  }
+  return Response.json(account.kickoff ?? emptyKickoff());
+};
+
+/** The admin's signed requests core answers alike: by path, a `POST` each. */
+const signedPosts: ReadonlyMap<
+  string,
+  (
+    account: AccountState,
+    live: VersionState,
+    request: Request
+  ) => Promise<Response>
+> = new Map([
+  [platformUpdatePath, takeNotice],
+  [onboardingSummaryPath, answerSummary],
+  [provisionProbePath, answerProbe],
+  [connectVersionPath, answerConnectVersion],
+  [adminAskPath, answerAsk],
+  [adminKickoffPath, answerKickoff],
+]);
+
 /**
  * The workers.dev subdomains taken across Cloudflare: a subdomain is one
  * account's only.
@@ -569,6 +769,55 @@ const accountRoutes: Route[] = [
     },
   },
   {
+    method: "DELETE",
+    path: /^\/d1\/database\/(?<uuid>[^/]+)$/u,
+    answer: ({ account, params }) => {
+      const index = account.d1.findIndex(({ uuid }) => uuid === params.uuid);
+      if (index === -1) {
+        return notFound();
+      }
+      account.d1.splice(index, 1);
+      return envelope(null);
+    },
+  },
+  {
+    method: "DELETE",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)$/u,
+    answer: ({ account, call, params }) => {
+      const index = account.buckets.findIndex(
+        ({ name, jurisdiction }) =>
+          name === params.name && jurisdiction === jurisdictionOf(call)
+      );
+      if (index === -1) {
+        return notFound();
+      }
+      if (account.fullBuckets.has(params.name ?? "")) {
+        return refusal(
+          409,
+          10_008,
+          "The bucket you tried to delete is not empty"
+        );
+      }
+      account.buckets.splice(index, 1);
+      return envelope(null);
+    },
+  },
+  {
+    method: "PUT",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)\/lifecycle$/u,
+    answer: ({ account, call, params, json }) => {
+      const bucket = account.buckets.find(
+        ({ name, jurisdiction }) =>
+          name === params.name && jurisdiction === jurisdictionOf(call)
+      );
+      if (bucket === undefined) {
+        return notFound();
+      }
+      account.lifecycles.set(bucket.name, json);
+      return envelope(null);
+    },
+  },
+  {
     method: "GET",
     path: /^\/ai-gateway\/gateways\/(?<id>[^/]+)$/u,
     answer: ({ account, params }) => {
@@ -601,52 +850,8 @@ const accountRoutes: Route[] = [
   },
 ];
 
-/** The roles every account has, as the API lists them. */
-const accountRoles = [
-  { id: "role-admin", name: "Administrator" },
-  { id: "role-read", name: "Administrator Read Only" },
-];
-
-/** An account's members and roles, as a tenant admin manages them, and its scripts. */
+/** An account's scripts, as the API lists them. */
 const memberRoutes: Route[] = [
-  {
-    method: "GET",
-    path: /^\/members$/u,
-    answer: ({ account, call }) =>
-      paged(
-        [...account.members].map(([email, status]) => ({
-          id: `member-${email}`,
-          status,
-          user: { email },
-        })),
-        call.query
-      ),
-  },
-  {
-    method: "POST",
-    path: /^\/members$/u,
-    answer: ({ account, json }) => {
-      const email = text(json, "email");
-      const { roles } = json;
-      if (
-        !Array.isArray(roles) ||
-        !roles.every((role) => accountRoles.some(({ id }) => id === role))
-      ) {
-        return refusal(400, 1003, "Invalid roles");
-      }
-      // An existing user added as accepted is a member at once; otherwise
-      // it's an invitation.
-      const status =
-        text(json, "status") === "accepted" ? "accepted" : "pending";
-      account.members.set(email, status);
-      return envelope({ id: `member-${email}`, status, user: { email } });
-    },
-  },
-  {
-    method: "GET",
-    path: /^\/roles$/u,
-    answer: ({ call }) => paged(accountRoles, call.query),
-  },
   {
     method: "GET",
     path: /^\/workers\/scripts$/u,
@@ -666,9 +871,8 @@ const routes = [
 const isMember = (account: AccountState, caller: string | undefined) =>
   caller !== undefined && account.members.get(caller) === "accepted";
 
-/** Who the deployer's token and the tenant admin's belong to. */
+/** Who the deployer's token belongs to. */
 export const deployerEmail = "deployer@grasp.test";
-export const tenantEmail = "tenant@grasp.test";
 
 /** The route that serves `call`, with its path's named parts. */
 const routeOf = (
@@ -695,6 +899,11 @@ const routeOf = (
 export type Failure =
   /** A refusal: the admin retries none. */
   | 400
+  /**
+   * A 400 with no answer Cloudflare wrote, as a proxy in front of it may
+   * send: no error code to read.
+   */
+  | "400-uncoded"
   | 408
   | 429
   | 500
@@ -731,6 +940,12 @@ const failed = (failure: Exclude<Failure, "lost">): Response => {
   if (failure === 400) {
     return refusal(400, 10_000, "Bad request");
   }
+  if (failure === "400-uncoded") {
+    return new Response("<html>Bad request</html>", {
+      status: 400,
+      headers: { "content-type": "text/html" },
+    });
+  }
   if (failure === 408) {
     return refusal(408, 10_000, "Request timeout");
   }
@@ -766,56 +981,13 @@ const readBody = async (request: Request): Promise<unknown> => {
   return request.body === null ? undefined : await request.text();
 };
 
-/** A day, in ms. */
-const dayMs = 24 * 60 * 60 * 1000;
-
 /**
- * Why the admin's usage query (src/cloudflare/analytics.ts) isn't one
- * the fake answers: a dataset, field or filter it doesn't read as the
- * schema names them, or a window that isn't the month so far and the last
- * day, or another gateway than the client's; null when it is. So a typo
- * fails the tests rather than reads nothing.
- */
-const analyticsMisread = (
-  query: string,
-  variables: Record<string, unknown>
-): string | null => {
-  const expected = [
-    "workersInvocationsAdaptive(limit: 1, filter: { datetime_geq: $monthStart, datetime_leq: $now }) { sum { requests cpuTimeUs } }",
-    "workersInvocationsAdaptive(limit: 1, filter: { datetime_geq: $dayStart, datetime_leq: $now }) { sum { requests errors } }",
-    "aiGatewayRequestsAdaptiveGroups(limit: 1, filter: { datetime_geq: $monthStart, datetime_leq: $now, gateway: $gateway }) { sum { cost } }",
-    "accounts(filter: { accountTag: $a0 })",
-  ];
-  const missing = expected.find((part) => !query.includes(part));
-  if (missing !== undefined) {
-    return `The query doesn't read ${missing}`;
-  }
-  const now = Date.parse(String(variables.now));
-  const month = new Date(now);
-  const monthStart = Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1);
-  if (
-    Number.isNaN(now) ||
-    Date.parse(String(variables.monthStart)) !== monthStart ||
-    Date.parse(String(variables.dayStart)) !== now - dayMs
-  ) {
-    return "The query's window isn't the month so far and the last day";
-  }
-  return variables.gateway === "grasp-os"
-    ? null
-    : "The query doesn't filter the client's AI Gateway";
-};
-
-/**
- * A fake Cloudflare API that lets `token` (the deployer's) and
- * `tenantToken` (a tenant admin's, which alone creates accounts) in, each
- * to the accounts its user is an accepted member of. It answers what it's
+ * A fake Cloudflare API that lets `token` (the deployer's) in, to the
+ * accounts its user is an accepted member of. It answers what it's
  * sent in place of `fetch` (`fetch`), until it's emptied (`reset`). Add
  * accounts with `addAccount`; plan failures with `failCall`.
  */
-export const fakeCloudflareApi = (
-  token: string,
-  tenantToken = `${token}-tenant-admin`
-) => {
+export const fakeCloudflareApi = (token: string) => {
   const accounts = new Map<string, AccountState>();
   const calls: ApiCall[] = [];
   const planned = new Map<number, Failure>();
@@ -827,6 +999,15 @@ export const fakeCloudflareApi = (
    * once: something else landing while that call is in flight.
    */
   const interleaved: {
+    matches: (call: ApiCall) => boolean;
+    meanwhile: () => Promise<void>;
+  }[] = [];
+  /**
+   * What runs once the fake has answered the next call a test picks out,
+   * before its caller gets the answer, each once: the caller held between
+   * what it read and what it does next.
+   */
+  const answeredThen: {
     matches: (call: ApiCall) => boolean;
     meanwhile: () => Promise<void>;
   }[] = [];
@@ -842,6 +1023,8 @@ export const fakeCloudflareApi = (
       members: new Map([[member, "accepted"]]),
       d1: [],
       buckets: [],
+      fullBuckets: new Set(),
+      lifecycles: new Map(),
       gateways: [],
       zones: [],
       scripts: new Map(),
@@ -854,6 +1037,7 @@ export const fakeCloudflareApi = (
       notices: [],
       adminReaders: [],
       asked: [],
+      kickoffAsks: [],
     };
     accounts.set(account.id, account);
     return account;
@@ -872,90 +1056,18 @@ export const fakeCloudflareApi = (
   const adminReads = { now: 0, peak: 0 };
   /** The requests a redirect sent elsewhere, with the router secret they carried. */
   const redirected: { url: string; routerSecret: string | null }[] = [];
+  const dispatched: { namespace: string; script: string; url: string }[] = [];
 
-  /** Whose token a call carries: the deployer's or the tenant admin's. */
-  const callers = new Map([
-    [`Bearer ${token}`, deployerEmail],
-    [`Bearer ${tenantToken}`, tenantEmail],
-  ]);
+  /** Whose token a call carries: the deployer's. */
+  const callers = new Map([[`Bearer ${token}`, deployerEmail]]);
   /**
-   * What the analytics API answers the admin's usage query with: for each
-   * account the query names (variables `a0`, `a1`, ...), what the account
-   * reports, as GraphQL groups; an error for one the caller isn't a member
-   * of, as the API answers it, with the rest of the data.
-   */
-  const answerAnalytics = (body: unknown, caller: string): Response => {
-    const parsed = z
-      .object({
-        query: z.string(),
-        variables: z.record(z.string(), z.unknown()),
-      })
-      .safeParse(body);
-    const query = parsed.success ? parsed.data.query : "";
-    const variables = parsed.success ? parsed.data.variables : {};
-    const misread = analyticsMisread(query, variables);
-    if (misread !== null) {
-      // As the API answers a query it can't run: errors, and no data.
-      return Response.json({ data: null, errors: [{ message: misread }] });
-    }
-    const errors: { message: string }[] = [];
-    const viewer = Object.fromEntries(
-      Object.entries(variables)
-        .filter(([name]) => /^a\d+$/u.test(name))
-        .map(([name, tag]) => {
-          const account = accounts.get(typeof tag === "string" ? tag : "");
-          if (account === undefined || !isMember(account, caller)) {
-            errors.push({ message: `not authorized for ${String(tag)}` });
-            return [name, null];
-          }
-          const { usage } = account;
-          return [
-            name,
-            usage === undefined
-              ? []
-              : [
-                  {
-                    month: [
-                      {
-                        sum: {
-                          requests: usage.monthRequests,
-                          cpuTimeUs: usage.monthCpuTimeUs,
-                        },
-                      },
-                    ],
-                    day: [
-                      {
-                        sum: {
-                          requests: usage.dayRequests,
-                          errors: usage.dayErrors,
-                        },
-                      },
-                    ],
-                    ai: [{ sum: { cost: usage.monthAiCost } }],
-                  },
-                ],
-          ];
-        })
-    );
-    return Response.json({
-      data: { viewer },
-      errors: errors.length === 0 ? null : errors,
-    });
-  };
-
-  /**
-   * Answers a call that names no account (`/user`, `/accounts`,
-   * `/graphql`), or undefined for any other.
+   * Answers a call that names no account (`/user`, `/accounts`), or
+   * undefined for any other.
    */
   const answerUnscoped = (
     call: ApiCall,
     caller: string | undefined
   ): Response | undefined => {
-    if (call.path === "/graphql" && call.method === "POST") {
-      return caller === undefined
-        ? refusal(403, 10_000, "Authentication error")
-        : answerAnalytics(call.body, caller);
-    }
     if (call.path !== "/user" && call.path !== "/accounts") {
       return undefined;
     }
@@ -965,17 +1077,8 @@ export const fakeCloudflareApi = (
     if (call.path === "/user") {
       return envelope({ email: caller });
     }
-    if (call.method === "POST") {
-      if (caller !== tenantEmail) {
-        return refusal(403, 10_000, "Only a tenant admin creates accounts");
-      }
-      // The tenant admin who creates one is its only member.
-      const body: Json =
-        typeof call.body === "object" && call.body !== null
-          ? { ...call.body }
-          : {};
-      const created = addAccount(text(body, "name"), tenantEmail);
-      return envelope({ id: created.id, name: created.name });
+    if (call.method !== "GET") {
+      return undefined;
     }
     // The API matches `name` loosely; the fake as a substring.
     const name = call.query.get("name") ?? "";
@@ -1129,17 +1232,23 @@ export const fakeCloudflareApi = (
     const match = matched.findIndex(({ matches }) => matches(call));
     const [picked] = match === -1 ? [] : matched.splice(match, 1);
     const failure = planned.get(calls.length) ?? picked?.failure;
+    let response: Response;
     if (failure === "lost") {
       await respond(request, call);
-      return lostConnection();
+      response = lostConnection();
+    } else if (failure === undefined) {
+      const between = interleaved.findIndex(({ matches }) => matches(call));
+      const [meanwhile] = between === -1 ? [] : interleaved.splice(between, 1);
+      await meanwhile?.meanwhile();
+      response = await respond(request, call);
+    } else {
+      response = failed(failure);
     }
-    if (failure !== undefined) {
-      return failed(failure);
-    }
-    const between = interleaved.findIndex(({ matches }) => matches(call));
-    const [meanwhile] = between === -1 ? [] : interleaved.splice(between, 1);
-    await meanwhile?.meanwhile();
-    return await respond(request, call);
+    // Answered, a failure too: the caller holds what it got back.
+    const after = answeredThen.findIndex(({ matches }) => matches(call));
+    const [then] = after === -1 ? [] : answeredThen.splice(after, 1);
+    await then?.meanwhile();
+    return response;
   };
 
   /**
@@ -1185,17 +1294,10 @@ export const fakeCloudflareApi = (
     ) {
       return new Response("Forbidden", { status: 403 });
     }
-    if (url.pathname === platformUpdatePath && request.method === "POST") {
-      return await takeNotice(account, live, request);
-    }
-    if (url.pathname === onboardingSummaryPath && request.method === "POST") {
-      return await answerSummary(account, live, request);
-    }
-    if (url.pathname === provisionProbePath && request.method === "POST") {
-      return await answerProbe(account, live, request);
-    }
-    if (url.pathname === adminAskPath && request.method === "POST") {
-      return await answerAsk(account, live, request);
+    const signed =
+      request.method === "POST" ? signedPosts.get(url.pathname) : undefined;
+    if (signed !== undefined) {
+      return await signed(account, live, request);
     }
     if (url.pathname === quotaPolicyReportPath && request.method === "POST") {
       return await answerQuotaPolicy(account, script, live, request);
@@ -1214,12 +1316,15 @@ export const fakeCloudflareApi = (
         adminReads.now -= 1;
       }
     }
-    return url.pathname === "/health"
-      ? Response.json({
-          ok: true,
-          version: account.answeringVersion ?? live.id,
-        })
-      : new Response("Not found", { status: 404 });
+    if (url.pathname !== "/health") {
+      return new Response("Not found", { status: 404 });
+    }
+    const [early, ...later] = account.healthAnswersFirst ?? [];
+    account.healthAnswersFirst = later;
+    return Response.json({
+      ok: true,
+      version: early ?? account.answeringVersion ?? live.id,
+    });
   };
 
   const workersDev = async (
@@ -1247,6 +1352,41 @@ export const fakeCloudflareApi = (
     }
     return await workerAnswer(request, url, worker);
   };
+
+  /**
+   * The dispatch namespace `name` in account `accountId`, as a Worker
+   * binding reaches it: only that account's namespace, as a real
+   * DISPATCHER binds one namespace in its own account. Each script's live
+   * version answers as a workers.dev Worker's does (`workerAnswer`); a
+   * script it doesn't have, or one only another account holds, throws, as
+   * Workers for Platforms does.
+   */
+  const dispatcher = (accountId: string, name: string) => ({
+    get: (scriptName: string) => {
+      const account = accounts.get(accountId);
+      const script = account?.namespaces.get(name)?.get(scriptName);
+      const [only] = script?.deployments[0]?.versions ?? [];
+      const live = script?.versions.find(({ id }) => id === only?.version_id);
+      const worker =
+        account === undefined || script === undefined || live === undefined
+          ? undefined
+          : { account, script, live };
+      if (worker === undefined) {
+        throw new Error(`Worker not found: ${scriptName}`);
+      }
+      return {
+        fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          dispatched.push({
+            namespace: name,
+            script: scriptName,
+            url: request.url,
+          });
+          return await workerAnswer(request, new URL(request.url), worker);
+        },
+      };
+    },
+  });
 
   /** What the API, or a Worker on workers.dev, answers `fetch(input, init)` with. */
   const answerFetch = async (
@@ -1329,6 +1469,7 @@ export const fakeCloudflareApi = (
     takenSubdomains.clear();
     matched.length = 0;
     interleaved.length = 0;
+    answeredThen.length = 0;
     load.peak = 0;
     load.peakAccounts = 0;
     busyAccounts.clear();
@@ -1336,11 +1477,20 @@ export const fakeCloudflareApi = (
     adminReads.now = 0;
     adminReads.peak = 0;
     redirected.length = 0;
+    dispatched.length = 0;
   };
 
   return {
     /** Answers in place of `fetch`. */
     fetch: answerFetch,
+    /** The dispatch namespace `name`, as the router and the admin bind it. */
+    dispatcher,
+    /** Every request a namespace's script got through `dispatcher`, in this test. */
+    dispatched: (): readonly {
+      namespace: string;
+      script: string;
+      url: string;
+    }[] => dispatched,
     /** Empties the fake. */
     reset,
     /** Every call the fake got in this test, in order. */
@@ -1358,9 +1508,6 @@ export const fakeCloudflareApi = (
     abortedCalls: () => aborted.count,
     /** Adds an account the token is a member of, and returns what it holds. */
     addAccount,
-    /** The accounts named `name`, as the fake holds them. */
-    accountsNamed: (name: string): AccountState[] =>
-      [...accounts.values()].filter((account) => account.name === name),
     /** Fails the `n`th call from now as `failure` says, whatever it asks. */
     failCall: (n: number, failure: Failure) => {
       planned.set(calls.length + n, failure);
@@ -1383,6 +1530,18 @@ export const fakeCloudflareApi = (
       meanwhile: () => Promise<void>
     ) => {
       interleaved.push({ matches, meanwhile });
+    },
+    /**
+     * Runs `meanwhile` once the next call `matches` picks out has been
+     * answered and before its caller gets the answer, once: so what
+     * `meanwhile` does lands after the caller's read, and before it acts
+     * on it.
+     */
+    afterAnswering: (
+      matches: (call: ApiCall) => boolean,
+      meanwhile: () => Promise<void>
+    ) => {
+      answeredThen.push({ matches, meanwhile });
     },
   };
 };

@@ -5,6 +5,7 @@ import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { operationErrors } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { runFileIdSchema } from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -39,6 +40,7 @@ import {
   callKnowledge,
   callTemplate,
   requireKnowledgeRequest,
+  requireResourceRunEvidenceReadable,
 } from "./resource-reads.ts";
 import type { KnowledgeCall } from "./resource-reads.ts";
 import { callFiles, requireFilesArguments } from "./run-files.ts";
@@ -342,6 +344,10 @@ const callConnector = async (
           await requireCallAuthority(env, run, binding);
           effect.requireHolds();
         },
+        // Its mail is stamped with the run (mail-stamps.ts), so a copy
+        // that reaches a mailbox a connector trigger watches starts the
+        // trigger's run in this run's lineage, never as a new root.
+        stamping: { run: run.runId, stepKey: effect.key, kind: "resource" },
       };
     },
     {
@@ -477,7 +483,7 @@ const connectionsOf = async (env: Env, run: CallingRun): Promise<string[]> => {
  * run's included: its instructions as text, and a whole number above 0 of
  * output tokens if any (`workflow.call_invalid` otherwise).
  */
-const requireModelRequest = (
+export const requireModelRequest = (
   call: Extract<BuiltCall, { name: "grasp.model" }>
 ): { instructions: string; tokens: number | undefined } => {
   if (typeof call.instructions !== "string") {
@@ -660,6 +666,22 @@ export const auditAdmissionRefusal = async (
 const namesFileSchema = z.object({ file: runFileIdSchema });
 
 /**
+ * The files operations that publish what a run hands them: a file's name
+ * as it opens, its bytes as it's appended to, both once it's finished.
+ */
+const filesWrites: ReadonlySet<string> = new Set(["open", "append", "finish"]);
+
+/**
+ * Whether `call` may hand out what its run recalled: a connector call, a
+ * store operation, a model call, or a file it writes (`filesWrites`).
+ */
+const handsOut = (call: BuiltCall): boolean =>
+  call.name === "grasp.connector" ||
+  call.name === "grasp.operation" ||
+  call.name === "grasp.model" ||
+  (call.name === "grasp.files" && filesWrites.has(call.operation));
+
+/**
  * What every receipt of a files call says before its answer: the
  * operation, and the file it names, if it names one as a file ID, so a
  * refused call's receipt still says which file was asked for.
@@ -755,6 +777,13 @@ export const makeCall = async (
   if (run.candidate !== undefined) {
     return await candidateAnswer(env, run.candidate, call);
   }
+  // A run an App's test started never comes here: its host answers its
+  // model and store calls from its test (fixture-calls.ts) and refuses
+  // the rest. Refused again, before anything is looked at, so none of
+  // its calls can reach connect, a model, an App, a store or Knowledge.
+  if (run.fixture === true) {
+    throw operationErrors.create("resource.unavailable");
+  }
   const binding = run.bindings.get(call.binding);
   if (binding?.kind !== kindOf[call.name]) {
     throw workflowResourceErrors.create("workflow.call_denied");
@@ -808,6 +837,17 @@ export const makeCall = async (
       fileDetail = filesCallDetail(call.operation, call.arguments);
     }
     await requireCallAuthority(env, run, binding);
+    // What the run recalled leaves with a connector call, a store
+    // operation or a model call, and with a file it writes: a file's name
+    // and its bytes are shown outside the run once it's finished
+    // (run-files.ts), so opening, appending to and finishing one are
+    // gated too. Not once the run may no longer read it
+    // (resource-reads.ts), refused with its receipt kept as
+    // `brain.revoked`. Reading, listing or deleting its own files hands
+    // nothing out.
+    if (handsOut(call)) {
+      await requireResourceRunEvidenceReadable(env, run);
+    }
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
     await audited(env, receipt("started"));

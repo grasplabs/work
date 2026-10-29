@@ -15,6 +15,7 @@ import type {
 } from "@grasp-os/shared/audit-log";
 import { deploymentConfig, jsonVar } from "@grasp-os/shared/config";
 import {
+  auditArchiveRetentionDefaultDays,
   auditArchiveRetentionSchema,
   auditRetentionDefaultDays,
   auditRetentionSchema,
@@ -100,15 +101,22 @@ export const auditRetentionDays = (
 /**
  * Days an event is kept in all, archive included, counted from when the
  * log received it: the `AUDIT_ARCHIVE_RETENTION_DAYS` var the admin sets
- * per deployment, as the DPA states it (AU7). At least a year and at least
- * the retention, at most ten years. `undefined` while it's unset, or
- * invalid (logged as `config.invalid`), or while retention is invalid: then
- * nothing is purged. It's deployment config, so no session can shorten it.
+ * per deployment, as the DPA states it (AU7), at least a year and at least
+ * the retention, at most ten years. Unset, seven years
+ * (`auditArchiveRetentionDefaultDays`), or the retention if that is longer.
+ * `undefined` while it's invalid (logged as `config.invalid`), or while
+ * retention is invalid: then nothing is purged. It's deployment config, so
+ * no session can shorten it.
  */
 export const archiveRetentionDays = (
   env: Pick<Env, "AUDIT_ARCHIVE_RETENTION_DAYS" | "AUDIT_RETENTION_DAYS">
 ): number | undefined => {
   const retention = auditRetentionDays(env);
+  if (env.AUDIT_ARCHIVE_RETENTION_DAYS === undefined) {
+    return retention === undefined
+      ? undefined
+      : Math.max(auditArchiveRetentionDefaultDays, retention);
+  }
   const days = deploymentConfig(
     auditArchiveRetentionSchema,
     "AUDIT_ARCHIVE_RETENTION_DAYS",
@@ -150,7 +158,7 @@ export const archiveRetentionDays = (
 //
 // The log runs retention itself, daily, on its alarm (`AuditLog.alarm`),
 // which it arms when it appends an event while none is set (and core's
-// 15-minute cron trigger arms it too, for a deployment that appends
+// 15-minute clock arms it too, for a deployment that appends
 // nothing). Daily, not at each event's exact deadline: that would archive
 // a stretch per event, and each `audit.archived` event would bring an
 // alarm of its own. An event is archived at most a day past retention.
@@ -479,7 +487,7 @@ export class AuditLog extends DurableObject<Env> {
 
   /**
    * Arms the retention alarm if none is set (see `#armRetentionIfUnset`):
-   * core's 15-minute cron trigger calls it, so a deployment that appends
+   * core's 15-minute clock calls it, so a deployment that appends
    * nothing after a release still starts retention.
    */
   async armRetention(): Promise<void> {
@@ -510,7 +518,7 @@ export class AuditLog extends DurableObject<Env> {
   /**
    * Sets the alarm from within the alarm. If that fails, the alarm may be
    * left unset, so this instance forgets it was armed: the next append or
-   * 15-minute cron run arms it again. The error is thrown, so the platform
+   * 15-minute clock run arms it again. The error is thrown, so the platform
    * also retries the alarm, with backoff.
    */
   async #rearm(time: number): Promise<void> {

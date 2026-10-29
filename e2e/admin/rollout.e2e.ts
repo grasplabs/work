@@ -3,9 +3,9 @@ import type { APIRequestContext, Page } from "@playwright/test";
 import { z } from "zod";
 
 /**
- * How long a rollout to ring 0 may take to finish: each of the client's
- * Workers through its gradual stages, held 2 s each
- * (apps/admin/test/e2e-worker.ts), and the page's 5 s refreshes.
+ * How long a rollout to ring 0 may take to finish: the client's operation
+ * releasing it (apps/admin/src/hosting/operation.ts), and the page's 5 s
+ * refreshes.
  */
 const rolloutMs = 90_000;
 
@@ -13,11 +13,12 @@ const rolloutMs = 90_000;
 const seededSchema = z.object({
   clientId: z.string(),
   releaseId: z.string(),
+  previousReleaseId: z.string(),
 });
 
 /**
- * A new client in ring 0, the only active one, running a release, with a
- * newer one imported.
+ * A new placed client in ring 0, the only active one, running a release,
+ * with a newer one imported.
  */
 const seed = async (
   request: APIRequestContext
@@ -44,7 +45,7 @@ const startRollout = async (page: Page, releaseId: string): Promise<void> => {
   await expect(page.getByLabel("Release")).toHaveValue(releaseId);
   await expect(
     page.getByText(
-      "Only ring 0 has active clients, so this reaches only our own deployments."
+      "Only Alpha has active clients, so this reaches only our own deployments."
     )
   ).toBeVisible();
   await page.getByRole("button", { name: "Start rollout" }).click();
@@ -86,7 +87,7 @@ const checkDrift = async (page: Page, clientId: string) => {
   }));
 };
 
-test("staff roll a release out to ring 0 and watch it go and finish", async ({
+test("staff roll a release out to Alpha and watch it go and finish", async ({
   page,
   request,
 }) => {
@@ -94,9 +95,10 @@ test("staff roll a release out to ring 0 and watch it go and finish", async ({
 
   await startRollout(page, releaseId);
 
-  await expect(page.getByText("Rolling out to ring 0")).toBeVisible();
+  await expect(page.getByText("Rolling out to Alpha")).toBeVisible();
+  // Named by the release's version, not its id.
   await expect(
-    page.getByRole("heading", { name: `Rollout of ${releaseId}` })
+    page.getByRole("heading", { name: /^Rollout of v\d+\.\d+$/u })
   ).toBeVisible();
   await expect(targetRow(page, clientId)).toBeVisible();
   // The page follows the run on its own, without a reload: the rollout's
@@ -115,11 +117,11 @@ test("staff roll a release out to ring 0 and watch it go and finish", async ({
   ).toBeVisible();
 });
 
-test("staff roll a client back from a rollout and see it on its previous versions", async ({
+test("staff roll a client back from a rollout and see it on its previous release", async ({
   page,
   request,
 }) => {
-  const { clientId, releaseId } = await seed(request);
+  const { clientId, releaseId, previousReleaseId } = await seed(request);
   const before = await checkDrift(page, clientId);
   await startRollout(page, releaseId);
   const rollout = page.url();
@@ -140,15 +142,24 @@ test("staff roll a client back from a rollout and see it on its previous version
   );
   const after = await checkDrift(page, clientId);
   const inSync = "In sync: it runs what the admin made live";
+  // Back on the release it ran: run again, so on new versions of it.
+  await page.goto(setupOf(clientId, "releases"));
+  await expect(
+    page.getByRole("definition").filter({ hasText: previousReleaseId }).first()
+  ).toBeVisible();
   expect({
     before: before.map(({ state }) => state),
     rolledOut: rolledOut.every(
       (worker, index) => worker.madeLive !== before[index]?.madeLive
     ),
-    after,
+    after: after.map(({ worker, state }) => ({ worker, state })),
+    rolledBack: after.every(
+      (worker, index) => worker.madeLive !== rolledOut[index]?.madeLive
+    ),
   }).toStrictEqual({
     before: before.map(() => inSync),
     rolledOut: true,
-    after: before,
+    after: before.map(({ worker }) => ({ worker, state: inSync })),
+    rolledBack: true,
   });
 });

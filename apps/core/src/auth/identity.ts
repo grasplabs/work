@@ -174,7 +174,7 @@ export const signedInSession = async (
   headers: Headers
 ): Promise<SignedInSession | undefined> => {
   const config = signInConfig(env);
-  const auth = authFor(env, config);
+  const auth = await authFor(env, config);
   if (!(auth && config)) {
     return undefined;
   }

@@ -106,6 +106,11 @@ const person = (userId: string): ConsolidationScope => ({
 });
 
 describe("consolidating episodes into lesson candidates", () => {
+  // Filling a scope to its cap of open candidates records some hundred and
+  // fifty episodes and runs several jobs over them: half a second alone,
+  // past the default timeout on a loaded CI shard.
+  const fillTimeout = 60_000;
+
   it("keeps a repeated failure as a candidate in exactly its episodes' scope, with what supports and contradicts it", async () => {
     const { brain } = testHost();
     const ann = `ann-${crypto.randomUUID()}`;
@@ -604,48 +609,52 @@ describe("consolidating episodes into lesson candidates", () => {
     });
   });
 
-  it("counts a reopened lesson against the scope's open candidates", async () => {
-    const { brain } = testHost();
-    const ann = `ann-${crypto.randomUUID()}`;
-    const scope = person(ann);
-    const reopening = [
-      run(ann, "failed"),
-      run(ann, "failed"),
-      run(ann, "failed"),
-    ];
-    await recorded(brain, reopening);
-    await consolidate(brain, scope);
-    // Retired by its evidence going.
-    await eraseOutcomes(
-      brain,
-      reopening.map(({ evidenceId }) => evidenceId)
-    );
-    // The scope fills up with open candidates.
-    await recorded(
-      brain,
-      Array.from({ length: consolidationLimits.openPerScope }, (_, n) =>
-        Array.from({ length: 3 }, () =>
-          run(ann, "failed", { taskType: `workflow:app/full-${n}` })
-        )
-      ).flat()
-    );
-    for (let job = 0; job < 4; job += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one job after another
+  it(
+    "counts a reopened lesson against the scope's open candidates",
+    { timeout: fillTimeout },
+    async () => {
+      const { brain } = testHost();
+      const ann = `ann-${crypto.randomUUID()}`;
+      const scope = person(ann);
+      const reopening = [
+        run(ann, "failed"),
+        run(ann, "failed"),
+        run(ann, "failed"),
+      ];
+      await recorded(brain, reopening);
       await consolidate(brain, scope);
-    }
-    // New failures of the retired lesson's group.
-    await recorded(brain, [
-      run(ann, "failed"),
-      run(ann, "failed"),
-      run(ann, "failed"),
-    ]);
-    await consolidate(brain, scope);
-    const lessons = await lessonsOf(brain, scope);
+      // Retired by its evidence going.
+      await eraseOutcomes(
+        brain,
+        reopening.map(({ evidenceId }) => evidenceId)
+      );
+      // The scope fills up with open candidates.
+      await recorded(
+        brain,
+        Array.from({ length: consolidationLimits.openPerScope }, (_, n) =>
+          Array.from({ length: 3 }, () =>
+            run(ann, "failed", { taskType: `workflow:app/full-${n}` })
+          )
+        ).flat()
+      );
+      for (let job = 0; job < 4; job += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one job after another
+        await consolidate(brain, scope);
+      }
+      // New failures of the retired lesson's group.
+      await recorded(brain, [
+        run(ann, "failed"),
+        run(ann, "failed"),
+        run(ann, "failed"),
+      ]);
+      await consolidate(brain, scope);
+      const lessons = await lessonsOf(brain, scope);
 
-    expect(lessons.filter(({ state }) => state === "candidate")).toHaveLength(
-      consolidationLimits.openPerScope
-    );
-  });
+      expect(lessons.filter(({ state }) => state === "candidate")).toHaveLength(
+        consolidationLimits.openPerScope
+      );
+    }
+  );
 
   it("reads an episode recorded late, whatever its clock said, past the watermark", async () => {
     const { brain } = testHost();
@@ -730,64 +739,69 @@ describe("consolidating episodes into lesson candidates", () => {
     });
   });
 
-  it("never opens past the scope's cap when another job opens one meanwhile", async () => {
-    const { brain } = testHost();
-    const ann = `ann-${crypto.randomUUID()}`;
-    const scope = person(ann);
-    await recorded(
-      brain,
-      Array.from({ length: consolidationLimits.openPerScope - 1 }, (_, n) =>
+  it(
+    "never opens past the scope's cap when another job opens one meanwhile",
+    { timeout: fillTimeout },
+    async () => {
+      const { brain } = testHost();
+      const ann = `ann-${crypto.randomUUID()}`;
+      const scope = person(ann);
+      await recorded(
+        brain,
+        Array.from({ length: consolidationLimits.openPerScope - 1 }, (_, n) =>
+          Array.from({ length: 3 }, () =>
+            run(ann, "failed", { taskType: `workflow:app/held-${n}` })
+          )
+        ).flat()
+      );
+      for (let job = 0; job < 3; job += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one job after another
+        await consolidate(brain, scope);
+      }
+      await recorded(
+        brain,
         Array.from({ length: 3 }, () =>
-          run(ann, "failed", { taskType: `workflow:app/held-${n}` })
+          run(ann, "failed", { taskType: "workflow:app/new" })
         )
-      ).flat()
-    );
-    for (let job = 0; job < 3; job += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one job after another
-      await consolidate(brain, scope);
+      );
+      // Another job opens the scope's last free candidate just before this
+      // one writes, after this one counted what was open.
+      let overlapped = false;
+      const racing = new Proxy(env.BRAIN, {
+        get: (target, property) => {
+          if (property === "batch") {
+            return async (statements: D1PreparedStatement[]) => {
+              if (!overlapped) {
+                overlapped = true;
+                const at = Date.now();
+                await target
+                  .prepare(
+                    "INSERT INTO brain_lessons (id, revision, scope, scope_id, group_key, kind, applicability, exclusions, instruction, evidence_status, state, retired_by, created_at, updated_at) VALUES (?, 1, 'person', ?, ?, 'failure_pattern', '{\"taskType\":\"other\",\"versions\":[]}', '[]', 'Other.', 'supported', 'candidate', NULL, ?, ?)"
+                  )
+                  .bind(crypto.randomUUID(), ann, crypto.randomUUID(), at, at)
+                  .run();
+              }
+              return await target.batch(statements);
+            };
+          }
+          const value: unknown = Reflect.get(target, property);
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      });
+
+      await consolidate(createBrain(racing, brain.ports), scope);
+      const lessons = await lessonsOf(brain, scope);
+
+      expect({
+        overlapped,
+        open: lessons.filter(({ state }) => state === "candidate").length,
+      }).toStrictEqual({
+        overlapped: true,
+        open: consolidationLimits.openPerScope,
+      });
     }
-    await recorded(
-      brain,
-      Array.from({ length: 3 }, () =>
-        run(ann, "failed", { taskType: "workflow:app/new" })
-      )
-    );
-    // Another job opens the scope's last free candidate just before this
-    // one writes, after this one counted what was open.
-    let overlapped = false;
-    const racing = new Proxy(env.BRAIN, {
-      get: (target, property) => {
-        if (property === "batch") {
-          return async (statements: D1PreparedStatement[]) => {
-            if (!overlapped) {
-              overlapped = true;
-              const at = Date.now();
-              await target
-                .prepare(
-                  "INSERT INTO brain_lessons (id, revision, scope, scope_id, group_key, kind, applicability, exclusions, instruction, evidence_status, state, retired_by, created_at, updated_at) VALUES (?, 1, 'person', ?, ?, 'failure_pattern', '{\"taskType\":\"other\",\"versions\":[]}', '[]', 'Other.', 'supported', 'candidate', NULL, ?, ?)"
-                )
-                .bind(crypto.randomUUID(), ann, crypto.randomUUID(), at, at)
-                .run();
-            }
-            return await target.batch(statements);
-          };
-        }
-        const value: unknown = Reflect.get(target, property);
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
-
-    await consolidate(createBrain(racing, brain.ports), scope);
-    const lessons = await lessonsOf(brain, scope);
-
-    expect({
-      overlapped,
-      open: lessons.filter(({ state }) => state === "candidate").length,
-    }).toStrictEqual({
-      overlapped: true,
-      open: consolidationLimits.openPerScope,
-    });
-  });
+  );
 });

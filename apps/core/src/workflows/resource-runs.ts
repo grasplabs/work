@@ -1,3 +1,4 @@
+import { brainErrors } from "@grasp-os/brain/contract";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
@@ -46,6 +47,7 @@ import {
 import type { Acting } from "../auth/identity.ts";
 import { tellOfferedRunEnd } from "../channels/offered-runs.ts";
 import {
+  runEvidenceHolds,
   workflowResourceRunControls,
   workflowResourceRunTerminations,
   workflowResourceVersions,
@@ -68,14 +70,16 @@ import {
   countedStep,
   forIsolate,
   fromIsolate,
+  modelCallLimitOf,
   settle,
   stepLimitOf,
   unadmitted,
 } from "./host.ts";
 import type { RunStep } from "./host.ts";
-import { admitAttempt, quotaPolicy } from "./quotas.ts";
+import { admitAttempt } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import { callingRunOf } from "./resource-authority.ts";
+import type { CallingRun } from "./resource-authority.ts";
 import {
   maxResultBytes,
   openRunMain,
@@ -84,6 +88,7 @@ import {
   ResourceRunHost,
 } from "./resource-host.ts";
 import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
+import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import type { EngineStatus } from "./runs.ts";
@@ -131,7 +136,7 @@ import { wakingOnSettle } from "./share-wakes.ts";
 //   must be the identity the run was admitted for.
 // - A start lost between its receipt and the engine. The run's row says
 //   `starting` until the engine's first notification; a start sent again
-//   under the same key, and the cron's repair, send it again, which the
+//   under the same key, and the clock's repair, send it again, which the
 //   engine takes once (its admission is keyed by the run's ID).
 // - Output the workflow doesn't declare. The run's result must match its
 //   version's output schema, by the SDK's own validator, or the run fails
@@ -652,7 +657,7 @@ const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
  * stopped between the receipt and the engine, or the engine refused),
  * those due first: each backs off on its own, so runs that can't start
  * don't keep newer ones from their turn, and end failed (`repairStart`).
- * From the cron, at `now`.
+ * From the clock, at `now`.
  */
 export const repairResourceStarts = async (
   env: Env,
@@ -804,7 +809,9 @@ const loadedRun = async (
   if (contract === undefined) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
-  const { limits } = await quotaPolicy(env);
+  // Never an end of the run when the policy can't be read for a moment
+  // (`modelCallLimitOf`): its last read, else the platform's limit.
+  const modelCalls = await modelCallLimitOf(env);
   const calling = await callingRunOf(env, pin.workflow, runId);
   if (calling === undefined) {
     throw new Error(`Run ${runId} has ended`);
@@ -825,8 +832,8 @@ const loadedRun = async (
       calling,
       // The workflow's own limit only ever lowers the host's ceiling.
       maxModelCalls: Math.min(
-        limits.lineageModelRequests,
-        build.limits.maxModelCalls ?? limits.lineageModelRequests
+        modelCalls,
+        build.limits.maxModelCalls ?? modelCalls
       ),
     },
     output: JSON.stringify(contract.output),
@@ -874,6 +881,27 @@ const acceptedOutput = (descriptor: string, value: unknown): unknown => {
     throw workflowResourceErrors.create("workflow.output_invalid");
   }
   return checked.value;
+};
+
+/**
+ * The refusal of a run's end once it may no longer read what it recalled
+ * (`requireResourceRunEvidenceReadable`), as the isolate's errors are
+ * reported; undefined when it may. A passing failure propagates, so the
+ * engine tries the activation again.
+ */
+const evidenceRefusal = async (
+  env: Env,
+  run: CallingRun
+): Promise<StepError | undefined> => {
+  try {
+    await requireResourceRunEvidenceReadable(env, run);
+    return undefined;
+  } catch (error) {
+    if (brainErrors.codeOf(error) !== "brain.revoked") {
+      throw error;
+    }
+    return forIsolate(error);
+  }
 };
 
 /** What one activation of a hosted run runs, and what holds it to account. */
@@ -998,7 +1026,16 @@ export const runActivation = async (
     result.ok && host.failureUntaken
       ? forIsolate(workflowErrors.create("workflow.invalid"))
       : undefined;
-  const failed = tampered ?? untaken ?? (result.ok ? undefined : result.error);
+  // Its output leaves the run (its parent, its screens, its details), and
+  // so does its failure: neither once it may no longer read what it
+  // recalled (resource-reads.ts). A run caught tampering fails all the
+  // same, but checked first: the refusal can hold what the run said.
+  const evidenceRefused = await evidenceRefusal(env, run.calling);
+  const failed =
+    evidenceRefused ??
+    tampered ??
+    untaken ??
+    (result.ok ? undefined : result.error);
   if (failed !== undefined) {
     throw namedError(failed.name, failed.message, failed.code);
   }
@@ -1176,11 +1213,36 @@ const childEndOf = async (env: Env, row: RunRow): Promise<ChildEnd> => {
   return { status: "failed", code: "workflow.child_output_too_large" };
 };
 
+/**
+ * Has run `parentRunId` hold child run `childRunId`'s evidence, and every
+ * run the child held (`runEvidenceHolds`): an output it takes may carry
+ * what any of them recalled, so before each of its releases the parent is
+ * checked against theirs too (resource-reads.ts). Kept before the parent
+ * is told, so no parent holds the output without them. Again, it adds
+ * nothing.
+ */
+const holdChildEvidence = async (
+  env: Env,
+  parentRunId: string,
+  childRunId: string
+): Promise<void> => {
+  await drizzle(env.DB).run(
+    sql`INSERT INTO ${runEvidenceHolds} (run_id, held_run_id)
+      SELECT ${parentRunId}, ${childRunId}
+      UNION SELECT ${parentRunId}, ${runEvidenceHolds.heldRunId}
+        FROM ${runEvidenceHolds} WHERE ${runEvidenceHolds.runId} = ${childRunId}
+      ON CONFLICT DO NOTHING`
+  );
+};
+
 export const tellParentOfEnd = async (env: Env, row: RunRow): Promise<void> => {
   if (row.parentRunId === null || unended.includes(row.status)) {
     return;
   }
   const end = await childEndOf(env, row);
+  if (end.status === "completed") {
+    await holdChildEvidence(env, row.parentRunId, row.id);
+  }
   const tell = async (told: ChildEnd) =>
     await runEngine(env).admitEvent(row.parentRunId ?? "", {
       type: childEndType(row.id),
@@ -1921,7 +1983,7 @@ const terminationsPerRepair = 50;
  * first, each backing off on its own as the engine refuses it (claimed by
  * its count, so two repairs never send one at once). Never given up: an
  * instance made before its cancel would otherwise keep its lease, or
- * sleep on to its alarm. From the cron, at `now`.
+ * sleep on to its alarm. From the clock, at `now`.
  */
 export const repairResourceTerminations = async (
   env: Env,

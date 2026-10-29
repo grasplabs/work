@@ -6,13 +6,14 @@ import { callGate } from "./call-gate.ts";
 import { seededConnections, seededTools } from "./connections-seed.ts";
 import type { SeededConnection } from "./connections-seed.ts";
 import { test } from "./csp.ts";
-import { apiOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 
 // The Integrations pages: a person finds the account they connected on
 // its integration's page, with where it stands, signs in again to one whose
 // access ran out, and disconnects one; an admin sees which Apps hold a
 // permission for a shared connection and revokes it there, and reads a
-// Composio connection's consent. The connections are what finished flows
+// Composio connection's consent; and someone sees which workflows use an
+// app, on its row and its page, and opens one. The connections are what finished flows
 // leave behind (e2e/connections-seed.ts): the flows through Entra and
 // Composio are core's tests.
 
@@ -72,12 +73,17 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await expect(
     page.getByRole("heading", { level: 1, name: "Microsoft 365" })
   ).toBeVisible();
-  await expect(page.getByRole("status")).toHaveCount(0);
-  // Where core's callback sends the browser once a flow finished.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  // Where core's callback sends the browser once a flow finished: the
+  // success screen, with what was chosen, until it is closed.
   await page.goto(`/integrations/native:microsoft?connection=${mine.id}`);
-  await expect(
-    page.getByRole("status").filter({ hasText: "Connected." })
-  ).toBeVisible();
+  const done = page.getByRole("dialog", {
+    name: "Microsoft 365 is connected",
+  });
+  await expect(done.getByText("Just for you")).toBeVisible();
+  await done.getByRole("button", { name: "Close" }).click();
+  await expect(done).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("connection")).toBeNull();
   // Its Overview's account card: where it stands, what it reaches, and
   // signing in again to the connection whose access ran out.
   const account = page.getByRole("region", { name: "Account" });
@@ -164,9 +170,6 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
     .click();
   await expect(expiredCard).toHaveCount(0);
   await expect(mineCard).toBeVisible();
-  // The notice was about the flow that came back, not about the page now.
-  await expect(page.getByText("Connected.", { exact: true })).toHaveCount(0);
-  expect(new URL(page.url()).searchParams.get("connection")).toBeNull();
 
   // Connecting another account: the test stack has no Microsoft tenant set
   // up, so core refuses the start, and the dialog says so.
@@ -197,8 +200,9 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await page.goto(`/connections?connection=${mine.id}`);
   await expect(page).toHaveURL(/\/integrations\?connection=/u);
   await expect(
-    page.getByRole("status").filter({ hasText: "Connected." })
+    page.getByRole("dialog", { name: "Microsoft 365 is connected" })
   ).toBeVisible();
+  await page.keyboard.press("Escape");
 
   // An integration there isn't is not found, in the frame.
   await page.goto("/integrations/native:no-such-app");
@@ -330,4 +334,76 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   await expect(toolkitCard).toContainText(
     `Tools allowed: ${seededTools.join(", ")}`
   );
+});
+
+/** An App workflow that lists HubSpot's contacts through its `CRM` binding. */
+const syncFiles = {
+  "workflows/sync.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow("sync", { params: {}, input: z.unknown() }, async (step, { env }) =>
+  await step.do(
+    "list",
+    { description: "List the contacts", sideEffect: true, input: {} },
+    async ({ idempotencyKey, input }) => {
+      const listed = await env.CRM.call("HUBSPOT_LIST_CONTACTS", input, { idempotencyKey });
+      return (listed as { output: string }).output;
+    }
+  )
+);
+`,
+  "workflows/sync.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import definition from "./sync.ts";
+
+export default workflowTests(definition, [
+  { name: "runs", mocks: { list: {} }, expect: {} },
+]);
+`,
+};
+
+test("someone sees which workflows use an app, on its row and its page, and opens one", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("connections");
+  const { toolkit } = seededConnections();
+  const appName = `Lead sync ${crypto.randomUUID()}`;
+  const { core, api } = apiOf(admin);
+  let appId: string;
+  try {
+    ({ id: appId } = await api.apps.create({ name: appName }));
+    const { id } = await api.permissions.request({
+      subject: { type: "app", appId },
+      object: { type: "connection", connectionId: toolkit.id },
+      actions: seededTools,
+      binding: "CRM",
+    });
+    await api.permissions.grant(id, { version: null });
+    await release(api, appId, syncFiles, "Sync the contacts");
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  const page = await pageOf(admin);
+  // Its row says how many workflows use it, and lists them. Other
+  // attempts' HubSpot connections may be used too, so only this App's is
+  // looked for.
+  await page.goto("/integrations?show=connected");
+  const row = page.getByRole("listitem").filter({
+    has: page.getByRole("link", { name: "hubspot", exact: true }),
+  });
+  await row.getByRole("button", { name: /^Used by \d+ workflows?$/u }).click();
+  const listed = page
+    .getByRole("dialog")
+    .getByRole("link")
+    .filter({ hasText: appName });
+  await expect(listed).toHaveText(`sync${appName}`);
+
+  // Its page lists them on Workflows, each opening its workflow.
+  await page.goto("/integrations/composio:hubspot?tab=workflows");
+  const onPage = page
+    .getByRole("tabpanel")
+    .getByRole("listitem")
+    .filter({ hasText: appName });
+  await onPage.getByRole("link", { name: "sync" }).click();
+  await expect(page).toHaveURL(`/workflows/${appId}/sync`);
 });

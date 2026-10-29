@@ -1,5 +1,6 @@
-// grasp-os-staging deployment. Client deployments are provisioned by the admin,
-// which creates the D1 databases and R2 buckets below in the EU jurisdiction;
+// Released, never deployed from here: CI builds it into every release, and
+// the admin deploys each client's core from it, creating the D1 databases
+// and R2 buckets below in the EU jurisdiction;
 // Durable Objects run in it through `jurisdiction("eu")` (src/durable-objects.ts),
 // workflow runs included: each is a Durable Object of its own.
 {
@@ -70,7 +71,7 @@
   // WebSocket to the gateway needs it.
   //
   // So is `PLATFORM_CHANGE` (src/platform-updates.ts): who made this
-  // version, and what they changed, which the cron records in the audit log
+  // version, and what they changed, which the clock records in the audit log
   // once per version.
   //
   // And the audit log's retention: the `AUDIT_RETENTION_DAYS` var
@@ -78,7 +79,7 @@
   // event's total age before it is purged from the archive, counted from
   // when the log received it: `AUDIT_ARCHIVE_RETENTION_DAYS`
   // (src/audit-log.ts), at least 365 and at least `AUDIT_RETENTION_DAYS`;
-  // archived events are never purged while it's unset.
+  // seven years unless set (or `AUDIT_RETENTION_DAYS`, if longer).
   //
   // And how long an ended workflow run keeps its details: the
   // `RUN_RETENTION_DAYS` var (src/workflows/retention.ts), 30 days unless
@@ -96,9 +97,8 @@
   //
   // And the runtime profile, `RUNTIME_PROFILE` (src/code-mode.ts): only
   // `cloudflare` makes Code Mode's run record claim the CPU limit as
-  // enforced. Not a var here, which local dev and tests read too: staging's
-  // deploy script passes it (package.json), and the admin sets it on every
-  // client deploy (apps/admin/src/deploy/core-config.ts). Plain workerd
+  // enforced. Not a var here, which local dev and tests read too: the admin
+  // sets it on every client deploy (apps/admin/src/deploy/core-config.ts). Plain workerd
   // and on-prem say `workerd` (scripts/workerd-smoke-config.ts).
   //
   // Local dev reads none of these from .dev.vars (Wrangler loads only the
@@ -192,13 +192,6 @@
       "jurisdiction": "eu",
     },
   ],
-  // Every minute: appends the audit events waiting in core's outboxes and
-  // connect's to the AuditLog object, records platform updates, starts
-  // workflows' schedules as they come due, and more (src/index.ts). Every
-  // 15 minutes, on its own: the day's improvement signals, until they're
-  // computed (src/signals.ts), and Apps whose entry in the Apps collection
-  // isn't of their current version (src/knowledge/apps-collection.ts).
-  "triggers": { "crons": ["* * * * *", "*/15 * * * *"] },
   // The model gateway's transport to AI Gateway (src/models.ts); core never
   // holds a raw provider key.
   "ai": { "binding": "AI", "remote": true },
@@ -210,7 +203,7 @@
   // `email` handler (src/workflows/inbound-email.ts), set up with the
   // domain, outside this file.
   "send_email": [{ "name": "EMAIL" }],
-  // The running version's ID, which the cron records once per version to
+  // The running version's ID, which the clock records once per version to
   // audit platform updates (src/platform-updates.ts).
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "services": [{ "binding": "CONNECT", "service": "grasp-os-connect" }],

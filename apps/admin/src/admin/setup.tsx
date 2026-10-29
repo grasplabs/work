@@ -43,9 +43,6 @@ import {
   CircleIcon,
   CopyIcon,
   ExternalLinkIcon,
-  LoaderCircleIcon,
-  PauseIcon,
-  XIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -53,10 +50,9 @@ import { z } from "zod";
 
 import { QuotaPolicyCard } from "../clients/quota-policy-card.tsx";
 import type { ClientQuotaPolicy } from "../clients/quota-policy.ts";
-import type { ClientSetup, SetupDeploy } from "../clients/setup.ts";
+import type { ClientSetup } from "../clients/setup.ts";
 import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
 import { overBars } from "../clients/watch-signals.ts";
-import type { DeployStep } from "../deploy/deploy.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
 import type { ClientHostingView } from "../hosting/placement.ts";
@@ -65,6 +61,7 @@ import { formatTime } from "../releases/format.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { fetchDrift } from "../rollout/functions.ts";
 import type { DriftCheck } from "../rollout/functions.ts";
+import { ringWords } from "./platform-parts.tsx";
 import { sectionTo } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
 import {
@@ -75,7 +72,6 @@ import {
   RingChange,
   RollBack,
   RotateSecrets,
-  SettingUpNow,
   SignInChange,
   SealedSecretChange,
   TeamsBotChange,
@@ -84,20 +80,13 @@ import {
   useRefreshSetup,
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
-import {
-  Body,
-  ErrorCode,
-  Facts,
-  Quiet,
-  ringWords,
-  SetupSection,
-} from "./setup-parts.tsx";
+import { Body, ErrorCode, Facts, Quiet, SetupSection } from "./setup-parts.tsx";
 import { formatDate } from "./words.ts";
 
 /** The section's tabs, in order: how it stands first. */
 export const setupTabs = [
   "status",
-  "deploys",
+  "history",
   "resources",
   "releases",
   "settings",
@@ -106,7 +95,7 @@ export type SetupTab = (typeof setupTabs)[number];
 
 const tabWords: Record<SetupTab, string> = {
   status: "Status",
-  deploys: "Deploys",
+  history: "History",
   resources: "Resources",
   releases: "Releases",
   settings: "Settings",
@@ -118,80 +107,7 @@ const dayOf = (at: Date): string => formatDate(at.toISOString().slice(0, 10));
 /** A version's id, short. */
 const shortVersion = (id: string): string => id.slice(0, 8);
 
-const dashboard = (accountId: string): string =>
-  `https://dash.cloudflare.com/${accountId}`;
-
 // The words of the admin's own records, as staff read them.
-
-/** A deploy's steps, in order, as src/deploy/deploy.ts runs them. */
-const deploySteps = [
-  "resources",
-  "migrations",
-  "workers",
-  "smoke",
-  "router",
-] as const satisfies readonly DeployStep[];
-
-/** Where each step is in a deploy. */
-const deployStepAt = new Map<string, number>(
-  deploySteps.map((step, index) => [step, index])
-);
-
-const stepWords: Record<DeployStep, { label: string; about: string }> = {
-  resources: {
-    label: "Resources",
-    about:
-      "Its databases, its files and its AI Gateway, found or made, all in the EU.",
-  },
-  migrations: {
-    label: "Migrations",
-    about: "The database migrations of the release, once each.",
-  },
-  workers: {
-    label: "Workers",
-    about: "Core and connect uploaded with their secrets, and made live.",
-  },
-  smoke: {
-    label: "Smoke check",
-    about: "Core answers as the new version, through the router.",
-  },
-  router: {
-    label: "Address",
-    about: "Its address in the router’s map, so its people reach it.",
-  },
-};
-
-/** Setting a company up, in order: its account, its record, Workers Paid, the first deploy, active. */
-const provisionSteps = [
-  "account",
-  "record",
-  "paid",
-  "deploy",
-  "active",
-] as const;
-type ProvisionStep = (typeof provisionSteps)[number];
-
-const provisionWords: Record<ProvisionStep, string> = {
-  account: "Its own Cloudflare account, in the EU",
-  record: "Recorded in the admin",
-  paid: "Workers Paid, confirmed by someone at Grasp",
-  deploy: "The first deploy",
-  active: "Active",
-};
-
-const kindWords: Record<SetupDeploy["kind"], string> = {
-  release: "Release",
-  secrets: "New secrets",
-  settings: "Settings",
-  settings_and_secrets: "Settings and secrets",
-};
-
-const deployStatusWords: Record<SetupDeploy["status"], string> = {
-  running: "Running",
-  done: "Done",
-  failed: "Failed",
-  superseded: "Replaced",
-};
 
 type Target = NonNullable<ClientSetup["rollout"]>["target"];
 
@@ -261,152 +177,10 @@ const OutLink = ({ href, label }: { href: string; label: string }) => (
   </Button>
 );
 
-type StepState = "done" | "running" | "waiting" | "failed" | "todo";
-
-const stepSaid: Record<StepState, string> = {
-  done: "done",
-  running: "running",
-  waiting: "waits on someone at Grasp",
-  failed: "failed",
-  todo: "to come",
-};
-
-/** Each state's mark: its colours, and its sign. */
-const marks: Record<StepState, { className: string; sign: ReactNode }> = {
-  done: {
-    className: "bg-status-agreed text-background border-transparent",
-    sign: <CheckIcon className="size-3.5" />,
-  },
-  failed: {
-    className: "bg-status-attention text-background border-transparent",
-    sign: <XIcon className="size-3.5" />,
-  },
-  running: {
-    className: "border-foreground",
-    sign: <LoaderCircleIcon className="size-3.5 motion-safe:animate-spin" />,
-  },
-  waiting: {
-    className: "border-status-attention text-status-attention",
-    sign: <PauseIcon className="size-3" />,
-  },
-  todo: { className: "bg-card", sign: null },
-};
-
-const StepMark = ({ state }: { state: StepState }) => (
-  <span
-    className={cn(
-      "flex size-6 flex-none items-center justify-center rounded-full border",
-      marks[state].className
-    )}
-  >
-    {marks[state].sign}
-  </span>
-);
-
-/**
- * Steps in order, each with how far it is: across on a wide page, one
- * under the other on a phone. What each is now is read out after it.
- */
-const Steps = ({
-  label,
-  steps,
-}: {
-  label: string;
-  steps: { id: string; label: string; about?: string; state: StepState }[];
-}) => (
-  <div className="@container">
-    <ol
-      aria-label={label}
-      className="grid gap-3 @2xl:auto-cols-fr @2xl:grid-flow-col @2xl:gap-0"
-    >
-      {steps.map((step, index) => (
-        <li className="flex gap-3 @2xl:flex-col @2xl:gap-2" key={step.id}>
-          <span className="flex items-center @2xl:pr-2">
-            <StepMark state={step.state} />
-            {index < steps.length - 1 ? (
-              <span
-                aria-hidden
-                className={cn(
-                  "ml-2 hidden h-px flex-1 @2xl:block",
-                  step.state === "done" ? "bg-status-agreed" : "bg-border"
-                )}
-              />
-            ) : null}
-          </span>
-          <span className="flex min-w-0 flex-col gap-0.5 @2xl:pr-4">
-            <span
-              className={cn(
-                step.state === "todo" && "text-muted-foreground",
-                step.state === "failed" && "text-status-attention"
-              )}
-            >
-              {step.label}
-              <span className="sr-only">{`: ${stepSaid[step.state]}`}</span>
-            </span>
-            {step.about === undefined ? null : (
-              <span className="text-muted-foreground text-xs">
-                {step.about}
-              </span>
-            )}
-          </span>
-        </li>
-      ))}
-    </ol>
-  </div>
-);
-
 // What the admin's records say, worked out.
-
-/** How far setting the company up got: every step done once it is active. */
-const provisionStepsOf = (
-  view: ProvisioningView
-): { step: ProvisionStep; state: StepState }[] => {
-  if (view.client !== null && view.client.status !== "provisioning") {
-    return provisionSteps.map((step) => ({ step, state: "done" }));
-  }
-  let at: ProvisionStep = "deploy";
-  if (view.client === null) {
-    at = "account";
-  } else if (!view.workersPaidConfirmed) {
-    at = "paid";
-  }
-  let now: StepState = "running";
-  if (view.phase === "failed") {
-    now = "failed";
-  } else if (view.phase === "workers_paid") {
-    now = "waiting";
-  }
-  const reached = provisionSteps.indexOf(at);
-  return provisionSteps.map((step, index) => {
-    if (index < reached) {
-      return { step, state: "done" };
-    }
-    return { step, state: index === reached ? now : "todo" };
-  });
-};
-
-/** How far a deploy got, step by step. */
-const deployStepsOf = (
-  deploy: SetupDeploy
-): { step: DeployStep; state: StepState }[] => {
-  const reached = deployStepAt.get(deploy.step ?? "") ?? -1;
-  return deploySteps.map((step, index) => {
-    if (deploy.status === "done" || index <= reached) {
-      return { step, state: "done" };
-    }
-    if (index > reached + 1) {
-      return { step, state: "todo" };
-    }
-    if (deploy.status === "failed") {
-      return { step, state: "failed" };
-    }
-    return { step, state: deploy.status === "running" ? "running" : "todo" };
-  });
-};
 
 /** What about a company's platform needs someone at Grasp, the most pressing first. */
 type PlatformNeed =
-  | { kind: "failed"; deploy: SetupDeploy }
   | { kind: "provisioning"; view: ProvisioningView }
   | { kind: "rollout"; rollout: NonNullable<ClientSetup["rollout"]> }
   | { kind: "secrets" }
@@ -424,17 +198,9 @@ const secretsWaiting = (account: ClientSetup["account"]): boolean =>
     account.rotationLiveAt < account.rotatedAt);
 
 const needsOf = (setup: ClientSetup): PlatformNeed[] => {
-  const { provisioning, deploys, rollout, behind } = setup;
+  const { provisioning, rollout, behind } = setup;
   const needs: PlatformNeed[] = [];
-  const [last] = deploys;
-  if (last?.status === "failed") {
-    needs.push({ kind: "failed", deploy: last });
-  }
-  if (
-    provisioning.phase === "failed" ||
-    (provisioning.phase === "workers_paid" &&
-      !provisioning.workersPaidConfirmed)
-  ) {
+  if (provisioning.phase === "failed") {
     needs.push({ kind: "provisioning", view: provisioning });
   }
   if (rollout?.target === "failed" || rollout?.target === "rolled_back") {
@@ -457,21 +223,10 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
 
 /** A need in a sentence. */
 const needWords = (need: PlatformNeed): ReactNode => {
-  if (need.kind === "failed") {
-    return (
-      <>
-        {`The last deploy failed (${kindWords[need.deploy.kind]}): `}
-        <ErrorCode code={need.deploy.error ?? "no code"} />
-      </>
-    );
-  }
   if (need.kind === "provisioning") {
     const { view } = need;
-    if (view.phase === "workers_paid") {
-      return `Setting it up waits on someone at Grasp: ${provisionWords.paid}.`;
-    }
     return view.stopped === null ? (
-      "Setting it up stopped, and waits to be resumed."
+      "Setting it up stopped, and waits to be started again from Hosting."
     ) : (
       <>
         {`Setting it up stopped at its ${view.stopped.step} step: `}
@@ -608,12 +363,6 @@ const Header = ({
               label="Its activity"
             />
           </>
-        )}
-        {client === null ? null : (
-          <OutLink
-            href={dashboard(client.accountId)}
-            label="Open in Cloudflare"
-          />
         )}
       </div>
     </section>
@@ -881,13 +630,6 @@ const NeedAction = ({
         </Button>
       );
     }
-    case "failed": {
-      return (
-        <TabLink clientId={clientId} tab="deploys">
-          Its deploys
-        </TabLink>
-      );
-    }
     case "secrets":
     case "settings": {
       return (
@@ -917,44 +659,6 @@ const NeedAction = ({
 const placedOf = (hosting: ClientHostingView | null): boolean =>
   hosting !== null &&
   (hosting.placement !== null || hosting.operation !== null);
-
-/**
- * Setting it up, while it is: its steps, where it is now and what someone
- * at Grasp does there. A company placed in a hosting destination is
- * followed by its operation instead (`HostingSection`).
- */
-const SettingUp = ({
-  setup,
-  hosting,
-  refresh,
-}: {
-  setup: ClientSetup;
-  hosting: ClientHostingView | null;
-  refresh: Refresh;
-}) => {
-  const { provisioning } = setup;
-  if (provisioning.client?.status === "active" || placedOf(hosting)) {
-    return null;
-  }
-  return (
-    <SetupSection
-      description="One run in the admin makes its account, records it, waits for Workers Paid, deploys the release of its ring and marks it active. Every step can run again without making anything twice."
-      title="Setting it up"
-    >
-      <div className="border-t px-5 py-4">
-        <Steps
-          label="Setting it up"
-          steps={provisionStepsOf(provisioning).map(({ step, state }) => ({
-            id: step,
-            label: provisionWords[step],
-            state,
-          }))}
-        />
-      </div>
-      <SettingUpNow refresh={refresh} view={provisioning} />
-    </SetupSection>
-  );
-};
 
 /**
  * Where its Grasp is hosted: the destination it is placed in, or where it
@@ -1061,7 +765,6 @@ const Status = ({
   quotaPolicy,
   hosting,
   releases,
-  refresh,
 }: {
   clientId: string;
   setup: ClientSetup;
@@ -1072,7 +775,6 @@ const Status = ({
   quotaPolicy: Promise<ClientQuotaPolicy | null>;
   hosting: ClientHostingView | null;
   releases: readonly { id: string; notes: string }[];
-  refresh: Refresh;
 }) => (
   <>
     <Header clientId={clientId} needs={needs} setup={setup} />
@@ -1100,7 +802,6 @@ const Status = ({
         </ul>
       </SetupSection>
     ) : null}
-    <SettingUp hosting={hosting} refresh={refresh} setup={setup} />
     <HostingSection hosting={hosting} releases={releases} setup={setup} />
     <SetupSection
       description="Read from its account now, and kept a minute. The admin doesn’t keep these day by day yet. Cost is an estimate for the calendar month: its Workers Paid plan past what it includes, and AI Gateway spend; not storage or Durable Objects."
@@ -1165,6 +866,7 @@ const isSealedSecretName = (
 /** What staff did by hand, in a sentence. */
 /** What staff did by hand that needs nothing of its event to say, in a sentence. */
 const plainEventWords: Readonly<Record<string, string>> = {
+  "client.create": "Added it.",
   "client.rotate_secrets": "Rotated its secrets.",
   "client.sign_in": "Changed how its people sign in.",
   "client.teams_bot": "Changed its Teams bot.",
@@ -1177,21 +879,18 @@ const eventWords = ({
   detail,
 }: ClientSetup["done"][number]): string => {
   switch (action) {
-    case "client.provision_start": {
-      return "Started setting it up.";
+    case "client.place": {
+      return `Placed it in ${target ?? "a hosting destination"}.`;
     }
-    case "client.provision_retry": {
-      return "Resumed setting it up.";
-    }
-    case "client.workers_paid": {
-      return "Confirmed Workers Paid.";
+    case "client.provision_placed": {
+      return `Started provisioning it on ${target ?? "a release"}.`;
     }
     case "client.ring": {
       const ring = ringSchema.safeParse(JSON.parse(detail ?? "null")).data
         ?.ring;
       return ring === undefined
         ? "Moved it to another ring."
-        : `Moved it to ${ringWords(ring).toLowerCase()}.`;
+        : `Moved it to ${ringWords(ring)}.`;
     }
     case "client.pin": {
       return `Pinned it to ${target ?? "a release"}.`;
@@ -1223,131 +922,10 @@ const eventWords = ({
   }
 };
 
-const Deploys = ({
-  clientId,
-  setup,
-}: {
-  clientId: string;
-  setup: ClientSetup;
-}) => {
-  const { provisioning, deploys, done, history } = setup;
-  const [latest] = deploys;
-  const settingUp = provisioning.client?.status !== "active";
+const Done = ({ setup }: { setup: ClientSetup }) => {
+  const { done, history } = setup;
   return (
     <>
-      {settingUp ? (
-        <SetupSection
-          action={
-            <TabLink clientId={clientId} tab="status">
-              Where it is now
-            </TabLink>
-          }
-          description="One run in the admin makes its account, records it, waits for Workers Paid, deploys the release of its ring and marks it active. Every step can run again without making anything twice."
-          title="Setting it up"
-        >
-          <div className="border-t px-5 py-4">
-            <Steps
-              label="Setting it up"
-              steps={provisionStepsOf(provisioning).map(({ step, state }) => ({
-                id: step,
-                label: provisionWords[step],
-                state,
-              }))}
-            />
-          </div>
-        </SetupSection>
-      ) : null}
-      {latest === undefined ? (
-        <SetupSection title="Its deploys">
-          <Quiet>No deploy yet.</Quiet>
-        </SetupSection>
-      ) : (
-        <SetupSection
-          description={`${kindWords[latest.kind]} · ${latest.releaseId} · ${formatTime(latest.createdAt)} UTC · ${latest.startedBy}`}
-          title="The last deploy"
-        >
-          <div className="flex flex-col gap-3 border-t px-5 py-4">
-            <Steps
-              label="The last deploy"
-              steps={deployStepsOf(latest).map(({ step, state }) => ({
-                id: step,
-                ...stepWords[step],
-                state,
-              }))}
-            />
-            {latest.status === "failed" ? (
-              <p className="text-status-attention">
-                {"It stopped: "}
-                <ErrorCode code={latest.error ?? "no code"} />
-              </p>
-            ) : null}
-          </div>
-        </SetupSection>
-      )}
-      {deploys.length > 0 ? (
-        <SetupSection
-          description={`${setup.moreDeploys ? `The latest ${deploys.length}, newest first: older ones aren’t listed.` : "The newest first."} A rollout deploys a release; someone at Grasp deploys new settings or secrets.`}
-          title="Recent deploys"
-        >
-          <div className="@container border-t">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead variant="card">When (UTC)</TableHead>
-                  <TableHead variant="card">What</TableHead>
-                  <TableHead className="hidden @xl:table-cell" variant="card">
-                    Release
-                  </TableHead>
-                  <TableHead className="hidden @2xl:table-cell" variant="card">
-                    By
-                  </TableHead>
-                  <TableHead className="text-right" variant="card">
-                    Result
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {deploys.map((deploy) => (
-                  <TableRow key={deploy.id}>
-                    <TableCell variant="card">
-                      <span className="tabular-nums">
-                        {formatTime(deploy.createdAt)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="whitespace-normal" variant="card">
-                      {kindWords[deploy.kind]}
-                    </TableCell>
-                    <TableCell className="hidden @xl:table-cell" variant="card">
-                      <span className="font-mono text-xs">
-                        {deploy.releaseId}
-                      </span>
-                    </TableCell>
-                    <TableCell
-                      className="hidden whitespace-normal @2xl:table-cell"
-                      variant="card"
-                    >
-                      <span className="text-muted-foreground">
-                        {deploy.startedBy}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right" variant="card">
-                      <span
-                        className={cn(
-                          deploy.status === "failed" && "text-status-attention",
-                          deploy.status === "superseded" &&
-                            "text-muted-foreground"
-                        )}
-                      >
-                        {deployStatusWords[deploy.status]}
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </SetupSection>
-      ) : null}
       {done.length > 0 ? (
         <SetupSection
           description="What someone at Grasp did to its platform by hand, as the admin’s audit log keeps it."
@@ -1505,47 +1083,20 @@ const Resources = ({
   clientId: string;
   setup: ClientSetup;
 }) => {
-  const { provisioning, account, workers, resources } = setup;
+  const { provisioning, workers, resources } = setup;
   const { client } = provisioning;
-  if (client === null) {
-    return (
-      <SetupSection
-        description="Made when it is set up, in the EU."
-        title="Its Cloudflare account"
-      >
-        <Quiet>Nothing yet.</Quiet>
-      </SetupSection>
-    );
-  }
-  const core = workers.find(({ worker }) => worker === "core");
-  const subdomain = account?.workersSubdomain ?? null;
   return (
     <>
       <SetupSection
-        description="Its own, in the EU: Grasp deploys into it, and the company’s data stays in it."
-        title="Its Cloudflare account"
+        description="In the hosting destination it is placed in (Hosting, on its Status), in the EU: the company’s data stays in its own resources there."
+        title="Its deployment"
       >
         <Facts
           rows={[
-            { label: "Account", value: client.name },
-            {
-              label: "Account id",
-              value: (
-                <span className="font-mono text-xs">{client.accountId}</span>
-              ),
-            },
+            { label: "Company", value: client.name },
             {
               label: "Address",
               value: provisioning.hostname ?? "No domain set in the admin",
-            },
-            {
-              label: "Before the address",
-              value:
-                subdomain === null || core === undefined ? (
-                  "–"
-                ) : (
-                  <span className="font-mono text-xs">{`${core.scriptName}.${subdomain}.workers.dev`}</span>
-                ),
             },
             { label: "Added by", value: client.createdBy ?? "–" },
             { label: "Added (UTC)", value: formatTime(client.createdAt) },
@@ -2129,14 +1680,9 @@ const Settings = ({
 /** How often the Setup is read again while setting it up moves on by itself. */
 const followMs = 5000;
 
-/**
- * Phases that move on without the page: the run works on its own, or
- * (Workers Paid) goes on once someone at Grasp confirms.
- */
+/** Phases that move on without the page: its operation works on its own. */
 const working: ReadonlySet<ProvisioningView["phase"]> = new Set([
-  "account",
-  "workers_paid",
-  "deploying",
+  "provisioning",
 ]);
 
 /**
@@ -2218,16 +1764,15 @@ export const OrgSetup = ({
             hosting={hosting}
             needs={needs}
             quotaPolicy={quotaPolicy}
-            refresh={refresh}
             releases={releases}
             setup={setup}
             view={view}
           />
         </div>
       </TabsContent>
-      <TabsContent value="deploys">
+      <TabsContent value="history">
         <div className="flex flex-col gap-6 pt-4">
-          <Deploys clientId={clientId} setup={setup} />
+          <Done setup={setup} />
         </div>
       </TabsContent>
       <TabsContent value="resources">

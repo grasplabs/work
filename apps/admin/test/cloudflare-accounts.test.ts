@@ -1,27 +1,24 @@
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import {
-  ensureAccount,
   ensureAiGateway,
   ensureD1Database,
-  ensureMember,
   ensureR2Bucket,
-  findAccount,
   getAccount,
 } from "../src/cloudflare/accounts.ts";
-import { CloudflareApiError, cloudflareApi } from "../src/cloudflare/api.ts";
+import {
+  CloudflareApiError,
+  cloudflareApi,
+  listAll,
+} from "../src/cloudflare/api.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { deployerEmail, tenantEmail } from "./cloudflare-api.ts";
 
 const token = "test-deployer-token-0123456789";
 const cloudflare = mockCloudflareApi(token);
 /** No waiting between retries: the fake answers at once. */
 const api = cloudflareApi({ token, retryDelayMs: 0 });
-/** A tenant admin's: it alone creates accounts. */
-const tenant = cloudflareApi({
-  token: `${token}-tenant-admin`,
-  retryDelayMs: 0,
-});
+const accountSchema = z.object({ id: z.string(), name: z.string() });
 
 /** What `promise` fails with, or undefined if it doesn't. */
 const errorOf = async (promise: Promise<unknown>): Promise<unknown> => {
@@ -42,80 +39,26 @@ describe("accounts", () => {
     });
   });
 
-  it("finds an account by its exact name, page by page", async () => {
-    // Every one of them matches the name loosely, as the API does.
-    for (let index = 0; index < 57; index += 1) {
+  it("lists every account page by page", async () => {
+    for (let index = 0; index < 58; index += 1) {
       cloudflare.addAccount(`Client ${index}`);
     }
-    const exact = cloudflare.addAccount("Client");
-    await expect(findAccount(api, "Client")).resolves.toStrictEqual({
-      id: exact.id,
+    const listed = await listAll(api, "/accounts", accountSchema, {
       name: "Client",
     });
-    expect(
-      cloudflare.calls.map(({ query }) => query.get("page"))
-    ).toStrictEqual(["1", "2"]);
+    expect({
+      listed: listed.length,
+      pages: cloudflare.calls.map(({ query }) => query.get("page")),
+    }).toStrictEqual({ listed: 58, pages: ["1", "2"] });
   });
 
   it("fails a list longer than it walks, rather than return part of it", async () => {
     for (let index = 0; index <= 1000; index += 1) {
       cloudflare.addAccount(`Client ${index}`);
     }
-    await expect(findAccount(api, "Client")).rejects.toThrow(
-      "Listing /accounts passed 20 pages"
-    );
-  });
-
-  it("creates an account by name once, as a tenant admin, matching the name exactly", async () => {
-    cloudflare.addAccount("grasp-os-acme-old", tenantEmail);
-    const created = await ensureAccount(tenant, "grasp-os-acme");
-    const again = await ensureAccount(tenant, "grasp-os-acme");
-    expect({
-      again,
-      named: cloudflare.accountsNamed("grasp-os-acme").length,
-      asDeployer: await errorOf(ensureAccount(api, "grasp-os-other")),
-    }).toMatchObject({ again: created, named: 1, asDeployer: { status: 403 } });
-  });
-
-  it("refuses to pick between two accounts of one name", async () => {
-    cloudflare.addAccount("grasp-os-twin", tenantEmail);
-    cloudflare.addAccount("grasp-os-twin", tenantEmail);
-    await expect(ensureAccount(tenant, "grasp-os-twin")).rejects.toThrow(
-      "2 accounts are named grasp-os-twin"
-    );
-  });
-
-  it("makes the deployer a member as an Administrator once, at once, and refuses a pending one or a role the account lacks", async () => {
-    const account = cloudflare.addAccount("grasp-os-member", tenantEmail);
-    await ensureMember(tenant, account.id, deployerEmail, "Administrator");
-    await ensureMember(tenant, account.id, deployerEmail, "Administrator");
-    const posts = cloudflare.calls.filter(
-      ({ method, path }) => method === "POST" && path.endsWith("/members")
-    );
-    const pending = cloudflare.addAccount("grasp-os-pending", tenantEmail);
-    pending.members.set(deployerEmail, "pending");
-
-    const messageOf = async (promise: Promise<unknown>) => {
-      const error = await errorOf(promise);
-      return error instanceof Error ? error.message : error;
-    };
-    expect({
-      member: account.members.get(deployerEmail),
-      posts: posts.map(({ body }) => body),
-      pending: await messageOf(
-        ensureMember(tenant, pending.id, deployerEmail, "Administrator")
-      ),
-      role: await messageOf(
-        ensureMember(tenant, pending.id, "someone@grasp.test", "No such role")
-      ),
-    }).toStrictEqual({
-      member: "accepted",
-      posts: [
-        { email: deployerEmail, roles: ["role-admin"], status: "accepted" },
-      ],
-      pending: `${deployerEmail}'s membership of ${pending.id} is pending`,
-      role: `Account ${pending.id} has no role named No such role`,
-    });
+    await expect(
+      listAll(api, "/accounts", accountSchema, { name: "Client" })
+    ).rejects.toThrow("Listing /accounts passed 20 pages");
   });
 
   it("refuses an account the token isn't a member of", async () => {
@@ -266,6 +209,55 @@ describe("EU resources", () => {
       "POST",
       "GET",
     ]);
+  });
+});
+
+describe("answers as Cloudflare sends them", () => {
+  it("takes a success whose errors, messages and result info are null", async () => {
+    const account = cloudflare.addAccount("Acme");
+    // An assets upload session answers this way on a real account (GRA-430).
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({
+        success: true,
+        errors: null,
+        messages: null,
+        result_info: null,
+        result: { id: account.id, name: "Acme" },
+      })
+    );
+    await expect(getAccount(api, account.id)).resolves.toMatchObject({
+      id: account.id,
+      name: "Acme",
+    });
+  });
+
+  it("still refuses a failure whose errors are null, saying only its status", async () => {
+    const account = cloudflare.addAccount("Acme");
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json(
+        { success: false, errors: null, messages: null, result: null },
+        { status: 400 }
+      )
+    );
+    const error = await errorOf(getAccount(api, account.id));
+    expect(
+      error instanceof CloudflareApiError
+        ? { status: error.status, codes: error.codes }
+        : error
+    ).toStrictEqual({ status: 400, codes: [] });
+  });
+
+  it("still refuses a success flag on a non-2xx answer", async () => {
+    const account = cloudflare.addAccount("Acme");
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json(
+        { success: true, errors: null, result: { id: account.id } },
+        { status: 403 }
+      )
+    );
+    await expect(errorOf(getAccount(api, account.id))).resolves.toBeInstanceOf(
+      CloudflareApiError
+    );
   });
 });
 

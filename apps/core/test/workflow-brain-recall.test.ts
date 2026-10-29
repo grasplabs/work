@@ -1,14 +1,21 @@
+import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
-import { describe, expect, it } from "vite-plus/test";
+import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { describe, expect, it, vi } from "vite-plus/test";
 
+import { appVersions } from "../src/db/core/schema.ts";
+import { fakeGateway } from "./ai-gateway.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { readCollection } from "./knowledge.ts";
-import { finished } from "./runs.ts";
+import { finished, sleeping, stopped, woken } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
-import { sampleApp, workflowFiles } from "./workflow-apps.ts";
+import { bindModel, sampleApp, workflowFiles } from "./workflow-apps.ts";
 
 // An App's workflow recalling the Brain through its Brain binding,
 // `brain(env.BRAIN).recall(…)` (GRA-1067; the threat model is on the
@@ -26,19 +33,33 @@ type Admin = Awaited<ReturnType<typeof signedInApi>>;
 const rareWord = (): string =>
   `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
 
-/** A collection everyone reads, holding `word` in one document. */
-const collectionSaying = async (admin: Admin, name: string, word: string) => {
+/**
+ * A collection everyone reads, holding `word` in its one document, and
+ * who says so, `by`.
+ */
+const documentSaying = async (
+  admin: Admin,
+  name: string,
+  word: string,
+  by = "Ops"
+) => {
   const { id } = await admin.api.knowledge.createCollection({
     name: `${name} ${crypto.randomUUID()}`,
     access: "everyone",
   });
-  await admin.api.knowledge.saveDocument({
+  const document = await admin.api.knowledge.saveDocument({
     collectionId: id,
     path: "plan.md",
-    text: `# Plan\n${word} is the plan.`,
+    text: `# Plan\n${word} is the plan, says ${by}.`,
     ifVersion: 0,
   });
-  return id;
+  return { collectionId: id, documentId: document.id };
+};
+
+/** A collection everyone reads, holding `word` in one document. */
+const collectionSaying = async (admin: Admin, name: string, word: string) => {
+  const { collectionId } = await documentSaying(admin, name, word);
+  return collectionId;
 };
 
 /** `files`, their workflow importing the SDK's `brain` too. */
@@ -141,6 +162,17 @@ const ranOnce = async (admin: Admin, app: string) => {
   };
 };
 
+/** How many recalls the audit log has of run `run`. */
+const recallsOf = async (run: string): Promise<number> => {
+  const events = await allEvents();
+  return events.filter(
+    ({ action, detail }) =>
+      action === "knowledge.search" &&
+      detail.via === "recall" &&
+      detail.run === run
+  ).length;
+};
+
 describe("a workflow's recall through the Brain binding", () => {
   it("recalls as the run from the collections its App was granted, refuses a wider filter, and is recorded with the run", async () => {
     const admin = await signedInApi(idp, "admin");
@@ -238,6 +270,294 @@ describe("a workflow's recall through the Brain binding", () => {
       // A run's env holds a binding only while its permission does: the
       // run that names it fails.
       withoutBrain: { status: "failed", error: "PermissionError" },
+    });
+  });
+
+  it("keeps a recall's evidence across a crash, never recalling again, and still refuses the next model call once a revoke came in between", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const word = rareWord();
+    const handbook = await collectionSaying(admin, "Handbook", word);
+    const { id: app } = await admin.api.apps.create({ name: "Recall" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    const collectionGrant = await requestGranted(
+      idp,
+      admin,
+      readCollection(app_, handbook)
+    );
+    await requestGranted(idp, admin, brainFor(app));
+    await release(admin, app, {
+      ...sampleApp({ models: { extractor: 6000 } }),
+      ...withBrain(
+        workflowFiles(
+          "asker",
+          `  const recalled = await step.do("recall", { description: "Recall the plan" }, async () => {
+    const pack = await brain(env.BRAIN).recall({ query: ${JSON.stringify(word)} });
+    return pack.items.length as Json;
+  });
+  await step.sleep("go", { description: "Wait", duration: "1 day" });
+  let asked: Json;
+  try {
+    const answer = await step.llm("extract", {
+      description: "Read the total",
+      binding: "extractor",
+      instructions: "Read the total in cents.",
+      input: "Total 12.34 EUR",
+      schema: z.object({ total: z.int() }),
+      retries: { limit: 0 },
+    });
+    asked = answer.total;
+  } catch (error) {
+    asked = JSON.stringify(error, Object.getOwnPropertyNames(error)).includes("brain.revoked") ? "brain.revoked" : "refused";
+  }
+  return { recalled, asked } as Json;`,
+          { recall: 1, extract: { total: 1234 } }
+        )
+      ),
+    });
+    await bindModel(
+      app,
+      "extractor",
+      "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+    );
+    const gateway = fakeGateway(
+      {
+        text: JSON.stringify({ total: 1234 }),
+        inputTokens: 5,
+        outputTokens: 2,
+      },
+      { text: JSON.stringify({ total: 1234 }), inputTokens: 5, outputTokens: 2 }
+    );
+    const ai: AiBinding = env.AI;
+    const answering = vi
+      .spyOn(ai, "fetch")
+      .mockImplementation(gateway.binding.fetch);
+    /** A run killed while asleep after its recall, then resumed. */
+    const crashed = async (between?: () => Promise<void>) => {
+      const { id } = await admin.api.workflows.start(app, "asker");
+      await sleeping(id, "go");
+      await stopped(id);
+      await between?.();
+      await woken(id);
+      await finished(id);
+      const status = await admin.api.workflows.status(id);
+      return {
+        status: status.status,
+        output: status.output ?? null,
+        revoked:
+          JSON.stringify(status.error ?? null).includes("brain.revoked") ||
+          JSON.stringify(status.error ?? null).includes(
+            "can no longer be read"
+          ),
+        recalls: await recallsOf(id),
+        asked: gateway.requests.length,
+      };
+    };
+
+    try {
+      const kept = await crashed();
+      const revoked = await crashed(async () => {
+        await admin.api.permissions.revoke(collectionGrant);
+      });
+
+      expect({ kept, revoked }).toStrictEqual({
+        // Replayed from its record after the crash: one recall, its pack,
+        // and the model asked once, as it may still read what it cites.
+        kept: {
+          status: "completed",
+          output: { recalled: 1, asked: 1234 },
+          revoked: false,
+          recalls: 1,
+          asked: 1,
+        },
+        // The revoke while it was down: the resumed run's replayed recall
+        // stands as recorded, its model call is refused before the gateway
+        // is asked, and so is its output: the run fails as revoked.
+        revoked: {
+          status: "failed",
+          output: null,
+          revoked: true,
+          recalls: 1,
+          asked: 1,
+        },
+      });
+    } finally {
+      answering.mockRestore();
+    }
+  });
+
+  it("fails as revoked, never with its own message, a run that throws what it recalled once it may no longer read it, or once it was purged", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const word = rareWord();
+    const by = rareWord();
+    const { collectionId: handbook, documentId } = await documentSaying(
+      admin,
+      "Handbook",
+      word,
+      by
+    );
+    const { id: app } = await admin.api.apps.create({ name: "Recall" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    const collectionGrant = await requestGranted(
+      idp,
+      admin,
+      readCollection(app_, handbook)
+    );
+    await requestGranted(idp, admin, brainFor(app));
+    await release(admin, app, {
+      ...sampleApp(),
+      ...withBrain(
+        workflowFiles(
+          "thrower",
+          `  const recalled = await step.do("recall", { description: "Recall the plan" }, async () => {
+    const pack = await brain(env.BRAIN).recall({ query: ${JSON.stringify(word)} });
+    return pack.items.map(({ statement }) => statement).join(" ") as Json;
+  });
+  await step.sleep("go", { description: "Wait", duration: "1 day" });
+  await step.do("fail", { description: "Fail with it" }, async () => {
+    throw new Error(String(recalled));
+  });
+  return null;`,
+          { recall: "", fail: null }
+        )
+      ),
+    });
+    /** A run of `thrower`, `between` its recall and its throw. */
+    const thrown = async (between?: () => Promise<void>) => {
+      const { id } = await admin.api.workflows.start(app, "thrower");
+      await sleeping(id, "go");
+      await stopped(id);
+      await between?.();
+      await woken(id);
+      await finished(id);
+      const { status, error, failure } = await admin.api.workflows.status(id);
+      // Its failure report, and the error the engine ended it with.
+      const stored = JSON.stringify([failure ?? null, error ?? null]);
+      return {
+        status,
+        code: failure?.error.code ?? null,
+        recalledText: stored.includes(word),
+        purgedText: stored.includes(by),
+      };
+    };
+
+    const kept = await thrown();
+    // The document still readable, its ID and collection the same, but who
+    // said it purged from it while the run slept.
+    const purged = await thrown(async () => {
+      const input: PurgeInput = {
+        type: "content",
+        documentIds: [documentId],
+        terms: [by],
+        reason: "erasure_request",
+      };
+      const plan = await admin.api.knowledge.preparePurge(input);
+      await admin.api.knowledge.purge(input, plan.token);
+    });
+    const revoked = await thrown(async () => {
+      await admin.api.permissions.revoke(collectionGrant);
+    });
+
+    expect({ kept, purged, revoked }).toStrictEqual({
+      // Still readable: its own error, as it threw it.
+      kept: {
+        status: "failed",
+        code: "workflow.run_failed",
+        recalledText: true,
+        purgedText: true,
+      },
+      // Purged since: the refusal, nothing it recalled in it.
+      purged: {
+        status: "failed",
+        code: "brain.revoked",
+        recalledText: false,
+        purgedText: false,
+      },
+      // Not any more: its error is the refusal, its text nowhere in it.
+      revoked: {
+        status: "failed",
+        code: "brain.revoked",
+        recalledText: false,
+        purgedText: false,
+      },
+    });
+  });
+
+  it("fails as revoked a run caught running a step named with what it recalled, once it may no longer read it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const word = rareWord();
+    const handbook = await collectionSaying(admin, "Handbook", word);
+    const { id: app } = await admin.api.apps.create({ name: "Recall" });
+    const app_ = { type: "app", appId: appIdSchema.parse(app) } as const;
+    const collectionGrant = await requestGranted(
+      idp,
+      admin,
+      readCollection(app_, handbook)
+    );
+    await requestGranted(idp, admin, brainFor(app));
+    /** A workflow that recalls, sleeps, then runs a step named `third`. */
+    const naming = (id: string, third: string, named: string) =>
+      workflowFiles(
+        id,
+        `  const recalled = await step.do("recall", { description: "Recall the plan" }, async () => {
+    const pack = await brain(env.BRAIN).recall({ query: ${JSON.stringify(word)} });
+    return pack.items.map(({ statement }) => statement).join(" ") as Json;
+  });
+  await step.sleep("go", { description: "Wait", duration: "1 day" });
+  await step.do(${third}, { description: "Name it" }, async () => null);
+  return null;`,
+        { recall: "", [named]: null }
+      );
+    await release(admin, app, {
+      ...sampleApp(),
+      ...withBrain({
+        ...naming("shown", `"rename"`, "rename"),
+        // Named with the recalled word: a step name holds no spaces.
+        ...naming(
+          "renamer",
+          'String(recalled).match(/zq[a-f]+/u)?.[0] ?? "none"',
+          "none"
+        ),
+      }),
+    });
+    // What the review shows `renamer` running: its first two steps, as
+    // `shown` writes them, so its third, named by the run, is tampering.
+    const [row] = await drizzle(env.DB)
+      .select({ calls: appVersions.workflowCalls })
+      .from(appVersions)
+      .where(and(eq(appVersions.appId, app), eq(appVersions.version, 1)));
+    const stored = row?.calls ?? {};
+    const { shown } = stored;
+    if (shown?.steps === null || shown === undefined) {
+      throw new Error("The review didn't read shown's steps");
+    }
+    const { rename: _step, ...steps } = shown.steps;
+    const { rename: _kind, ...kinds } = shown.kinds;
+    await drizzle(env.DB)
+      .update(appVersions)
+      .set({
+        workflowCalls: { ...stored, renamer: { ...shown, steps, kinds } },
+      })
+      .where(and(eq(appVersions.appId, app), eq(appVersions.version, 1)));
+
+    const { id } = await admin.api.workflows.start(app, "renamer");
+    await sleeping(id, "go");
+    await stopped(id);
+    await admin.api.permissions.revoke(collectionGrant);
+    await woken(id);
+    await finished(id);
+    const { status, error, failure } = await admin.api.workflows.status(id);
+    const stored_ = JSON.stringify([failure ?? null, error ?? null]);
+
+    // Refused for its evidence, not for its step: the step's name, made of
+    // what it recalled, nowhere in its failure.
+    expect({
+      status,
+      code: failure?.error.code ?? null,
+      recalledText: stored_.includes(word),
+    }).toStrictEqual({
+      status: "failed",
+      code: "brain.revoked",
+      recalledText: false,
     });
   });
 });

@@ -24,6 +24,7 @@ import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 
 import { connectionErrorMessage } from "../connection-errors.ts";
+import { ConnectedDialog } from "../connections/connected-dialog.tsx";
 import { groupIcon, groupLabel } from "../connections/groups.ts";
 import { IntegrationRow } from "../connections/integration-row.tsx";
 import { IntegrationsBanner } from "../connections/integrations-banner.tsx";
@@ -42,6 +43,7 @@ import type {
 } from "../connections/integrations.ts";
 import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
+import type { ConnectionUses } from "../connections/workflows-using.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
 import {
@@ -334,9 +336,12 @@ const upTo = (
 const Kinds = ({
   sections,
   identity,
+  uses,
 }: {
   sections: readonly IntegrationSection[];
   identity: Identity;
+  /** Which workflows use each connection, read on its own. */
+  uses: ConnectionUses;
 }) => {
   const { i18n } = useLingui();
   const [drawn, setDrawn] = useState(step);
@@ -390,6 +395,7 @@ const Kinds = ({
                 identity={identity}
                 integration={integration}
                 key={integration.key}
+                uses={uses}
               />
             ))}
           </ul>
@@ -504,8 +510,42 @@ const FilterSelect = ({
   );
 };
 
+/**
+ * The success screen for the connection a flow just made, once core sent
+ * the browser back here with it. Only a connection the page lists: anyone
+ * can put an ID in a link.
+ */
+const Returned = ({
+  connection,
+  integrations,
+}: {
+  connection: string | undefined;
+  integrations: readonly Integration[];
+}) => {
+  const navigate = useNavigate({ from: "/integrations/" });
+  const connectedTo =
+    connection === undefined
+      ? undefined
+      : integrations.find((integration) =>
+          integration.connections.some(({ id }) => id === connection)
+        );
+  return (
+    <ConnectedDialog
+      again={false}
+      app={connectedTo?.name ?? ""}
+      connection={connectedTo?.connections.find(({ id }) => id === connection)}
+      onClose={() => {
+        void navigate({
+          replace: true,
+          search: (last) => ({ ...last, connection: undefined }),
+        });
+      }}
+    />
+  );
+};
+
 const Integrations = () => {
-  const { catalog, connections, requests } = Route.useLoaderData();
+  const { catalog, connections, uses, requests } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const search = Route.useSearch();
   const { q, connectionError, connection } = search;
@@ -515,11 +555,6 @@ const Integrations = () => {
     connections.state === "ready" ? connections.data : []
   );
   const filter = filterOf(search);
-  // Only a connection the page lists: anyone can put an ID in a link.
-  const connected =
-    connection !== undefined &&
-    connections.state === "ready" &&
-    connections.data.some(({ id }) => id === connection);
   const choices = useChoices(integrations);
   const sections = sectionsOf(integrations, filter, q);
   const shown = sections.reduce(
@@ -560,11 +595,7 @@ const Integrations = () => {
               }
               title={t`Integrations`}
             />
-            {connected ? (
-              <output>
-                <Trans>Connected.</Trans>
-              </output>
-            ) : null}
+            <Returned connection={connection} integrations={integrations} />
             {connectionError === undefined ? null : (
               <ErrorText>{connectionErrorMessage(connectionError)}</ErrorText>
             )}
@@ -623,6 +654,7 @@ const Integrations = () => {
               identity={identity}
               key={`${JSON.stringify(filter)}·${q ?? ""}`}
               sections={sections}
+              uses={uses}
             />
             {/* Under the whole catalog only: not a kind, nor a search's match. */}
             {wholeCatalog ? <RequestedApps requests={requests} /> : null}

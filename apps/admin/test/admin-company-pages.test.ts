@@ -1,18 +1,14 @@
-import { introspectWorkflow } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
 import { setSignIn } from "../src/clients/settings.ts";
-import { act, audit, adminDatabase } from "../src/db/act.ts";
+import { act, adminDatabase } from "../src/db/act.ts";
 import {
-  clientDeploys,
-  clientRuns,
+  clientProvisions,
   clients,
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
-import { startProvisioning } from "../src/provision/control.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import { page } from "./pages.ts";
@@ -25,48 +21,15 @@ const db = adminDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };
 
 /**
- * A client whose real run waits for Workers Paid, its account step as it
- * ends for a new account (the page's tests have no Cloudflare API to
- * settle one against). The caller disposes of `runs`.
+ * A client recorded as `status`, without a run: one being provisioned as
+ * adding it records it, with no account of its own; an active one on an
+ * account of its own, as the account-per-client path left it.
  */
-const waitingClient = async () => {
-  const release = await publishRelease({ notes: "feat(core): waits" });
-  await importReleases(env.RELEASES, db);
-  const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const accountId = crypto.randomUUID().replaceAll("-", "");
-  const runs = await introspectWorkflow(env.PROVISION_CLIENT);
-  await runs.modifyAll(async (modifier) => {
-    await modifier.mockStepResult(
-      { name: "account" },
-      { accountId, abandonedAccountId: null }
-    );
-  });
-  await startProvisioning(env, staff, {
-    clientId,
-    name: "Acme",
-    releaseId: release.id,
-    ring: 1,
-    signIn: {
-      domains: ["acme.test"],
-      admins: ["ada@acme.test"],
-      googleHostedDomain: "acme.test",
-    },
-  });
-  const [run] = await runs.get();
-  if (run === undefined) {
-    throw new Error("No run was created");
-  }
-  await run.waitForStepResult({ name: "client" });
-  return { clientId, accountId, releaseId: release.id, runs };
-};
-
-/** A client recorded as `status`, without a run, on a new account id. */
 const recordClient = async (
   status: "provisioning" | "active" = "provisioning",
   pinnedReleaseId: string | null = null
 ) => {
   const id = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const accountId = crypto.randomUUID().replaceAll("-", "");
   const now = new Date();
   await act(
     db,
@@ -75,7 +38,6 @@ const recordClient = async (
       db.insert(clients).values({
         id,
         name: `Acme ${id}`,
-        accountId,
         ring: 3,
         status,
         pinnedReleaseId,
@@ -86,7 +48,7 @@ const recordClient = async (
     ],
     { action: "client.create", clientId: id }
   );
-  return { id, accountId };
+  return { id };
 };
 
 /** A release, published and imported. */
@@ -172,121 +134,74 @@ describe("the company pages, in the admin", () => {
     });
   });
 
-  it("offers the imported releases, with their notes, on adding an organization, and every sign-in field", async () => {
-    const releaseId = await importedRelease("feat(core): newest of all");
-
+  it("asks who an organization is, its sign-in and its ring on adding it, and no account to adopt or release", async () => {
     const { status, html } = await page("/new-organization");
 
     expect({
       status,
-      form:
-        html.includes('name="clientId"') && html.includes('name="accountId"'),
+      form: html.includes('name="clientId"') && html.includes('name="ring"'),
+      account: html.includes('name="accountId"'),
+      release: html.includes('name="releaseId"'),
       signIn: [
         'name="entraTenantId"',
         'name="googleHostedDomain"',
         'name="domains"',
         'name="admins"',
       ].every((field) => html.includes(field)),
-      newest: html.includes(`${releaseId} · feat(core): newest of all`),
-    }).toStrictEqual({ status: 200, form: true, signIn: true, newest: true });
+    }).toStrictEqual({
+      status: 200,
+      form: true,
+      account: false,
+      release: false,
+      signIn: true,
+    });
   });
 
-  it("shows a company waiting for Workers Paid the checklist in its Setup, with its account's dashboard", async () => {
-    const { clientId, accountId, runs } = await waitingClient();
-    await using _runs = runs;
+  it("shows a company just added its Hosting, to place and provision on an imported release", async () => {
+    await importedRelease("feat(core): newest of all");
+    const client = await recordClient();
 
-    const { status, html } = await setupOf(clientId);
-    const settingUp = sectionOf(html, "Setting it up");
+    const { status, html } = await setupOf(client.id);
+    const hosting = sectionOf(html, "Hosting");
 
     expect({
       status,
-      checklist: settingUp.includes("upgrade it to Workers Paid"),
-      dashboard: settingUp.includes(`https://dash.cloudflare.com/${accountId}`),
-      confirm: settingUp.includes("Workers Paid is on"),
-      hostname: html.includes(`${clientId}.grasp.test`),
+      place: hosting.includes("Place and start provisioning"),
+      release: hosting.includes('id="hosting-release"'),
+      account: html.includes("Account id"),
+      hostname: html.includes(`${client.id}.grasp.test`),
     }).toStrictEqual({
       status: 200,
-      checklist: true,
-      dashboard: true,
-      confirm: true,
+      place: true,
+      release: true,
+      account: false,
       hostname: true,
     });
   });
 
-  it("says a Workers Paid confirmation is in, in place of the button, while the run gets to it", async () => {
-    const { clientId, runs } = await waitingClient();
-    await using _runs = runs;
-    // Once the run has checked for a confirmation and found none, it waits:
-    // recorded then, as confirming does first, before the run has the event.
-    const [run] = await runs.get();
-    await run?.waitForStepResult({ name: "workers paid confirmed" });
-    await audit(db, staff, { action: "client.workers_paid", clientId });
-
-    const { html } = await setupOf(clientId);
-
-    expect({
-      confirmed: html.includes("Confirmed, waiting for the run."),
-      button: html.includes("Workers Paid is on"),
-    }).toStrictEqual({ confirmed: true, button: false });
-  });
-
-  it("shows a deploy under way with its release and the last step it finished", async () => {
-    const { clientId, releaseId, runs } = await waitingClient();
-    await using _runs = runs;
+  it("says where a company's provisioning stopped and why, for staff to start it again from Hosting", async () => {
+    const releaseId = await importedRelease("feat(core): stops");
+    const client = await recordClient();
     const now = new Date();
-    await db.insert(clientDeploys).values({
+    await db.insert(clientProvisions).values({
       id: crypto.randomUUID(),
-      clientId,
+      clientId: client.id,
       releaseId,
-      status: "running",
-      step: "migrations",
+      status: "failed",
+      step: "resources",
+      error: "probe_unanswered",
       startedBy: staff.email,
       createdAt: now,
       updatedAt: now,
     });
 
-    const { html } = await setupOf(clientId);
-
-    expect(sectionOf(html, "Setting it up")).toContain(
-      `Deploying ${releaseId}: migrations done.`
-    );
-  });
-
-  it("shows a resumed run in its first steps, not the deploy an earlier run left", async () => {
-    const { clientId, releaseId, runs } = await waitingClient();
-    await using _runs = runs;
-    const [run] = await runs.get();
-    await run?.waitForStepResult({ name: "workers paid confirmed" });
-    // Staff confirmed Workers Paid, an earlier run's deploy failed, and the
-    // current run was claimed after both: it won't wait, and hasn't started
-    // its own deploy yet.
-    await audit(db, staff, { action: "client.workers_paid", clientId });
-    const earlier = new Date(Date.now() - 60 * 60 * 1000);
-    await db.insert(clientDeploys).values({
-      id: crypto.randomUUID(),
-      clientId,
-      releaseId,
-      status: "failed",
-      step: "workers",
-      error: "hostname_taken",
-      startedBy: staff.email,
-      createdAt: earlier,
-      updatedAt: earlier,
-    });
-    await db
-      .update(clientRuns)
-      .set({ claimedAt: new Date(Date.now() + 1000) })
-      .where(eq(clientRuns.clientId, clientId));
-
-    const { html } = await setupOf(clientId);
-    const settingUp = sectionOf(html, "Setting it up");
+    const { html } = await setupOf(client.id);
 
     expect({
-      settingUp: settingUp.includes(
-        "Setting up: its Cloudflare account, then its record."
-      ),
-      deploying: settingUp.includes("Deploying"),
-    }).toStrictEqual({ settingUp: true, deploying: false });
+      stopped: html.includes("Setting it up stopped at its resources step"),
+      code: html.includes("probe_unanswered"),
+      resume: sectionOf(html, "Hosting").includes("Resume provisioning"),
+    }).toStrictEqual({ stopped: true, code: true, resume: true });
   });
 
   it("shows an active company nothing left to set up, and reads its account's numbers once the page shows", async () => {
@@ -306,65 +221,6 @@ describe("the company pages, in the admin", () => {
       settingUp: false,
       resume: false,
       numbers: true,
-    });
-  });
-
-  it("offers to resume a company whose run is gone", async () => {
-    const client = await recordClient();
-
-    const { status, html } = await setupOf(client.id);
-
-    expect({
-      status,
-      gone: html.includes("its run is gone"),
-      resume: html.includes("Resume"),
-      confirm: html.includes("Workers Paid is on"),
-    }).toStrictEqual({ status: 200, gone: true, resume: true, confirm: false });
-  });
-
-  it("follows a run that stopped before it recorded the company where it was added, with why and a way to add it again", async () => {
-    const release = await publishRelease({ notes: "feat(core): stops" });
-    await importReleases(env.RELEASES, db);
-    const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-    await using runs = await introspectWorkflow(env.PROVISION_CLIENT);
-    // The test's store holds no deployer token: the run's first step stops.
-    await startProvisioning(env, staff, {
-      clientId,
-      name: "Acme",
-      releaseId: release.id,
-      ring: 1,
-      signIn: {
-        domains: ["acme.test"],
-        admins: ["ada@acme.test"],
-        googleHostedDomain: "acme.test",
-      },
-    });
-    const [run] = await runs.get();
-    await run?.waitForStatus("errored");
-
-    const moved = await movedFrom(
-      `https://ops.grasp.test/organizations/${clientId}/setup`
-    );
-    const { status, html } = await page(
-      `/new-organization?following=${clientId}`
-    );
-
-    expect({
-      moved: moved.location?.endsWith(
-        `/new-organization?following=${clientId}`
-      ),
-      status,
-      reason: html.includes(
-        "store_secret_missing: DEPLOYER_API_TOKEN is missing from Secrets Store"
-      ),
-      addAgain: html.includes('href="/new-organization"'),
-      resume: html.includes("Resume"),
-    }).toStrictEqual({
-      moved: true,
-      status: 200,
-      reason: true,
-      addAgain: true,
-      resume: false,
     });
   });
 
@@ -388,11 +244,11 @@ describe("the company pages, in the admin", () => {
 
     const releases = await setupOf(client.id, "releases");
     const settings = await setupOf(client.id, "settings");
-    const deploys = await setupOf(client.id, "deploys");
-    const history = sectionOf(deploys.html, "Its history");
+    const historyTab = await setupOf(client.id, "history");
+    const history = sectionOf(historyTab.html, "Its history");
 
     expect({
-      statuses: [releases.status, settings.status, deploys.status],
+      statuses: [releases.status, settings.status, historyTab.status],
       ring:
         releases.html.includes('name="ring"') &&
         releases.html.includes('value="3"'),

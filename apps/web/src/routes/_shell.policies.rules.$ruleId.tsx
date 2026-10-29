@@ -15,7 +15,12 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { loadLandscape } from "../landscape/landscape-data.ts";
 import type { LandscapeApp } from "../landscape/landscape.ts";
 import { FindingsTable } from "../policies/findings-table.tsx";
-import { policyBook, policyToday } from "../policies/policies-data.ts";
+import { bookOf, findingsOfLoaded } from "../policies/policies-data.ts";
+import {
+  editsPolicies,
+  RuleActions,
+  RuleExceptions,
+} from "../policies/policy-editing.tsx";
 import {
   ConditionChips,
   PolicyExcerpt,
@@ -24,30 +29,46 @@ import {
 import {
   effectDescription,
   effectLabel,
-  findings,
+  findingsWith,
   ruleStatusDescription,
 } from "../policies/policy.ts";
-import type { PolicyRule } from "../policies/policy.ts";
+import type {
+  PolicyBook,
+  PolicyFinding,
+  PolicyRule,
+} from "../policies/policy.ts";
 
 // One rule, as in the prototype (`routes/policies/rules/$ruleId.tsx`):
 // what it checks and why, whether it is on, and the apps it catches now.
-// The prototype edits, deletes and turns a rule on or off here; Grasp
-// keeps no rules yet (policies/policies-data.ts), so every link to one
-// finds the prototype's state for a rule that isn't there.
+// Core keeps the rules (policies/policies-data.ts); the organization's own
+// admins edit, delete and turn a rule on or off here, and let an app break
+// it until a day (policies/policy-editing.tsx). A link to a rule that
+// isn't there finds the prototype's state for one.
 
 const RuleDetail = ({
   rule,
+  found: all,
   apps,
+  book,
+  edits,
 }: {
   rule: PolicyRule;
+  found: readonly PolicyFinding[];
+  /** The Landscape's apps, an exception is granted to one of. */
   apps: readonly LandscapeApp[];
+  book: PolicyBook;
+  /** Whether the reader may change it. */
+  edits: boolean;
 }) => {
   const { t, i18n } = useLingui();
   const policy =
     rule.policyId === null
       ? undefined
-      : policyBook.policies.find(({ id }) => id === rule.policyId);
-  const found = findings([rule], apps, policyBook.exceptions, policyToday());
+      : book.policies.find(({ id }) => id === rule.policyId);
+  const found = findingsWith(
+    book,
+    all.filter(({ ruleId }) => ruleId === rule.id)
+  );
   const madeOn = formatDate(rule.createdAt);
   const { createdBy } = rule;
   return (
@@ -57,6 +78,11 @@ const RuleDetail = ({
       />
       <Page>
         <PageHeading
+          action={
+            edits ? (
+              <RuleActions policies={book.policies} rule={rule} />
+            ) : undefined
+          }
           description={rule.description === "" ? undefined : rule.description}
           meta={<RuleStatusBadge status={rule.status} />}
           title={rule.name}
@@ -133,6 +159,13 @@ const RuleDetail = ({
             showRule={false}
           />
         </section>
+
+        <RuleExceptions
+          apps={apps}
+          edits={edits}
+          exceptions={book.exceptions}
+          rule={rule}
+        />
       </Page>
     </>
   );
@@ -141,8 +174,10 @@ const RuleDetail = ({
 const RulePage = () => {
   const { t } = useLingui();
   const { ruleId } = Route.useParams();
-  const { apps } = Route.useLoaderData();
-  const rule = policyBook.rules.find(({ id }) => id === ruleId);
+  const { apps, found, book: loaded } = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
+  const book = bookOf(loaded);
+  const rule = book.rules.find(({ id }) => id === ruleId);
   if (rule === undefined) {
     return (
       <>
@@ -177,11 +212,18 @@ const RulePage = () => {
     );
   }
   return (
-    <RuleDetail apps={apps.state === "ready" ? apps.data : []} rule={rule} />
+    <RuleDetail
+      book={book}
+      apps={apps.state === "ready" ? apps.data : []}
+      edits={editsPolicies(identity)}
+      found={findingsOfLoaded(found).findings}
+      rule={rule}
+    />
   );
 };
 
 export const Route = createFileRoute("/_shell/policies/rules/$ruleId")({
+  // The Landscape's apps too: an exception is granted to one of them.
   loader: async ({ context: { core, identity } }) =>
     await loadLandscape(core, identity),
   pendingComponent: PageLoading,

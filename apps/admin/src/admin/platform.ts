@@ -15,9 +15,6 @@ import type { GridRow, LiveStatus } from "../clients/grid.ts";
 import type { ReleaseSummary } from "../releases/queries.ts";
 import type { RolloutSummary, TargetView } from "../rollout/queries.ts";
 
-/** A last day's error rate at or above this needs a look. */
-export const errorRateLimit = 0.01;
-
 /** So many releases behind the newest, unpinned, needs a look. */
 export const behindLimit = 2;
 
@@ -184,14 +181,6 @@ export const spreadOf = (
   ];
 };
 
-/** Of the last day's requests, the share that ended in an error; null without any, or unread. */
-export const errorRateOf = (live: LiveStatus | undefined): number | null => {
-  const day = live?.day;
-  return day === undefined || day === null || day.requests === 0
-    ? null
-    : day.errors / day.requests;
-};
-
 /**
  * How many releases came after the one the company runs: 0 when it runs
  * none; every listed one when it runs a release older than all of them.
@@ -211,7 +200,6 @@ export const behindOf = (
 export type PlatformNeed =
   | { kind: "failed"; releaseId: string }
   | { kind: "drift"; drift: "drifted" | "split" | "off_pin" }
-  | { kind: "errors"; rate: number }
   | { kind: "behind"; releases: number };
 
 export const needsOf = (
@@ -230,10 +218,6 @@ export const needsOf = (
   if (drift === "drifted" || drift === "split" || drift === "off_pin") {
     needs.push({ kind: "drift", drift });
   }
-  const rate = errorRateOf(live);
-  if (rate !== null && rate >= errorRateLimit) {
-    needs.push({ kind: "errors", rate });
-  }
   // A pinned company stays behind on purpose.
   const behind = row.pinnedReleaseId === null ? behindOf(row, releases) : 0;
   if (behind >= behindLimit) {
@@ -244,9 +228,8 @@ export const needsOf = (
 
 /**
  * How a company stands, as one word. `unread`: active, nothing recorded
- * needs a look, but its account wasn't read (yet, or the read failed or
- * timed out), so whether it drifted or errs isn't known; never called
- * healthy unread.
+ * needs a look, but it wasn't read (yet, or the read failed or timed
+ * out), so whether it drifted isn't known; never called healthy unread.
  */
 export type Standing =
   | "attention"
@@ -256,12 +239,12 @@ export type Standing =
   | "offboarded";
 
 /**
- * Whether the account was read for what a standing needs: its drift and
- * its last day's requests. A read that failed or timed out comes back with
- * them unknown (`gridLive`), which says nothing about either.
+ * Whether it was read for what a standing needs: its drift. A read that
+ * failed or timed out comes back with it unknown (`gridLive`), which says
+ * nothing about it.
  */
 const wasRead = (live: LiveStatus | undefined): boolean =>
-  live !== undefined && live.drift !== "unknown" && live.day !== null;
+  live !== undefined && live.drift !== "unknown";
 
 export const standingOf = (
   row: GridRow,

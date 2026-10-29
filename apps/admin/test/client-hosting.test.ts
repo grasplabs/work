@@ -1,4 +1,3 @@
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -7,24 +6,42 @@ import {
   auditEvents,
   clientPlacements,
   clientProvisions,
+  clients,
   clientRuns,
   hostingDestinations,
   releases,
 } from "../src/db/schema.ts";
 import {
+  deletePlacedClientFn,
   fetchClientHosting,
+  offboardPlacedClientFn,
   placeAndProvisionFn,
+  releasePlacedClientFn,
+  rollbackPlacedClientFn,
 } from "../src/hosting/functions.ts";
+import {
+  allocateClientResources,
+  placeClient,
+} from "../src/hosting/inventory.ts";
 import { getClientHosting } from "../src/hosting/placement.ts";
+import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { client, db, destination, release, verified } from "./hosting.ts";
+import {
+  client,
+  db,
+  destination,
+  release,
+  staff,
+  verified,
+} from "./hosting.ts";
 import { callServerFn, page } from "./pages.ts";
+import { ended, startsOf } from "./runs.ts";
+import type { Starts } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-hosting-3c81d2";
-const tenantToken = "test-tenant-admin-token-hosting-77a0e4";
-mockCloudflareApi(token, tenantToken);
+mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -104,29 +121,22 @@ const actorsOf = async (clientId: string, action: string) => {
   return events.map(({ actor }) => actor);
 };
 
-/** The attempts a test starts, their retries going at once. */
-const followAttempts = async () => {
-  const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
-  await attempts.modifyAll(async (modifier) => {
-    await modifier.disableRetryDelays();
-  });
-  return attempts;
-};
-
-type Attempts = Awaited<ReturnType<typeof followAttempts>>;
+/** The attempts a test starts. */
+const followAttempts = () => startsOf(adminWorkflows.provisionPlacedClient);
 
 /** Waits until the latest attempt stopped, which it does at validation. */
-const latestStopped = async (attempts: Attempts): Promise<void> => {
-  const started = await attempts.get();
+const latestStopped = async ({ started }: Starts): Promise<void> => {
   const latest = started.at(-1);
   if (latest === undefined) {
     throw new Error("No attempt was started");
   }
-  await latest.waitForStatus("errored");
+  await expect(
+    ended(adminWorkflows.provisionPlacedClient, latest)
+  ).resolves.toMatchObject({ status: "errored" });
 };
 
 describe("placing a client and provisioning it, through the admin's entry", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // The database outlives each test: earlier tests' destinations stop
   // serving the policy, so each test chooses among its own alone.
   beforeEach(async () => {
@@ -180,7 +190,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       },
     });
 
-    await using attempts = await followAttempts();
+    using attempts = followAttempts();
     const result = await place(clientId, releaseId, null);
     await latestStopped(attempts);
 
@@ -277,16 +287,16 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
   });
 
-  it("leaves a client whose run ended while provisioning it in an account of its own unplaced, for that run to resume", async () => {
+  it("leaves a client whose last run was another kind's unplaced, for that run's own path", async () => {
     await destination();
     const clientId = await client();
     const releaseId = await importedRelease();
-    // Its account-per-client run ended without saying so, long enough ago
-    // that it's no longer starting.
+    // Another kind's run ended without saying so, long enough ago that
+    // it's no longer starting.
     await db.insert(clientRuns).values({
       clientId,
-      runId: `${clientId}-own-account`,
-      kind: "provision",
+      runId: `${clientId}-apply`,
+      kind: "apply",
       claimedAt: new Date(Date.now() - 3_600_000),
     });
 
@@ -302,7 +312,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       refused: { runId: null, refused: "other_run_held", problems: [] },
       placement: undefined,
       operation: undefined,
-      run: [{ runId: `${clientId}-own-account`, kind: "provision" }],
+      run: [{ runId: `${clientId}-apply`, kind: "apply" }],
     });
   });
 
@@ -321,7 +331,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       refused: "no_automatic_destination",
     });
 
-    await using attempts = await followAttempts();
+    using attempts = followAttempts();
     await expect(place(clientId, releaseId, second)).resolves.toMatchObject({
       refused: null,
     });
@@ -340,7 +350,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     const clientId = await client();
     const releaseId = await importedRelease();
 
-    await using attempts = await followAttempts();
+    using attempts = followAttempts();
     await expect(place(clientId, releaseId, dedicated)).resolves.toMatchObject({
       refused: null,
     });
@@ -362,7 +372,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     const other = await destination({ kind: "dedicated", namespace: null });
     const clientId = await client();
     const releaseId = await importedRelease();
-    await using attempts = await followAttempts();
+    using attempts = followAttempts();
     await place(clientId, releaseId, null);
     await latestStopped(attempts);
     const first = await operationOf(clientId);
@@ -385,7 +395,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     const resumed = await place(clientId, releaseId, null);
     await latestStopped(attempts);
     const again = await operationOf(clientId);
-    const started = await attempts.get();
+    const { started } = attempts;
     expect({
       resumed,
       operation: again?.id,
@@ -434,6 +444,139 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       placement: undefined,
       operation: undefined,
       audited: [],
+    });
+  });
+
+  it("offers staff a live placed client's later release, and the rollback to the one before, and refuses both to anyone Access doesn't vouch for", async () => {
+    const destinationId = await destination();
+    const clientId = await client();
+    const [before, current, later] = [
+      await importedRelease(),
+      await importedRelease(),
+      await importedRelease(),
+    ];
+    await placeClient(db, staff, { clientId, destinationId, policyId });
+    const now = new Date();
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId,
+      releaseId: current,
+      previousReleaseId: before,
+      status: "done",
+      step: "route",
+      startedBy: caller,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db
+      .update(clients)
+      .set({ status: "active" })
+      .where(eq(clients.id, clientId));
+
+    const { status, html } = await page(
+      `/organizations/${clientId}/setup`,
+      caller
+    );
+    // Its release left running by a runner that has ended: resumed from
+    // here, the release it was of offered first.
+    await db
+      .update(clientProvisions)
+      .set({ status: "running", step: "core" })
+      .where(eq(clientProvisions.clientId, clientId));
+    const stopped = await page(`/organizations/${clientId}/setup`, caller);
+    await db
+      .update(clientProvisions)
+      .set({ status: "done", step: "route" })
+      .where(eq(clientProvisions.clientId, clientId));
+    const refused = await Promise.all([
+      callServerFn(
+        releasePlacedClientFn,
+        { clientId, releaseId: later },
+        { email: null }
+      ).then(() => "answered", String),
+      callServerFn(rollbackPlacedClientFn, { clientId }, { email: null }).then(
+        () => "answered",
+        String
+      ),
+    ]);
+
+    expect({
+      status,
+      release: html.includes("Release it"),
+      rollBack: html.includes(`Roll back to ${before}`),
+      resume: stopped.html.includes("Resume the release"),
+      place: html.includes("Place and start provisioning"),
+      refused: refused.map((answer) => answer.includes("answered 403")),
+      operation: await operationOf(clientId),
+    }).toMatchObject({
+      status: 200,
+      release: true,
+      rollBack: true,
+      resume: true,
+      place: false,
+      refused: [true, true],
+      operation: { releaseId: current, status: "done" },
+    });
+  });
+
+  it("offers to offboard a placed client, then to delete its resources with no export confirmed, and refuses both to anyone Access doesn't vouch for", async () => {
+    const destinationId = await destination();
+    const clientId = await client();
+    await placeClient(db, staff, { clientId, destinationId, policyId });
+    // Its resources, as provisioning records them before it makes them.
+    await allocateClientResources(db, staff, {
+      clientId,
+      manifest: await release(),
+      operationId: "op",
+    });
+    await db
+      .update(clients)
+      .set({ status: "active" })
+      .where(eq(clients.id, clientId));
+
+    const live = await page(`/organizations/${clientId}/setup`, caller);
+    const refused = await Promise.all([
+      callServerFn(offboardPlacedClientFn, { clientId }, { email: null }).then(
+        () => "answered",
+        String
+      ),
+      callServerFn(
+        deletePlacedClientFn,
+        { clientId, exportConfirmed: true },
+        { email: null }
+      ).then(() => "answered", String),
+    ]);
+    const offboarded = await callServerFn(
+      offboardPlacedClientFn,
+      { clientId },
+      { email: caller }
+    );
+    const early = await callServerFn(
+      deletePlacedClientFn,
+      { clientId, exportConfirmed: true },
+      { email: caller }
+    );
+    // Offboarded, it has no page among the organizations: its deletion is
+    // on Platform's Offboarded page.
+    const gone = await page(`/organizations/${clientId}/setup`, caller);
+    const after = await page("/platform/offboarded", caller);
+
+    expect({
+      offer: live.html.includes("Offboard it"),
+      refused: refused.map((answer) => answer.includes("answered 403")),
+      offboarded,
+      early,
+      gone: gone.status,
+      deleteOffer: after.html.includes("Delete its resources"),
+      kept: after.html.includes(`${clientId})`),
+    }).toStrictEqual({
+      offer: true,
+      refused: [true, true],
+      offboarded: { refused: null, deletion: null },
+      early: { refused: "retention_running", deletion: null },
+      gone: 404,
+      deleteOffer: true,
+      kept: true,
     });
   });
 });
