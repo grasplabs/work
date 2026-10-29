@@ -1,5 +1,6 @@
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import type { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import { withCpuKills } from "./cpu-kills.ts";
@@ -89,6 +90,28 @@ describe("fork tasks of JSON workflows", { timeout: 60_000 }, () => {
       executable: true,
       end: { status: "completed", output: { status: "2,3:1" } },
     });
+  });
+
+  it("give a fork's output.as the time it started, before its branches waited", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      {
+        both: {
+          fork: { branches: [{ pause: { wait: "PT1S" } }] },
+          output: {
+            as: "${ {status: ($task.startedAt.epoch.milliseconds | tostring)} }",
+          },
+        },
+      },
+    ]);
+    const run = await ranFor(by, workflow.id);
+    const started = Number(
+      z.object({ status: z.string() }).parse(run.output).status
+    );
+    // Started before the branch's wait: the run ended a second or more later.
+    expect(Date.parse(run.endedAt ?? "") - started).toBeGreaterThanOrEqual(
+      1000
+    );
   });
 
   it("leave a branch at its exit, and the workflow at an end in a branch", async () => {

@@ -900,7 +900,9 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
         throw new TypeError("A fork has its branches, in order");
       }
       let { input } = data;
-      if (enters(plan)) {
+      // A fork with stages after its branches enters too: its enter step
+      // records when it started, its leave step's `$task.startedAt`.
+      if (enters(plan) || leaves(plan)) {
         const entered = await flow.enter(id, data, plan);
         if (entered.skipped) {
           return { output: data.input, context: data.context, end: false };

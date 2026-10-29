@@ -3056,7 +3056,10 @@ const lowerFork = (
   const branchesPointer = pointerJoin(pointerJoin(pointer, "fork"), "branches");
   const branches = Array.isArray(fork.branches) ? fork.branches : [];
   const steps: TaskStep[] = [];
-  if (stages.enter.length > 0) {
+  // As a durable task's: a leave stage's `$task.startedAt` is the time the
+  // enter step recorded, before any branch waits, so a fork with stages
+  // after its branches always enters.
+  if (stages.enter.length > 0 || stages.leave.length > 0) {
     steps.push("enter");
   }
   if (compete) {
