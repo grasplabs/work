@@ -11,17 +11,14 @@ import { cfWorker } from "../apps/admin/cf-worker.ts";
 // required one stopping it, and the settings keep_vars used to keep.
 
 /** The admin's real wrangler.jsonc. */
-const realWranglerText = readFileSync(
+const wranglerText = readFileSync(
   path.join(import.meta.dirname, "../apps/admin/wrangler.jsonc"),
   "utf-8"
 );
-/**
- * The same, with an Access application's tag in both stages, as a
- * deployable stage has: the Access apps don't exist yet.
- */
-const wranglerText = realWranglerText.replaceAll(
-  '"CF_ACCESS_ISS":',
-  '"CF_ACCESS_AUD": "aud-1", "CF_ACCESS_ISS":'
+/** The same without either stage's Access application tag. */
+const withoutAudience = wranglerText.replaceAll(
+  /^\s*"CF_ACCESS_AUD": "[0-9a-f]+",\n/gmu,
+  ""
 );
 
 /** A field of a binding, as cf's builders shape it. */
@@ -211,6 +208,7 @@ describe("the admin's Worker for cf", () => {
           "ENTRA_CLIENT_ID",
           "GOOGLE_CLIENT_ID",
           "CLIENT_DOMAIN",
+          "ADMIN_HOST",
         ].map((name) => [name, bindingOf(worker, name)?.value])
       );
     };
@@ -225,6 +223,7 @@ describe("the admin's Worker for cf", () => {
         GOOGLE_CLIENT_ID:
           "740037143590-b2d0cpupcj0t800rth3ekr6g310unatv.apps.googleusercontent.com",
         CLIENT_DOMAIN: "ongrasp.app",
+        ADMIN_HOST: "admin.ongrasp.app",
       },
       staging: {
         STAGE: "staging",
@@ -232,16 +231,17 @@ describe("the admin's Worker for cf", () => {
         ENTRA_CLIENT_ID: "01228906-bd5b-488e-b7c1-720f4dc12dc2",
         GOOGLE_CLIENT_ID:
           "740037143590-9sb4tsn4di5lqvq5vc1ldtr2kgmm16p2.apps.googleusercontent.com",
-        CLIENT_DOMAIN: undefined,
+        CLIENT_DOMAIN: "staging.ongrasp.app",
+        ADMIN_HOST: "admin.staging.ongrasp.app",
       },
     });
   });
 
   it("stops a deploy of a stage without its Access application, but still builds it", () => {
-    expect(() => cfWorker(realWranglerText, "staging", deployed)).toThrow(
+    expect(() => cfWorker(withoutAudience, "staging", deployed)).toThrow(
       "Set CF_ACCESS_AUD in apps/admin/wrangler.jsonc for staging"
     );
-    expect(cfWorker(realWranglerText, "staging", {}).name).toBe(
+    expect(cfWorker(withoutAudience, "staging", {}).name).toBe(
       "grasp-admin-staging"
     );
   });

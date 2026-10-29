@@ -11,6 +11,9 @@
  * | Router's hostname map (KV)   | `grasp-router-hosts`    | `grasp-router-hosts-staging`     |
  * | Clients' dispatch namespace  | `grasp-clients`         | `grasp-clients-staging`          |
  * | A Secrets Store secret       | `NAME`                  | `NAME_STAGING`                   |
+ * | Clients' domain              | `ongrasp.app`           | `staging.ongrasp.app`            |
+ * | Admin's host                 | `admin.ongrasp.app`     | `admin.staging.ongrasp.app`      |
+ * | Auth relay's host            | `auth.ongrasp.app`      | `auth.staging.ongrasp.app`       |
  *
  * A staging client is never placed beside a production one: each stage
  * has its own namespace. Each placed client's resources are named after
@@ -75,6 +78,39 @@ export const platformR2Endpoint = `https://${platformAccountId}.eu.r2.cloudflare
 /** The router's hostname map (KV) in `stage`, by its title. */
 export const routerHostsName = (stage: Stage): string =>
   staged(`${namePrefix}router-hosts`, stage);
+
+/** Production's domain; staging's is a subdomain of it. */
+const productionDomain = "ongrasp.app";
+
+/**
+ * The domain `stage`'s clients are served under, a client being
+ * `<id>.<domain>`: staging's is `staging.` below production's.
+ */
+export const clientDomain = (stage: Stage): string =>
+  stage === "staging" ? `staging.${productionDomain}` : productionDomain;
+
+/** The admin's own hostname in `stage`. */
+export const adminHost = (stage: Stage): string =>
+  `admin.${clientDomain(stage)}`;
+
+/** The auth relay's hostname in `stage`. */
+export const authRelayHost = (stage: Stage): string =>
+  `auth.${clientDomain(stage)}`;
+
+/**
+ * The stage hostname `host` belongs to: staging for staging's domain and
+ * everything below it, production for anything else. Staging's domain
+ * sits below production's, so production's `*.ongrasp.app` would take a
+ * staging host unless it asks this first; staging takes nothing of
+ * production's, which is never below staging's domain.
+ */
+export const stageOfHost = (host: string): Stage => {
+  const name = host.toLowerCase().replace(/\.$/u, "");
+  const staging = clientDomain("staging");
+  return name === staging || name.endsWith(`.${staging}`)
+    ? "staging"
+    : "production";
+};
 
 /** What a staging secret's name ends with in the account's Secrets Store. */
 const stagingSecretSuffix = "_STAGING";

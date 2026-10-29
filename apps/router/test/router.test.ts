@@ -69,6 +69,19 @@ describe("router", () => {
     expect(headers?.get(routerSecretHeader)).toBe(await secretOf("acme", 3));
   });
 
+  it("never routes a host of the other stage, even one its map holds", async () => {
+    // This router is production's (wrangler.jsonc's top level): staging's
+    // clients are below its domain, and stay staging's router's.
+    await mapHost("acme.staging.ongrasp.app", acme);
+    await mapHost("acme.ongrasp.app", acme);
+
+    expect({
+      staging: await statusOf("https://acme.staging.ongrasp.app/"),
+      production: await statusOf("https://acme.ongrasp.app/"),
+    }).toStrictEqual({ staging: 404, production: 200 });
+    expect(cores.received).toHaveLength(1);
+  });
+
   it("looks a hostname up however the request cases it", async () => {
     await mapHost("mixed.grasp.test", acme);
 
