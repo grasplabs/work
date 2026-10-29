@@ -5372,7 +5372,10 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Keeps a piece of work as drawn, from whose agreements, or as it was
    * when `drawn` is null; and notes as drawn whoever it was drawn for
-   * that has nothing else waiting to be drawn.
+   * that has nothing else waiting to be drawn. A new drawing replaces the
+   * old one whole: the difference checked in the old one goes with it, so
+   * a fresh drawing never carries an old one's words (it is checked anew
+   * as it reaches the brain).
    */
   #keepDrawing(due: WorkToDraw, drawn: DrawnWork | null, at: string): void {
     const exists = this.#db
@@ -5382,6 +5385,12 @@ export class Onboarding extends DurableObject<Env> {
       .all();
     if (exists.length === 0) {
       return;
+    }
+    if (drawn !== null) {
+      this.#db
+        .delete(checkedDifferences)
+        .where(eq(checkedDifferences.work, due.id))
+        .run();
     }
     const agreed = JSON.stringify(due.agreed);
     this.#db
