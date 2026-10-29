@@ -1,3 +1,4 @@
+import { routerHostKey } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
@@ -10,7 +11,7 @@ import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
-import { useStoreSecrets } from "./secrets-store.ts";
+import { emptyStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-admin-ask-71c0d2";
 
@@ -44,19 +45,40 @@ const liveClient = async () => {
   return { clientId, account };
 };
 
-/** Runs `run` with `GRASP_CLIENT_ID` set to `clientId` (undefined for none). */
+/**
+ * Runs `run` with `GRASP_CLIENT_ID` set to `clientId` (undefined for none),
+ * its client domain as `clientDomain` gives it, and without its
+ * dispatcher binding for `noDispatcher`.
+ */
 const asGrasp = async <T>(
   clientId: string | undefined,
-  run: () => Promise<T>
+  run: () => Promise<T>,
+  {
+    clientDomain,
+    noDispatcher = false,
+  }: { clientDomain?: string; noDispatcher?: boolean } = {}
 ): Promise<T> => {
-  const before = env.GRASP_CLIENT_ID;
+  const before = { ...env };
   env.GRASP_CLIENT_ID = clientId;
+  if (clientDomain !== undefined) {
+    env.CLIENT_DOMAIN = clientDomain;
+  }
+  if (noDispatcher) {
+    // An admin deployed without the binding, as a local run can be.
+    Reflect.set(env, "DISPATCHER", undefined);
+  }
   try {
     return await run();
   } finally {
-    env.GRASP_CLIENT_ID = before;
+    env.GRASP_CLIENT_ID = before.GRASP_CLIENT_ID;
+    env.CLIENT_DOMAIN = before.CLIENT_DOMAIN;
+    env.DISPATCHER = before.DISPATCHER;
   }
 };
+
+/** Client `clientId`'s hostname, as the router's map keys it. */
+const hostKeyOf = (clientId: string): string =>
+  routerHostKey(`${clientId}.${env.CLIENT_DOMAIN}`);
 
 const document = "# Grasp's admin\n\n## Noordkade\n- Interviews done: 12 of 20";
 
@@ -64,18 +86,95 @@ const document = "# Grasp's admin\n\n## Noordkade\n- Interviews done: 12 of 20";
 const ask = async (said: { role: "user" | "assistant"; text: string }[]) =>
   await callServerFn(askGraspFn, { document, said }, { email: staff.email });
 
+/** What the chat gets back when it can't ask, for `refused`. */
+const cannotAsk = (refused: string, more: { secret?: string } = {}) => ({
+  text: null,
+  truncated: false,
+  refused,
+  ...more,
+});
+const question = [{ role: "user" as const, text: "Which company?" }];
+
 describe("Ask Grasp", () => {
   useStoreSecrets({ deployer: token });
   eachTest();
 
-  it("says it isn't set up, and asks nothing, while no client is Grasp's own", async () => {
+  it("says no organization is named as Grasp's own, and asks nothing", async () => {
+    const { account } = await liveClient();
+    const answer = await asGrasp(undefined, async () => await ask(question));
+    expect({ answer, asked: account.asked.length }).toStrictEqual({
+      answer: cannotAsk("grasp_client_unset"),
+      asked: 0,
+    });
+  });
+
+  it("says the organization named as Grasp's own is one the admin doesn't have", async () => {
     const { account } = await liveClient();
     const answer = await asGrasp(
-      undefined,
-      async () => await ask([{ role: "user", text: "Which company?" }])
+      "client-nobody",
+      async () => await ask(question)
     );
     expect({ answer, asked: account.asked.length }).toStrictEqual({
-      answer: { text: null, truncated: false, refused: "not_set_up" },
+      answer: cannotAsk("grasp_client_unknown"),
+      asked: 0,
+    });
+  });
+
+  it("says Grasp's own organization isn't live, while it's still being set up", async () => {
+    const { clientId, account } = await liveClient();
+    await db
+      .update(clients)
+      .set({ status: "provisioning" })
+      .where(eq(clients.id, clientId));
+    const answer = await asGrasp(clientId, async () => await ask(question));
+    expect({ answer, asked: account.asked.length }).toStrictEqual({
+      answer: cannotAsk("grasp_client_not_active"),
+      asked: 0,
+    });
+  });
+
+  it("names the secret missing from Secrets Store that the question is signed with", async () => {
+    const { clientId, account } = await liveClient();
+    await emptyStoreSecret(env.CLIENT_KEY, "CLIENT_KEY");
+    const answer = await asGrasp(clientId, async () => await ask(question));
+    expect({ answer, asked: account.asked.length }).toStrictEqual({
+      answer: cannotAsk("secret_missing", { secret: "CLIENT_KEY" }),
+      asked: 0,
+    });
+  });
+
+  it("says no client domain is set, so Grasp's own organization has no hostname", async () => {
+    const { clientId, account } = await liveClient();
+    const answer = await asGrasp(clientId, async () => await ask(question), {
+      clientDomain: "",
+    });
+    expect({ answer, asked: account.asked.length }).toStrictEqual({
+      answer: cannotAsk("no_client_domain"),
+      asked: 0,
+    });
+  });
+
+  it("says the router has no route to Grasp's own organization", async () => {
+    const { clientId, account } = await liveClient();
+    await env.ROUTER_HOSTS.delete(hostKeyOf(clientId));
+    const answer = await asGrasp(clientId, async () => await ask(question));
+    expect({ answer, asked: account.asked.length }).toStrictEqual({
+      answer: cannotAsk("not_routed"),
+      asked: 0,
+    });
+  });
+
+  it("says Grasp's own core runs where the admin has no dispatcher to reach it", async () => {
+    const { clientId, account } = await liveClient();
+    await env.ROUTER_HOSTS.put(
+      hostKeyOf(clientId),
+      JSON.stringify({ clientId, script: `${clientId}-core`, generation: 1 })
+    );
+    const answer = await asGrasp(clientId, async () => await ask(question), {
+      noDispatcher: true,
+    });
+    expect({ answer, asked: account.asked.length }).toStrictEqual({
+      answer: cannotAsk("core_unreachable"),
       asked: 0,
     });
   });
