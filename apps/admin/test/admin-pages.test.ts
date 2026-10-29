@@ -240,7 +240,7 @@ describe("the admin's frame", () => {
 
     const places = [
       "Overview",
-      "Integrations to build",
+      "Apps asked for",
       "Platform",
       "Ask Grasp",
       "Stephen Lab",
@@ -293,45 +293,27 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("says there is nothing to build yet where the integrations' table goes, and how a build goes, with no build to move on", async () => {
+  it("says nothing is asked for yet where the table of apps goes, with nothing to act on", async () => {
     const { status, html } = await page("/integrations");
-    const text = html.replaceAll(tags, " ").replaceAll(spaces, " ");
-    const steps = [
-      "A company’s workflow needs an app Composio does not have.",
-      "Build it starts Grasp’s agent on a branch of its own.",
-      "A person registers Grasp with the app and puts the keys in the admin.",
-      "The agent writes the connection and its tests",
-      "The merge goes into the next release",
-    ].map((step) => text.indexOf(step));
 
     expect({
       status,
-      title: html.includes(">Integrations to build</h1>"),
-      nothingToBuild: html.includes("Nothing to build yet"),
-      howItIsBuilt: html.includes(">How it is built</h2>"),
-      stepsInOrder:
-        steps.every((at) => at >= 0) &&
-        steps.toSorted((a, b) => a - b).every((at, i) => at === steps[i]),
-      // No sample builds, and nothing that would move one on.
+      title: html.includes(">Apps asked for</h1>"),
+      nothingAsked: html.includes("Nothing asked for yet"),
       table: html.includes("<table"),
       buttons: html
-        .slice(html.indexOf(">Integrations to build</h1>"))
+        .slice(html.indexOf(">Apps asked for</h1>"))
         .includes("<button"),
-      // Connect signs in with OAuth2 and API keys now (GRA-688).
-      firstByHand: text.includes("First, by hand"),
     }).toStrictEqual({
       status: 200,
       title: true,
-      nothingToBuild: true,
-      howItIsBuilt: true,
-      stepsInOrder: true,
+      nothingAsked: true,
       table: false,
       buttons: false,
-      firstByHand: false,
     });
   });
 
-  it("lists every app the companies asked Grasp for once, most asked first, each opening its build, and every company's request leading to it", async () => {
+  it("lists every app the companies asked Grasp for once, most asked first, and every company's request leading to it", async () => {
     const acme = await liveClient();
     const globex = await liveClient();
     const asked = (name: string, ago: number) => ({
@@ -372,17 +354,13 @@ describe("the admin's frame", () => {
       // Once each, the one two companies asked for first.
       rows: (html.match(/<tr/gu) ?? []).length - 1,
       order: exact !== -1 && twinfield > exact,
-      exact: [
-        rowText("exact-online").includes(
-          `Acme ${acme.clientId} and Acme ${globex.clientId}`
-        ),
-        rowText("exact-online").includes("Waiting for Grasp to start it"),
-      ],
+      exact: rowText("exact-online").includes(
+        `Acme ${acme.clientId} and Acme ${globex.clientId}`
+      ),
       twinfield: rowText("twinfield").includes(`Acme ${acme.clientId}`),
-      badge: text.includes("2 wait on Grasp"),
-      sidebar: sidebarOf(html).includes("2 apps wait on Grasp"),
-      nothingToBuild: html.includes("Nothing to build yet"),
-      // Its own request, on the company's Integrations, leads to the build.
+      sidebar: sidebarOf(html).includes("2 apps asked for"),
+      nothingAsked: html.includes("Nothing asked for yet"),
+      // Its own request, on the company's Integrations, leads to the app.
       companyAsked: company.html.includes(
         `href="/integrations?app=exact-online"`
       ),
@@ -391,11 +369,10 @@ describe("the admin's frame", () => {
       status: [200, 200],
       rows: 2,
       order: true,
-      exact: [true, true],
+      exact: true,
       twinfield: true,
-      badge: true,
       sidebar: true,
-      nothingToBuild: false,
+      nothingAsked: false,
       companyAsked: true,
       companyWords: true,
     });
