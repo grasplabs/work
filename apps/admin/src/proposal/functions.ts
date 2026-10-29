@@ -13,6 +13,7 @@ import {
   setRoomsProject,
 } from "./link.ts";
 import type { RoomsLinkErrorCode } from "./link.ts";
+import { roomsAccess } from "./proposal.ts";
 
 /** What linking answers: whether it changed anything, or why it was refused. */
 export type RoomsLinkChange =
@@ -34,3 +35,8 @@ export const setRoomsProjectFn = createServerFn({ method: "POST" })
       throw error;
     }
   });
+
+/** Whether the admin reaches Rooms: its origin set and its token in Secrets Store. */
+export const fetchRoomsConnected = createServerFn({ method: "GET" }).handler(
+  async (): Promise<boolean> => (await roomsAccess(env)) !== null
+);

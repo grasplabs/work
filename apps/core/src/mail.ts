@@ -79,6 +79,15 @@ const transportOf = (
 ): MailTransport | undefined => env.EMAIL;
 
 /**
+ * Whether the deployment can send mail where it runs: something is bound
+ * to send it (`EMAIL`). Not where its hosting gives it none, as Workers
+ * for Platforms doesn't yet (GRA-965). A sender left unset (`MAIL_FROM`)
+ * is a setting to fix, not the hosting: each mail then fails, saying so.
+ */
+export const mailSends = (env: Partial<Pick<Env, "EMAIL">>): boolean =>
+  transportOf(env) !== undefined;
+
+/**
  * Sends `mail` once, and says what became of it. Throws nothing: what the
  * binding threw is sorted into `retry` or `failed`, and an error without
  * Email Sending's code (the binding unreachable, say) is tried again.

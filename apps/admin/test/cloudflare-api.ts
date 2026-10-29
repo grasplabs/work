@@ -1015,10 +1015,12 @@ export const fakeCloudflareApi = (token: string) => {
   /** Adds an account `member` is a member of, and returns what it holds. */
   const addAccount = (
     name = "Client",
-    member = deployerEmail
+    member = deployerEmail,
+    /** Its id, for an account the admin knows by its own, such as Grasp's. */
+    id = crypto.randomUUID().replaceAll("-", "")
   ): AccountState => {
     const account: AccountState = {
-      id: crypto.randomUUID().replaceAll("-", ""),
+      id,
       name,
       members: new Map([[member, "accepted"]]),
       d1: [],
