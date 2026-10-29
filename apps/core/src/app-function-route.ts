@@ -504,7 +504,13 @@ const keyedAnswer = async (
   const access = await accessOf(env, person, id);
   const invocation = actionInvocation(env, name);
   const frames = await invocation.open({
-    by: { userId: person.userId, role: person.role, teams: person.teams },
+    by: {
+      userId: person.userId,
+      role: person.role,
+      teams: person.teams,
+      // A Grasp staff session's mark goes on with the run (GRA-1088).
+      ...(person.staff ? { staff: true } : {}),
+    },
     access,
     app: id,
     name,
@@ -1229,7 +1235,13 @@ const appStreamResponse = async (
     // invocation compares with the access it started under.
     const access = await accessOf(env, person, id);
     const frames = await invocation.open({
-      by: { userId: person.userId, role: person.role, teams: person.teams },
+      by: {
+        userId: person.userId,
+        role: person.role,
+        teams: person.teams,
+        // A Grasp staff session's mark goes on with the run (GRA-1088).
+        ...(person.staff ? { staff: true } : {}),
+      },
       access,
       app: id,
       name,

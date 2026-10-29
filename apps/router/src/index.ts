@@ -19,7 +19,14 @@ import {
   mailIngressRequest,
   mailRejectedStatus,
 } from "@grasp-os/shared/mail-ingress";
-import { stageNamed, stageOfHost } from "@grasp-os/shared/names";
+import { authRelayHost, stageNamed, stageOfHost } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
+import {
+  readRelayRequest,
+  relayKindOf,
+  relayStateValid,
+  relayTarget,
+} from "@grasp-os/shared/oauth-relay";
 import {
   deriveRouterSecret,
   routerHostKey,
@@ -255,6 +262,142 @@ const limiterFor = (pathname: string, env: Env): RateLimit | undefined => {
   return undefined;
 };
 
+/** The OAuth relay's pages: a fixed title and line each, never anything a request carried. */
+const relayPages = {
+  invalid: {
+    status: 400,
+    title: "This sign-in can't go on",
+    line: "The link it came back with isn't valid, or is too old. Go back to your Grasp workspace and start again.",
+  },
+  unknownClient: {
+    status: 404,
+    title: "This workspace isn't available",
+    line: "The workspace this sign-in started at isn't served here. Go back to it and start again.",
+  },
+  notFound: {
+    status: 404,
+    title: "Not found",
+    line: "There is nothing at this address.",
+  },
+  methodNotAllowed: {
+    status: 405,
+    title: "Not allowed",
+    line: "This address only takes your browser coming back from signing in.",
+  },
+  rateLimited: {
+    status: 429,
+    title: "Too many attempts",
+    line: "Wait a minute, then go back to your Grasp workspace and start again.",
+  },
+  unavailable: {
+    status: 503,
+    title: "Try again in a moment",
+    line: "Grasp couldn't finish this just now. Go back to your Grasp workspace and start again.",
+  },
+} as const;
+type RelayPage = keyof typeof relayPages;
+
+/**
+ * The headers of every answer the relay makes: never stored, never
+ * framed, never leaking its URL (an OAuth code, a state) to where it
+ * leads, with HSTS on https.
+ */
+const relayHeaders = (url: URL): Headers => {
+  const headers = new Headers({
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+  });
+  if (url.protocol === "https:") {
+    headers.set("strict-transport-security", strictTransportSecurity);
+  }
+  return headers;
+};
+
+/** One of the relay's plain pages (`relayPages`). */
+const relayPage = (url: URL, page: RelayPage): Response => {
+  const { status, title, line } = relayPages[page];
+  const headers = relayHeaders(url);
+  headers.set("content-type", "text/html; charset=utf-8");
+  if (page === "methodNotAllowed") {
+    headers.set("allow", "GET");
+  }
+  if (page === "rateLimited") {
+    headers.set("retry-after", String(limitPeriodS));
+  }
+  return new Response(
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><h1>${title}</h1><p>${line}</p></html>`,
+    { status, headers }
+  );
+};
+
+/**
+ * The OAuth relay (@grasp-os/shared/oauth-relay), on this stage's relay
+ * host: sends a browser an IdP brought back on to the client whose
+ * signed state it carries, at that client's own callback, with the
+ * client's own state. Only a GET to one of its two paths, within the
+ * sign-in limit for the caller's address, with a state that names a
+ * client in the map and that client's MAC, no older than the relay
+ * allows; anything else gets a plain page and goes nowhere. It reads
+ * nothing of the code, forwards nothing to a core, and logs the client's
+ * hostname alone.
+ */
+const oauthRelay = async (
+  request: Request,
+  url: URL,
+  env: Env,
+  stage: Stage
+): Promise<Response> => {
+  const relayHost = authRelayHost(stage);
+  if (relayKindOf(url.pathname) === undefined) {
+    return relayPage(url, "notFound");
+  }
+  if (request.method !== "GET") {
+    return relayPage(url, "methodNotAllowed");
+  }
+  // Per address across clients, before anything is looked up: a flood of
+  // guessed states costs no map reads.
+  if (!(await withinLimit(env.AUTH_RATE_LIMIT, request, relayHost))) {
+    log.warn("router.rate_limited", { host: relayHost });
+    return relayPage(url, "rateLimited");
+  }
+  const relayed = readRelayRequest(url, stage);
+  if (relayed === null) {
+    log.info("router.relay_refused", { reason: "malformed" });
+    return relayPage(url, "invalid");
+  }
+  let route: Route | null;
+  try {
+    route = await routeFor(relayed.host, env);
+  } catch (error) {
+    log.error("router.route_failed", {
+      host: relayed.host,
+      ...errorFields(error),
+    });
+    return relayPage(url, "unavailable");
+  }
+  // Unknown, or offboarded: offboarding takes the hostname out of the map.
+  if (route === null) {
+    log.info("router.relay_refused", {
+      host: relayed.host,
+      reason: "unknown_client",
+    });
+    return relayPage(url, "unknownClient");
+  }
+  if (!(await relayStateValid(route.secret, relayed))) {
+    log.warn("router.relay_refused", {
+      host: relayed.host,
+      reason: "bad_state",
+    });
+    return relayPage(url, "invalid");
+  }
+  const headers = relayHeaders(url);
+  headers.set("location", relayTarget(url, relayed));
+  log.info("router.relay_forwarded", { host: relayed.host });
+  return new Response(null, { status: 302, headers });
+};
+
 /**
  * Forwards each request on a client's hostname to that client's core (its
  * user Worker through the dispatch namespace, or its workers.dev origin:
@@ -269,6 +412,20 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const host = routerHostKey(url.hostname);
+    // The relay only on this router's own stage's host, and only when
+    // STAGE names one exactly: never production's by default.
+    const stage = stageNamed(env.STAGE);
+    if (stage !== undefined && host === authRelayHost(stage)) {
+      return await oauthRelay(request, url, env, stage);
+    }
+    // No client is `auth` (reservedClientIds): a map entry for such a
+    // host, at any domain, is never forwarded to.
+    if (host.startsWith("auth.")) {
+      if (stage === undefined) {
+        log.error("router.relay_stage_unset", { host });
+      }
+      return relayPage(url, "notFound");
+    }
 
     let route: Route | null;
     try {

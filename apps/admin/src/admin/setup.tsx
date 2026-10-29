@@ -56,6 +56,7 @@ import { overBars } from "../clients/watch-signals.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
 import type { ClientHostingView } from "../hosting/placement.ts";
+import { operationErrorWords } from "../hosting/words.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { formatTime } from "../releases/format.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
@@ -231,6 +232,7 @@ const needWords = (need: PlatformNeed): ReactNode => {
       <>
         {`Setting it up stopped at its ${view.stopped.step} step: `}
         <ErrorCode code={view.stopped.error} />
+        {` ${operationErrorWords(view.stopped.error)}`}
       </>
     );
   }

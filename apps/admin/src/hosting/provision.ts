@@ -12,6 +12,13 @@
  * only after such a request, as one whose create answer was lost; one
  * nobody asked for is someone else's, and stops the run rather than be
  * adopted because its name matches (spec 39.2). Nothing here deletes.
+ *
+ * In a destination that checks itself (`checksItself`), what it reads
+ * back is also the destination's evidence (`selfCheckedCapabilities`):
+ * each kind it observed in the policy's jurisdiction is recorded as
+ * verified by the system, the first time, and one it observed outside it
+ * as unsupported, which stops this run and keeps every later placement
+ * out of the destination.
  */
 import { and, eq, isNull } from "drizzle-orm";
 
@@ -29,14 +36,138 @@ import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import {
   assertPlaceable,
+  checksItself,
   clientInventory,
   destinationOf,
   InventoryError,
   placementOf,
+  recordCapabilityEvidence,
   recordProviderId,
 } from "./inventory.ts";
 import type { ClientResource } from "./inventory.ts";
 import { hostingPolicyIdSchema } from "./policy.ts";
+import type { Capability, DestinationCapabilities } from "./policy.ts";
+
+/** What provisioning's own check is recorded against: the release it runs, and where to read about the run. */
+export interface SelfCheck {
+  releaseId: string;
+  /** The run that observed it. */
+  runId: string;
+  /** A page in the admin where the run's client and its operation are. */
+  record: string;
+}
+
+/** The capability a kind of resource's jurisdiction shows. */
+const capabilityOf: Partial<Record<ClientResource["kind"], Capability>> = {
+  d1_database: "d1.eu_jurisdiction",
+  r2_bucket: "r2.eu_jurisdiction",
+};
+
+/** Provisioning's observations of `observed`, each `status`, as evidence. */
+const observations = (
+  check: SelfCheck,
+  observed: readonly Capability[],
+  status: "verified" | "unsupported"
+): DestinationCapabilities =>
+  Object.fromEntries(
+    observed.map((capability) => [
+      capability,
+      {
+        status,
+        evidence: {
+          procedure: `Automatic check during provisioning, run ${check.runId}: read back from Cloudflare the jurisdiction of each ${capability.startsWith("d1") ? "D1 database" : "R2 bucket"} it created or found for the client.`,
+          subject: { kind: "release", id: check.releaseId },
+          observedAt: new Date().toISOString(),
+          recordedBy: "system",
+          record: check.record,
+        },
+      },
+    ])
+  );
+
+/**
+ * Records, in a destination that checks itself, that the resource just
+ * read back shows `capability` unsupported, then throws: the run stops
+ * there, and the destination takes no one until a person looks.
+ */
+const refuseOutside = async (
+  db: AdminDatabase,
+  destinationId: string,
+  check: SelfCheck | undefined,
+  resource: ClientResource,
+  jurisdiction: string | null | undefined
+): Promise<never> => {
+  const capability = capabilityOf[resource.kind];
+  if (check !== undefined && capability !== undefined) {
+    await recordCapabilityEvidence(
+      db,
+      "system",
+      destinationId,
+      observations(check, [capability], "unsupported")
+    );
+  }
+  throw new InventoryError(
+    "resource_outside_jurisdiction",
+    `${resource.physicalName} is in ${jurisdiction ?? "no jurisdiction"}, not ${resource.jurisdiction}`,
+    capability === undefined
+      ? []
+      : [{ kind: "capability_unsupported", capability }]
+  );
+};
+
+/**
+ * Judges what the provider reported of `resource`'s jurisdiction: outside
+ * the recorded one, it stops the run (`refuseOutside`); in it, in a
+ * destination that checks itself, it is recorded as the capability's
+ * evidence there and then, before the next resource, so a run that
+ * fails later has recorded it already. Written only where the capability
+ * has no record yet (`unrecordedOnly`), in the statement that writes it:
+ * a retry, or the next resource of the same kind, writes nothing again,
+ * and it never replaces what a person or an earlier check found, a
+ * capability found not to hold above all.
+ */
+const judge = async (
+  db: AdminDatabase,
+  destinationId: string,
+  check: SelfCheck | undefined,
+  resource: ClientResource,
+  jurisdiction: string | null | undefined
+): Promise<void> => {
+  if (jurisdiction !== resource.jurisdiction) {
+    await refuseOutside(db, destinationId, check, resource, jurisdiction);
+  }
+  const capability = capabilityOf[resource.kind];
+  if (check !== undefined && capability !== undefined) {
+    await recordCapabilityEvidence(
+      db,
+      "system",
+      destinationId,
+      observations(check, [capability], "verified"),
+      { unrecordedOnly: true }
+    );
+  }
+};
+
+/**
+ * Reads `resource`, made by an earlier attempt, back from the provider
+ * and judges where it is (`judge`), as a run that made it would have.
+ * Only the client's own: one the provider no longer has, or has under its
+ * name with another id than the one recorded (a database replaced since;
+ * a bucket's id is its name), says nothing of the destination, and is
+ * left to the steps that use it, which refuse it (`foreign_resource`).
+ */
+const checkJurisdiction = async (
+  db: AdminDatabase,
+  destinationId: string,
+  check: SelfCheck,
+  resource: ClientResource,
+  provider: Provider
+): Promise<void> => {
+  const observed = await provider.find(resource);
+  if (observed !== undefined && observed.id === resource.providerId) {
+    await judge(db, destinationId, check, resource, observed.jurisdiction);
+  }
+};
 
 /** What the provider reports of a database or bucket. */
 interface Observed {
@@ -162,7 +293,8 @@ export const ensureClientResources = async (
   api: CloudflareApi,
   db: AdminDatabase,
   actor: Actor,
-  held: HeldClient
+  held: HeldClient,
+  selfCheck?: SelfCheck
 ): Promise<ClientResource[]> => {
   const { clientId } = held;
   if (
@@ -193,14 +325,21 @@ export const ensureClientResources = async (
     );
   }
   const { accountId } = destination;
+  const check = checksItself(destination.kind) ? selfCheck : undefined;
 
   for (const resource of await clientInventory(db, clientId)) {
     const provider = providerFor(api, accountId, resource.kind);
-    if (
-      provider === undefined ||
-      resource.lifecycle !== "allocated" ||
-      resource.providerId !== null
-    ) {
+    if (provider === undefined || resource.lifecycle !== "allocated") {
+      continue;
+    }
+    if (resource.providerId !== null) {
+      // Made by an earlier attempt: only read back again where the
+      // destination checks itself, so a retry checks, and records, every
+      // resource the client has, not only the ones it made itself.
+      if (check !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
+        await checkJurisdiction(db, destination.id, check, resource, provider);
+      }
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
@@ -219,12 +358,8 @@ export const ensureClientResources = async (
     }
     // Whichever call answered, only what the provider reports in the
     // recorded jurisdiction is used: one set at creation isn't relabelled.
-    if (observed.jurisdiction !== resource.jurisdiction) {
-      throw new InventoryError(
-        "resource_outside_jurisdiction",
-        `${resource.physicalName} is in ${observed.jurisdiction ?? "no jurisdiction"}, not ${resource.jurisdiction}`
-      );
-    }
+    // oxlint-disable-next-line no-await-in-loop -- recorded before the next
+    await judge(db, destination.id, check, resource, observed.jurisdiction);
     // oxlint-disable-next-line no-await-in-loop -- persisted before the next
     await recordProviderId(
       db,
