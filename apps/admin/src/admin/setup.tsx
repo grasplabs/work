@@ -17,6 +17,7 @@
  * admin doesn't keep day by day says so rather than show a number.
  */
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import type { ModelSpendReport } from "@grasp-os/shared/model-spend-report";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -83,7 +84,7 @@ import {
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
 import { Body, ErrorCode, Facts, Quiet, SetupSection } from "./setup-parts.tsx";
-import { euro, euros, formatDate } from "./words.ts";
+import { euros, formatDate } from "./words.ts";
 
 /** The section's tabs, in order: how it stands first. */
 export const setupTabs = [
@@ -760,6 +761,27 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
   );
 };
 
+/** List prices in US dollars, to the cent, as the gateway counts them. */
+const dollars = new Intl.NumberFormat("en", {
+  style: "currency",
+  currency: "USD",
+});
+
+/**
+ * This month's spend against the ceiling, as the gateway's ledger counts
+ * it, or that it's unknown: never an estimate in its place.
+ */
+const spendWords = (
+  report: ModelSpendReport | null,
+  ceiling: number
+): string => {
+  if (report === null) {
+    return `Ceiling: ${euros(ceiling)} a month. This month's spend: unknown, as its core couldn't be asked.`;
+  }
+  const share = Math.round((report.spent / ceiling) * 100);
+  return `This month (${report.month}): ${dollars.format(report.spent)} of its ${euros(ceiling)} ceiling (${String(share)}%), as its gateway counts it, at the providers' list prices in US dollars.`;
+};
+
 /**
  * Its model spend: the ceiling its core's gateway holds it to, what this
  * month's use came to as far as its core counted it, and changing the
@@ -768,35 +790,34 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
 const ModelSpend = ({
   clientId,
   ceiling,
-  view,
+  spend,
   refresh,
 }: {
   clientId: string;
   ceiling: number;
-  view: AdminView | null;
+  /** What its core's ledger charged its budget this month; null when unknown. */
+  spend: Promise<ModelSpendReport | null>;
   refresh: Refresh;
-}) => {
-  const spent = view?.usage.thisMonth.spend;
-  return (
-    <SetupSection
-      description="What its model calls may cost in a calendar month. Its core's model gateway refuses a call that would go past it."
-      title="Model spend"
-    >
-      <Body>
-        <p>
-          {spent === undefined
-            ? `Ceiling: ${euros(ceiling)} a month. This month's spend shows once its core answers.`
-            : `This month: about ${euro(spent)} of its ${euros(ceiling)} ceiling (${String(Math.min(100, Math.round((spent / ceiling) * 100)))}%), estimated from what its core counted.`}
-        </p>
-        <ModelSpendCeilingChange
-          ceiling={ceiling}
-          clientId={clientId}
-          refresh={refresh}
-        />
-      </Body>
-    </SetupSection>
-  );
-};
+}) => (
+  <SetupSection
+    description="What its model calls may cost in a calendar month. Its core's model gateway refuses a call that would go past it."
+    title="Model spend"
+  >
+    <Body>
+      <Await
+        fallback={<p>{`Ceiling: ${euros(ceiling)} a month.`}</p>}
+        promise={spend}
+      >
+        {(report) => <p>{spendWords(report, ceiling)}</p>}
+      </Await>
+      <ModelSpendCeilingChange
+        ceiling={ceiling}
+        clientId={clientId}
+        refresh={refresh}
+      />
+    </Body>
+  </SetupSection>
+);
 
 const Status = ({
   clientId,
@@ -804,6 +825,7 @@ const Status = ({
   needs,
   view,
   quotaPolicy,
+  modelSpend,
   hosting,
   releases,
   refresh,
@@ -815,6 +837,8 @@ const Status = ({
   view: AdminView | null;
   /** Its quota policy, its core read live; null when it couldn't be read. */
   quotaPolicy: Promise<ClientQuotaPolicy | null>;
+  /** Its spend this month as its core's ledger counts it, read live and not awaited; null when unknown. */
+  modelSpend: Promise<ModelSpendReport | null>;
   hosting: ClientHostingView | null;
   releases: readonly { id: string; notes: string }[];
   refresh: Refresh;
@@ -851,7 +875,7 @@ const Status = ({
         ceiling={setup.account.modelSpendCeiling}
         clientId={clientId}
         refresh={refresh}
-        view={view}
+        spend={modelSpend}
       />
     )}
     <SetupSection
@@ -1787,6 +1811,7 @@ export const OrgSetup = ({
   tab,
   view,
   quotaPolicy,
+  modelSpend,
   releases,
   hosting,
 }: {
@@ -1796,6 +1821,8 @@ export const OrgSetup = ({
   view: AdminView | null;
   /** Its quota policy, read live and not awaited; null when it couldn't be read. */
   quotaPolicy: Promise<ClientQuotaPolicy | null>;
+  /** Its spend this month as its core's ledger counts it, read live and not awaited; null when unknown. */
+  modelSpend: Promise<ModelSpendReport | null>;
   /** Every imported release, newest first. */
   releases: readonly { id: string; notes: string }[];
   hosting: ClientHostingView | null;
@@ -1828,6 +1855,7 @@ export const OrgSetup = ({
             clientId={clientId}
             hosting={hosting}
             needs={needs}
+            modelSpend={modelSpend}
             quotaPolicy={quotaPolicy}
             refresh={refresh}
             releases={releases}

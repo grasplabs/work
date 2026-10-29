@@ -1,7 +1,8 @@
 import { clientDomain, stages } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { setModelSpendCeiling } from "../src/clients/settings.ts";
 import { auditEvents, clients, settings } from "../src/db/schema.ts";
@@ -310,6 +311,49 @@ describe("a client's model spend ceiling, as its gateway's budget", () => {
       again: false,
       audited: [{ from: 250, to: 1200 }],
       marked: true,
+    });
+  });
+
+  it("audits two saves that overlap each as what it replaced, the second from the first's ceiling", async () => {
+    const clientId = await clientWith({});
+
+    const saved = await Promise.all([
+      setModelSpendCeiling(env, staff, { clientId, euros: 300 }),
+      setModelSpendCeiling(env, staff, { clientId, euros: 400 }),
+    ]);
+    const audited = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "client.model_spend_ceiling")
+        )
+      )
+      .orderBy(auditEvents.at, sql`rowid`);
+    const changes = audited.map(({ detail }) =>
+      z
+        .object({ from: z.number(), to: z.number() })
+        .parse(JSON.parse(detail ?? "null"))
+    );
+    const [first, second] = changes;
+    const [record] = await db
+      .select({ ceiling: clients.modelSpendCeiling })
+      .from(clients)
+      .where(eq(clients.id, clientId));
+
+    expect({
+      saved,
+      count: changes.length,
+      chained: [first?.from, second?.from === first?.to],
+      ends: record?.ceiling === second?.to,
+      both: [first?.to ?? 0, second?.to ?? 0].toSorted((a, b) => a - b),
+    }).toStrictEqual({
+      saved: [true, true],
+      count: 2,
+      chained: [250, true],
+      ends: true,
+      both: [300, 400],
     });
   });
 

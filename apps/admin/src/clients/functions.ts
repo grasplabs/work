@@ -18,6 +18,7 @@ import { adminReader } from "./admin.ts";
 import { applySettings } from "./apply.ts";
 import { clientGrid, defaultLiveOptions, gridLive } from "./grid.ts";
 import type { LiveStatus } from "./grid.ts";
+import { clientModelSpend } from "./model-spend.ts";
 import { clientQuotaPolicy } from "./quota-policy.ts";
 import {
   modelSpendCeilingInputSchema,
@@ -105,6 +106,14 @@ export const fetchClientSetup = createServerFn({ method: "GET" })
 export const fetchClientQuotaPolicy = createServerFn({ method: "GET" })
   .validator(clientSchema)
   .handler(async ({ data }) => await clientQuotaPolicy(env, data.clientId));
+
+/**
+ * A client's model spend this month as its core's ledger counts it, read
+ * live; null when unknown.
+ */
+export const fetchClientModelSpend = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(async ({ data }) => await clientModelSpend(env, data.clientId));
 
 export const setRingFn = createServerFn({ method: "POST" })
   .validator(ringInputSchema)
