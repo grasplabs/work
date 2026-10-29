@@ -78,6 +78,15 @@ export const ringInputSchema = z.object({
   ring: z.int().nonnegative(),
 });
 
+/** The most staff may set a client's monthly model spend ceiling to, in euros. */
+export const modelSpendCeilingMost = 100_000;
+
+export const modelSpendCeilingInputSchema = z.object({
+  clientId: clientIdSchema,
+  /** Whole euros a month, at least one. */
+  euros: z.int().min(1).max(modelSpendCeilingMost),
+});
+
 /**
  * A sign-in as the page sends it, checked here rather than by the server
  * function's validator, so a refusal comes back as its code.
@@ -122,6 +131,45 @@ export const setRing = async (
       .set({ ring, updatedAt: new Date() })
       .where(and(eq(clients.id, clientId), ne(clients.ring, ring))),
     { action: "client.ring", clientId, detail: { ring } }
+  );
+};
+
+/**
+ * Sets client `clientId`'s monthly model spend ceiling to `euros`, as
+ * `staff`, audited (`client.model_spend_ceiling`, with the ceiling before
+ * and after) when it changes, and marks its config changed
+ * (`configChangedAt`): its core's gateway enforces the new ceiling once
+ * its next deploy or provisioning gives it (src/deploy/core-vars.ts).
+ */
+export const setModelSpendCeiling = async (
+  env: Env,
+  staff: Staff,
+  input: z.input<typeof modelSpendCeilingInputSchema>
+): Promise<boolean> => {
+  const db = adminDatabase(env.DB);
+  const { clientId, euros } = modelSpendCeilingInputSchema.parse(input);
+  const [client] = await db
+    .select({ ceiling: clients.modelSpendCeiling })
+    .from(clients)
+    .where(eq(clients.id, clientId));
+  if (client === undefined) {
+    throw new SettingsError("unknown_client", `No client ${clientId}`);
+  }
+  const now = new Date();
+  return await actIfChanged(
+    db,
+    staff,
+    db
+      .update(clients)
+      .set({ modelSpendCeiling: euros, configChangedAt: now, updatedAt: now })
+      .where(
+        and(eq(clients.id, clientId), ne(clients.modelSpendCeiling, euros))
+      ),
+    {
+      action: "client.model_spend_ceiling",
+      clientId,
+      detail: { from: client.ceiling, to: euros },
+    }
   );
 };
 

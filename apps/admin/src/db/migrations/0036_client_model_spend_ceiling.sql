@@ -1,0 +1,1 @@
+ALTER TABLE `clients` ADD `model_spend_ceiling` integer DEFAULT 500 NOT NULL;

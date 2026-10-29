@@ -70,6 +70,7 @@ import {
   History,
   LiveNumbers,
   PinRelease,
+  ModelSpendCeilingChange,
   RingChange,
   RollBack,
   RotateSecrets,
@@ -82,7 +83,7 @@ import {
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
 import { Body, ErrorCode, Facts, Quiet, SetupSection } from "./setup-parts.tsx";
-import { formatDate } from "./words.ts";
+import { euro, euros, formatDate } from "./words.ts";
 
 /** The section's tabs, in order: how it stands first. */
 export const setupTabs = [
@@ -759,6 +760,44 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
   );
 };
 
+/**
+ * Its model spend: the ceiling its core's gateway holds it to, what this
+ * month's use came to as far as its core counted it, and changing the
+ * ceiling.
+ */
+const ModelSpend = ({
+  clientId,
+  ceiling,
+  view,
+  refresh,
+}: {
+  clientId: string;
+  ceiling: number;
+  view: AdminView | null;
+  refresh: Refresh;
+}) => {
+  const spent = view?.usage.thisMonth.spend;
+  return (
+    <SetupSection
+      description="What its model calls may cost in a calendar month. Its core's model gateway refuses a call that would go past it."
+      title="Model spend"
+    >
+      <Body>
+        <p>
+          {spent === undefined
+            ? `Ceiling: ${euros(ceiling)} a month. This month's spend shows once its core answers.`
+            : `This month: about ${euro(spent)} of its ${euros(ceiling)} ceiling (${String(Math.min(100, Math.round((spent / ceiling) * 100)))}%), estimated from what its core counted.`}
+        </p>
+        <ModelSpendCeilingChange
+          ceiling={ceiling}
+          clientId={clientId}
+          refresh={refresh}
+        />
+      </Body>
+    </SetupSection>
+  );
+};
+
 const Status = ({
   clientId,
   setup,
@@ -767,6 +806,7 @@ const Status = ({
   quotaPolicy,
   hosting,
   releases,
+  refresh,
 }: {
   clientId: string;
   setup: ClientSetup;
@@ -777,6 +817,7 @@ const Status = ({
   quotaPolicy: Promise<ClientQuotaPolicy | null>;
   hosting: ClientHostingView | null;
   releases: readonly { id: string; notes: string }[];
+  refresh: Refresh;
 }) => (
   <>
     <Header clientId={clientId} needs={needs} setup={setup} />
@@ -805,6 +846,14 @@ const Status = ({
       </SetupSection>
     ) : null}
     <HostingSection hosting={hosting} releases={releases} setup={setup} />
+    {setup.account === null ? null : (
+      <ModelSpend
+        ceiling={setup.account.modelSpendCeiling}
+        clientId={clientId}
+        refresh={refresh}
+        view={view}
+      />
+    )}
     <SetupSection
       description="Read from its account now, and kept a minute. The admin doesn’t keep these day by day yet. Cost is an estimate for the calendar month: its Workers Paid plan past what it includes, and AI Gateway spend; not storage or Durable Objects."
       title="Its platform in numbers"
@@ -851,6 +900,7 @@ const Status = ({
 
 /** What a ring change records besides. */
 const ringSchema = z.object({ ring: z.number() });
+const ceilingChangeSchema = z.object({ to: z.number() });
 
 /** What setting each sealed secret did, for its log. */
 const sealedSecretWords: Record<SealedSecretName, string> = {
@@ -872,6 +922,15 @@ const plainEventWords: Readonly<Record<string, string>> = {
   "client.rotate_secrets": "Rotated its secrets.",
   "client.sign_in": "Changed how its people sign in.",
   "client.teams_bot": "Changed its Teams bot.",
+};
+
+/** A change of its model spend ceiling, in a sentence. */
+const ceilingWords = ({ detail }: ClientSetup["done"][number]): string => {
+  const to = ceilingChangeSchema.safeParse(JSON.parse(detail ?? "null")).data
+    ?.to;
+  return to === undefined
+    ? "Changed its model spend ceiling."
+    : `Set its model spend ceiling to ${euros(to)} a month.`;
 };
 
 /** What staff did by hand, in a sentence. */
@@ -940,7 +999,11 @@ const Done = ({ setup }: { setup: ClientSetup }) => {
                 key={event.id}
               >
                 <span className="flex min-w-0 flex-col gap-0.5">
-                  <span>{eventWords(event)}</span>
+                  <span>
+                    {event.action === "client.model_spend_ceiling"
+                      ? ceilingWords(event)
+                      : eventWords(event)}
+                  </span>
                   <span className="text-muted-foreground text-xs">
                     {event.actor}
                   </span>
@@ -1766,6 +1829,7 @@ export const OrgSetup = ({
             hosting={hosting}
             needs={needs}
             quotaPolicy={quotaPolicy}
+            refresh={refresh}
             releases={releases}
             setup={setup}
             view={view}
