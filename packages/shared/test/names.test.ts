@@ -119,12 +119,15 @@ describe("the platform's names", () => {
   it("serve staging below production's domain, and give every host to exactly one stage", () => {
     expect({
       domains: stages.map((stage) => clientDomain(stage)),
+      relays: stages.map((stage) => authRelayHost(stage)),
       production: hostsOf("production").map((host) => stageOfHost(host)),
       staging: hostsOf("staging").map((host) => stageOfHost(host)),
       stagingDomainItself: stageOfHost(clientDomain("staging")),
       lookalike: stageOfHost("acme.notstaging.ongrasp.app"),
     }).toStrictEqual({
       domains: ["ongrasp.app", "staging.ongrasp.app"],
+      // What Grasp's Google and Entra apps name as their redirect URIs' host.
+      relays: ["auth.ongrasp.app", "auth.staging.ongrasp.app"],
       production: ["production", "production", "production", "production"],
       staging: ["staging", "staging", "staging", "staging"],
       stagingDomainItself: "staging",
