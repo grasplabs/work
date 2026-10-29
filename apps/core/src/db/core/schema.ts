@@ -57,8 +57,12 @@ const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
  * in the same release, to that migration's own number.
  *
  * 0120 dropped `admission_topics` in the release that stopped using it.
+ * 0169 lets a revocation be every App's (a null `app_id`), which the code
+ * before it reads as one App's and fails on: a release before it would
+ * drop such rows unexpanded, and the screens they were for would never be
+ * told.
  */
-export const compatibleFromMigration = 120;
+export const compatibleFromMigration = 169;
 
 /** A person. Found by their IdP account, never by email alone. */
 export const users = sqliteTable("users", {
@@ -748,18 +752,21 @@ export const appIntegrations = sqliteTable(
  * Revocations an App's host couldn't be told of (src/access-revocations.ts):
  * told again by the clock until it takes them, so a host away for
  * longer than its retries still clears the screens of whoever lost a
- * role. `user_ids` is null for everyone the host knows of.
+ * role. `user_ids` is null for everyone the host knows of. A null
+ * `app_id` is a revocation for every App (an admin's role lost), kept as
+ * one row so the change's batch stays one row however many Apps there
+ * are; it is expanded into one row per App a page at a time, in App ID
+ * order, `after_app_id` the last App it has expanded to (GRA-650).
  */
 export const accessRevocations = sqliteTable(
   "access_revocations",
   {
     id: text().primaryKey(),
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id, { onDelete: "cascade" }),
+    appId: text("app_id").references(() => apps.id, { onDelete: "cascade" }),
     userIds: text("user_ids", { mode: "json" }).$type<string[] | null>(),
     attempts: integer().notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
+    afterAppId: text("after_app_id"),
   },
   // The clock tells the least tried first, oldest first among them,
   // once it dropped those a day old.
@@ -1308,16 +1315,31 @@ export const businessStoreVersions = sqliteTable(
 );
 
 /**
- * The App a store serves, claimed by the first seal that binds it and kept
- * for good: retention deletes releases and their bindings, never this. So
- * a store an App stopped using never comes to serve another App, which
- * would read what the first left behind.
+ * The one canonical owner of a store's schema and operations (spec 40.8),
+ * claimed once and kept for good: retention deletes releases and their
+ * bindings, never this. So a store its owner stopped using never comes to
+ * serve another owner, which would read what the first left behind. The
+ * owner is an App (`appId`), claimed by the first seal that binds the
+ * store, or an independent workflow (`workflowId`, GRA-682), claimed when
+ * an admin activates a version that declares it: exactly one of the two.
+ * A workflow's store has no App, so nothing that looks a store's App up
+ * ever finds one for it.
  */
-export const sdkStoreOwners = sqliteTable("sdk_store_owners", {
-  storeId: text("store_id").primaryKey(),
-  appId: text("app_id").notNull(),
-  claimedAt: timestamp("claimed_at").notNull(),
-});
+export const sdkStoreOwners = sqliteTable(
+  "sdk_store_owners",
+  {
+    storeId: text("store_id").primaryKey(),
+    appId: text("app_id"),
+    workflowId: text("workflow_id"),
+    claimedAt: timestamp("claimed_at").notNull(),
+  },
+  () => [
+    check(
+      "sdk_store_owners_one_owner",
+      sql`(app_id IS NULL) <> (workflow_id IS NULL)`
+    ),
+  ]
+);
 
 /**
  * The store an App of spec 8's layout runs on, one per App: created by the

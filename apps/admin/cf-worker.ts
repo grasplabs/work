@@ -2,18 +2,19 @@
  * The admin's Worker as Cloudflare's cf CLI deploys it (cloudflare.config.ts),
  * read from its wrangler.jsonc, which stays the one source of the admin's
  * bindings: the tests' pool, typegen and check:wrangler-configs read it too.
- * cf's config has no Wrangler environments and no keep_vars, so this:
+ * cf's config has no Wrangler environments, so this:
  *
  * - takes the stage's view of wrangler.jsonc (the top level for production,
  *   `env.staging` over it for staging, as Wrangler merges them);
  * - declares each Durable Object class the migrations create, and each
  *   Workflow, as an export of cf's exports model (the admin's Worker is
  *   new on Grasp's account: nothing there was migrated the classic way);
- * - fills in what a deploy looks up (the account's Secrets Store and the
- *   stage's hostname map, `DeployInputs`), leaving out bindings to optional
- *   secrets the store doesn't have yet, and stopping on a required one;
- * - adds the admin's settings from the deploy's environment as text
- *   bindings, each only when it's set, in keep_vars' place.
+ * - fills in what a deploy passes (the account's Secrets Store, the
+ *   stage's hostname map and the store's secrets, `DeployInputs`), leaving
+ *   out bindings to optional secrets the store doesn't have yet, and
+ *   stopping on a required one;
+ * - stops a deploy whose stage sets no Access application in its vars
+ *   (`CF_ACCESS_AUD`, `CF_ACCESS_ISS`): every request would be refused.
  *
  * Pure: the deploy (deploy-platform) passes what it looked up in `inputs`.
  */
@@ -23,30 +24,18 @@ import type { WorkerConfig } from "cf/config";
 import { parseJsonc } from "../../scripts/jsonc.ts";
 import { optionalSecrets } from "../../scripts/optional-secrets.ts";
 
-/** The admin's settings, passed at deploy time (deploy-platform), never secrets. */
-export const adminSettings = [
-  "CF_ACCESS_AUD",
-  "CF_ACCESS_ISS",
-  "CLIENT_DOMAIN",
-  "ENTRA_CLIENT_ID",
-  "GOOGLE_CLIENT_ID",
-  "GRASP_CLIENT_ID",
-  "ROOMS_ORIGIN",
-  "ADMIN_HOST",
-  "DISCORD_PUBLIC_KEY",
-  "DISCORD_STAFF_IDS",
-] as const;
-
-/** What a deploy looked up, and the admin's settings; all unset for a build. */
+/** What a deploy passes; all unset for a build. */
 export interface DeployInputs {
-  /** The account's Secrets Store id. */
+  /** The account's Secrets Store id (the names module's, `secretsStoreId`). */
   SECRETS_STORE_ID?: string;
   /** The stage's router hostname map's KV namespace id. */
   ROUTER_HOSTS_ID?: string;
   /** The names of the secrets the store has, comma-separated. */
   STORED_SECRETS?: string;
-  [setting: string]: string | undefined;
 }
+
+/** The vars without which the admin refuses every request (src/access.ts). */
+const accessVars = ["CF_ACCESS_AUD", "CF_ACCESS_ISS"] as const;
 
 type Stage = "production" | "staging";
 type Json = Record<string, unknown>;
@@ -126,17 +115,11 @@ const durableObjectClasses = (config: Json): string[] => {
   return [...live];
 };
 
-/** Its vars, then the admin's settings the deploy set. */
-const textBindings = (config: Json, inputs: DeployInputs): Env => {
+/** Its vars: every setting of the admin's, per stage, in wrangler.jsonc. */
+const textBindings = (config: Json): Env => {
   const env: Env = {};
   for (const [key, value] of Object.entries(objectOf(config.vars))) {
     env[key] = bindings.text(text(value));
-  }
-  for (const setting of adminSettings) {
-    const value = inputs[setting];
-    if (value !== undefined && value !== "") {
-      env[setting] = bindings.text(value);
-    }
   }
   return env;
 };
@@ -266,6 +249,15 @@ export const cfWorker = (
 ): WorkerConfig => {
   const config = stageView(objectOf(parseJsonc(wranglerText)), stage);
   const name = text(config.name);
+  const vars = objectOf(config.vars);
+  const unset = accessVars.filter(
+    (key) => typeof vars[key] !== "string" || vars[key] === ""
+  );
+  if (inputs.STORED_SECRETS !== undefined && unset.length > 0) {
+    throw new Error(
+      `Set ${unset.join(" and ")} in apps/admin/wrangler.jsonc for ${stage}: without them the admin refuses everyone, so nothing is deployed`
+    );
+  }
   const observability = objectOf(config.observability);
   const classes = classBindings(config, name);
   return {
@@ -287,7 +279,7 @@ export const cfWorker = (
       triggers.scheduled({ schedule })
     ),
     env: {
-      ...textBindings(config, inputs),
+      ...textBindings(config),
       ...storageBindings(config, inputs),
       ...secretBindings(config, inputs),
       ...classes.env,
