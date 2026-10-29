@@ -58,6 +58,7 @@ import {
   publishWorkflowVersion,
   releaseWorkflowName,
   setWorkflowAskable,
+  setWorkflowProcess,
   shareWorkflowResource,
   unshareWorkflowResource,
   workflowAskable,
@@ -217,6 +218,13 @@ export class WorkflowResourcesRpc
       this.#check,
       async (person) =>
         await startWorkflow(this.#env, { type: "person", person }, id, input)
+    );
+  }
+
+  async setProcess(id: string, process: unknown): Promise<WorkflowResource> {
+    return await withPerson(
+      this.#check,
+      async (person) => await setWorkflowProcess(this.#env, person, id, process)
     );
   }
 

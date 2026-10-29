@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { Brain, BrainPorts } from "./brain.ts";
 import {
   brainContractVersion,
@@ -48,8 +50,10 @@ import { tokensOf } from "./tokens.ts";
 // reader may read, and their candidates are fused by rank, each source
 // version once (fusion.ts). A recall narrowed to collections, or bound to
 // some, reads no memory record: none is in a collection, so no narrowing
-// widens into memory. No model is used, so no source text reaches one
-// here; the recheck before model use comes with reranking.
+// widens into memory. Only a recall whose budget asks for it reranks
+// (`reranked`): the best of the fused candidates, their access checked
+// again first, ordered by the deployment's model through the host's
+// gateway; otherwise no model is used, and no source text reaches one.
 
 /** The retrieval policy this service follows: lanes fused by rank (fusion.ts). */
 export const recallPolicyVersion = fusionPolicy.version;
@@ -80,6 +84,7 @@ export const clampBudget = (
   maxItems: budget?.maxItems ?? recallDefaults.maxItems,
   maxTokens: budget?.maxTokens ?? recallDefaults.maxTokens,
   deadlineMs: budget?.deadlineMs ?? recallDefaults.deadlineMs,
+  rerank: budget?.rerank ?? false,
 });
 
 /** A refusal from a read below, as the Brain's stable code. */
@@ -283,7 +288,11 @@ const sourcesOf = (items: readonly MemoryItem[]): BrainSourceRef[] => {
  * asked finished its bounded read (`complete`, never exhaustive). The
  * vector lane is reported as not enabled where the store has none.
  */
-const coverageOf = (read: LanesRead, truncated: boolean): Coverage => {
+const coverageOf = (
+  read: LanesRead,
+  truncated: boolean,
+  rerank: RerankOutcome
+): Coverage => {
   const routes: [Lane, LaneRead][] = [
     ["exact", read.exact],
     ["fulltext", read.fulltext],
@@ -301,12 +310,24 @@ const coverageOf = (read: LanesRead, truncated: boolean): Coverage => {
   if (failed) {
     state = "degraded";
   }
+  // A rerank that didn't happen leaves the fused order: nothing read is
+  // missing, so the read's state stands; why is said.
   return {
     state,
-    queriedRoutes: routes.flatMap(([route, lane]) =>
-      lane.state === "read" ? [route] : []
-    ),
-    omittedRoutes: omitted,
+    queriedRoutes: [
+      ...routes.flatMap(([route, lane]) =>
+        lane.state === "read" ? [route] : []
+      ),
+      ...(rerank === "reranked" ? ["rerank"] : []),
+    ],
+    omittedRoutes: [
+      ...omitted,
+      ...(rerank === "reranked" ||
+      rerank === "not_asked" ||
+      rerank === "unneeded"
+        ? []
+        : [{ route: "rerank", reason: rerank }]),
+    ],
   };
 };
 
@@ -383,6 +404,131 @@ const memoriesFound = async <C>(
   return found.length === 0
     ? []
     : await brain.ports.memories.keep(reader, readers.people, found);
+};
+
+/** The reranking policy, its version added to the pack's policy when it reranked. */
+export const rerankPolicyVersion = "rerank@1";
+
+/** Most candidates one rerank reads: the best of the fused ones. */
+const rerankCandidatesMax = 20;
+
+/** Characters of each candidate's statement the reranker reads. */
+const rerankTextMax = 800;
+
+/** How a rerank went: done, not asked for, or why not. */
+type RerankOutcome =
+  | "reranked"
+  | "not_asked"
+  /** Asked, but fewer than two candidates: nothing to order. */
+  | "unneeded"
+  | "not_enabled"
+  | "deadline"
+  | "failed"
+  | "access_changed";
+
+/** What a reranker answers: the candidates' IDs, best first. */
+const rerankAnswerSchema = z
+  .array(z.string().max(200))
+  .max(rerankCandidatesMax);
+
+/**
+ * `found` ordered again by the host's reranker, when `asked`: the best
+ * `rerankCandidatesMax` of it, each document's version checked as still
+ * readable by `reader` before any of its text reaches a model, within
+ * `remaining` milliseconds. The reranker's answer only orders what it was
+ * given: an ID it invents, or repeats, is ignored, and one it leaves out
+ * follows in fused order, as does everything past the best. Otherwise,
+ * or when it fails, `found` as it was, and why.
+ */
+const reranked = async <C>(
+  brain: Brain<C>,
+  store: BrainStore<C>,
+  reader: C,
+  question: string,
+  found: readonly { item: MemoryItem; memory?: KeptMemory }[],
+  { asked, remaining }: { asked: boolean; remaining: number }
+): Promise<{
+  found: { item: MemoryItem; memory?: KeptMemory }[];
+  outcome: RerankOutcome;
+}> => {
+  const kept = [...found];
+  const { rerank } = brain.ports;
+  if (!asked) {
+    return { found: kept, outcome: "not_asked" };
+  }
+  if (rerank === undefined) {
+    return { found: kept, outcome: "not_enabled" };
+  }
+  if (remaining <= 0) {
+    return { found: kept, outcome: "deadline" };
+  }
+  if (kept.length < 2) {
+    return { found: kept, outcome: "unneeded" };
+  }
+  const best = kept.slice(0, rerankCandidatesMax);
+  const documents = best.flatMap(({ item }) =>
+    item.sourceRefs.flatMap((ref) =>
+      ref.kind === "document"
+        ? [
+            {
+              documentId: ref.documentId,
+              collectionId: ref.collectionId,
+              version: ref.version,
+            },
+          ]
+        : []
+    )
+  );
+  try {
+    // Before any text reaches a model: what the lanes read a moment ago
+    // may have been taken from the reader since.
+    await store.pinsOf(reader, documents);
+  } catch {
+    return { found: kept, outcome: "access_changed" };
+  }
+  const started = brain.ports.clock().getTime();
+  let answer: unknown;
+  try {
+    answer = await Promise.race([
+      rerank(reader, {
+        question,
+        candidates: best.map(({ item }) => ({
+          id: item.id,
+          text: item.statement.slice(0, rerankTextMax),
+        })),
+        provenance: [
+          ...new Set(documents.map(({ collectionId }) => collectionId)),
+        ],
+        deadlineMs: remaining,
+      }),
+      timeout(remaining),
+    ]);
+  } catch {
+    return { found: kept, outcome: "failed" };
+  }
+  if (answer === undefined) {
+    return {
+      found: kept,
+      outcome:
+        brain.ports.clock().getTime() - started >= remaining
+          ? "deadline"
+          : "failed",
+    };
+  }
+  const ranking = rerankAnswerSchema.safeParse(answer);
+  if (!ranking.success) {
+    return { found: kept, outcome: "failed" };
+  }
+  const byId = new Map(best.map((entry) => [entry.item.id, entry]));
+  const ordered = [...new Set(ranking.data)].flatMap((id) => {
+    const entry = byId.get(id);
+    byId.delete(id);
+    return entry === undefined ? [] : [entry];
+  });
+  return {
+    found: [...ordered, ...byId.values(), ...kept.slice(best.length)],
+    outcome: "reranked",
+  };
 };
 
 /** What one lane read, or why it read nothing. */
@@ -643,7 +789,18 @@ export const recallWithSources = async <C>(
       remaining,
       ...(collectionIds === undefined ? {} : { collectionIds }),
     });
-    const found = fusedItems(read);
+    const { found, outcome } = await reranked(
+      brain,
+      store,
+      reader,
+      query,
+      fusedItems(read),
+      {
+        asked: limits.rerank,
+        remaining:
+          limits.deadlineMs - (brain.ports.clock().getTime() - startedAt),
+      }
+    );
     const { items, memories, tokenCount } = packed(found, limits);
     const truncated = items.length < found.length || readFull(read, limit);
     const provenance = joined(
@@ -651,11 +808,14 @@ export const recallWithSources = async <C>(
       await memoriesRead(brain, reader, memories),
       collectionIds ?? []
     );
-    const coverage = coverageOf(read, truncated);
+    const coverage = coverageOf(read, truncated, outcome);
     const pack: MemoryPack = {
       id: crypto.randomUUID(),
       contractVersion: brainContractVersion,
-      retrievalPolicyVersion: recallPolicyVersion,
+      retrievalPolicyVersion:
+        outcome === "reranked"
+          ? `${recallPolicyVersion}+${rerankPolicyVersion}`
+          : recallPolicyVersion,
       items,
       sourceVersions: sourcesOf(items),
       conflicts: [],
