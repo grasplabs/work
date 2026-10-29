@@ -7,7 +7,9 @@ import type {
 // The marks of the texts the Stephen Lab measures (interviewer-text.ts),
 // one per interviewer, kind of interview and language: the text on the
 // prototype's main at 48534d4 (grasplabs/prototype, packages/grasp), after
-// the lab's round of 5 October and the interview's audit of the same day.
+// the lab's round of 5 October and the interview's audit of the same day,
+// with the handover to a named colleague (8c7e1ff4, 15 October) and the
+// promise about whose words are seen (af8e34c1, 16 October).
 // Core speaks only a text whose mark is here, and a test holds it to that:
 // a text changes only through the lab, one change at a time, and its new
 // marks come in with the change the lab kept.
@@ -17,34 +19,34 @@ export const labMarks: Record<
 > = {
   stephen: {
     own: {
-      en: "b13487518370a0ad47b9cb235a6fe21d16cfe51db3980cb0787a01e899fe9266",
-      nl: "3c01d4a212ce318f328a22aeed08d3423a7f57eefe94c3f292542e392c3262fd",
-      de: "240919bd4475a0fe76f2a3a138f4c3867380e8f50b91c4a1857a7cb769cba687",
-      fr: "38499828ea21c1133878571551467439d2c10893e81355e0a21c7d0d6cc9f7bf",
-      es: "ddde5ff9037de39a5738b35740eeced7fc46aecb881cce1481092883b0ead4aa",
+      en: "76a5d9ed59b7d24fecaf6897b2bb450b4d0893aadd06cd9291e68a3adc63eb85",
+      nl: "a7c965a1d750aa396e77e8f25539f243eecb8232e462fbd95112893ab7df3c49",
+      de: "88c24f80df5bc08b6c00d6bb23a6f5da564b10408de550ca09fa37fa2b38bff9",
+      fr: "848ca68f5524ed6bf8cfa9b3806c8ee20964bda3ca1ace93c05007f139d7a5e6",
+      es: "b3336e76c49fb6b973a447d90a2efc20cdcbfb1302a95c7c4aceca5fc435670f",
     },
     lead: {
-      en: "0e63aa13955b0bdc4fc2963ac0049da6fe13feea6eeb41d03e9991f12a55569c",
-      nl: "95b7d91cc975aa04eb5c65f220bf60cf9ddaf8f584734227794b510dd8235779",
-      de: "72e61870324ee52626bce03886db6e4feb092bd2a6c9693f8e3c84393807a092",
-      fr: "04644dd34c4834844fd75a703fe9fb8070073ec56caf7e3a23438cec4371fd11",
-      es: "ad6c4e6532ee54f58f99ec23972e48bcb51ad612ea1a1609753066e70e6d036f",
+      en: "d238af3f8de94ad37189363f341d63f6f546fee177d9c60d788a350a063a2bd7",
+      nl: "5ca515561995f10be29e8786a87320e483627ed08a2a3abba3bddb88a73edcf2",
+      de: "590054b30680bd9326b65ae052c4583f6612366a6f9dc8d3590a220bbff95697",
+      fr: "9751ee09c7c31f19a6c138eac219493b79f7b0af1e6ee1ead0130a8ad5756db0",
+      es: "713c4899ecf45f556b6f979af8fe349ee17e68dd20aedd25d48ba4d724404e15",
     },
   },
   claire: {
     own: {
-      en: "0eb41874cc88974bb5d9ff03ccad9d9e2e4bb9948c59c804a96362d88a6a61bb",
-      nl: "9167e33150dce860562032909d6c164297c831a11c125c706a9ab00660b71a32",
-      de: "b6a8054c9b1d75eee9d6b0b7a3b92203a65468334a6eeffd10c70bdc0e8c4ab2",
-      fr: "4ebf202290bc94cf19df69997866c5bb965892c6500b8eafa0d69a094fec5f48",
-      es: "4d4db436a51b4c9c41a58716563a208470031aaafafc7b26a72884b7c8b3349f",
+      en: "0a59f54cc0140eeaa0337a703678ec216ec9b65533d6922568d958933cf4affe",
+      nl: "0150b2ea2a7efd83ee15022d93c791b5ba327b5ddf159a33d1528268d69cccd6",
+      de: "544f88250f19a45cc0bc1895e4d4e7fd825aadb28e36f386f4306a701e87de0d",
+      fr: "ba2e34c22a41807a3cf07bb0aa053dc9491c2598b185d788bdd3740275824d3c",
+      es: "9016e9a067de5c428f7236c7b2567ec8ee4c51ab5f809adad3c86bc4224dd1d0",
     },
     lead: {
-      en: "2f8d925531468c361067fbf6b03df0b481b4387979b2f69bf0d31a49b7b68225",
-      nl: "58c17e5aaba72914920637e8f35b9a507fba28a82b77ea295a046fed136c2fda",
-      de: "5eee13f17de8d9b166e8da33a61548a45353525a9270215a6fd661d177f18bb1",
-      fr: "4f4a5c32b6371cc29b63cfe230409e9f3ce1fb5bfb391986a8595b8abf83135f",
-      es: "a76c6661f6bea7e368af2c0298af5494d6433c6b82027874d49e505e6cf604db",
+      en: "6044edd8be8d1c8a2b5cbd1088abc17394ef64d10c86bf15ae1caf769cbfbeba",
+      nl: "2ad1b9c4010cb8d1d5352c19750605ba2bb737367129c3aeb277dd89870c159b",
+      de: "f526a5fd3c17bc11968d707892085e5373357887388b33e6fd751bc916f7bb7e",
+      fr: "10c1d1607803c1c9927218553b7dca3d7102f7944790c4153ce77db67acb9d68",
+      es: "b7dd1a8465cb0f8b269fa9853ca82926b4c835dc04879d77ddb613d426aa5af5",
     },
   },
 };
