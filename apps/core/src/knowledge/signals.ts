@@ -57,6 +57,7 @@ import {
   knowledgeSignalComputations as computations,
   knowledgeSignalDismissals as dismissals,
   knowledgeSignals,
+  personErasures,
 } from "../db/core/schema.ts";
 import { chunks, inList } from "../db/d1.ts";
 import { allowedCollections } from "./access.ts";
@@ -551,7 +552,15 @@ export const storeKnowledgeSignals = async (
       ? []
       : unreadSignals(knowledge, now, totals.unreadDays, totals.read),
   ]);
-  const found = [...questions, ...overdue, ...unread];
+  // None for someone erased (core's person-erasure.ts): their erasure
+  // took out theirs, and none comes back.
+  const erasures = await db
+    .select({ userId: personErasures.userId })
+    .from(personErasures);
+  const erased = new Set(erasures.map(({ userId }) => userId));
+  const found = [...questions, ...overdue, ...unread].filter(
+    ({ owner }) => !erased.has(owner)
+  );
   const rows = await Promise.all(
     found.map(async (row) => ({
       ...row,
@@ -576,7 +585,10 @@ export const storeKnowledgeSignals = async (
                 ${knowledgeSignals.evidenceAt}
               FROM ${knowledgeSignals}
               WHERE ${knowledgeSignals.computation} = ${previous.id}
-                AND ${knowledgeSignals.kind} = 'unread_document'`
+                AND ${knowledgeSignals.kind} = 'unread_document'
+                AND ${knowledgeSignals.owner} NOT IN (
+                  SELECT ${personErasures.userId} FROM ${personErasures}
+                )`
           ),
         ];
   for (const [first, ...rest] of chunks(
