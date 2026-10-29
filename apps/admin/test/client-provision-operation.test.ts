@@ -1221,6 +1221,19 @@ describe("provisioning a placed client", () => {
           ?.get(core)
           ?.versions.at(-1)?.metadata.bindings ?? []
       );
+    // The version each runs, as the namespace has it live: connect's
+    // after its secrets were delivered.
+    const liveIn = (script: string) =>
+      account.namespaces.get(clientDispatchNamespace)?.get(script)
+        ?.deployments[0]?.versions[0]?.version_id;
+    const recorded = await db
+      .select({
+        worker: clientWorkers.worker,
+        versionId: clientWorkers.versionId,
+      })
+      .from(clientWorkers)
+      .where(eq(clientWorkers.clientId, clientId))
+      .orderBy(clientWorkers.worker);
     const [probed] = await db
       .select({ detail: auditEvents.detail })
       .from(auditEvents)
@@ -1236,6 +1249,9 @@ describe("provisioning a placed client", () => {
       versionUnchecked: z
         .object({ versionUnchecked: z.number().optional() })
         .parse(JSON.parse(probed?.detail ?? "{}")).versionUnchecked,
+      // What drift compares against: core's as it answered, and its
+      // connect's as connect named it to core in the probe.
+      recorded,
       entry: await env.ROUTER_HOSTS.get(`${clientId}.${domain}`, "json"),
       // Its connect, as core binds it: the gateway, naming its own script.
       connectBinding: bindings.find(({ name }) => name === "CONNECT"),
@@ -1252,6 +1268,10 @@ describe("provisioning a placed client", () => {
     }).toMatchObject({
       operation: { status: "done" },
       versionUnchecked: 1,
+      recorded: [
+        { worker: "connect", versionId: liveIn(connect) ?? "none" },
+        { worker: "core", versionId: liveIn(core) ?? "none" },
+      ],
       entry: { clientId, script: core, generation: 1 },
       connectBinding: {
         type: "service",

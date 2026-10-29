@@ -21,7 +21,10 @@ import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
-import { provisionProbePath } from "@grasp-os/shared/provision-probe";
+import {
+  connectHealthPath,
+  provisionProbePath,
+} from "@grasp-os/shared/provision-probe";
 import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
@@ -69,7 +72,10 @@ import {
 } from "./packages/serve.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
 import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
-import { provisionProbeResponse } from "./provision-probe.ts";
+import {
+  connectHealthResponse,
+  provisionProbeResponse,
+} from "./provision-probe.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
 import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
@@ -301,6 +307,7 @@ const pathHandlers: ReadonlyMap<
   [adminKickoffPath, adminKickoffResponse],
   [platformUpdatePath, platformUpdateResponse],
   [mailIngressPath, mailIngressResponse],
+  [connectHealthPath, connectHealthResponse],
 ]);
 
 /** Routes a request that has passed the router-secret check. */

@@ -135,20 +135,22 @@ const healthSchema = z.object({ ok: z.literal(true), version: z.string() });
 
 /**
  * The version core's `/health` at `origin` names, to a request carrying
- * `routerSecret` as the router sends it; undefined when it doesn't
- * answer, answers otherwise, or takes longer than `timeoutMs` (its body
+ * `routerSecret` as the router sends it, or the one another health path
+ * of core's names (`path`: its connect's, `connectHealthPath`); undefined when it doesn't answer,
+ * answers otherwise, or takes longer than `timeoutMs` (its body
  * included): a stalled connection ends this try, not the check.
  */
 export const answeringVersion = async (
   fetchCore: typeof fetch,
   origin: string,
   routerSecret: string,
-  timeoutMs: number
+  timeoutMs: number,
+  path = "/health"
 ): Promise<string | undefined> => {
   const limit = deadline(timeoutMs);
   try {
     const answer = async () => {
-      const response = await fetchCore(`${origin}/health`, {
+      const response = await fetchCore(`${origin}${path}`, {
         headers: { [routerSecretHeader]: routerSecret },
         redirect: "manual",
         signal: limit.signal,

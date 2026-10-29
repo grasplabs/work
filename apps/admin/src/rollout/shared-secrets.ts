@@ -173,10 +173,10 @@ const liveMatches = async (
       };
     })
   );
-  // A Worker drift doesn't read (connect, in a namespace, whose versions
-  // only core's health tells) runs none: what its operation delivered
-  // doesn't say what it runs now, and a secret it still runs must never
-  // read as revocable.
+  // A Worker drift doesn't read (in a namespace, one core's health names
+  // no version for) runs none: what its operation delivered doesn't say
+  // what it runs now, and a secret it still runs must never read as
+  // revocable.
   const read = new Set(drift.workers.map(({ worker }) => worker));
   const unread = Object.keys(holders)
     .filter((app) => !read.has(app))
@@ -213,8 +213,9 @@ export const storeCheck = async (
  * every shared secret in the store now (`check`), on every Worker holding
  * it; null when that can't be told: its drift is unknown (nothing
  * recorded, or its account didn't answer), or a Worker's live versions
- * weren't read, or drift doesn't read a Worker holding one (connect, in a
- * namespace). Only what was read and differs is behind.
+ * weren't read, or drift doesn't read a Worker holding one (in a
+ * namespace, one core's health names no version for). Only what was read
+ * and differs is behind.
  */
 export const sharedSecretsStatus = async (
   db: AdminDatabase,

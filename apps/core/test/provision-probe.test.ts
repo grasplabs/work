@@ -19,6 +19,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { clock, clockTasks } from "../src/clock.ts";
 import worker from "../src/index.ts";
+import { connectVersionMetadata } from "./connect-providers.ts";
 import { coreOrigin } from "./sign-in.ts";
 
 // The admin's provisioning probe (src/provision-probe.ts). The ways it
@@ -162,6 +163,8 @@ describe("the console's provisioning probe", () => {
       cache: "no-store",
       answer: {
         version: env.CF_VERSION_METADATA.id,
+        // Connect's, as connect named it over its binding.
+        connectVersion: connectVersionMetadata.id,
         clientId,
         bindings: {
           DB: true,

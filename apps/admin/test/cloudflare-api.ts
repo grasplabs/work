@@ -49,6 +49,7 @@ import {
   platformUpdateSignatureHeader,
 } from "@grasp-os/shared/platform-change";
 import {
+  connectHealthPath,
   provisionProbePath,
   provisionProbePurpose,
   provisionProbeRequestSchema,
@@ -190,6 +191,28 @@ const connectOf = (
 };
 
 /**
+ * The version a core whose live version is `live` names for its connect:
+ * the version all of its connect's traffic goes to (`connectOf`), unless
+ * the account says otherwise (`connectAnswering`); null with no connect.
+ */
+const connectAnswering = (
+  account: AccountState,
+  live: VersionState
+): string | null => {
+  if (account.connectAnswering !== undefined) {
+    return account.connectAnswering;
+  }
+  const connect = connectOf(
+    account,
+    bindingsSchema
+      .parse(live.metadata.bindings ?? [])
+      .find(({ name }) => name === "CONNECT")
+  );
+  const [only] = connect?.deployments[0]?.versions ?? [];
+  return only?.percentage === 100 ? only.version_id : null;
+};
+
+/**
  * What a client's core answers the admin's provisioning probe with, as
  * core does (core's src/provision-probe.ts), once the signature checks
  * out with the key its live version's auth secret gives and the request
@@ -241,6 +264,7 @@ const answerProbe = async (
       : { armed: true, tasks: clockTaskNames[name] };
   return Response.json({
     version: account.answeringVersion ?? live.id,
+    connectVersion: connectAnswering(account, live),
     clientId:
       probe.asClient ?? (typeof clientId === "string" ? clientId : null),
     bindings: Object.fromEntries(
@@ -1405,6 +1429,12 @@ export const fakeCloudflareApi = (
       } finally {
         adminReads.now -= 1;
       }
+    }
+    if (url.pathname === connectHealthPath) {
+      const version = connectAnswering(account, live);
+      return version === null
+        ? Response.json({ ok: false }, { status: 503 })
+        : Response.json({ ok: true, version });
     }
     return url.pathname === "/health"
       ? Response.json({

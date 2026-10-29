@@ -1906,28 +1906,30 @@ const deliverSecrets = async (
  * Records each Worker's version live, as its probe found it, on what the
  * client runs (`client_workers`): what drift compares against
  * (src/rollout/drift.ts). Core's is the version its probe answered as;
- * connect's, read from its script in an account's own Workers, or none in
- * a namespace, whose versions the admin reads only through core's health.
- * Only while the runner holds the client.
+ * connect's, read from its script in an account's own Workers, or in a
+ * namespace, whose versions Cloudflare's API doesn't list, the version
+ * connect named to core in the probe (`connectVersion`): after its secrets
+ * were delivered, so the version they were delivered to, or none when it
+ * named none. Only while the runner holds the client.
  */
 const recordLiveVersions = async (
   context: ProvisionContext,
   loaded: Loaded,
   inventory: readonly ClientResource[],
-  coreVersion: string
+  answered: { core: string; connect: string | null }
 ): Promise<void> => {
   const { api, db } = context;
   const { held } = loaded;
   for (const app of appsOf(loaded.manifest)) {
     const target = targetOf(loaded, inventory, app);
-    let version: string | null = coreVersion;
+    let version: string | null = answered.core;
     if (app !== "core") {
       version =
         target.namespace === null
           ? // oxlint-disable-next-line no-await-in-loop -- two Workers
             ((await liveVersion(api, target.accountId, target.scriptName)) ??
             null)
-          : null;
+          : answered.connect;
     }
     // oxlint-disable-next-line no-await-in-loop -- two Workers
     await db
@@ -2065,14 +2067,18 @@ const probe = async (
   if (fault !== null) {
     throw new ProvisionOperationError(fault.code, fault.message);
   }
-  await recordLiveVersions(context, loaded, inventory, version);
+  await recordLiveVersions(context, loaded, inventory, {
+    core: version,
+    connect: answer.connectVersion,
+  });
   const progress = await progressNow(db, loaded.operation.id);
   await recordStep(
     db,
     loaded,
     "probe",
-    // On record: a namespace core's version was the one it answered, not
-    // checked against its upload (GRA-430 qualifies how to).
+    // On record: a namespace core's version, and its connect's, were the
+    // ones they answered, not checked against their uploads (GRA-430
+    // qualifies how to).
     target.namespace === null
       ? { attempts }
       : { attempts, versionUnchecked: 1 },

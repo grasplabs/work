@@ -10,11 +10,20 @@ import { z } from "zod";
 // every public request it forwards, so it alone says nothing of who asks.
 //
 // The answer carries no secret, no resource id and nothing a client's
-// people entered: a version id, the client id the admin deployed, and
+// people entered: core's and connect's version ids, the client id the admin deployed, and
 // binding and task names from core's own code, each with a yes or no.
 
 /** Where the admin asks. Behind the router-secret check. */
 export const provisionProbePath = "/platform/probe";
+
+/**
+ * Where core names the version its connect answers as, as `/health` names
+ * its own: `{ ok: true, version }`, or 503 when connect doesn't answer or
+ * has no version metadata. Behind the router-secret check. How the admin
+ * reads which version a connect in a Workers for Platforms namespace runs
+ * (its rollout/drift.ts), as Cloudflare's API lists none there.
+ */
+export const connectHealthPath = "/health/connect";
 
 /** The purpose the request's signing key is derived for (`hkdfHmacKey`). */
 export const provisionProbePurpose = "grasp-os provisioning probe key";
@@ -41,6 +50,12 @@ export type ClockRegistration = z.infer<typeof clockRegistrationSchema>;
 export const provisionProbeSchema = z.strictObject({
   /** The version answering (version metadata); null where there is none. */
   version: z.string().nullable(),
+  /**
+   * The version connect answers as, as connect named it to core over its
+   * binding (through the connect gateway, in a namespace); null where it
+   * has none or didn't answer.
+   */
+  connectVersion: z.string().nullable(),
   /** The client id its deploy set (`CLIENT_ID`); null where none is set. */
   clientId: z.string().nullable(),
   /**

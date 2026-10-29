@@ -37,8 +37,8 @@ import { callSandboxed } from "./sandboxed.ts";
 // - Making core work for nobody: nothing is read, armed or called before
 //   the signature verifies.
 // - Leaking what the answer is about: binding and task names from core's
-//   own code, each with a yes or no, the version id and the client id the
-//   admin deployed. No resource id, no error message, no secret and
+//   own code, each with a yes or no, core's and connect's version ids and
+//   the client id the admin deployed. No resource id, no error message, no secret and
 //   nothing a client's people entered.
 
 /** What a bucket is asked for: a key nothing writes, so the answer is "none". */
@@ -75,6 +75,37 @@ const connectProbe = async (env: Env): Promise<Record<string, boolean>> => {
     });
     return {};
   }
+};
+
+/** The version connect answers as; null when it has none or didn't answer. */
+export const connectVersion = async (env: Env): Promise<string | null> => {
+  try {
+    const version: unknown = await env.CONNECT.version();
+    return typeof version === "string" && version !== "" ? version : null;
+  } catch (error) {
+    log.warn("probe.connect_version_failed", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    return null;
+  }
+};
+
+/**
+ * Connect's version, as connect names it over its binding
+ * (@grasp-os/shared/provision-probe `connectHealthPath`): how the admin
+ * reads what a connect in a Workers for Platforms namespace runs. 503 when
+ * it names none. Never cached: a stale answer would say connect still runs
+ * what it ran. Behind the router-secret check, as every route is.
+ */
+export const connectHealthResponse = async (
+  _request: Request,
+  env: Env
+): Promise<Response> => {
+  const version = await connectVersion(env);
+  const headers = { "cache-control": "no-store" };
+  return version === null
+    ? Response.json({ ok: false }, { status: 503, headers })
+    : Response.json({ ok: true, version }, { headers });
 };
 
 /** A clock's registration, or null when it didn't answer. */
@@ -190,6 +221,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     brainObjects,
     loader,
     connectBindings,
+    connectAnswering,
     connect,
     core,
     ...namespaced
@@ -201,6 +233,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     answers("BRAIN_OBJECTS", r2(env.BRAIN_OBJECTS)),
     answers("LOADER", sandbox(env)),
     connectProbe(env),
+    connectVersion(env),
     registration("connect", async () => await env.CONNECT.ensureClock()),
     registration("core", async () => await clock(env).ensureRegistered()),
     ...namespaces.map(
@@ -209,6 +242,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
   ]);
   return {
     version: env.CF_VERSION_METADATA?.id ?? null,
+    connectVersion: connectAnswering,
     clientId: env.CLIENT_ID ?? null,
     bindings: {
       DB: db,
