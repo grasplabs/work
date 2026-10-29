@@ -124,7 +124,7 @@ const storedSecrets = async (): Promise<Map<string, StoredSecret>> => {
   }
 };
 
-/** Makes one write: a secret created, its value replaced, or its fingerprint recorded. */
+/** Makes one write: a secret created, or its value (and fingerprint) replaced. */
 const send = async (write: StoreWrite): Promise<unknown> => {
   switch (write.kind) {
     case "create": {
@@ -143,14 +143,10 @@ const send = async (write: StoreWrite): Promise<unknown> => {
     case "update": {
       return await call(`${storeUrl}/${write.id}`, {
         method: "PATCH",
-        body: { value: write.value },
-      });
-    }
-    case "fingerprint": {
-      // The comment alone: the value the store holds stays.
-      return await call(`${storeUrl}/${write.id}`, {
-        method: "PATCH",
-        body: { comment: write.comment },
+        body: {
+          value: write.value,
+          ...(write.comment === undefined ? {} : { comment: write.comment }),
+        },
       });
     }
     default: {
@@ -168,7 +164,7 @@ if (command === "names") {
       `Empty in the ${stage} 1Password Environment, nothing written: ${plan.missing.join(", ")}`
     );
   }
-  const { writes, mismatched, adopted } = planStoreWrites(
+  const { writes, mismatched, claimed } = planStoreWrites(
     plan,
     await storedSecrets()
   );
@@ -184,9 +180,7 @@ if (command === "names") {
   const kept = plan.writes
     .map(({ storeName }) => storeName)
     .filter((name) => !writes.some((write) => write.storeName === name));
-  const written = writes
-    .filter(({ kind }) => kind !== "fingerprint")
-    .map(({ storeName }) => storeName);
+  const written = writes.map(({ storeName }) => storeName);
   console.info(
     [
       `Secrets Store: ${written.length > 0 ? written.join(", ") : "nothing"} written`,
@@ -195,9 +189,9 @@ if (command === "names") {
             `master keys already in the store, left as they are: ${kept.join(", ")}`,
           ]
         : []),
-      ...(adopted.length > 0
+      ...(claimed.length > 0
         ? [
-            `master keys the store held with no fingerprint, kept as they are and fingerprinted from 1Password: ${adopted.join(", ")}`,
+            `master keys the store held with no fingerprint, replaced with 1Password's value and fingerprinted: ${claimed.join(", ")}`,
           ]
         : []),
       ...(plan.skipped.length > 0

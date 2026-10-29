@@ -298,31 +298,33 @@ describe("copying the runtime secrets into the Secrets Store", () => {
     });
   });
 
-  it("keeps a master key the store holds without a fingerprint, and compares against it from then on", async () => {
+  it("replaces a master key the store holds without a fingerprint with 1Password's, and compares against it from then on", async () => {
     store.set("ROUTER_KEY_STAGING", { id: "id-old-router", value: "old" });
 
     const stdout = await copy("staging", everySecret());
-    const adopted = store.get("ROUTER_KEY_STAGING");
+    const claimed = store.get("ROUTER_KEY_STAGING");
     const secrets = everySecret();
     secrets.ROUTER_KEY = "yet-another-router-key";
     const outcome = await outcomeOf(copy("staging", secrets));
 
     expect({
-      value: adopted?.value,
-      fingerprinted: (adopted?.comment ?? "") !== "",
-      valueWritten: writes.includes("update ROUTER_KEY_STAGING"),
+      id: claimed?.id,
+      value: claimed?.value,
+      fingerprinted: (claimed?.comment ?? "") !== "",
       reported: stdout.includes(
-        "no fingerprint, kept as they are and fingerprinted from 1Password: ROUTER_KEY_STAGING"
+        "no fingerprint, replaced with 1Password's value and fingerprinted: ROUTER_KEY_STAGING"
       ),
       laterMismatchStops: outcome.includes(
         "for the master key ROUTER_KEY_STAGING"
       ),
+      keptAfterMismatch: store.get("ROUTER_KEY_STAGING")?.value,
     }).toStrictEqual({
-      value: "old",
+      id: "id-old-router",
+      value: "value-ROUTER_KEY",
       fingerprinted: true,
-      valueWritten: false,
       reported: true,
       laterMismatchStops: true,
+      keptAfterMismatch: "value-ROUTER_KEY",
     });
   });
 });

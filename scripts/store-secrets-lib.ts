@@ -140,16 +140,22 @@ export interface StoredSecret {
 /** One call a copy makes to the store. */
 export type StoreWrite =
   | { kind: "create"; storeName: string; value: string; comment: string }
-  | { kind: "update"; storeName: string; id: string; value: string }
-  | { kind: "fingerprint"; storeName: string; id: string; comment: string };
+  | {
+      kind: "update";
+      storeName: string;
+      id: string;
+      value: string;
+      /** A master key's fingerprint, recorded with its value; none for an ordinary secret. */
+      comment?: string;
+    };
 
 /** The calls a copy makes, and the master keys that stop it. */
 export interface StoreWritesPlan {
   writes: StoreWrite[];
   /** Master keys the store holds with another value than 1Password's. */
   mismatched: string[];
-  /** Master keys the store held with no fingerprint, now given 1Password's. */
-  adopted: string[];
+  /** Master keys the store held with no fingerprint, now 1Password's value. */
+  claimed: string[];
 }
 
 /**
@@ -160,15 +166,24 @@ export interface StoreWritesPlan {
  * its fingerprint as its comment when the store lacks it, and otherwise
  * never written: the same fingerprint means 1Password and the store
  * agree; another one means they don't, which stops the copy before
- * anything is written. One the store holds with no fingerprint (put there
- * before copies kept one) is trusted on first use: its value stays, and
- * 1Password's fingerprint becomes its comment, so the next copy compares.
+ * anything is written.
+ *
+ * One the store holds with no fingerprint (put there by hand, before
+ * copies kept one) is written with 1Password's value and fingerprint, so
+ * 1Password is the source of truth from the first copy on. Keeping the
+ * store's value and recording 1Password's fingerprint instead would let
+ * the two differ for good, with every later copy saying they agree, and
+ * 1Password would hold a key nothing runs on. Overwriting is safe only
+ * because nothing has been provisioned under these keys yet: no client's
+ * secrets are derived from them, and nothing is sealed under them. The
+ * first copy under a stage's name therefore makes 1Password's value the
+ * key, before anything depends on it.
  */
 export const planStoreWrites = (
   plan: StoreSecretsPlan,
   stored: ReadonlyMap<string, StoredSecret>
 ): StoreWritesPlan => {
-  const result: StoreWritesPlan = { writes: [], mismatched: [], adopted: [] };
+  const result: StoreWritesPlan = { writes: [], mismatched: [], claimed: [] };
   for (const { binding, storeName, value } of plan.writes) {
     const existing = stored.get(storeName);
     const fingerprint = masterKeys.has(binding)
@@ -188,11 +203,12 @@ export const planStoreWrites = (
         comment: fingerprint,
       });
     } else if (!existing.comment.startsWith(fingerprintPrefix)) {
-      result.adopted.push(storeName);
+      result.claimed.push(storeName);
       result.writes.push({
-        kind: "fingerprint",
+        kind: "update",
         storeName,
         id: existing.id,
+        value,
         comment: fingerprint,
       });
     } else if (existing.comment !== fingerprint) {
